@@ -151,7 +151,16 @@ Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () 
       space: "did:key:z6Mk-space",
       sessionId: "session:alice",
       query: {
+        branch: "feature",
+        ownerSpace: "did:key:z6Mk-owner",
+        pieceId: "space:of:piece",
+        processGeneration: 0,
+        actionId: "pattern.tsx:computed:1",
+        sinceCommitSeq: 1,
+        throughCommitSeq: 2,
+        limit: 10,
         cursor: {
+          ownerSpace: "did:key:z6Mk-owner",
           pieceId: "space:of:piece",
           processGeneration: 0,
           actionId: "pattern.tsx:computed:1",
@@ -165,7 +174,16 @@ Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () 
       space: "did:key:z6Mk-space",
       sessionId: "session:alice",
       query: {
+        branch: "feature",
+        ownerSpace: "did:key:z6Mk-owner",
+        pieceId: "space:of:piece",
+        processGeneration: 0,
+        actionId: "pattern.tsx:computed:1",
+        sinceCommitSeq: 1,
+        throughCommitSeq: 2,
+        limit: 10,
         cursor: {
+          ownerSpace: "did:key:z6Mk-owner",
           pieceId: "space:of:piece",
           processGeneration: 0,
           actionId: "pattern.tsx:computed:1",
@@ -173,6 +191,24 @@ Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () 
         },
       },
     },
+  );
+
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "scheduler.snapshot.list",
+      requestId: "scheduler-list-invalid-cursor",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:alice",
+      query: {
+        cursor: {
+          pieceId: "space:of:piece",
+          processGeneration: -1,
+          actionId: "pattern.tsx:computed:1",
+          executionContextKey: "space",
+        },
+      },
+    })),
+    null,
   );
 });
 

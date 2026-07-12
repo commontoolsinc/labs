@@ -1,5 +1,6 @@
 // Scheduler throttle and bounded-freshness tests.
 
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   afterEach,
   beforeEach,
@@ -448,5 +449,59 @@ describe("throttle - bounded freshness", () => {
     await cell.pull();
 
     expect(runCount).toBe(1);
+  });
+
+  it("emits lazy scheduling diagnostics for registration and execution", async () => {
+    const logger = getLogger("scheduler");
+    const previousLevel = logger.level;
+    const previousDisabled = logger.disabled;
+    const originalDebug = console.debug;
+    const debugCalls: unknown[][] = [];
+    logger.level = "debug";
+    logger.disabled = false;
+    console.debug = (...args: unknown[]) => debugCalls.push(args);
+
+    const source = runtime.getCell<number>(
+      space,
+      "throttle-debug-diagnostics",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let observed = 0;
+    const effect: Action = (actionTx) => {
+      observed = source.withTx(actionTx).get();
+    };
+    const log = {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    };
+
+    try {
+      runtime.scheduler.subscribe(effect, log, { isEffect: true });
+      await runtime.scheduler.idle();
+      expect(observed).toBe(1);
+      runtime.scheduler.subscribe(
+        () => {},
+        { reads: [], shallowReads: [], writes: [] },
+      );
+
+      const keys = debugCalls.flatMap((call) => call).filter((value) =>
+        typeof value === "string"
+      );
+      expect(keys).toContain("schedule");
+      expect(keys).toContain("schedule-resubscribe");
+      expect(keys).toContain("schedule-execute-pull");
+      expect(keys).toContain("schedule-execute");
+    } finally {
+      logger.level = previousLevel;
+      logger.disabled = previousDisabled;
+      console.debug = originalDebug;
+      await runtime.scheduler.idle();
+    }
   });
 });

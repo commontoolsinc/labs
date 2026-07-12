@@ -2,6 +2,7 @@ import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import {
+  type AppliedCommit,
   applyCommit as applyCommitEngine,
   close,
   createBranch,
@@ -2618,6 +2619,136 @@ Deno.test("memory v2 server skips scheduler mirrors for unmounted read spaces", 
     await client.close().catch(() => {});
     await server.close().catch(() => {});
     await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 anonymous sessions do not persist scheduler observations", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({
+    store,
+    authorizeSessionOpen: () => undefined,
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const client = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-anonymous-owner";
+  const readSpace = "did:key:scheduler-anonymous-read";
+  const owner = await client.mount(ownerSpace, {}, testSessionOpenAuthFactory);
+  await client.mount(readSpace, {}, testSessionOpenAuthFactory);
+  const anonymousObservation = observationForAction(
+    "pattern.tsx:computed:anonymous-space-scope",
+    {
+      ownerSpace,
+      reads: [{ ...sourceRead, space: readSpace }],
+    },
+  );
+
+  try {
+    await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:scheduler-anonymous-owner-value",
+        value: { value: 1 },
+      }],
+      schedulerObservation: anonymousObservation,
+    });
+
+    const listed = await owner.listSchedulerActionSnapshots({
+      actionId: anonymousObservation.actionId,
+    });
+    assertEquals(listed.snapshots, []);
+
+    await client.close();
+    await server.close();
+    const readEngine = await openEngine({
+      url: resolveSpaceStoreUrl(store, readSpace),
+    });
+    try {
+      assertEquals(
+        listSchedulerActionSnapshots(readEngine, {
+          actionId: anonymousObservation.actionId,
+        }).snapshots,
+        [],
+      );
+    } finally {
+      close(readEngine);
+    }
+  } finally {
+    await client.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 server contains incomplete scheduler replay metadata", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const server = new Server({
+    store: new URL("memory://scheduler-incomplete-replay"),
+    authorizeSessionOpen: () => "did:key:test-principal",
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const runSideEffects = (server as unknown as {
+    runPostCommitSchedulerSideEffects: (
+      ownerSpace: string,
+      commit: AppliedCommit,
+      observations: readonly {
+        localSeq: number;
+        observation: SchedulerActionObservation;
+      }[],
+      previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
+      session: undefined,
+    ) => Promise<void>;
+  }).runPostCommitSchedulerSideEffects.bind(server);
+  const baseCommit = {
+    seq: 1,
+    branch: "",
+    revisions: [],
+  } as unknown as AppliedCommit;
+  const observations = [{ localSeq: 1, observation }];
+
+  const originalWarn = console.warn;
+  const warnings: unknown[][] = [];
+  console.warn = (...args: unknown[]) => warnings.push(args);
+  try {
+    // A replay whose durable owner observation was narrowed away has no result
+    // array and must quietly skip its stale mirror payload.
+    await runSideEffects(
+      "did:key:scheduler-incomplete-replay-owner",
+      baseCommit,
+      observations,
+      new Map(),
+      undefined,
+    );
+    assertEquals(warnings, []);
+
+    // A malformed partial result array is contained as a post-commit side
+    // effect failure: the cell commit itself has already succeeded.
+    await runSideEffects(
+      "did:key:scheduler-incomplete-replay-owner",
+      {
+        ...baseCommit,
+        schedulerObservationResults: [{
+          localSeq: 2,
+          status: "dropped",
+        }],
+      } as AppliedCommit,
+      observations,
+      new Map(),
+      undefined,
+    );
+    assertEquals(warnings.length, 1);
+    assertEquals(
+      warnings[0]?.[0],
+      "Post-commit scheduler state update failed after semantic commit:",
+    );
+  } finally {
+    console.warn = originalWarn;
+    await server.close();
     resetPersistentSchedulerStateConfig();
   }
 });

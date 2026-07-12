@@ -622,6 +622,12 @@ Deno.test("memory v2 carries first and changed observation-only rows on the next
         operations: [],
         schedulerObservation: observationFor("next-window", {
           implementationFingerprint,
+          currentKnownWrites: [{
+            space: SPACE,
+            scope: "space",
+            id: SHARED_DOC,
+            path: ["value", "derived"],
+          }],
         }),
       });
     };
@@ -650,11 +656,30 @@ Deno.test("memory v2 carries first and changed observation-only rows on the next
 
     receiverSyncs.length = 0;
     await commitObservationOnly("impl:changed");
+    const engine = await openEngine({
+      url: resolveSpaceStoreUrl(toFileUrl(`${storePath}/`), SPACE),
+    });
+    try {
+      engine.database.prepare(`
+        UPDATE scheduler_action_state
+        SET unknown_reason = 'coverage:test-unknown'
+        WHERE action_id = 'next-window'
+      `).run();
+    } finally {
+      closeEngine(engine);
+    }
     await commitWatchedWrite(2);
     const changed = receiverSyncs.flatMap((sync) => sync.observations ?? [])
-      .map((row) => row.observation as SchedulerActionObservation)
-      .find((row) => row.actionId === "next-window");
-    assertEquals(changed?.implementationFingerprint, "impl:changed");
+      .find((row) =>
+        (row.observation as SchedulerActionObservation).actionId ===
+          "next-window"
+      );
+    assertEquals(
+      (changed?.observation as SchedulerActionObservation | undefined)
+        ?.implementationFingerprint,
+      "impl:changed",
+    );
+    assertEquals(changed?.unknownReason, "coverage:test-unknown");
 
     // A receiver can cross the reserved delivery sequence without a watched
     // document diff — for example, by committing to an untracked document.
