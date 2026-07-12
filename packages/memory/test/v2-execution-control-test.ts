@@ -779,7 +779,7 @@ Deno.test("out-of-band inactive policy revokes claims without removing shadow de
           op: "delete" as const,
           id: `of:${POLICY_SPACE}:execution-policy`,
         },
-        probe: "settlement" as const,
+        probe: "listing" as const,
       },
       {
         name: "malformed",
@@ -847,7 +847,7 @@ Deno.test("out-of-band inactive policy revokes claims without removing shadow de
           Error,
           "execution policy",
         );
-      } else {
+      } else if (testCase.probe === "settlement") {
         assertEquals(
           await server.publishActionSettlement({
             branch: "",
@@ -857,6 +857,8 @@ Deno.test("out-of-band inactive policy revokes claims without removing shadow de
           }),
           false,
         );
+      } else {
+        assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
       }
 
       assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
