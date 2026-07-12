@@ -1466,6 +1466,12 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
       id: "of:unserved-pending",
       path: ["value"],
     };
+    const rejectedUserSurface = {
+      space: POLICY_SPACE,
+      scope: "user" as const,
+      id: "of:unserved-user-surface",
+      path: ["value"],
+    };
     const observation = {
       ...base,
       inputBasisSeq: 999_999,
@@ -1474,9 +1480,9 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
       },
       completeActionScopeSummary: {
         ...base.completeActionScopeSummary,
-        reads: [confirmedRead, pendingRead],
+        reads: [confirmedRead, pendingRead, rejectedUserSurface],
       },
-      reads: [confirmedRead, pendingRead],
+      reads: [confirmedRead, pendingRead, rejectedUserSurface],
       actualChangedWrites: [],
     };
     const result = await session.transact({
@@ -1539,6 +1545,20 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
     assertEquals(stored.executionUnservedAttempt, undefined);
     assertEquals(stored.inputBasisSeq, pending.seq);
     assertEquals(stored.executionProvenance, undefined);
+
+    assertEquals(server.revokeExecutionClaim(claim), true);
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 5,
+          reads: { confirmed: [], pending: [] },
+          operations: [],
+          schedulerObservation: observation,
+        }),
+      Error,
+      "execution claim incarnation",
+    );
+    assertEquals(settlements.length, 1);
   } finally {
     unbind();
     unsubscribe();

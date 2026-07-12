@@ -249,6 +249,10 @@ export class Client {
         (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
           result.error.retryAfterSeq;
       }
+      if (result.error.diagnosticCode !== undefined) {
+        (error as Error & { diagnosticCode?: string }).diagnosticCode =
+          result.error.diagnosticCode;
+      }
       throw error;
     }
     return result.ok as Result;

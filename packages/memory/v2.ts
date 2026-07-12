@@ -934,6 +934,8 @@ export interface V2Error {
   message: string;
   precondition?: string;
   retryAfterSeq?: number;
+  /** Stable reason attached to a rejected server-execution action attempt. */
+  diagnosticCode?: string;
 }
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };

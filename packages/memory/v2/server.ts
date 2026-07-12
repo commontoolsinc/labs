@@ -4258,12 +4258,21 @@ export class Server {
           // Fold-in SQLite writes: ATTACH their cell-db(s) BEFORE applyCommit (ATTACH
           // cannot run inside a transaction); the engine executes them inside the
           // commit txn (atomic with cell ops). Detach in finally.
-          const sqliteAttachments = this.#attachCommitSqliteDbs(
-            engine,
-            message.space,
-            commitPayload.operations,
-            scopeContext,
-          );
+          // A bound executor can never pass the claimed-action firewall with
+          // a folded SQLite operation. Do not ATTACH/create its cell database
+          // before the Engine has rejected the transaction atomically.
+          const claimedActionAttempt = executionBinding !== undefined &&
+            schedulerObservations.some(({ observation }) =>
+              observation.executionClaimAssertion !== undefined
+            );
+          const sqliteAttachments = !claimedActionAttempt
+            ? this.#attachCommitSqliteDbs(
+              engine,
+              message.space,
+              commitPayload.operations,
+              scopeContext,
+            )
+            : new Map<string, string>();
           let commit: Engine.AppliedCommit;
           try {
             commit = tracer.startActiveSpan(
@@ -4397,6 +4406,8 @@ export class Server {
           const responseError = preconditionError ? preconditionError : toError(
             error instanceof Engine.ConflictError
               ? "ConflictError"
+              : error instanceof Engine.ExecutionActionFirewallError
+              ? error.name
               : error instanceof Engine.ProtocolError
               ? "ProtocolError"
               // A RowLabelCommitError (Phase 3.c commit-time row-label refusal,
@@ -4411,6 +4422,9 @@ export class Server {
               : "TransactionError",
             messageText,
           );
+          if (error instanceof Engine.ExecutionActionFirewallError) {
+            responseError.diagnosticCode = error.diagnosticCode;
+          }
           if (retryAfterSeq !== undefined) {
             responseError.retryAfterSeq = retryAfterSeq;
           }
@@ -5690,6 +5704,7 @@ export class Server {
       const {
         inputBasisSeq: _assertedBasis,
         executionClaimAssertion: _assertedClaim,
+        executionUnservedAttempt: _unservedAttempt,
         executionProvenance: _assertedProvenance,
         ...requestedObservation
       } = observation;
@@ -5724,6 +5739,9 @@ export class Server {
           claim: attempt.claim,
           inputBasisSeq: attempt.provenance.inputBasisSeq,
           outcome: attempt.outcome,
+          ...(attempt.outcome === "unserved"
+            ? { diagnosticCode: attempt.diagnosticCode }
+            : {}),
         };
       // The attempt was accepted synchronously under this exact live claim.
       // A false return now means expiry/revocation won during async post-commit

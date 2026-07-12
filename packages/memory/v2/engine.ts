@@ -831,6 +831,21 @@ export class ExecutionLeaseFenceError extends Error {
   }
 }
 
+/**
+ * Stable, terminal rejection from the claimed whole-action transaction
+ * firewall. The host may use `diagnosticCode` to report an unserved attempt;
+ * it must never retry only a subset of the rejected transaction.
+ */
+export class ExecutionActionFirewallError extends Error {
+  readonly diagnosticCode: string;
+
+  constructor(diagnosticCode: string, message: string) {
+    super(`execution action firewall rejected ${diagnosticCode}: ${message}`);
+    this.name = "ExecutionActionFirewallError";
+    this.diagnosticCode = diagnosticCode;
+  }
+}
+
 export interface OpenOptions {
   url: URL;
   snapshotInterval?: number;
@@ -1009,6 +1024,13 @@ export type AppliedActionAttempt =
     claim: ExecutionClaim;
     provenance: ActionExecutionProvenance;
     outcome: "no-op" | "failed";
+  }
+  | {
+    localSeq: number;
+    claim: ExecutionClaim;
+    provenance: ActionExecutionProvenance;
+    outcome: "unserved";
+    diagnosticCode: string;
   };
 
 export interface AppliedCommit {
@@ -1089,6 +1111,12 @@ export interface SchedulerActionObservation {
   inputBasisSeq?: InputBasisSeq;
   /** Transient exact-claim assertion; validated by the bound executor host. */
   executionClaimAssertion?: ExecutionClaimAssertion;
+  /**
+   * Transient report that the host discarded a claimed action as one whole
+   * transaction. Valid only on an observation-only exact claimed attempt and
+   * stripped before scheduler state is persisted.
+   */
+  executionUnservedAttempt?: { diagnosticCode: string };
   executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
@@ -1129,6 +1157,15 @@ const isExecutionClaimAssertion = (
   Number(value.leaseGeneration) > 0 &&
   Number.isSafeInteger(value.claimGeneration) &&
   Number(value.claimGeneration) > 0;
+
+const isExecutionUnservedAttempt = (
+  value: unknown,
+): value is NonNullable<
+  SchedulerActionObservation["executionUnservedAttempt"]
+> =>
+  isSchedulerRecord(value) &&
+  typeof value.diagnosticCode === "string" &&
+  value.diagnosticCode.length > 0 && value.diagnosticCode.length <= 256;
 
 const isSchedulerObservationAddress = (value: unknown): boolean =>
   isSchedulerRecord(value) &&
@@ -1191,6 +1228,8 @@ export const schedulerObservationFromValue = (
         Number(value.inputBasisSeq) < 0)) ||
     (value.executionClaimAssertion !== undefined &&
       !isExecutionClaimAssertion(value.executionClaimAssertion)) ||
+    (value.executionUnservedAttempt !== undefined &&
+      !isExecutionUnservedAttempt(value.executionUnservedAttempt)) ||
     (value.observedAtLocalSeq !== undefined &&
       (!Number.isSafeInteger(value.observedAtLocalSeq) ||
         Number(value.observedAtLocalSeq) < 0)) ||
@@ -4932,6 +4971,203 @@ function schedulerRuntimeExceedsSummary(
     );
 }
 
+type ExecutionActionTransaction = Pick<
+  ClientCommit,
+  "reads" | "operations" | "preconditions" | "merge"
+>;
+
+const rejectExecutionAction = (
+  diagnosticCode: string,
+  message: string,
+): never => {
+  throw new ExecutionActionFirewallError(diagnosticCode, message);
+};
+
+const assertSpaceScopedAddress = (
+  address: SchedulerObservationAddress,
+  servedSpace: string,
+  scopeContext: SchedulerScopeContext,
+): void => {
+  if (address.space !== servedSpace) {
+    rejectExecutionAction(
+      "foreign-space-surface",
+      `surface ${address.id} belongs to ${address.space}, not ${servedSpace}`,
+    );
+  }
+  if (resolveScopeKey(address.scope, scopeContext) !== DEFAULT_SCOPE_KEY) {
+    rejectExecutionAction(
+      "non-space-scope",
+      `surface ${address.id} does not resolve to the space scope`,
+    );
+  }
+};
+
+/**
+ * Validate the complete static and observed surface plus the actual commit
+ * shape for one positively claimed action. This function is pure; callers run
+ * it inside the same IMMEDIATE transaction before any commit row, revision,
+ * scheduler row, SQLite statement, or merge state can be applied.
+ */
+const assertExecutionActionTransaction = (
+  options: {
+    servedSpace: string;
+    branch: BranchName;
+    scopeContext: SchedulerScopeContext;
+    transaction: ExecutionActionTransaction;
+    observation: SchedulerActionObservation;
+  },
+): void => {
+  const { observation, transaction } = options;
+  if (
+    observation.ownerSpace !== options.servedSpace ||
+    observation.branch !== options.branch
+  ) {
+    rejectExecutionAction(
+      "claim-lane-mismatch",
+      "observation owner space or branch does not match the served lane",
+    );
+  }
+  const summary = trustedSchedulerScopeSummary(observation);
+  if (summary === undefined) {
+    return rejectExecutionAction(
+      "incomplete-static-scope",
+      "execution claim context requires a complete trusted static scope summary",
+    );
+  }
+
+  for (const address of schedulerSummaryAddresses(summary)) {
+    assertSpaceScopedAddress(
+      address,
+      options.servedSpace,
+      options.scopeContext,
+    );
+  }
+  for (const address of schedulerObservationAddresses(observation)) {
+    assertSpaceScopedAddress(
+      address,
+      options.servedSpace,
+      options.scopeContext,
+    );
+  }
+  if (schedulerRuntimeExceedsSummary(observation, summary)) {
+    rejectExecutionAction(
+      "runtime-exceeds-static-scope",
+      "observed action surfaces exceed the complete static summary",
+    );
+  }
+
+  if (transaction.merge !== undefined) {
+    rejectExecutionAction(
+      "merge-commit",
+      "claimed actions may not carry branch merge metadata",
+    );
+  }
+  for (const precondition of transaction.preconditions ?? []) {
+    if (
+      precondition.kind === "entity-absent" &&
+      resolveScopeKey(precondition.scope, options.scopeContext) !==
+        DEFAULT_SCOPE_KEY
+    ) {
+      rejectExecutionAction(
+        "non-space-scope",
+        `precondition ${precondition.id} does not resolve to the space scope`,
+      );
+    }
+  }
+
+  const observedReads = [...observation.reads, ...observation.shallowReads];
+  for (const read of transaction.reads.confirmed) {
+    if ((read.branch ?? options.branch) !== options.branch) {
+      rejectExecutionAction(
+        "cross-branch-read",
+        `confirmed read ${read.id} belongs to another branch`,
+      );
+    }
+    if (
+      resolveScopeKey(read.scope, options.scopeContext) !== DEFAULT_SCOPE_KEY
+    ) {
+      rejectExecutionAction(
+        "non-space-scope",
+        `confirmed read ${read.id} does not resolve to the space scope`,
+      );
+    }
+    const address: SchedulerObservationAddress = {
+      space: options.servedSpace,
+      id: read.id,
+      scope: read.scope,
+      path: read.path,
+    };
+    if (!schedulerAddressCoveredBy(address, observedReads)) {
+      rejectExecutionAction(
+        "unobserved-read",
+        `confirmed read ${read.id} is absent from the action observation`,
+      );
+    }
+  }
+  for (const read of transaction.reads.pending) {
+    if (
+      resolveScopeKey(read.scope, options.scopeContext) !== DEFAULT_SCOPE_KEY
+    ) {
+      rejectExecutionAction(
+        "non-space-scope",
+        `pending read ${read.id} does not resolve to the space scope`,
+      );
+    }
+    const address: SchedulerObservationAddress = {
+      space: options.servedSpace,
+      id: read.id,
+      scope: read.scope,
+      path: read.path,
+    };
+    if (!schedulerAddressCoveredBy(address, observedReads)) {
+      rejectExecutionAction(
+        "unobserved-read",
+        `pending read ${read.id} is absent from the action observation`,
+      );
+    }
+  }
+
+  for (const operation of transaction.operations) {
+    if (operation.op === "sqlite") {
+      rejectExecutionAction(
+        "sqlite-operation",
+        "claimed actions may not execute folded SQLite writes",
+      );
+      continue;
+    }
+    if (
+      resolveScopeKey(operation.scope, options.scopeContext) !==
+        DEFAULT_SCOPE_KEY
+    ) {
+      rejectExecutionAction(
+        "non-space-scope",
+        `write ${operation.id} does not resolve to the space scope`,
+      );
+    }
+    const matchingWrites = observation.actualChangedWrites.filter((write) =>
+      write.space === options.servedSpace && write.id === operation.id &&
+      resolveScopeKey(write.scope, options.scopeContext) === DEFAULT_SCOPE_KEY
+    );
+    if (matchingWrites.length === 0) {
+      rejectExecutionAction(
+        "unobserved-write",
+        `write ${operation.id} is absent from the action observation`,
+      );
+    }
+    if (
+      operation.op === "patch" &&
+      operation.patches.flatMap(touchedPointerPaths).some((path) =>
+        !matchingWrites.some((write) => pathsOverlap(write.path, path))
+      )
+    ) {
+      rejectExecutionAction(
+        "unobserved-write",
+        `patch write ${operation.id} exceeds the observed changed paths`,
+      );
+    }
+  }
+};
+
 function schedulerStaticContextFloor(
   observation: SchedulerActionObservation,
 ): SchedulerContextScope {
@@ -6518,7 +6754,7 @@ const applyCommitTransaction = (
       principal,
       branch,
       localSeq: commit.localSeq,
-      reads: commit.reads,
+      transaction: commit,
       schedulerObservation,
       executionClaim: executionClaims?.get(commit.localSeq),
       executionLeaseFence,
@@ -6553,6 +6789,21 @@ const applyCommitTransaction = (
     throw new ProtocolError(
       "failed claimed actions must not include semantic operations",
     );
+  }
+  if (acceptedObservation?.provenance !== undefined) {
+    if (acceptedObservation.unservedDiagnosticCode !== undefined) {
+      rejectExecutionAction(
+        "unserved-marker-with-operations",
+        "an unserved attempt marker is valid only without semantic operations",
+      );
+    }
+    assertExecutionActionTransaction({
+      servedSpace: space!,
+      branch,
+      scopeContext: { principal: principal!, sessionId: scopeSessionId },
+      transaction: commit,
+      observation: schedulerObservation!,
+    });
   }
 
   assertExecutionLeaseFenceTransaction(engine, {
@@ -6981,7 +7232,7 @@ const validateCommitPreconditions = (
 const validateConfirmedReads = (
   engine: Engine,
   branch: BranchName,
-  commit: ClientCommit,
+  commit: Pick<ClientCommit, "reads">,
   scopeContext: { principal?: string; sessionId: SessionId },
 ): void => {
   // A commit is evaluated under one connection principal/session context.
@@ -7015,7 +7266,7 @@ const resolvePendingReads = (
   sessionKey: string,
   scopeContext: { principal?: string; sessionId: SessionId },
   branch: BranchName,
-  commit: ClientCommit,
+  commit: Pick<ClientCommit, "reads">,
 ): Array<{ localSeq: number; seq: number }> => {
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
@@ -7117,19 +7368,22 @@ const acceptedSchedulerObservation = (
 ): {
   observation: SchedulerActionObservation;
   provenance?: ActionExecutionProvenance;
+  unservedDiagnosticCode?: string;
 } => {
   const assertedClaim = observation.executionClaimAssertion;
+  const unservedAttempt = observation.executionUnservedAttempt;
   // Reserved fields are host outputs. Strip any wire/Worker assertion before
   // constructing the canonical accepted observation.
   const {
     inputBasisSeq: _assertedBasis,
     executionClaimAssertion: _assertedClaim,
+    executionUnservedAttempt: _unservedAttempt,
     executionProvenance: _assertedProvenance,
     ...untrustedObservation
   } = observation;
   const claim = options.executionClaim;
   if (claim === undefined) {
-    if (assertedClaim !== undefined) {
+    if (assertedClaim !== undefined || unservedAttempt !== undefined) {
       throw new ProtocolError(
         "execution claim incarnation is not live for this action attempt",
       );
@@ -7175,10 +7429,18 @@ const acceptedSchedulerObservation = (
   };
   return {
     provenance,
+    ...(unservedAttempt !== undefined
+      ? { unservedDiagnosticCode: unservedAttempt.diagnosticCode }
+      : {}),
     observation: {
       ...untrustedObservation,
       inputBasisSeq: options.inputBasisSeq,
-      executionProvenance: provenance,
+      // An unserved attempt may have discovered a narrower/foreign surface.
+      // Persist that scheduler evidence under its derived context without
+      // falsely labeling the observation as a space-scoped accepted execution.
+      ...(unservedAttempt === undefined
+        ? { executionProvenance: provenance }
+        : {}),
     },
   };
 };
@@ -7374,7 +7636,7 @@ const applySchedulerObservationOnlyCommit = (
     principal,
     branch,
     localSeq,
-    reads,
+    transaction,
     schedulerObservation,
     executionClaim,
     executionLeaseFence,
@@ -7386,7 +7648,7 @@ const applySchedulerObservationOnlyCommit = (
     principal?: string;
     branch: BranchName;
     localSeq: number;
-    reads: ClientCommit["reads"];
+    transaction: ExecutionActionTransaction;
     schedulerObservation: SchedulerActionObservation;
     executionClaim?: ExecutionClaim;
     executionLeaseFence?: ExecutionLeaseFence;
@@ -7428,10 +7690,47 @@ const applySchedulerObservationOnlyCommit = (
     });
   }
 
-  const inputBasisSeq = acceptedInputBasisSeq(
-    reads.confirmed,
-    resolvedPendingReadsForBasis(engine, sessionKey, reads.pending),
-  );
+  const unservedAttempt =
+    schedulerObservation.executionUnservedAttempt !== undefined;
+  let dropReason: SchedulerObservationDropReason | undefined;
+  let inputBasisSeq: InputBasisSeq;
+  if (unservedAttempt) {
+    // An unserved settlement is authoritative only after the same canonical
+    // conflict path has accepted every input revision. Never accept a
+    // Worker-supplied basis or merely sample the current head.
+    validateConfirmedReads(
+      engine,
+      branch,
+      transaction,
+      { principal, sessionId: scopeSessionId },
+    );
+    const resolvedPending = resolvePendingReads(
+      engine,
+      sessionKey,
+      { principal, sessionId: scopeSessionId },
+      branch,
+      transaction,
+    );
+    inputBasisSeq = acceptedInputBasisSeq(
+      transaction.reads.confirmed,
+      resolvedPending,
+    );
+  } else {
+    inputBasisSeq = acceptedInputBasisSeq(
+      transaction.reads.confirmed,
+      resolvedPendingReadsForBasis(
+        engine,
+        sessionKey,
+        transaction.reads.pending,
+      ),
+    );
+    dropReason = schedulerObservationReadDropReason(engine, {
+      sessionKey,
+      scopeContext: { principal, sessionId: scopeSessionId },
+      branch,
+      reads: transaction.reads,
+    });
+  }
   const accepted = acceptedSchedulerObservation(schedulerObservation, {
     branch,
     space,
@@ -7439,13 +7738,22 @@ const applySchedulerObservationOnlyCommit = (
     inputBasisSeq,
     executionClaim,
   });
-
-  const dropReason = schedulerObservationReadDropReason(engine, {
-    sessionKey,
-    scopeContext: { principal, sessionId: scopeSessionId },
-    branch,
-    reads,
-  });
+  if (accepted.provenance !== undefined) {
+    if (accepted.unservedDiagnosticCode === undefined) {
+      assertExecutionActionTransaction({
+        servedSpace: space!,
+        branch,
+        scopeContext: { principal: principal!, sessionId: scopeSessionId },
+        transaction,
+        observation: schedulerObservation,
+      });
+    } else if (transaction.merge !== undefined) {
+      rejectExecutionAction(
+        "merge-commit",
+        "an unserved attempt marker may not carry branch merge metadata",
+      );
+    }
+  }
   assertExecutionLeaseFenceTransaction(engine, {
     fence: executionLeaseFence,
     space,
@@ -7494,6 +7802,7 @@ const applySchedulerObservationOnlyCommit = (
   });
   if (
     accepted.provenance !== undefined &&
+    accepted.unservedDiagnosticCode === undefined &&
     observationResult.executionContextKey !==
       accepted.provenance.claim.contextKey
   ) {
@@ -7512,7 +7821,8 @@ const applySchedulerObservationOnlyCommit = (
       schedulerObservationId: observationResult.observationId,
       executionContextKey: observationResult.executionContextKey,
       inputBasisSeq,
-      ...(accepted.provenance !== undefined
+      ...(accepted.provenance !== undefined &&
+          accepted.unservedDiagnosticCode === undefined
         ? { executionProvenance: accepted.provenance }
         : {}),
     }],
@@ -7522,9 +7832,16 @@ const applySchedulerObservationOnlyCommit = (
           localSeq,
           claim: executionClaim,
           provenance: accepted.provenance,
-          outcome: schedulerObservation.status === "failed"
-            ? "failed" as const
-            : "no-op" as const,
+          ...(accepted.unservedDiagnosticCode !== undefined
+            ? {
+              outcome: "unserved" as const,
+              diagnosticCode: accepted.unservedDiagnosticCode,
+            }
+            : {
+              outcome: schedulerObservation.status === "failed"
+                ? "failed" as const
+                : "no-op" as const,
+            }),
         }],
       }
       : {}),
@@ -7567,7 +7884,10 @@ const applySchedulerObservationBatchCommit = (
       principal,
       branch,
       localSeq: item.localSeq,
-      reads: item.reads,
+      transaction: {
+        reads: item.reads,
+        operations: [],
+      },
       schedulerObservation: item
         .schedulerObservation as SchedulerActionObservation,
       executionClaim: executionClaims?.get(item.localSeq),
