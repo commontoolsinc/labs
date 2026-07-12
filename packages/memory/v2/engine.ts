@@ -1,5 +1,6 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatch,
@@ -5283,7 +5284,7 @@ function schedulerMatchedWriteKey(match: SchedulerMatchedWrite): string {
 }
 
 function compareSchedulerKeys(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
+  return utf8Compare(left, right);
 }
 
 const applyCommitTransaction = (
