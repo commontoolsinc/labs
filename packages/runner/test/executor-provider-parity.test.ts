@@ -9,8 +9,15 @@ import type {
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
   type AcceptedCommitEvent,
+  type AcceptedCommitListener,
   Server,
 } from "@commonfabric/memory/v2/server";
+import { table } from "@commonfabric/memory/sqlite/schema";
+import {
+  all,
+  match,
+  principal as rowPrincipal,
+} from "@commonfabric/memory/sqlite/row-label";
 import type { StorageNotification } from "../src/storage/interface.ts";
 import type { NativeStorageCommit } from "../src/storage/interface.ts";
 import {
@@ -55,6 +62,25 @@ class GatedGraphServer extends WatchCountingServer {
       await this.releaseGraphQuery.promise;
     }
     return response;
+  }
+}
+
+class LifecycleServer extends GatedGraphServer {
+  acceptedCommitSubscriptions = 0;
+
+  override subscribeAcceptedCommits(
+    space: string,
+    listener: AcceptedCommitListener,
+  ): () => void {
+    this.acceptedCommitSubscriptions++;
+    const unsubscribe = super.subscribeAcceptedCommits(space, listener);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      this.acceptedCommitSubscriptions--;
+      unsubscribe();
+    };
   }
 }
 
@@ -770,6 +796,46 @@ const runProviderTrace = async (kind: ProviderKind) => {
       actionId: "action:differential",
     });
 
+    const atomicUri = "of:executor-provider:cfc-atomic" as URI;
+    const addr = /[^\s<>,;"]+@[^\s<>,;"]+/g;
+    const acceptedBeforeCfc = accepted.length;
+    const cfc = await commit({
+      operations: [{
+        op: "set",
+        id: atomicUri,
+        type,
+        value: { value: { mustRollback: true } },
+      }],
+      sqliteOps: [{
+        op: "sqlite",
+        db: {
+          id: ("of:executor-provider:cfc-" + crypto.randomUUID()) as URI,
+          owner: space,
+          tables: {
+            emails: table(
+              { id: "integer primary key", from_addr: "text", body: "text" },
+              (fields) => ({
+                confidentiality: all(
+                  rowPrincipal(
+                    "mailto",
+                    match(fields.from_addr, addr, { min: 1 }),
+                  ),
+                ),
+              }),
+            ),
+          },
+        },
+        sql: "INSERT INTO emails (from_addr, body) VALUES (?, ?)",
+        params: ["not an address", "must reject"],
+      }],
+    });
+    const cfcReplicaValue = replica.get({
+      id: atomicUri,
+      type,
+    })?.is;
+    const cfcServerValue = await server.readDocument(space, atomicUri);
+    const cfcAcceptedDelta = accepted.length - acceptedBeforeCfc;
+
     assertEquals(
       (await commit({
         operations: [{ op: "delete", id: uri, type }],
@@ -786,6 +852,12 @@ const runProviderTrace = async (kind: ProviderKind) => {
         executionContextKey: snapshot.executionContextKey,
         status: (snapshot.observation as { status?: string }).status,
       })),
+      cfc: {
+        name: cfc.error?.name as string | undefined,
+        replicaValue: cfcReplicaValue,
+        serverValue: cfcServerValue,
+        acceptedDelta: cfcAcceptedDelta,
+      },
       final: replica.get(address)?.is,
       accepted: accepted.map((event) => ({
         order: event.order,
@@ -812,6 +884,220 @@ Deno.test("executor host provider is behaviorally equivalent to authenticated lo
     { ...host, watchAdds: undefined },
     { ...loopback, watchAdds: undefined },
   );
+  assertEquals(host.afterExternal, {
+    value: { count: 3, external: true },
+  });
+  assertEquals(host.conflict, "ConflictError");
+  assertEquals(host.afterConflict, host.afterExternal);
+  assertEquals(host.scheduler, [{
+    actionId: "action:differential",
+    executionContextKey: "space",
+    status: "success",
+  }]);
+  assertEquals(host.cfc, {
+    name: "RowLabelCommitError",
+    replicaValue: undefined,
+    serverValue: null,
+    acceptedDelta: 0,
+  });
+  assertEquals(host.final, undefined);
   assertEquals(host.watchAdds, 0);
   assert(loopback.watchAdds > 0);
+});
+
+const runAclTrace = async (kind: ProviderKind) => {
+  const owner = await Identity.fromPassphrase(
+    "executor ACL owner " + kind + " " + crypto.randomUUID(),
+  );
+  const reader = await Identity.fromPassphrase(
+    "executor ACL reader " + kind + " " + crypto.randomUUID(),
+  );
+  const space = owner.did();
+  const server = new WatchCountingServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-acl-test",
+    },
+    acl: { mode: "enforce" },
+  });
+  const authFor = (
+    principal: string,
+  ): MemoryClient.SessionOpenAuthFactory =>
+  (_space, _session, context) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal },
+  });
+  const ownerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const ownerSession = await ownerClient.mount(
+    space,
+    {},
+    authFor(owner.did()),
+  );
+  const uri = "of:executor-provider:acl-data" as URI;
+  await ownerSession.transact({
+    localSeq: 1,
+    reads: { confirmed: [], pending: [] },
+    operations: [{
+      op: "set",
+      id: ("of:" + space) as URI,
+      value: {
+        value: {
+          [owner.did()]: "OWNER",
+          [reader.did()]: "READ",
+        },
+      },
+    }],
+  });
+  await ownerSession.transact({
+    localSeq: 2,
+    reads: { confirmed: [], pending: [] },
+    operations: [{
+      op: "set",
+      id: uri,
+      value: { value: { protected: true } },
+    }],
+  });
+
+  const channel = kind === "host"
+    ? createHostProviderChannel({
+      server,
+      space,
+      authorizeSessionOpen: authFor(reader.did()),
+    })
+    : undefined;
+  const storage: StorageManager = kind === "host"
+    ? HostStorageManager.connect({
+      port: channel!.port,
+      principal: reader.did(),
+      space,
+    })
+    : LoopbackStorageManager.connectTo(server, { as: reader });
+  const accepted: AcceptedCommitEvent[] = [];
+  server.subscribeAcceptedCommits(space, (event) => {
+    accepted.push(event);
+  });
+
+  try {
+    const provider = storage.open(space);
+    assertEquals((await provider.sync(uri)).error, undefined);
+    const replica = provider.replica;
+    assert(replica.commitNative);
+    const denied = await replica.commitNative({
+      operations: [{
+        op: "set",
+        id: uri,
+        type: "application/json",
+        value: { value: { protected: false } },
+      }],
+    });
+    return {
+      denial: {
+        name: denied.error?.name,
+        message: denied.error?.message.replace(/did:key:\S+/g, "<did>"),
+      },
+      replicaValue: replica.get({
+        id: uri,
+        type: "application/json",
+      })?.is,
+      serverValue: await server.readDocument(space, uri),
+      accepted: accepted.length,
+      watchAdds: server.watchAddCount,
+    };
+  } finally {
+    await storage.close();
+    await channel?.dispose();
+    await ownerClient.close();
+    await server.close();
+  }
+};
+
+Deno.test("executor host provider preserves ACL denial and atomic rollback parity", async () => {
+  const loopback = await runAclTrace("loopback");
+  const host = await runAclTrace("host");
+  assertEquals(
+    { ...host, watchAdds: undefined },
+    { ...loopback, watchAdds: undefined },
+  );
+  assertEquals(host.denial.name, "TransactionError");
+  assert(host.denial.message?.includes("lacks WRITE"));
+  assertEquals(host.replicaValue, { value: { protected: true } });
+  assertEquals(host.serverValue, { value: { protected: true } });
+  assertEquals(host.accepted, 0);
+  assertEquals(host.watchAdds, 0);
+  assert(loopback.watchAdds > 0);
+});
+
+Deno.test("executor host provider disposal releases callbacks and pending reads", async () => {
+  const principal = await Identity.fromPassphrase(
+    "executor provider disposal " + crypto.randomUUID(),
+  );
+  const space = principal.did();
+  const server = new LifecycleServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-disposal-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    authorizeSessionOpen,
+  });
+  const storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: principal.did(),
+    space,
+  });
+  let disposing: Promise<void> | undefined;
+
+  try {
+    assertEquals(server.acceptedCommitSubscriptions, 1);
+    server.gateNextGraphQuery();
+    const pendingRead = storage.open(space).sync(
+      "of:executor-provider:pending-disposal",
+    );
+    await server.graphQueryStarted.promise;
+
+    await storage.close();
+    const readResult = await pendingRead;
+    assert(readResult.error);
+
+    disposing = channel.dispose();
+    const disposedPromptly = await Promise.race([
+      disposing.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100)),
+    ]);
+    assertEquals(disposedPromptly, true);
+    assertEquals(server.acceptedCommitSubscriptions, 0);
+  } finally {
+    server.releaseGraphQuery.resolve();
+    await disposing;
+    await channel.dispose();
+    await storage.close();
+    await server.close();
+  }
 });
