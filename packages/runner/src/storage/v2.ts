@@ -2662,7 +2662,17 @@ class SpaceReplica implements ISpaceReplica {
           : {}),
       }),
     );
-    const route = await this.routeActionTransaction(commit, source);
+    // Preserve the storage contract that ordinary client commits install their
+    // optimistic versions synchronously before commit() returns its promise.
+    // Awaiting even an already-resolved fallback here inserts a microtask gap;
+    // callers can then start a piece or issue a second transaction before the
+    // first transaction is locally visible. Only executor/overlay providers
+    // have a router and need the asynchronous authority decision.
+    const route = this.#actionTransactionRouter === undefined
+      ? (this.#shadowWrites
+        ? { disposition: "local", kind: "executor-shadow" } as const
+        : { disposition: "upstream" } as const)
+      : await this.routeActionTransaction(commit, source);
     if (route.disposition === "unserved") {
       return await this.publishUnservedAttempt(commit, route);
     }
