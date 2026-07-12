@@ -18,6 +18,7 @@ import {
   schedulerObservationFromValue,
   type SchedulerScopeContext,
   upsertSchedulerObservation,
+  writersForTargets,
 } from "../v2/engine.ts";
 
 const OWNER_SPACE = "did:key:scheduler-context-owner";
@@ -1631,6 +1632,195 @@ Deno.test("scheduler context read lookup keeps its target index at 10k rows", as
         .sort((left, right) => left.seqno - right.seqno)
         .map((row) => row.name),
       ["branch", "read_space", "read_id", "read_scope_key"],
+    );
+  });
+});
+
+Deno.test("scheduler writer lookup isolates user and session contexts", async () => {
+  await withEngine((engine) => {
+    const userActionId = "context:writer:user";
+    const userObservation = observationFor({
+      actionId: userActionId,
+      summaryScope: "user",
+    });
+    storeObservation(engine, userObservation, ALICE_A);
+    storeObservation(engine, userObservation, BOB);
+
+    const userTarget = {
+      ...schedulerAddress("output", "user"),
+      scopeKey: ALICE_USER_KEY,
+    };
+    const aliceUserWriters = writersForTargets(engine, {
+      branch: "",
+      targets: [userTarget],
+      applicableExecutionContextKeys: [
+        SPACE_KEY,
+        ALICE_USER_KEY,
+        ALICE_A_SESSION_KEY,
+      ],
+    });
+    assertEquals(aliceUserWriters.length, 1);
+    assertEquals(aliceUserWriters[0]?.actionId, userActionId);
+    assertEquals(
+      aliceUserWriters[0]?.executionContextKey,
+      ALICE_USER_KEY,
+    );
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [userTarget],
+        applicableExecutionContextKeys: [
+          SPACE_KEY,
+          BOB_USER_KEY,
+          BOB_SESSION_KEY,
+        ],
+      }),
+      [],
+    );
+
+    const sessionActionId = "context:writer:session";
+    const sessionObservation = observationFor({
+      actionId: sessionActionId,
+      summaryScope: "session",
+    });
+    storeObservation(engine, sessionObservation, ALICE_A);
+    storeObservation(engine, sessionObservation, ALICE_B);
+
+    const sessionTarget = {
+      ...schedulerAddress("output", "session"),
+      scopeKey: ALICE_A_SESSION_KEY,
+    };
+    const aliceSessionWriters = writersForTargets(engine, {
+      branch: "",
+      targets: [sessionTarget],
+      applicableExecutionContextKeys: [
+        SPACE_KEY,
+        ALICE_USER_KEY,
+        ALICE_A_SESSION_KEY,
+      ],
+    });
+    assertEquals(aliceSessionWriters.length, 1);
+    assertEquals(aliceSessionWriters[0]?.actionId, sessionActionId);
+    assertEquals(
+      aliceSessionWriters[0]?.executionContextKey,
+      ALICE_A_SESSION_KEY,
+    );
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [sessionTarget],
+        applicableExecutionContextKeys: [
+          SPACE_KEY,
+          ALICE_USER_KEY,
+          ALICE_B_SESSION_KEY,
+        ],
+      }),
+      [],
+    );
+  });
+});
+
+Deno.test("scheduler writer lookup keeps its target index at 10k rows", async () => {
+  await withEngine((engine) => {
+    const actionId = "context:writer-index-plan";
+    const stored = storeObservation(
+      engine,
+      observationFor({ actionId, summaryScope: "user" }),
+      ALICE_A,
+    );
+    engine.database.prepare(`
+      DELETE FROM scheduler_write_index
+      WHERE action_id = :action_id
+    `).run({ action_id: actionId });
+
+    const insert = engine.database.prepare(`
+      INSERT INTO scheduler_write_index (
+        branch,
+        owner_space,
+        write_space,
+        write_id,
+        write_scope,
+        write_scope_key,
+        write_path,
+        write_kind,
+        piece_id,
+        process_generation,
+        action_id,
+        execution_context_key,
+        observation_id
+      ) VALUES (
+        '',
+        :owner_space,
+        :write_space,
+        :write_id,
+        'user',
+        :write_scope_key,
+        :write_path,
+        'current-known',
+        :piece_id,
+        1,
+        :action_id,
+        :execution_context_key,
+        :observation_id
+      )
+    `);
+    engine.database.transaction(() => {
+      for (let index = 0; index < 10_000; index++) {
+        insert.run({
+          owner_space: OWNER_SPACE,
+          write_space: OWNER_SPACE,
+          write_id: `output-${index.toString().padStart(5, "0")}`,
+          write_scope_key: ALICE_USER_KEY,
+          write_path: encodeMemoryBoundary(["value"]),
+          piece_id: PIECE_ID,
+          action_id: actionId,
+          execution_context_key: stored.executionContextKey,
+          observation_id: stored.observationId,
+        });
+      }
+    }).immediate();
+
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [{
+          space: OWNER_SPACE,
+          id: "output-09999",
+          scope: "user",
+          scopeKey: ALICE_USER_KEY,
+          path: ["value"],
+        }],
+        applicableExecutionContextKeys: [ALICE_USER_KEY],
+      })[0]?.actionId,
+      actionId,
+    );
+
+    const plan = engine.database.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT observation_id
+      FROM scheduler_write_index
+      WHERE branch = ''
+        AND write_space = :write_space
+        AND write_id = :write_id
+        AND write_scope_key = :write_scope_key
+    `).all({
+      write_space: OWNER_SPACE,
+      write_id: "output-09999",
+      write_scope_key: ALICE_USER_KEY,
+    }) as Array<{ detail: string }>;
+    assert(
+      plan.some((row) =>
+        row.detail.includes("idx_scheduler_write_index_lookup")
+      ),
+      `expected indexed writer target lookup, got ${JSON.stringify(plan)}`,
+    );
+    assertEquals(
+      (engine.database.prepare(`
+        PRAGMA index_info('idx_scheduler_write_index_lookup')
+      `).all() as Array<{ seqno: number; name: string }>)
+        .sort((left, right) => left.seqno - right.seqno)
+        .map((row) => row.name),
+      ["branch", "write_space", "write_id", "write_scope_key"],
     );
   });
 });
