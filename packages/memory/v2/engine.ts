@@ -3083,13 +3083,7 @@ export const writersForTargets = (
         AND o.piece_id = s.piece_id
         AND o.process_generation = s.process_generation
         AND o.action_id = s.action_id
-        AND o.observed_at_seq = s.observed_at_seq
         AND o.payload = s.payload
-        AND (
-          o.commit_seq = s.commit_seq
-          OR o.commit_seq IS NULL
-          OR s.commit_seq IS NULL
-        )
       JOIN scheduler_action_state a
         ON a.branch = w.branch
         AND a.owner_space = w.owner_space
