@@ -20,6 +20,7 @@ import {
   serverSeq,
   upsertSchedulerObservation as upsertSchedulerObservationEngine,
   type UpsertSchedulerObservationOptions,
+  writersForTargets,
 } from "../v2/engine.ts";
 import {
   connect,
@@ -1391,6 +1392,242 @@ Deno.test("memory v2 updates scheduler index rows by diff instead of rewriting u
       }).length,
       1,
     );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup matches direct, side, and materializer surfaces", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-lookup";
+  const directWrite = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:direct-output",
+    path: ["value"],
+  };
+  const sideWrite = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:side-output",
+    path: ["value", "summary"],
+  };
+  const materializerWrite = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:materialized-output",
+    path: ["value", "items"],
+  };
+
+  try {
+    const stored = upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 7,
+      observation: observationForAction("writer-lookup:surfaces", {
+        ownerSpace,
+        pieceId: "space:of:writer-piece",
+        currentKnownWrites: [directWrite, sideWrite],
+        materializerWriteEnvelopes: [materializerWrite],
+      }),
+    });
+
+    const direct = writersForTargets(engine, {
+      branch: "",
+      targets: [{
+        ...directWrite,
+        scopeKey: "space",
+        path: ["value", "nested", "result"],
+      }],
+    });
+    assertEquals(direct.length, 1);
+    assertEquals(direct[0]?.actionId, "writer-lookup:surfaces");
+    assertEquals(direct[0]?.pieceId, "space:of:writer-piece");
+    assertEquals(direct[0]?.actionKind, "computation");
+    assertEquals(direct[0]?.implementationFingerprint, "impl:v1");
+    assertEquals(direct[0]?.runtimeFingerprint, "runtime:test");
+    assertEquals(direct[0]?.status, "success");
+    assertEquals(direct[0]?.executionContextKey, stored.executionContextKey);
+    assertEquals(direct[0]?.matchedWrites, [{
+      kind: "current-known",
+      write: { ...directWrite, scopeKey: "space" },
+    }]);
+
+    const side = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...sideWrite, scopeKey: "space" }],
+    });
+    assertEquals(side.length, 1);
+    assertEquals(side[0]?.actionId, "writer-lookup:surfaces");
+    assertEquals(side[0]?.matchedWrites, [{
+      kind: "current-known",
+      write: { ...sideWrite, scopeKey: "space" },
+    }]);
+
+    const materializer = writersForTargets(engine, {
+      branch: "",
+      targets: [{
+        ...materializerWrite,
+        scopeKey: "space",
+        path: ["value", "items", "0"],
+      }],
+    });
+    assertEquals(materializer.length, 1);
+    assertEquals(materializer[0]?.actionId, "writer-lookup:surfaces");
+    assertEquals(materializer[0]?.matchedWrites, [{
+      kind: "materializer",
+      write: { ...materializerWrite, scopeKey: "space" },
+    }]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup returns every candidate deterministically", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-candidates";
+  const sharedTarget = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:shared-output",
+    path: ["value"],
+  };
+
+  try {
+    for (const actionId of ["writer:z-last", "writer:a-first"]) {
+      upsertSchedulerObservation(engine, {
+        branch: "",
+        ownerSpace,
+        observedAtSeq: 1,
+        observation: observationForAction(actionId, {
+          ownerSpace,
+          pieceId: `space:of:${actionId}`,
+          currentKnownWrites: [sharedTarget],
+        }),
+      });
+    }
+
+    const candidates = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...sharedTarget, scopeKey: "space" }],
+    });
+    assertEquals(candidates.length, 2);
+    assertEquals(candidates[0]?.actionId, "writer:a-first");
+    assertEquals(candidates[1]?.actionId, "writer:z-last");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup replaces stale targets on re-observation", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-reobservation";
+  const retained = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:retained-output",
+    path: ["value"],
+  };
+  const removed = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:removed-output",
+    path: ["value"],
+  };
+  const actionId = "writer-lookup:reobserved";
+
+  try {
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 1,
+      observation: observationForAction(actionId, {
+        ownerSpace,
+        currentKnownWrites: [retained, removed],
+      }),
+    });
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [{ ...removed, scopeKey: "space" }],
+      }).length,
+      1,
+    );
+
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 2,
+      observation: observationForAction(actionId, {
+        ownerSpace,
+        observedAtSeq: 2,
+        currentKnownWrites: [retained],
+      }),
+    });
+
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [{ ...removed, scopeKey: "space" }],
+      }),
+      [],
+    );
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [{ ...retained, scopeKey: "space" }],
+      })[0]?.actionId,
+      actionId,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup ignores target creation provenance", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-preexisting";
+  const target = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:preexisting-output",
+    path: ["value"],
+  };
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:unrelated-creator",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: target.id,
+          value: { value: { creator: "unrelated" } },
+        }],
+      },
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: headSeq(engine),
+      observation: observationForAction("writer-lookup:current-producer", {
+        ownerSpace,
+        currentKnownWrites: [target],
+      }),
+    });
+
+    const candidates = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    });
+    assertEquals(candidates.length, 1);
+    assertEquals(candidates[0]?.actionId, "writer-lookup:current-producer");
   } finally {
     close(engine);
     await Deno.remove(path);
