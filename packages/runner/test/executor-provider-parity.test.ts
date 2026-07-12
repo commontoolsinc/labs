@@ -23,6 +23,30 @@ class WatchCountingServer extends Server {
   }
 }
 
+class GatedGraphServer extends WatchCountingServer {
+  graphQueryStarted = Promise.withResolvers<void>();
+  releaseGraphQuery = Promise.withResolvers<void>();
+  #gateNextGraphQuery = false;
+
+  gateNextGraphQuery(): void {
+    this.graphQueryStarted = Promise.withResolvers<void>();
+    this.releaseGraphQuery = Promise.withResolvers<void>();
+    this.#gateNextGraphQuery = true;
+  }
+
+  override async graphQuery(
+    message: Parameters<Server["graphQuery"]>[0],
+  ): ReturnType<Server["graphQuery"]> {
+    const response = await super.graphQuery(message);
+    if (this.#gateNextGraphQuery) {
+      this.#gateNextGraphQuery = false;
+      this.graphQueryStarted.resolve();
+      await this.releaseGraphQuery.promise;
+    }
+    return response;
+  }
+}
+
 Deno.test("executor host provider commits through authenticated memory without a Worker key", async () => {
   const hostSigner = await Identity.fromPassphrase(
     `executor host provider ${crypto.randomUUID()}`,
@@ -376,4 +400,120 @@ Deno.test("executor host provider source has no engine mutation bypass", async (
   assertEquals(source.includes("applyCommit"), false);
   assertEquals(source.includes("/v2/engine"), false);
   assertEquals(source.includes("this.session.watchAddSync"), false);
+});
+
+Deno.test("executor host provider closes the initial read and invalidation race", async () => {
+  const principal = await Identity.fromPassphrase(
+    "executor initial read race " + crypto.randomUUID(),
+  );
+  const space = principal.did();
+  const server = new GatedGraphServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-initial-race-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const writerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const writer = await writerClient.mount(
+    space,
+    {},
+    authorizeSessionOpen,
+  );
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    authorizeSessionOpen,
+  });
+  const storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: principal.did(),
+    space,
+  });
+  const uri = "of:executor-provider:initial-race" as URI;
+  const address = {
+    id: uri,
+    type: "application/json" as MIME,
+    path: [],
+  };
+
+  try {
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { version: 1 } },
+      }],
+    });
+    const provider = storage.open(space);
+    const integrated = Promise.withResolvers<void>();
+    storage.subscribe({
+      next(notification) {
+        if (
+          notification.type === "integrate" &&
+          JSON.stringify(provider.replica.get(address)?.is) ===
+            JSON.stringify({ value: { version: 2 } })
+        ) {
+          integrated.resolve();
+        }
+        return { done: false };
+      },
+    });
+
+    server.gateNextGraphQuery();
+    const initialRead = provider.sync(uri);
+    await server.graphQueryStarted.promise;
+    await writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { version: 2 } },
+      }],
+    });
+    server.releaseGraphQuery.resolve();
+    assertEquals((await initialRead).error, undefined);
+
+    const timer = setTimeout(
+      () =>
+        integrated.reject(
+          new Error("commit racing the initial graph read was missed"),
+        ),
+      1_000,
+    );
+    try {
+      await integrated.promise;
+    } finally {
+      clearTimeout(timer);
+    }
+    assertEquals(provider.replica.get(address)?.is, {
+      value: { version: 2 },
+    });
+    assertEquals(server.watchAddCount, 0);
+  } finally {
+    server.releaseGraphQuery.resolve();
+    await storage.close();
+    await channel.dispose();
+    await writerClient.close();
+    await server.close();
+  }
 });
