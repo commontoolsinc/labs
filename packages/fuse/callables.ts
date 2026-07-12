@@ -49,6 +49,33 @@ export function patternFactorySchemas(value: unknown): {
     : undefined;
 }
 
+export function patternFactorySchemasFromSchema(
+  schema: JSONSchema | undefined,
+): {
+  argumentSchema: JSONSchema;
+  resultSchema: JSONSchema;
+} | undefined {
+  if (!isSchemaRecord(schema)) return undefined;
+  const direct = schema.asFactory;
+  if (direct?.kind === "pattern") {
+    return {
+      argumentSchema: direct.argumentSchema,
+      resultSchema: direct.resultSchema,
+    };
+  }
+
+  const properties = schema.properties;
+  if (!isSchemaRecord(properties)) return undefined;
+  const pattern = properties.pattern;
+  if (!isSchemaRecord(pattern) || pattern.asFactory?.kind !== "pattern") {
+    return undefined;
+  }
+  return {
+    argumentSchema: pattern.asFactory.argumentSchema,
+    resultSchema: pattern.asFactory.resultSchema,
+  };
+}
+
 export function encodeFactoryProjection(value: unknown): string | undefined {
   return isAdmittedFabricFactory(value)
     ? jsonFromValue(value as FabricValue)
@@ -137,19 +164,7 @@ export function isPatternFactoryValue(v: unknown): boolean {
 export function isPatternFactorySchema(
   schema: JSONSchema | undefined,
 ): boolean {
-  if (!isSchemaRecord(schema)) return false;
-  if (schema.asFactory?.kind === "pattern") return true;
-  const properties = schema.properties;
-  if (
-    typeof properties !== "object" || properties === null ||
-    Array.isArray(properties)
-  ) {
-    return false;
-  }
-
-  const pattern = properties.pattern;
-  return isSchemaRecord(pattern) &&
-    pattern.asFactory?.kind === "pattern";
+  return patternFactorySchemasFromSchema(schema) !== undefined;
 }
 
 export function classifyCallableEntry(

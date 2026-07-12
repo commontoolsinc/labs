@@ -47,8 +47,8 @@ const append = handler<{ text: string }, { rows: Writable<string[]> }>(
 
 export interface Output {
   appendFactory: HandlerFactory<
-    { text: string },
-    { rows: Writable<string[]> }
+    { rows: Writable<string[]> },
+    { text: string }
   >;
 }
 

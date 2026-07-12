@@ -25,6 +25,7 @@ import {
   decodeFactoryProjections,
   isHandlerCell,
   patternFactorySchemas,
+  patternFactorySchemasFromSchema,
 } from "./callables.ts";
 import { parseMountedCallablePath } from "./callable-path.ts";
 import {
@@ -2854,10 +2855,14 @@ export class CellBridge {
 
       const factorySchemas = patternFactorySchemas(resolvedCandidate) ??
         patternFactorySchemas(candidate);
+      const schemaFactorySchemas = patternFactorySchemasFromSchema(
+        childCell.schema,
+      );
       callables.push({
         key,
         callableKind,
         schema: factorySchemas?.argumentSchema ??
+          schemaFactorySchemas?.argumentSchema ??
           getInputSchema(childCell.schema),
       });
       callableKinds.set(key, callableKind);

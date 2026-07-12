@@ -26,21 +26,23 @@ import { CellBridge } from "./cell-bridge.ts";
 
 const decoder = new TextDecoder();
 
+const patternArgumentSchema = {
+  type: "object",
+  properties: { query: { type: "string" } },
+  required: ["query"],
+} as const;
+const patternResultSchema = {
+  type: "object",
+  properties: { answer: { type: "string" } },
+} as const;
 const patternFactory = createFactoryShell({
   kind: "pattern",
   ref: {
     identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     symbol: "search",
   },
-  argumentSchema: {
-    type: "object",
-    properties: { query: { type: "string" } },
-    required: ["query"],
-  },
-  resultSchema: {
-    type: "object",
-    properties: { answer: { type: "string" } },
-  },
+  argumentSchema: patternArgumentSchema,
+  resultSchema: patternResultSchema,
 });
 
 function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
@@ -1101,7 +1103,13 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
 
   const handlerCell = makeCell(undefined, undefined, {}, { isStream: true });
   const toolCell = makeCell(patternFactory, undefined);
-  const directToolCell = makeCell(patternFactory, undefined);
+  const directToolCell = makeCell(undefined, {
+    asFactory: {
+      kind: "pattern",
+      argumentSchema: patternArgumentSchema,
+      resultSchema: patternResultSchema,
+    },
+  });
   const resultCell = makeCell(
     undefined,
     {
@@ -1179,7 +1187,14 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
   assertEquals(directToolNode?.kind, "callable");
   if (directToolNode?.kind === "callable") {
     const script = decoder.decode(directToolNode.script);
-    assertEquals(script.includes('"query"'), true);
+    const schemaLine = script.split("\n").find((line) =>
+      line.startsWith("# schema: ")
+    );
+    assertEquals(schemaLine !== undefined, true);
+    assertEquals(
+      JSON.parse(schemaLine!.slice("# schema: ".length)),
+      patternArgumentSchema,
+    );
   }
   assertEquals(tree.lookup(resultIno!, "search.tool") !== undefined, true);
 
