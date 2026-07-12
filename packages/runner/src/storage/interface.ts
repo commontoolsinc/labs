@@ -8,6 +8,8 @@ import type {
   BranchName,
   CommitPrecondition,
   EntityDocument,
+  LegacyBackgroundExclusion,
+  LegacyBackgroundExclusionStatus,
   PatchOp,
   SchedulerActionSnapshotQuery,
   SchedulerExecutionContextKey,
@@ -380,6 +382,19 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   writersForTargets?(
     query: SchedulerWritersForTargetsProviderQuery,
   ): Promise<SchedulerWritersForTargetsResult>;
+
+  /** Service-only durable exclusion for the legacy background runtime. */
+  acquireLegacyBackgroundExclusion?(
+    branch: BranchName,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined>;
+  renewLegacyBackgroundExclusion?(
+    branch: BranchName,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined>;
+  releaseLegacyBackgroundExclusion?(
+    branch: BranchName,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusion | null | undefined>;
 
   /**
    * Conservative scheduler-snapshot currency oracle. Returns true only when

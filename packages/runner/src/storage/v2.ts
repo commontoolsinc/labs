@@ -26,6 +26,8 @@ import {
   type EntityDocument,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  type LegacyBackgroundExclusion,
+  type LegacyBackgroundExclusionStatus,
   type PatchOp,
   type SchedulerActionSnapshotQuery,
   type SchedulerObservationCommit,
@@ -1518,6 +1520,32 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.writersForTargets(query);
   }
 
+  acquireLegacyBackgroundExclusion(
+    branch: string,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
+    return this.replica.acquireLegacyBackgroundExclusion(branch);
+  }
+
+  renewLegacyBackgroundExclusion(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
+    return this.replica.renewLegacyBackgroundExclusion(
+      branch,
+      exclusionGeneration,
+    );
+  }
+
+  releaseLegacyBackgroundExclusion(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusion | null | undefined> {
+    return this.replica.releaseLegacyBackgroundExclusion(
+      branch,
+      exclusionGeneration,
+    );
+  }
+
   areSchedulerAddressesCurrentAtOrBelow(
     addresses: readonly IMemorySpaceAddress[],
     seq: number,
@@ -1747,6 +1775,35 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<SqliteQueryResult> {
     const { session } = await this.sessionHandle();
     return await session.sqliteQuery(db, sql, params);
+  }
+
+  async acquireLegacyBackgroundExclusion(
+    branch: string,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
+    const { session } = await this.sessionHandle();
+    return await session.acquireLegacyBackgroundExclusion?.(branch);
+  }
+
+  async renewLegacyBackgroundExclusion(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
+    const { session } = await this.sessionHandle();
+    return await session.renewLegacyBackgroundExclusion?.(
+      branch,
+      exclusionGeneration,
+    );
+  }
+
+  async releaseLegacyBackgroundExclusion(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusion | null | undefined> {
+    const { session } = await this.sessionHandle();
+    return await session.releaseLegacyBackgroundExclusion?.(
+      branch,
+      exclusionGeneration,
+    );
   }
 
   /**

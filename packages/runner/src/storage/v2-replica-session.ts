@@ -4,6 +4,8 @@ import type {
   ExecutionControlEvent,
   GraphQuery,
   GraphQueryResult,
+  LegacyBackgroundExclusion,
+  LegacyBackgroundExclusionStatus,
   MemoryProtocolFlags,
   SchedulerActionSnapshotQuery,
   SchedulerSnapshotListResult,
@@ -64,6 +66,17 @@ export interface ReplicaSession {
     branch: string,
     pieces: readonly string[],
   ): Promise<boolean>;
+  acquireLegacyBackgroundExclusion?(
+    branch: string,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined>;
+  renewLegacyBackgroundExclusion?(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined>;
+  releaseLegacyBackgroundExclusion?(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusion | null | undefined>;
   subscribeExecutionControl?(
     listener: (event: ExecutionControlEvent) => void,
   ): () => void;

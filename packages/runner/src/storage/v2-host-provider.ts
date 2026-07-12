@@ -260,6 +260,18 @@ export function createHostProviderChannel(
       });
       return;
     }
+    if (
+      parsed.type === "session.execution.legacy-background.acquire" ||
+      parsed.type === "session.execution.legacy-background.renew" ||
+      parsed.type === "session.execution.legacy-background.release"
+    ) {
+      sendError(parsed.requestId, {
+        name: "AuthorizationError",
+        message:
+          "executor providers cannot control legacy background execution",
+      });
+      return;
+    }
     if (options.shadowWrites === true && parsed.type === "transact") {
       sendError(parsed.requestId, {
         name: "AuthorizationError",
