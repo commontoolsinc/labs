@@ -9,6 +9,7 @@ import {
 } from "./patch.ts";
 import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
 import {
+  type ActionExecutionProvenance,
   type BranchName,
   type CellScope,
   type ClientCommit,
@@ -17,6 +18,7 @@ import {
   encodeMemoryBoundary,
   type EntityDocument,
   type EntityId,
+  type ExecutionClaim,
   isEntityDocument,
   type Operation,
   type PatchOp,
@@ -811,6 +813,12 @@ export interface ApplyCommitOptions {
   invocationPayload?: FabricValue;
   authorization?: AuthorizationRecord;
   commit: ClientCommit;
+  /**
+   * Host-only exact live claims for scheduler observations in this commit,
+   * keyed by the observation localSeq. This never appears in ClientCommit or
+   * crosses the memory protocol boundary.
+   */
+  executionClaims?: ReadonlyMap<number, ExecutionClaim>;
   /** Map of cell-db id -> attach alias for `sqlite` ops in this commit. The
    *  server attaches these BEFORE applyCommit (ATTACH can't run in a txn); the
    *  apply loop executes the SQL inside the commit's transaction against the
@@ -837,11 +845,29 @@ export interface AppliedSchedulerObservationResult {
   schedulerObservationId?: number;
   /** Effective owner-derived context; emitted metadata, never client input. */
   executionContextKey?: SchedulerExecutionContextKey;
+  /** Canonical accepted basis/provenance, emitted only for kept rows. */
+  inputBasisSeq?: number;
+  executionProvenance?: ActionExecutionProvenance;
   reason?:
     | "stale-confirmed-read"
     | "stale-pending-read"
     | "pending-read-missing";
 }
+
+export type AppliedActionAttempt =
+  | {
+    localSeq: number;
+    claim: ExecutionClaim;
+    provenance: ActionExecutionProvenance;
+    outcome: "committed";
+    acceptedCommitSeq: number;
+  }
+  | {
+    localSeq: number;
+    claim: ExecutionClaim;
+    provenance: ActionExecutionProvenance;
+    outcome: "no-op" | "failed";
+  };
 
 export interface AppliedCommit {
   seq: number;
@@ -849,6 +875,7 @@ export interface AppliedCommit {
   revisions: AppliedRevision[];
   schedulerObservationId?: number;
   schedulerObservationResults?: AppliedSchedulerObservationResult[];
+  actionAttempts?: AppliedActionAttempt[];
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
 }
 
@@ -918,6 +945,7 @@ export interface SchedulerActionObservation {
   observedAtSeq: number;
   /** Host-derived maximum accepted revision sequence in the commit read set. */
   inputBasisSeq?: number;
+  executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
   reads: SchedulerObservationAddress[];
@@ -5180,6 +5208,7 @@ const applyCommitTransaction = (
     space,
     principal,
     commit,
+    executionClaims,
     sqliteAttachments,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
@@ -5273,6 +5302,7 @@ const applyCommitTransaction = (
       principal,
       branch,
       batch: schedulerObservationBatch,
+      executionClaims,
     });
   }
 
@@ -5286,6 +5316,7 @@ const applyCommitTransaction = (
       localSeq: commit.localSeq,
       reads: commit.reads,
       schedulerObservation,
+      executionClaim: executionClaims?.get(commit.localSeq),
     });
   }
 
@@ -5302,6 +5333,23 @@ const applyCommitTransaction = (
     commit.reads.confirmed,
     resolvedPendingReads,
   );
+  const acceptedObservation = schedulerObservation
+    ? acceptedSchedulerObservation(schedulerObservation, {
+      branch,
+      space,
+      principal,
+      inputBasisSeq,
+      executionClaim: executionClaims?.get(commit.localSeq),
+    })
+    : undefined;
+  if (
+    acceptedObservation?.provenance !== undefined &&
+    schedulerObservation?.status === "failed"
+  ) {
+    throw new ProtocolError(
+      "failed claimed actions must not include semantic operations",
+    );
+  }
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
@@ -5379,21 +5427,16 @@ const applyCommitTransaction = (
     });
   }
 
-  const schedulerObservationResult = schedulerObservation
+  const schedulerObservationResult = acceptedObservation
     ? upsertSchedulerObservationTransaction(engine, {
       branch,
-      ownerSpace: space ?? schedulerObservation.ownerSpace,
+      ownerSpace: space ?? acceptedObservation.observation.ownerSpace,
       commitSeq: seq,
       observedAtSeq: seq,
       scopeContext: { principal: principal!, sessionId },
       writerSessionId: sessionKey,
       localSeq: commit.localSeq,
-      // The host derives the basis from the same confirmed/pending reads that
-      // just passed canonical validation. Never persist a caller assertion.
-      observation: {
-        ...schedulerObservation,
-        inputBasisSeq,
-      },
+      observation: acceptedObservation.observation,
     })
     : undefined;
 
@@ -5409,6 +5452,22 @@ const applyCommitTransaction = (
           status: "kept" as const,
           schedulerObservationId: schedulerObservationResult.observationId,
           executionContextKey: schedulerObservationResult.executionContextKey,
+          inputBasisSeq,
+          ...(acceptedObservation?.provenance !== undefined
+            ? { executionProvenance: acceptedObservation.provenance }
+            : {}),
+        }],
+      }
+      : {}),
+    ...(acceptedObservation?.provenance !== undefined &&
+        executionClaims?.get(commit.localSeq) !== undefined
+      ? {
+        actionAttempts: [{
+          localSeq: commit.localSeq,
+          claim: executionClaims.get(commit.localSeq)!,
+          provenance: acceptedObservation.provenance,
+          outcome: "committed" as const,
+          acceptedCommitSeq: seq,
         }],
       }
       : {}),
@@ -5787,6 +5846,85 @@ const resolvedPendingReadsForBasis = (
   return [...resolutions.values()];
 };
 
+const claimKeyFromExecutionClaim = (
+  claim: ExecutionClaim,
+): ActionExecutionProvenance["claim"] => ({
+  branch: claim.branch,
+  space: claim.space,
+  contextKey: claim.contextKey,
+  pieceId: claim.pieceId,
+  actionId: claim.actionId,
+  actionKind: claim.actionKind,
+  implementationFingerprint: claim.implementationFingerprint,
+  runtimeFingerprint: claim.runtimeFingerprint,
+});
+
+const acceptedSchedulerObservation = (
+  observation: SchedulerActionObservation,
+  options: {
+    branch: BranchName;
+    space?: string;
+    principal?: string;
+    inputBasisSeq: number;
+    executionClaim?: ExecutionClaim;
+  },
+): {
+  observation: SchedulerActionObservation;
+  provenance?: ActionExecutionProvenance;
+} => {
+  // Reserved fields are host outputs. Strip any wire/Worker assertion before
+  // constructing the canonical accepted observation.
+  const {
+    inputBasisSeq: _assertedBasis,
+    executionProvenance: _assertedProvenance,
+    ...untrustedObservation
+  } = observation;
+  const claim = options.executionClaim;
+  if (claim === undefined) {
+    return {
+      observation: {
+        ...untrustedObservation,
+        inputBasisSeq: options.inputBasisSeq,
+      },
+    };
+  }
+  if (
+    options.principal === undefined || options.space === undefined ||
+    claim.branch !== options.branch || claim.space !== options.space ||
+    // Initial server execution is deliberately space-scoped. W1.3 owns the
+    // full firewall; a host cannot smuggle a narrower claim through W0.4.
+    claim.contextKey !== "space" ||
+    claim.pieceId !== observation.pieceId ||
+    claim.actionId !== observation.actionId ||
+    claim.actionKind !== observation.actionKind ||
+    claim.implementationFingerprint !== observation.implementationFingerprint ||
+    claim.runtimeFingerprint !== observation.runtimeFingerprint ||
+    observation.actionKind === "event-handler"
+  ) {
+    throw new ProtocolError(
+      "execution claim does not match the accepted scheduler action",
+    );
+  }
+  const provenance: ActionExecutionProvenance = {
+    claim: claimKeyFromExecutionClaim(claim),
+    onBehalfOf: options.principal,
+    leaseGeneration: claim.leaseGeneration,
+    claimGeneration: claim.claimGeneration,
+    // Invalidations currently retain addresses, not authoritative source
+    // sequences. Unknown is represented honestly as an empty sorted set.
+    causedBy: [],
+    inputBasisSeq: options.inputBasisSeq,
+  };
+  return {
+    provenance,
+    observation: {
+      ...untrustedObservation,
+      inputBasisSeq: options.inputBasisSeq,
+      executionProvenance: provenance,
+    },
+  };
+};
+
 const findConflictSeq = (
   engine: Engine,
   branch: BranchName,
@@ -5945,15 +6083,23 @@ const schedulerObservationReplayPayload = (
     ownerSpace?: string;
     observation: SchedulerActionObservation;
   },
-): string =>
-  encodeSchedulerDependencySnapshot(
+): string => {
+  // Replay identity is the client/Worker request, not host-derived acceptance
+  // metadata. A reconnect may reconstruct the same authority separately.
+  const {
+    inputBasisSeq: _acceptedBasis,
+    executionProvenance: _acceptedProvenance,
+    ...requestedObservation
+  } = options.observation;
+  return encodeSchedulerDependencySnapshot(
     normalizeSchedulerObservation(
-      options.observation,
+      requestedObservation as SchedulerActionObservation,
       options.branch,
       options.observedAtSeq,
       options.ownerSpace,
     ),
   );
+};
 
 const applySchedulerObservationOnlyCommit = (
   engine: Engine,
@@ -5966,6 +6112,7 @@ const applySchedulerObservationOnlyCommit = (
     localSeq,
     reads,
     schedulerObservation,
+    executionClaim,
   }: {
     sessionId: SessionId;
     sessionKey: string;
@@ -5975,21 +6122,26 @@ const applySchedulerObservationOnlyCommit = (
     localSeq: number;
     reads: ClientCommit["reads"];
     schedulerObservation: SchedulerActionObservation;
+    executionClaim?: ExecutionClaim;
   },
 ): AppliedCommit => {
   const observedAtSeq = headSeq(engine, branch);
-  const acceptedObservation: SchedulerActionObservation = {
-    ...schedulerObservation,
-    inputBasisSeq: acceptedInputBasisSeq(
-      reads.confirmed,
-      resolvedPendingReadsForBasis(engine, sessionKey, reads.pending),
-    ),
-  };
+  const inputBasisSeq = acceptedInputBasisSeq(
+    reads.confirmed,
+    resolvedPendingReadsForBasis(engine, sessionKey, reads.pending),
+  );
+  const accepted = acceptedSchedulerObservation(schedulerObservation, {
+    branch,
+    space,
+    principal,
+    inputBasisSeq,
+    executionClaim,
+  });
   const replayPayload = schedulerObservationReplayPayload({
     branch,
     observedAtSeq,
-    ownerSpace: space ?? acceptedObservation.ownerSpace,
-    observation: acceptedObservation,
+    ownerSpace: space ?? accepted.observation.ownerSpace,
+    observation: accepted.observation,
   });
   const existingReplay = getSchedulerObservationReplay(engine, {
     branch,
@@ -6048,7 +6200,7 @@ const applySchedulerObservationOnlyCommit = (
 
   const observationResult = upsertSchedulerObservationTransaction(engine, {
     branch,
-    ownerSpace: space ?? acceptedObservation.ownerSpace,
+    ownerSpace: space ?? accepted.observation.ownerSpace,
     // An observation-only commit advances no semantic sequence, so reserve the
     // next GLOBAL server sequence as its delivery slot. `observedAtSeq` is the
     // selected branch's head and can lag the space-wide sync watermark after a
@@ -6060,7 +6212,7 @@ const applySchedulerObservationOnlyCommit = (
     scopeContext: { principal: principal!, sessionId },
     writerSessionId: sessionKey,
     localSeq,
-    observation: acceptedObservation,
+    observation: accepted.observation,
   });
   return {
     seq: observedAtSeq,
@@ -6072,7 +6224,23 @@ const applySchedulerObservationOnlyCommit = (
       status: "kept",
       schedulerObservationId: observationResult.observationId,
       executionContextKey: observationResult.executionContextKey,
+      inputBasisSeq,
+      ...(accepted.provenance !== undefined
+        ? { executionProvenance: accepted.provenance }
+        : {}),
     }],
+    ...(accepted.provenance !== undefined && executionClaim !== undefined
+      ? {
+        actionAttempts: [{
+          localSeq,
+          claim: executionClaim,
+          provenance: accepted.provenance,
+          outcome: schedulerObservation.status === "failed"
+            ? "failed" as const
+            : "no-op" as const,
+        }],
+      }
+      : {}),
   };
 };
 
@@ -6085,6 +6253,7 @@ const applySchedulerObservationBatchCommit = (
     principal,
     branch,
     batch,
+    executionClaims,
   }: {
     sessionId: SessionId;
     sessionKey: string;
@@ -6092,9 +6261,11 @@ const applySchedulerObservationBatchCommit = (
     principal?: string;
     branch: BranchName;
     batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
+    executionClaims?: ReadonlyMap<number, ExecutionClaim>;
   },
 ): AppliedCommit => {
   const results: AppliedSchedulerObservationResult[] = [];
+  const actionAttempts: AppliedActionAttempt[] = [];
   let hasNewObservation = false;
   for (const item of batch) {
     const result = applySchedulerObservationOnlyCommit(engine, {
@@ -6107,9 +6278,11 @@ const applySchedulerObservationBatchCommit = (
       reads: item.reads,
       schedulerObservation: item
         .schedulerObservation as SchedulerActionObservation,
+      executionClaim: executionClaims?.get(item.localSeq),
     });
     hasNewObservation ||= !isAppliedCommitReplay(result);
     results.push(result.schedulerObservationResults![0]);
+    actionAttempts.push(...(result.actionAttempts ?? []));
   }
 
   const commit: AppliedCommit = {
@@ -6117,6 +6290,7 @@ const applySchedulerObservationBatchCommit = (
     branch,
     revisions: [],
     schedulerObservationResults: results,
+    ...(actionAttempts.length > 0 ? { actionAttempts } : {}),
   };
   return hasNewObservation ? commit : markAppliedCommitReplay(commit);
 };

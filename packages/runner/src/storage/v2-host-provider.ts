@@ -511,6 +511,10 @@ class HostReplicaSession implements ReplicaSession {
     }
   }
 
+  noteAppliedCommit(seq: number): void {
+    this.session.noteAppliedCommit(seq);
+  }
+
   queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
     return this.session.queryGraph({ ...query, branch: this.branch });
   }

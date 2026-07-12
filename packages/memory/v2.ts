@@ -376,6 +376,21 @@ export interface ExecutionClaim extends ActionClaimKey {
   expiresAt: number;
 }
 
+/**
+ * Host-authored metadata for one accepted server action transaction.
+ * `onBehalfOf` is execution authority, not semantic authorship. The host
+ * derives it from the authenticated sponsor session and derives the basis from
+ * the validated commit reads; Worker/client values are never authoritative.
+ */
+export interface ActionExecutionProvenance {
+  claim: ActionClaimKey;
+  onBehalfOf: string;
+  leaseGeneration: number;
+  claimGeneration: number;
+  causedBy: number[];
+  inputBasisSeq: number;
+}
+
 export interface ExecutionClaimSetEvent {
   type: "session.execution.claim.set";
   claim: ExecutionClaim;
