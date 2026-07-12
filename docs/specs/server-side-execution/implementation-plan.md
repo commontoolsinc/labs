@@ -238,6 +238,7 @@ provenance/echo metadata and is not a substitute for execution_context_key.
 
 **Depends on:** #4288.
 **Unblocks:** deterministic action/output discovery and static servability.
+**Status:** implemented.
 
 **Decision:** important authored patterns go through the transformer. Do not
 build a legacy Pattern JSON migration or retain recursive emitted-output-binding
@@ -273,15 +274,15 @@ guessing for computation nodes.
 
 **Success criteria:**
 
-- [ ] A transformed lift has one direct root binding and registers the expected
+- [x] A transformed lift has one direct root binding and registers the expected
       stable action/output identity.
-- [ ] A malformed hand-built computation with nested or multiple root bindings
+- [x] A malformed hand-built computation with nested or multiple root bindings
       fails at registration with the new diagnostic.
-- [ ] A compliant passthrough fixture has one direct root binding; nested or
+- [x] A compliant passthrough fixture has one direct root binding; nested or
       multiple passthrough aliases fail with the same actionable diagnostic.
-- [ ] Static side writes still appear as additional write-index entries.
-- [ ] General Cell redirect and alias tests remain green.
-- [ ] No corpus migration, historical JSON compatibility path, or recursive
+- [x] Static side writes still appear as additional write-index entries.
+- [x] General Cell redirect and alias tests remain green.
+- [x] No corpus migration, historical JSON compatibility path, or recursive
       first-output heuristic remains for computations.
 
 ---
