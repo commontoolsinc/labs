@@ -241,6 +241,82 @@ Deno.test("memory v2 migrates scheduler read indexes to include owner space", as
   }
 });
 
+Deno.test("memory v2 migrates canonical replay payload without changing snapshots", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  let engine = await openEngine({ url: toFileUrl(path) });
+  close(engine);
+
+  const legacyDb = new Database(path);
+  try {
+    legacyDb.exec(`
+      ALTER TABLE scheduler_observation_replay
+      DROP COLUMN accepted_payload;
+
+      INSERT INTO scheduler_observation_replay (
+        branch,
+        session_id,
+        local_seq,
+        status,
+        reason,
+        observation_id,
+        observed_at_seq,
+        payload
+      ) VALUES (
+        '',
+        'migration-session',
+        7,
+        'dropped',
+        'stale-confirmed-read',
+        NULL,
+        11,
+        '{}'
+      );
+    `);
+  } finally {
+    legacyDb.close();
+  }
+
+  engine = await openEngine({ url: toFileUrl(path) });
+  try {
+    const replayColumns = engine.database.prepare(
+      `PRAGMA table_info("scheduler_observation_replay")`,
+    ).all() as Array<{ name: string }>;
+    assertEquals(
+      replayColumns.some((column) => column.name === "accepted_payload"),
+      true,
+    );
+    const replay = engine.database.prepare(`
+      SELECT local_seq, status, reason, observed_at_seq, accepted_payload
+      FROM scheduler_observation_replay
+      WHERE session_id = 'migration-session'
+    `).get() as {
+      local_seq: number;
+      status: string;
+      reason: string;
+      observed_at_seq: number;
+      accepted_payload: string | null;
+    };
+    assertEquals(replay, {
+      local_seq: 7,
+      status: "dropped",
+      reason: "stale-confirmed-read",
+      observed_at_seq: 11,
+      accepted_payload: null,
+    });
+
+    const snapshotColumns = engine.database.prepare(
+      `PRAGMA table_info("scheduler_action_snapshot")`,
+    ).all() as Array<{ name: string }>;
+    assertEquals(
+      snapshotColumns.some((column) => column.name === "accepted_payload"),
+      false,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 migrates legacy scheduler write and snapshot metadata", async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
   const legacyDb = new Database(path, { create: true });

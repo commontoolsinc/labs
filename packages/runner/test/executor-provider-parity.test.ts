@@ -371,6 +371,11 @@ Deno.test("executor host provider binds accepted action provenance to its authen
       }],
       schedulerObservation: {
         ...baseObservation,
+        executionClaimAssertion: {
+          contextKey: claim.contextKey,
+          leaseGeneration: claim.leaseGeneration,
+          claimGeneration: claim.claimGeneration,
+        },
         inputBasisSeq: 999_999,
         executionProvenance: {
           claim,
