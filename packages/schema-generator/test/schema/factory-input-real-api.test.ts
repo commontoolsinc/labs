@@ -7,6 +7,10 @@ import { asObjectSchema } from "../utils.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("../../../../", import.meta.url));
 const TEST_FILE = join(REPO_ROOT, "__schema_factory_input_real_api_test.ts");
+const DEEP_FREEZE_STUB = join(
+  REPO_ROOT,
+  "__schema_factory_input_deep_freeze.d.ts",
+);
 
 function formatDiagnostics(diagnostics: readonly ts.Diagnostic[]): string {
   return diagnostics.map((diagnostic) => {
@@ -49,6 +53,13 @@ function getTypeFromRealApiCode(
   const originalGetSourceFile = host.getSourceFile.bind(host);
   const originalFileExists = host.fileExists.bind(host);
   const originalReadFile = host.readFile.bind(host);
+  const virtualFiles = new Map([
+    [TEST_FILE, code],
+    [
+      DEEP_FREEZE_STUB,
+      "export declare function deepFreeze<T>(value: T): T;",
+    ],
+  ]);
 
   host.getSourceFile = (
     fileName,
@@ -56,8 +67,14 @@ function getTypeFromRealApiCode(
     onError,
     shouldCreateNewSourceFile,
   ) => {
-    if (fileName === TEST_FILE) {
-      return ts.createSourceFile(fileName, code, languageVersion, true);
+    const virtualSource = virtualFiles.get(fileName);
+    if (virtualSource !== undefined) {
+      return ts.createSourceFile(
+        fileName,
+        virtualSource,
+        languageVersion,
+        true,
+      );
     }
     return originalGetSourceFile(
       fileName,
@@ -67,9 +84,25 @@ function getTypeFromRealApiCode(
     );
   };
   host.fileExists = (fileName) =>
-    fileName === TEST_FILE || originalFileExists(fileName);
+    virtualFiles.has(fileName) || originalFileExists(fileName);
   host.readFile = (fileName) =>
-    fileName === TEST_FILE ? code : originalReadFile(fileName);
+    virtualFiles.get(fileName) ?? originalReadFile(fileName);
+  host.resolveModuleNames = (moduleNames, containingFile) =>
+    moduleNames.map((moduleName) => {
+      if (moduleName === "@commonfabric/data-model/deep-freeze") {
+        return {
+          resolvedFileName: DEEP_FREEZE_STUB,
+          extension: ts.Extension.Dts,
+          isExternalLibraryImport: false,
+        };
+      }
+      return ts.resolveModuleName(
+        moduleName,
+        containingFile,
+        compilerOptions,
+        host,
+      ).resolvedModule;
+    });
 
   const program = ts.createProgram([TEST_FILE], compilerOptions, host);
   const diagnostics = ts.getPreEmitDiagnostics(program);
