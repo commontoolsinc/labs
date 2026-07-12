@@ -140,6 +140,14 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       claimsByAction.delete(sourceAction);
       worker.postMessage({ type: "unserved-claim", claim, diagnosticCode });
     },
+    onInvalidated: (claim, sourceAction, diagnosticCode) => {
+      claimsByAction.delete(sourceAction);
+      worker.postMessage({
+        type: "invalidated-claim",
+        claim,
+        diagnosticCode,
+      });
+    },
   });
   storage = HostStorageManager.connect({
     port: request.port,

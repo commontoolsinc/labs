@@ -56,6 +56,7 @@ type WorkerResponse = {
     | "fatal"
     | "candidate-claim"
     | "candidate-diagnostic"
+    | "invalidated-claim"
     | "unserved-claim";
   requestId?: number;
   message?: string;
@@ -72,6 +73,7 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
     message.type === "complete" || message.type === "fatal" ||
     message.type === "candidate-claim" ||
     message.type === "candidate-diagnostic" ||
+    message.type === "invalidated-claim" ||
     message.type === "unserved-claim") &&
     (message.requestId === undefined ||
       Number.isSafeInteger(message.requestId)) &&
@@ -80,7 +82,8 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
       isCandidateClaim(message.candidate)) &&
     (message.type !== "candidate-diagnostic" ||
       isCandidateClaimDiagnostic(message.diagnostic)) &&
-    (message.type !== "unserved-claim" ||
+    ((message.type !== "unserved-claim" &&
+      message.type !== "invalidated-claim") ||
       (isExecutionClaim(message.claim) &&
         typeof message.diagnosticCode === "string" &&
         message.diagnosticCode.length > 0));
@@ -267,12 +270,15 @@ class DenoSpaceExecutor implements SpaceExecutor {
       this.#onCandidateDiagnostic?.(message.diagnostic!);
       return;
     }
-    if (message.type === "unserved-claim") {
+    if (
+      message.type === "unserved-claim" ||
+      message.type === "invalidated-claim"
+    ) {
       const claim = message.claim!;
       const diagnosticCode = message.diagnosticCode!;
       this.#claimControl = this.#claimControl.then(
-        () => this.#handleUnserved(claim, diagnosticCode),
-        () => this.#handleUnserved(claim, diagnosticCode),
+        () => this.#handleClaimRelease(claim, diagnosticCode),
+        () => this.#handleClaimRelease(claim, diagnosticCode),
       ).catch((error) => this.#fail(error));
       return;
     }
@@ -326,7 +332,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
     });
   }
 
-  #handleUnserved(
+  #handleClaimRelease(
     claim: ExecutionClaim,
     diagnosticCode: string,
   ): void {
@@ -336,7 +342,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
       live === undefined || live.leaseGeneration !== claim.leaseGeneration ||
       live.claimGeneration !== claim.claimGeneration
     ) {
-      throw new Error("unserved executor attempt does not match a live claim");
+      throw new Error("executor claim release does not match a live claim");
     }
     this.#revokeClaim(live);
     this.#claims.delete(mapKey);

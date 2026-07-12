@@ -36,6 +36,11 @@ export interface ExecutorActionTransactionRouterOptions {
     sourceAction: object,
     diagnosticCode: string,
   ) => void;
+  readonly onInvalidated?: (
+    claim: ExecutionClaim,
+    sourceAction: object,
+    diagnosticCode: string,
+  ) => void;
 }
 
 /**
@@ -56,33 +61,68 @@ export function createExecutorActionTransactionRouter(
   return (input: ActionTransactionRouteInput) => {
     const observation = input.commit.schedulerObservation;
     if (!isSchedulerActionObservation(observation)) {
-      options.onDiagnostic?.({
-        diagnosticCode: "malformed-action-observation",
-      });
-      return local;
-    }
-    const claimKey = actionClaimKey(observation);
-    if (input.sourceAction === undefined) {
-      options.onDiagnostic?.({
-        diagnosticCode: "missing-source-action",
-        claimKey,
-      });
-      return local;
-    }
-    const sourceAction = input.sourceAction;
-
-    const liveClaim = options.claimForAction(sourceAction);
-    if (liveClaim !== undefined && !claimMatchesKey(liveClaim, claimKey)) {
-      options.onDiagnostic?.({
-        diagnosticCode: "claim-key-mismatch",
-        claimKey,
-      });
+      const sourceAction = input.sourceAction;
+      const liveClaim = sourceAction === undefined
+        ? undefined
+        : options.claimForAction(sourceAction);
+      if (sourceAction !== undefined && liveClaim !== undefined) {
+        invalidateClaim(
+          reported,
+          options,
+          liveClaim,
+          sourceAction,
+          "malformed-action-observation",
+        );
+      } else {
+        options.onDiagnostic?.({
+          diagnosticCode: "malformed-action-observation",
+        });
+      }
       return local;
     }
     const staticDecision = classifyStaticActionServability(
       observation,
       options.servedSpace,
     );
+    const claimKey = safeActionClaimKey(observation);
+    if (input.sourceAction === undefined) {
+      options.onDiagnostic?.({
+        diagnosticCode: "missing-source-action",
+        ...(claimKey !== undefined ? { claimKey } : {}),
+      });
+      return local;
+    }
+    const sourceAction = input.sourceAction;
+
+    const liveClaim = options.claimForAction(sourceAction);
+    if (claimKey === undefined) {
+      const diagnosticCode = staticDecision.status === "unservable"
+        ? staticDecision.reason
+        : "malformed-candidate";
+      if (liveClaim !== undefined) {
+        invalidateClaim(
+          reported,
+          options,
+          liveClaim,
+          sourceAction,
+          diagnosticCode,
+        );
+      } else {
+        options.onDiagnostic?.({ diagnosticCode });
+      }
+      return local;
+    }
+    if (liveClaim !== undefined && !claimMatchesKey(liveClaim, claimKey)) {
+      invalidateClaim(
+        reported,
+        options,
+        liveClaim,
+        sourceAction,
+        "claim-key-mismatch",
+        claimKey,
+      );
+      return local;
+    }
     if (staticDecision.status !== "claim-ready") {
       const diagnosticCode = staticDecision.status === "broker-required"
         ? "broker-required"
@@ -143,6 +183,25 @@ export function createExecutorActionTransactionRouter(
   };
 }
 
+function invalidateClaim(
+  reported: WeakMap<object, string>,
+  options: ExecutorActionTransactionRouterOptions,
+  claim: ExecutionClaim,
+  sourceAction: object,
+  diagnosticCode: string,
+  claimKey?: ActionClaimKey,
+): void {
+  reported.delete(sourceAction);
+  if (options.onInvalidated !== undefined) {
+    options.onInvalidated(claim, sourceAction, diagnosticCode);
+  } else {
+    options.onDiagnostic?.({
+      diagnosticCode,
+      ...(claimKey !== undefined ? { claimKey } : {}),
+    });
+  }
+}
+
 function unservedRoute(
   reported: WeakMap<object, string>,
   options: ExecutorActionTransactionRouterOptions,
@@ -179,12 +238,28 @@ function attachClaimAssertion(
   };
 }
 
-function actionClaimKey(
+function safeActionClaimKey(
   observation: SchedulerActionObservation,
-): ActionClaimKey {
+): ActionClaimKey | undefined {
+  if (
+    typeof observation.ownerSpace !== "string" ||
+    observation.ownerSpace.length === 0 ||
+    typeof observation.pieceId !== "string" ||
+    observation.pieceId.length === 0 ||
+    typeof observation.actionId !== "string" ||
+    observation.actionId.length === 0 ||
+    (observation.actionKind !== "computation" &&
+      observation.actionKind !== "effect") ||
+    typeof observation.implementationFingerprint !== "string" ||
+    observation.implementationFingerprint.length === 0 ||
+    typeof observation.runtimeFingerprint !== "string" ||
+    observation.runtimeFingerprint.length === 0
+  ) {
+    return undefined;
+  }
   return {
     branch: observation.branch,
-    space: observation.ownerSpace!,
+    space: observation.ownerSpace,
     contextKey: "space",
     pieceId: observation.pieceId,
     actionId: observation.actionId,

@@ -332,8 +332,8 @@ Deno.test("changed action identity invalidates its old exact claim", async () =>
     ) => invalidated.push({ claim: oldClaim, sourceAction, diagnosticCode }),
   });
   const changed = commit();
-  (changed.schedulerObservation as Record<string, unknown>)
-    .runtimeFingerprint = "runtime:changed";
+  (changed.schedulerObservation as Record<string, unknown>).actionId =
+    "action:changed";
 
   assertEquals(
     await router({ space: SPACE, commit: changed, sourceAction: action }),
@@ -344,4 +344,32 @@ Deno.test("changed action identity invalidates its old exact claim", async () =>
     sourceAction: action,
     diagnosticCode: "claim-key-mismatch",
   }]);
+});
+
+Deno.test("malformed observation invalidates an already live claim", async () => {
+  const claim: ExecutionClaim = {
+    ...key,
+    leaseGeneration: 18,
+    claimGeneration: 20,
+    expiresAt: 100_000,
+  };
+  const invalidated: string[] = [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    claimForAction: () => claim,
+    onCandidate: () => {
+      throw new Error("malformed observation must not recandidate");
+    },
+    onInvalidated: (_oldClaim, _sourceAction, diagnosticCode) =>
+      invalidated.push(diagnosticCode),
+  });
+  const malformed = commit();
+  malformed.schedulerObservation = { version: 2 };
+
+  assertEquals(
+    await router({ space: SPACE, commit: malformed, sourceAction: action }),
+    { disposition: "local", kind: "executor-shadow" },
+  );
+  assertEquals(invalidated, ["malformed-action-observation"]);
 });
