@@ -14,7 +14,13 @@ const { API_URL } = env;
 const keyConfig: IdentityCreateConfig = {
   implementation: "noble",
 };
-const identity = await Identity.fromPassphrase("test operator", keyConfig);
+// This test writes fixed cell causes into a persistent integration store. Use a
+// fresh space per invocation so rerunning the suite cannot inherit stale cells
+// from an earlier server process.
+const identity = await Identity.fromPassphrase(
+  `sync schema path ${crypto.randomUUID()}`,
+  keyConfig,
+);
 
 console.log("\n=== TEST: Sync Schema uses Path ===");
 

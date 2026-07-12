@@ -852,6 +852,20 @@ export interface AppliedCommit {
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
 }
 
+// Replay status is process-local engine metadata, deliberately kept outside
+// AppliedCommit's serialized shape. The canonical response to a replay stays
+// byte-compatible while host-side post-commit feeds can avoid publishing the
+// same accepted transaction twice.
+const replayedAppliedCommits = new WeakSet<AppliedCommit>();
+
+const markAppliedCommitReplay = (commit: AppliedCommit): AppliedCommit => {
+  replayedAppliedCommits.add(commit);
+  return commit;
+};
+
+export const isAppliedCommitReplay = (commit: AppliedCommit): boolean =>
+  replayedAppliedCommits.has(commit);
+
 export type SchedulerActionKind =
   | "computation"
   | "effect"
@@ -5225,7 +5239,7 @@ const applyCommitTransaction = (
         observationReplay,
       )
       : undefined;
-    return {
+    return markAppliedCommitReplay({
       seq: existing.seq,
       branch: existing.branch,
       revisions: selectCommitRevisions(engine, existing.seq),
@@ -5235,7 +5249,7 @@ const applyCommitTransaction = (
       ...(observationResult
         ? { schedulerObservationResults: [observationResult] }
         : {}),
-    };
+    });
   }
 
   // Preconditions gate every commit shape, including the observation-only
@@ -5936,7 +5950,7 @@ const applySchedulerObservationOnlyCommit = (
       localSeq,
       existingReplay,
     );
-    return {
+    return markAppliedCommitReplay({
       seq: existingReplay.observed_at_seq,
       branch,
       revisions: [],
@@ -5944,7 +5958,7 @@ const applySchedulerObservationOnlyCommit = (
         ? { schedulerObservationId: replayed.schedulerObservationId }
         : {}),
       schedulerObservationResults: [replayed],
-    };
+    });
   }
 
   const dropReason = schedulerObservationReadDropReason(engine, {
@@ -6025,6 +6039,7 @@ const applySchedulerObservationBatchCommit = (
   },
 ): AppliedCommit => {
   const results: AppliedSchedulerObservationResult[] = [];
+  let hasNewObservation = false;
   for (const item of batch) {
     const result = applySchedulerObservationOnlyCommit(engine, {
       sessionId,
@@ -6037,15 +6052,17 @@ const applySchedulerObservationBatchCommit = (
       schedulerObservation: item
         .schedulerObservation as SchedulerActionObservation,
     });
+    hasNewObservation ||= !isAppliedCommitReplay(result);
     results.push(result.schedulerObservationResults![0]);
   }
 
-  return {
+  const commit: AppliedCommit = {
     seq: headSeq(engine, branch),
     branch,
     revisions: [],
     schedulerObservationResults: results,
   };
+  return hasNewObservation ? commit : markAppliedCommitReplay(commit);
 };
 
 // The COMMIT conflict matcher uses LEAF-ONLY touched paths (no add/remove/move

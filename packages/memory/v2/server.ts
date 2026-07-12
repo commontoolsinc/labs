@@ -2,6 +2,7 @@ import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
+  type BranchName,
   type CellScope,
   type ClientCommit,
   type ClientMessage,
@@ -355,6 +356,42 @@ type DirtyOrigin = {
   sessionId: string;
   seq: number;
 };
+
+/**
+ * Host-only notification emitted after a commit has passed the canonical
+ * server transaction path and its scheduler side effects have run. This is
+ * deliberately distinct from the dirty-session refresh queue: that queue also
+ * carries rejected-commit catch-up and may coalesce several commits.
+ */
+export interface AcceptedCommitEvent {
+  /** Ephemeral per-space callback order. W0.6 replaces this with the durable
+   *  reconnectable execution-feed sequence. */
+  readonly order: number;
+  /** Data/adoption window through which this commit is visible. Metadata-only
+   *  scheduler observations may reserve a future delivery slot without
+   *  advancing the semantic branch head. */
+  readonly deliverySeq: number;
+  readonly space: string;
+  readonly originSessionId?: string;
+  readonly branch: BranchName;
+  readonly dataSeq: number;
+  /** Detached scalar revision metadata; document payloads never enter the
+   *  host callback surface. */
+  readonly revisions: readonly Readonly<{
+    branch: BranchName;
+    id: string;
+    scope?: CellScope;
+    seq: number;
+    op: Operation["op"];
+  }>[];
+  /** Scheduler snapshot rows changed by this accepted transaction, whether by
+   *  re-observation or by a semantic write dirtying a reader. */
+  readonly schedulerUpdateIds: readonly number[];
+}
+
+export type AcceptedCommitListener = (
+  event: AcceptedCommitEvent,
+) => void | Promise<void>;
 
 class Connection {
   #ready = false;
@@ -862,6 +899,8 @@ export class Server {
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
   #lastRefreshDurationMs = 0;
+  #acceptedCommitListeners = new Map<string, Set<AcceptedCommitListener>>();
+  #acceptedCommitOrderBySpace = new Map<string, number>();
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
@@ -1271,7 +1310,99 @@ export class Server {
     }
     this.#engines.clear();
     this.#connections.clear();
+    this.#acceptedCommitListeners.clear();
+    this.#acceptedCommitOrderBySpace.clear();
     this.#readPool.close();
+  }
+
+  /**
+   * Subscribe to accepted commits for one exact space. The callback is a
+   * host-side execution primitive, not a client protocol surface. Listener
+   * failures are contained because a commit is already durable by the time it
+   * is published and must never be reported as rejected afterward.
+   */
+  subscribeAcceptedCommits(
+    space: string,
+    listener: AcceptedCommitListener,
+  ): () => void {
+    let listeners = this.#acceptedCommitListeners.get(space);
+    if (listeners === undefined) {
+      listeners = new Set();
+      this.#acceptedCommitListeners.set(space, listeners);
+    }
+    listeners.add(listener);
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      const current = this.#acceptedCommitListeners.get(space);
+      current?.delete(listener);
+      if (current?.size === 0) {
+        this.#acceptedCommitListeners.delete(space);
+      }
+    };
+  }
+
+  #publishAcceptedCommit(
+    event: {
+      space: string;
+      originSessionId?: string;
+      deliverySeq: number;
+      commit: Engine.AppliedCommit;
+    },
+  ): void {
+    const order = (this.#acceptedCommitOrderBySpace.get(event.space) ?? 0) + 1;
+    this.#acceptedCommitOrderBySpace.set(event.space, order);
+    const revisions = Object.freeze(
+      event.commit.revisions.map((revision) =>
+        Object.freeze({
+          branch: revision.branch,
+          id: revision.id,
+          ...(revision.scope !== undefined ? { scope: revision.scope } : {}),
+          seq: revision.seq,
+          op: revision.op,
+        })
+      ),
+    );
+    const schedulerUpdateIds = Object.freeze([
+      ...new Set([
+        ...(event.commit.schedulerObservationResults ?? []).flatMap((result) =>
+          result.status === "kept" &&
+            result.schedulerObservationId !== undefined
+            ? [result.schedulerObservationId]
+            : []
+        ),
+        ...(event.commit.schedulerDirtiedReaders ?? []).map((reader) =>
+          reader.observationId
+        ),
+      ]),
+    ].sort((left, right) => left - right));
+    const orderedEvent: AcceptedCommitEvent = Object.freeze({
+      order,
+      deliverySeq: event.deliverySeq,
+      space: event.space,
+      ...(event.originSessionId !== undefined
+        ? { originSessionId: event.originSessionId }
+        : {}),
+      branch: event.commit.branch,
+      dataSeq: event.commit.seq,
+      revisions,
+      schedulerUpdateIds,
+    });
+    for (
+      const listener of this.#acceptedCommitListeners.get(event.space) ?? []
+    ) {
+      try {
+        const result = listener(orderedEvent);
+        if (result instanceof Promise) {
+          void result.catch((error) => {
+            console.warn("accepted commit listener failed", error);
+          });
+        }
+      } catch (error) {
+        console.warn("accepted commit listener failed", error);
+      }
+    }
   }
 
   /**
@@ -1346,6 +1477,11 @@ export class Server {
       new Map(),
       undefined,
     );
+    this.#publishAcceptedCommit({
+      space,
+      deliverySeq: commit.seq,
+      commit,
+    });
     this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
   }
@@ -2087,6 +2223,12 @@ export class Server {
               detachDatabase(engine.database, alias);
             }
           }
+          const acceptedDeliverySeq = commitPayload.operations.length === 0 &&
+              commit.schedulerObservationResults?.some((result) =>
+                result.status === "kept"
+              )
+            ? Engine.serverSeq(engine) + 1
+            : commit.seq;
           if (aclTouched) {
             this.#invalidateAclCapabilities(message.space);
             // Pass the writing session so it isn't sent the terminal revocation
@@ -2106,6 +2248,14 @@ export class Server {
             previousReadSpaces,
             session,
           );
+          if (!Engine.isAppliedCommitReplay(commit)) {
+            this.#publishAcceptedCommit({
+              space: message.space,
+              originSessionId: message.sessionId,
+              deliverySeq: acceptedDeliverySeq,
+              commit,
+            });
+          }
           this.markSpaceDirty(
             message.space,
             message.commit.operations

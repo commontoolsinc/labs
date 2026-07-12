@@ -3,6 +3,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
+import type { ReplicaSessionHandle } from "./v2-replica-session.ts";
 
 export interface SessionFactory {
   /** Opt in to StorageManager's ACL genesis handshake. Scripted factories used
@@ -13,10 +14,7 @@ export interface SessionFactory {
     space: MemorySpace,
     signer?: Signer,
     mountOptions?: MemoryClient.MountOptions,
-  ): Promise<{
-    client: MemoryClient.Client;
-    session: MemoryClient.SpaceSession;
-  }>;
+  ): Promise<ReplicaSessionHandle>;
 }
 
 export const toWebSocketAddress = (address: URL): URL => {
