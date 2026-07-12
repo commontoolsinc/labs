@@ -540,7 +540,18 @@ export type StorageNotification =
   | IPullNotification
   | IIntegrateNotification
   | ISchedulerObservationsNotification
+  | IExecutionClaimInvalidationNotification
   | IResetNotification;
+
+/** A live server authority claim ended or its source basis was rejected.
+ * Storage has already removed the affected overlay; the scheduler must rerun
+ * the exact producing action under the now-current authority snapshot. */
+export interface IExecutionClaimInvalidationNotification {
+  type: "execution-claim-invalidation";
+  space: MemorySpace;
+  sourceAction: object;
+  diagnosticCode: string;
+}
 
 /**
  * This notification is broadcasted after commit on {@link IStorageTransaction}

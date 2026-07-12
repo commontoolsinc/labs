@@ -19,6 +19,8 @@ import {
 import { assert, unclaimed } from "@commonfabric/memory/fact";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
+  actionClaimMapKey,
+  type ActionSettlement,
   type BranchName,
   type CellScope,
   type ClientCommit,
@@ -26,8 +28,12 @@ import {
   type DocumentPath,
   type EntityDocument,
   type ExecutionClaim,
+  executionClaimIncarnationKey,
+  type ExecutionControlEvent,
+  type ExecutionFeedBatch,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  getServerPrimaryExecutionConfig,
   type LegacyBackgroundExclusion,
   type LegacyBackgroundExclusionStatus,
   type PatchOp,
@@ -104,6 +110,7 @@ import {
   isReadIgnoredForCommit,
   isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
+import { routeClientActionTransaction } from "../client-execution/action-transaction-router.ts";
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
 // part of the write; that read is dropped from its conflict set.
@@ -1724,6 +1731,15 @@ type NativeCommitOperation =
   }
   | { op: "delete"; id: URI; scope?: CellScope };
 
+type ClaimedOverlayGeneration = {
+  readonly localSeq: number;
+  readonly claim: ExecutionClaim;
+  readonly sourceAction: object;
+  basisSeq: number;
+  readonly unresolvedBasisLocalSeqs: Set<number>;
+  readonly touched: readonly { id: URI; scope?: CellScope }[];
+};
+
 type SchedulerObservationBatchEntry = {
   commit: SchedulerObservationCommit;
   pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
@@ -1739,6 +1755,15 @@ class SpaceReplica implements ISpaceReplica {
   readonly #shadowWrites: boolean;
   readonly #actionTransactionRouter?: ActionTransactionRouter;
   readonly #shadowLocalSeqsByAction = new WeakMap<object, Set<number>>();
+  readonly #executionClaims = new Map<string, ExecutionClaim>();
+  readonly #claimedOverlays = new Map<number, ClaimedOverlayGeneration>();
+  readonly #confirmedSeqByLocalSeq = new Map<number, number>();
+  #pendingExecutionSettlements: ActionSettlement[] = [];
+  #executionFeedSeq = 0;
+  #executionAppliedSeq = 0;
+  #executionClaimRouting = false;
+  #executionBuiltinPassivity = false;
+  #executionSnapshotRequired = false;
   #sessionHandle?: Promise<ReplicaSessionHandle>;
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
@@ -2677,7 +2702,7 @@ class SpaceReplica implements ISpaceReplica {
     const route = this.#actionTransactionRouter === undefined
       ? (this.#shadowWrites
         ? { disposition: "local", kind: "executor-shadow" } as const
-        : { disposition: "upstream" } as const)
+        : this.routeClientActionTransaction(commit, source))
       : await this.routeActionTransaction(commit, source);
     if (route.disposition === "unserved") {
       return await this.publishUnservedAttempt(commit, route);
@@ -2744,6 +2769,16 @@ class SpaceReplica implements ISpaceReplica {
           this.#shadowLocalSeqsByAction.set(source.sourceAction, localSeqs);
         }
         localSeqs.add(localSeq);
+      } else if (
+        route.kind === "claimed-overlay" && source?.sourceAction !== undefined
+      ) {
+        this.recordClaimedOverlay(
+          localSeq,
+          route.claim,
+          source.sourceAction,
+          commit,
+          touched,
+        );
       }
       return { ok: {} };
     }
@@ -2802,6 +2837,34 @@ class SpaceReplica implements ISpaceReplica {
       ]);
     }
     return fallback;
+  }
+
+  private routeClientActionTransaction(
+    commit: ClientCommit,
+    source?: IStorageTransaction,
+  ): ActionTransactionRoute {
+    if (!this.#executionClaimRouting || this.#executionSnapshotRequired) {
+      // During a reconnect/feed gap, existing claims remain authoritative. The
+      // snapshot-required state freezes the last integrated view rather than
+      // interpreting missing control data as authority return.
+      if (!this.#executionClaimRouting) return { disposition: "upstream" };
+    }
+    return routeClientActionTransaction({
+      space: this.#space,
+      commit,
+      ...(source?.sourceAction !== undefined
+        ? { sourceAction: source.sourceAction }
+        : {}),
+    }, {
+      claims: [...this.#executionClaims.values()],
+      builtinPassivity: this.#executionBuiltinPassivity,
+      onDiagnostic: ({ diagnosticCode, claim }) => {
+        logger.warn("execution-client-route", () => [
+          `Claimed action failed open: ${diagnosticCode}`,
+          { actionId: claim.actionId, branch: claim.branch },
+        ]);
+      },
+    });
   }
 
   private async publishUnservedAttempt(
@@ -2956,6 +3019,7 @@ class SpaceReplica implements ISpaceReplica {
       const { session } = await this.sessionHandle();
       const applied = await session.transact(commit);
       this.confirmPending(localSeq, operations, applied);
+      this.noteSourceCommitConfirmed(localSeq, applied.seq);
       session.noteAppliedCommit?.(applied.seq);
       telemetry?.submit({
         type: "storage.push.complete",
@@ -3240,6 +3304,7 @@ class SpaceReplica implements ISpaceReplica {
       sync.removes.length === 0 &&
       !hasAdoptionObservations
     ) {
+      this.applyReplicaExecutionSync(sync);
       this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
@@ -3317,6 +3382,7 @@ class SpaceReplica implements ISpaceReplica {
           this.schedulerHasPendingWriteOverlapping(addresses),
       } as StorageNotification);
     }
+    this.applyReplicaExecutionSync(sync);
     this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
   }
 
@@ -3684,6 +3750,298 @@ class SpaceReplica implements ISpaceReplica {
     return false;
   }
 
+  private initializeClientExecutionControl(
+    handle: ReplicaSessionHandle,
+  ): void {
+    const enabled = getServerPrimaryExecutionConfig() &&
+      handle.client.serverFlags?.serverPrimaryExecutionV1 === true &&
+      handle.client.serverFlags?.serverPrimaryExecutionClaimRoutingV1 === true;
+    if (!enabled) return;
+    this.#executionClaimRouting = true;
+    this.#executionBuiltinPassivity =
+      handle.client.serverFlags?.serverPrimaryExecutionBuiltinPassivityV1 ===
+        true;
+    this.#executionFeedSeq = handle.session.executionFeedSeq ?? 0;
+    this.#executionClaims.clear();
+    for (const claim of handle.session.executionClaims ?? []) {
+      this.#executionClaims.set(actionClaimMapKey(claim), claim);
+    }
+  }
+
+  private recordClaimedOverlay(
+    localSeq: number,
+    claim: ExecutionClaim,
+    sourceAction: object,
+    commit: ClientCommit,
+    touched: readonly { id: URI; scope?: CellScope }[],
+  ): void {
+    let basisSeq = commit.reads.confirmed.reduce(
+      (maximum, read) => Math.max(maximum, read.seq),
+      0,
+    );
+    const unresolvedBasisLocalSeqs = new Set<number>();
+    for (const read of commit.reads.pending) {
+      const confirmed = this.#confirmedSeqByLocalSeq.get(read.localSeq);
+      if (confirmed === undefined) {
+        unresolvedBasisLocalSeqs.add(read.localSeq);
+      } else {
+        basisSeq = Math.max(basisSeq, confirmed);
+      }
+    }
+    this.#claimedOverlays.set(localSeq, {
+      localSeq,
+      claim,
+      sourceAction,
+      basisSeq,
+      unresolvedBasisLocalSeqs,
+      touched: [...new Map(touched.map((entry) => [
+        docKey(entry.id, entry.scope),
+        entry,
+      ])).values()],
+    });
+  }
+
+  private noteSourceCommitConfirmed(localSeq: number, seq: number): void {
+    this.#confirmedSeqByLocalSeq.set(localSeq, seq);
+    let changed = false;
+    for (const overlay of this.#claimedOverlays.values()) {
+      if (!overlay.unresolvedBasisLocalSeqs.delete(localSeq)) continue;
+      overlay.basisSeq = Math.max(overlay.basisSeq, seq);
+      changed = true;
+    }
+    if (changed) this.reconcilePendingExecutionSettlements();
+  }
+
+  private applyReplicaExecutionSync(sync: SessionSync): void {
+    this.#executionAppliedSeq = Math.max(this.#executionAppliedSeq, sync.toSeq);
+    const batch = sync.execution;
+    if (batch !== undefined && this.#executionClaimRouting) {
+      this.applyExecutionFeedBatch(batch);
+    }
+    this.reconcilePendingExecutionSettlements();
+  }
+
+  private applyExecutionFeedBatch(batch: ExecutionFeedBatch): void {
+    if (batch.snapshot === undefined) {
+      if (batch.toFeedSeq <= this.#executionFeedSeq) return;
+      if (
+        this.#executionSnapshotRequired ||
+        batch.fromFeedSeq !== this.#executionFeedSeq
+      ) {
+        // Never turn missing authority data into an upstream write. Retain the
+        // last integrated claim view until a full reconnect snapshot arrives.
+        this.#executionSnapshotRequired = true;
+        return;
+      }
+      for (const event of batch.events) this.applyExecutionControlEvent(event);
+      this.#executionFeedSeq = batch.toFeedSeq;
+      return;
+    }
+
+    // A snapshot is authoritative even when a replaced session restarts its
+    // feed sequence below the previous session's cursor.
+    for (const event of batch.events) this.applyExecutionControlEvent(event);
+    const next = new Map(
+      batch.snapshot.claims.map((claim) => [actionClaimMapKey(claim), claim]),
+    );
+    for (const [key, previous] of this.#executionClaims) {
+      const replacement = next.get(key);
+      if (
+        replacement === undefined ||
+        executionClaimIncarnationKey(replacement) !==
+          executionClaimIncarnationKey(previous)
+      ) {
+        this.dropClaimedOverlays(
+          (overlay) =>
+            executionClaimIncarnationKey(overlay.claim) ===
+              executionClaimIncarnationKey(previous),
+          { dirtyProducer: true, diagnosticCode: "claim-snapshot-replaced" },
+        );
+      }
+    }
+    this.#executionClaims.clear();
+    for (const [key, value] of next) this.#executionClaims.set(key, value);
+    this.#executionFeedSeq = batch.toFeedSeq;
+    this.#executionSnapshotRequired = false;
+  }
+
+  private applyExecutionControlEvent(event: ExecutionControlEvent): void {
+    if (event.type === "session.execution.claim.set") {
+      const key = actionClaimMapKey(event.claim);
+      const current = this.#executionClaims.get(key);
+      if (current !== undefined) {
+        if (
+          event.claim.leaseGeneration < current.leaseGeneration ||
+          (event.claim.leaseGeneration === current.leaseGeneration &&
+            event.claim.claimGeneration <= current.claimGeneration)
+        ) {
+          return;
+        }
+        this.dropClaimedOverlays(
+          (overlay) =>
+            executionClaimIncarnationKey(overlay.claim) ===
+              executionClaimIncarnationKey(current),
+          { dirtyProducer: true, diagnosticCode: "claim-generation-replaced" },
+        );
+      }
+      this.#executionClaims.set(key, event.claim);
+      return;
+    }
+
+    if (event.type === "session.execution.claim.revoke") {
+      const key = actionClaimMapKey(event.claim);
+      const current = this.#executionClaims.get(key);
+      if (
+        current === undefined ||
+        current.leaseGeneration !== event.leaseGeneration ||
+        current.claimGeneration !== event.claimGeneration
+      ) {
+        return;
+      }
+      this.#executionClaims.delete(key);
+      this.dropClaimedOverlays(
+        (overlay) =>
+          executionClaimIncarnationKey(overlay.claim) ===
+            executionClaimIncarnationKey(current),
+        { dirtyProducer: true, diagnosticCode: "claim-revoked" },
+      );
+      return;
+    }
+
+    if (this.settlementMatchesLiveClaim(event.settlement)) {
+      if (this.reconcileExecutionSettlement(event.settlement)) {
+        this.#pendingExecutionSettlements.push(event.settlement);
+      }
+    }
+  }
+
+  private settlementMatchesLiveClaim(settlement: ActionSettlement): boolean {
+    const current = this.#executionClaims.get(
+      actionClaimMapKey(settlement.claim),
+    );
+    return current !== undefined &&
+      executionClaimIncarnationKey(current) ===
+        executionClaimIncarnationKey(settlement.claim);
+  }
+
+  /** Returns true only while this exact settlement still awaits a local basis
+   * translation or accepted-data application barrier. */
+  private reconcileExecutionSettlement(settlement: ActionSettlement): boolean {
+    const incarnation = executionClaimIncarnationKey(settlement.claim);
+    const matching = [...this.#claimedOverlays.values()].filter((overlay) =>
+      executionClaimIncarnationKey(overlay.claim) === incarnation
+    );
+    if (matching.length === 0) return false;
+    if (settlement.outcome === "failed") return false;
+    if (settlement.outcome === "unserved") {
+      this.dropClaimedOverlays(
+        (overlay) =>
+          executionClaimIncarnationKey(overlay.claim) === incarnation,
+        { dirtyProducer: false, diagnosticCode: "claim-unserved" },
+      );
+      return false;
+    }
+
+    const unresolved = matching.some((overlay) =>
+      overlay.unresolvedBasisLocalSeqs.size > 0
+    );
+    const covered = matching.filter((overlay) =>
+      overlay.unresolvedBasisLocalSeqs.size === 0 &&
+      overlay.basisSeq <= settlement.inputBasisSeq
+    );
+    if (covered.length === 0) return unresolved;
+    if (
+      settlement.outcome === "committed" &&
+      this.#executionAppliedSeq < settlement.acceptedCommitSeq
+    ) {
+      return true;
+    }
+    const coveredSeqs = new Set(covered.map((overlay) => overlay.localSeq));
+    this.dropClaimedOverlays(
+      (overlay) => coveredSeqs.has(overlay.localSeq),
+      { dirtyProducer: false, diagnosticCode: `claim-${settlement.outcome}` },
+    );
+    return unresolved;
+  }
+
+  private reconcilePendingExecutionSettlements(): void {
+    if (this.#pendingExecutionSettlements.length === 0) return;
+    const pending = this.#pendingExecutionSettlements;
+    this.#pendingExecutionSettlements = [];
+    for (const settlement of pending) {
+      if (
+        this.settlementMatchesLiveClaim(settlement) &&
+        this.reconcileExecutionSettlement(settlement)
+      ) {
+        this.#pendingExecutionSettlements.push(settlement);
+      }
+    }
+  }
+
+  private dropClaimedOverlays(
+    predicate: (overlay: ClaimedOverlayGeneration) => boolean,
+    options: { dirtyProducer: boolean; diagnosticCode: string },
+  ): void {
+    const dropped = [...this.#claimedOverlays.values()].filter(predicate);
+    if (dropped.length === 0) return;
+    const localSeqs = new Set(dropped.map((overlay) => overlay.localSeq));
+    const touched = [
+      ...new Map(
+        dropped.flatMap((overlay) =>
+          overlay.touched.map((entry) =>
+            [docKey(entry.id, entry.scope), entry] as const
+          )
+        ),
+      ).values(),
+    ];
+    const shouldNotifySubscribers = touched.length > 0 &&
+      this.hasNotificationSubscribers();
+    const shouldNotifySinks = touched.length > 0 &&
+      this.hasSinkSubscribers(touched);
+    const before = shouldNotifySubscribers
+      ? Differential.checkout(
+        this,
+        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+      )
+      : undefined;
+    for (const record of this.#docs.values()) {
+      if (!record.pending.some((entry) => localSeqs.has(entry.localSeq))) {
+        continue;
+      }
+      record.pending = record.pending.filter((entry) =>
+        !localSeqs.has(entry.localSeq)
+      );
+      record.materialized = undefined;
+    }
+    for (const overlay of dropped) {
+      this.#claimedOverlays.delete(overlay.localSeq);
+    }
+    if (before !== undefined) {
+      const changes = before.compare(this);
+      if ([...changes].length > 0) {
+        this.#subscription.next({
+          type: "integrate",
+          space: this.#space,
+          changes,
+        });
+        if (shouldNotifySinks) this.notifySinks(changes);
+      }
+    } else if (shouldNotifySinks) {
+      this.notifySinksForIds(touched);
+    }
+    if (options.dirtyProducer) {
+      const actions = new Set(dropped.map((overlay) => overlay.sourceAction));
+      for (const sourceAction of actions) {
+        this.#subscription.next({
+          type: "execution-claim-invalidation",
+          space: this.#space,
+          sourceAction,
+          diagnosticCode: options.diagnosticCode,
+        });
+      }
+    }
+  }
+
   private sessionHandle(): Promise<ReplicaSessionHandle> {
     if (this.#sessionHandle === undefined) {
       // Defer the factory call until after #sessionHandle is installed. Session
@@ -3694,6 +4052,7 @@ class SpaceReplica implements ISpaceReplica {
       const handle = Promise.resolve().then(() => this.#createSession()).then(
         (resolved) => {
           this.#sessionClient = resolved.client;
+          this.initializeClientExecutionControl(resolved);
           return resolved;
         },
       ).catch((error) => {

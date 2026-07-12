@@ -1,5 +1,6 @@
 import {
   type ActionClaimKey,
+  actionClaimMapKey,
   type ActionSettlement,
   type ClientCommit,
   compatibleMemoryProtocolFlags,
@@ -108,18 +109,6 @@ const watchKey = (
   id: string,
   scope: string | undefined,
 ): string => `${branch}\0${scope ?? "space"}\0${id}`;
-
-const actionClaimMapKey = (claim: ActionClaimKey): string =>
-  encodeMemoryBoundary({
-    branch: claim.branch,
-    space: claim.space,
-    contextKey: claim.contextKey,
-    pieceId: claim.pieceId,
-    actionId: claim.actionId,
-    actionKind: claim.actionKind,
-    implementationFingerprint: claim.implementationFingerprint,
-    runtimeFingerprint: claim.runtimeFingerprint,
-  });
 
 const compareEntitySnapshot = (
   left: EntitySnapshot,
@@ -608,6 +597,10 @@ export class SpaceSession {
         actionClaimMapKey(left).localeCompare(actionClaimMapKey(right))
       ),
     );
+  }
+
+  get executionFeedSeq(): number {
+    return this.#executionFeedSeq;
   }
 
   subscribeExecutionControl(

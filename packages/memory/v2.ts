@@ -377,12 +377,40 @@ export interface ActionClaimKey {
   runtimeFingerprint: string;
 }
 
+/** Canonical field projection shared by protocol, host, and runner maps. */
+export const canonicalActionClaimKey = (
+  claim: ActionClaimKey,
+): ActionClaimKey => ({
+  branch: claim.branch,
+  space: claim.space,
+  contextKey: claim.contextKey,
+  pieceId: claim.pieceId,
+  actionId: claim.actionId,
+  actionKind: claim.actionKind,
+  implementationFingerprint: claim.implementationFingerprint,
+  runtimeFingerprint: claim.runtimeFingerprint,
+});
+
+/** Unambiguous branch/context-qualified key for one logical action. */
+export const actionClaimMapKey = (claim: ActionClaimKey): string =>
+  encodeMemoryBoundary(canonicalActionClaimKey(claim));
+
 export interface ExecutionClaim extends ActionClaimKey {
   leaseGeneration: number;
   claimGeneration: number;
   /** Unix milliseconds assigned by the host clock. */
   expiresAt: number;
 }
+
+/** Unambiguous key for one exact lease + action claim incarnation. */
+export const executionClaimIncarnationKey = (
+  claim: ExecutionClaim,
+): string =>
+  encodeMemoryBoundary([
+    canonicalActionClaimKey(claim),
+    claim.leaseGeneration,
+    claim.claimGeneration,
+  ]);
 
 /**
  * Transient executor assertion naming the exact live claim incarnation under

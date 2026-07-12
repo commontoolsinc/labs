@@ -62,6 +62,9 @@ export interface ReplicaSession {
   /** Client-only execution-control surface. Executor provider sessions omit
    *  these methods so a Worker cannot manufacture client demand. */
   readonly executionClaims?: readonly ExecutionClaim[];
+  /** Highest ordered execution-control feed sequence already reflected in
+   * `executionClaims`. Lets a replica seed atomically before consuming deltas. */
+  readonly executionFeedSeq?: number;
   setExecutionDemand?(
     branch: string,
     pieces: readonly string[],

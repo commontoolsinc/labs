@@ -3,8 +3,10 @@ import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
   type ActionClaimKey,
+  actionClaimMapKey,
   type ActionSettlement,
   type BranchName,
+  canonicalActionClaimKey,
   canonicalSchedulerPieceIdForDemandRoot,
   type CellScope,
   type ClientCommit,
@@ -492,20 +494,6 @@ type BoundExecutionSession = {
   readonly sponsorSessionId: string;
   readonly lease: ExecutionLeaseHandle;
 };
-
-const actionClaimKey = (claim: ActionClaimKey): ActionClaimKey => ({
-  branch: claim.branch,
-  space: claim.space,
-  contextKey: claim.contextKey,
-  pieceId: claim.pieceId,
-  actionId: claim.actionId,
-  actionKind: claim.actionKind,
-  implementationFingerprint: claim.implementationFingerprint,
-  runtimeFingerprint: claim.runtimeFingerprint,
-});
-
-const actionClaimMapKey = (claim: ActionClaimKey): string =>
-  encodeMemoryBoundary(actionClaimKey(claim));
 
 const isPositiveSafeInteger = (value: number): boolean =>
   Number.isSafeInteger(value) && value > 0;
@@ -3048,7 +3036,7 @@ export class Server {
     this.#publishExecutionControl(Object.freeze({
       type: "session.execution.claim.revoke",
       branch: claim.branch,
-      claim: Object.freeze(actionClaimKey(claim)),
+      claim: Object.freeze(canonicalActionClaimKey(claim)),
       leaseGeneration: claim.leaseGeneration,
       claimGeneration: claim.claimGeneration,
     }));
@@ -3179,7 +3167,7 @@ export class Server {
       throw new TypeError("execution claim ttl must be a positive integer");
     }
     const claim: ExecutionClaim = Object.freeze({
-      ...actionClaimKey(claimInput),
+      ...canonicalActionClaimKey(claimInput),
       leaseGeneration: current.leaseGeneration,
       claimGeneration,
       expiresAt: Math.min(now + ttlMs, current.expiresAt),

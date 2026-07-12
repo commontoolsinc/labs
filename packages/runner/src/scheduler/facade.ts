@@ -2061,6 +2061,10 @@ export class Scheduler {
   }
 
   private processStorageNotification(notification: StorageNotification): void {
+    if (notification.type === "execution-claim-invalidation") {
+      this.markAndScheduleInvalidAction(notification.sourceAction as Action);
+      return;
+    }
     if (notification.type === "scheduler-observations") {
       // Subscription-carried observations arrive AFTER their sync's
       // integrate notification (same synchronous turn): the writes have been
