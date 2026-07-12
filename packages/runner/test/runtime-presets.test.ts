@@ -107,6 +107,7 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   commitBackpressure: { treat: "absent" },
   moduleByteCache: { treat: "absent" },
   fetch: { treat: "absent" },
+  externalSinkDisposition: { treat: "absent" },
 };
 
 describe("runtimePresets conformance (CT-1814)", () => {
@@ -199,12 +200,14 @@ describe("runtimePresets conformance (CT-1814)", () => {
         consoleHandler,
         errorHandlers,
         telemetry,
+        externalSinkDisposition: "suppress",
       })).toEqual({
         ...minimalOutputs.productionServer,
         patternEnvironment: { apiUrl: patternApiUrl },
         consoleHandler,
         errorHandlers,
         telemetry,
+        externalSinkDisposition: "suppress",
       });
     });
 

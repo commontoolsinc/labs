@@ -10,6 +10,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,
+  ExternalSinkDisposition,
   IAttestation,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -352,7 +353,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
+    private readonly sinkDisposition: ExternalSinkDisposition = "allow",
   ) {}
+
+  externalSinkDisposition(): ExternalSinkDisposition {
+    return this.sinkDisposition;
+  }
 
   noteCfcSinkReleaseReject(
     info: { sink: string; effectId: string; detail: string },
@@ -2057,6 +2063,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     info: { sink: string; effectId: string; detail: string },
   ): void {
     this.wrapped.noteCfcSinkReleaseReject(info);
+  }
+
+  externalSinkDisposition(): ExternalSinkDisposition {
+    return this.wrapped.externalSinkDisposition();
   }
 
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {

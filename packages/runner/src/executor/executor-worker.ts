@@ -116,6 +116,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       serverPrimaryExecution: true,
     },
     fetch: denyExternalBuiltinFetch,
+    externalSinkDisposition: "suppress",
   }));
   const storageSubscription: IStorageNotification = {
     next(notification) {

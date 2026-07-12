@@ -68,6 +68,8 @@
  * |                            | localhost fallback); constructor default in the  |
  * |                            | local presets (patternTest/localDev/unitTest)    |
  * | fetch                      | real everywhere; patternTest delta (mock)        |
+ * | externalSinkDisposition   | allow everywhere; productionServer delta for     |
+ * |                            | executor shadow suppression                      |
  * | errorHandlers              | delta (collectors/telemetry), per preset         |
  * | consoleHandler             | delta (productionServer, browserWorker)          |
  * | navigateCallback           | delta (patternTest, remoteClient, browserWorker) |
@@ -89,7 +91,10 @@ import type {
   TrustSnapshot,
 } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
-import type { IStorageManager } from "./storage/interface.ts";
+import type {
+  ExternalSinkDisposition,
+  IStorageManager,
+} from "./storage/interface.ts";
 import type { RuntimeTelemetry } from "./telemetry.ts";
 import type {
   ConsoleHandler,
@@ -144,6 +149,7 @@ export const RUNTIME_OPTION_KEYS = [
   "commitBackpressure",
   "moduleByteCache",
   "fetch",
+  "externalSinkDisposition",
 ] as const satisfies readonly (keyof RuntimeOptions)[];
 
 export type RuntimeOptionKey = (typeof RUNTIME_OPTION_KEYS)[number];
@@ -277,6 +283,7 @@ export interface ProductionServerPresetParams extends CoreParams {
   telemetry?: RuntimeTelemetry;
   /** Executor workers inject a deny/broker boundary; ordinary servers omit. */
   fetch?: typeof globalThis.fetch;
+  externalSinkDisposition?: ExternalSinkDisposition;
 }
 
 export interface RemoteClientPresetParams extends CoreParams {
@@ -347,6 +354,9 @@ export const runtimePresets = {
         ? { telemetry: params.telemetry }
         : {}),
       ...(params.fetch !== undefined ? { fetch: params.fetch } : {}),
+      ...(params.externalSinkDisposition !== undefined
+        ? { externalSinkDisposition: params.externalSinkDisposition }
+        : {}),
     };
   },
 

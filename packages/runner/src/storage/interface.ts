@@ -79,6 +79,7 @@ export type {
   URI,
 };
 export type ChangeGroup = unknown;
+export type ExternalSinkDisposition = "allow" | "suppress";
 
 /**
  * Base interface for storage errors. These are lightweight objects (not Error
@@ -1249,6 +1250,9 @@ export interface IExtendedStorageTransaction
    * Diagnostics are advisory and never feed an enforcement decision.
    */
   noteCfcDiagnostic(message: string): void;
+
+  /** Runtime-pinned policy for releasing external builtin side effects. */
+  externalSinkDisposition(): ExternalSinkDisposition;
 
   /**
    * Enqueues a side effect to run from the CFC outbox after a successful

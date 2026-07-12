@@ -40,6 +40,7 @@ import type {
   ChangeGroup,
   CommitError,
   DID,
+  ExternalSinkDisposition,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
@@ -437,6 +438,8 @@ export interface RuntimeOptions {
    * globals. (LLM calls mock separately, at the `LLMClient` layer.)
    */
   fetch?: typeof globalThis.fetch;
+  /** Whether builtins may release external post-commit sink effects. */
+  externalSinkDisposition?: ExternalSinkDisposition;
 }
 
 export interface CfcRuntimeStats {
@@ -608,6 +611,7 @@ export class Runtime {
    * `RuntimeOptions.fetch`.
    */
   readonly fetch: typeof globalThis.fetch;
+  readonly externalSinkDisposition: ExternalSinkDisposition;
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
   readonly userIdentityDID: DID;
@@ -908,6 +912,7 @@ export class Runtime {
     // mock is used as-is.
     this.fetch = options.fetch ??
       ((input, init) => globalThis.fetch(input, init));
+    this.externalSinkDisposition = options.externalSinkDisposition ?? "allow";
     this.staticCache = isDeno()
       ? new StaticCacheFS()
       : new StaticCacheHTTP(new URL("/static", this.apiUrl));
@@ -1251,7 +1256,7 @@ export class Runtime {
           },
         }
         : {}),
-    });
+    }, this.externalSinkDisposition);
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
