@@ -1953,6 +1953,28 @@ Deno.test("memory v2 writer lookup fails open on corrupt projections", async () 
     });
     assertEquals(lookup(mismatchedPayload.target), []);
 
+    const mismatchedAddress = storeWriter(
+      "writer-corrupt:mismatched-address",
+    );
+    const forgedTarget = {
+      ...mismatchedAddress.target,
+      id: "of:forged-writer-target",
+    };
+    engine.database.prepare(`
+      UPDATE scheduler_write_index
+      SET write_id = :write_id
+      WHERE action_id = 'writer-corrupt:mismatched-address'
+    `).run({ write_id: forgedTarget.id });
+    assertEquals(lookup(forgedTarget), []);
+
+    const mismatchedKind = storeWriter("writer-corrupt:mismatched-kind");
+    engine.database.prepare(`
+      UPDATE scheduler_write_index
+      SET write_kind = 'materializer'
+      WHERE action_id = 'writer-corrupt:mismatched-kind'
+    `).run();
+    assertEquals(lookup(mismatchedKind.target), []);
+
     const invalidPath = storeWriter("writer-corrupt:invalid-path");
     engine.database.prepare(`
       UPDATE scheduler_write_index
