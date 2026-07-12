@@ -245,6 +245,8 @@ export interface SessionOpenResult {
 export interface MemoryProtocolFlags {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
+  /** Build-inherent support for authenticated scheduler writer lookup. */
+  schedulerWriterLookup: boolean;
   commitPreconditions: boolean;
   /** Legacy CT-1775 draft capability: index-keyed per-frame schema table. */
   syncSchemaTable: boolean;
@@ -269,6 +271,7 @@ export interface MemoryProtocolFlags {
 export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
+  schedulerWriterLookup?: boolean;
   commitPreconditions?: boolean;
   syncSchemaTable?: boolean;
   syncSchemaTableV2?: boolean;
@@ -611,6 +614,69 @@ export interface SchedulerSnapshotListRequest {
   query: SchedulerActionSnapshotQuery;
 }
 
+export interface SchedulerWriterTarget {
+  id: EntityId;
+  scope?: CellScope;
+  path: DocumentPath;
+}
+
+export interface SchedulerWritersForTargetsQuery {
+  branch?: BranchName;
+  targets: SchedulerWriterTarget[];
+}
+
+export type SchedulerWriterMatchKind =
+  | "current-known"
+  | "declared"
+  | "materializer";
+
+export interface SchedulerResolvedWriterAddress {
+  space: string;
+  id: EntityId;
+  scope: CellScope;
+  scopeKey: string;
+  path: DocumentPath;
+}
+
+export interface SchedulerWriterMatch {
+  kind: SchedulerWriterMatchKind;
+  write: SchedulerResolvedWriterAddress;
+}
+
+export interface SchedulerWriterCandidate {
+  branch: BranchName;
+  ownerSpace?: string;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  executionContextKey: SchedulerExecutionContextKey;
+  observationId: number;
+  commitSeq: number | null;
+  observedAtSeq: number;
+  actionKind: "computation" | "effect" | "event-handler";
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  status: "success" | "failed";
+  errorFingerprint?: string;
+  directDirtySeq?: number;
+  staleSeq?: number;
+  unknownReason?: string;
+  matchedWrites: SchedulerWriterMatch[];
+}
+
+export interface SchedulerWritersForTargetsResult {
+  serverSeq: number;
+  writers: SchedulerWriterCandidate[];
+}
+
+export interface SchedulerWriterListRequest {
+  type: "scheduler.writer.list";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  query: SchedulerWritersForTargetsQuery;
+}
+
 export interface ResponseMessage<Result> {
   type: "response";
   requestId: string;
@@ -660,6 +726,7 @@ export type ClientMessage =
   | WatchSetRequest
   | WatchAddRequest
   | SchedulerSnapshotListRequest
+  | SchedulerWriterListRequest
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage
@@ -733,6 +800,9 @@ export function resetSyncSchemaTableConfig(): void {
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
+  // Build-inherent capability: older servers omit it and clients fail open to
+  // piece-root discovery rather than sending an RPC the peer cannot parse.
+  schedulerWriterLookup: true,
   commitPreconditions: getCommitPreconditionsConfig(),
   syncSchemaTable: false,
   // A build-inherent capability, not configuration: this build's engine always
@@ -769,6 +839,14 @@ export const parseMemoryProtocolFlags = (
   if (
     persistentSchedulerState !== undefined &&
     typeof persistentSchedulerState !== "boolean"
+  ) {
+    return null;
+  }
+
+  const schedulerWriterLookup = value.schedulerWriterLookup;
+  if (
+    schedulerWriterLookup !== undefined &&
+    typeof schedulerWriterLookup !== "boolean"
   ) {
     return null;
   }
@@ -816,6 +894,7 @@ export const parseMemoryProtocolFlags = (
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
+    schedulerWriterLookup: schedulerWriterLookup === true,
     commitPreconditions: commitPreconditions === true,
     syncSchemaTable: syncSchemaTable === true,
     syncSchemaTableV2: syncSchemaTableV2 === true,
@@ -833,6 +912,7 @@ export const wireMemoryProtocolFlags = (
 ): WireMemoryProtocolFlags => ({
   modernCellRep: flags.modernCellRep,
   persistentSchedulerState: flags.persistentSchedulerState,
+  schedulerWriterLookup: flags.schedulerWriterLookup,
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTable: flags.syncSchemaTable,
   syncSchemaTableV2: flags.syncSchemaTableV2,

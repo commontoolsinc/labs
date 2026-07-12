@@ -21,6 +21,9 @@ import {
   type SchedulerExecutionContextKey,
   type SchedulerSnapshotListRequest,
   type SchedulerSnapshotListResult,
+  type SchedulerWriterListRequest,
+  type SchedulerWritersForTargetsQuery,
+  type SchedulerWritersForTargetsResult,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
@@ -38,6 +41,7 @@ import {
   type SqliteRegisterDiskSourceRequest,
   type SqliteRegisterDiskSourceResult,
   type SqliteResultColumn,
+  toDocumentPath,
   type TransactRequest,
   type V2Error,
   type WatchAddRequest,
@@ -741,6 +745,26 @@ class Connection {
           const response = await this.server.listSchedulerActionSnapshots(
             parsed,
           );
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "scheduler.writer.list":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.writersForTargets(parsed);
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -2335,6 +2359,97 @@ export class Server {
     }
   }
 
+  async writersForTargets(
+    message: SchedulerWriterListRequest,
+  ): Promise<ResponseMessage<SchedulerWritersForTargetsResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<SchedulerWritersForTargetsResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const deny = this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<SchedulerWritersForTargetsResult>(
+          message.requestId,
+          deny,
+        );
+      }
+
+      if (!getPersistentSchedulerStateConfig()) {
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq: Engine.serverSeq(engine),
+            writers: [],
+          },
+        };
+      }
+
+      const targets: Engine.SchedulerWriterTarget[] = message.query.targets.map(
+        (target) => ({
+          space: message.space,
+          id: target.id,
+          scope: target.scope,
+          scopeKey: Engine.resolveScopeKey(target.scope, {
+            principal: session.principal,
+            sessionId: message.sessionId,
+          }),
+          path: [...target.path],
+        }),
+      );
+      const writers: SchedulerWritersForTargetsResult["writers"] = Engine
+        .writersForTargets(engine, {
+          branch: message.query.branch,
+          ownerSpace: message.space,
+          targets,
+          applicableExecutionContextKeys: schedulerApplicableContextKeys(
+            session.principal,
+            message.sessionId,
+          ),
+        }).map((writer) => ({
+          ...writer,
+          matchedWrites: writer.matchedWrites.map((match) => ({
+            kind: match.kind,
+            write: {
+              space: match.write.space,
+              id: match.write.id,
+              scope: match.write.scope ?? "space",
+              scopeKey: match.write.scopeKey,
+              path: toDocumentPath(match.write.path),
+            },
+          })),
+        }));
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq: Engine.serverSeq(engine),
+          writers,
+        },
+      };
+    } catch (error) {
+      return respondTypedError<SchedulerWritersForTargetsResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
   async watchSet(
     message: WatchSetRequest,
   ): Promise<ResponseMessage<WatchSetResult>> {
@@ -3498,6 +3613,48 @@ const parseSchedulerSnapshotQuery = (
   };
 };
 
+const parseSchedulerWritersForTargetsQuery = (
+  value: Record<string, unknown>,
+): SchedulerWritersForTargetsQuery | undefined => {
+  if (
+    Object.keys(value).some((key) => key !== "branch" && key !== "targets") ||
+    (value.branch !== undefined && typeof value.branch !== "string") ||
+    !Array.isArray(value.targets)
+  ) {
+    return undefined;
+  }
+
+  const targets: SchedulerWritersForTargetsQuery["targets"] = [];
+  for (const target of value.targets) {
+    if (
+      !isRecord(target) ||
+      Object.keys(target).some((key) =>
+        key !== "id" && key !== "scope" && key !== "path"
+      ) ||
+      typeof target.id !== "string" ||
+      target.id.length === 0 ||
+      (target.scope !== undefined && target.scope !== "space" &&
+        target.scope !== "user" && target.scope !== "session") ||
+      !Array.isArray(target.path) ||
+      !target.path.every((part) => typeof part === "string")
+    ) {
+      return undefined;
+    }
+    targets.push({
+      id: target.id,
+      ...(target.scope !== undefined
+        ? { scope: target.scope as CellScope }
+        : {}),
+      path: toDocumentPath(target.path),
+    });
+  }
+
+  return {
+    ...(value.branch !== undefined ? { branch: value.branch as string } : {}),
+    targets,
+  };
+};
+
 export const parseClientMessage = (
   payload: string,
 ): ClientMessage | null => {
@@ -3684,6 +3841,24 @@ export const parseClientMessage = (
     if (query === undefined) return null;
     return {
       type: "scheduler.snapshot.list",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      query,
+    };
+  }
+
+  if (
+    parsed.type === "scheduler.writer.list" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    isRecord(parsed.query)
+  ) {
+    const query = parseSchedulerWritersForTargetsQuery(parsed.query);
+    if (query === undefined) return null;
+    return {
+      type: "scheduler.writer.list",
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
