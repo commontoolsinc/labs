@@ -12,10 +12,6 @@ export interface ExecutionPoolControl {
     branch: BranchName,
     options?: { preferredOriginSessionId?: string },
   ): Promise<ExecutionLeaseHandle | null>;
-  currentExecutionLease(
-    space: string,
-    branch: BranchName,
-  ): Promise<ExecutionLease | null>;
   renewExecutionLease(
     lease: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null>;
@@ -61,6 +57,8 @@ export interface SharedExecutionPoolOptions {
   now?: () => number;
   setTimer?: (callback: () => void, delayMs: number) => number;
   clearTimer?: (timer: number) => void;
+  crashBackoffBaseMs?: number;
+  crashBackoffMaxMs?: number;
 }
 
 export interface SpaceExecutionSnapshot {
@@ -69,7 +67,8 @@ export interface SpaceExecutionSnapshot {
     | "excluded"
     | "starting"
     | "live"
-    | "draining";
+    | "draining"
+    | "backoff";
   readonly referenceCount: number;
   readonly pieces: readonly string[];
   readonly leaseGeneration?: number;
@@ -88,6 +87,8 @@ type Slot = {
   generationToken: object | null;
   crashToken: object | null;
   renewTimer: number | null;
+  backoffTimer: number | null;
+  crashAttempts: number;
   tail: Promise<void>;
 };
 
@@ -105,15 +106,6 @@ const sameStrings = (
   left.length === right.length &&
   left.every((value, index) => value === right[index]);
 
-const sameLease = (
-  left: ExecutionLease,
-  right: ExecutionLease,
-): boolean =>
-  left.space === right.space && left.branch === right.branch &&
-  left.hostId === right.hostId &&
-  left.leaseGeneration === right.leaseGeneration &&
-  left.onBehalfOf === right.onBehalfOf;
-
 /**
  * Host-local demand coordinator. A lane is branch-qualified and owns at most
  * one isolated Runtime generation regardless of how many client connections
@@ -128,6 +120,8 @@ export class SharedExecutionPool {
   readonly #now: () => number;
   readonly #setTimer: (callback: () => void, delayMs: number) => number;
   readonly #clearTimer: (timer: number) => void;
+  readonly #crashBackoffBaseMs: number;
+  readonly #crashBackoffMaxMs: number;
   readonly #slots = new Map<string, Slot>();
   readonly #tasks = new Set<Promise<void>>();
   #unsubscribe: (() => void) | null = null;
@@ -145,6 +139,8 @@ export class SharedExecutionPool {
     this.#clearTimer = options.clearTimer ??
       ((timer) =>
         clearTimeout(timer as unknown as ReturnType<typeof setTimeout>));
+    this.#crashBackoffBaseMs = options.crashBackoffBaseMs ?? 1_000;
+    this.#crashBackoffMaxMs = options.crashBackoffMaxMs ?? 30_000;
   }
 
   start(): void {
@@ -209,6 +205,8 @@ export class SharedExecutionPool {
         generationToken: null,
         crashToken: null,
         renewTimer: null,
+        backoffTimer: null,
+        crashAttempts: 0,
         tail: Promise.resolve(),
       };
       this.#slots.set(key, slot);
@@ -225,7 +223,10 @@ export class SharedExecutionPool {
       console.warn("shared execution pool reconciliation failed", error);
     });
     this.#tasks.add(task);
-    void task.finally(() => this.#tasks.delete(task));
+    void task.then(
+      () => this.#tasks.delete(task),
+      () => this.#tasks.delete(task),
+    );
     return task;
   }
 
@@ -233,6 +234,7 @@ export class SharedExecutionPool {
     if (this.#closed && slot.executor === null && slot.lease === null) return;
     const nextPieces = unionPieces(slot.demands);
     if (slot.demands.length === 0 || nextPieces.length === 0 || this.#closed) {
+      this.#cancelBackoff(slot);
       await this.#shutdown(slot, false);
       if (this.#slots.get(slot.key) === slot) this.#slots.delete(slot.key);
       return;
@@ -245,26 +247,30 @@ export class SharedExecutionPool {
       console.warn("legacy background exclusion check failed", error);
     }
     if (legacyOwned) {
+      this.#cancelBackoff(slot);
       await this.#shutdown(slot, false);
       slot.pieces = nextPieces;
       slot.state = "excluded";
       return;
     }
 
+    if (slot.backoffTimer !== null) {
+      slot.pieces = nextPieces;
+      slot.state = "backoff";
+      return;
+    }
+
     if (slot.executor !== null && slot.lease !== null) {
-      const current = await this.#control.currentExecutionLease(
-        slot.space,
-        slot.branch,
-      );
-      if (
-        slot.crashToken === slot.generationToken || current === null ||
-        current.state !== "active" || !sameLease(current, slot.lease)
-      ) {
-        await this.#shutdown(
-          slot,
-          slot.crashToken === slot.generationToken,
-        );
+      if (slot.crashToken === slot.generationToken) {
+        await this.#shutdown(slot, true);
+        this.#scheduleCrashRetry(slot);
+        return;
+      }
+      const renewed = await this.#control.renewExecutionLease(slot.lease);
+      if (renewed === null) {
+        await this.#shutdown(slot, true);
       } else {
+        slot.lease = renewed;
         if (!sameStrings(slot.pieces, nextPieces)) {
           await slot.executor.setDemand(nextPieces);
           slot.pieces = nextPieces;
@@ -308,6 +314,7 @@ export class SharedExecutionPool {
       slot.executor = executor;
       slot.pieces = nextPieces;
       slot.state = "live";
+      slot.crashAttempts = 0;
       this.#scheduleRenewal(slot, token);
       if (slot.crashToken === token) {
         await this.#reconcile(slot);
@@ -315,7 +322,11 @@ export class SharedExecutionPool {
     } catch (error) {
       slot.crashToken = token;
       await this.#shutdown(slot, true);
-      throw error;
+      console.warn(
+        `executor Worker failed to start for ${slot.space}/${slot.branch}`,
+        error,
+      );
+      this.#scheduleCrashRetry(slot);
     }
   }
 
@@ -330,7 +341,7 @@ export class SharedExecutionPool {
         if (slot.lease === null || slot.generationToken !== token) return;
         const renewed = await this.#control.renewExecutionLease(slot.lease);
         if (renewed === null) {
-          slot.crashToken = token;
+          await this.#shutdown(slot, true);
           await this.#reconcile(slot);
           return;
         }
@@ -346,8 +357,32 @@ export class SharedExecutionPool {
     slot.renewTimer = null;
   }
 
+  #scheduleCrashRetry(slot: Slot): void {
+    this.#cancelBackoff(slot);
+    if (this.#closed || slot.demands.length === 0) return;
+    slot.crashAttempts++;
+    const exponent = Math.max(0, slot.crashAttempts - 1);
+    const delayMs = Math.min(
+      this.#crashBackoffMaxMs,
+      this.#crashBackoffBaseMs * (2 ** exponent),
+    );
+    slot.state = "backoff";
+    slot.backoffTimer = this.#setTimer(() => {
+      slot.backoffTimer = null;
+      if (this.#closed || this.#slots.get(slot.key) !== slot) return;
+      void this.#enqueue(slot, () => this.#reconcile(slot));
+    }, delayMs);
+  }
+
+  #cancelBackoff(slot: Slot): void {
+    if (slot.backoffTimer === null) return;
+    this.#clearTimer(slot.backoffTimer);
+    slot.backoffTimer = null;
+  }
+
   async #shutdown(slot: Slot, abrupt: boolean): Promise<void> {
     this.#cancelRenewal(slot);
+    this.#cancelBackoff(slot);
     const executor = slot.executor;
     let lease = slot.lease;
     slot.executor = null;
