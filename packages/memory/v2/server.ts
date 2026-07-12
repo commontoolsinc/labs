@@ -511,8 +511,8 @@ class Connection {
     space: string,
     sessionId: string,
   ): boolean {
-    return this.server.isAclActive() &&
-      (!this.hasSession(space, sessionId) ||
+    return !this.hasSession(space, sessionId) ||
+      (this.server.isAclActive() &&
         !this.server.isSessionAttached(space, sessionId, this.id));
   }
 
@@ -1806,7 +1806,10 @@ export class Server {
       ? session.executionFeedSeq
       : Math.max(0, Math.min(snapshotFrom, session.executionFeedSeq));
     const events = snapshotFrom === undefined ? [] : session.executionEvents
-      .filter((entry) => entry.feedSeq > fromFeedSeq)
+      .filter((entry) =>
+        entry.feedSeq > fromFeedSeq &&
+        this.#sessionAcceptsClaim(session, this.#eventClaim(entry.event))
+      )
       .map((entry) => entry.event);
     const toFeedSeq = session.executionFeedSeq + 1;
     session.executionFeedSeq = toFeedSeq;
