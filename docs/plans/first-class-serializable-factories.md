@@ -1361,6 +1361,15 @@ Focused coverage passes `7 passed`, golden regeneration passes `369 steps`,
 direct transformed-output inspection shows the required root split and one
 curry, and the complete transformer task passes `1123 passed (742 steps)`.
 
+The follow-up golden inventory found one stale
+`map-type-assertion.expected.jsx` using the retired sibling-params shape, but no
+matching input fixture exists in the current tree or its history. The fixture
+runner therefore never exercised or regenerated that file. It was removed as
+an orphan rather than retained as false compatibility coverage. The remaining
+expected outputs use one-argument `*WithPattern` calls, and the policy
+capability-analysis source sample now uses the same canonical spelling; the
+explicit legacy routing fixture remains separately named and exercised.
+
 WP3.5 canonical writer/runtime slice (2026-07-11): the new one-argument public
 overloads write only `{ list, op }` and the old two-argument overloads remain
 explicitly deprecated writers of `{ list, op, params }`. Runtime dispatch

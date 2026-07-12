@@ -696,9 +696,9 @@ Deno.test("Capability analysis keeps opaque derivation methods opaque", () => {
       input.map(mapper);
       input.flatMap(mapper);
       input.filter(mapper);
-      input.mapWithPattern(mapper, {});
-      input.flatMapWithPattern(mapper, {});
-      input.filterWithPattern(mapper, {});
+      input.mapWithPattern(mapper);
+      input.flatMapWithPattern(mapper);
+      input.filterWithPattern(mapper);
     };`,
   );
   const summary = analyzeFunctionCapabilities(fn);
