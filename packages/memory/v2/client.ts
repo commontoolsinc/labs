@@ -29,6 +29,8 @@ import {
   type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
+  type WireMemoryProtocolFlags,
+  wireMemoryProtocolFlags,
 } from "../v2.ts";
 import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
@@ -44,6 +46,9 @@ export interface Transport {
 
 export interface ConnectOptions {
   transport: Transport;
+  /** Optional per-client capability override, primarily for skew tests and
+   *  hosts whose client and server runtimes use different rollout settings. */
+  protocolFlags?: Partial<WireMemoryProtocolFlags>;
 }
 
 export interface MountOptions {
@@ -116,13 +121,14 @@ export class Client {
 
   private constructor(
     private readonly transport: Transport,
+    private readonly protocolFlags?: Partial<WireMemoryProtocolFlags>,
   ) {
     this.transport.setReceiver((payload) => this.onMessage(payload));
     this.transport.setCloseReceiver?.((error) => this.onClose(error));
   }
 
   static async connect(options: ConnectOptions): Promise<Client> {
-    const client = new Client(options.transport);
+    const client = new Client(options.transport, options.protocolFlags);
     await client.hello();
     return client;
   }
@@ -257,10 +263,17 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
+    const flags = parseMemoryProtocolFlags({
+      ...wireMemoryProtocolFlags(getMemoryProtocolFlags()),
+      ...this.protocolFlags,
+    });
+    if (flags === null) {
+      throw protocolError("memory client protocol flags are malformed");
+    }
     await this.transport.send(encodeMemoryBoundary({
       type: "hello",
       protocol: MEMORY_PROTOCOL,
-      flags: getMemoryProtocolFlags(),
+      flags: wireMemoryProtocolFlags(flags),
     }));
     try {
       await ack.promise;
@@ -291,7 +304,10 @@ export class Client {
     if (this.#helloPending !== null) {
       const helloOk = parseHelloOk(message);
       if (helloOk !== null) {
-        const expectedFlags = getMemoryProtocolFlags();
+        const expectedFlags = parseMemoryProtocolFlags({
+          ...wireMemoryProtocolFlags(getMemoryProtocolFlags()),
+          ...this.protocolFlags,
+        })!;
         if (!compatibleMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
           const error = new Error(
             `memory flag mismatch: client=${
