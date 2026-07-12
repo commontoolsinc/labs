@@ -292,9 +292,12 @@ guessing for computation nodes.
 
 **Depends on:** W0.1, W0.2.
 **Unblocks:** demand discovery and cold wake.
+**Status:** implemented.
 
 **Decision:** creation provenance is not current producer identity. Do not add
-universal source stamping or walk from a target through its creator.
+universal source stamping or walk from a target through its creator. Likewise,
+`actualChangedWrites` is downstream invalidation evidence, not a producer
+surface; producer lookup uses declared, current-known, and materializer rows.
 
 **Read first:**
 
@@ -325,15 +328,15 @@ universal source stamping or walk from a target through its creator.
 
 **Success criteria:**
 
-- [ ] A direct result target returns its producing action from the durable row
+- [x] A direct result target returns its producing action from the durable row
       after observation and from the live static surface before first run.
-- [ ] A side-write target and materializer target return the correct action.
-- [ ] A pre-existing target redirected from a computation returns the current
+- [x] A side-write target and materializer target return the correct action.
+- [x] A pre-existing target redirected from a computation returns the current
       writer even though its creator is unrelated.
-- [ ] Multiple candidate writers are all returned deterministically.
-- [ ] PerUser/PerSession target lookups never return another context's writer.
-- [ ] Re-observation with a smaller write set removes obsolete lookup results.
-- [ ] A 10k-row query uses the intended index and meets the existing scheduler
+- [x] Multiple candidate writers are all returned deterministically.
+- [x] PerUser/PerSession target lookups never return another context's writer.
+- [x] Re-observation with a smaller write set removes obsolete lookup results.
+- [x] A 10k-row query uses the intended index and meets the existing scheduler
       index performance budget.
 
 ---

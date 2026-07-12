@@ -1,5 +1,6 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatch,
@@ -244,6 +245,8 @@ CREATE TABLE IF NOT EXISTS scheduler_write_index (
   FOREIGN KEY (observation_id, execution_context_key)
     REFERENCES scheduler_observation(observation_id, execution_context_key)
 );
+CREATE INDEX IF NOT EXISTS idx_scheduler_write_index_lookup
+  ON scheduler_write_index (branch, write_space, write_id, write_scope_key);
 CREATE INDEX IF NOT EXISTS idx_scheduler_write_index_action
   ON scheduler_write_index (
     branch,
@@ -1050,6 +1053,41 @@ export interface SchedulerReaderIndexEntry {
   read: ResolvedSchedulerObservationAddress;
 }
 
+export type SchedulerWriteIndexKind =
+  | "current-known"
+  | "declared"
+  | "materializer";
+
+export type SchedulerWriterTarget = SchedulerObservationAddress & {
+  scopeKey?: string;
+};
+
+export interface SchedulerMatchedWrite {
+  kind: SchedulerWriteIndexKind;
+  write: ResolvedSchedulerObservationAddress;
+}
+
+export interface SchedulerWriterCandidate {
+  branch: BranchName;
+  ownerSpace?: string;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  executionContextKey: SchedulerExecutionContextKey;
+  observationId: number;
+  commitSeq: number | null;
+  observedAtSeq: number;
+  actionKind: SchedulerActionKind;
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  status: SchedulerActionObservation["status"];
+  errorFingerprint?: string;
+  directDirtySeq?: number;
+  staleSeq?: number;
+  unknownReason?: string;
+  matchedWrites: SchedulerMatchedWrite[];
+}
+
 export interface SchedulerActionState {
   branch: BranchName;
   ownerSpace?: string;
@@ -1603,6 +1641,30 @@ CREATE INDEX idx_scheduler_write_index_action
     action_id,
     execution_context_key
   );
+`);
+};
+
+const migrateSchedulerWriteLookupIndex = (database: Database): void => {
+  if (
+    hasExactIndex(
+      database,
+      "scheduler_write_index",
+      "idx_scheduler_write_index_lookup",
+      ["branch", "write_space", "write_id", "write_scope_key"],
+      false,
+    )
+  ) {
+    return;
+  }
+
+  // This index is an additive target projection, not part of the scheduler
+  // execution-context table contract. Repair it independently so adding or
+  // correcting the index never triggers the conservative context-table
+  // rebuild used for ownership/schema migrations.
+  database.exec(`
+DROP INDEX IF EXISTS idx_scheduler_write_index_lookup;
+CREATE INDEX idx_scheduler_write_index_lookup
+  ON scheduler_write_index (branch, write_space, write_id, write_scope_key);
 `);
 };
 
@@ -2201,6 +2263,7 @@ export const open = async (
     migrateSchedulerObservationReplayStatus(database);
   }
   migrateSchedulerExecutionContextSchema(database);
+  migrateSchedulerWriteLookupIndex(database);
   migrateSchedulerActionIndexes(database);
   return {
     url,
@@ -2886,6 +2949,240 @@ export const findSchedulerReadersForWrite = (
     });
 };
 
+/**
+ * Returns every current durable action whose indexed write surface overlaps
+ * one of `targets`.
+ *
+ * Target scope keys are resolved by the authenticated caller before reaching
+ * this engine seam. `applicableExecutionContextKeys` is likewise
+ * server-derived; omitting it is reserved for trusted internal scans.
+ */
+export const writersForTargets = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    ownerSpace?: string;
+    targets: readonly SchedulerWriterTarget[];
+    applicableExecutionContextKeys?: readonly SchedulerExecutionContextKey[];
+  },
+): SchedulerWriterCandidate[] => {
+  if (options.targets.length === 0) return [];
+
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const applicableContextKeys = options.applicableExecutionContextKeys ===
+      undefined
+    ? undefined
+    : [...new Set(options.applicableExecutionContextKeys)];
+  if (applicableContextKeys?.length === 0) return [];
+
+  const contextFilter = applicableContextKeys === undefined
+    ? ""
+    : `AND w.execution_context_key IN (${
+      applicableContextKeys.map((_, index) => `:context_${index}`).join(", ")
+    })`;
+  const contextParams = Object.fromEntries(
+    applicableContextKeys?.map((key, index) => [`context_${index}`, key]) ?? [],
+  );
+  const candidates = new Map<
+    string,
+    {
+      candidate: Omit<SchedulerWriterCandidate, "matchedWrites">;
+      matchedWrites: Map<string, SchedulerMatchedWrite>;
+    }
+  >();
+
+  for (const requestedTarget of options.targets) {
+    const declaredScope = normalizeSchedulerScope(requestedTarget.scope);
+    if (
+      requestedTarget.scopeKey === undefined && declaredScope !== "space"
+    ) {
+      throw new ProtocolError(
+        "scoped scheduler writer targets require a resolved scope key",
+      );
+    }
+    const target: ResolvedSchedulerObservationAddress = {
+      ...normalizeSchedulerAddress(requestedTarget),
+      scopeKey: requestedTarget.scopeKey ?? DEFAULT_SCOPE_KEY,
+    };
+    const rows = engine.database.prepare(`
+      SELECT
+        w.branch,
+        w.owner_space,
+        w.write_space,
+        w.write_id,
+        w.write_scope,
+        w.write_scope_key,
+        w.write_path,
+        w.write_kind,
+        w.piece_id,
+        w.process_generation,
+        w.action_id,
+        w.execution_context_key,
+        w.observation_id,
+        COALESCE(s.commit_seq, o.commit_seq) AS commit_seq,
+        s.observed_at_seq,
+        s.payload,
+        a.direct_dirty_seq,
+        a.stale_seq,
+        a.unknown_reason
+      FROM scheduler_write_index w
+      JOIN scheduler_action_snapshot s
+        ON s.branch = w.branch
+        AND s.owner_space = w.owner_space
+        AND s.piece_id = w.piece_id
+        AND s.process_generation = w.process_generation
+        AND s.action_id = w.action_id
+        AND s.execution_context_key = w.execution_context_key
+        AND s.observation_id = w.observation_id
+      JOIN scheduler_observation o
+        ON o.observation_id = s.observation_id
+        AND o.execution_context_key = s.execution_context_key
+        AND o.branch = s.branch
+        AND o.piece_id = s.piece_id
+        AND o.process_generation = s.process_generation
+        AND o.action_id = s.action_id
+        AND o.payload = s.payload
+      JOIN scheduler_action_state a
+        ON a.branch = w.branch
+        AND a.owner_space = w.owner_space
+        AND a.piece_id = w.piece_id
+        AND a.process_generation = w.process_generation
+        AND a.action_id = w.action_id
+        AND a.execution_context_key = w.execution_context_key
+        AND a.latest_observation_id = w.observation_id
+      WHERE w.branch = :branch
+        AND w.write_space = :write_space
+        AND w.write_id = :write_id
+        AND w.write_scope_key = :write_scope_key
+        AND w.write_scope = :write_scope
+        AND (:owner_space IS NULL OR w.owner_space = :owner_space)
+        ${contextFilter}
+    `).all({
+      branch,
+      write_space: target.space,
+      write_id: target.id,
+      write_scope_key: target.scopeKey,
+      write_scope: declaredScope,
+      owner_space: options.ownerSpace === undefined
+        ? null
+        : normalizeSchedulerOwnerSpace(options.ownerSpace),
+      ...contextParams,
+    }) as SchedulerWriterLookupRow[];
+
+    for (const row of rows) {
+      if (!isSchedulerWriteIndexKind(row.write_kind)) continue;
+      let writePath: string[];
+      try {
+        writePath = decodeSchedulerPath(row.write_path);
+      } catch {
+        continue;
+      }
+      if (!schedulerPathsOverlap(writePath, target.path, false)) continue;
+
+      let observation: SchedulerActionObservation | undefined;
+      try {
+        observation = schedulerObservationFromValue(
+          decodeSchedulerSnapshotObservation(
+            row.payload,
+            row.observed_at_seq,
+          ),
+        );
+      } catch {
+        // Indexes are projections, never ground truth. A corrupt snapshot row
+        // is an index miss so callers can fail open to piece instantiation.
+        continue;
+      }
+      if (
+        observation === undefined ||
+        observation.branch !== row.branch ||
+        normalizeSchedulerOwnerSpace(observation.ownerSpace) !==
+          row.owner_space ||
+        observation.pieceId !== row.piece_id ||
+        observation.processGeneration !== row.process_generation ||
+        observation.actionId !== row.action_id ||
+        !schedulerObservationContainsIndexedWrite(
+          observation,
+          row,
+          writePath,
+        )
+      ) {
+        continue;
+      }
+
+      const ownerSpace = denormalizeSchedulerOwnerSpace(row.owner_space);
+      const candidateKey = schedulerWriterCandidateKey({
+        branch: row.branch,
+        ownerSpace,
+        pieceId: row.piece_id,
+        processGeneration: row.process_generation,
+        actionId: row.action_id,
+        executionContextKey: row.execution_context_key,
+      });
+      let accumulated = candidates.get(candidateKey);
+      if (!accumulated) {
+        accumulated = {
+          candidate: {
+            branch: row.branch,
+            ...(ownerSpace !== undefined ? { ownerSpace } : {}),
+            pieceId: row.piece_id,
+            processGeneration: row.process_generation,
+            actionId: row.action_id,
+            executionContextKey: row.execution_context_key,
+            observationId: row.observation_id,
+            commitSeq: row.commit_seq,
+            observedAtSeq: row.observed_at_seq,
+            actionKind: observation.actionKind,
+            implementationFingerprint: observation.implementationFingerprint,
+            runtimeFingerprint: observation.runtimeFingerprint,
+            status: observation.status,
+            ...(observation.errorFingerprint !== undefined
+              ? { errorFingerprint: observation.errorFingerprint }
+              : {}),
+            ...(row.direct_dirty_seq !== null
+              ? { directDirtySeq: row.direct_dirty_seq }
+              : {}),
+            ...(row.stale_seq !== null ? { staleSeq: row.stale_seq } : {}),
+            ...(row.unknown_reason !== null
+              ? { unknownReason: row.unknown_reason }
+              : {}),
+          },
+          matchedWrites: new Map(),
+        };
+        candidates.set(candidateKey, accumulated);
+      }
+
+      const match: SchedulerMatchedWrite = {
+        kind: row.write_kind,
+        write: {
+          space: row.write_space,
+          id: row.write_id,
+          scope: row.write_scope as CellScope,
+          scopeKey: row.write_scope_key,
+          path: writePath,
+        },
+      };
+      accumulated.matchedWrites.set(schedulerMatchedWriteKey(match), match);
+    }
+  }
+
+  return [...candidates.values()]
+    .map(({ candidate, matchedWrites }) => ({
+      ...candidate,
+      matchedWrites: [...matchedWrites.values()].sort((left, right) =>
+        compareSchedulerKeys(
+          schedulerMatchedWriteKey(left),
+          schedulerMatchedWriteKey(right),
+        )
+      ),
+    }))
+    .sort((left, right) =>
+      compareSchedulerKeys(
+        schedulerWriterCandidateKey(left),
+        schedulerWriterCandidateKey(right),
+      )
+    );
+};
+
 export const markSchedulerReadersDirtyForWrites = (
   engine: Engine,
   options: {
@@ -3238,6 +3535,15 @@ type SchedulerWriteIndexRow = {
   action_id: string;
   execution_context_key: SchedulerExecutionContextKey;
   observation_id: number;
+};
+
+type SchedulerWriterLookupRow = SchedulerWriteIndexRow & {
+  commit_seq: number | null;
+  observed_at_seq: number;
+  payload: string;
+  direct_dirty_seq: number | null;
+  stale_seq: number | null;
+  unknown_reason: string | null;
 };
 
 type SchedulerSnapshotRow = {
@@ -3861,6 +4167,81 @@ function invalidateSchedulerExecutionContexts(
 
 function normalizeSchedulerScope(scope: CellScope | undefined): CellScope {
   return scope ?? DEFAULT_SCOPE;
+}
+
+function isSchedulerWriteIndexKind(
+  value: string,
+): value is SchedulerWriteIndexKind {
+  return value === "current-known" || value === "declared" ||
+    value === "materializer";
+}
+
+function schedulerObservationContainsIndexedWrite(
+  observation: SchedulerActionObservation,
+  row: SchedulerWriterLookupRow,
+  writePath: readonly string[],
+): boolean {
+  const writes = row.write_kind === "current-known"
+    ? observation.currentKnownWrites
+    : row.write_kind === "declared"
+    ? observation.declaredWrites ?? []
+    : row.write_kind === "materializer"
+    ? observation.materializerWriteEnvelopes
+    : [];
+
+  return writes.some((write) => {
+    const scope = normalizeSchedulerScope(write.scope);
+    return write.space === row.write_space &&
+      write.id === row.write_id &&
+      scope === row.write_scope &&
+      schedulerScopeKeyForExecutionContext(
+          scope,
+          row.execution_context_key,
+        ) === row.write_scope_key &&
+      write.path.length === writePath.length &&
+      write.path.every((part, index) => part === writePath[index]);
+  });
+}
+
+function schedulerScopeKeyForExecutionContext(
+  scope: CellScope,
+  executionContextKey: SchedulerExecutionContextKey,
+): string | undefined {
+  const parts = executionContextKey.split(":");
+  let encodedPrincipal: string | undefined;
+  let contextScope: "space" | "user" | "session";
+  if (executionContextKey === "space") {
+    contextScope = "space";
+  } else if (parts.length === 2 && parts[0] === "user" && parts[1] !== "") {
+    contextScope = "user";
+    encodedPrincipal = parts[1];
+  } else if (
+    parts.length === 3 && parts[0] === "session" && parts[1] !== "" &&
+    parts[2] !== ""
+  ) {
+    contextScope = "session";
+    encodedPrincipal = parts[1];
+  } else {
+    return undefined;
+  }
+
+  try {
+    if (encodedPrincipal !== undefined) {
+      decodeURIComponent(encodedPrincipal);
+    }
+    if (contextScope === "session") decodeURIComponent(parts[2]);
+  } catch {
+    return undefined;
+  }
+
+  if (scope === "space") return DEFAULT_SCOPE_KEY;
+  if (scope === "user" && encodedPrincipal !== undefined) {
+    return `user:${encodedPrincipal}`;
+  }
+  if (scope === "session" && contextScope === "session") {
+    return executionContextKey;
+  }
+  return undefined;
 }
 
 function selectSchedulerSnapshotRow(
@@ -4697,10 +5078,13 @@ function encodeSchedulerPath(path: readonly string[]): string {
 
 function decodeSchedulerPath(payload: string): string[] {
   const path = decodeMemoryBoundary(payload);
-  if (!Array.isArray(path)) {
-    throw new Error("scheduler paths must be arrays");
+  if (
+    !Array.isArray(path) ||
+    !path.every((part): part is string => typeof part === "string")
+  ) {
+    throw new Error("scheduler paths must be arrays of strings");
   }
-  return path.map((part) => String(part));
+  return path;
 }
 
 function schedulerPathsOverlap(
@@ -4736,6 +5120,38 @@ function schedulerActionKey(entry: {
   return `${entry.branch}\0${
     normalizeSchedulerOwnerSpace(entry.ownerSpace)
   }\0${entry.pieceId}\0${entry.processGeneration}\0${entry.actionId}\0${entry.executionContextKey}`;
+}
+
+function schedulerWriterCandidateKey(entry: {
+  branch: BranchName;
+  ownerSpace?: string | null;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  executionContextKey: SchedulerExecutionContextKey;
+}): string {
+  return [
+    entry.branch,
+    normalizeSchedulerOwnerSpace(entry.ownerSpace),
+    entry.pieceId,
+    String(entry.processGeneration),
+    entry.actionId,
+    entry.executionContextKey,
+  ].join("\0");
+}
+
+function schedulerMatchedWriteKey(match: SchedulerMatchedWrite): string {
+  return [
+    match.kind,
+    match.write.space,
+    match.write.scopeKey,
+    match.write.id,
+    encodeSchedulerPath(match.write.path),
+  ].join("\0");
+}
+
+function compareSchedulerKeys(left: string, right: string): number {
+  return utf8Compare(left, right);
 }
 
 const applyCommitTransaction = (

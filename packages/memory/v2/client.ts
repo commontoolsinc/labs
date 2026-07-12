@@ -14,6 +14,8 @@ import {
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
   type SchedulerSnapshotListResult,
+  type SchedulerWritersForTargetsQuery,
+  type SchedulerWritersForTargetsResult,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionOpenChallenge,
@@ -172,6 +174,26 @@ export class Client {
 
   async request<Result>(message: Record<string, unknown>): Promise<Result> {
     await this.ensureConnected();
+    return await this.requestConnected(message);
+  }
+
+  /**
+   * Dispatch only when the active connection advertises the capability.
+   * Checking after ensureConnected keeps a reconnect from carrying a cached
+   * capable-server decision onto an older peer.
+   */
+  async requestIfServerSupports<Result>(
+    capability: keyof MemoryProtocolFlags,
+    message: Record<string, unknown>,
+  ): Promise<Result | undefined> {
+    await this.ensureConnected();
+    if (this.#serverFlags?.[capability] !== true) return undefined;
+    return await this.requestConnected(message);
+  }
+
+  private async requestConnected<Result>(
+    message: Record<string, unknown>,
+  ): Promise<Result> {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
@@ -603,6 +625,32 @@ export class SpaceSession {
       sessionId: this.#sessionId,
       query,
     });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async writersForTargets(
+    query: SchedulerWritersForTargetsQuery,
+  ): Promise<SchedulerWritersForTargetsResult> {
+    this.#assertOpen();
+    if (!getPersistentSchedulerStateConfig()) {
+      return { serverSeq: this.#serverSeq, writers: [] };
+    }
+    const result = await this.client
+      .requestIfServerSupports<SchedulerWritersForTargetsResult>(
+        "schedulerWriterLookup",
+        {
+          type: "scheduler.writer.list",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          query,
+        },
+      );
+    if (result === undefined) {
+      return { serverSeq: this.#serverSeq, writers: [] };
+    }
 
     this.noteResult(result.serverSeq);
     return result;
