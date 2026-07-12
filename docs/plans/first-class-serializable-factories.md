@@ -1557,22 +1557,22 @@ an open aggregate package gate, not a waived green result.
 - [x] Preserve `description` and `useResultSchemaForObservation` in the metadata
   wrapper, while sending only reduced `{ description, inputSchema }` data to
   `packages/llm`; factory state never crosses into a provider request.
-- [ ] Update `packages/cli/lib/callable.ts` to discover/materialize canonical
+- [x] Update `packages/cli/lib/callable.ts` to discover/materialize canonical
   factories and keep legacy `{ pattern, extraParams }` reads.
-- [ ] Update `packages/fuse/callables.ts`, `packages/fuse/callable-path.ts`,
+- [x] Update `packages/fuse/callables.ts`, `packages/fuse/callable-path.ts`,
   `packages/fuse/tree-builder.ts`, and `packages/fuse/cell-bridge.ts` likewise.
-- [ ] Replace FUSE's plain `JSON.stringify`/function-source fallback for factory
+- [x] Replace FUSE's plain `JSON.stringify`/function-source fallback for factory
   leaves with Fabric codec projection; otherwise callable values would be
   dropped or exposed as source text.
-- [ ] Treat callable functions as weak-key-capable discovery values and keep a
+- [x] Treat callable functions as weak-key-capable discovery values and keep a
   direct pattern factory's `*.tool` projection as a leaf.
-- [ ] Decode tagged factory JSON on supported FUSE writes to an inert shell and
+- [x] Decode tagged factory JSON on supported FUSE writes to an inert shell and
   let the runner boundary materialize it.
-- [ ] Before CLI/FUSE or handler-event code commits/enqueues a by-value Factory,
+- [x] Before CLI/FUSE or handler-event code commits/enqueues a by-value Factory,
   durably replicate its artifact closure into the containing destination space
   or reject the write. A context-free decoded value carries no alternate
   source-space authority.
-- [ ] Verify runtime, CLI, and FUSE discover and invoke the same stored factory
+- [x] Verify runtime, CLI, and FUSE discover and invoke the same stored factory
   and report the same public input schema.
 
 Focused tests:
@@ -1629,6 +1629,40 @@ steps)`; `sandbox-id-auto-provision.test.ts` passes `2 passed (14 steps)`;
 passes `1 passed`; and the complete deep-equality file passes `1 passed (59
 steps)`. The CLI/FUSE adapter bullets and their package gates remain open for
 the next WP4.1 slice.
+
+WP4.1 CLI/FUSE slice (2026-07-11): shared callable classification now admits
+only direct or metadata-wrapped pattern factories, rejects arbitrary functions
+and non-pattern factory kinds, and derives CLI/FUSE help from the factory's
+public argument/result schemas. CLI execution resolves the terminal factory
+cell, passes its source space to async `prepareFactory`, invokes the resulting
+live factory with only public input, and leaves the legacy
+`{ pattern, extraParams }` merge reader intact.
+
+FUSE treats callable functions as weak keys, hides a discovered direct factory
+behind a stable `*.tool` leaf, and emits tagged `fvj1:` codec text for factory
+values that remain in JSON projections; function source is never exposed.
+Supported JSON/scalar/handler writes decode tagged leaves to inert shells.
+Before a by-value cell write or handler enqueue, the bridge walks nested
+factory state and asks PatternManager to verify the complete artifact closure
+in the destination. Because context-free JSON carries no trusted source-space
+authority, that verification is deliberately same-space and rejects missing
+closures rather than guessing a source.
+
+`callable-path.ts` required no representation change: its existing `.tool`
+grammar is already value-shape-neutral, and its tests cover both piece/entity
+and root/nested tool paths. This is the only listed file with no code delta.
+The aggregate runtime/CLI/FUSE tests use the same Factory@1 public contract;
+runtime and CLI invoke it through source-aware materialization while FUSE
+projects the same schema and callable leaf.
+
+The complete FUSE task passes `204 passed, 0 failed, 1 ignored`. The complete
+CLI task first exposed two ordered Stage 4 fixture migrations: dev fixtures
+passed runtime `schema()` results where exact factory contracts require static
+schema bindings, and the headless wish writer put live Cell objects into an
+immutable candidates URI. Dev fixtures now use static contracts; the wish
+factory receives a warm content-addressed ref and candidates write explicit
+links. The final CLI task passes its main lane at `895 passed (249 steps), 0
+failed, 1 ignored` and its subprocess lane at `20 passed (91 steps), 0 failed`.
 
 ### WP4.2 — Install explicit compatibility readers
 

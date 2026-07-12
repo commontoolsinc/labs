@@ -1632,7 +1632,9 @@ function createWishCandidatesCell(
   tx: IExtendedStorageTransaction,
 ): Cell<unknown> {
   const values = schema === undefined
-    ? candidates
+    ? candidates.map((candidate) =>
+      candidate.getAsLink({ includeSchema: true })
+    )
     : candidates.map((candidate) => projectWishCellValue(candidate, schema));
   return runtime.getImmutableCell(space, values, undefined, tx);
 }

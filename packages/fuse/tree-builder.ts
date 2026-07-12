@@ -2,6 +2,7 @@
 
 import {
   type CallableKind,
+  encodeFactoryProjection,
   isHandlerCell,
   isStreamValue,
   transformCallableValues,
@@ -35,6 +36,8 @@ export function safeStringify(value: unknown, indent = 2): string {
   return JSON.stringify(
     value,
     function (this: unknown, _key, val) {
+      const factoryProjection = encodeFactoryProjection(val);
+      if (factoryProjection !== undefined) return factoryProjection;
       if (val !== null && typeof val === "object") {
         while (
           ancestors.length > 0 &&

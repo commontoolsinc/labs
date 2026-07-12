@@ -15,6 +15,7 @@ import {
   listCfcXattrNames,
 } from "./annotations.ts";
 import { encodeFuseComponent } from "./path-codec.ts";
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -614,6 +615,108 @@ Deno.test("CellBridge finalizes CFC annotations after committed writeback", asyn
     tree.getCfcAnnotation(childIno!)?.ref.projection,
     "value",
   );
+});
+
+Deno.test("CellBridge verifies a decoded factory artifact before a by-value write", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const factory = createFactoryShell({
+    kind: "pattern",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "writeFactory",
+    },
+    argumentSchema: true,
+    resultSchema: true,
+  });
+  const events: string[] = [];
+  const piece = {
+    id: "of:factory-write",
+    manager: () => ({
+      getSpace: () => "did:key:destination",
+      runtime: {
+        patternManager: {
+          ensureArtifactClosureInSpace: (
+            identity: string,
+            fromSpace: string,
+            toSpace: string,
+          ) => {
+            events.push(`ensure:${identity}:${fromSpace}:${toSpace}`);
+            return Promise.resolve();
+          },
+        },
+      },
+    }),
+    input: { set: () => Promise.resolve() },
+    result: {
+      set: (value: unknown) => {
+        assertEquals(value, factory);
+        events.push("set");
+        return Promise.resolve();
+      },
+    },
+  };
+
+  await bridge.writeValue({
+    spaceName: "home",
+    pieceName: "Factory Write",
+    cell: "result",
+    jsonPath: [],
+    isJsonFile: true,
+    piece: piece as unknown as WritePath["piece"],
+  }, factory);
+
+  assertEquals(events, [
+    "ensure:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:did:key:destination:did:key:destination",
+    "set",
+  ]);
+});
+
+Deno.test("CellBridge verifies nested factory artifacts before handler enqueue", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const factory = createFactoryShell({
+    kind: "module",
+    ref: {
+      identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      symbol: "handlerInputFactory",
+    },
+  });
+  const events: string[] = [];
+  const handlerCell = {
+    send: (value: unknown) => {
+      assertEquals(value, { factory });
+      events.push("send");
+    },
+  };
+  const rootCell = { key: () => handlerCell };
+  const manager = {
+    getSpace: () => "did:key:destination",
+    runtime: {
+      patternManager: {
+        ensureArtifactClosureInSpace: () => {
+          events.push("ensure");
+          return Promise.resolve();
+        },
+      },
+      idle: () => Promise.resolve(),
+    },
+    synced: () => Promise.resolve(),
+  };
+  const piece = {
+    id: "of:handler-factory-event",
+    manager: () => manager,
+    input: { getCell: () => Promise.resolve(rootCell) },
+    result: { getCell: () => Promise.resolve(rootCell) },
+  };
+
+  await bridge.sendToHandlerTarget({
+    piece: piece as unknown as HandlerTarget["piece"],
+    cellProp: "result",
+    cellKey: "handle",
+  }, { factory });
+
+  assertEquals(events, ["ensure", "send"]);
 });
 
 Deno.test("CellBridge finalizes CFC annotations after namespace mutation writeback", async () => {

@@ -1,12 +1,15 @@
 import type { DID } from "@commonfabric/identity";
 import {
   createBuilder,
+  createRef,
   isCell,
   isStream,
   type JSONSchema,
   type MemorySpace,
   type Runtime,
 } from "@commonfabric/runner";
+import { fromURI, toURI } from "../../runner/src/uri-utils.ts";
+import { setDurableArtifactEntryRef } from "../../runner/src/builder/pattern-metadata.ts";
 import { loadManager, type SpaceConfig } from "./piece.ts";
 import { awaitSyncWithTimeout } from "./utils.ts";
 
@@ -97,6 +100,14 @@ export async function resolveWish(
         headless: true,
       }),
   }));
+  const ref = {
+    identity: fromURI(
+      toURI(createRef(wishPattern, "cf wish headless factory")),
+    ),
+    symbol: "default",
+  };
+  setDurableArtifactEntryRef(wishPattern, ref);
+  runtime.patternManager.associatePatternIdentity(wishPattern, ref);
 
   const tx = runtime.edit();
   const resultCell = runtime.getCell<{

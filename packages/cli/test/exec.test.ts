@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { dirname, join } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
+import {
+  createFactoryShell,
+  factoryStateOf,
+} from "@commonfabric/data-model/fabric-factory";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   type ExecCommandSpec,
@@ -20,6 +24,23 @@ import {
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import { cf, isIgnorableDenoWarningLine } from "./utils.ts";
+
+const canonicalSearchFactory = createFactoryShell({
+  kind: "pattern",
+  ref: {
+    identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    symbol: "search",
+  },
+  argumentSchema: {
+    type: "object",
+    properties: { query: { type: "string" } },
+    required: ["query"],
+  },
+  resultSchema: {
+    type: "object",
+    properties: { echoed: { type: "string" } },
+  },
+});
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -1787,6 +1808,57 @@ describe("mounted callable resolution and execution", () => {
     });
   });
 
+  it("discovers and source-space materializes a direct PatternFactory tool", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: true,
+      canonicalFactory: canonicalSearchFactory,
+      factorySourceSpace: "did:key:factory-source",
+      toolResult: { echoed: "tea" },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const resolved = await resolveMountedCallableFile(filePath, {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+    });
+    const result = await executeMountedCallableFile(
+      filePath,
+      ["--query", "tea"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        prepareFactory: (factory, context) => {
+          expect(factory).toBe(canonicalSearchFactory);
+          harness.tracker.factoryMaterializationSpace = context.artifactSpace;
+          return Promise.resolve(factory);
+        },
+      },
+    );
+
+    expect(resolved.commandSpec.inputSchema).toEqual(
+      (factoryStateOf(canonicalSearchFactory) as {
+        argumentSchema: JSONSchema;
+      }).argumentSchema,
+    );
+    expect(harness.tracker.factoryMaterializationSpace).toBe(
+      "did:key:factory-source",
+    );
+    expect(harness.tracker.toolRunInput).toEqual({ query: "tea" });
+    expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
+  });
+
   it("idles before committing mounted tool results and syncs before waiting", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -2473,6 +2545,8 @@ function createExecHarness(options: {
     argumentSchema: JSONSchema;
     resultSchema?: JSONSchema;
   };
+  canonicalFactory?: unknown;
+  factorySourceSpace?: string;
   extraParams?: Record<string, unknown>;
   toolResult?: unknown;
   toolResultGetValue?: unknown;
@@ -2492,9 +2566,12 @@ function createExecHarness(options: {
     }>,
     toolRunInput: undefined as unknown,
     toolResultSpace: undefined as string | undefined,
+    factoryMaterializationSpace: undefined as string | undefined,
   };
 
-  const callableSchema: JSONSchema = options.callableKind === "tool"
+  const callableSchema: JSONSchema = options.canonicalFactory !== undefined
+    ? true
+    : options.callableKind === "tool"
     ? {
       type: "object",
       properties: {
@@ -2503,14 +2580,15 @@ function createExecHarness(options: {
       },
     }
     : options.inputSchema;
-  const callableValue = options.callableKind === "tool"
-    ? {
-      pattern: options.pattern,
-      extraParams: options.extraParams ?? {},
-    }
-    : options.sparseHandlerCell
-    ? undefined
-    : { $stream: true };
+  const callableValue = options.canonicalFactory ??
+    (options.callableKind === "tool"
+      ? {
+        pattern: options.pattern,
+        extraParams: options.extraParams ?? {},
+      }
+      : options.sparseHandlerCell
+      ? undefined
+      : { $stream: true });
   const runtimeErrors: Array<{ message: string }> = [];
   const handlerSend = function (
     this: unknown,
@@ -2555,6 +2633,9 @@ function createExecHarness(options: {
         onSchemaFromLinks: () => {
           tracker.asSchemaFromLinksCalls++;
         },
+        normalizedLink: options.factorySourceSpace
+          ? { space: options.factorySourceSpace }
+          : undefined,
       },
   );
   const rootCell = createMockCell(
@@ -2675,6 +2756,7 @@ function createMockCell(
       ) => void,
     ) => void;
     isStream?: () => boolean;
+    normalizedLink?: { space?: string };
   },
 ) {
   const cell = {
@@ -2687,6 +2769,8 @@ function createMockCell(
     },
     send: options?.send,
     isStream: options?.isStream,
+    resolveAsCell: () => cell,
+    getAsNormalizedFullLink: () => options?.normalizedLink ?? {},
     key: (key: string) => {
       if (options?.childOverrides?.[key]) {
         return options.childOverrides[key];

@@ -22,7 +22,9 @@ import {
   buildCallableScript,
   type CallableKind,
   classifyCallableEntry,
+  decodeFactoryProjections,
   isHandlerCell,
+  patternFactorySchemas,
 } from "./callables.ts";
 import { parseMountedCallablePath } from "./callable-path.ts";
 import {
@@ -42,6 +44,10 @@ import {
   encodeFusePathSegments,
 } from "./path-codec.ts";
 import type { JSONSchema } from "@commonfabric/api";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import type { PieceManager } from "@commonfabric/piece";
 import type {
   PieceController,
@@ -1074,6 +1080,7 @@ export class CellBridge {
     target: HandlerTarget,
     value: unknown,
   ): Promise<void> {
+    await this.ensureFactoryValueDurability(target.piece, value);
     const rootCell = await target.piece[target.cellProp].getCell();
     const handlerCell = rootCell.key(target.cellKey as keyof unknown) as Cell<
       unknown
@@ -1897,8 +1904,63 @@ export class CellBridge {
     return null;
   }
 
+  /** Verify every by-value factory closure before a FUSE write/enqueue. */
+  private async ensureFactoryValueDurability(
+    piece: PieceController,
+    value: unknown,
+  ): Promise<void> {
+    const identities = new Set<string>();
+    const seen = new WeakSet<object>();
+    const visit = (candidate: unknown): void => {
+      if (isAdmittedFabricFactory(candidate)) {
+        const state = factoryStateOf(candidate);
+        if (state.ref === undefined) {
+          throw new Error(
+            "FUSE cannot write an unsealed factory without a durable artifact ref",
+          );
+        }
+        identities.add(state.ref.identity);
+        if (state.kind === "pattern") {
+          visit(state.params);
+          visit(state.spaceSelector);
+        }
+        return;
+      }
+      if (
+        candidate === null ||
+        (typeof candidate !== "object" && typeof candidate !== "function")
+      ) {
+        return;
+      }
+      const key = candidate as object;
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (Array.isArray(candidate)) {
+        for (const item of candidate) visit(item);
+      } else {
+        for (const item of Object.values(candidate)) visit(item);
+      }
+    };
+    visit(value);
+    if (identities.size > 0) {
+      const manager = piece.manager();
+      const destinationSpace = manager.getSpace();
+      for (const identity of identities) {
+        // A context-free tagged decode carries no source-space authority.
+        // Verify the complete closure already exists in the destination before
+        // the by-value write; otherwise PatternManager rejects the write.
+        await manager.runtime.patternManager.ensureArtifactClosureInSpace(
+          identity,
+          destinationSpace,
+          destinationSpace,
+        );
+      }
+    }
+  }
+
   /** Write a value via the piece controller. */
   async writeValue(writePath: WritePath, value: unknown): Promise<void> {
+    await this.ensureFactoryValueDurability(writePath.piece, value);
     await writePath.piece[writePath.cell].set(
       value,
       writePath.jsonPath.length > 0 ? writePath.jsonPath : undefined,
@@ -1947,13 +2009,17 @@ export class CellBridge {
     } else if (writePath.fsProjection === "json") {
       let obj: Record<string, unknown>;
       try {
-        obj = JSON.parse(text);
+        obj = decodeFactoryProjections(JSON.parse(text)) as Record<
+          string,
+          unknown
+        >;
       } catch {
         return false;
       }
       if (typeof obj !== "object" || obj === null || Array.isArray(obj)) {
         return false;
       }
+      await this.ensureFactoryValueDurability(writePath.piece, obj);
       // Plain-object shorthand stores keys directly under $FS instead of
       // nesting them under $FS.content.
       let isPlainObjectShorthand = false;
@@ -2799,22 +2865,31 @@ export class CellBridge {
 
       if (!callableKind) continue;
 
+      const factorySchemas = patternFactorySchemas(resolvedCandidate) ??
+        patternFactorySchemas(candidate);
       callables.push({
         key,
         callableKind,
-        schema: getInputSchema(childCell.schema),
+        schema: factorySchemas?.argumentSchema ??
+          getInputSchema(childCell.schema),
       });
       callableKinds.set(key, callableKind);
-      if (typeof candidate === "object" && candidate !== null) {
-        callableValues.add(candidate);
+      for (const value of [candidate, resolvedCandidate]) {
+        if (
+          (typeof value === "object" && value !== null) ||
+          typeof value === "function"
+        ) {
+          callableValues.add(value as object);
+        }
       }
     }
 
     return {
       callables,
       skipEntry: (candidate: unknown) =>
-        (typeof candidate === "object" && candidate !== null &&
-          callableValues.has(candidate)) ||
+        (((typeof candidate === "object" && candidate !== null) ||
+          typeof candidate === "function") &&
+          callableValues.has(candidate as object)) ||
         isVNode(candidate),
       classifyEntry: (key: string) => callableKinds.get(key) ?? null,
     };
@@ -2851,10 +2926,11 @@ export class CellBridge {
     for (const key of Object.keys(properties)) {
       const childCell = rootCell.key(key).asSchemaFromLinks();
       let childValue: unknown;
+      let rawValue: unknown;
       try {
         childValue = childCell.get?.();
         // Override with raw link reference only for sigil links (enables FUSE symlinks)
-        const rawValue = childCell.getRaw?.();
+        rawValue = childCell.getRaw?.();
         if (isSigilLink(rawValue)) {
           childValue = rawValue;
         }
@@ -2864,11 +2940,12 @@ export class CellBridge {
 
       const callableKind =
         classifyCallableEntry(childValue, childCell.schema) ??
+          classifyCallableEntry(rawValue, childCell.schema) ??
           classifyCallableEntry(childCell, childCell.schema);
 
       if (callableKind) {
         if (!(key in materialized)) {
-          materialized[key] = childValue ?? childCell;
+          materialized[key] = childValue ?? rawValue ?? childCell;
         }
         continue;
       }

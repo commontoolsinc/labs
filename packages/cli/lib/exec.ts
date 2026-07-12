@@ -11,6 +11,7 @@ import {
 import {
   type CallableCellLike,
   callableCommandSpec,
+  type CallableExecutionDeps,
   type CallableManagerLike,
   type CallablePieceLike,
   detectCallableKind,
@@ -48,7 +49,7 @@ export interface ResolvedMountedCallableFile {
   pieceMeta: MountedPieceMeta;
 }
 
-export interface ExecDependencies {
+export interface ExecDependencies extends CallableExecutionDeps {
   stateDir?: string;
   loadManager?: (config: SpaceConfig) => Promise<CallableManagerLike>;
   loadPiece?: (

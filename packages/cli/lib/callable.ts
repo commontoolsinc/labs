@@ -1,8 +1,17 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
+import {
   type CallableKind,
   classifyCallableEntry,
+  patternFactoryFromCallableEntry,
+  patternFactorySchemas,
 } from "../../fuse/callables.ts";
+import { prepareFactory } from "../../runner/src/factory-materialization.ts";
+import type { Runtime } from "../../runner/src/runtime.ts";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
@@ -31,10 +40,15 @@ export interface CallableCellLike {
   schema?: JSONSchema;
   get: () => unknown;
   getRaw?: () => unknown;
+  resolveAsCell?: () => CallableCellLike;
   asSchemaFromLinks?: () => CallableCellLike;
   key: (segment: string) => CallableCellLike;
   pull?: () => Promise<unknown>;
-  getAsNormalizedFullLink?: () => { scope?: CellScope };
+  getAsNormalizedFullLink?: () => {
+    id?: string;
+    space?: string;
+    scope?: CellScope;
+  };
   send?: (
     value: unknown,
     onCommit?: (tx: CallableTransactionLike) => void,
@@ -96,6 +110,10 @@ export interface CallableExecutionDeps {
     resultCell: CallableCellLike,
     timeoutMs: number,
   ) => Promise<unknown>;
+  prepareFactory?: (
+    factory: unknown,
+    context: { runtime: CallableRuntimeLike; artifactSpace: string },
+  ) => Promise<unknown>;
 }
 
 export interface ExecutedCallable {
@@ -117,6 +135,37 @@ function asCallablePattern(value: unknown): CallablePatternLike | undefined {
 
 function asExtraParams(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
+}
+
+function canonicalFactorySelection(callableCell: CallableCellLike): {
+  factory: unknown;
+  leafCell: CallableCellLike;
+} | undefined {
+  let value: unknown;
+  try {
+    value = callableCell.getRaw?.() ?? callableCell.get();
+  } catch {
+    value = undefined;
+  }
+  if (isAdmittedFabricFactory(value)) {
+    return factoryStateOf(value).kind === "pattern"
+      ? { factory: value, leafCell: callableCell }
+      : undefined;
+  }
+  const factory = patternFactoryFromCallableEntry(value);
+  if (factory !== undefined) {
+    return { factory, leafCell: callableCell.key("pattern") };
+  }
+  try {
+    const leafCell = callableCell.key("pattern");
+    const nested = leafCell.getRaw?.() ?? leafCell.get();
+    return isAdmittedFabricFactory(nested) &&
+        factoryStateOf(nested).kind === "pattern"
+      ? { factory: nested, leafCell }
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
@@ -267,6 +316,19 @@ export function callableCommandSpec(
     };
   }
 
+  const canonical = canonicalFactorySelection(callableCell);
+  const canonicalSchemas = canonical === undefined
+    ? undefined
+    : patternFactorySchemas(canonical.factory);
+  if (canonicalSchemas) {
+    return {
+      callableKind: "tool",
+      defaultVerb: "run",
+      inputSchema: canonicalSchemas.argumentSchema,
+      outputSchemaSummary: canonicalSchemas.resultSchema,
+    };
+  }
+
   const pattern = asCallablePattern(
     callableCell.key("pattern").getRaw?.() ??
       callableCell.key("pattern").get(),
@@ -329,26 +391,51 @@ export async function executeResolvedCallable(
     return {};
   }
 
-  const pattern = asCallablePattern(
-    resolved.callableCell.key("pattern").getRaw?.() ??
-      resolved.callableCell.key("pattern").get(),
-  );
-  const extraParams = asExtraParams(
-    resolved.callableCell.key("extraParams").get?.(),
-  );
+  const canonical = canonicalFactorySelection(resolved.callableCell);
+  let pattern: unknown;
+  let resultSchema: JSONSchema | undefined;
+  let extraParams: Record<string, unknown> = {};
+  if (canonical) {
+    const schemas = patternFactorySchemas(canonical.factory);
+    if (!schemas) throw new TypeError("Mounted tool requires a PatternFactory");
+    resultSchema = schemas.resultSchema;
+    const sourceCell = canonical.leafCell.resolveAsCell?.() ??
+      canonical.leafCell;
+    const artifactSpace = sourceCell.getAsNormalizedFullLink?.().space ??
+      resolved.space;
+    pattern = await (deps.prepareFactory ??
+      ((factory, context) =>
+        prepareFactory(factory, {
+          runtime: context.runtime as unknown as Runtime,
+          artifactSpace: context.artifactSpace as MemorySpace,
+        })))(canonical.factory, {
+        runtime: resolved.manager.runtime,
+        artifactSpace,
+      });
+  } else {
+    const legacyPattern = asCallablePattern(
+      resolved.callableCell.key("pattern").getRaw?.() ??
+        resolved.callableCell.key("pattern").get(),
+    );
+    pattern = legacyPattern;
+    resultSchema = legacyPattern?.resultSchema;
+    extraParams = asExtraParams(
+      resolved.callableCell.key("extraParams").get?.(),
+    );
+  }
   const tx = resolved.manager.runtime.edit();
   const resultScope = resolved.callableCell.getAsNormalizedFullLink?.().scope;
   const resultCell = resolved.manager.runtime.getCell(
     resolved.space,
     deps.uuid?.() ?? crypto.randomUUID(),
-    pattern?.resultSchema,
+    resultSchema,
     tx,
     resultScope,
   );
   const running = resolved.manager.runtime.run(
     tx,
     pattern,
-    mergeToolInput(input, extraParams),
+    canonical ? mergeToolInput(input, {}) : mergeToolInput(input, extraParams),
     resultCell,
   );
   let sinkValue: unknown;
