@@ -1320,7 +1320,7 @@ complete task must pass after Stage 4 before final handoff.
   materialization.
 - [ ] Isolate the legacy branch in `Runner.substituteOpPatternRefs()` so it
   cannot remain an accidental writer dependency.
-- [ ] Update closure-capture diagnostics to recommend inline patterns, not
+- [x] Update closure-capture diagnostics to recommend inline patterns, not
   manual sibling params.
 - [ ] Regenerate affected transformer goldens and test nested map/filter/flatMap
   chains, capture-free callbacks, identity stability, resume, and CFC labels.
