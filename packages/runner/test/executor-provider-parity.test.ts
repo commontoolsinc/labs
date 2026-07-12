@@ -9,6 +9,7 @@ import type {
 } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import * as MemoryEngine from "@commonfabric/memory/v2/engine";
+import type { ActionSettlement } from "@commonfabric/memory/v2";
 import { resolveSpaceStoreUrl } from "@commonfabric/memory/v2/storage-path";
 import {
   type AcceptedCommitEvent,
@@ -260,6 +261,190 @@ Deno.test("executor host provider commits through authenticated memory without a
   } finally {
     await storage.close();
     await channel.dispose();
+    await server.close();
+  }
+});
+
+Deno.test("executor host provider binds accepted action provenance to its authenticated user", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor provenance provider ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const flags = {
+    serverPrimaryExecutionV1: true,
+    serverPrimaryExecutionClaimRoutingV1: true,
+    serverPrimaryExecutionBuiltinPassivityV1: true,
+  } as const;
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-provenance-test",
+    },
+    protocolFlags: flags,
+    acl: { mode: "off", serviceDids: [principal.did()] },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const observerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+    protocolFlags: flags,
+  });
+  const observer = await observerClient.mount(
+    space,
+    {},
+    authorizeSessionOpen,
+  );
+  await observer.transact({
+    localSeq: 1,
+    reads: { confirmed: [], pending: [] },
+    operations: [{
+      op: "set",
+      id: `of:${space}:execution-policy`,
+      value: { value: { version: 1, serverPrimaryExecution: true } },
+    }],
+  });
+  await observer.watchSet([{
+    id: "executor-provenance-output",
+    kind: "graph",
+    query: {
+      roots: [{
+        id: "of:executor-provider:provenance-output",
+        selector: { path: [], schema: true },
+      }],
+    },
+  }]);
+
+  const actionId = "action:executor-provenance";
+  const baseObservation = schedulerObservationFor(space, actionId);
+  const claim = server.setExecutionClaim({
+    branch: "",
+    space,
+    contextKey: "space",
+    pieceId: baseObservation.pieceId,
+    actionId,
+    actionKind: "computation",
+    implementationFingerprint: baseObservation.implementationFingerprint,
+    runtimeFingerprint: baseObservation.runtimeFingerprint,
+    leaseGeneration: 23,
+  });
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    authorizeSessionOpen,
+    executionLeaseGeneration: claim.leaseGeneration,
+  });
+  const storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: principal.did(),
+    space,
+    protocolFlags: flags,
+  });
+  const settlement = Promise.withResolvers<ActionSettlement>();
+  const unsubscribe = observer.subscribeExecutionControl((event) => {
+    if (event.type === "session.execution.settlement") {
+      settlement.resolve(event.settlement);
+    }
+  });
+
+  try {
+    const replica = storage.open(space).replica;
+    assert(replica.commitNative);
+    const result = await replica.commitNative({
+      operations: [{
+        op: "set",
+        id: "of:executor-provider:provenance-output",
+        type: "application/json",
+        value: { value: { answer: 42 } },
+      }],
+      schedulerObservation: {
+        ...baseObservation,
+        inputBasisSeq: 999_999,
+        executionProvenance: {
+          claim,
+          onBehalfOf: "did:key:forged",
+          leaseGeneration: 999,
+          claimGeneration: 999,
+          causedBy: [999_999],
+          inputBasisSeq: 999_999,
+        },
+      },
+    });
+    assertEquals(result.error, undefined);
+
+    const snapshots = await observer.listSchedulerActionSnapshots({
+      actionId,
+      pieceId: baseObservation.pieceId,
+      processGeneration: baseObservation.processGeneration,
+    });
+    const stored = snapshots.snapshots[0]?.observation as {
+      inputBasisSeq?: number;
+      executionProvenance?: {
+        claim: {
+          branch: string;
+          space: string;
+          contextKey: string;
+          pieceId: string;
+          actionId: string;
+          actionKind: string;
+          implementationFingerprint: string;
+          runtimeFingerprint: string;
+        };
+        onBehalfOf: string;
+        leaseGeneration: number;
+        claimGeneration: number;
+        causedBy: number[];
+        inputBasisSeq: number;
+      };
+    };
+    assertEquals(stored.inputBasisSeq, 0);
+    assertEquals(stored.executionProvenance, {
+      claim: {
+        branch: "",
+        space,
+        contextKey: "space",
+        pieceId: claim.pieceId,
+        actionId,
+        actionKind: "computation",
+        implementationFingerprint: claim.implementationFingerprint,
+        runtimeFingerprint: claim.runtimeFingerprint,
+      },
+      onBehalfOf: principal.did(),
+      leaseGeneration: claim.leaseGeneration,
+      claimGeneration: claim.claimGeneration,
+      causedBy: [],
+      inputBasisSeq: 0,
+    });
+
+    await server.flushSessions();
+    const accepted = await Promise.race([
+      settlement.promise,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("executor settlement was not delivered")),
+          1_000,
+        )
+      ),
+    ]);
+    assertEquals(accepted.outcome, "committed");
+    assertEquals(accepted.inputBasisSeq, 0);
+  } finally {
+    unsubscribe();
+    await storage.close();
+    await channel.dispose();
+    await observerClient.close();
     await server.close();
   }
 });
