@@ -3104,6 +3104,7 @@ class SpaceReplica implements ISpaceReplica {
       : undefined;
     await this.waitForConflictReadRepair(rejection);
     this.dropPending(localSeq);
+    this.noteSourceCommitRejected(localSeq);
     if (before !== undefined) {
       const changes = before.compare(this);
       // The revert snapshots CURRENT confirmed state (which already includes
@@ -3812,6 +3813,14 @@ class SpaceReplica implements ISpaceReplica {
     if (changed) this.reconcilePendingExecutionSettlements();
   }
 
+  private noteSourceCommitRejected(localSeq: number): void {
+    this.#confirmedSeqByLocalSeq.delete(localSeq);
+    this.dropClaimedOverlays(
+      (overlay) => overlay.unresolvedBasisLocalSeqs.has(localSeq),
+      { dirtyProducer: true, diagnosticCode: "source-basis-rejected" },
+    );
+  }
+
   private applyReplicaExecutionSync(sync: SessionSync): void {
     this.#executionAppliedSeq = Math.max(this.#executionAppliedSeq, sync.toSeq);
     const batch = sync.execution;
@@ -3998,7 +4007,9 @@ class SpaceReplica implements ISpaceReplica {
       this.hasNotificationSubscribers();
     const shouldNotifySinks = touched.length > 0 &&
       this.hasSinkSubscribers(touched);
-    const before = shouldNotifySubscribers
+    const trackDivergence = options.diagnosticCode === "claim-committed" ||
+      options.diagnosticCode === "claim-no-op";
+    const before = shouldNotifySubscribers || trackDivergence
       ? Differential.checkout(
         this,
         touched.map(({ id, scope }) => snapshotState(this, id, scope)),
@@ -4018,12 +4029,21 @@ class SpaceReplica implements ISpaceReplica {
     }
     if (before !== undefined) {
       const changes = before.compare(this);
-      if ([...changes].length > 0) {
-        this.#subscription.next({
-          type: "integrate",
-          space: this.#space,
-          changes,
-        });
+      const changed = [...changes].length > 0;
+      if (changed) {
+        if (trackDivergence) {
+          logger.debug("execution-overlay-divergence", () => [
+            "Authoritative server state replaced a speculative overlay",
+            { overlays: dropped.length, reason: options.diagnosticCode },
+          ]);
+        }
+        if (shouldNotifySubscribers) {
+          this.#subscription.next({
+            type: "integrate",
+            space: this.#space,
+            changes,
+          });
+        }
         if (shouldNotifySinks) this.notifySinks(changes);
       }
     } else if (shouldNotifySinks) {

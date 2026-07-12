@@ -3,6 +3,7 @@ import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
 import {
+  type AcceptedCommitSeq,
   type ActionSettlement,
   type ClientCommit,
   type ExecutionClaim,
@@ -19,6 +20,7 @@ import type {
 } from "../src/storage/v2-replica-session.ts";
 import { type SessionFactory, StorageManager } from "../src/storage/v2.ts";
 import type { StorageNotification } from "../src/storage/interface.ts";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
 const signer = await Identity.fromPassphrase(
   "client execution overlay test principal",
@@ -54,7 +56,12 @@ const observation = () => ({
   runtimeFingerprint: claim.runtimeFingerprint,
   observedAtSeq: 0,
   transactionKind: "action-run" as const,
-  reads: [],
+  reads: [{
+    space: SPACE,
+    scope: "space" as const,
+    id: INPUT,
+    path: ["value"],
+  }],
   shallowReads: [],
   actualChangedWrites: [{
     space: SPACE,
@@ -80,7 +87,12 @@ const observation = () => ({
       id: "of:client-overlay-piece",
       path: ["value"],
     },
-    reads: [],
+    reads: [{
+      space: SPACE,
+      scope: "space" as const,
+      id: INPUT,
+      path: ["value"],
+    }],
     writes: [{
       space: SPACE,
       scope: "space" as const,
@@ -145,6 +157,10 @@ class OverlaySessionFactory implements SessionFactory {
   readonly commits: ClientCommit[] = [];
   readonly view = new PushView();
   claims: ExecutionClaim[] = [claim];
+  onTransact?: (
+    commit: ClientCommit,
+    attempt: number,
+  ) => Promise<AppliedCommit>;
   #seq = 0;
 
   create(
@@ -160,6 +176,9 @@ class OverlaySessionFactory implements SessionFactory {
       },
       transact: async (commit: ClientCommit): Promise<AppliedCommit> => {
         this.commits.push(structuredClone(commit));
+        if (this.onTransact) {
+          return await this.onTransact(commit, this.commits.length);
+        }
         return {
           seq: ++this.#seq,
           branch: "",
@@ -213,10 +232,20 @@ async function waitFor(check: () => boolean): Promise<void> {
 async function writeClaimedOutput(
   storage: StorageManager,
   value: FabricValue,
+  readInput = false,
 ): Promise<void> {
   const tx = storage.edit();
   tx.sourceAction = sourceAction;
   tx.setSchedulerObservation?.(observation());
+  if (readInput) {
+    const read = tx.read({
+      space: SPACE,
+      id: INPUT,
+      type: "application/json",
+      path: ["value"],
+    });
+    if (read.error) throw read.error;
+  }
   const writer = tx.writer(SPACE);
   if (writer.error) throw writer.error;
   const written = writer.ok.write({
@@ -227,6 +256,22 @@ async function writeClaimedOutput(
   if (written.error) throw written.error;
   const result = await tx.commit();
   if (result.error) throw new Error(result.error.message);
+}
+
+function beginSourceInputWrite(
+  storage: StorageManager,
+  value: FabricValue,
+): Promise<unknown> {
+  const tx = storage.edit();
+  const writer = tx.writer(SPACE);
+  if (writer.error) throw writer.error;
+  const written = writer.ok.write({
+    id: INPUT,
+    type: "application/json",
+    path: ["value"],
+  }, value);
+  if (written.error) throw written.error;
+  return tx.commit();
 }
 
 function visibleOutput(storage: StorageManager): unknown {
@@ -345,6 +390,370 @@ Deno.test("matching no-op settlement clears a claimed overlay", async () => {
     }));
     await waitFor(() => visibleOutput(storage) === undefined);
     assertEquals(visibleOutput(storage), undefined);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("settlement basis older than a direct confirmed read retains the overlay", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    factory.view.push(emptySync({
+      toSeq: 5,
+      upserts: [{
+        branch: "",
+        id: INPUT,
+        seq: 5,
+        doc: { value: "confirmed-input" },
+      }],
+    }));
+    await waitFor(() =>
+      storage.open(SPACE).replica.get({
+        id: INPUT,
+        type: "application/json",
+      }) !== undefined
+    );
+    await writeClaimedOutput(storage, "basis-five", true);
+
+    factory.view.push(emptySync({
+      fromSeq: 5,
+      toSeq: 5,
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(4),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(visibleOutput(storage), "basis-five");
+
+    factory.view.push(emptySync({
+      fromSeq: 5,
+      toSeq: 5,
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(5),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() => visibleOutput(storage) === undefined);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("pending source basis translates to its confirmation-assigned sequence", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const sourceApplied = Promise.withResolvers<AppliedCommit>();
+  factory.onTransact = () => sourceApplied.promise;
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    const sourceCommit = beginSourceInputWrite(storage, "pending-source");
+    await waitFor(() => factory.commits.length === 1);
+    await writeClaimedOutput(storage, "pending-basis-overlay", true);
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(6),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(visibleOutput(storage), "pending-basis-overlay");
+
+    sourceApplied.resolve({ seq: 6, branch: "", revisions: [] });
+    await sourceCommit;
+    await waitFor(() => visibleOutput(storage) === undefined);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("rejected source basis discards its dependent overlay", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const sourceApplied = Promise.withResolvers<AppliedCommit>();
+  factory.onTransact = () => sourceApplied.promise;
+  const storage = OverlayStorageManager.connect(factory);
+  const notifications: StorageNotification[] = [];
+  storage.subscribe({
+    next(notification) {
+      notifications.push(notification);
+      return { done: false };
+    },
+  });
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    const sourceCommit = beginSourceInputWrite(storage, "doomed-source");
+    await waitFor(() => factory.commits.length === 1);
+    await writeClaimedOutput(storage, "doomed-overlay", true);
+    sourceApplied.reject(Object.assign(new Error("source rejected"), {
+      name: "TransactionError",
+    }));
+    await sourceCommit;
+    await waitFor(() => visibleOutput(storage) === undefined);
+    assertEquals(
+      notifications.some((notification) =>
+        notification.type === "execution-claim-invalidation" &&
+        notification.diagnosticCode === "source-basis-rejected"
+      ),
+      true,
+    );
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("committed settlement waits for the accepted data to be replica-applied", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "speculative");
+    const divergenceBaseline = getLoggerCountsBreakdown()["storage.v2"]?.[
+      "execution-overlay-divergence"
+    ]?.debug ?? 0;
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "committed",
+            acceptedCommitSeq: 7 as AcceptedCommitSeq,
+          },
+        }],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(visibleOutput(storage), "speculative");
+
+    factory.view.push(emptySync({
+      toSeq: 7,
+      upserts: [{
+        branch: "",
+        id: OUTPUT,
+        seq: 7,
+        doc: { value: "authoritative" },
+      }],
+    }));
+    await waitFor(() => visibleOutput(storage) === "authoritative");
+    assertEquals(
+      getLoggerCountsBreakdown()["storage.v2"]?.[
+        "execution-overlay-divergence"
+      ]?.debug ?? 0,
+      divergenceBaseline + 1,
+    );
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("old claim generation settlement cannot clear a replacement overlay", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const replacement = { ...claim, claimGeneration: claim.claimGeneration + 1 };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "old-overlay");
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.claim.set",
+          claim: replacement,
+        }],
+      },
+    }));
+    await waitFor(() => visibleOutput(storage) === undefined);
+    await writeClaimedOutput(storage, "replacement-overlay");
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(visibleOutput(storage), "replacement-overlay");
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("two rapid source bases require settlement through the later basis", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    factory.view.push(emptySync({
+      toSeq: 5,
+      upserts: [{
+        branch: "",
+        id: INPUT,
+        seq: 5,
+        doc: { value: "source-five" },
+      }],
+    }));
+    await waitFor(() =>
+      storage.open(SPACE).replica.get({
+        id: INPUT,
+        type: "application/json",
+      }) !== undefined
+    );
+    await writeClaimedOutput(storage, "overlay-five", true);
+    factory.view.push(emptySync({
+      fromSeq: 5,
+      toSeq: 6,
+      upserts: [{
+        branch: "",
+        id: INPUT,
+        seq: 6,
+        doc: { value: "source-six" },
+      }],
+    }));
+    await waitFor(() => {
+      const value = storage.open(SPACE).replica.get({
+        id: INPUT,
+        type: "application/json",
+      })?.is as { value?: unknown } | undefined;
+      return value?.value === "source-six";
+    });
+    await writeClaimedOutput(storage, "overlay-six", true);
+
+    factory.view.push(emptySync({
+      fromSeq: 6,
+      toSeq: 6,
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(5),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(visibleOutput(storage), "overlay-six");
+
+    factory.view.push(emptySync({
+      fromSeq: 6,
+      toSeq: 6,
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(6),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() => visibleOutput(storage) === undefined);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("execution feed gap freezes known authority until an authoritative snapshot", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "held-through-gap");
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 99,
+        toFeedSeq: 100,
+        events: [{
+          type: "session.execution.claim.revoke",
+          branch: "",
+          claim,
+          leaseGeneration: claim.leaseGeneration,
+          claimGeneration: claim.claimGeneration,
+        }],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(visibleOutput(storage), "held-through-gap");
+    await writeClaimedOutput(storage, "still-local-through-gap");
+    assertEquals(factory.commits, []);
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 0,
+        toFeedSeq: 1,
+        snapshot: { claims: [] },
+        events: [],
+      },
+    }));
+    await waitFor(() => visibleOutput(storage) === undefined);
+    await writeClaimedOutput(storage, "resumed-upstream");
+    assertEquals(factory.commits.length, 1);
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
