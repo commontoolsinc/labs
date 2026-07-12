@@ -12,14 +12,16 @@ model.
 
 Draft — seeking framework author review. None of this is implemented in labs
 today (§3 inventories what exists), and §10 names the net-new runtime surface
-this design requires — most importantly a version-exposure API (§10.1) and
-write-authorization gating for sqlite (§10.2). The Loom product's in-flight
-attention framework and Pond's spatial shell are the first intended
+this design requires — most importantly the **changes projection** (§10.1), a
+small read-only query primitive over shipped memory-v2 machinery, and a
+cross-principal append gate for candidate intake (§10.2). The Loom product's
+in-flight attention framework and Pond's spatial shell are the first intended
 consumers; this spec defines the runtime primitives their product surfaces
 should compile onto, so each stops hand-rolling its own attention state
 (Appendix A maps Loom's candidate shape onto the envelope). Derived from the
 2026-05-21 multi-user/notifications design sessions and the 2026-07 attention
-reframe; revised 2026-07-12 after adversarial runtime and product review.
+reframe; revised 2026-07-12 after two adversarial review rounds (runtime +
+product, then Android-as-gold-standard + primitive-shape + parsimony).
 
 ## Last Updated
 
@@ -32,32 +34,35 @@ Every existing notification system is biased toward interruption because the
 loudness. This design inverts that: **sources only request a posture; the
 user's ranker — running with the user's policies, structurally on the user's
 side — decides**. The runtime's job is to make that inversion enforceable
-(CFC write-gating on the canonical ledger), cheap (pull-based derived
-queries, no second event journal), and portable across surfaces (one
-envelope, per-platform adapters).
+(CFC write-gating on the canonical ledger), cheap (derived queries over
+stores the user already holds, no second event journal), and portable across
+surfaces (one envelope, per-platform adapters).
 
 Five load-bearing moves:
 
-1. **One ledger, four postures.** Attention items land in exactly one rung of
-   a posture ladder — `silent` → `review` → `heads-up` → `interrupt` — and
-   the rung is the promise made to the user (§4.2). The system is biased
-   downward: a source earns its way up, and every ignore/dismiss/mute pushes
-   its future items back down.
+1. **One ledger, one posture scale.** Attention items land on exactly one
+   rung of an ordered scale — `silent` → `review` → `heads-up` →
+   `interrupt` — and the rung is the promise made to the user (§4.2). The
+   system is biased downward: a source earns its way up through **learned
+   policies** the user can read and edit (§7), and every
+   dismiss-without-open pushes its future items back down.
 2. **The ranker is the only writer.** The canonical ledger carries a
    `writeAuthorizedBy` claim; untrusted patterns can emit candidates and
    render their own local views, but cannot spam the ledger (§6).
 3. **Attention over artifacts is derived, not emitted.** The runtime already
-   versions every entity (memory-v2 `seq`) — though exposing that version to
-   patterns is net-new API work (§10.1). Seen-state is one small relation —
-   last observed version per (user, entity) — and "unseen change", "while
-   you were away", and the artifact lifecycle all fall out as queries (§5).
-   For in-fabric sources, an attention item is a *view over* "an artifact
-   you care about changed", which dissolves the "every pattern must remember
-   to emit notifications" problem.
+   versions every entity (memory-v2 `seq`), and the version already crosses
+   the wire on every query result; exposing it is one small read-only
+   primitive, the changes projection (§10.1). Seen-state is one small
+   relation — last observed version per (user, entity) — and "unseen
+   change", "while you were away", item currency, and the artifact
+   lifecycle all fall out as joins against it (§5). For in-fabric sources,
+   an attention item is a *view over* "an artifact you care about changed",
+   which dissolves the "every pattern must remember to emit notifications"
+   problem.
 4. **Policies are user-owned cells**, not ranker code. The core ships a
    good-enough default fold; the bespoke last 20% ("library book due"
    escalations, quiet hours, per-thread mutes) is data the user — or a
-   pattern, on proposal — writes (§7).
+   pattern, on proposal, or the ranker itself, legibly (§7) — writes.
 5. **Multi-user needs almost nothing new.** Attention is a per-(user, item)
    relation: a shared space emits one candidate and each member's ranker
    lanes it independently. "Who has seen this" — and, per disclosure policy,
@@ -73,8 +78,18 @@ interviews that seed policy — is product-side and stays there. A product
 framework (e.g. Loom's attention framework) enters this pipeline as a
 *trusted source* emitting well-prepared candidates with a requested posture;
 the runtime ranker's job for such a source is cross-source arbitration and
-enforcement of the user's posture caps, not re-litigating the product's
+enforcement of the user's posture clamps, not re-litigating the product's
 preparation decisions.
+
+### Vocabulary
+
+*Item* — a materialized record in the ledger (*claim* when speaking of what
+it means to the user). *Candidate* — the same envelope before the ranker
+assigns `id`, `posture`, and `weight`; not a separate type. *Ledger* — the
+items store specifically. *Attention state* — the triple of stores (items,
+actions, seen — §4.5). *Lane* — a shell projection over attention state
+(most lanes correspond to a posture rung; some, like the snoozed lane, are
+lifecycle views).
 
 ## Goals
 
@@ -87,10 +102,15 @@ preparation decisions.
   the emitter cannot force it.
 - User-owned, inspectable, editable routing policy — when the system
   mis-lanes something, the fix is a one-line policy edit, not a black box.
+  This includes what the system learns on its own: learned policies are
+  visible and editable, never hidden state.
+- Close the loop without a context switch where the platform allows it:
+  one-tap approve/deny/done and direct reply from the surface (§4.6).
 - Per-viewer lanes over shared state: the same event can interrupt one member
   of a space and be texture for another.
 - OS delivery (Web Push, APNs/FCM) as replaceable adapters over the same
-  ledger, honoring per-platform replace/retract semantics.
+  ledger, honoring per-platform replace/retract semantics and the item's
+  confidentiality labels (§9.3).
 
 ## Non-goals
 
@@ -117,8 +137,8 @@ preparation decisions.
   lacks one (see `docs/specs/shared-profile-rosters.md`); multi-user features
   here are designed within that constraint, not around it.
 - **Replacing source UIs.** An attention item opens its focused destination
-  (the artifact, the draft, the conversation); it displaces the source
-  occurrence rather than duplicating it (`displaces`, §4.4).
+  (the artifact, the draft, the conversation); within a thread, the newest
+  live claim displaces older ones (§6.4) rather than piling on.
 
 ## 3. Background — what exists today
 
@@ -167,9 +187,17 @@ The runtime does not — cannot — enforce that items are well-prepared; it
 enforces the things preparation depends on: who may write the ledger, which
 posture a claim actually gets, and that handled claims retract everywhere.
 
-### 4.2 The posture ladder
+### 4.2 The posture scale
 
-Every visible item occupies exactly one rung. The rung is a promise:
+One ordered scale:
+
+```text
+suppress < silent < review < heads-up < interrupt
+```
+
+`suppress` is rank zero: never materialized for this user (distinct from
+`silent`, which is recorded and findable). Every materialized item occupies
+exactly one rung, and the rung is a promise:
 
 | Posture | Promise to the user | Typical projection |
 |---|---|---|
@@ -178,25 +206,21 @@ Every visible item occupies exactly one rung. The rung is a promise:
 | `heads-up` | "Look when you next check in; we'll hold it." | shell bell/badge count, quiet OS delivery |
 | `interrupt` | "Worth breaking your flow for." | OS banner/sound, in-shell takeover |
 
-Plus one policy *effect* that is not a rung: `suppress` (never materialize
-for this user; distinct from `silent`, which is findable).
-
 Two invariants:
 
 - **Downward bias.** Defaults sit low (`silent`/`review`). Sources *request*
-  a posture; the ranker assigns the real one, capped by policy, and repeated
-  dismiss-without-open or mute feeds back as posture caps. Crucially,
-  **no emitter-controlled field may raise posture**: eligibility for
-  `interrupt` (and `heads-up` above a source's baseline) comes only from a
-  user-granted posture floor in policy (§7) — never from urgency claims,
-  expiry times, or any other field the emitter writes. An emitter cannot buy
-  `interrupt` with enthusiasm.
+  a posture; the ranker assigns the real one via the policy clamp (§7), and
+  repeated dismiss-without-open feeds back as learned clamps. Crucially,
+  **no emitter-controlled field may raise posture**: reaching `interrupt`
+  (or `heads-up` above a source's learned baseline) requires a user-adopted
+  policy floor — never urgency claims, expiry times, or any other field the
+  emitter writes. An emitter cannot buy `interrupt` with enthusiasm.
 - **Attention ≠ confidence.** How sure the system is about an item and how
   loudly it surfaces are separate axes. Uncertain-but-urgent goes to
-  `heads-up` with its uncertainty stated; certain-but-routine stays in
-  `review`. The envelope carries them separately.
+  `heads-up` with its uncertainty stated (product copy; `ext` if structured);
+  certain-but-routine stays in `review`.
 
-The ladder deliberately matches the posture vocabulary the Loom product
+The rung names deliberately match the posture vocabulary the Loom product
 already uses (silent memory → daily review → timely heads-up → interrupt), so
 product surfaces map 1:1 onto runtime postures. Within a rung, ordering is
 the ranker-assigned `weight` (§4.4) — an opaque scalar that never crosses
@@ -213,11 +237,11 @@ Sources                         emit candidates (requested posture = advisory)
   sharing directed at me          │
   artifact changes (derived, §5)  │
   external ingress (webhooks)     ▼
-Candidate intake (durable, per-source quotas)    §6.1
+Candidate intake (durable; quota-gated append)   §6.1, §10.2
   ▼
 Ranker (per-user, trusted single writer)         §6
   folds candidates × policy cells (§7)
-  assigns posture; coalesces; writes the ledger
+  assigns posture + weight; coalesces; writes the ledger
   ── writeAuthorizedBy gate: only the ranker's verified
      module identity may write the canonical ledger ──
 Ledger (per-user, durable, queryable)            §4.5
@@ -233,11 +257,15 @@ cannot do is write the canonical ledger the shell and OS adapters trust.
 
 ### 4.4 The envelope
 
+A **candidate** is this envelope minus the ranker-assigned fields (`id`,
+`posture`, `weight`); the ranker *promotes* candidates to items. One type,
+two stages.
+
 ```ts
 // Shown for illustration only.
 // A source-entity version: memory-v2 seq is per-space (a space-global
 // Lamport clock, monotone per entity), so versions are only comparable
-// within the same space. Exposing this to patterns is net-new API (§10.1).
+// within the same space. Read via the changes projection (§10.1).
 type EntityVersion = { space: string; seq: number };
 
 type AttentionItem = {
@@ -251,33 +279,56 @@ type AttentionItem = {
   id: string;
 
   // Pointer to the source of truth (a stored cell link, not a query string).
-  // The item is the invitation; the source is the truth. Used to evaluate
-  // active(), to navigate, and as the key for source-scoped policies.
+  // The item is the invitation; the source is the truth.
   source: unknown;            // asCell: ["cell"]
   // Source classification ("group-chat", "importer", "agent-run", ...).
-  // First-class because policy matching (§7) and digest grouping (§9.2)
-  // both key on it.
+  // First-class because policy matching (§7) and digest grouping (§9.2) key
+  // on it. BOUND BY THE RANKER to the source's verified identity: the
+  // first-seen kind for a given source sticks; a source changing its
+  // declared kind is itself a reputation signal (and does not escape
+  // kind-matched clamps, which follow the source identity).
   sourceKind: string;
-  // The source entity's version at emission. Drives replace, retract, and
-  // re-emerge semantics.
+  // The source entity's version at emission. Drives coalescing (same id,
+  // advancing version) and re-emergence tombstones (§4.7).
   sourceVersion: EntityVersion;
-  // Optional grouping key for presentation (one conversation, one task,
-  // one agent run — see §5 on run-level grouping).
+  // Grouping key for presentation AND displacement: within a threadKey,
+  // only the newest live claim is visible (§6.4). One conversation, one
+  // task, one agent run (threadKey = run id).
   threadKey?: string;
+  // Who this claim is about/from (a DID when known): "Ana: running late"
+  // vs "New message". Serves OS payloads, digest grouping, and §5's
+  // "by whom" in one field.
+  actor?: string;
 
   // Content. Snapshot at emission (title/body) plus the live destination.
   title: string;
   body: string;
+  // Redacted variant for untrusted displays: lockscreens and push relays
+  // (§9.3). When absent and labels forbid egress, adapters send a generic
+  // envelope and fetch full content on unlock/open.
+  redacted?: { title: string; body: string };
   // Focused destination: a stored cell link navigated with navigateTo().
   target: unknown;            // asCell: ["cell"]
   // Optional link to prepared material (draft, diff, packet) when it is a
   // different artifact than target.
   prepared?: unknown;         // asCell: ["cell"]
-  // Cross-item displacement: item ids this claim supersedes. A prepared
-  // result displaces the raw occurrence's claim — the ranker terminates the
-  // displaced items (system-on-behalf action) so source and result never
-  // both surface unless each has an independent live claim.
-  displaces?: string[];
+  // Close-the-loop affordances rendered on the surface itself (§4.6):
+  // approve/deny, done/later, inline reply — act without opening the app.
+  actions?: Array<{
+    key: string;              // semantic key, recorded in the acted action
+    label: string;
+    input?: "text";           // direct reply / free-text input
+    // Durable endpoint in the source space; acting appends
+    // {key, input?, itemId, at} under the user's ordinary session
+    // authority — the same authority the user would have acting in-app.
+    // No new trust surface.
+    handler?: unknown;        // asCell: ["cell"]
+  }>;
+  // Live progress for ongoing work ("agent is 60% through your refactor").
+  // Progress updates are same-rung coalesces and therefore silent (§9.3).
+  // Absent total = indeterminate. Rich live chrome (Live Activities) is a
+  // later adapter track; the field is the floor every surface can render.
+  progress?: { done: number; total?: number };
 
   // Routing. requestedPosture is advisory input from the source; posture is
   // assigned by the ranker and is the only one surfaces read.
@@ -286,78 +337,104 @@ type AttentionItem = {
   // Intra-rung ordering, ranker-assigned. Opaque; never crosses rungs;
   // never gates delivery (§4.2).
   weight?: number;
-  // Confidence is orthogonal to posture (§4.2); surfaces may render it.
-  confidence?: number;        // 0..1
 
   emittedAt: number;
   notBefore?: number;         // embargo: hold materialization until then
-  expiresAt?: number;         // time-bound claims retract themselves —
-                              // evaluate-on-read semantics, see §9.3
+  expiresAt?: number;         // evaluate-on-read; swept terminally by the
+                              // ranker (§4.7, §9.3)
 
-  // Opaque product extension. The runtime never interprets it; products
-  // round-trip their own fields (e.g. Loom's why_now, channel,
-  // authorization_state — Appendix A) here instead of smuggling them
-  // into body.
+  // Opaque product extension. Disciplined by invariant: NO runtime-derived
+  // predicate, NO ranker fold step, and NO policy match may read ext — it
+  // is a round-trip channel for product fields (Loom's why_now, channel,
+  // authorization_state — Appendix A), not a side door into routing. An
+  // ext key consumed by two independent products is a candidate for
+  // promotion to the envelope (or a sign the envelope is wrong).
   ext?: Record<string, unknown>;
 };
 
-// Append-only per-item action log. Replaces {active, dismissed} booleans:
-// cause is preserved, multi-device writes merge, re-emerge is well-defined.
+// Append-only per-item action log — the state-bearing user dispositions.
+// Deliberately small: "seen" is NOT an action (it lives in the seen store,
+// §4.5/§5, and item-seen is a join); "muted" is NOT an action (mute IS a
+// policy write, §7). Cause-preservation across the three terminal types is
+// the point: undo, history, and calibration all key on it.
 type AttentionAction = {
   itemId: string;
-  type: "seen" | "dismissed" | "snoozed" | "archived" | "acted" | "muted";
+  type: "dismissed" | "snoozed" | "archived" | "acted";
   at: number;
   // Which surface the action came from (shell, os-tray, digest, ...). Lets
   // policy decide e.g. "os-tray dismiss clears that device only".
   surface: string;
-  by: string;                 // DID; may be a module identity for
-                              // system-on-behalf actions (auto-expiry,
-                              // displacement)
+  by: string;                 // DID; or the ranker's module identity for
+                              // system-on-behalf actions (expiry sweep,
+                              // thread displacement — §4.7)
   // The sourceVersion the action was taken against. A dismissal tombstones
-  // that version; if the source advances past it, the item re-emerges and
-  // the old dismissal no longer applies. Comparable only within
-  // sourceVersion.space.
+  // that version; if the source advances past it, the item re-emerges (the
+  // ranker's coalesce advances sourceVersion past the tombstone — one
+  // operation, not a separate mechanism) and the old dismissal no longer
+  // applies. Comparable only within sourceVersion.space.
   againstVersion: EntityVersion;
-  payload?: unknown;          // snoozeUntil, acted result, mute scope, ...
+  payload?: unknown;          // snoozeUntil, acted {key, input?}, ...
   ext?: Record<string, unknown>; // product extension (e.g. calibration
-                              // feedback like "not-useful")
+                              // feedback like "not-useful"); same
+                              // discipline as item.ext
 };
 ```
 
-Nothing stores `active`, `dismissed`, or `unread` flags. They are **derived,
-pull-evaluated queries** — computed when a surface demands them:
+Nothing stores `active`, `dismissed`, or `unread` flags — dispositions are
+derived. And critically, **currency is a local join, not a cross-space
+read**: an item is *observed-satisfied* once the user's own seen mark on its
+target reaches the item's version. This is the Android behavioral gold
+standard — view the source anywhere, the notification retracts everywhere —
+computed entirely from the user's own stores:
 
 ```ts
 // Shown for illustration only.
 const sameSpaceGte = (a: EntityVersion, b: EntityVersion) =>
   a.space === b.space && a.seq >= b.seq;
-const active = (n: AttentionItem) =>
-  // pull-read of the source's current head version (§10.1); a claim's
-  // currency is the source's call
-  !sameSpaceGte(currentVersion(n.source), advancedPast(n));
 const terminal = (n: AttentionItem, log: AttentionAction[]) =>
   log.some((a) =>
     (a.type === "dismissed" || a.type === "archived" || a.type === "acted") &&
     sameSpaceGte(a.againstVersion, n.sourceVersion)
   );
-const visible = (n: AttentionItem, log: AttentionAction[], now: number) =>
-  !terminal(n, log) && active(n) && !snoozedUntil(log, now) &&
+const observedSatisfied = (n: AttentionItem, seen: SeenStore) =>
+  sameSpaceGte(seen.versionOf(n.target), n.sourceVersion);
+const visible = (
+  n: AttentionItem, log: AttentionAction[], seen: SeenStore, now: number,
+) =>
+  !terminal(n, log) && !observedSatisfied(n, seen) &&
+  !snoozedUntil(log, now) &&
   (n.notBefore === undefined || now >= n.notBefore) &&
   (n.expiresAt === undefined || now < n.expiresAt);
 ```
 
+Claims that should outlive observation (a todo is not done because you
+looked at it) are *re-emitted deliberately* — a deadline policy or the
+source's own artifact change produces a fresh claim at a newer version —
+rather than the runtime guessing which glances "count". Source-side
+satisfaction that doesn't involve the user looking (someone else handled it;
+the trip ended) is the ranker's job: its fold observes the source change and
+terminally retracts the item (system `acted`/`dismissed` by module
+identity).
+
 A caveat on "cheap": pull-based scheduling makes *unobserved* queries free
 (`docs/specs/pull-based-scheduler/README.md`), not observed ones. A mounted
-lane is a live subscription and re-evaluates when its inputs change; §4.5 and
-§10.1 bound how often that happens (conditional seen writes, non-reactive
-version reads by default, seen-state segregated from lane queries).
+lane is a live subscription over the user's own three stores — no per-item
+cross-space reads (that was a design bug this revision fixed; cross-space
+reading happens once, in the ranker's fold) — and §4.5's write discipline
+bounds how often those stores change.
 
 ### 4.5 Storage
 
-The ledger lives in the **user's home space** (home space DID = user identity
-DID; the established home for durable per-user state, alongside favorites and
-journal — see `docs/common/conventions/HOME_SPACE.md`). It is **three
-stores with three writer models**, not one:
+Attention state lives in the **user's home space** (home space DID = user
+identity DID; the established home for durable per-user state, alongside
+favorites and journal — see `docs/common/conventions/HOME_SPACE.md`). It is
+three stores, and the three backings are not ad-hoc — they derive from a
+2×2 of **writer authority × reactivity coupling**:
+
+| | wakes lane queries | must never wake lane queries |
+|---|---|---|
+| **ranker-only writes** | `items` | *(learned policies live with §7 policies, not here — they are user-visible data)* |
+| **any-surface writes** | `actions` | `seen` |
 
 1. **`items`** — written *only* by the ranker. Backing for phase 1:
    a **durable array cell carrying the `writeAuthorizedBy` claim**, the
@@ -365,13 +442,15 @@ stores with three writer models**, not one:
    (`docs/common/conventions/HOME_SPACE.md`,
    `packages/runner/src/cfc/prepare.ts`). Coalescing (same `id`, source
    advanced) is an in-place element update by the single leased ranker
-   instance (§6.2). This is deliberately *not* sqlite yet: `writeAuthorizedBy`
+   instance (§6.2); coalescing **refreshes** content, `expiresAt`, and
+   `progress` — a re-emerged claim carries the new emission's lifetime, not
+   a stale one. This is deliberately *not* sqlite yet: `writeAuthorizedBy`
    is enforced on the cell-write prepare path and **does not gate
    `db.exec`** today — sqlite's implemented CFC covers confidentiality
    ceilings and row-label rules, not write authorization
    (`docs/specs/sqlite-builtin/06-cfc.md`). Migrating `items` to a sqlite
    table (better ranking/pagination/retention at volume) is gated on the
-   net-new work item in §10.2, and on giving `items` **its own database**:
+   net-new work item in §10.3, and on giving `items` **its own database**:
    every `db.exec` serializes on the database handle cell's `rev`, so one
    shared db cannot hold both a ranker-only table and an
    everyone-writes table without gating both or neither.
@@ -383,23 +462,28 @@ stores with three writer models**, not one:
    the canonical writer is singular per store, and user actions are
    mergeable appends). The ranker periodically compacts actions for
    terminal, swept items.
-3. **`seen`** — the seen ledger (§5), highest write rate in the system,
+3. **`seen`** — the seen store (§5), highest write rate in the system,
    ships in phase 0 and gets its own store so its writes never wake lane
-   queries. One mark per (entity), upserted: recommended backing is a small
-   **sqlite database private to seen-state** (upsert-by-key is what SQL is
-   for; no trust gating needed — every surface of the *user's own runtime*
-   may write the user's own marks), with an array-cell fallback. Write
-   discipline is part of the spec, not an optimization: a mark is written
-   **only when it advances** (`newSeq > seenSeq`, so re-renders and repeat
-   views are no-ops — this is also what breaks any render→write→render
-   cycle) and **debounced per focus session** (at most one write per entity
-   per focused open). Retention is trivial — one row per cared-about
-   entity, reaped when the care-relation drops the entity.
+   queries eagerly (lanes sample it; the join is evaluated on lane
+   re-render, not per seen-write). One mark per entity, upserted:
+   recommended backing is a small **sqlite database private to seen-state**
+   (upsert-by-key is what SQL is for; no trust gating needed — every
+   surface of the *user's own runtime* may write the user's own marks),
+   with an array-cell fallback. Write discipline is part of the spec, not
+   an optimization: **seen = focused open** (§5), a mark is written **only
+   when it advances** (`newSeq > seenSeq` — re-renders and repeat views are
+   no-ops, which is also what breaks any render→write→render cycle) and
+   **debounced per focus session** (at most one write per entity per
+   focused open). A focused open writes *only* the seen mark — item-seen
+   is a join (`observedSatisfied`, §4.4), not a second record; the earlier
+   draft's duplicate "seen" action defeated this store's whole reason to
+   exist. Retention is trivial — one row per cared-about entity, reaped
+   when the care-relation drops the entity.
 
 Two rules regardless of backing:
 
-- **Never model a ledger itself as `asCell: ["stream"]`** — stream cells
-  are ephemeral (only the marker persists; payloads do not — see
+- **Never model a store as `asCell: ["stream"]`** — stream cells are
+  ephemeral (only the marker persists; payloads do not — see
   `docs/specs/space-model/4-cells.md`). Streams are append *endpoints*, not
   logs. This matters doubly for ingress: webhook payloads ride an ephemeral
   stream, so a **receiving handler must persist candidates durably at
@@ -407,11 +491,65 @@ Two rules regardless of backing:
   live are lost permanently, not delayed (§6.1).
 - **Never `set()` a whole array** that has more than one writer.
 
-Retention: `expiresAt` handles time-bound claims (evaluate-on-read, §9.3); a
-sweep reaps items that are terminal with `sourceVersion` below a watermark,
-plus their actions. Sweeping is a ranker duty (it owns `items`), bounded and
-boring by design. Because sweeping only reaps *terminal* rows, per-source
-intake quotas (§6.1) are what bound a flooding source, not retention.
+Retention: the ranker's sweep terminally retracts expired items (system
+action, `by` = module identity — this is the *one* expiry mechanism;
+`visible()`'s expiry check is the read-side shadow of it, so an expired item
+is hidden immediately and reaped eventually) and reaps items that are
+terminal with `sourceVersion` below a watermark, plus their actions.
+Sweeping is a ranker duty (it owns `items`), bounded and boring by design.
+Because sweeping only reaps terminal rows, per-source intake quotas (§6.1)
+are what bound a flooding source, not retention.
+
+### 4.6 Actions on the claim
+
+The most attention-respecting affordance in existing systems (Android
+actions + direct reply) is closing the loop *without opening the app* —
+approve/deny, done/later, reply, from the shade or the bell. The envelope's
+`actions` field carries it:
+
+- Rendering: shell lanes and OS adapters render `actions` as buttons (plus
+  an inline input when `input: "text"`). Android compiles to
+  `Notification.Action`/`RemoteInput`; Web Push to `showNotification`
+  actions (buttons; inline text where supported); the shell renders
+  natively. The PWA floor holds — Web Push supports action buttons.
+- Acting: writes the ordinary `acted` action (`payload: {key, input?}`),
+  which is terminal; and, when `handler` is present, appends
+  `{key, input?, itemId, at}` to the handler cell in the source space
+  **under the user's ordinary session authority** — exactly the authority
+  the user would exercise replying in-app. No new trust surface: the
+  source granted itself read on its own cell, and the user could always
+  write there through the source's own UI.
+- The "needs your approval" genre (Loom's `authorization_state:
+  proposal-required`) compiles to `actions: [approve, deny]` — the approval
+  affordance travels with the claim instead of forcing navigation.
+
+### 4.7 Lifecycle
+
+For review clarity, the full per-(user, item) state machine, every
+transition named once:
+
+```text
+(candidate) --ranker fold: clamp > suppress--> MATERIALIZED
+MATERIALIZED --now < notBefore--> EMBARGOED --time--> VISIBLE
+VISIBLE --user: dismissed|archived|acted--> TERMINAL
+VISIBLE --ranker: source satisfied / thread displaced / expiry sweep
+         (system action)--> TERMINAL
+VISIBLE --user: snoozed--> SNOOZED --snoozeUntil--> VISIBLE
+VISIBLE --seen mark on target reaches sourceVersion--> OBSERVED-SATISFIED
+         (hidden; no action row — pure join)
+VISIBLE --now ≥ expiresAt--> hidden immediately (read-side),
+         TERMINAL at next sweep (write-side)
+TERMINAL --ranker coalesce advances sourceVersion past tombstone-->
+         VISIBLE (re-emergence: a consequence of coalescing, not a
+         separate mechanism)
+TERMINAL + below watermark --sweep--> reaped
+```
+
+Posture may change after materialization (escalation raises it, collective
+handling demotes it — §8); §9.3 defines alerting and retraction in terms of
+these posture transitions. **Policy changes re-fold**: policy cells are fold
+inputs, so a policy commit wakes the ranker and materialized items re-lane —
+muting a thread demotes its existing items, not just future ones.
 
 ## 5. Seen-state and attention over artifacts
 
@@ -420,8 +558,8 @@ The most common attention event in practice is not "interrupt me" — it is
 be able to *see that it happened*". That is not a notification; it is
 seen-state.
 
-**The seen ledger** is one small relation per user: the last version the
-user actually observed, per entity. "Observed" is defined strictly:
+**The seen store** is one small relation per user: the last version of an
+entity the user actually observed. "Observed" is defined strictly:
 **seen = focused open** — the user navigated to the entity (or an item whose
 `target` is the entity) and it was the focus of their attention. Scrolling
 past a row in a list is *not* seen; rendering a lane is *not* seen. This
@@ -438,22 +576,20 @@ type SeenMark = {
 };
 ```
 
-Everything else is a query over marks joined against current heads (which
-requires the version-exposure API, §10.1 — the versions exist in memory-v2;
-reading them from pattern/shell code is net-new):
+Everything else is the **changes projection** (§10.1) joined against marks:
 
-- `unseen(entity) = head(entity).seq > seenVersion.seq` (same space) →
-  change dots on artifacts and their containers (space lists, home).
-- **"While you were away"** = all cared-about entities with unseen changes,
-  grouped by space, ordered by the ranker. Renders as a pattern on the home
-  context. This is the first-run view and the every-return view — the same
-  query. The affordance must answer *what changed, by whom, since you
-  looked* — author and time of the unseen changes, and a jump-in that
-  emphasizes the changed region (memory-v2 holds both versions; the diff is
-  derivable). A bare dot that says "something happened" does not meet the
-  bar (§4.1). Note the *by whom* half is gated on commit attribution
-  exposure (§10.1); until it lands, the view can say what changed but only
-  approximate who.
+- `unseen(entity)` = `changes([entity], sinceSeq: seenVersion.seq)` is
+  non-empty → change dots on artifacts and their containers (space lists,
+  home).
+- **"While you were away"** = one `changes(careSet, basis: seenWatermark,
+  attribution: true)` call, grouped by run/thread then space, ordered by
+  the ranker. Renders as a pattern on the home context. This is the
+  first-run view and the every-return view — the same query. The affordance
+  must answer *what changed, by whom, since you looked* — the projection's
+  `author` field gives session-grain attribution from day one (§10.1) — and
+  a jump-in that emphasizes the changed region (memory-v2 holds both
+  versions; the diff is derivable). A bare dot that says "something
+  happened" does not meet the bar (§4.1).
 - **Artifact lifecycle** falls out of the same two numbers plus a timestamp:
   *fresh* (unseen changes) → *seen* → *stale* (untouched for N) →
   *archived*. No new subsystem.
@@ -468,25 +604,29 @@ commit log already records.
 
 **Run-level grouping.** One agent run touching twelve artifacts must not be
 twelve scattered dots. From phase 1, agent-shaped sources emit one
-receipt-shaped candidate per run (`threadKey` = run id, `displaces` covering
-the per-artifact noise), and "while you were away" groups by `threadKey`
-before space. Phase 0 — dots only — does not have this, which is a stated
+receipt-shaped claim per run (`threadKey` = run id), and the
+while-you-were-away view folds entity changes under the run's receipt by
+**attribution**: changes whose `author` is the run's session group beneath
+the receipt rather than appearing as free-floating dots. (Attribution-based
+folding, not an envelope field — the changes projection already carries the
+join key.) Phase 0 — dots only — does not have this, which is a stated
 limitation, not an oversight: phase 0 makes agent work *visible*; run-level
 legibility is phase 1's tracked follow-through (§11).
 
-**The care-relation** answers "which entities produce dots at all":
-approximately *touched-recently ∪ agent-did-it-for-you ∪ explicitly-watched*,
-itself tunable by policy. Getting this right is an open question (§12.2);
-getting it wrong in the "too broad" direction is the failure mode to avoid
-(dots everywhere = dots nowhere).
+**The care-relation** is not a fourth kind of policy — it is **the ranker's
+watch set**: the entity set handed to the changes projection, seeded by
+derived defaults (*touched-recently ∪ agent-did-it-for-you*) and extended by
+explicit watch/unwatch policies (§7). Getting the defaults right is an open
+question (§12.2); getting them wrong in the "too broad" direction is the
+failure mode to avoid (dots everywhere = dots nowhere).
 
 ## 6. The ranker
 
 **One logical ranker per user.** It folds candidates and policies into the
 ledger, assigns postures and weights, coalesces (same `id` when the same
-source object advances; same `threadKey` when distinct events share a
-conversation or run), applies displacement, computes re-emergence, and
-sweeps retention.
+source object advances — re-emergence is this same operation crossing a
+tombstone), applies thread displacement (§6.4), retracts source-satisfied
+claims, and sweeps retention (§4.5).
 
 ### 6.1 Candidate intake
 
@@ -494,19 +634,24 @@ Candidates must be **durable before ranking**: the ranker may be asleep or
 absent (interim mode, closed clients), and ephemeral candidates would be
 silently lost, not delayed. Intake shape:
 
-- In-fabric artifact changes need no intake at all — they are derived (§5).
-- Pattern-emitted candidates land in a durable per-source candidate cell in
-  the space where they arise; a small forwarder (part of the emitting
-  pattern's contract) or the user's runtime copies them into a **candidate
-  inbox in the user's home space**, making the ranker's whole world
-  home-space-local (this is also what makes server-side execution viable
-  before cross-space wake exists — §6.3).
+- In-fabric artifact changes need no *emission* — they are derived (§5).
+  (They do need *reach*: until server-side cross-space wake exists, changes
+  in other spaces reach a server-side ranker via the same forwarding path as
+  explicit candidates below; a client-side ranker reads them directly
+  through the user's ordinary sessions.)
+- Pattern-emitted candidates land in the **candidate inbox in the user's
+  home space** — a cross-principal, quota-gated append surface, named
+  net-new work (§10.2), because it is the one place untrusted-ish writers
+  meet the user's home space: the write gate enforces per-source quotas
+  against the *verified writer identity*, not against self-reported fields.
+  Until §10.2 lands, candidates rest in a durable per-source cell in the
+  space where they arise and the ranker reads them there (client-side
+  interim), with quotas enforced at fold time — weaker (a flood bloats the
+  source-space cell, not the home space) but sound.
 - Webhook ingress: the receiving handler persists the payload durably at
   ingress (§4.5); the ephemeral stream is transport, not storage.
-- **Per-source quotas** apply at intake (candidates per source per window).
-  Retention only reaps terminal items, so quotas — not retention — are the
-  bound on a flooding source. Quota state feeds the same source-reputation
-  signal as dismiss-without-open.
+- Quota pressure and dismiss-without-open feed the same **learned-policy**
+  signal (§7): the source's baseline clamps down, legibly.
 
 ### 6.2 Trust and instance discipline
 
@@ -545,13 +690,14 @@ window degrades to wasted work, not divergence.
   (`docs/specs/server-side-execution/`). With intake home-space-local
   (§6.1), the ranker is a *standing registration on the user's home space* —
   work whose value is its effects rather than client-read output — woken by
-  commits to the candidate inbox or cared-about entities' forwarded events.
-  Execution is attributed `onBehalfOf` the user. Named dependencies, since
-  that spec's workers, registrations, and wake-on-commit are all
-  **per-space**: standing registrations are its own later phase; scoped
-  (`PerUser`) state claims are gated (its G16); server-side *cross-space*
-  reads/wake are explicitly deferred there — which is exactly why intake
-  forwards into the home space instead of the ranker reading N spaces.
+  commits to the candidate inbox, the policy cells, or forwarded
+  care-events. Execution is attributed `onBehalfOf` the user. Named
+  dependencies, since that spec's workers, registrations, and wake-on-commit
+  are all **per-space**: standing registrations are its own later phase;
+  scoped (`PerUser`) state claims are gated (its G16); server-side
+  *cross-space* reads/wake are explicitly deferred there — which is exactly
+  why intake forwards into the home space instead of the ranker reading N
+  spaces.
 - **Interim: client-side, under lease** (§6.2). Until standing registrations
   land, the leaseholder client runs the ranker as an ordinary piece. This
   degrades gracefully for in-fabric state (candidates are durable; folding
@@ -563,9 +709,30 @@ window degrades to wasted work, not divergence.
   interim service, treat that as scaffolding, not the design.
 
 **Laziness.** The ranker materializes *rows*; it does not keep derived
-predicates hot. `active()`/`visible()` evaluate on surface demand. The one
-push-shaped duty is OS delivery (§9.3), which is explicitly an edge adapter
-fed by wake-on-commit, not a hot loop.
+predicates hot. `visible()` evaluates on surface demand over the user's own
+stores (§4.4). The one push-shaped duty is OS delivery (§9.3), which is
+explicitly an edge adapter fed by wake-on-commit, not a hot loop.
+
+### 6.4 Coalescing and thread displacement
+
+Three mechanisms in the earlier draft (`id`-coalescing, `threadKey`
+grouping, an emitter-declared `displaces` list) are two in this one, at
+distinct altitudes:
+
+- **`id` is identity**: the same claim at a newer source version. Coalescing
+  updates the item in place (refreshing content, expiry, progress);
+  crossing a dismissal tombstone is re-emergence. Identity is
+  ranker-derived from verified provenance (§4.4), so it cannot be forged.
+- **`threadKey` is the thread**, and displacement is a *derived rule over
+  it*: **within a threadKey, only the newest live claim is visible**; older
+  live claims in the thread are terminally retracted by the ranker (system
+  action) when a newer one materializes. A prepared result therefore
+  displaces the raw occurrence by *sharing its thread*, not by naming item
+  ids — no displacement chains, no tombstone bookkeeping for the emitter,
+  and "the displaced item's source advances again" needs no special case
+  (it is simply the thread's newest claim again). Cross-thread or
+  multi-target displacement is deliberately not expressible; a consumer
+  who needs it should make the case with a concrete scenario (§12.7).
 
 ## 7. Policies
 
@@ -577,43 +744,76 @@ ranker code**:
 type AttentionPolicy = {
   match: {
     source?: unknown;         // asCell: ["cell"] — a specific source/thread
-    sourceKind?: string;      // "group-chat", "importer", "agent-run", ...
+    sourceKind?: string;      // as bound by the ranker, §4.4
     spaceDid?: string;
     threadKey?: string;
   };
   effect: {
-    postureCap?: "suppress" | "silent" | "review" | "heads-up";
-    // The ONLY path to interrupt: a user-granted floor (§4.2).
-    postureFloor?: "review" | "heads-up" | "interrupt";
+    // One clamp on the one ordered scale (§4.2):
+    // suppress < silent < review < heads-up < interrupt.
+    clamp?: { min?: "review" | "heads-up" | "interrupt";
+              max?: "suppress" | "silent" | "review" | "heads-up" };
+    // Exempts this policy's min from quiet-hours clamping (the babysitter
+    // thread breaks through). User-set only.
+    bypassQuietHours?: boolean;
     coalesceWindowMs?: number;
+    // Time-conditional clamp sugar: during these hours, max = "review".
     quietHours?: { start: string; end: string };
+    watch?: boolean;          // extend/prune the care-relation (§5)
   };
   reason?: string;            // human-legible: why this policy exists
-  createdBy: string;          // user DID, or module identity for proposals
-  ext?: Record<string, unknown>; // product dimensions (e.g. stances),
-                              // opaque to the runtime fold
+  createdBy: string;          // user DID; a pattern's module identity for
+                              // proposals; the RANKER's module identity for
+                              // learned policies (see below)
 };
 ```
+
+**Composition is one formula.** Effective posture =
+`clampScale(baseline, max(matching mins), min(matching maxes))` where
+`baseline` is the requested posture bounded by the source's learned
+baseline; **maxes dominate mins** on conflict, with one exception —
+a user-created min marked `bypassQuietHours` survives the quiet-hours max.
+`quietHours` is defined as nothing more than a time-conditional
+`max: "review"`. The canonical case — "quiet hours 22:00–07:00, but the
+babysitter thread always breaks through" — is two records and zero
+ambiguity.
 
 - Policies live in the user's home space (`PerUser` scope). The core ships a
   handful of defaults: messages-from-humans → `heads-up`;
   agent-completions → `silent` (visible as seen-state, never buzzing).
   There is deliberately **no default that maps any emitter-supplied field to
   `interrupt`** — deadline-driven interruption ("library book due
-  tomorrow") exists only as a user-adopted policy floor on a named source.
-- **Mute is a policy, not a special relation.** "Mute this thread" writes
-  `{match: {threadKey}, effect: {postureCap: "suppress"}}`. The ledger item
-  that carried the mute action just records that it happened.
+  tomorrow") exists only as a user-adopted policy min on a named source.
+- **Mute is a policy, not a special relation** (and not an action type).
+  "Mute this thread" writes `{match: {threadKey}, effect: {clamp: {max:
+  "suppress"}}}`; the re-fold rule (§4.7) demotes existing items too.
 - **Patterns propose, the user disposes.** A pattern can ship a suggested
   policy with its artifacts ("library book due → heads-up 3 days before");
   adoption goes through a trusted surface, exactly like other user-consented
   writes — adoption *is* the write, and unadopted proposals never enter the
-  fold. This is where the bespoke 20% lives, and why the ranker doesn't
-  have to be perfect: when it mis-lanes something, the fix is a legible
-  one-line policy, written by the user or by their agent on request.
-  (Onboarding flows that propose an initial policy set are this same
-  primitive N times, batch-confirmed by a product surface — out of scope
-  here, §Non-goals.)
+  fold. (Onboarding flows that propose an initial policy set are this same
+  primitive N times, batch-confirmed by a product surface — out of scope,
+  §Non-goals.)
+- **Learned policies: the reputation loop, made legible.** The downward
+  feedback the spec promises (dismiss-without-open, quota pressure ⇒ the
+  source's items sink) has to live *somewhere*, and hidden ranker state
+  would break the inspectability goal. It lives here: the ranker — which is
+  already the trusted fold, not a third party petitioning for adoption —
+  writes ordinary policy records (`createdBy` = its module identity,
+  `reason` = the evidence, e.g. "7 of 8 items dismissed without open over
+  30d") into a designated **learned** section of the policy store. They are
+  visible, editable, and deletable exactly like hand-written policies; a
+  user deleting one is itself a signal. Learned policies may only *lower*
+  (set maxes / lower the baseline) — raising posture remains exclusively
+  user-authored (§4.2). This follows the platform's existing precedent for
+  system-inferred-but-user-owned data (`packages/home-schemas/learned.ts`).
+- **Product policy dimensions compile down.** Stance-like vocabularies
+  (Loom's `attention-policy-v1`) do not ride an opaque field on runtime
+  policies — there is deliberately no `policy.ext`, because an opaque blob
+  on the user's routing rules would imply a second, shadow interpreter of
+  the same cells. Product policy systems keep their own records and
+  *compile* to plain runtime clamps/watches, exactly as a trusted source
+  compiles its channel semantics to requested postures.
 - **Policy privacy, honestly stated.** Policy cells are never directly
   readable by other principals — they are ordinary confidential home-space
   data. But *behavioral* inference cannot be fully prevented: in a space
@@ -643,23 +843,24 @@ relation" plus existing constraints:
   plan", and *"Bea already handled this"* are queries over that contributed
   state. Disclosing terminal actions matters because handling often doesn't
   touch the source artifact (triaged verbally, replied off-fabric): when the
-  source *is* mutated, everyone's `active()` flips false for free; when it
-  isn't, a disclosed `acted` is the only retraction signal others can get.
-  A per-space opt-in policy — *"acted-by-any-member demotes to `silent` for
-  all"* — turns that signal into collective quiet. Disclosure is a per-space
-  policy cell (some spaces want receipts, some don't); a member who
-  discloses nothing simply doesn't appear.
+  source *is* mutated, everyone's claims coalesce or satisfy for free; when
+  it isn't, a disclosed `acted` is the only retraction signal others can
+  get. A per-space opt-in policy — *"acted-by-any-member demotes to
+  `silent` for all"* — turns that signal into collective quiet.
+  Disclosure is a per-space policy cell (some spaces want receipts, some
+  don't); a member who discloses nothing simply doesn't appear.
 - **Escalation across people is a policy.** "If nobody attends to this
   within 2h, raise it to `heads-up` for the space owner" is a policy cell on
   the shared space, evaluated by the owner's ranker against contributed
   state. No siloed notification system can express this; here it is one
-  record.
+  record. (Escalation is a posture *raise* after materialization; §9.3's
+  transition rule makes it alert exactly once.)
 
 ## 9. Surfaces
 
 ### 9.1 Shell
 
-The shell renders the ledger; it does not own attention logic. Per the
+The shell renders attention state; it does not own attention logic. Per the
 "pattern on the context" resolution: the home/shell context declares how the
 attention surface renders, so it is replaceable like the rest of the home
 experience. Concretely:
@@ -668,9 +869,9 @@ experience. Concretely:
   `review` (digest entry point), `silent` (dots via seen-state, §5);
 - unseen-change dots on artifacts and containers;
 - a snoozed lane (snoozed items must stay discoverable);
-- **focused opens** — not renders — write `seen` (an `AttentionAction` for
-  the item, a `SeenMark` for its target entity), under §4.5's
-  advance-only + debounced discipline. Rendering a lane never writes.
+- item `actions` rendered in place (§4.6);
+- **focused opens** — never renders — write the seen mark, under §4.5's
+  advance-only + debounced discipline. Rendering a lane writes nothing.
 
 Presentation components exist (`cf-toast`/`cf-toast-provider`, `cf-alert`,
 badge conventions); the net-new work is mounting them against ledger
@@ -697,20 +898,38 @@ Adapters compile the envelope down; the ledger stays canonical and
 "Android-shaped" (live update + auto-retract), and platforms degrade from
 there:
 
+- **Alerting rides posture transitions, not writes.** A delivered item
+  alerts when it first materializes at an alert-bearing rung and again only
+  when the ranker *raises* its posture (escalation, §8); every same-rung
+  coalesce — new message in the thread, progress tick, content refresh —
+  **replaces silently** on every surface (Android `setOnlyAlertOnce`
+  semantics, made unconditional: the emitter cannot choose to re-buzz).
+  Posture *demotion* and visibility flips are retraction triggers: the
+  dispatcher retracts or downgrades the delivered surface when either
+  occurs. Without this rule a coalescing thread would legally buzz on
+  every advance — louder than Android, inverting the spec's promise.
 - **Replace/retract rides `id`** everywhere: iOS
   `UNNotificationRequest.identifier` / `apns-collapse-id`, Android
-  `notify(id)`, Web Push `options.tag`. When `visible()` flips false *on
-  evaluation*, the dispatcher retracts on every delivered surface. Two
-  honesty notes. First, `visible()` is evaluated on commit-driven wakes and
-  on read — **nothing wakes anything at `expiresAt`**: server-side timers
-  don't exist yet (they are "(Future)" in
-  `docs/specs/server-side-execution/`), so an expired item may linger on an
-  OS tray until the next wake or app-open re-evaluates it. Timer
-  registrations that feed the dispatcher are named net-new work (§10.4);
-  until they land, `expiresAt` is evaluate-on-read with explicitly stale OS
-  surfaces. Second, iOS replaces but does not tick (text refreshes when the
-  shade reopens); genuinely-live claims are a Live Activities track,
-  explicitly out of V1.
+  `notify(id)`, Web Push `options.tag`. Two honesty notes. First,
+  transitions are evaluated on commit-driven wakes and on read — **nothing
+  wakes anything at `expiresAt`**: server-side timers don't exist yet (they
+  are "(Future)" in `docs/specs/server-side-execution/`), so an expired
+  item may linger on an OS tray until the next wake re-evaluates it. Timer
+  registrations that feed the dispatcher are named net-new work (§10.5);
+  until they land, expiry is evaluate-on-read with explicitly stale OS
+  surfaces (the ranker's sweep is the terminal write-side, §4.5). Second,
+  iOS replaces but does not tick (text refreshes when the shade reopens);
+  genuinely-live claims (`progress`) render best-effort per platform, and
+  rich live chrome (Live Activities) is a separate later track.
+- **Confidentiality crosses the push boundary explicitly.** Push payloads
+  and lockscreens are untrusted displays: they carry `redacted` when
+  present, otherwise a generic envelope ("Update from <sourceKind>"), with
+  full content fetched on unlock/app-open (the conventional
+  mutable-content/fetch-on-receive shape). Items whose confidentiality
+  labels forbid egress to the push relay get the generic envelope
+  unconditionally — the same CFC labels that govern every other flow govern
+  this one; a system that gates reading a version number (§10.1) does not
+  get to mail full message bodies through third-party relays unexamined.
 - **Two transports, not one.** Browser/PWA: Web Push (VAPID + service
   worker). Wrapped mobile apps: native APNs/FCM via the wrapper's plugin —
   embedded webviews do not get Web Push. The server side (toolshed) needs a
@@ -719,8 +938,9 @@ there:
   retractedAt}` so retraction can target what was actually delivered.
   Ship Web Push first; the envelope is transport-agnostic.
 - **The PWA is the floor.** The canonical shape includes nothing that cannot
-  be expressed on the most-constrained surface; richer platforms are adapter
-  opt-ins, not envelope fields.
+  be expressed on the most-constrained surface (action buttons included —
+  Web Push has them); richer platforms are adapter opt-ins, not envelope
+  fields.
 - **Tray-dismiss is per-device by default.** An OS-tray dismissal writes an
   action with `surface: "os-tray"`; whether it terminates the item globally
   is policy (default: clears that device only; the shell is canonical).
@@ -731,34 +951,61 @@ This design mostly composes existing primitives, but not entirely. Naming
 the gaps is the point of this section — each is a prerequisite of the phase
 that first needs it (§11), and each needs its own (small) design pass.
 
-1. **Version exposure** *(phase 0)*. Patterns and the shell currently cannot
-   read an entity's memory-v2 head `seq` — the `Cell` interface exposes no
-   version, deliberately. Seen-state needs: (a) a **non-reactive** per-entity
-   head-version read (non-reactive by default is essential — a reactive seq
-   read re-fires on every change, exactly what seen writes must not do);
-   (b) a *changed-since(version)* enumeration over a set of cared-about
-   entities for "while you were away"; (c) eventually, commit-attribution
-   exposure (who wrote) — memory-v2 reserves `invocationRef` /
-   `authorizationRef` for a later signed-write pass, so phase 0's "by whom"
-   is approximate until that lands. CFC story required: observing a head
-   version reveals *that* activity occurred; version reads must be gated by
-   the same read authority as the entity itself.
-2. **Write-authorization for sqlite** *(pre-migration of `items` to sqlite;
+1. **Changes projection** *(phase 0)*. Patterns and the shell cannot read an
+   entity's memory-v2 head `seq` — `Cell` exposes no version, deliberately —
+   yet `seq` already crosses the wire in every query result
+   (`FactEntry.seq`, memory-v2 §5.7.1), and changed-since-a-basis is
+   precisely the session catch-up computation (memory-v2 §5.4.2,
+   `SessionSync.fromSeq/toSeq`). Rather than a Cell method, seen-state
+   needs one small **read-only, one-shot, session-independent query**:
+
+   `graph.changes(roots, branch, sinceSeq?, attribution?) →
+   { toSeq, entries: [{id, seq, deleted?, author?}] }`
+
+   (a) With a single root and no basis it is the **non-reactive head read**
+   — a one-shot query, not a watch, so re-renders never re-fire. (b) With
+   the care-relation as roots and the seen watermark as basis it is the
+   **"while you were away" enumeration** — one indexed scan of the `head`
+   table (add a `(branch, seq)` index). (c) With `attribution: true` it
+   joins the commit log's already-persisted `sessionId` — **session-grain,
+   server-asserted "by whom" from day one**, upgrading in place to
+   `invocationRef`-backed proof when the signed-write pass lands (a join,
+   not a cryptography project). CFC: an entity may appear in a changes
+   result iff the caller may read the entity on that branch — strictly less
+   than a materialized read reveals. Not attention-specific: offline
+   catch-up UIs, activity/audit views, incremental derived indexes, and
+   retention watermarks consume the same query. It is the entity-grain,
+   payload-free member of the projection family memory-v2 §07 sketches —
+   and deliberately *not* built on §07's annotations plane, which is
+   range-anchored collaborative-field machinery, self-declared future work;
+   the one annotation prototype's review (PR #4132) documents why
+   side-table indexes invisible to the reactive graph are the wrong shape.
+2. **Candidate inbox append gate** *(phase 1; hardened by phase 2)*. A
+   home-space inbox cell with **restricted cross-principal append**: other
+   principals' patterns may append candidates (the rosters
+   contribute-your-own idiom, reversed) but the write gate enforces
+   per-source quotas against the verified writer identity. This is what
+   makes dead-device delivery an authority question with an answer instead
+   of an open question — the full chain "someone messages me while all my
+   devices are closed → my phone buzzes" is inbox append → home-space
+   wake → ranker fold → dispatcher push.
+3. **Write-authorization for sqlite** *(pre-migration of `items` to sqlite;
    not needed for phase 1's array-cell backing)*. `writeAuthorizedBy` is
    enforced on the cell-write prepare path only; `db.exec` today checks
    confidentiality ceilings and row-label rules but not write authorization.
    Gating `db.exec` per database handle (the `rev` bump is a cell write, so
    the prepare path sees it) needs specification and a security review of
    its own, including whether any sqlite write path bypasses the rev write.
-3. **Ranker lease** *(phase 1)*. A small mutex-cell convention (claim with
+4. **Ranker lease** *(phase 1)*. A small mutex-cell convention (claim with
    expiry, renew, steal-on-expiry) for single-instance election of the
    interim client-side ranker (§6.2). Generalizes beyond attention.
-4. **Timer wake** *(phase 2+)*. Executor-pool timer registrations
+5. **Timer wake** *(phase 2+)*. Executor-pool timer registrations
    (`notBefore`, `expiresAt`, snooze expiry, digest cadence) feeding
    wake-on-commit's machinery, so time-driven transitions don't depend on
    coincidental commits. Until then: evaluate-on-read, stale OS surfaces
-   acknowledged (§9.3).
-5. **Push transports** *(phase 2/3)*. Web Push then APNs/FCM: device
+   acknowledged (§9.3). Note this also bounds the "library book due"
+   genre: alarm-shaped interruption is only as timely as the wake source.
+6. **Push transports** *(phase 2/3)*. Web Push then APNs/FCM: device
    registration, delivery ledger, retraction dispatch (§9.3). Net-new but
    conventional.
 
@@ -766,28 +1013,28 @@ that first needs it (§11), and each needs its own (small) design pass.
 
 Each phase is independently shippable and none re-shapes the data model.
 
-- **Phase 0 — seen-state.** The seen ledger (§5) with its write discipline
-  (§4.5.3), unseen dots in the shell, and a "while you were away" home
-  pattern. Requires version exposure (§10.1). No ranker, no candidates, no
-  push. Acceptance bar: the user can see *what changed and since when* (by
-  whom, to the extent §10.1c allows), and jump in with the changed region
-  emphasized — not merely that a dot exists. This makes agent work
-  **visible** — the single most-requested product gap — while run-level
-  *legibility* (one claim per agent run, not twelve dots) is explicitly
-  phase 1's follow-through.
+- **Phase 0 — seen-state.** The changes projection (§10.1), the seen store
+  with its write discipline (§4.5.3), unseen dots in the shell, and a
+  "while you were away" home pattern. No ranker, no candidates, no push.
+  Acceptance bar: the user can see *what changed, by whom (session-grain),
+  and since when*, and jump in with the changed region emphasized — not
+  merely that a dot exists. This makes agent work **visible** — the single
+  most-requested product gap — while run-level *legibility* (one claim per
+  agent run, not twelve dots) is explicitly phase 1's follow-through.
 - **Phase 1 — ledger + lanes.** Envelope, home-space `items` (array cell +
-  `writeAuthorizedBy`) and `actions` stores, candidate inbox with quotas
-  (§6.1), a minimal client-executed ranker under lease (defaults + mute +
-  posture caps/floors + displacement), shell bell/lanes, receipt-shaped
-  candidates for agent runs. Policies v0.
+  `writeAuthorizedBy`) and `actions` stores, candidate intake (inbox gate
+  §10.2, or interim source-space cells), a minimal client-executed ranker
+  under lease (defaults + clamp composition + learned policies + thread
+  displacement), shell bell/lanes with item actions (§4.6), receipt-shaped
+  claims for agent runs with attribution folding (§5). Policies v0.
 - **Phase 2 — server ranker + first transport.** Ranker as a standing
   registration on the home space under server-primary execution
-  (dependencies named in §6.3); Web Push with device registration and
-  retraction; digest queries; timer wake (§10.4).
-- **Phase 3 — breadth.** Wrapped-app APNs/FCM; full action vocabulary
-  (snooze/archive surfaced); shared seen-state + disclosed terminal actions
-  + escalation policies (§8); `items` on sqlite once §10.2 lands;
-  coalescing refinements. Live Activities remain a separate track.
+  (dependencies named in §6.3); Web Push with device registration,
+  redaction rules, and retraction; digest queries; timer wake (§10.5).
+- **Phase 3 — breadth.** Wrapped-app APNs/FCM; shared seen-state +
+  disclosed terminal actions + escalation policies (§8); `items` on sqlite
+  once §10.3 lands; snooze/archive surfaced fully; `progress` rich chrome
+  (Live Activities) as its own track.
 
 ## 12. Open questions
 
@@ -795,12 +1042,14 @@ Each phase is independently shippable and none re-shapes the data model.
    but the "wholly-system service" alternative keeps resurfacing; if the
    server executor itself writes the ledger, is that a builtin identity, and
    does that preempt user-forkable rankers? Resolve before phase 1.
-2. **The care-relation.** Which entities produce seen-state dots (§5)?
-   Touched ∪ agent-authored ∪ watched is the working answer; validate
-   against real spaces before hardening, and decide whether "touched" decays.
-3. **Forwarder contract.** §6.1 makes intake home-space-local via
-   forwarders. Who runs them (the emitting pattern? the user's runtime on
-   visit?), and what happens for spaces the user hasn't opened in weeks?
+2. **Care-relation defaults.** Touched ∪ agent-authored ∪ watched is the
+   working answer for the watch set (§5); validate against real spaces
+   before hardening, and decide whether "touched" decays.
+3. **Forwarder contract.** Cross-space reach for a server-side ranker
+   (§6.1, §6.3): who runs the forwarding (the emitting pattern? the user's
+   runtime on visit?), and what happens for spaces the user hasn't opened
+   in weeks? Partially subsumed by §10.2's inbox gate; the residue is
+   *derived* care-events from spaces with no cooperating emitter.
 4. **Seen-mark granularity.** Per-entity marks are the floor. Do container
    views (a space list showing N dots) warrant container-level marks, and
    does "seen the container" imply anything about members?
@@ -811,13 +1060,14 @@ Each phase is independently shippable and none re-shapes the data model.
    regexes and LLM-judged predicates ("only interrupt if actually urgent")
    are clearly coming — as ranker inputs they inherit the ranker's authority,
    so they need their own integrity story before admission.
-7. **Coalescing.** Same `id` vs same `threadKey` heuristics; displacement
-   chains (a prepared result displacing an item that itself displaced);
-   sub-object edge cases (a thread whose items have their own lifecycles).
-8. **Cross-space lane cost.** A rendered lane is a ledger query plus N
-   cross-space source reads (per-item `active()`), each through the user's
-   ordinary session against the source space. Fine at dozens; model the
-   cost before hundreds, and decide how stale a lane's `active()` may be.
+7. **Displacement scope.** Thread displacement (§6.4) deliberately cannot
+   express cross-thread or multi-target displacement. If a real consumer
+   produces a scenario that needs it, revisit with that scenario on the
+   table; until then the simpler rule stands.
+8. **Learned-policy dynamics.** Decay (does a learned clamp relax after N
+   weeks of the user opening that source's items?), evidence thresholds,
+   and whether a user deleting a learned policy suppresses re-learning for
+   a period.
 9. **Digest self-promotion.** May a digest claim `heads-up` on a schedule
    (§9.2)? Leaning policy-gated, default off.
 10. **Convergence with product stores.** Loom currently materializes
@@ -836,23 +1086,24 @@ For the first consumer's adoption review. Loom fields → envelope:
 | `id` / source identity | `id` (re-derived by ranker from verified provenance) |
 | subject / focused target | `target` (cell link); `focused_view_fallback` → `ext` |
 | prepared material | `prepared` |
-| `title`, body copy | `title`, `body` |
+| `title`, body copy | `title`, `body` (+ `redacted` where the product wants lockscreen-safe copy) |
 | `why_now` | `ext.why_now` (product copy, runtime-opaque) |
 | `claim_kind` (act-now / review / notice / …) | `sourceKind` + `requestedPosture` (kind is classification; posture is the loudness request derived from it) |
 | `channel` (important-and-urgent / yours-in-progress / might-interest-you) | `ext.channel` — audience/genre, orthogonal to posture; product lanes render it |
-| `relation_to_trigger: supersedes` | `displaces` |
-| other `relation_to_trigger` values | `ext.relation_to_trigger` |
-| `authorization_state` (proposal-required / …) | `ext.authorization_state` — the "needs your approval" affordance is product chrome; posture only governs loudness |
+| `relation_to_trigger` (augments / supersedes / resolves / …) | `ext.relation_to_trigger`, whole; *supersedes* additionally = share the trigger's `threadKey` (thread displacement, §6.4, does the retraction) |
+| `authorization_state: proposal-required` | `actions: [{key:"approve"…},{key:"deny"…}]` (§4.6) + `ext.authorization_state` — the approval affordance travels with the claim |
 | `authority_class` | `ext` (work-start domain, product-side per §Division of labor) |
 | `not_before` | `notBefore` |
-| delivery/interrupt eligibility | `requestedPosture`, capped/floored by user policy (§7) |
+| sender / subject person | `actor` |
+| delivery/interrupt eligibility | `requestedPosture`, clamped by user policy (§7) |
 | feedback: done / later | actions `acted` / `snoozed` |
-| feedback: never-for-this-class | a policy write (`postureCap`) via the trusted surface |
+| feedback: never-for-this-class | a policy write (`clamp.max`) via the trusted surface |
 | feedback: not-useful | action `dismissed` + `ext.feedback: "not-useful"` (calibration signal round-trips to the product) |
 
 Not mapped, deliberately: Work-start Policies, continuity owners, typed
 receipts' internals, stance vocabularies — upstream product machinery
-(§Division of labor). A receipt *summary* enters as an ordinary candidate.
+(§Division of labor); stance policies compile down to plain clamps/watches
+(§7). A receipt *summary* enters as an ordinary candidate.
 
 ## References
 
@@ -862,19 +1113,26 @@ receipts' internals, stance vocabularies — upstream product machinery
 - `docs/specs/server-side-execution/README.md` — standing registrations,
   wake-on-commit, `onBehalfOf` attribution (ranker execution home; §6.3
   names this spec's dependencies on it).
-- `docs/specs/memory-v2/` (esp. `01-data-model.md`, `03-commit-model.md`,
-  `08-conflict-granularity.md`) — `seq`, optimistic concurrency, mergeable
-  ops, reserved commit-attribution fields.
+- `docs/specs/memory-v2/` — `01-data-model.md` (seq, heads),
+  `03-commit-model.md` (optimistic concurrency; commit-log `sessionId` /
+  reserved `invocationRef`), `04-protocol.md` + `05-queries.md`
+  (`SessionSync` catch-up, `FactEntry.seq` — the shipped machinery behind
+  §10.1), `07-op-views-and-annotations.md` (the projection-family framing
+  §10.1 borrows; the annotations plane it deliberately does not build on),
+  `08-conflict-granularity.md` (mergeable ops).
 - `docs/specs/sqlite-builtin/` (esp. `05-reactivity.md`, `06-cfc.md`) —
-  seen-ledger backing; why trust-bearing tables wait on §10.2; `reactOn`
-  coarseness; the rev-serialized write path.
+  seen-store backing; why trust-bearing tables wait on §10.3; `reactOn`
+  coarseness; the rev-serialized write path; the `tryClaimMutex` shape §10.4
+  borrows.
 - `docs/specs/space-model/4-cells.md` — stream-cell ephemerality.
 - `docs/specs/pull-based-scheduler/README.md` — demand-driven evaluation
   (and its limits for observed queries, §4.4).
 - `docs/specs/webhook-ingress/README.md` — external candidate ingress
   (durable persistence at the handler required, §6.1).
-- `packages/home-schemas/` (`journal.ts`, `favorites.ts`, `home.ts`) — the
-  durable-array + stream-append precedent and stable-key discipline.
+- `packages/home-schemas/` (`journal.ts`, `favorites.ts`, `learned.ts`,
+  `home.ts`) — the durable-array + stream-append precedent; stable-key
+  discipline; the system-inferred-but-user-owned precedent for learned
+  policies (§7).
 - `packages/runner/src/cfc/prepare.ts`, `packages/runner/src/cfc/ui-contract.ts`
   — `writeAuthorizedBy` enforcement (cell-write path); trusted surfaces.
 - `packages/runner/src/builtins/navigate-to.ts`,
@@ -884,3 +1142,6 @@ receipts' internals, stance vocabularies — upstream product machinery
   existing presentation components.
 - `packages/background-piece-service/README.md` — why the ranker does not
   run there.
+- PR #4132 (annotation-primitive prototype, draft) — the documented
+  anti-precedent for storage-side reverse indexes invisible to the reactive
+  graph; §10.1's design constraint.
