@@ -1404,6 +1404,40 @@ Deno.test("acl enforce: auxiliary read and operator surfaces honor capabilities"
     });
     assertEquals(snapshots.ok?.snapshots, []);
 
+    const bobWriterRequestId = nextRequestId("acl-scheduler-writers");
+    await bob.connection.receive(encodeMemoryBoundary({
+      type: "scheduler.writer.list",
+      requestId: bobWriterRequestId,
+      space,
+      sessionId: bobSession.ok.sessionId,
+      query: {
+        branch: "",
+        targets: [{ id: "of:output", path: ["value"] }],
+      },
+    }));
+    const writers = assertResponse<{ serverSeq: number; writers: unknown[] }>(
+      shiftMessage(bob.messages),
+    );
+    assertEquals(writers.requestId, bobWriterRequestId);
+    assertEquals(writers.ok?.writers, []);
+
+    const carolWriterRequestId = nextRequestId(
+      "acl-scheduler-writers-denied",
+    );
+    await carol.connection.receive(encodeMemoryBoundary({
+      type: "scheduler.writer.list",
+      requestId: carolWriterRequestId,
+      space,
+      sessionId: carolSession.ok.sessionId,
+      query: {
+        branch: "",
+        targets: [{ id: "of:output", path: ["value"] }],
+      },
+    }));
+    const deniedWriters = assertResponse<unknown>(shiftMessage(carol.messages));
+    assertEquals(deniedWriters.requestId, carolWriterRequestId);
+    assertEquals(deniedWriters.error?.name, "AuthorizationError");
+
     const watch = await server.watchAdd({
       type: "session.watch.add",
       requestId: nextRequestId("acl-watch-add"),
