@@ -275,6 +275,8 @@ export interface ProductionServerPresetParams extends CoreParams {
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   telemetry?: RuntimeTelemetry;
+  /** Executor workers inject a deny/broker boundary; ordinary servers omit. */
+  fetch?: typeof globalThis.fetch;
 }
 
 export interface RemoteClientPresetParams extends CoreParams {
@@ -344,6 +346,7 @@ export const runtimePresets = {
       ...(params.telemetry !== undefined
         ? { telemetry: params.telemetry }
         : {}),
+      ...(params.fetch !== undefined ? { fetch: params.fetch } : {}),
     };
   },
 
