@@ -2203,6 +2203,20 @@ export class Runner {
     this.executionDemandBySpace.clear();
   }
 
+  /**
+   * Wait for every execution-demand snapshot queued so far to settle.
+   *
+   * Teardown calls this after {@link stopAll} has queued the final empty
+   * snapshot and before storage closes its transport. Looping is intentional:
+   * tail cleanup runs in promise continuations, and a continuation may replace
+   * the current tail before the previous snapshot finishes.
+   */
+  async executionDemandSettled(): Promise<void> {
+    while (this.executionDemandTails.size > 0) {
+      await Promise.allSettled([...this.executionDemandTails.values()]);
+    }
+  }
+
   private schedulerRehydrationOptions(
     resultCell: Cell<any>,
     snapshotsByActionId?: ReadonlyMap<

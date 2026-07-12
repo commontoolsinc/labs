@@ -18,7 +18,7 @@ type DemandProvider = IStorageProviderWithReplica & {
   setExecutionDemand?: (
     branch: string,
     pieces: readonly string[],
-  ) => Promise<boolean | undefined>;
+  ) => Promise<boolean>;
 };
 
 type DemandCall = {
@@ -138,5 +138,39 @@ describe("runner execution demand export", () => {
 
     expect(provider.setExecutionDemand).toBeUndefined();
     expect(await runtime.start(piece)).toBe(true);
+  });
+
+  it("waits for the final empty demand snapshot before disposing storage", async () => {
+    const { runtime, storageManager } = createRuntime(true);
+    const provider = storageManager.open(space) as DemandProvider;
+    const originalClose = storageManager.close.bind(storageManager);
+    let storageCloseStarted = false;
+    storageManager.close = async () => {
+      storageCloseStarted = true;
+      await originalClose();
+    };
+    let releaseFinalDemand!: () => void;
+    const finalDemandSettled = new Promise<void>((resolve) => {
+      releaseFinalDemand = resolve;
+    });
+    provider.setExecutionDemand = (_branch, pieces) =>
+      pieces.length === 0
+        ? finalDemandSettled.then(() => true)
+        : Promise.resolve(true);
+    const piece = await setupPiece(runtime, "execution-demand-dispose");
+    expect(await runtime.start(piece)).toBe(true);
+    await runtime.scheduler.idle();
+
+    let disposed = false;
+    const disposal = runtime.dispose().then(() => {
+      disposed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(disposed).toBe(false);
+    expect(storageCloseStarted).toBe(false);
+    releaseFinalDemand();
+    await disposal;
+    expect(disposed).toBe(true);
   });
 });

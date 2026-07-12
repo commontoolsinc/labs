@@ -1141,6 +1141,11 @@ export class Runtime {
     // Stop all running docs
     this.runner.stopAll();
 
+    // stopAll() publishes the final empty execution-demand snapshot. Keep the
+    // memory transport alive until that snapshot settles so the shared server
+    // pool does not retain a client that has already gone away.
+    await this.runner.executionDemandSettled();
+
     // Scheduler background work can still be using storage, for example the
     // lifecycle-guarded boot-time persistent-state listing. Let that finish
     // before tearing down storage sessions.
