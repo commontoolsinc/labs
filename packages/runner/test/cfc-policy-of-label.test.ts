@@ -4,7 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
-import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
+import {
+  buildCfcPolicyArtifactManifest,
+  cfcPolicyManifestDocId,
+} from "../src/cfc/policy.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -94,6 +97,37 @@ describe("PolicyOf label-time binding", () => {
     runtime.getCell(space, "missing-policy", schema, tx).set("secret");
     expect(() => tx.prepareCfc()).toThrow("is not installed");
     tx.abort?.();
+  });
+
+  it("rejects unprivileged overwrite and deletion of a durable manifest", async () => {
+    runtime.registerCfcPolicyManifests(space, [artifact]);
+    const installTx = runtime.edit();
+    runtime.getCell(space, "immutable-policy", schema, installTx).set("secret");
+    installTx.prepareCfc();
+    expect((await installTx.commit()).ok).toBeDefined();
+
+    const manifestId = cfcPolicyManifestDocId(artifact.policyDigest);
+    const overwrite = runtime.edit();
+    expect(() =>
+      overwrite.writeOrThrow({
+        space,
+        id: manifestId,
+        type: "application/json",
+        path: ["value"],
+      }, { forged: true })
+    ).toThrow("immutable reserved policy state");
+    overwrite.abort();
+
+    const deletion = runtime.edit();
+    expect(() =>
+      deletion.writeOrThrow({
+        space,
+        id: manifestId,
+        type: "application/json",
+        path: ["value"],
+      }, undefined, { delete: true })
+    ).toThrow("immutable reserved policy state");
+    deletion.abort();
   });
 
   it("rejects a raw module-policy object in authored schema metadata", () => {

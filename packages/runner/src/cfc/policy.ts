@@ -3,6 +3,12 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isRecord } from "@commonfabric/utils/types";
 import { type AtomPattern, isAtomVarPlaceholder } from "./atom-pattern.ts";
 
+export const CFC_POLICY_MANIFEST_ID_PREFIX = "of:cfc-policy-manifest:";
+
+export const cfcPolicyManifestDocId = (
+  policyDigest: string,
+): `of:${string}` => `${CFC_POLICY_MANIFEST_ID_PREFIX}${policyDigest}`;
+
 /**
  * Policy records + exchange rules (spec §4.3/§4.4, Epic B2 of
  * docs/history/plans/cfc-future-work-implementation.md §3).

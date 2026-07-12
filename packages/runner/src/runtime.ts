@@ -93,6 +93,7 @@ import {
   type TrustSnapshot,
 } from "./cfc/mod.ts";
 import {
+  cfcPolicyManifestDocId,
   type PolicyArtifactManifestV1,
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
@@ -529,9 +530,6 @@ const CFC_POLICY_MANIFEST_DOC_SCHEMA = {
   additionalProperties: true,
 } as const satisfies JSONSchema;
 
-const cfcPolicyManifestCause = (policyDigest: string) =>
-  `cfc-policy-manifest-${policyDigest}`;
-
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
 }
@@ -702,9 +700,10 @@ export class Runtime {
         : this.#readCfcPolicyManifest(space, reference, tx));
     if (artifact === undefined) return false;
     if (tx !== undefined) {
-      const cell = this.getCell(
+      const cell = this.getCellFromEntityId(
         space,
-        cfcPolicyManifestCause(artifact.policyDigest),
+        cfcPolicyManifestDocId(artifact.policyDigest),
+        [],
         CFC_POLICY_MANIFEST_DOC_SCHEMA,
         tx,
       );
@@ -748,9 +747,10 @@ export class Runtime {
     ) return undefined;
     const candidate = reference as Record<string, unknown>;
     if (typeof candidate.policyDigest !== "string") return undefined;
-    const cell = this.getCell(
+    const cell = this.getCellFromEntityId(
       space,
-      cfcPolicyManifestCause(candidate.policyDigest),
+      cfcPolicyManifestDocId(candidate.policyDigest),
+      [],
       CFC_POLICY_MANIFEST_DOC_SCHEMA,
       tx,
     );

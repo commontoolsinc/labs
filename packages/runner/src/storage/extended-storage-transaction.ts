@@ -103,6 +103,7 @@ import {
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
+import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -691,6 +692,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // prepareBoundaryCommit, so the record stays inert there.
   private noteSystemWrite(address: IMemorySpaceAddress): void {
     if (this.#privilegedSystemWriteDepth > 0) return;
+    if (address.id.startsWith(CFC_POLICY_MANIFEST_ID_PREFIX)) {
+      throw new Error(
+        `cfcPolicyManifest: ${address.id} is immutable reserved policy state`,
+      );
+    }
     // Reserved grant documents (§8.12.7 route 2a, cfc/grants.ts): the WHOLE
     // document is policy state — a forged grant at the derived address would
     // spend another principal's release authority — so any unprivileged
