@@ -406,6 +406,23 @@ export interface SessionAckResult {
   serverSeq: number;
 }
 
+/** Coarse v1 client-read demand. It is owned by the authenticated connection;
+ * callers name only the branch and piece roots, never principal/connection or
+ * sponsor authority. */
+export interface ExecutionDemandSetRequest {
+  type: "session.execution.demand.set";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  branch: BranchName;
+  pieces: string[];
+}
+
+export interface ExecutionDemandSetResult {
+  serverSeq: number;
+  references: number;
+}
+
 export interface TransactRequest {
   type: "transact";
   requestId: string;
@@ -730,6 +747,7 @@ export type ClientMessage =
   | WatchAddRequest
   | SchedulerSnapshotListRequest
   | SchedulerWriterListRequest
+  | ExecutionDemandSetRequest
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage

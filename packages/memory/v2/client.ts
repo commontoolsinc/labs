@@ -4,6 +4,7 @@ import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntitySnapshot,
+  type ExecutionDemandSetResult,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
@@ -114,6 +115,7 @@ export class Client {
   #helloPending: PromiseWithResolvers<void> | null = null;
   #sessionOpenAuthContext: SessionOpenAuthContext | null = null;
   #serverFlags: MemoryProtocolFlags | null = null;
+  #advertisedFlags: MemoryProtocolFlags | null = null;
   #reconnecting: Promise<void> | null = null;
   #cancelReconnectDelay: (() => void) | null = null;
   #connected = false;
@@ -138,6 +140,11 @@ export class Client {
    *  optional-capability consumers fail closed by reading this. */
   get serverFlags(): MemoryProtocolFlags | null {
     return this.#serverFlags;
+  }
+
+  get serverPrimaryExecutionV1(): boolean {
+    return this.#advertisedFlags?.serverPrimaryExecutionV1 === true &&
+      this.#serverFlags?.serverPrimaryExecutionV1 === true;
   }
 
   async close(): Promise<void> {
@@ -270,6 +277,7 @@ export class Client {
     if (flags === null) {
       throw protocolError("memory client protocol flags are malformed");
     }
+    this.#advertisedFlags = flags;
     await this.transport.send(encodeMemoryBoundary({
       type: "hello",
       protocol: MEMORY_PROTOCOL,
@@ -510,6 +518,7 @@ export class SpaceSession {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
   }[] = [];
+  #executionDemands = new Map<string, readonly string[]>();
 
   constructor(
     private readonly client: Client,
@@ -672,6 +681,29 @@ export class SpaceSession {
     return result;
   }
 
+  async setExecutionDemand(
+    branch: string,
+    pieces: readonly string[],
+  ): Promise<boolean> {
+    this.#assertOpen();
+    if (!this.client.serverPrimaryExecutionV1) return false;
+    const result = await this.client.request<ExecutionDemandSetResult>({
+      type: "session.execution.demand.set",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      branch,
+      pieces: [...pieces],
+    });
+    this.noteResult(result.serverSeq);
+    if (pieces.length === 0) {
+      this.#executionDemands.delete(branch);
+    } else {
+      this.#executionDemands.set(branch, Object.freeze([...pieces]));
+    }
+    return true;
+  }
+
   async watchSet(watches: WatchSpec[]): Promise<WatchView> {
     this.#assertOpen();
     const hadView = this.#watchView !== null;
@@ -804,13 +836,6 @@ export class SpaceSession {
         0,
         ...this.#outstandingCommits.keys(),
       );
-      const replayTasks = [...this.#outstandingCommits.entries()].map((
-        [localSeq, pendingCommit],
-      ) =>
-        this.sendOutstandingCommit(localSeq, pendingCommit, {
-          throwOnConnectionError: true,
-        })
-      );
       if (restored.sync) {
         this.noteCaughtUpLocalSeq(restored.sync.caughtUpLocalSeq);
         if (this.#watchView === null) {
@@ -845,6 +870,19 @@ export class SpaceSession {
           view.emit(sync);
         }
       }
+      // Demand belongs to the physical connection, not the resumable logical
+      // session. Re-establish it after authoritative catch-up and before any
+      // retained derived commits are replayed.
+      for (const [branch, pieces] of this.#executionDemands) {
+        if (!await this.setExecutionDemand(branch, pieces)) break;
+      }
+      const replayTasks = [...this.#outstandingCommits.entries()].map((
+        [localSeq, pendingCommit],
+      ) =>
+        this.sendOutstandingCommit(localSeq, pendingCommit, {
+          throwOnConnectionError: true,
+        })
+      );
       await Promise.all(replayTasks);
     } finally {
       this.#restoring = false;
@@ -857,6 +895,16 @@ export class SpaceSession {
   async close(): Promise<void> {
     if (this.#closed) {
       return;
+    }
+    if (
+      this.client.isConnected() && this.#readyOnConnection &&
+      this.#executionDemands.size > 0
+    ) {
+      await Promise.allSettled(
+        [...this.#executionDemands.keys()].map((branch) =>
+          this.setExecutionDemand(branch, [])
+        ),
+      );
     }
     this.#closed = true;
     this.#closeError = new Error("memory session closed");
@@ -871,6 +919,7 @@ export class SpaceSession {
     }
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
+    this.#executionDemands.clear();
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -891,6 +940,7 @@ export class SpaceSession {
     this.rejectCaughtUpLocalSeqWaiters(error);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
+    this.#executionDemands.clear();
     this.#watchView?.close();
     this.#watchView = null;
   }
