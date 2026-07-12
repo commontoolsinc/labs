@@ -5,7 +5,11 @@ import {
   type ResponseMessage,
 } from "@commonfabric/memory/v2";
 import { Server } from "@commonfabric/memory/v2/server";
-import { createHostProviderChannel } from "../src/storage/v2-host-provider.ts";
+import {
+  createHostProviderChannel,
+  type HostProviderChannelOptions,
+  HostStorageManager,
+} from "../src/storage/v2-host-provider.ts";
 
 const SPACE = "did:key:z6Mk-executor-provider-demand-space";
 
@@ -66,6 +70,56 @@ Deno.test("executor host provider rejects client demand before canonical registr
     });
     assertEquals(server.listExecutionDemands(SPACE, ""), []);
   } finally {
+    await channel.dispose();
+    await server.close();
+  }
+});
+
+Deno.test("shadow executor host provider rejects leaked upstream transactions", async () => {
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: { audience: SPACE },
+  });
+  const channel = createHostProviderChannel({
+    server,
+    space: SPACE,
+    shadowWrites: true,
+    authorizeSessionOpen: (_space, _session, context) => ({
+      invocation: {
+        aud: context.audience,
+        challenge: context.challenge.value,
+      },
+      authorization: { principal: SPACE },
+    }),
+  } as HostProviderChannelOptions);
+  const storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: SPACE,
+    space: SPACE,
+  });
+
+  try {
+    const result = await storage.open(SPACE).replica.commitNative!({
+      operations: [{
+        op: "set",
+        id: "of:shadow-leak",
+        type: "application/json",
+        value: { value: { leaked: true } },
+      }],
+    });
+
+    assertEquals(result.error?.name, "AuthorizationError");
+    assertEquals(
+      result.error?.message,
+      "shadow executor providers cannot transact upstream",
+    );
+    assertEquals(await server.readDocument(SPACE, "of:shadow-leak"), null);
+  } finally {
+    await storage.close();
     await channel.dispose();
     await server.close();
   }
