@@ -1720,6 +1720,106 @@ Deno.test("scheduler writer lookup isolates user and session contexts", async ()
   });
 });
 
+Deno.test("scheduler writer lookup filters shared targets by action context", async () => {
+  await withEngine((engine) => {
+    const sharedTarget = schedulerAddress("shared-output", "space");
+    const userActionId = "context:writer:shared-user";
+    const userBase = observationFor({
+      actionId: userActionId,
+      summaryScope: "user",
+    });
+    const userObservation: SchedulerActionObservation = {
+      ...userBase,
+      completeActionScopeSummary: {
+        ...userBase.completeActionScopeSummary!,
+        writes: [sharedTarget],
+        directOutputs: [sharedTarget],
+      },
+      currentKnownWrites: [sharedTarget],
+    };
+    storeObservation(engine, userObservation, ALICE_A);
+    storeObservation(engine, userObservation, BOB);
+
+    const target = { ...sharedTarget, scopeKey: SPACE_KEY };
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [target],
+        applicableExecutionContextKeys: [
+          SPACE_KEY,
+          ALICE_USER_KEY,
+          ALICE_A_SESSION_KEY,
+        ],
+      }).map((candidate) => candidate.executionContextKey),
+      [ALICE_USER_KEY],
+    );
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [target],
+        applicableExecutionContextKeys: [
+          SPACE_KEY,
+          BOB_USER_KEY,
+          BOB_SESSION_KEY,
+        ],
+      }).map((candidate) => candidate.executionContextKey),
+      [BOB_USER_KEY],
+    );
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [target],
+        applicableExecutionContextKeys: [SPACE_KEY],
+      }),
+      [],
+    );
+
+    const sessionActionId = "context:writer:shared-session";
+    const sessionBase = observationFor({
+      actionId: sessionActionId,
+      summaryScope: "session",
+    });
+    const sessionObservation: SchedulerActionObservation = {
+      ...sessionBase,
+      completeActionScopeSummary: {
+        ...sessionBase.completeActionScopeSummary!,
+        writes: [sharedTarget],
+        directOutputs: [sharedTarget],
+      },
+      currentKnownWrites: [sharedTarget],
+    };
+    storeObservation(engine, sessionObservation, ALICE_A);
+    storeObservation(engine, sessionObservation, ALICE_B);
+
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [target],
+        applicableExecutionContextKeys: [
+          SPACE_KEY,
+          ALICE_USER_KEY,
+          ALICE_A_SESSION_KEY,
+        ],
+      }).filter((candidate) => candidate.actionId === sessionActionId)
+        .map((candidate) => candidate.executionContextKey),
+      [ALICE_A_SESSION_KEY],
+    );
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [target],
+        applicableExecutionContextKeys: [
+          SPACE_KEY,
+          ALICE_USER_KEY,
+          ALICE_B_SESSION_KEY,
+        ],
+      }).filter((candidate) => candidate.actionId === sessionActionId)
+        .map((candidate) => candidate.executionContextKey),
+      [ALICE_B_SESSION_KEY],
+    );
+  });
+});
+
 Deno.test("scheduler writer lookup keeps its target index at 10k rows", async () => {
   await withEngine((engine) => {
     const actionId = "context:writer-index-plan";
