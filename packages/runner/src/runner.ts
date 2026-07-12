@@ -1033,32 +1033,61 @@ export class Runner {
     return this.runtime.patternManager.ensureKeylessPatternIdentity(pattern);
   }
 
-  private updateArgument<T>(
+  private updateRootCell<T>(
     tx: IExtendedStorageTransaction,
-    argumentLink: NormalizedFullLink,
-    argument: T,
-    argumentSchema: JSONSchema | undefined,
+    rootLink: NormalizedFullLink,
+    value: T,
+    schema: JSONSchema | undefined,
   ): void {
-    const preparedArgument = prepareFactoryStatesForWrite(argument) as T;
-    const argumentCell = this.runtime.getCellFromLink(
-      argumentLink,
+    const preparedValue = prepareFactoryStatesForWrite(value) as T;
+    const rootCell = this.runtime.getCellFromLink(
+      rootLink,
       undefined,
       tx,
     );
-    argumentCell.set(preparedArgument);
+    rootCell.set(preparedValue);
     recordSetupProjectionPolicyInputs(
       tx,
       this.runtime,
-      argumentCell,
-      argumentSchema,
-      preparedArgument,
+      rootCell,
+      schema,
+      preparedValue,
     );
     diffAndUpdate(
       this.runtime,
       tx,
-      argumentLink,
-      preparedArgument,
-      argumentLink,
+      rootLink,
+      preparedValue,
+      rootLink,
+    );
+  }
+
+  private updatePatternParams(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<unknown>,
+    params: unknown,
+    paramsSchema: JSONSchema,
+    resultSchema: JSONSchema | undefined,
+  ): void {
+    const paramsCell = getMetaCell(
+      resultCell,
+      "params",
+      tx,
+      paramsSchema,
+    );
+    setResultCell(paramsCell, resultCell.asSchema(resultSchema));
+    resultCell.withTx(tx).setMetaRaw(
+      "params",
+      paramsCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+      }),
+    );
+    this.updateRootCell(
+      tx,
+      paramsCell.getAsNormalizedFullLink(),
+      params,
+      paramsSchema,
     );
   }
 
@@ -1071,7 +1100,7 @@ export class Runner {
     argumentSchema: JSONSchema,
     defaults: FabricValue,
   ): void {
-    this.updateArgument(tx, argumentLink, argument, argumentSchema);
+    this.updateRootCell(tx, argumentLink, argument, argumentSchema);
     this.validateArgument(tx, argumentLink, argumentSchema, defaults);
   }
 
@@ -1150,7 +1179,7 @@ export class Runner {
       // when its payload is cold or absent. Piece API argument mutations
       // validate their exact supplied value before entering Runner;
       // pattern-changing updates always take the validated path below.
-      this.updateArgument(
+      this.updateRootCell(
         tx,
         argumentLink,
         nextArgument,
@@ -1398,7 +1427,7 @@ export class Runner {
       // produced no value to write, so this branch is only reachable for new
       // argument cells and same-pattern replay. Piece API argument mutations
       // validate their exact supplied value before entering Runner.
-      this.updateArgument(
+      this.updateRootCell(
         tx,
         argumentLink,
         nextArgument,
@@ -1460,6 +1489,24 @@ export class Runner {
     }
 
     const { pattern, entryRef, resolvedPatternOrModule } = resolvedPattern;
+    const invocationState = isAdmittedFabricFactory(resolvedPatternOrModule)
+      ? factoryStateOf(resolvedPatternOrModule)
+      : undefined;
+    let invocationParams:
+      | { params: unknown; paramsSchema: JSONSchema }
+      | undefined;
+    if (
+      invocationState?.kind === "pattern" &&
+      Object.hasOwn(invocationState, "paramsSchema")
+    ) {
+      if (!Object.hasOwn(invocationState, "params")) {
+        throw new Error("Pattern factory requires bound params");
+      }
+      invocationParams = {
+        params: invocationState.params,
+        paramsSchema: invocationState.paramsSchema!,
+      };
+    }
     // "Same pattern between runs" — drives name preservation and
     // reuse-running-setup. Compare the new pattern pointer against the stored
     // one. A keyless pattern carries a stable session-synthetic ref (minted per
@@ -1487,6 +1534,16 @@ export class Runner {
           overwrite: "redirect",
         },
       ) as T;
+    }
+
+    if (invocationParams !== undefined) {
+      this.updatePatternParams(
+        tx,
+        resultCell,
+        invocationParams.params,
+        invocationParams.paramsSchema,
+        pattern.resultSchema,
+      );
     }
 
     this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
@@ -3296,6 +3353,29 @@ export class Runner {
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
+    } else if (isAdmittedFabricFactory(module)) {
+      const state = factoryStateOf(module);
+      if (state.kind !== "pattern") {
+        throw new Error(
+          `Static factory node requires a pattern factory, got ${state.kind}`,
+        );
+      }
+      this.instantiatePatternNode(
+        tx,
+        {
+          type: "pattern",
+          implementation: module,
+          ...(state.defaultScope === undefined
+            ? {}
+            : { defaultScope: state.defaultScope }),
+        },
+        inputBindings,
+        outputBindings,
+        resultCell,
+        addCancel,
+        pattern,
+        schedulerRehydration,
+      );
     } else if (isWriteRedirectLink(module)) {
       if (expectedFactory === undefined) {
         throw new Error(
@@ -6078,15 +6158,44 @@ export class Runner {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
+    const containingFactoryState = isAdmittedFabricFactory(pattern)
+      ? factoryStateOf(pattern)
+      : undefined;
+    const containingParamsSchema = containingFactoryState?.kind === "pattern"
+      ? containingFactoryState.paramsSchema
+      : undefined;
     const boundPatternImpl: unknown = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       resultCell,
-      { derivedInternalCells: pattern.derivedInternalCells },
+      {
+        derivedInternalCells: pattern.derivedInternalCells,
+        sourceSchemas: {
+          argument: pattern.argumentSchema,
+          ...(containingParamsSchema === undefined
+            ? {}
+            : { params: containingParamsSchema }),
+        },
+      },
     );
     let patternImpl: Pattern;
-    if (isPatternRefSentinel(boundPatternImpl)) {
+    if (isAdmittedFabricFactory(boundPatternImpl)) {
+      const state = factoryStateOf(boundPatternImpl);
+      if (state.kind !== "pattern") {
+        throw new Error(
+          `Static factory node requires a pattern factory, got ${state.kind}`,
+        );
+      }
+      const materialized = materializeFactory(boundPatternImpl, {
+        runtime: this.runtime,
+        artifactSpace: parentResultCell.space,
+      });
+      if (!isPattern(materialized)) {
+        throw new Error("Materialized static pattern factory is not a pattern");
+      }
+      patternImpl = materialized;
+    } else if (isPatternRefSentinel(boundPatternImpl)) {
       const resolved = this.resolveTrustedPatternRef(boundPatternImpl);
       if (resolved !== undefined) {
         patternImpl = resolved;

@@ -1181,18 +1181,18 @@ containing `asFactory` schemas.
 
 - [x] Extend the alias vocabulary with `{ $alias: { cell: "params", ... } }`
   without treating `params` as piece input.
-- [ ] Give each bound-pattern invocation one immutable hidden params cell with a
+- [x] Give each bound-pattern invocation one immutable hidden params cell with a
   deterministic result-relative cause and `paramsSchema`.
-- [ ] Link that cell from result metadata under `params` and link it back to its
+- [x] Link that cell from result metadata under `params` and link it back to its
   owning result for resume/teardown.
-- [ ] Resolve bound params against the parent binding context before writing or
+- [x] Resolve bound params against the parent binding context before writing or
   linking them into the hidden cell.
 - [ ] Preserve nested link parents and cross-space links rather than copying
   values across spaces.
 - [ ] For factory-valued params, preserve artifact-source provenance separately
   from any selected pattern factory's execution `spaceSelector`; resume must
   not infer source space from the target modifier.
-- [ ] Update `unwrapOneLevelAndBindtoDoc`, `sendValueToBinding`, and direct
+- [x] Update `unwrapOneLevelAndBindtoDoc`, `sendValueToBinding`, and direct
   sub-pattern setup to accept the params pseudo-root only when the invocation
   owns a params cell.
 - [ ] Populate the same deterministic cell from serialized `Factory@1` state on
@@ -1205,8 +1205,8 @@ containing `asFactory` schemas.
 - [ ] Define teardown in terms of cancellation, subscription ownership, and
   reachability. If durable owned cells are not physically deleted on ordinary
   stop, prove they cannot be reused or rescheduled by a later generation.
-- [ ] Reject invocation of a closure-bearing base factory with absent params.
-- [ ] Prove a public field and closure param with the same name remain distinct.
+- [x] Reject invocation of a closure-bearing base factory with absent params.
+- [x] Prove a public field and closure param with the same name remain distinct.
 - [ ] Traverse nested factories and preserve CFC labels inside params.
 - [ ] Add an A-with-params → B-with-different-params → A dynamic replacement
   test proving a stable output spot, generation-fenced captured writes,
@@ -1237,6 +1237,17 @@ The same slice removes a second mismatch outside the original seam list:
 graph, discarding bound `Factory@1` state. New pattern nodes retain the admitted
 callable directly, while the named legacy graph serialization branches remain
 for unbranded stored readers.
+
+WP3.4 invocation-cell slice (2026-07-11): Runner dispatch now keeps a static
+bound pattern factory callable while resolving its hidden state against the
+containing pattern's argument/params context. Setup writes the complete params
+record into the deterministic invocation-owned cell before result projection or
+node startup, records both metadata directions, and deliberately does not apply
+public argument defaults. A fresh closure-bearing base without params is
+rejected before setup writes or node execution. Focused coverage proves the
+capture remains a link to the parent argument cell, same-named public/private
+fields remain separate, and the existing nearby binding/serialization/reload
+matrix passes `10 passed (114 steps)`.
 
 ### WP3.5 — Unify list callback lowering
 
