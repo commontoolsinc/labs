@@ -175,6 +175,46 @@ Deno.test("executor action router rejects the whole dynamic scoped transaction",
   ]);
 });
 
+Deno.test("executor action router turns a dynamically invalid live claim into an unserved attempt", async () => {
+  const claim: ExecutionClaim = {
+    ...key,
+    leaseGeneration: 9,
+    claimGeneration: 11,
+    expiresAt: 100_000,
+  };
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    claimForAction: () => claim,
+    onCandidate: () => {
+      throw new Error("a live claim must settle unserved, not re-candidate");
+    },
+  });
+  const scoped = commit();
+  scoped.reads.confirmed[0]!.scope = "user";
+
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: scoped,
+      sourceAction: action,
+    }),
+    {
+      disposition: "unserved",
+      diagnosticCode: "dynamic-non-space-read-scope",
+    },
+  );
+  assertEquals(
+    (scoped.schedulerObservation as Record<string, unknown>)
+      .executionClaimAssertion,
+    {
+      contextKey: "space",
+      leaseGeneration: 9,
+      claimGeneration: 11,
+    },
+  );
+});
+
 Deno.test("executor action router keeps broker-required effects local", async () => {
   const effectCommit = commit();
   (effectCommit.schedulerObservation as Record<string, unknown>).actionKind =
