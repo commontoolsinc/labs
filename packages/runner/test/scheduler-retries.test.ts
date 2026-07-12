@@ -87,6 +87,32 @@ describe("reactive retries", () => {
     },
   );
 
+  it("reports rejected action commits to the executor control hook", async () => {
+    const rejected: Array<{ action: Action; error: unknown }> = [];
+    runtime.scheduler.setActionCommitRejectionHandler(
+      (action: Action, error: unknown) => {
+        rejected.push({ action, error });
+      },
+    );
+    const action: Action = (actionTx) => {
+      actionTx.abort("executor-control-rejection");
+    };
+
+    runtime.scheduler.subscribe(
+      action,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+    for (let attempt = 0; attempt < 20 && rejected.length === 0; attempt++) {
+      await runtime.idle();
+    }
+
+    expect(rejected[0]?.action).toBe(action);
+    expect((rejected[0]?.error as { name?: string })?.name).toBe(
+      "StorageTransactionAborted",
+    );
+  });
+
   // Directly exercise the reactive commit-result classification
   // (`watchReactiveActionCommit`): a whole-runtime commit injector would churn
   // every commit and re-trigger the action externally, confounding the retry
