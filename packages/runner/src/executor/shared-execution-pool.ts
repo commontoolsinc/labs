@@ -234,8 +234,19 @@ export class SharedExecutionPool {
     if (this.#closed && slot.executor === null && slot.lease === null) return;
     const nextPieces = unionPieces(slot.demands);
     if (slot.demands.length === 0 || nextPieces.length === 0 || this.#closed) {
+      const drainOrder = slot.order;
       this.#cancelBackoff(slot);
       await this.#shutdown(slot, false);
+      // Demand snapshots mutate the slot before their queued reconciliation
+      // runs. A newer non-empty snapshot may therefore arrive while stop() is
+      // awaiting runtime settlement. Keep the mapped lane in that case so the
+      // queued reconciliation can start its fenced replacement; deleting it
+      // here would orphan that replacement and let the next snapshot create a
+      // second lane for the same branch/space.
+      if (
+        !this.#closed &&
+        (slot.order !== drainOrder || slot.demands.length > 0)
+      ) return;
       if (this.#slots.get(slot.key) === slot) this.#slots.delete(slot.key);
       return;
     }

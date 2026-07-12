@@ -263,6 +263,51 @@ Deno.test("shared execution pool stops a fenced worker before releasing its leas
   }
 });
 
+Deno.test("shared execution pool retains demand that arrives during drain", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    const active = [demand(1, ["piece:a"])];
+    await control.emit(1, active);
+    await pool.idle();
+    const first = factory.executors[0]!;
+    const stopGate = Promise.withResolvers<void>();
+    first.stopGate = stopGate.promise;
+
+    control.emit(2, []);
+    await first.stopStarted.promise;
+    const redemanded = control.emit(3, active);
+
+    stopGate.resolve();
+    await redemanded;
+    await pool.idle();
+
+    assertEquals(first.stopped, 1);
+    assertEquals(factory.starts.length, 2);
+    assertEquals(pool.snapshot(SPACE, BRANCH), {
+      state: "live",
+      referenceCount: 1,
+      pieces: ["piece:a"],
+      leaseGeneration: 2,
+    });
+
+    // A later update must still reconcile against the replacement generation,
+    // not create a second mapped slot beside an orphaned Worker.
+    await control.emit(4, [demand(1, ["piece:a", "piece:b"])]);
+    await pool.idle();
+    assertEquals(factory.starts.length, 2);
+    assertEquals(factory.executors[1]?.demandUpdates, [[
+      "piece:a",
+      "piece:b",
+    ]]);
+  } finally {
+    await pool.close();
+  }
+});
+
 Deno.test("shared execution pool fails closed while legacy background owns a space", async () => {
   const control = new FakeExecutionControl();
   const factory = new FakeExecutorFactory();
