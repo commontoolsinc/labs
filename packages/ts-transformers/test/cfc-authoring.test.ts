@@ -5,6 +5,7 @@ import { transformSource, validateSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { CFC_CANONICAL_ALIAS_NAMES } from "../src/cfc-authoring.ts";
 import { CrossStageState, SchemaInjectionTransformer } from "../src/mod.ts";
+import type { CfcPolicyCompilerManifestV1 } from "../src/mod.ts";
 
 function normalizePrintedNode(
   node: ts.Node,
@@ -195,6 +196,193 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "ProjectionOf",
     "Projection",
   ]);
+});
+
+Deno.test("static exchange-rule declarations emit a deterministic side-channel manifest", async () => {
+  const source = `/// <cts-enable />
+    import {
+      cfcPattern,
+      exchangeRule,
+      exchangeRules,
+      THIS_POLICY,
+      v,
+    } from "commonfabric/cfc";
+
+    export const releaseToReviewer = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: {
+        integrity: [cfcPattern.hasRole(
+          v("reviewer"),
+          THIS_POLICY.subject,
+          "reader",
+        )],
+      },
+      post: {
+        addAlternatives: [cfcPattern.user(v("reviewer"))],
+      },
+    });
+
+    export const releaseRules = exchangeRules([releaseToReviewer]);
+  `;
+  const manifests: unknown[] = [];
+  const output = await transformSource(source, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+    policyManifests: manifests,
+  });
+  const artifact = manifests[0] as CfcPolicyCompilerManifestV1;
+
+  assertEquals(manifests.length, 1);
+  assertEquals(artifact.manifest, {
+    formatVersion: 1,
+    moduleIdentity: "sha256:module",
+    symbol: "releaseRules",
+    template: {
+      templateVersion: 1,
+      exchangeRules: [{
+        name: "releaseToReviewer",
+        preCondition: {
+          confidentiality: [{ thisPolicy: true }],
+          integrity: [{
+            type: "https://commonfabric.org/cfc/atom/HasRole",
+            principal: { var: "reviewer" },
+            space: { thisPolicyField: "subject" },
+            role: "reader",
+          }],
+        },
+        postCondition: {
+          confidentiality: [{
+            type: "https://commonfabric.org/cfc/atom/User",
+            subject: { var: "reviewer" },
+          }],
+          integrity: [],
+        },
+      }],
+      dependencies: { authorityOnly: [], dataBearing: [] },
+      integrityRequirements: {},
+    },
+  });
+  assertEquals(typeof artifact.policyDigest, "string");
+  assertEquals(output.includes("policyDigest"), false);
+
+  const repeated: unknown[] = [];
+  await transformSource(source, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+    policyManifests: repeated,
+  });
+  assertEquals(repeated, manifests);
+});
+
+Deno.test("exchange-rule authoring rejects dynamic and unguarded declarations", async () => {
+  const { diagnostics } = await validateSource(
+    `/// <cts-enable />
+    import { exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+    const dynamic = Math.random() > 0.5 ? [] : [];
+    export const release = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: { integrity: dynamic },
+      post: { dropClause: true },
+    });
+    export const rules = exchangeRules([release]);
+  `,
+    {
+      types: COMMONFABRIC_TYPES,
+      moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+    },
+  );
+
+  assertEquals(
+    diagnostics.some((diagnostic) =>
+      diagnostic.type === "cfc-policy-authoring" &&
+      diagnostic.message.includes("static")
+    ),
+    true,
+  );
+});
+
+Deno.test("exchange-rule declarations fail closed on invalid export and binding forms", async () => {
+  const cases = [
+    {
+      source: `
+        const release = exchangeRule({
+          appliesTo: THIS_POLICY,
+          pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+          post: { dropClause: true },
+        });
+        export const rules = exchangeRules([release]);
+      `,
+      message: "must be exported",
+    },
+    {
+      source: `
+        export const release = exchangeRule({
+          appliesTo: THIS_POLICY,
+          pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+          post: { dropClause: true },
+        });
+        export const first = exchangeRules([release]);
+        export const second = exchangeRules([release]);
+      `,
+      message: "cannot be reused",
+    },
+    {
+      source: `
+        export const release = exchangeRule({
+          ...BASE,
+          post: { addAlternatives: [cfcPattern.user(v("unbound"))] },
+        });
+        export const rules = exchangeRules([release]);
+      `,
+      message: "static",
+    },
+    {
+      source: `
+        export const release = exchangeRule({
+          appliesTo: THIS_POLICY,
+          pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+          post: { addAlternatives: [cfcPattern.user(v("unbound"))] },
+        });
+        export const rules = exchangeRules([release]);
+      `,
+      message: "not bound",
+    },
+    {
+      source: `
+        export const release = exchangeRule({ ...BASE, mystery: true });
+        export const rules = exchangeRules([release]);
+      `,
+      message: "static",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const { diagnostics } = await validateSource(
+      `/// <cts-enable />
+      import {
+        cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+      } from "commonfabric/cfc";
+      const BASE = {
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+        post: { dropClause: true },
+      };
+      ${testCase.source}
+    `,
+      {
+        types: COMMONFABRIC_TYPES,
+        moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+      },
+    );
+    assertEquals(
+      diagnostics.some((diagnostic) =>
+        diagnostic.type === "cfc-policy-authoring" &&
+        diagnostic.message.includes(testCase.message)
+      ),
+      true,
+      testCase.message,
+    );
+  }
 });
 
 Deno.test("WriteAuthorizedBy accepts a local function binding", async () => {

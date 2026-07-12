@@ -22,6 +22,8 @@ export interface TransformOptions {
   precomputedDiagnostics?: ts.Diagnostic[];
   /** If provided, pipeline diagnostics will be pushed into this array after transformation. */
   pipelineDiagnostics?: TransformationDiagnostic[];
+  moduleIdentities?: ReadonlyMap<string, string>;
+  policyManifests?: unknown[];
 }
 
 export interface BatchTypeCheckResult {
@@ -168,6 +170,13 @@ export async function batchTypeCheckFixtures(
           return {
             resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (name === "commonfabric/cfc" && types["cfc.ts"]) {
+          return {
+            resolvedFileName: "cfc.ts",
+            extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
         }
@@ -402,6 +411,13 @@ export async function transformFiles(
             isExternalLibraryImport: false,
           };
         }
+        if (name === "commonfabric/cfc" && types["cfc.ts"]) {
+          return {
+            resolvedFileName: "cfc.ts",
+            extension: ts.Extension.Ts,
+            isExternalLibraryImport: false,
+          };
+        }
         if (
           name === "commonfabric/schema" && types["commonfabric-schema.d.ts"]
         ) {
@@ -536,6 +552,7 @@ export async function transformFiles(
   const pipeline = new CommonFabricTransformerPipeline({
     mode,
     logger,
+    moduleIdentities: options.moduleIdentities,
   });
 
   const out: Record<string, string> = {};
@@ -568,6 +585,11 @@ export async function transformFiles(
   }
   if (options.pipelineDiagnostics) {
     options.pipelineDiagnostics.push(...pipeline.getDiagnostics());
+  }
+  if (options.policyManifests) {
+    for (const manifests of pipeline.getPolicyManifests().values()) {
+      options.policyManifests.push(...manifests);
+    }
   }
   return out;
 }
@@ -740,6 +762,13 @@ export async function validateFiles(
           return {
             resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (name === "commonfabric/cfc" && types["cfc.ts"]) {
+          return {
+            resolvedFileName: "cfc.ts",
+            extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
         }

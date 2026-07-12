@@ -1,6 +1,7 @@
 import {
   BuilderCallHoistingTransformer,
   CastValidationTransformer,
+  CfcPolicyAuthoringTransformer,
   EmptyArrayOfValidationTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
   JsxExpressionSiteRouterTransformer,
@@ -27,6 +28,7 @@ import {
   TransformationOptions,
   Transformer,
 } from "./core/mod.ts";
+import type { CfcPolicyCompilerManifestV1 } from "./core/runtime-contract.ts";
 
 type TransformerStageSpec = {
   readonly name: string;
@@ -53,6 +55,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "MergeablePushValidationTransformer",
     create: (options) => new MergeablePushValidationTransformer(options),
+  },
+  {
+    name: "CfcPolicyAuthoringTransformer",
+    create: (options) => new CfcPolicyAuthoringTransformer(options),
   },
   {
     name: "JsxExpressionSiteRouterTransformer",
@@ -127,10 +133,12 @@ export const CFC_TRANSFORMER_STAGE_NAMES = CFC_TRANSFORMER_STAGE_SPECS.map(
 
 export class CommonFabricTransformerPipeline extends Pipeline {
   private readonly diagnosticsCollector: TransformationDiagnostic[] = [];
+  private readonly state: CrossStageState;
 
   constructor(options: TransformationOptions = {}) {
+    const state = options.state ?? new CrossStageState();
     const ops: TransformationOptions = {
-      state: new CrossStageState(),
+      state,
       ...options,
     };
     // Create a shared diagnostics collector
@@ -147,6 +155,7 @@ export class CommonFabricTransformerPipeline extends Pipeline {
     // Store reference to shared collector
     // Note: We need to access it after construction, so we store the array reference
     this.diagnosticsCollector = sharedOps.diagnosticsCollector!;
+    this.state = state;
   }
 
   /**
@@ -163,5 +172,12 @@ export class CommonFabricTransformerPipeline extends Pipeline {
    */
   clearDiagnostics(): void {
     this.diagnosticsCollector.length = 0;
+  }
+
+  getPolicyManifests(): ReadonlyMap<
+    string,
+    readonly CfcPolicyCompilerManifestV1[]
+  > {
+    return this.state.getPolicyManifests();
   }
 }

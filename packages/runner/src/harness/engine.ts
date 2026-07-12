@@ -355,6 +355,7 @@ export class Engine extends EventTarget implements Harness {
       // Carry per-module source maps so the ESM loader can compose a per-load
       // bundle map (CFC verified-source / fn.src coordinate resolution).
       const precompiledSourceMaps = new Map<string, SourceMap>();
+      const precompiledPolicyManifests = new Map<string, readonly unknown[]>();
 
       if (fullHit) {
         logger.info("compile-cache-hit", () => ["compileToRecordGraph", id]);
@@ -365,6 +366,12 @@ export class Engine extends EventTarget implements Harness {
             precompiledSourceMaps.set(
               file.name,
               artifact.sourceMap as SourceMap,
+            );
+          }
+          if (artifact.policyManifests !== undefined) {
+            precompiledPolicyManifests.set(
+              file.name,
+              artifact.policyManifests,
             );
           }
           if (options.patternCoverage !== undefined) {
@@ -399,10 +406,12 @@ export class Engine extends EventTarget implements Harness {
             const pipeline = new (compilerStack()
               .CommonFabricTransformerPipeline)({
               patternCoverage,
+              moduleIdentities: identityByPath,
             });
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
+              getPolicyManifests: () => pipeline.getPolicyManifests(),
             };
           },
         };
@@ -425,6 +434,9 @@ export class Engine extends EventTarget implements Harness {
         for (const [name, out] of modules) {
           precompiledBodies.set(name, out.js);
           if (out.sourceMap) precompiledSourceMaps.set(name, out.sourceMap);
+          if (out.policyManifests) {
+            precompiledPolicyManifests.set(name, out.policyManifests);
+          }
         }
       }
       const { runtimeExports } = await this.getRuntimeInternals();
@@ -555,6 +567,9 @@ export class Engine extends EventTarget implements Harness {
           ...(patternCoverageSpans === undefined
             ? {}
             : { patternCoverageSpans }),
+          ...(precompiledPolicyManifests.get(file.name) === undefined ? {} : {
+            policyManifests: precompiledPolicyManifests.get(file.name),
+          }),
           imports,
         };
       });
@@ -631,8 +646,11 @@ export class Engine extends EventTarget implements Harness {
         runtimeModules: Engine.runtimeModuleNames(),
         beforeTransformers: runTransform
           ? (program) => {
+            const moduleIdentities = new Map(
+              [...unioned.keys()].map((name) => [name, `check:${name}`]),
+            );
             const pipeline = new (compilerStack()
-              .CommonFabricTransformerPipeline)();
+              .CommonFabricTransformerPipeline)({ moduleIdentities });
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
@@ -755,10 +773,13 @@ export class Engine extends EventTarget implements Harness {
       specifierAliases,
       beforeTransformers: (program) => {
         const pipeline = new (compilerStack()
-          .CommonFabricTransformerPipeline)();
+          .CommonFabricTransformerPipeline)({
+          moduleIdentities: identityByPath,
+        });
         return {
           factories: pipeline.toFactories(program),
           getDiagnostics: () => pipeline.getDiagnostics(),
+          getPolicyManifests: () => pipeline.getPolicyManifests(),
         };
       },
     });
@@ -788,6 +809,9 @@ export class Engine extends EventTarget implements Harness {
         source: file.contents,
         js: out.js,
         ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+        ...(out.policyManifests === undefined
+          ? {}
+          : { policyManifests: out.policyManifests }),
         imports,
       };
     });
