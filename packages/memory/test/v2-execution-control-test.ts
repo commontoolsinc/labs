@@ -759,6 +759,127 @@ Deno.test("positive claims require enabled policy and disabling it revokes autho
   }
 });
 
+Deno.test("out-of-band inactive policy revokes claims without removing shadow demand", async () => {
+  for (
+    const testCase of [
+      {
+        name: "disabled",
+        operation: {
+          op: "set" as const,
+          id: `of:${POLICY_SPACE}:execution-policy`,
+          value: {
+            value: { version: 1, serverPrimaryExecution: false },
+          },
+        },
+        probe: "claim" as const,
+      },
+      {
+        name: "deleted",
+        operation: {
+          op: "delete" as const,
+          id: `of:${POLICY_SPACE}:execution-policy`,
+        },
+        probe: "settlement" as const,
+      },
+      {
+        name: "malformed",
+        operation: {
+          op: "set" as const,
+          id: `of:${POLICY_SPACE}:execution-policy`,
+          value: {
+            value: { version: 2, serverPrimaryExecution: true },
+          },
+        },
+        probe: "settlement" as const,
+      },
+    ]
+  ) {
+    const directory = await Deno.makeTempDir();
+    const store = toFileUrl(`${directory}/`);
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store,
+      protocolFlags: {
+        serverPrimaryExecutionV1: true,
+        serverPrimaryExecutionClaimRoutingV1: true,
+        serverPrimaryExecutionBuiltinPassivityV1: true,
+      },
+      acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
+    }) as ExecutionServer;
+    const client = await connectControlClient(server);
+    const session = await mount(client) as ExecutionSession;
+    const events: ExecutionControlEvent[] = [];
+    const unsubscribe = session.subscribeExecutionControl((event) => {
+      events.push(event);
+    });
+    try {
+      await setPolicy(session, true);
+      const lease = await demandAndAcquireLease(server, session);
+      const claim = await server.setExecutionClaim(
+        lease,
+        claimKey(POLICY_SPACE, ""),
+      );
+
+      const external = await Engine.open({
+        url: resolveSpaceStoreUrl(store, POLICY_SPACE),
+      });
+      try {
+        Engine.applyCommit(external, {
+          sessionId: `external-policy-${testCase.name}`,
+          space: POLICY_SPACE,
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [testCase.operation],
+          },
+        });
+      } finally {
+        Engine.close(external);
+      }
+
+      if (testCase.probe === "claim") {
+        await assertRejects(
+          () =>
+            server.setExecutionClaim(
+              lease,
+              claimKey(POLICY_SPACE, "", "action:after-policy-loss"),
+            ),
+          Error,
+          "execution policy",
+        );
+      } else {
+        assertEquals(
+          await server.publishActionSettlement({
+            branch: "",
+            claim,
+            inputBasisSeq: 1,
+            outcome: "no-op",
+          }),
+          false,
+        );
+      }
+
+      assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+      assertEquals(session.executionClaims, []);
+      assertEquals(
+        events.filter((event) =>
+          event.type === "session.execution.claim.revoke"
+        ).length,
+        1,
+      );
+      assertEquals(
+        server.listExecutionDemands(POLICY_SPACE, "").length,
+        1,
+      );
+    } finally {
+      unsubscribe();
+      await client.close();
+      await server.close();
+      await Deno.remove(directory, { recursive: true });
+    }
+  }
+});
+
 Deno.test("claim expiry timer revokes clients and rejects stale settlement", async () => {
   const server = createControlServer("memory-v2-execution-claim-expiry", {
     executionControl: { claimTtlMs: 5 },
