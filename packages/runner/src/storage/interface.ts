@@ -5,12 +5,14 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import type {
+  BranchName,
   CommitPrecondition,
   EntityDocument,
   PatchOp,
   SchedulerActionSnapshotQuery,
   SchedulerExecutionContextKey,
   SchedulerSnapshotListResult,
+  SchedulerWritersForTargetsResult,
   SqliteDbRef,
   SqliteOperation,
   SqliteParamsWire,
@@ -373,6 +375,11 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
     query?: SchedulerActionSnapshotQuery,
   ): Promise<SchedulerSnapshotListResult>;
 
+  /** Authenticated durable writer-index lookup for this provider's space. */
+  writersForTargets?(
+    query: SchedulerWritersForTargetsProviderQuery,
+  ): Promise<SchedulerWritersForTargetsResult>;
+
   /**
    * Conservative scheduler-snapshot currency oracle. Returns true only when
    * every address belongs to this provider, has a confirmed local base, and
@@ -417,6 +424,11 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
     id: string,
     path: string,
   ): Promise<SqliteRegisterDiskSourceResult>;
+}
+
+export interface SchedulerWritersForTargetsProviderQuery {
+  branch?: BranchName;
+  targets: readonly IMemorySpaceAddress[];
 }
 
 /**
