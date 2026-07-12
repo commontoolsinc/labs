@@ -1,4 +1,8 @@
-import type { WireMemoryProtocolFlags } from "@commonfabric/memory/v2";
+import type {
+  ActionClaimKey,
+  ExecutionClaim,
+  WireMemoryProtocolFlags,
+} from "@commonfabric/memory/v2";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Server } from "@commonfabric/memory/v2/server";
 import {
@@ -24,37 +28,69 @@ export interface DenoSpaceExecutorFactoryOptions {
   patternApiUrl?: URL;
   experimental?: ExperimentalOptions;
   protocolFlags?: Partial<WireMemoryProtocolFlags>;
+  /** Host-local shadow diagnostic. Receiving one never transfers authority;
+   * the explicit claim-routing sub-capability controls that separately. */
+  onCandidateClaim?: (candidate: CandidateClaim) => void;
   createWorker?: () => ExecutorWorkerLike;
   createProvider?: (
     options: HostProviderChannelOptions,
   ) => HostProviderChannel;
 }
 
+export interface CandidateClaim {
+  readonly claimKey: ActionClaimKey;
+}
+
 type WorkerResponse = {
-  type: "booted" | "ready" | "complete" | "fatal";
+  type: "booted" | "ready" | "complete" | "fatal" | "candidate-claim";
   requestId?: number;
   message?: string;
+  candidate?: CandidateClaim;
 };
 
 const isWorkerResponse = (value: unknown): value is WorkerResponse => {
   if (typeof value !== "object" || value === null) return false;
   const message = value as Record<string, unknown>;
   return (message.type === "booted" || message.type === "ready" ||
-    message.type === "complete" || message.type === "fatal") &&
+    message.type === "complete" || message.type === "fatal" ||
+    message.type === "candidate-claim") &&
     (message.requestId === undefined ||
       Number.isSafeInteger(message.requestId)) &&
-    (message.message === undefined || typeof message.message === "string");
+    (message.message === undefined || typeof message.message === "string") &&
+    (message.type !== "candidate-claim" ||
+      isCandidateClaim(message.candidate));
 };
+
+const isCandidateClaim = (value: unknown): value is CandidateClaim => {
+  if (typeof value !== "object" || value === null) return false;
+  const claim = (value as { claimKey?: unknown }).claimKey;
+  if (typeof claim !== "object" || claim === null) return false;
+  const key = claim as Record<string, unknown>;
+  return typeof key.branch === "string" && typeof key.space === "string" &&
+    key.contextKey === "space" && typeof key.pieceId === "string" &&
+    typeof key.actionId === "string" &&
+    (key.actionKind === "computation" || key.actionKind === "effect") &&
+    typeof key.implementationFingerprint === "string" &&
+    typeof key.runtimeFingerprint === "string";
+};
+
+const candidateKey = (candidate: CandidateClaim): string =>
+  JSON.stringify(candidate.claimKey);
 
 class DenoSpaceExecutor implements SpaceExecutor {
   readonly #worker: ExecutorWorkerLike;
   readonly #provider: HostProviderChannel;
   readonly #startOptions: SpaceExecutorStartOptions;
+  readonly #server: Server;
+  readonly #protocolFlags: Partial<WireMemoryProtocolFlags>;
+  readonly #onCandidateClaim?: (candidate: CandidateClaim) => void;
+  readonly #claims = new Map<string, ExecutionClaim>();
   readonly #pending = new Map<
     number,
     PromiseWithResolvers<void>
   >();
   readonly #booted = Promise.withResolvers<void>();
+  #claimControl = Promise.resolve();
   #requestId = 0;
   #stopped = false;
   #failed = false;
@@ -63,10 +99,18 @@ class DenoSpaceExecutor implements SpaceExecutor {
     worker: ExecutorWorkerLike,
     provider: HostProviderChannel,
     startOptions: SpaceExecutorStartOptions,
+    control: {
+      server: Server;
+      protocolFlags?: Partial<WireMemoryProtocolFlags>;
+      onCandidateClaim?: (candidate: CandidateClaim) => void;
+    },
   ) {
     this.#worker = worker;
     this.#provider = provider;
     this.#startOptions = startOptions;
+    this.#server = control.server;
+    this.#protocolFlags = control.protocolFlags ?? {};
+    this.#onCandidateClaim = control.onCandidateClaim;
     this.#worker.addEventListener("message", this.#onMessage);
     this.#worker.addEventListener("error", this.#onError);
     this.#worker.addEventListener("messageerror", this.#onMessageError);
@@ -107,8 +151,10 @@ class DenoSpaceExecutor implements SpaceExecutor {
     if (this.#stopped) return;
     this.#stopped = true;
     try {
+      await this.#claimControl;
       if (!this.#failed) await this.#request("stop");
     } finally {
+      this.#revokeClaims();
       this.#detach();
       this.#worker.terminate();
       await this.#provider.dispose();
@@ -149,6 +195,14 @@ class DenoSpaceExecutor implements SpaceExecutor {
       this.#fail(new Error(message.message ?? "executor Worker failed"));
       return;
     }
+    if (message.type === "candidate-claim") {
+      const candidate = message.candidate!;
+      this.#claimControl = this.#claimControl.then(
+        () => this.#handleCandidate(candidate),
+        () => this.#handleCandidate(candidate),
+      ).catch((error) => this.#fail(error));
+      return;
+    }
     if (message.requestId === undefined) {
       this.#fail(new Error("executor Worker response has no request id"));
       return;
@@ -161,6 +215,43 @@ class DenoSpaceExecutor implements SpaceExecutor {
     this.#pending.delete(message.requestId);
     pending.resolve();
   };
+
+  async #handleCandidate(candidate: CandidateClaim): Promise<void> {
+    this.#onCandidateClaim?.(candidate);
+    const key = candidate.claimKey;
+    if (
+      key.space !== this.#startOptions.space ||
+      key.branch !== this.#startOptions.branch
+    ) {
+      throw new Error("executor CandidateClaim escaped its bound lane");
+    }
+    const routingEnabled =
+      this.#protocolFlags.serverPrimaryExecutionV1 === true &&
+      this.#protocolFlags.serverPrimaryExecutionClaimRoutingV1 === true &&
+      (key.actionKind !== "effect" ||
+        this.#protocolFlags.serverPrimaryExecutionBuiltinPassivityV1 === true);
+    const mapKey = candidateKey(candidate);
+    if (!routingEnabled || this.#claims.has(mapKey) || this.#stopped) return;
+
+    const claim = await this.#server.setExecutionClaim(
+      this.#startOptions.lease,
+      key,
+    );
+    if (this.#stopped || this.#failed) {
+      this.#revokeClaim(claim);
+      return;
+    }
+    this.#claims.set(mapKey, claim);
+    this.#worker.postMessage({
+      type: "run-claimed-action",
+      claim,
+      assertion: {
+        contextKey: claim.contextKey,
+        leaseGeneration: claim.leaseGeneration,
+        claimGeneration: claim.claimGeneration,
+      },
+    });
+  }
 
   #onError = (event: Event): void => {
     const error = event as ErrorEvent;
@@ -179,10 +270,23 @@ class DenoSpaceExecutor implements SpaceExecutor {
     this.#booted.reject(failure);
     for (const pending of this.#pending.values()) pending.reject(failure);
     this.#pending.clear();
+    this.#revokeClaims();
     this.#detach();
     this.#worker.terminate();
     void this.#provider.dispose();
     this.#startOptions.onCrash(failure);
+  }
+
+  #revokeClaims(): void {
+    for (const claim of this.#claims.values()) {
+      this.#revokeClaim(claim);
+    }
+    this.#claims.clear();
+  }
+
+  #revokeClaim(claim: ExecutionClaim): void {
+    const revoke = (this.#server as Partial<Server>).revokeExecutionClaim;
+    if (typeof revoke === "function") revoke.call(this.#server, claim);
   }
 
   #detach(): void {
@@ -224,7 +328,11 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
       await provider.dispose();
       throw error;
     }
-    const executor = new DenoSpaceExecutor(worker, provider, options);
+    const executor = new DenoSpaceExecutor(worker, provider, options, {
+      server: this.options.server,
+      protocolFlags: this.options.protocolFlags,
+      onCandidateClaim: this.options.onCandidateClaim,
+    });
     try {
       await executor.initialize({
         apiUrl: this.options.apiUrl,
