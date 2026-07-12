@@ -9,13 +9,11 @@ Deno.test("executor shadow runtime records but never releases external sink effe
     "executor shadow external sink suppression",
   );
   const storage = StorageManager.emulate({ as: signer });
-  const runtime = new Runtime(
-    {
-      apiUrl: new URL(import.meta.url),
-      storageManager: storage,
-      externalSinkDisposition: "suppress",
-    } as ConstructorParameters<typeof Runtime>[0],
-  );
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+    externalSinkDisposition: "suppress",
+  });
 
   try {
     const transaction = runtime.edit();
