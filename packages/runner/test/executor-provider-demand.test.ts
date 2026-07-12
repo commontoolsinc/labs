@@ -74,6 +74,79 @@ Deno.test("executor host provider rejects client demand before canonical registr
   }
 });
 
+Deno.test("executor host provider rejects legacy background control", async () => {
+  const server = new Server({
+    authorizeSessionOpen: () => SPACE,
+    sessionOpenAuth: { audience: SPACE },
+    protocolFlags: { serverPrimaryExecutionV1: true },
+    acl: { mode: "off", serviceDids: [SPACE] },
+  });
+  const channel = createHostProviderChannel({
+    server,
+    space: SPACE,
+    authorizeSessionOpen: (_space, _session, context) => ({
+      invocation: {
+        aud: context.audience,
+        challenge: context.challenge.value,
+      },
+      authorization: { principal: SPACE },
+    }),
+  });
+  const responses = new Map<
+    string,
+    PromiseWithResolvers<ResponseMessage<never>>
+  >();
+  channel.port.addEventListener("message", (event: MessageEvent<unknown>) => {
+    const envelope = event.data as { type?: unknown; payload?: unknown };
+    if (envelope.type !== "memory" || typeof envelope.payload !== "string") {
+      return;
+    }
+    const message = decodeMemoryBoundary(envelope.payload);
+    if (typeof message !== "object" || message === null) return;
+    const requestId = (message as { requestId?: unknown }).requestId;
+    if (typeof requestId !== "string") return;
+    responses.get(requestId)?.resolve(message as ResponseMessage<never>);
+  });
+  channel.port.start();
+
+  try {
+    for (
+      const [operation, extra] of [
+        ["acquire", {}],
+        ["renew", { exclusionGeneration: 1 }],
+        ["release", { exclusionGeneration: 1 }],
+      ] as const
+    ) {
+      const requestId = `legacy-background:${operation}`;
+      const response = Promise.withResolvers<ResponseMessage<never>>();
+      responses.set(requestId, response);
+      channel.port.postMessage({
+        type: "memory",
+        payload: encodeMemoryBoundary({
+          type: `session.execution.legacy-background.${operation}`,
+          requestId,
+          space: SPACE,
+          sessionId: "session:executor",
+          branch: "",
+          ...extra,
+        }),
+      });
+      assertEquals(await response.promise, {
+        type: "response",
+        requestId,
+        error: {
+          name: "AuthorizationError",
+          message:
+            "executor providers cannot control legacy background execution",
+        },
+      });
+    }
+  } finally {
+    await channel.dispose();
+    await server.close();
+  }
+});
+
 Deno.test("shadow executor host provider rejects leaked upstream transactions", async () => {
   const server = new Server({
     authorizeSessionOpen(message) {
