@@ -922,6 +922,12 @@ Deno.test("executor host provider source has no engine mutation bypass", async (
   assertEquals(source.includes("applyCommit"), false);
   assertEquals(source.includes("/v2/engine"), false);
   assertEquals(source.includes("this.session.watchAddSync"), false);
+  assertEquals(
+    source.includes(
+      "executor providers cannot originate client execution demand",
+    ),
+    true,
+  );
 });
 
 Deno.test("executor host provider closes the initial read and invalidation race", async () => {
