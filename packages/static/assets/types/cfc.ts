@@ -142,6 +142,66 @@ export type CfcModulePolicyRefAtom = CfcAtomObject & {
   readonly hash?: never;
 };
 export type CfcPolicyRefAtom = CfcNamedPolicyRefAtom | CfcModulePolicyRefAtom;
+export type CfcPatternVariable = CfcAtomObject & {
+  readonly var: string;
+};
+export type CfcThisPolicySubjectPattern = CfcAtomObject & {
+  readonly thisPolicyField: "subject";
+};
+export type CfcThisPolicyPattern = CfcAtomObject & {
+  readonly thisPolicy: true;
+  readonly subject: CfcThisPolicySubjectPattern;
+};
+export type CfcPatternString =
+  | string
+  | CfcPatternVariable
+  | CfcThisPolicySubjectPattern;
+export type CfcUserPattern = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.User;
+  readonly subject: CfcPatternString;
+};
+export type CfcHasRolePattern = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.HasRole;
+  readonly principal: CfcPatternString;
+  readonly space: CfcPatternString;
+  readonly role: "owner" | "writer" | "reader" | CfcPatternVariable;
+};
+export type CfcExchangeRuleAuthoringInput = {
+  readonly appliesTo: CfcThisPolicyPattern;
+  readonly pre?: {
+    readonly confidentiality?: readonly CfcAtom[];
+    readonly integrity?: readonly CfcAtom[];
+  };
+  readonly preConfScope?: "targetClause" | "anywhere";
+  readonly guard?: {
+    readonly policyState: readonly CfcAtom[];
+  };
+  readonly post: {
+    readonly addAlternatives: readonly CfcAtom[];
+  } | {
+    readonly dropClause: true;
+  };
+};
+export type CfcExchangeRuleDeclaration<
+  T extends CfcExchangeRuleAuthoringInput = CfcExchangeRuleAuthoringInput,
+> = Readonly<T> & {
+  readonly __ct_cfc_exchange_rule__?: true;
+};
+export type CfcExchangeRulesDeclaration<
+  T extends readonly CfcExchangeRuleDeclaration[] =
+    readonly CfcExchangeRuleDeclaration[],
+> = Readonly<T> & {
+  readonly __ct_cfc_exchange_rules__?: true;
+};
+export declare function v(name: string): CfcPatternVariable;
+export declare const THIS_POLICY: CfcThisPolicyPattern;
+export declare const cfcPattern: any;
+export declare function exchangeRule<
+  const T extends CfcExchangeRuleAuthoringInput,
+>(input: T): CfcExchangeRuleDeclaration<T>;
+export declare function exchangeRules<
+  const T extends readonly CfcExchangeRuleDeclaration[],
+>(rules: T): CfcExchangeRulesDeclaration<T>;
 export type CfcSpaceAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Space;
   readonly id: string;

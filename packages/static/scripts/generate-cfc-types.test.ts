@@ -67,9 +67,10 @@ function exportedDeclarationNames(source: ts.SourceFile): Set<string> {
     if (!isExported) continue;
     if (
       ts.isTypeAliasDeclaration(statement) ||
-      ts.isInterfaceDeclaration(statement)
+      ts.isInterfaceDeclaration(statement) ||
+      ts.isFunctionDeclaration(statement)
     ) {
-      names.add(statement.name.text);
+      if (statement.name) names.add(statement.name.text);
     } else if (ts.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
         if (ts.isIdentifier(declaration.name)) names.add(declaration.name.text);
@@ -212,6 +213,17 @@ Deno.test("withExport throws on an unsupported declaration kind", () => {
 
 Deno.test("declarationName returns undefined for a non-declaration", () => {
   assertEquals(declarationName(parse("doThing();").statements[0]), undefined);
+});
+
+Deno.test("flatten preserves public declaration-only functions", () => {
+  const body = flatten(
+    "export declare function make<T>(value: T): Box<T>;\ninterface Box<T> { value: T }\n",
+    "x.d.ts",
+    new Set(["make"]),
+  );
+  assert(body.includes("export declare function make<T>"));
+  assert(body.includes("interface Box<T>"));
+  assert(!body.includes("export interface Box<T>"));
 });
 
 Deno.test("flatten skips non-declarations and drops unreferenced types", () => {
