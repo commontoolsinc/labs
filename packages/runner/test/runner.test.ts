@@ -94,10 +94,8 @@ describe("runPattern", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     } as Pattern;
@@ -289,10 +287,8 @@ describe("runPattern", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     } as Pattern;
@@ -359,10 +355,8 @@ describe("runPattern", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     } as Pattern;
@@ -439,14 +433,10 @@ describe("runPattern", () => {
             type: "passthrough",
           },
           inputs: {
-            value: {
-              $alias: { cell: "argument", path: ["input"], defer: 1 },
-            },
+            $alias: { cell: "argument", path: ["input"], defer: 1 },
           },
           outputs: {
-            value: {
-              $alias: { partialCause: "output", path: [], defer: 1 },
-            },
+            $alias: { partialCause: "output", path: [], defer: 1 },
           },
         },
       ],
@@ -612,7 +602,7 @@ describe("runPattern", () => {
     expect(sourceDataReads).toBe(0);
   });
 
-  it("should run a simple module with no outputs", async () => {
+  it("should write undefined from a simple module", async () => {
     let ran = false;
 
     const mockPattern: Pattern = {
@@ -628,14 +618,14 @@ describe("runPattern", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["value"] } },
-          outputs: {},
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
 
     const resultCell = runtime.getCell(
       space,
-      "should run a simple module with no outputs",
+      "should write undefined from a simple module",
     );
     const result = await runtime.runSynced(
       resultCell,
@@ -665,7 +655,7 @@ describe("runPattern", () => {
             },
           },
           inputs: { $alias: { cell: "argument", path: ["other"] } },
-          outputs: {},
+          outputs: { $alias: { partialCause: "result", path: [] } },
         },
       ],
     };
@@ -1361,10 +1351,8 @@ describe("setup/start", () => {
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };
@@ -1696,10 +1684,8 @@ describe("setup/start", () => {
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };
@@ -1826,10 +1812,8 @@ describe("setup/start", () => {
       nodes: [
         {
           module: { type: "passthrough" },
-          inputs: { value: { $alias: { cell: "argument", path: ["input"] } } },
-          outputs: {
-            value: { $alias: { partialCause: "output", path: [] } },
-          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
         },
       ],
     };
