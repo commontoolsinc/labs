@@ -52,10 +52,10 @@ class FakeExecutionControl {
     };
   }
 
-  async acquireExecutionLease(): Promise<ExecutionLeaseHandle | null> {
+  acquireExecutionLease(): Promise<ExecutionLeaseHandle | null> {
     this.acquired++;
     this.current ??= lease(this.acquired);
-    return this.current;
+    return Promise.resolve(this.current);
   }
 
   currentExecutionLease(): Promise<ExecutionLease | null> {
@@ -68,22 +68,22 @@ class FakeExecutionControl {
     return Promise.resolve(current);
   }
 
-  async beginExecutionLeaseDrain(
+  beginExecutionLeaseDrain(
     current: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null> {
     this.drains++;
     const draining = { ...current, state: "draining" as const };
     this.current = draining as ExecutionLeaseHandle;
-    return this.current;
+    return Promise.resolve(this.current);
   }
 
-  async finishExecutionLeaseDrain(
+  finishExecutionLeaseDrain(
     current: ExecutionLeaseHandle,
   ): Promise<ExecutionLease | null> {
     this.finished++;
     const revoked = { ...current, state: "revoked" as const };
     this.current = null;
-    return revoked;
+    return Promise.resolve(revoked);
   }
 
   emit(order: number, demands: readonly AuthenticatedExecutionDemand[]) {
@@ -102,8 +102,9 @@ class FakeExecutor implements SpaceExecutor {
   wakes = 0;
   stopped = 0;
 
-  async setDemand(pieces: readonly string[]): Promise<void> {
+  setDemand(pieces: readonly string[]): Promise<void> {
     this.demandUpdates = [...this.demandUpdates, [...pieces]];
+    return Promise.resolve();
   }
 
   wake(): Promise<void> {
@@ -121,13 +122,13 @@ class FakeExecutorFactory implements SpaceExecutorFactory {
   readonly executors: FakeExecutor[] = [];
   starts: Parameters<SpaceExecutorFactory["start"]>[0][] = [];
 
-  async start(
+  start(
     options: Parameters<SpaceExecutorFactory["start"]>[0],
   ): Promise<SpaceExecutor> {
     this.starts.push(options);
     const executor = new FakeExecutor();
     this.executors.push(executor);
-    return executor;
+    return Promise.resolve(executor);
   }
 }
 
