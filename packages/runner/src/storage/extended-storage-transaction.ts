@@ -128,9 +128,20 @@ type CfcInstrumentationHooks = {
   // one summary per prepared transaction that measured a protected write.
   // When absent — the default — the prepare gate skips all measurement.
   onPrefixProvenance?(summary: CfcPrefixProvenanceSummary): void;
-  resolvePolicyManifest?(reference: unknown): unknown;
-  hasPolicyManifest?(space: MemorySpace, reference: unknown): boolean;
-  installPolicyManifest?(space: MemorySpace, reference: unknown): boolean;
+  resolvePolicyManifest?(
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+  ): unknown;
+  hasPolicyManifest?(
+    space: MemorySpace,
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+  ): boolean;
+  installPolicyManifest?(
+    space: MemorySpace,
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+  ): boolean;
 };
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -364,17 +375,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   resolveCfcPolicyManifest(reference: unknown): unknown {
-    return this.cfcInstrumentation.resolvePolicyManifest?.(reference);
+    return this.cfcInstrumentation.resolvePolicyManifest?.(reference, this);
   }
 
   hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
-    return this.cfcInstrumentation.hasPolicyManifest?.(space, reference) ??
-      false;
+    return this.cfcInstrumentation.hasPolicyManifest?.(
+      space,
+      reference,
+      this,
+    ) ?? false;
   }
 
   installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
-    return this.cfcInstrumentation.installPolicyManifest?.(space, reference) ??
-      false;
+    return this.cfcInstrumentation.installPolicyManifest?.(
+      space,
+      reference,
+      this,
+    ) ?? false;
   }
 
   setCfcEnforcementMode(mode: CfcEnforcementMode): void {

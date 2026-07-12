@@ -97,6 +97,7 @@ import {
   validateCfcPolicyArtifactManifest,
 } from "./cfc/policy.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
@@ -523,6 +524,14 @@ export const spaceCellSchema = internSchema(
   },
 );
 
+const CFC_POLICY_MANIFEST_DOC_SCHEMA = {
+  type: "object",
+  additionalProperties: true,
+} as const satisfies JSONSchema;
+
+const cfcPolicyManifestCause = (policyDigest: string) =>
+  `cfc-policy-manifest-${policyDigest}`;
+
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
 }
@@ -631,6 +640,24 @@ export class Runtime {
 
   resolveCfcPolicyManifest(
     reference: unknown,
+    tx?: IExtendedStorageTransaction,
+  ): PolicyArtifactManifestV1 | undefined {
+    if (tx === undefined) return this.#registeredCfcPolicyManifest(reference);
+    let artifact: PolicyArtifactManifestV1 | undefined;
+    const spaces = new Set<MemorySpace>();
+    const log = tx.getReactivityLog?.();
+    for (const address of [...(log?.writes ?? []), ...(log?.reads ?? [])]) {
+      spaces.add(address.space);
+    }
+    for (const space of spaces) {
+      artifact = this.#readCfcPolicyManifest(space, reference, tx);
+      if (artifact !== undefined) break;
+    }
+    return artifact;
+  }
+
+  #registeredCfcPolicyManifest(
+    reference: unknown,
   ): PolicyArtifactManifestV1 | undefined {
     if (
       !reference || typeof reference !== "object" || Array.isArray(reference)
@@ -647,16 +674,57 @@ export class Runtime {
       : undefined;
   }
 
-  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
-    const artifact = this.resolveCfcPolicyManifest(reference);
+  hasCfcPolicyManifest(
+    space: MemorySpace,
+    reference: unknown,
+    tx?: IExtendedStorageTransaction,
+  ): boolean {
+    const artifact = tx === undefined
+      ? this.#registeredCfcPolicyManifest(reference)
+      : this.#readCfcPolicyManifest(space, reference, tx);
     return artifact !== undefined &&
       this.#policyManifestSpaces.get(artifact.policyDigest)?.has(space) ===
         true;
   }
 
-  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
-    const artifact = this.resolveCfcPolicyManifest(reference);
+  installCfcPolicyManifest(
+    space: MemorySpace,
+    reference: unknown,
+    tx?: IExtendedStorageTransaction,
+  ): boolean {
+    const artifact = this.#registeredCfcPolicyManifest(reference) ??
+      (tx === undefined
+        ? undefined
+        : this.#readCfcPolicyManifest(space, reference, tx));
     if (artifact === undefined) return false;
+    if (tx !== undefined) {
+      const cell = this.getCell(
+        space,
+        cfcPolicyManifestCause(artifact.policyDigest),
+        CFC_POLICY_MANIFEST_DOC_SCHEMA,
+        tx,
+      );
+      const existing = snapshotQueryResult(cell.get());
+      if (existing === undefined) {
+        cell.set(artifact);
+        tx.markCreateOnly?.(cell.getAsNormalizedFullLink());
+      } else {
+        let verified: PolicyArtifactManifestV1;
+        try {
+          verified = validateCfcPolicyArtifactManifest(existing);
+        } catch (error) {
+          throw new Error(
+            `cfcPolicyManifest: invalid destination artifact for ${artifact.policyDigest}`,
+            { cause: error },
+          );
+        }
+        if (!deepEqual(verified, artifact)) {
+          throw new Error(
+            `cfcPolicyManifest: immutable destination collision for ${artifact.policyDigest}`,
+          );
+        }
+      }
+    }
     let spaces = this.#policyManifestSpaces.get(artifact.policyDigest);
     if (spaces === undefined) {
       spaces = new Set();
@@ -664,6 +732,39 @@ export class Runtime {
     }
     spaces.add(space);
     return true;
+  }
+
+  #readCfcPolicyManifest(
+    space: MemorySpace,
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+  ): PolicyArtifactManifestV1 | undefined {
+    if (
+      !reference || typeof reference !== "object" || Array.isArray(reference)
+    ) return undefined;
+    const candidate = reference as Record<string, unknown>;
+    if (typeof candidate.policyDigest !== "string") return undefined;
+    const cell = this.getCell(
+      space,
+      cfcPolicyManifestCause(candidate.policyDigest),
+      CFC_POLICY_MANIFEST_DOC_SCHEMA,
+      tx,
+    );
+    const stored = snapshotQueryResult(cell.get());
+    if (stored === undefined) return undefined;
+    let artifact: PolicyArtifactManifestV1;
+    try {
+      artifact = validateCfcPolicyArtifactManifest(stored);
+    } catch {
+      return undefined;
+    }
+    if (
+      artifact.policyDigest !== candidate.policyDigest ||
+      artifact.manifest.moduleIdentity !== candidate.moduleIdentity ||
+      artifact.manifest.symbol !== candidate.symbol
+    ) return undefined;
+    this.registerCfcPolicyManifests(space, [artifact]);
+    return artifact;
   }
 
   constructor(options: RuntimeOptions) {
@@ -1016,12 +1117,12 @@ export class Runtime {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
     const wrapped = new ExtendedStorageTransaction(tx, {
-      resolvePolicyManifest: (reference) =>
-        this.resolveCfcPolicyManifest(reference),
-      hasPolicyManifest: (space, reference) =>
-        this.hasCfcPolicyManifest(space, reference),
-      installPolicyManifest: (space, reference) =>
-        this.installCfcPolicyManifest(space, reference),
+      resolvePolicyManifest: (reference, tx) =>
+        this.resolveCfcPolicyManifest(reference, tx),
+      hasPolicyManifest: (space, reference, tx) =>
+        this.hasCfcPolicyManifest(space, reference, tx),
+      installPolicyManifest: (space, reference, tx) =>
+        this.installCfcPolicyManifest(space, reference, tx),
       onRelevantTx: () => {
         this.cfcStats.cfcRelevantTx += 1;
       },

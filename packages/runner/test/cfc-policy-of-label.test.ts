@@ -177,4 +177,64 @@ describe("PolicyOf label-time binding", () => {
     expect(reference.subject).toBe(space);
     expect(typeof reference.policyDigest).toBe("string");
   });
+
+  it("cold-loads the destination manifest without the producer module", async () => {
+    const program = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `/// <cts-enable />
+          import { Confidential, toSchema } from "commonfabric";
+          import type { PolicyOf } from "commonfabric/cfc";
+          import {
+            cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+          } from "commonfabric/cfc";
+          export const release = exchangeRule({
+            appliesTo: THIS_POLICY,
+            pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+            post: { addAlternatives: [cfcPattern.user(v("user"))] },
+          });
+          export const rules = exchangeRules([release]);
+          export const schema = toSchema<
+            Confidential<string, [PolicyOf<typeof rules>]>
+          >();
+        `,
+      }],
+    };
+    const engine = runtime.harness as Engine;
+    const compiled = await engine.compileToRecordGraph(program);
+    const evaluated = engine.evaluateRecordGraph(
+      compiled.id,
+      compiled.graph,
+      compiled.mainSpecifier,
+      program.files,
+    );
+    const emittedSchema = evaluated.main?.schema as JSONSchema;
+
+    const installTx = runtime.edit();
+    runtime.getCell(space, "durable-policy", emittedSchema, installTx).set(
+      "secret",
+    );
+    installTx.prepareCfc();
+    expect((await installTx.commit()).ok).toBeDefined();
+
+    const coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const coldTx = coldRuntime.edit();
+      coldRuntime.getCell(
+        space,
+        "cold-policy",
+        emittedSchema,
+        coldTx,
+      ).set("secret after restart");
+      coldTx.prepareCfc();
+      expect((await coldTx.commit()).ok).toBeDefined();
+    } finally {
+      await coldRuntime.dispose();
+    }
+  });
 });
