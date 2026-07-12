@@ -1,7 +1,8 @@
-import type {
-  SchedulerMatchedWrite,
-  SchedulerWriterCandidate as DurableSchedulerWriterCandidate,
-} from "@commonfabric/memory/v2/engine";
+import {
+  type SchedulerWriterCandidate as DurableSchedulerWriterCandidate,
+  type SchedulerWriterMatch,
+  toDocumentPath,
+} from "@commonfabric/memory/v2";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { NodeStatus } from "../src/scheduler/node-record.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
@@ -120,13 +121,13 @@ function durableWriter(
   target: IMemorySpaceAddress,
   overrides: Partial<DurableSchedulerWriterCandidate> = {},
 ): DurableSchedulerWriterCandidate {
-  const matchedWrite: SchedulerMatchedWrite = {
+  const matchedWrite: SchedulerWriterMatch = {
     kind: "current-known",
     write: {
       ...target,
       scope: target.scope ?? "space",
       scopeKey: "space",
-      path: [...target.path],
+      path: toDocumentPath([...target.path]),
     },
   };
   return {
@@ -366,6 +367,38 @@ describe("scheduler writer lookup", () => {
         "writer-lookup:a-first",
         "writer-lookup:z-last",
       ]);
+    } finally {
+      await disposeSchedulerTestRuntime(env);
+    }
+  });
+
+  it("fails open for a mixed-space target set", async () => {
+    const env = createSchedulerTestRuntime(import.meta.url);
+    try {
+      stubDurableWriters(env.runtime, []);
+      const output = env.runtime.getCell<number>(
+        space,
+        "writer-lookup-mixed-space-output",
+        undefined,
+        env.tx,
+      );
+      const outputLink = output.getAsNormalizedFullLink();
+      registerIdentifiedWriter(
+        env.runtime,
+        createWriterAction("writer-lookup:mixed-space", {
+          writes: [outputLink],
+        }),
+      );
+
+      expect(
+        await writersForTargets(env.runtime, [
+          toMemorySpaceAddress(outputLink),
+          {
+            ...toMemorySpaceAddress(outputLink),
+            space: "did:key:other-space" as typeof space,
+          },
+        ]),
+      ).toEqual([]);
     } finally {
       await disposeSchedulerTestRuntime(env);
     }
