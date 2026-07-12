@@ -187,7 +187,7 @@ Deno.test("shadow executor host provider rejects leaked upstream transactions", 
     assertEquals(result.error?.name, "TransactionError");
     assertEquals(
       result.error?.message.includes(
-        "shadow executor providers cannot transact upstream",
+        "shadow executor providers require an exact claimed action assertion",
       ),
       true,
     );

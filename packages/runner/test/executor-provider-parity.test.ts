@@ -311,7 +311,24 @@ Deno.test("executor host provider binds accepted action provenance to its authen
   );
   assertEquals(sessionAuthorizationCalls, 1);
   const actionId = "action:executor-provenance";
-  const baseObservation = schedulerObservationFor(space, actionId);
+  const outputAddress = {
+    space,
+    id: "of:executor-provider:provenance-output",
+    scope: "space" as const,
+    path: [],
+  };
+  const observationTemplate = schedulerObservationFor(space, actionId);
+  const baseObservation = {
+    ...observationTemplate,
+    actualChangedWrites: [outputAddress],
+    currentKnownWrites: [outputAddress],
+    declaredWrites: [outputAddress],
+    completeActionScopeSummary: {
+      ...observationTemplate.completeActionScopeSummary,
+      writes: [outputAddress],
+      directOutputs: [outputAddress],
+    },
+  };
   await observer.setExecutionDemand("", [baseObservation.pieceId]);
   const lease = await server.acquireExecutionLease(space, "");
   assertExists(lease);

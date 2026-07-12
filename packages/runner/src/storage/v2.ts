@@ -917,6 +917,12 @@ export class StorageManager implements IStorageManager {
     return provider;
   }
 
+  /** Remove optimistic executor-shadow versions produced by one live action
+   * before rerunning that action under an authoritative claim. */
+  discardShadowWritesForAction(space: MemorySpace, action: object): void {
+    this.#providers.get(space)?.replica.discardShadowWritesForAction(action);
+  }
+
   /**
    * Mount the normal user session, but serialize fresh-space ACL genesis ahead
    * of any replica work when this manager holds the space key. The temporary
@@ -1693,6 +1699,7 @@ class SpaceReplica implements ISpaceReplica {
   readonly #createSession: () => Promise<ReplicaSessionHandle>;
   readonly #shadowWrites: boolean;
   readonly #actionTransactionRouter?: ActionTransactionRouter;
+  readonly #shadowLocalSeqsByAction = new WeakMap<object, Set<number>>();
   #sessionHandle?: Promise<ReplicaSessionHandle>;
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
@@ -2675,6 +2682,17 @@ class SpaceReplica implements ISpaceReplica {
     // In both cases the whole action remains local and no scheduler,
     // precondition, SQLite, or semantic operation reaches the host.
     if (route.disposition === "local") {
+      if (
+        route.kind === "executor-shadow" && operations.length > 0 &&
+        source?.sourceAction !== undefined
+      ) {
+        let localSeqs = this.#shadowLocalSeqsByAction.get(source.sourceAction);
+        if (localSeqs === undefined) {
+          localSeqs = new Set();
+          this.#shadowLocalSeqsByAction.set(source.sourceAction, localSeqs);
+        }
+        localSeqs.add(localSeq);
+      }
       return { ok: {} };
     }
 
@@ -2725,6 +2743,20 @@ class SpaceReplica implements ISpaceReplica {
       ]);
     }
     return fallback;
+  }
+
+  discardShadowWritesForAction(action: object): void {
+    const localSeqs = this.#shadowLocalSeqsByAction.get(action);
+    if (localSeqs === undefined || localSeqs.size === 0) return;
+    for (const record of this.#docs.values()) {
+      const next = record.pending.filter((entry) =>
+        !localSeqs.has(entry.localSeq)
+      );
+      if (next.length === record.pending.length) continue;
+      record.pending = next;
+      record.materialized = undefined;
+    }
+    this.#shadowLocalSeqsByAction.delete(action);
   }
 
   private async pushCommit(

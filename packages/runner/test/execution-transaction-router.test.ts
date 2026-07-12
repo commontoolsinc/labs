@@ -126,3 +126,39 @@ Deno.test("action transaction router can send an exact action upstream", async (
     },
   );
 });
+
+Deno.test("claimed rerun can discard only its earlier executor-shadow writes", async () => {
+  const sourceAction = {};
+  await withServer(
+    () => ({ disposition: "local", kind: "executor-shadow" }),
+    async (_server, storage) => {
+      const tx = storage.edit();
+      tx.sourceAction = sourceAction;
+      const writer = tx.writer(SPACE);
+      if (writer.error) throw writer.error;
+      const written = writer.ok.write({
+        id: OUTPUT,
+        type: "application/json",
+        path: ["value"],
+      }, { route: "shadow" });
+      if (written.error) throw written.error;
+      assertEquals(await tx.commit(), { ok: {} });
+      assertEquals(
+        storage.open(SPACE).replica.get({
+          id: OUTPUT,
+          type: "application/json",
+        })?.is,
+        { value: { route: "shadow" } },
+      );
+
+      storage.discardShadowWritesForAction(SPACE, sourceAction);
+      assertEquals(
+        storage.open(SPACE).replica.get({
+          id: OUTPUT,
+          type: "application/json",
+        })?.is,
+        undefined,
+      );
+    },
+  );
+});

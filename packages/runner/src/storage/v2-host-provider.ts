@@ -30,7 +30,12 @@ import {
   type Server,
 } from "@commonfabric/memory/v2/server";
 import type { BranchName } from "@commonfabric/memory/v2";
-import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
+import {
+  type ActionTransactionRouter,
+  type Options,
+  type SessionFactory,
+  StorageManager,
+} from "./v2.ts";
 import type { ReplicaSession } from "./v2-replica-session.ts";
 
 interface AcceptedCommitNotice {
@@ -105,6 +110,14 @@ const requestIdOf = (message: unknown): string =>
 
 const messageSpace = (message: ReturnType<typeof parseClientMessage>) =>
   message !== null && "space" in message ? message.space : undefined;
+
+const hasExecutionClaimAssertion = (commit: ClientCommit): boolean => {
+  const observation = commit.schedulerObservation;
+  return typeof observation === "object" && observation !== null &&
+    !Array.isArray(observation) &&
+    typeof (observation as Record<string, unknown>)
+        .executionClaimAssertion === "object";
+};
 
 const toAcceptedCommitNotice = (
   event: AcceptedCommitEvent,
@@ -272,10 +285,14 @@ export function createHostProviderChannel(
       });
       return;
     }
-    if (options.shadowWrites === true && parsed.type === "transact") {
+    if (
+      options.shadowWrites === true && parsed.type === "transact" &&
+      !hasExecutionClaimAssertion(parsed.commit)
+    ) {
       sendError(parsed.requestId, {
         name: "AuthorizationError",
-        message: "shadow executor providers cannot transact upstream",
+        message:
+          "shadow executor providers require an exact claimed action assertion",
       });
       return;
     }
@@ -866,6 +883,9 @@ export interface HostStorageManagerOptions {
   /** Keep executor-derived writes inside the Worker replica for shadow graph
    * discovery. No transaction or scheduler operation reaches the host. */
   shadowWrites?: boolean;
+  /** Worker-local whole-action routing. The host still validates every
+   * asserted upstream transaction against its live lease and claim. */
+  actionTransactionRouter?: ActionTransactionRouter;
 }
 
 /** StorageManager construction available inside the executor Worker. */
@@ -878,6 +898,7 @@ export class HostStorageManager extends StorageManager {
         id: options.id,
         settings: options.settings,
         shadowWrites: options.shadowWrites,
+        actionTransactionRouter: options.actionTransactionRouter,
         // The host channel is already pinned to the memory Server.
         memoryHost: new URL("memory://executor-provider"),
       },

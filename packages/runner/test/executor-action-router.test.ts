@@ -50,7 +50,7 @@ const observation = () => ({
       space: SPACE,
       scope: "space" as const,
       id: "of:action-router-piece",
-      path: toDocumentPath(["value"]),
+      path: ["value"],
     },
     reads: [{
       space: SPACE,
@@ -71,7 +71,7 @@ const commit = (): ClientCommit => ({
     confirmed: [{
       id: "of:action-router-input",
       scope: "space",
-      path: ["value"],
+      path: toDocumentPath(["value"]),
       seq: 2,
     }],
     pending: [],

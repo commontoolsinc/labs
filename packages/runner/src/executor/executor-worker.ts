@@ -2,22 +2,31 @@
 
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type {
+  ActionClaimKey,
   BranchName,
+  ExecutionClaim,
   WireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import {
+  type Action,
   type Cell,
   entityIdFrom,
   type ExperimentalOptions,
   Runtime,
   runtimePresets,
 } from "../index.ts";
+import { createExecutorActionTransactionRouter } from "./action-transaction-router.ts";
 import type { IStorageNotification } from "../storage/interface.ts";
 import { HostStorageManager } from "../storage/v2-host-provider.ts";
 
 type WorkerRequest = {
-  type: "initialize" | "set-demand" | "wake" | "stop";
-  requestId: number;
+  type:
+    | "initialize"
+    | "set-demand"
+    | "wake"
+    | "stop"
+    | "run-claimed-action";
+  requestId?: number;
   space?: string;
   branch?: BranchName;
   principal?: string;
@@ -28,6 +37,7 @@ type WorkerRequest = {
   patternApiUrl?: string;
   experimental?: ExperimentalOptions;
   protocolFlags?: Partial<WireMemoryProtocolFlags>;
+  claim?: ExecutionClaim;
 };
 
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
@@ -35,6 +45,8 @@ let runtime: Runtime | null = null;
 let storage: HostStorageManager | null = null;
 let space: MemorySpace | null = null;
 const demanded = new Map<string, Cell<unknown>>();
+const candidateActions = new Map<string, Action>();
+const claimsByAction = new WeakMap<object, ExecutionClaim>();
 let cancelStorageSubscription: (() => void) | null = null;
 let work = Promise.resolve();
 let stopped = false;
@@ -52,6 +64,18 @@ const enqueue = (operation: () => Promise<void>): Promise<void> => {
 
 const normalizePieceId = (pieceId: string): string =>
   pieceId.startsWith("of:") ? pieceId.slice(3) : pieceId;
+
+const claimKey = (claim: ActionClaimKey): string =>
+  JSON.stringify({
+    branch: claim.branch,
+    space: claim.space,
+    contextKey: claim.contextKey,
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+    actionKind: claim.actionKind,
+    implementationFingerprint: claim.implementationFingerprint,
+    runtimeFingerprint: claim.runtimeFingerprint,
+  });
 
 const pullDemand = async (): Promise<void> => {
   for (const cell of demanded.values()) await cell.pull();
@@ -98,6 +122,18 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     throw new Error("invalid executor Worker initialization");
   }
   space = request.space as MemorySpace;
+  const actionTransactionRouter = createExecutorActionTransactionRouter({
+    servedSpace: space,
+    branch: request.branch ?? "",
+    claimForAction: (action) => claimsByAction.get(action),
+    onCandidate: (candidate, sourceAction) => {
+      candidateActions.set(
+        claimKey(candidate.claimKey),
+        sourceAction as Action,
+      );
+      worker.postMessage({ type: "candidate-claim", candidate });
+    },
+  });
   storage = HostStorageManager.connect({
     port: request.port,
     principal: request.principal as MemorySpace,
@@ -105,6 +141,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     branch: request.branch ?? "",
     protocolFlags: request.protocolFlags,
     shadowWrites: true,
+    actionTransactionRouter,
   });
   runtime = new Runtime(runtimePresets.productionServer({
     apiUrl: new URL(request.apiUrl),
@@ -131,6 +168,19 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   await replaceDemand(request.pieces);
 };
 
+const runClaimedAction = async (claim: ExecutionClaim): Promise<void> => {
+  if (runtime === null || storage === null || space === null) {
+    throw new Error("executor Worker is not initialized");
+  }
+  const action = candidateActions.get(claimKey(claim));
+  if (action === undefined) {
+    throw new Error("claimed executor action is no longer live");
+  }
+  storage.discardShadowWritesForAction(space, action);
+  claimsByAction.set(action, claim);
+  await runtime.scheduler.run(action);
+};
+
 const stop = async (): Promise<void> => {
   if (stopped) return;
   stopped = true;
@@ -147,9 +197,17 @@ const stop = async (): Promise<void> => {
   storage = null;
   space = null;
   demanded.clear();
+  candidateActions.clear();
 };
 
 const handle = async (request: WorkerRequest): Promise<void> => {
+  if (request.type === "run-claimed-action") {
+    if (request.claim === undefined) {
+      throw new Error("claimed executor rerun has no claim");
+    }
+    await enqueue(() => runClaimedAction(request.claim!));
+    return;
+  }
   if (!Number.isSafeInteger(request.requestId)) {
     throw new Error("executor Worker request has no request id");
   }
