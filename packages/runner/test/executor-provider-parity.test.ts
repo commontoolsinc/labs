@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import { toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import type {
   MemorySpace,
@@ -7,6 +8,8 @@ import type {
   URI,
 } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
+import * as MemoryEngine from "@commonfabric/memory/v2/engine";
+import { resolveSpaceStoreUrl } from "@commonfabric/memory/v2/storage-path";
 import {
   type AcceptedCommitEvent,
   type AcceptedCommitListener,
@@ -38,6 +41,27 @@ class WatchCountingServer extends Server {
   ): ReturnType<Server["watchAdd"]> {
     this.watchAddCount++;
     return await super.watchAdd(message);
+  }
+}
+
+class FailingSchedulerListServer extends WatchCountingServer {
+  failNextSchedulerList = false;
+
+  override listSchedulerActionSnapshots(
+    message: Parameters<Server["listSchedulerActionSnapshots"]>[0],
+  ): ReturnType<Server["listSchedulerActionSnapshots"]> {
+    if (this.failNextSchedulerList) {
+      this.failNextSchedulerList = false;
+      return Promise.resolve({
+        type: "response",
+        requestId: message.requestId,
+        error: {
+          name: "QueryError",
+          message: "injected scheduler adoption failure",
+        },
+      });
+    }
+    return super.listSchedulerActionSnapshots(message);
   }
 }
 
@@ -122,6 +146,63 @@ class LoopbackStorageManager extends StorageManager {
   }
 }
 
+const schedulerObservationFor = (space: MemorySpace, actionId: string) => ({
+  version: 2,
+  ownerSpace: space,
+  branch: "",
+  pieceId: "space:of:executor-provider:echo-piece",
+  processGeneration: 1,
+  actionId,
+  actionKind: "computation",
+  implementationFingerprint: "impl:executor-provider-echo",
+  runtimeFingerprint: "runtime:executor-provider-echo",
+  observedAtSeq: 0,
+  transactionKind: "action-run",
+  reads: [],
+  shallowReads: [],
+  actualChangedWrites: [],
+  currentKnownWrites: [{
+    space,
+    id: "of:executor-provider:echo-root",
+    scope: "space",
+    path: [],
+  }],
+  declaredWrites: [{
+    space,
+    id: "of:executor-provider:echo-root",
+    scope: "space",
+    path: [],
+  }],
+  materializerWriteEnvelopes: [],
+  completeActionScopeSummary: {
+    version: 1,
+    complete: true,
+    implementationFingerprint: "impl:executor-provider-echo",
+    runtimeFingerprint: "runtime:executor-provider-echo",
+    piece: {
+      space,
+      id: "of:executor-provider:echo-piece",
+      scope: "space",
+      path: [],
+    },
+    reads: [],
+    writes: [{
+      space,
+      id: "of:executor-provider:echo-root",
+      scope: "space",
+      path: [],
+    }],
+    materializerWriteEnvelopes: [],
+    directOutputs: [{
+      space,
+      id: "of:executor-provider:echo-root",
+      scope: "space",
+      path: [],
+    }],
+  },
+  status: "success",
+});
+
 Deno.test("executor host provider commits through authenticated memory without a Worker key", async () => {
   const hostSigner = await Identity.fromPassphrase(
     `executor host provider ${crypto.randomUUID()}`,
@@ -183,12 +264,12 @@ Deno.test("executor host provider commits through authenticated memory without a
   }
 });
 
-Deno.test("executor host provider refreshes from accepted commits without memory watches", async () => {
+Deno.test("executor host provider refreshes without watches when scheduler adoption fails", async () => {
   const principal = await Identity.fromPassphrase(
     `executor invalidation provider ${crypto.randomUUID()}`,
   );
   const space = principal.did();
-  const server = new WatchCountingServer({
+  const server = new FailingSchedulerListServer({
     authorizeSessionOpen(message) {
       const value = (message.authorization as { principal?: unknown })
         ?.principal;
@@ -243,6 +324,31 @@ Deno.test("executor host provider refreshes from accepted commits without memory
         id: uri,
         value: { value: { version: 1 } },
       }],
+      schedulerObservation: {
+        version: 1,
+        ownerSpace: space,
+        branch: "",
+        pieceId: "space:of:executor-provider:fail-open-piece",
+        processGeneration: 1,
+        actionId: "action:fail-open-reader",
+        actionKind: "computation",
+        implementationFingerprint: "impl:fail-open-reader",
+        runtimeFingerprint: "runtime:fail-open-reader",
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads: [{
+          space,
+          id: uri,
+          scope: "space",
+          path: [],
+        }],
+        shallowReads: [],
+        actualChangedWrites: [],
+        currentKnownWrites: [],
+        declaredWrites: [],
+        materializerWriteEnvelopes: [],
+        status: "success",
+      },
     });
     const provider = storage.open(space);
     assertEquals((await provider.sync(uri)).error, undefined);
@@ -266,6 +372,7 @@ Deno.test("executor host provider refreshes from accepted commits without memory
       },
     });
 
+    server.failNextSchedulerList = true;
     await writer.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
@@ -292,6 +399,161 @@ Deno.test("executor host provider refreshes from accepted commits without memory
     await channel.dispose();
     await writerClient.close();
     await server.close();
+  }
+});
+
+Deno.test("executor host provider invalidates inherited linked entities on its branch lane", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor branch invalidation ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  await Deno.mkdir(new URL("./engine-v3/", store), { recursive: true });
+  const seedEngine = await MemoryEngine.open({
+    url: resolveSpaceStoreUrl(store, space),
+  });
+  const root = "of:executor-provider:branch-root" as URI;
+  const target = "of:executor-provider:branch-target" as URI;
+  try {
+    MemoryEngine.applyCommit(seedEngine, {
+      sessionId: "session:branch-seed",
+      space,
+      principal: principal.did(),
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: root,
+          value: {
+            value: {
+              child: {
+                "/": { "link@1": { id: target, path: [], space } },
+              },
+            },
+          },
+        }, {
+          op: "set",
+          id: target,
+          value: { value: { version: 1 } },
+        }],
+      },
+    });
+    MemoryEngine.createBranch(seedEngine, "feature");
+  } finally {
+    MemoryEngine.close(seedEngine);
+  }
+
+  const server = new WatchCountingServer({
+    store,
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-branch-invalidation-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const writerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const writer = await writerClient.mount(space, {}, authorizeSessionOpen);
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    branch: "feature",
+    authorizeSessionOpen,
+  });
+  const storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: principal.did(),
+    space,
+    branch: "feature",
+  });
+  const targetAddress = {
+    id: target,
+    type: "application/json" as MIME,
+    path: [],
+  };
+
+  try {
+    const provider = storage.open(space);
+    assertEquals(
+      (await provider.sync(root, {
+        path: [],
+        schema: {
+          type: "object",
+          properties: {
+            child: {
+              type: "object",
+              properties: { version: { type: "number" } },
+              required: ["version"],
+            },
+          },
+          required: ["child"],
+        },
+      })).error,
+      undefined,
+    );
+    assertEquals(provider.replica.get(targetAddress)?.is, {
+      value: { version: 1 },
+    });
+    assertEquals(server.watchAddCount, 0);
+
+    const integrated = Promise.withResolvers<void>();
+    storage.subscribe({
+      next(notification) {
+        if (
+          notification.type === "integrate" &&
+          JSON.stringify(provider.replica.get(targetAddress)?.is) ===
+            JSON.stringify({ value: { version: 2 } })
+        ) {
+          integrated.resolve();
+        }
+        return { done: false };
+      },
+    });
+    await writer.transact({
+      branch: "feature",
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: target,
+        value: { value: { version: 2 } },
+      }],
+    });
+    const timer = setTimeout(
+      () => integrated.reject(new Error("feature target was not integrated")),
+      1_000,
+    );
+    try {
+      await integrated.promise;
+    } finally {
+      clearTimeout(timer);
+    }
+    assertEquals(provider.replica.get(targetAddress)?.is, {
+      value: { version: 2 },
+    });
+  } finally {
+    await storage.close();
+    await channel.dispose();
+    await writerClient.close();
+    await server.close();
+    await Deno.remove(storePath, { recursive: true });
   }
 });
 
@@ -519,6 +781,132 @@ Deno.test("executor host provider carries authenticated scheduler observations o
       },
     );
     assertEquals(accepted.length, 2);
+  } finally {
+    await storage.close();
+    await channel.dispose();
+    await writerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("executor host provider suppresses only same-session observation echoes", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor observation echo ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const server = new WatchCountingServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-observation-echo-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const writerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const writer = await writerClient.mount(space, {}, authorizeSessionOpen);
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    authorizeSessionOpen,
+  });
+  const storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: principal.did(),
+    space,
+  });
+  const accepted: AcceptedCommitEvent[] = [];
+  server.subscribeAcceptedCommits(space, (event) => {
+    accepted.push(event);
+  });
+
+  try {
+    const provider = storage.open(space);
+    assertEquals(
+      (await provider.sync("of:executor-provider:echo-root")).error,
+      undefined,
+    );
+    const adopted = Promise.withResolvers<StorageNotification>();
+    storage.subscribe({
+      next(notification) {
+        if (notification.type === "scheduler-observations") {
+          adopted.resolve(notification);
+        }
+        return { done: false };
+      },
+    });
+
+    const replica = provider.replica;
+    assert(replica.commitNative);
+    assertEquals(
+      (await replica.commitNative({
+        operations: [],
+        schedulerObservation: schedulerObservationFor(
+          space,
+          "action:provider-own",
+        ),
+      })).error,
+      undefined,
+    );
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: schedulerObservationFor(
+        space,
+        "action:external",
+      ),
+    });
+
+    assertEquals(
+      accepted.map((event) => ({
+        own: event.originSessionId === storage.id,
+        schedulerUpdateIds: event.schedulerUpdateIds,
+      })),
+      [
+        { own: true, schedulerUpdateIds: [1] },
+        { own: false, schedulerUpdateIds: [2] },
+      ],
+    );
+    const persisted = await writer.listSchedulerActionSnapshots();
+    assertEquals(
+      persisted.snapshots.map((snapshot) =>
+        (snapshot.observation as { actionId?: string }).actionId
+      ).sort(),
+      ["action:external", "action:provider-own"],
+    );
+
+    const timer = setTimeout(
+      () => adopted.reject(new Error("external observation was not adopted")),
+      1_000,
+    );
+    let notification: StorageNotification;
+    try {
+      notification = await adopted.promise;
+    } finally {
+      clearTimeout(timer);
+    }
+    assert(notification.type === "scheduler-observations");
+    assertEquals(
+      notification.observations.map((snapshot) =>
+        (snapshot.observation as { actionId?: string }).actionId
+      ),
+      ["action:external"],
+    );
   } finally {
     await storage.close();
     await channel.dispose();
@@ -921,10 +1309,8 @@ const runProviderTrace = async (kind: ProviderKind) => {
       accepted: accepted.map((event) => ({
         order: event.order,
         deliverySeq: event.deliverySeq,
-        revisionOps: event.commit.revisions.map((revision) => revision.op),
-        schedulerStatuses: event.commit.schedulerObservationResults?.map(
-          (result) => result.status,
-        ) ?? [],
+        revisionOps: event.revisions.map((revision) => revision.op),
+        schedulerUpdateIds: event.schedulerUpdateIds,
       })),
       watchAdds: server.watchAddCount,
     };
@@ -1288,8 +1674,10 @@ Deno.test("executor host provider transfers as an opaque channel to a real Worke
     });
     await nextMessage("integrated");
 
-    worker.postMessage({ type: "dispose" });
-    await nextMessage("disposed");
+    // The worker controller owns this pairing: an abrupt realm termination is
+    // immediately followed by host-channel disposal, which releases the
+    // authenticated connection and accepted-commit callback.
+    worker.terminate();
     await channel.dispose();
     assertEquals(server.acceptedCommitSubscriptions, 0);
     assertEquals(queued.find((message) => message.type === "error"), undefined);

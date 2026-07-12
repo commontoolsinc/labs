@@ -44,6 +44,7 @@ interface AcceptedCommitNotice {
     scope?: string;
     seq: number;
   }[];
+  schedulerUpdateIds: number[];
 }
 
 type ProviderPortMessage =
@@ -90,19 +91,20 @@ const toAcceptedCommitNotice = (
   event: AcceptedCommitEvent,
 ): AcceptedCommitNotice => ({
   space: event.space,
-  branch: event.commit.branch,
+  branch: event.branch,
   order: event.order,
-  dataSeq: event.commit.seq,
+  dataSeq: event.dataSeq,
   deliverySeq: event.deliverySeq,
   ...(event.originSessionId !== undefined
     ? { originSessionId: event.originSessionId }
     : {}),
-  revisions: event.commit.revisions.map((revision) => ({
+  revisions: event.revisions.map((revision) => ({
     branch: revision.branch,
     id: revision.id,
     ...(revision.scope !== undefined ? { scope: revision.scope } : {}),
     seq: revision.seq,
   })),
+  schedulerUpdateIds: [...event.schedulerUpdateIds],
 });
 
 /**
@@ -187,14 +189,15 @@ export function createHostProviderChannel(
     disposed = true;
     unsubscribeAcceptedCommits();
     connection.close();
-    if (message !== undefined) {
-      try {
-        hostPort.postMessage(
-          { type: "close", message } satisfies ProviderPortMessage,
-        );
-      } catch {
-        // The Worker may already have closed its transferred endpoint.
-      }
+    try {
+      hostPort.postMessage(
+        {
+          type: "close",
+          ...(message !== undefined ? { message } : {}),
+        } satisfies ProviderPortMessage,
+      );
+    } catch {
+      // The Worker may already have closed its transferred endpoint.
     }
     hostPort.close();
   };
@@ -295,7 +298,7 @@ export function createHostProviderChannel(
   unsubscribeAcceptedCommits = options.server.subscribeAcceptedCommits(
     options.space,
     (event) => {
-      if (disposed || event.commit.branch !== branch) return;
+      if (disposed || event.branch !== branch) return;
       hostPort.postMessage(
         {
           type: "accepted-commit",
@@ -405,6 +408,11 @@ const snapshotKey = (snapshot: {
 }): string =>
   `${snapshot.branch}\0${snapshot.scope ?? "space"}\0${snapshot.id}`;
 
+const dirtyEntityKey = (snapshot: {
+  id: string;
+  scope?: string;
+}): string => `${snapshot.scope ?? "space"}\0${snapshot.id}`;
+
 const syncUpsert = (snapshot: EntitySnapshot) => ({
   branch: snapshot.branch,
   id: snapshot.id,
@@ -428,7 +436,7 @@ class HostReplicaSession implements ReplicaSession {
   #appliedSeq: number;
   #acceptedOrder = 0;
   #schedulerDeliverySeq: number;
-  #seenObservationIds = new Set<number>();
+  #seenObservationVersions = new Map<number, string>();
   #closed = false;
 
   constructor(
@@ -523,7 +531,10 @@ class HostReplicaSession implements ReplicaSession {
       branch: this.branch,
     });
     for (const snapshot of result.snapshots) {
-      this.#seenObservationIds.add(snapshot.observationId);
+      this.#seenObservationVersions.set(
+        snapshot.observationId,
+        encodeMemoryBoundary(snapshot),
+      );
       if (snapshot.commitSeq !== null) {
         this.#schedulerDeliverySeq = Math.max(
           this.#schedulerDeliverySeq,
@@ -574,27 +585,41 @@ class HostReplicaSession implements ReplicaSession {
       return;
     }
     const fromSeq = this.#appliedSeq;
-    const observations = notice.originSessionId === this.sessionId
-      ? []
-      : await this.adoptionObservations(notice.deliverySeq);
+    let observations: SchedulerActionSnapshotResult[] = [];
+    if (
+      notice.originSessionId !== this.sessionId &&
+      notice.schedulerUpdateIds.length > 0
+    ) {
+      try {
+        observations = await this.adoptionObservations(
+          notice.deliverySeq,
+          new Set(notice.schedulerUpdateIds),
+        );
+      } catch (error) {
+        // Scheduler adoption is optional. Keep its cursor unchanged and still
+        // deliver the required document invalidation for this accepted commit.
+        console.warn("executor scheduler adoption failed", error);
+      }
+    }
     if (this.#watches.size === 0) {
       this.#acceptedOrder = notice.order;
       this.#appliedSeq = Math.max(this.#appliedSeq, notice.dataSeq);
       return;
     }
-    const dirty = new Set(notice.revisions.map(snapshotKey));
+    const dirty = new Set(notice.revisions.map(dirtyEntityKey));
     const affected: string[] = [];
     for (const [watchId, watch] of this.#watches) {
       const previous = this.#watchEntities.get(watchId);
       const rootDirty = watch.query.roots.some((root) =>
-        dirty.has(snapshotKey({
-          branch: this.branch,
+        dirty.has(dirtyEntityKey({
           id: root.id,
           scope: root.scope,
         }))
       );
       const trackedDirty = previous !== undefined &&
-        [...previous.keys()].some((key) => dirty.has(key));
+        [...previous.values()].some((snapshot) =>
+          dirty.has(dirtyEntityKey(snapshot))
+        );
       if (rootDirty || trackedDirty) affected.push(watchId);
     }
     if (notice.dataSeq <= this.#appliedSeq || affected.length === 0) {
@@ -637,8 +662,10 @@ class HostReplicaSession implements ReplicaSession {
 
   private async adoptionObservations(
     throughSeq: number,
+    allowedObservationIds: ReadonlySet<number>,
   ): Promise<SchedulerActionSnapshotResult[]> {
     const snapshots: SchedulerActionSnapshotResult[] = [];
+    const nextVersions = new Map<number, string>();
     const sinceCommitSeq = throughSeq <= this.#schedulerDeliverySeq
       ? Math.max(-1, throughSeq - 1)
       : this.#schedulerDeliverySeq;
@@ -652,12 +679,19 @@ class HostReplicaSession implements ReplicaSession {
         ...(cursor !== undefined ? { cursor } : {}),
       });
       for (const snapshot of page.snapshots) {
-        if (this.#seenObservationIds.has(snapshot.observationId)) continue;
-        this.#seenObservationIds.add(snapshot.observationId);
+        if (!allowedObservationIds.has(snapshot.observationId)) continue;
+        const version = encodeMemoryBoundary(snapshot);
+        if (
+          this.#seenObservationVersions.get(snapshot.observationId) === version
+        ) continue;
+        nextVersions.set(snapshot.observationId, version);
         snapshots.push(snapshot);
       }
       cursor = page.nextCursor;
     } while (cursor !== undefined);
+    for (const [observationId, version] of nextVersions) {
+      this.#seenObservationVersions.set(observationId, version);
+    }
     this.#schedulerDeliverySeq = Math.max(
       this.#schedulerDeliverySeq,
       throughSeq,
@@ -730,6 +764,13 @@ class HostSessionFactory implements SessionFactory {
     }
     const transport = new MessagePortTransport(this.port);
     const client = await MemoryClient.connect({ transport });
+    // This transferred channel is a lease-bound one-shot transport, not a
+    // reconnectable network endpoint. A host close is terminal: close the
+    // client so pending requests reject without starting the generic memory
+    // client's reconnect loop against an already-disposed MessagePort.
+    transport.setCloseReceiver(() => {
+      void client.close().catch(() => undefined);
+    });
     const session = await client.mount(space, mountOptions);
     return {
       client,

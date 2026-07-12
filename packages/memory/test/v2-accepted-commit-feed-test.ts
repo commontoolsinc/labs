@@ -77,7 +77,16 @@ Deno.test("memory v2 accepted-commit feed publishes canonical commits exactly on
       deliverySeq: applied.seq,
       space: SPACE,
       originSessionId: session.sessionId,
-      commit: applied,
+      branch: applied.branch,
+      dataSeq: applied.seq,
+      revisions: applied.revisions.map((revision) => ({
+        branch: revision.branch,
+        id: revision.id,
+        ...(revision.scope !== undefined ? { scope: revision.scope } : {}),
+        seq: revision.seq,
+        op: revision.op,
+      })),
+      schedulerUpdateIds: [],
     }]);
 
     unsubscribe();
@@ -141,8 +150,21 @@ Deno.test("memory v2 accepted-commit feed isolates listener payload mutation", a
   );
   let observed: AcceptedCommitEvent | undefined;
   server.subscribeAcceptedCommits(SPACE, (event) => {
-    event.commit.seq = 999;
-    event.commit.revisions.length = 0;
+    try {
+      (event as { dataSeq: number }).dataSeq = 999;
+    } catch {
+      // Frozen host events reject mutation in strict mode.
+    }
+    try {
+      (event.revisions[0] as { seq: number }).seq = 999;
+    } catch {
+      // Nested scalar metadata is frozen too.
+    }
+    try {
+      (event.schedulerUpdateIds as number[]).push(999);
+    } catch {
+      // Arrays are immutable across listeners.
+    }
   });
   server.subscribeAcceptedCommits(SPACE, (event) => {
     observed = event;
@@ -152,8 +174,9 @@ Deno.test("memory v2 accepted-commit feed isolates listener payload mutation", a
     const applied = await session.transact(commit(1, 1));
     assertEquals(applied.seq, 1);
     assertEquals(applied.revisions.length, 1);
-    assertEquals(observed?.commit.seq, 1);
-    assertEquals(observed?.commit.revisions.length, 1);
+    assertEquals(observed?.dataSeq, 1);
+    assertEquals(observed?.revisions[0]?.seq, 1);
+    assertEquals(observed?.schedulerUpdateIds, []);
   } finally {
     await client.close();
     await server.close();
@@ -200,8 +223,8 @@ Deno.test("memory v2 accepted-commit feed omits data and observation replays", a
     assertEquals(
       events.map((event) => ({
         order: event.order,
-        dataSeq: event.commit.seq,
-        observations: event.commit.schedulerObservationResults?.length ?? 0,
+        dataSeq: event.dataSeq,
+        observations: event.schedulerUpdateIds.length,
       })),
       [
         { order: 1, dataSeq: 1, observations: 0 },
@@ -234,7 +257,16 @@ Deno.test("memory v2 accepted-commit feed includes successful direct host writes
       order: 1,
       deliverySeq: applied.seq,
       space: SPACE,
-      commit: applied,
+      branch: applied.branch,
+      dataSeq: applied.seq,
+      revisions: applied.revisions.map((revision) => ({
+        branch: revision.branch,
+        id: revision.id,
+        ...(revision.scope !== undefined ? { scope: revision.scope } : {}),
+        seq: revision.seq,
+        op: revision.op,
+      })),
+      schedulerUpdateIds: [],
     }]);
   } finally {
     await server.close();
@@ -276,7 +308,7 @@ Deno.test("memory v2 accepted-commit feed orders observation-only commits sharin
       events.map((event) => ({
         order: event.order,
         deliverySeq: event.deliverySeq,
-        dataSeq: event.commit.seq,
+        dataSeq: event.dataSeq,
       })),
       [
         { order: 1, deliverySeq: 1, dataSeq: 0 },
