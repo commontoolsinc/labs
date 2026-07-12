@@ -1914,7 +1914,7 @@ export class Server {
     options: { preferredOriginSessionId?: string } = {},
   ): Promise<ExecutionLeaseHandle | null> {
     if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) return null;
-    const nowMs = this.#executionNowMs();
+    const nowMs = () => this.#executionNowMs();
     const engine = await this.openEngine(space);
     const slot = executionLeaseKey(space, branch);
     const owned = this.#ownedExecutionLeases.get(slot);
@@ -1926,7 +1926,7 @@ export class Server {
       });
       if (
         current !== null && this.#sameExecutionLease(current, owned.handle) &&
-        current.state !== "revoked" && current.expiresAt > nowMs
+        current.state !== "revoked"
       ) {
         if (
           current.state !== owned.handle.state ||
@@ -1939,8 +1939,7 @@ export class Server {
         return owned.handle;
       }
       const expired = Engine.expireExecutionLease(engine, {
-        space,
-        branch,
+        lease: owned.handle,
         nowMs,
       });
       if (
@@ -1948,7 +1947,7 @@ export class Server {
       ) {
         this.#releaseOwnedExecutionLease(owned, expired);
       } else {
-        this.#ownedExecutionLeases.delete(slot);
+        this.#abandonOwnedExecutionLease(owned);
       }
     }
     // A live durable row without this exact host-local sponsor anchor belongs
@@ -2009,7 +2008,7 @@ export class Server {
     branch: BranchName,
   ): Promise<ExecutionLease | null> {
     const engine = await this.openEngine(space);
-    const nowMs = this.#executionNowMs();
+    const nowMs = () => this.#executionNowMs();
     const current = await Engine.currentExecutionLease(engine, {
       space,
       branch,
@@ -2021,14 +2020,15 @@ export class Server {
     if (current === null) {
       if (owned !== undefined) {
         const expired = Engine.expireExecutionLease(engine, {
-          space,
-          branch,
+          lease: owned.handle,
           nowMs,
         });
         if (
           expired !== null && this.#sameExecutionLease(expired, owned.handle)
         ) {
           this.#releaseOwnedExecutionLease(owned, expired);
+        } else {
+          this.#abandonOwnedExecutionLease(owned);
         }
       }
       return null;
@@ -2036,6 +2036,7 @@ export class Server {
     if (
       owned === undefined || !this.#sameExecutionLease(current, owned.handle)
     ) {
+      if (owned !== undefined) this.#abandonOwnedExecutionLease(owned);
       return current;
     }
     if (
@@ -2073,7 +2074,10 @@ export class Server {
     this.#executionLeaseTasks.add(task);
     void task.then(
       () => this.#executionLeaseTasks.delete(task),
-      () => this.#executionLeaseTasks.delete(task),
+      (error) => {
+        this.#executionLeaseTasks.delete(task);
+        console.warn("execution lease lifecycle task failed", error);
+      },
     );
   }
 
@@ -2134,6 +2138,19 @@ export class Server {
     this.#scheduleExecutionLeaseExpiry();
   }
 
+  /** Relinquish host-local authority without touching another generation's
+   * durable row. This is the stale-host handoff path. */
+  #abandonOwnedExecutionLease(authority: OwnedExecutionLease): void {
+    const lease = authority.handle;
+    const slot = executionLeaseKey(lease.space, lease.branch);
+    if (this.#ownedExecutionLeases.get(slot) === authority) {
+      this.#ownedExecutionLeases.delete(slot);
+    }
+    authority.drainRequested = true;
+    this.#revokeExecutionClaimsForLease(lease);
+    this.#scheduleExecutionLeaseExpiry();
+  }
+
   async renewExecutionLease(
     lease: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null> {
@@ -2156,7 +2173,7 @@ export class Server {
     const engine = await this.openEngine(lease.space);
     const renewed = Engine.renewExecutionLease(engine, {
       lease: authority.handle,
-      nowMs: this.#executionNowMs(),
+      nowMs: () => this.#executionNowMs(),
       ttlMs: this.#executionLeaseTtlMs(),
       authorizeWrite: (transactionEngine) =>
         this.#executionSponsorCanWrite(transactionEngine, demand, sponsor),
@@ -2179,7 +2196,7 @@ export class Server {
     const engine = await this.openEngine(lease.space);
     const draining = Engine.beginExecutionLeaseDrain(engine, {
       lease: authority.handle,
-      nowMs: this.#executionNowMs(),
+      nowMs: () => this.#executionNowMs(),
       drainTtlMs: this.#executionDrainTimeoutMs(),
     });
     if (draining === null) return null;
@@ -2196,17 +2213,15 @@ export class Server {
     const engine = await this.openEngine(lease.space);
     const revoked = Engine.revokeExecutionLease(engine, {
       lease: authority.handle,
-      nowMs: this.#executionNowMs(),
+      nowMs: () => this.#executionNowMs(),
     });
     if (revoked === null) return null;
     this.#releaseOwnedExecutionLease(authority, revoked);
     return revoked;
   }
 
-  async expireExecutionLeases(
-    nowMs = this.#executionNowMs(),
-  ): Promise<number> {
-    if (!Number.isFinite(nowMs)) {
+  async expireExecutionLeases(nowMs?: number): Promise<number> {
+    if (nowMs !== undefined && !Number.isFinite(nowMs)) {
       throw new TypeError("execution lease expiry time must be finite");
     }
     let expired = 0;
@@ -2214,11 +2229,20 @@ export class Server {
       const lease = authority.handle;
       const engine = await this.openEngine(lease.space);
       const revoked = Engine.expireExecutionLease(engine, {
-        space: lease.space,
-        branch: lease.branch,
-        nowMs,
+        lease,
+        nowMs: nowMs ?? (() => this.#executionNowMs()),
       });
-      if (revoked === null) continue;
+      if (revoked === null) {
+        const current = await Engine.currentExecutionLease(engine, {
+          space: lease.space,
+          branch: lease.branch,
+          nowMs: nowMs ?? (() => this.#executionNowMs()),
+        });
+        if (current === null || !this.#sameExecutionLease(current, lease)) {
+          this.#abandonOwnedExecutionLease(authority);
+        }
+        continue;
+      }
       this.#releaseOwnedExecutionLease(authority, revoked);
       expired += 1;
     }
@@ -2501,7 +2525,6 @@ export class Server {
 
   #executionLeaseFenceForCommit(
     space: string,
-    branch: BranchName,
     session: SessionState,
     binding: BoundExecutionSession | undefined,
   ): Engine.ExecutionLeaseFence | undefined {
@@ -2510,7 +2533,7 @@ export class Server {
     const lease = authority?.handle ?? binding.lease;
     return {
       lease,
-      nowMs: this.#executionNowMs(),
+      nowMs: () => this.#executionNowMs(),
       authorize: (transactionEngine) => {
         if (
           this.#sessions.get(space, session.id) !== session ||
@@ -2534,7 +2557,6 @@ export class Server {
   #executionClaimsForCommit(
     space: string,
     branch: BranchName,
-    session: SessionState,
     binding: BoundExecutionSession | undefined,
     observations: readonly CommitSchedulerObservation[],
   ): ReadonlyMap<number, ExecutionClaim> | undefined {
@@ -3910,14 +3932,12 @@ export class Server {
           );
           const executionLeaseFence = this.#executionLeaseFenceForCommit(
             message.space,
-            message.commit.branch ?? "",
             session,
             executionBinding,
           );
           const executionClaims = this.#executionClaimsForCommit(
             message.space,
             message.commit.branch ?? "",
-            session,
             executionBinding,
             schedulerObservations,
           );

@@ -177,15 +177,13 @@ Deno.test("execution lease lifecycle is fenced and generation-monotonic", async 
     assertEquals(second.leaseGeneration, 2);
     assertEquals(
       Engine.expireExecutionLease(engine, {
-        space: SPACE,
-        branch: "",
+        lease: second,
         nowMs: nowMs + 45,
       }),
       null,
     );
     const expired = Engine.expireExecutionLease(engine, {
-      space: SPACE,
-      branch: "",
+      lease: second,
       nowMs: nowMs + 46,
     });
     assertExists(expired);

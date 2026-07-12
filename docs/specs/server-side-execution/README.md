@@ -752,9 +752,11 @@ and is separately attributable. It never signs client-pulled work.
   new incarnation. The attempt's exact assertion also prevents a delayed write
   from being attributed to that new incarnation or silently becoming an
   ordinary unclaimed write.
-- **Sponsor disconnect:** the worker finishes a bounded in-flight settle,
-  drains, and restarts under another eligible requester. It does not change
-  Runtime principal mid-settle.
+- **Sponsor disconnect:** the lease enters a bounded teardown drain and fences
+  every new first application immediately; exact accepted replays remain
+  idempotent. The worker then restarts under another eligible requester. It
+  does not change Runtime principal mid-settle. A later exact attempt-admission
+  mechanism may safely preserve work proven to have started before the drain.
 - **Client offline:** source writes queue (pending commits) and local overlays
   keep the UI coherent, but previously claimed derived writes do not flush
   merely because the connection disappeared. Reconnect applies the

@@ -841,7 +841,8 @@ export interface AcquireExecutionLeaseOptions {
   branch: BranchName;
   hostId: string;
   onBehalfOf: string;
-  nowMs: number;
+  /** Sampled only after the IMMEDIATE transaction owns the SQLite lock. */
+  nowMs: number | (() => number);
   ttlMs: number;
   /** Canonical fresh WRITE check, invoked inside the IMMEDIATE transaction. */
   authorizeWrite?: (engine: Engine) => boolean;
@@ -850,12 +851,13 @@ export interface AcquireExecutionLeaseOptions {
 export interface CurrentExecutionLeaseOptions {
   space: string;
   branch: BranchName;
-  nowMs: number;
+  nowMs: number | (() => number);
 }
 
 export interface RenewExecutionLeaseOptions {
   lease: ExecutionLease;
-  nowMs: number;
+  /** Sampled only after the IMMEDIATE transaction owns the SQLite lock. */
+  nowMs: number | (() => number);
   ttlMs: number;
   /** Canonical fresh WRITE check, invoked inside the IMMEDIATE transaction. */
   authorizeWrite?: (engine: Engine) => boolean;
@@ -863,25 +865,26 @@ export interface RenewExecutionLeaseOptions {
 
 export interface BeginExecutionLeaseDrainOptions {
   lease: ExecutionLease;
-  nowMs: number;
+  nowMs: number | (() => number);
   drainTtlMs: number;
 }
 
 export interface RevokeExecutionLeaseOptions {
   lease: ExecutionLease;
-  nowMs: number;
+  nowMs: number | (() => number);
 }
 
 export interface ExpireExecutionLeaseOptions {
-  space: string;
-  branch: BranchName;
-  nowMs: number;
+  /** Expiry may revoke only this exact owner/generation. */
+  lease: ExecutionLease;
+  nowMs: number | (() => number);
 }
 
 /** Host-only authority checked against the durable row inside applyCommit. */
 export interface ExecutionLeaseFence {
   lease: ExecutionLease;
-  nowMs: number;
+  /** Sampled after BEGIN IMMEDIATE and the fresh authority callback. */
+  nowMs: number | (() => number);
   /**
    * Canonical current WRITE and execution-policy check. It is invoked after
    * exact replay detection but before first-application mutation, inside the
@@ -2705,6 +2708,15 @@ const assertLeaseClock = (name: string, value: number): void => {
   }
 };
 
+const sampleLeaseClock = (
+  name: string,
+  clock: number | (() => number),
+): number => {
+  const value = typeof clock === "function" ? clock() : clock;
+  assertLeaseClock(name, value);
+  return value;
+};
+
 const leaseExpiry = (nowMs: number, ttlMs: number): number => {
   assertLeaseClock("execution lease server time", nowMs);
   if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) {
@@ -2795,12 +2807,16 @@ const acquireExecutionLeaseTransaction = (
   assertLeaseIdentityPart("space", options.space);
   assertLeaseIdentityPart("host id", options.hostId);
   assertLeaseIdentityPart("principal", options.onBehalfOf);
-  const expiresAt = leaseExpiry(options.nowMs, options.ttlMs);
   ensureActiveBranch(engine, options.branch);
   if (options.authorizeWrite?.(engine) !== true) return null;
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const expiresAt = leaseExpiry(nowMs, options.ttlMs);
 
   const current = selectExecutionLeaseRow(engine, options.branch);
-  if (current !== null && leaseIsLive(current, options.nowMs)) {
+  if (current !== null && leaseIsLive(current, nowMs)) {
     if (
       current.host_id !== options.hostId ||
       current.on_behalf_of !== options.onBehalfOf
@@ -2849,10 +2865,13 @@ const currentExecutionLeaseTransaction = (
   options: CurrentExecutionLeaseOptions,
 ): ExecutionLease | null => {
   assertLeaseIdentityPart("space", options.space);
-  assertLeaseClock("execution lease server time", options.nowMs);
   if (!branchIsActive(engine, options.branch)) return null;
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
   const row = selectExecutionLeaseRow(engine, options.branch);
-  return row !== null && leaseIsLive(row, options.nowMs)
+  return row !== null && leaseIsLive(row, nowMs)
     ? toExecutionLease(options.space, row)
     : null;
 };
@@ -2872,13 +2891,17 @@ const renewExecutionLeaseTransaction = (
   options: RenewExecutionLeaseOptions,
 ): ExecutionLease | null => {
   assertLeaseSnapshot(options.lease);
-  const expiresAt = leaseExpiry(options.nowMs, options.ttlMs);
   if (!branchIsActive(engine, options.lease.branch)) return null;
   if (options.authorizeWrite?.(engine) !== true) return null;
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const expiresAt = leaseExpiry(nowMs, options.ttlMs);
   const current = selectExecutionLeaseRow(engine, options.lease.branch);
   if (
     current === null || current.state !== "active" ||
-    current.expires_at <= options.nowMs ||
+    current.expires_at <= nowMs ||
     !leaseOwnerMatches(current, options.lease)
   ) {
     return null;
@@ -2912,10 +2935,14 @@ const beginExecutionLeaseDrainTransaction = (
   options: BeginExecutionLeaseDrainOptions,
 ): ExecutionLease | null => {
   assertLeaseSnapshot(options.lease);
-  const drainDeadline = leaseExpiry(options.nowMs, options.drainTtlMs);
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const drainDeadline = leaseExpiry(nowMs, options.drainTtlMs);
   const current = selectExecutionLeaseRow(engine, options.lease.branch);
   if (
-    current === null || !leaseIsLive(current, options.nowMs) ||
+    current === null || !leaseIsLive(current, nowMs) ||
     !leaseOwnerMatches(current, options.lease)
   ) {
     return null;
@@ -2951,12 +2978,15 @@ const revokeExecutionLeaseTransaction = (
   options: RevokeExecutionLeaseOptions,
 ): ExecutionLease | null => {
   assertLeaseSnapshot(options.lease);
-  assertLeaseClock("execution lease server time", options.nowMs);
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
   const current = selectExecutionLeaseRow(engine, options.lease.branch);
   if (current === null || !leaseOwnerMatches(current, options.lease)) {
     return null;
   }
-  const expiresAt = Math.min(current.expires_at, options.nowMs);
+  const expiresAt = Math.min(current.expires_at, nowMs);
   engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
     branch: current.branch,
     lease_generation: current.lease_generation,
@@ -2986,13 +3016,18 @@ const expireExecutionLeaseTransaction = (
   engine: Engine,
   options: ExpireExecutionLeaseOptions,
 ): ExecutionLease | null => {
-  assertLeaseIdentityPart("space", options.space);
-  assertLeaseClock("execution lease server time", options.nowMs);
-  const current = selectExecutionLeaseRow(engine, options.branch);
-  if (current === null) return null;
+  assertLeaseSnapshot(options.lease);
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const current = selectExecutionLeaseRow(engine, options.lease.branch);
+  if (
+    current === null || !leaseOwnerMatches(current, options.lease)
+  ) return null;
   if (
     (current.state === "active" || current.state === "draining") &&
-    current.expires_at > options.nowMs
+    current.expires_at > nowMs
   ) {
     return null;
   }
@@ -3007,12 +3042,12 @@ const expireExecutionLeaseTransaction = (
     });
   }
   return {
-    ...toExecutionLease(options.space, current),
+    ...toExecutionLease(options.lease.space, current),
     state: "revoked",
   };
 };
 
-/** Mark an elapsed lease revoked without naming a possibly stale owner. */
+/** Mark an elapsed exact owner/generation revoked. */
 export const expireExecutionLease = (
   engine: Engine,
   options: ExpireExecutionLeaseOptions,
@@ -3035,7 +3070,6 @@ const assertExecutionLeaseFenceTransaction = (
   const fence = options.fence;
   if (fence === undefined) return;
   assertLeaseSnapshot(fence.lease);
-  assertLeaseClock("execution lease server time", fence.nowMs);
   if (
     options.space === undefined || fence.lease.space !== options.space ||
     fence.lease.branch !== options.branch ||
@@ -3045,9 +3079,19 @@ const assertExecutionLeaseFenceTransaction = (
       "execution lease does not match the commit lane and principal",
     );
   }
+  if (fence.authorize?.(engine) !== true) {
+    throw new ExecutionLeaseFenceError(
+      "execution sponsor lacks current WRITE authority or execution policy",
+    );
+  }
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    fence.nowMs,
+  );
   const current = selectExecutionLeaseRow(engine, options.branch);
   if (
-    current === null || !leaseIsLive(current, fence.nowMs) ||
+    current === null || current.state !== "active" ||
+    current.expires_at <= nowMs ||
     !leaseOwnerMatches(current, fence.lease)
   ) {
     throw new ExecutionLeaseFenceError(
@@ -3063,11 +3107,6 @@ const assertExecutionLeaseFenceTransaction = (
         "execution claim does not match the durable lease generation",
       );
     }
-  }
-  if (fence.authorize?.(engine) !== true) {
-    throw new ExecutionLeaseFenceError(
-      "execution sponsor lacks current WRITE authority or execution policy",
-    );
   }
 };
 

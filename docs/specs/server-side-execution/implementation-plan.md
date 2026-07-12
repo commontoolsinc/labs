@@ -633,9 +633,11 @@ generation. Background-only work gets its service identity later.
    expiry, sponsor authorization, and executionPolicy immediately before apply.
 5. Renew with server time while demand/in-flight work exists. A heartbeat
    document is not a lease and must not be introduced.
-6. On sponsor disconnect/revocation, allow a bounded drain of already-started
-   work, revoke the lease, and restart under another eligible requester if
-   demand remains. No old/new overlap is allowed.
+6. On sponsor disconnect/revocation, enter a bounded teardown drain and reject
+   every new first application immediately (exact accepted replays remain
+   idempotent). Revoke the lease, and restart under another eligible requester
+   if demand remains. No old/new overlap is allowed. Exact pre-drain attempt
+   admission may recover an already-started-work allowance later.
 7. Provenance records onBehalfOf and worker generation. Future user-delegated
    keys can replace the session-derived lease without changing that semantic.
 
