@@ -4,6 +4,9 @@ import * as FS from "@std/fs";
 import env from "@/env.ts";
 import { memoryEngineStoreUrl } from "./memory-store-url.ts";
 import { identity } from "@/lib/identity.ts";
+import type { Runtime } from "@commonfabric/runner";
+import { SharedExecutionPool } from "@commonfabric/runner/executor";
+import { DenoSpaceExecutorFactory } from "@commonfabric/runner/executor/deno";
 
 const memoryAudience = identity.did();
 
@@ -40,10 +43,34 @@ export const memoryServer = new MemoryServer.Server({
       .filter((did) => did.length > 0),
   },
 });
+let executionPool: SharedExecutionPool | null = null;
+
+/** Start client-demand execution after runtime flags are installed, but before
+ * the HTTP server accepts connections. */
+export function startServerExecutionPool(runtime: Runtime): void {
+  if (
+    executionPool !== null ||
+    runtime.experimental.serverPrimaryExecution !== true
+  ) return;
+  executionPool = new SharedExecutionPool({
+    control: memoryServer,
+    factory: new DenoSpaceExecutorFactory({
+      server: memoryServer,
+      apiUrl: new URL(env.API_URL),
+      patternApiUrl: new URL(env.API_URL),
+      experimental: runtime.experimental,
+    }),
+  });
+  executionPool.start();
+  console.log("Memory: Server execution pool started");
+}
+
 export const memory = {
   async close(): Promise<
     { ok: Record<PropertyKey, never> } | { error: unknown }
   > {
+    await executionPool?.close();
+    executionPool = null;
     await memoryServer.close();
     return { ok: {} };
   },

@@ -4,7 +4,7 @@ import { identity } from "@/lib/identity.ts";
 import type { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createToolshedRuntime } from "@/runtime-options.ts";
-import { memory } from "@/routes/storage/memory.ts";
+import { memory, startServerExecutionPool } from "@/routes/storage/memory.ts";
 import { shutdownOpenTelemetry } from "@/lib/otel.ts";
 
 // Create a global runtime instance for the server
@@ -93,6 +93,9 @@ const handleShutdown = async () => {
 function startServer() {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
   initializeRuntime();
+  // The listener must be installed before Deno.serve accepts the first
+  // execution-demand-bearing connection.
+  startServerExecutionPool(runtime);
 
   const serverOptions = {
     hostname: env.HOST,
