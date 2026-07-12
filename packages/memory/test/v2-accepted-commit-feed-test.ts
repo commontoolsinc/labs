@@ -1,12 +1,6 @@
-import {
-  assertEquals,
-  assertRejects,
-} from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
-import {
-  type AcceptedCommitEvent,
-  Server,
-} from "../v2/server.ts";
+import { type AcceptedCommitEvent, Server } from "../v2/server.ts";
 import { type ClientCommit, toDocumentPath } from "../v2.ts";
 import {
   testSessionOpenAuth,
@@ -50,7 +44,9 @@ Deno.test("memory v2 accepted-commit feed publishes canonical commits exactly on
   const events: AcceptedCommitEvent[] = [];
   const unsubscribe = server.subscribeAcceptedCommits(
     SPACE,
-    (event) => events.push(event),
+    (event) => {
+      events.push(event);
+    },
   );
 
   try {
@@ -88,20 +84,44 @@ Deno.test("memory v2 accepted-commit feed contains listener failures and omits r
   server.subscribeAcceptedCommits(SPACE, () => {
     throw new Error("listener failure");
   });
-  server.subscribeAcceptedCommits(SPACE, () => delivered++);
+  server.subscribeAcceptedCommits(SPACE, () => {
+    delivered++;
+  });
 
   try {
     await session.transact(commit(1, 1));
     assertEquals(delivered, 1);
 
-    await assertRejects(
+    const rejection = await assertRejects(
       () => session.transact(commit(2, 2, 0)),
       Error,
-      "Conflict",
     );
+    assertEquals(rejection.name, "ConflictError");
     assertEquals(delivered, 1);
   } finally {
     await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 accepted-commit feed includes successful direct host writes", async () => {
+  const server = new Server({
+    authorizeSessionOpen: () => "did:key:z6Mk-accepted-commit-principal",
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const events: AcceptedCommitEvent[] = [];
+  server.subscribeAcceptedCommits(SPACE, (event) => {
+    events.push(event);
+  });
+
+  try {
+    const applied = await server.writeDocument(
+      SPACE,
+      "of:direct:1",
+      { direct: true },
+    );
+    assertEquals(events, [{ space: SPACE, commit: applied }]);
+  } finally {
     await server.close();
   }
 });
