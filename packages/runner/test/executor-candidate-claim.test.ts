@@ -53,10 +53,21 @@ interface CandidateDiagnostic {
   diagnosticCode: string;
 }
 
+interface WriterDiscovery {
+  pieceId: string;
+  indexMiss: boolean;
+  writers: Array<{
+    actionId: string;
+    pieceId: string;
+    actionKind: "computation" | "effect" | "event-handler";
+  }>;
+}
+
 type CandidateAwareFactoryOptions = DenoSpaceExecutorFactoryOptions & {
   /** Host-local diagnostic only. This callback never publishes authority. */
   onCandidateClaim?: (candidate: CandidateClaim) => void;
   onCandidateDiagnostic?: (diagnostic: CandidateDiagnostic) => void;
+  onWriterDiscovery?: (discovery: WriterDiscovery) => void;
 };
 
 class FakeWorker extends EventTarget implements ExecutorWorkerLike {
@@ -102,6 +113,14 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
     this.dispatchEvent(
       new MessageEvent("message", {
         data: { type: "invalidated-claim", claim, diagnosticCode },
+      }),
+    );
+  }
+
+  writerDiscovery(discovery: WriterDiscovery): void {
+    this.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "writer-discovery", discovery },
       }),
     );
   }
@@ -161,6 +180,7 @@ const startExecutor = async (options: {
   routing: boolean;
   onCandidateClaim?: (candidate: CandidateClaim) => void;
   onCandidateDiagnostic?: (diagnostic: CandidateDiagnostic) => void;
+  onWriterDiscovery?: (discovery: WriterDiscovery) => void;
 }) => {
   const worker = new FakeWorker();
   const server = new ClaimRecordingServer();
@@ -175,6 +195,7 @@ const startExecutor = async (options: {
     },
     onCandidateClaim: options.onCandidateClaim,
     onCandidateDiagnostic: options.onCandidateDiagnostic,
+    onWriterDiscovery: options.onWriterDiscovery,
     createWorker: () => {
       queueMicrotask(() => worker.boot());
       return worker;
@@ -287,6 +308,32 @@ Deno.test("changed action identity revokes its old host claim", async () => {
       claim: CLAIM,
       diagnosticCode: "claim-key-mismatch",
     }]);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("host records indexed executor writer discovery", async () => {
+  const discoveries: WriterDiscovery[] = [];
+  const { worker, crashes, executor } = await startExecutor({
+    routing: false,
+    onWriterDiscovery: (discovery) => discoveries.push(discovery),
+  });
+  try {
+    const discovery: WriterDiscovery = {
+      pieceId: CLAIM_KEY.pieceId,
+      indexMiss: false,
+      writers: [{
+        actionId: CLAIM_KEY.actionId,
+        pieceId: CLAIM_KEY.pieceId,
+        actionKind: CLAIM_KEY.actionKind,
+      }],
+    };
+    worker.writerDiscovery(discovery);
+    await flushClaimControl();
+
+    assertEquals(discoveries, [discovery]);
+    assertEquals(crashes, []);
   } finally {
     await executor.stop();
   }
