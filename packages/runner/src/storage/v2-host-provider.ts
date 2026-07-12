@@ -58,6 +58,8 @@ interface HostProviderChannelBaseOptions {
   server: Server;
   space: MemorySpace;
   branch?: BranchName;
+  /** Defense in depth: reject any Worker transaction escaping shadow storage. */
+  shadowWrites?: boolean;
 }
 
 interface UnleasedHostProviderChannelOptions {
@@ -255,6 +257,13 @@ export function createHostProviderChannel(
       sendError(parsed.requestId, {
         name: "AuthorizationError",
         message: "executor providers cannot originate client execution demand",
+      });
+      return;
+    }
+    if (options.shadowWrites === true && parsed.type === "transact") {
+      sendError(parsed.requestId, {
+        name: "AuthorizationError",
+        message: "shadow executor providers cannot transact upstream",
       });
       return;
     }

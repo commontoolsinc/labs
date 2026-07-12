@@ -7,7 +7,6 @@ import {
 import { Server } from "@commonfabric/memory/v2/server";
 import {
   createHostProviderChannel,
-  type HostProviderChannelOptions,
   HostStorageManager,
 } from "../src/storage/v2-host-provider.ts";
 
@@ -95,7 +94,7 @@ Deno.test("shadow executor host provider rejects leaked upstream transactions", 
       },
       authorization: { principal: SPACE },
     }),
-  } as HostProviderChannelOptions);
+  });
   const storage = HostStorageManager.connect({
     port: channel.port,
     principal: SPACE,
@@ -112,10 +111,12 @@ Deno.test("shadow executor host provider rejects leaked upstream transactions", 
       }],
     });
 
-    assertEquals(result.error?.name, "AuthorizationError");
+    assertEquals(result.error?.name, "TransactionError");
     assertEquals(
-      result.error?.message,
-      "shadow executor providers cannot transact upstream",
+      result.error?.message.includes(
+        "shadow executor providers cannot transact upstream",
+      ),
+      true,
     );
     assertEquals(await server.readDocument(SPACE, "of:shadow-leak"), null);
   } finally {

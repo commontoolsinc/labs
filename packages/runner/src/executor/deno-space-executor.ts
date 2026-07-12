@@ -215,6 +215,7 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
       space: options.space as MemorySpace,
       branch: options.branch,
       executionLease: options.lease,
+      shadowWrites: true,
     });
     let worker: ExecutorWorkerLike;
     try {
