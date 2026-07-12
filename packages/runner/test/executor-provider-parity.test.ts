@@ -1321,6 +1321,7 @@ Deno.test("executor host provider reports accepted commits only after replica in
     principal: principal.did(),
     space,
     onAcceptedCommitIntegrated(notice) {
+      if (notice.dataSeq !== 2) return;
       callbackRan = true;
       valueAtCallback = storage.open(space).replica.get(address)?.is;
       integrated.resolve(notice);
@@ -1330,10 +1331,26 @@ Deno.test("executor host provider reports accepted commits only after replica in
   try {
     const provider = storage.open(space);
     assertEquals((await provider.sync(uri)).error, undefined);
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { integrated: "baseline" } },
+      }],
+    });
+    // The writer response is delivered before the provider MessagePort gets a
+    // task turn. The explicit barrier must still include this already-accepted
+    // commit rather than sampling only notices already dispatched in-Worker.
+    assertEquals(await storage.acceptedCommitsSettled(), 1);
+    assertEquals(provider.replica.get(address)?.is, {
+      value: { integrated: "baseline" },
+    });
     server.gateNextGraphQuery();
 
     const commit = writer.transact({
-      localSeq: 1,
+      localSeq: 2,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -1347,10 +1364,10 @@ Deno.test("executor host provider reports accepted commits only after replica in
     server.releaseGraphQuery.resolve();
     await commit;
     const notice = await integrated.promise;
-    assertEquals(notice.dataSeq, 1);
-    assertEquals(notice.deliverySeq, 1);
+    assertEquals(notice.dataSeq, 2);
+    assertEquals(notice.deliverySeq, 2);
     assertEquals(valueAtCallback, { value: { integrated: true } });
-    assertEquals(await storage.acceptedCommitsSettled(), 1);
+    assertEquals(await storage.acceptedCommitsSettled(), 2);
   } finally {
     server.releaseGraphQuery.resolve();
     await storage.close();

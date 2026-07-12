@@ -57,6 +57,7 @@ export interface AcceptedCommitNotice {
 type ProviderPortMessage =
   | { type: "memory"; payload: string }
   | { type: "accepted-commit"; notice: AcceptedCommitNotice }
+  | { type: "accepted-commit-barrier"; barrierId: number }
   | { type: "close"; message?: string };
 
 interface HostProviderChannelBaseOptions {
@@ -347,6 +348,26 @@ export function createHostProviderChannel(
       closeHost();
       return;
     }
+    if (
+      message.type === "accepted-commit-barrier" &&
+      Number.isSafeInteger(message.barrierId)
+    ) {
+      // Queue behind every earlier Worker-originated memory frame. Any commit
+      // accepted while handling those frames publishes its notice before this
+      // marker is posted back on the same ordered MessagePort.
+      receiving = receiving.then(() => {
+        if (disposed) return;
+        hostPort.postMessage(
+          {
+            type: "accepted-commit-barrier",
+            barrierId: message.barrierId!,
+          } satisfies ProviderPortMessage,
+        );
+      }).catch((error) => {
+        closeHost(error instanceof Error ? error.message : String(error));
+      });
+      return;
+    }
     if (message.type !== "memory" || typeof message.payload !== "string") {
       closeHost("invalid executor provider message");
       return;
@@ -400,6 +421,8 @@ class MessagePortTransport implements MemoryClient.Transport {
   #acceptedCommitReceiver: ((notice: AcceptedCommitNotice) => void) | null =
     null;
   #bufferedAcceptedCommits: AcceptedCommitNotice[] = [];
+  #acceptedCommitBarrierId = 0;
+  #acceptedCommitBarriers = new Map<number, PromiseWithResolvers<void>>();
 
   constructor(private readonly port: MessagePort) {
     port.addEventListener("message", (event: MessageEvent<unknown>) => {
@@ -414,6 +437,17 @@ class MessagePortTransport implements MemoryClient.Transport {
         } else {
           this.#acceptedCommitReceiver(message.notice);
         }
+      } else if (
+        message.type === "accepted-commit-barrier" &&
+        Number.isSafeInteger(message.barrierId)
+      ) {
+        const pending = this.#acceptedCommitBarriers.get(message.barrierId!);
+        if (pending === undefined) {
+          this.closeFromHost("unknown executor provider commit barrier");
+          return;
+        }
+        this.#acceptedCommitBarriers.delete(message.barrierId!);
+        pending.resolve();
       } else if (message.type === "close") {
         this.closeFromHost(message.message);
       } else {
@@ -443,6 +477,27 @@ class MessagePortTransport implements MemoryClient.Transport {
     for (const notice of buffered) receiver(notice);
   }
 
+  acceptedCommitBarrier(): Promise<void> {
+    if (this.#closed) {
+      return Promise.reject(new Error("executor provider transport closed"));
+    }
+    const barrierId = ++this.#acceptedCommitBarrierId;
+    const pending = Promise.withResolvers<void>();
+    this.#acceptedCommitBarriers.set(barrierId, pending);
+    try {
+      this.port.postMessage(
+        {
+          type: "accepted-commit-barrier",
+          barrierId,
+        } satisfies ProviderPortMessage,
+      );
+    } catch (error) {
+      this.#acceptedCommitBarriers.delete(barrierId);
+      pending.reject(error);
+    }
+    return pending.promise;
+  }
+
   send(payload: string): Promise<void> {
     if (this.#closed) {
       return Promise.reject(new Error("executor provider transport closed"));
@@ -456,6 +511,9 @@ class MessagePortTransport implements MemoryClient.Transport {
   close(): Promise<void> {
     if (this.#closed) return Promise.resolve();
     this.#closed = true;
+    this.rejectAcceptedCommitBarriers(
+      new Error("executor provider transport closed"),
+    );
     try {
       this.port.postMessage({ type: "close" } satisfies ProviderPortMessage);
     } finally {
@@ -468,7 +526,16 @@ class MessagePortTransport implements MemoryClient.Transport {
     if (this.#closed) return;
     this.#closed = true;
     this.port.close();
-    this.#closeReceiver(new Error(message ?? "executor provider host closed"));
+    const error = new Error(message ?? "executor provider host closed");
+    this.rejectAcceptedCommitBarriers(error);
+    this.#closeReceiver(error);
+  }
+
+  private rejectAcceptedCommitBarriers(error: Error): void {
+    for (const pending of this.#acceptedCommitBarriers.values()) {
+      pending.reject(error);
+    }
+    this.#acceptedCommitBarriers.clear();
   }
 }
 
@@ -512,7 +579,7 @@ class HostReplicaSession implements ReplicaSession {
 
   constructor(
     private readonly session: MemoryClient.SpaceSession,
-    transport: MessagePortTransport,
+    private readonly transport: MessagePortTransport,
     private readonly branch: BranchName,
     private readonly onAcceptedCommitIntegrated?: (
       notice: AcceptedCommitNotice,
@@ -542,7 +609,8 @@ class HostReplicaSession implements ReplicaSession {
   /** Wait until every accepted-commit notice already delivered by the host has
    * refreshed the replica, then return the integrated data watermark. */
   acceptedCommitsSettled(): Promise<number> {
-    return this.#mutation.then(() => this.#appliedSeq);
+    return this.transport.acceptedCommitBarrier().then(() => this.#mutation)
+      .then(() => this.#appliedSeq);
   }
 
   private async refreshAndNotifyAcceptedCommit(
