@@ -619,3 +619,90 @@ Deno.test("sponsor WRITE loss fences commits before replacement", async () => {
     await Deno.remove(directory, { recursive: true });
   }
 });
+
+Deno.test("lease-bound execution projects the sponsor PerSession scope", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = createLeaseServer(
+    toFileUrl(`${directory}/`),
+    "host:sponsor-session-scope",
+  );
+  const sponsorClient = await connect(server);
+  const sponsor = await mount(sponsorClient, OWNER);
+  const siblingClient = await connect(server);
+  const sibling = await mount(siblingClient, OWNER);
+  const executorClient = await connect(server);
+  const executor = await mount(executorClient, OWNER);
+  const sessionValue = async (session: MemoryClient.SpaceSession, id: string) =>
+    (await session.queryGraph({
+      roots: [{
+        id,
+        scope: "session",
+        selector: {
+          path: [],
+          schema: {
+            type: "object",
+            properties: { lane: { type: "string" } },
+            required: ["lane"],
+          },
+        },
+      }],
+    })).entities[0]?.document?.value;
+
+  try {
+    await sponsor.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:sponsor-session-input",
+        scope: "session",
+        value: { value: { lane: "sponsor" } },
+      }],
+    });
+    await sibling.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:sponsor-session-input",
+        scope: "session",
+        value: { value: { lane: "sibling" } },
+      }],
+    });
+    await setPolicy(sponsor, 2);
+    await sponsor.setExecutionDemand("", ["space:piece"]);
+    const lease = await server.acquireExecutionLease(SPACE, "");
+    assertExists(lease);
+    server.bindExecutionSession(SPACE, executor.sessionId, lease);
+
+    assertEquals(
+      await sessionValue(executor, "of:sponsor-session-input"),
+      { lane: "sponsor" },
+    );
+
+    await executor.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:sponsor-session-output",
+        scope: "session",
+        value: { value: { lane: "executor" } },
+      }],
+    });
+    assertEquals(
+      await sessionValue(sponsor, "of:sponsor-session-output"),
+      { lane: "executor" },
+    );
+    assertEquals(
+      await sessionValue(sibling, "of:sponsor-session-output"),
+      undefined,
+    );
+  } finally {
+    await executorClient.close();
+    await siblingClient.close();
+    await sponsorClient.close();
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
