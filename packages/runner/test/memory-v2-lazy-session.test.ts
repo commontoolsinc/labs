@@ -148,12 +148,12 @@ describe("Memory v2 lazy session creation", () => {
     let sessionCreates = 0;
     let commits = 0;
     let reentrantCommit: Promise<unknown> | undefined;
-    let storage!: TestStorageManager;
+    const state: { storage?: TestStorageManager } = {};
     const sessionFactory = {
       create(_space: MemorySpace) {
         sessionCreates += 1;
         if (sessionCreates === 1) {
-          const nestedTx = storage.edit();
+          const nestedTx = state.storage!.edit();
           nestedTx.write({
             space,
             id: "of:memory-v2-reentrant-session-nested" as URI,
@@ -175,10 +175,11 @@ describe("Memory v2 lazy session creation", () => {
         });
       },
     };
-    storage = TestStorageManager.create({
+    const storage = TestStorageManager.create({
       as: signer,
       memoryHost: new URL("memory://"),
     }, sessionFactory);
+    state.storage = storage;
 
     const tx = storage.edit();
     tx.write({
