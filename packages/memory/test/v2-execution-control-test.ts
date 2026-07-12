@@ -725,7 +725,7 @@ Deno.test("positive claims require enabled policy and disabling it revokes autho
           claimKey(POLICY_SPACE, ""),
         ),
       Error,
-      "execution lease is not active and authorized",
+      "execution policy",
     );
 
     await setPolicy(session, true);

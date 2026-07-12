@@ -1178,6 +1178,7 @@ export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
   #engines = new Map<string, Promise<Engine.Engine>>();
+  #openedEngines = new Map<string, Engine.Engine>();
   // Synthesized session state for direct out-of-band document writes, such as blob uploads.
   #directSessionId = `server:${crypto.randomUUID()}`;
   #directLocalSeq = 0;
@@ -1208,7 +1209,6 @@ export class Server {
     OwnedExecutionLease
   >();
   #executionLeaseTasks = new Set<Promise<void>>();
-  #executionPolicyEnabledSpaces = new Set<string>();
   #executionClaimExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   #executionLeaseExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   #executionHostId: string;
@@ -1601,6 +1601,19 @@ export class Server {
         scope: "space",
       }),
     );
+  }
+
+  /** Reconcile ephemeral claim authority with the durable opt-in. Any
+   * inactive shape (absent, deleted, disabled, or malformed) is fail-open to
+   * client authority and therefore revokes every live server claim. Demand is
+   * deliberately independent and remains available for shadow execution. */
+  #reconcileExecutionPolicy(
+    engine: Engine.Engine,
+    space: string,
+  ): boolean {
+    const enabled = this.#executionPolicyEnabled(engine, space);
+    if (!enabled) this.#revokeExecutionClaimsForSpace(space);
+    return enabled;
   }
 
   /** Validate the owner-managed opt-in policy as one isolated whole-document
@@ -3083,6 +3096,11 @@ export class Server {
     const key = actionClaimMapKey(claimInput);
     const now = this.#executionNowMs();
     const engine = await this.openEngine(claimInput.space);
+    if (!this.#reconcileExecutionPolicy(engine, claimInput.space)) {
+      throw new Error(
+        `server-primary execution policy is not enabled for ${claimInput.space}`,
+      );
+    }
     const current = Engine.currentExecutionLease(engine, {
       space: claimInput.space,
       branch: claimInput.branch,
@@ -3103,8 +3121,7 @@ export class Server {
       !this.#sameExecutionLease(current, lease) || sponsor === null ||
       sponsor.sessionToken !== authority.sponsorSessionToken ||
       demand === undefined || demand.principal !== current.onBehalfOf ||
-      !this.#executionSponsorCanWrite(engine, demand, sponsor) ||
-      !this.#executionPolicyEnabled(engine, claimInput.space)
+      !this.#executionSponsorCanWrite(engine, demand, sponsor)
     ) {
       throw new Error("execution lease is not active and authorized");
     }
@@ -3176,6 +3193,16 @@ export class Server {
     ) {
       return false;
     }
+    const engine = this.#openedEngines.get(live.space);
+    if (
+      engine === undefined ||
+      !this.#reconcileExecutionPolicy(engine, live.space)
+    ) {
+      if (engine === undefined) {
+        this.#revokeExecutionClaimsForSpace(live.space);
+      }
+      return false;
+    }
     this.#publishExecutionControl(Object.freeze({
       type: "session.execution.settlement",
       settlement: Object.freeze({ ...settlement, claim: live }),
@@ -3185,6 +3212,12 @@ export class Server {
 
   listExecutionClaims(space: string): readonly ExecutionClaim[] {
     this.expireExecutionClaims();
+    const engine = this.#openedEngines.get(space);
+    if (engine === undefined) {
+      this.#revokeExecutionClaimsForSpace(space);
+    } else {
+      this.#reconcileExecutionPolicy(engine, space);
+    }
     return Object.freeze(
       [...this.#executionClaims.values()]
         .filter((claim) => claim.space === space)
@@ -3218,6 +3251,7 @@ export class Server {
       Engine.close(await engine);
     }
     this.#engines.clear();
+    this.#openedEngines.clear();
     this.#connections.clear();
     this.#acceptedCommitListeners.clear();
     this.#acceptedCommitOrderBySpace.clear();
@@ -3229,7 +3263,6 @@ export class Server {
     this.#executionClaimGeneration.clear();
     this.#boundExecutionSessions.clear();
     this.#ownedExecutionLeases.clear();
-    this.#executionPolicyEnabledSpaces.clear();
     this.#readPool.close();
   }
 
@@ -3939,15 +3972,10 @@ export class Server {
       if (deny) {
         return respondTypedError<SessionOpenResult>(message.requestId, deny);
       }
-      const executionPolicyEnabled = this.#executionPolicyEnabled(
+      const executionPolicyEnabled = this.#reconcileExecutionPolicy(
         engine,
         message.space,
       );
-      if (executionPolicyEnabled) {
-        this.#executionPolicyEnabledSpaces.add(message.space);
-      } else {
-        this.#executionPolicyEnabledSpaces.delete(message.space);
-      }
       if (
         this.memoryProtocolFlags().serverPrimaryExecutionV1 &&
         executionPolicyEnabled &&
@@ -4325,11 +4353,7 @@ export class Server {
             this.#drainIneligibleExecutionLeases(engine, message.space);
           }
           if (executionPolicyTouched) {
-            if (this.#executionPolicyEnabled(engine, message.space)) {
-              this.#executionPolicyEnabledSpaces.add(message.space);
-            } else {
-              this.#executionPolicyEnabledSpaces.delete(message.space);
-              this.#revokeExecutionClaimsForSpace(message.space);
+            if (!this.#reconcileExecutionPolicy(engine, message.space)) {
               this.#drainIneligibleExecutionLeases(engine, message.space, {
                 policyDisabled: true,
               });
@@ -5826,7 +5850,9 @@ export class Server {
       if (url.protocol === "file:") {
         await FS.ensureDir(Path.toFileUrl(Path.dirname(Path.fromFileUrl(url))));
       }
-      return await Engine.open({ url });
+      const engine = await Engine.open({ url });
+      this.#openedEngines.set(space, engine);
+      return engine;
     })();
     opened.catch(() => {
       if (this.#engines.get(space) === opened) {
