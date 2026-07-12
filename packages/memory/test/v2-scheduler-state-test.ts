@@ -1814,6 +1814,41 @@ Deno.test("memory v2 writer lookup ignores target creation provenance", async ()
   }
 });
 
+Deno.test("memory v2 writer lookup reports the last failure fingerprint", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-failure";
+  const target = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:failed-output",
+    path: ["value"],
+  };
+
+  try {
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 1,
+      observation: observationForAction("writer-lookup:failed", {
+        ownerSpace,
+        currentKnownWrites: [target],
+        status: "failed",
+        errorFingerprint: "error:stable-fingerprint",
+      }),
+    });
+
+    const candidate = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    })[0];
+    assertEquals(candidate?.status, "failed");
+    assertEquals(candidate?.errorFingerprint, "error:stable-fingerprint");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 writer lookup fails open on corrupt projections", async () => {
   const { engine, path } = await createEngine();
   const ownerSpace = "did:key:scheduler-writer-corruption";
@@ -1878,7 +1913,10 @@ Deno.test("memory v2 writer lookup fails open on corrupt projections", async () 
       SET write_path = :write_path
       WHERE action_id = 'writer-corrupt:invalid-path'
     `).run({ write_path: encodeMemoryBoundary([42]) });
-    assertEquals(lookup(invalidPath.target), []);
+    assertEquals(
+      lookup({ ...invalidPath.target, path: ["42"] }),
+      [],
+    );
 
     const invalidKind = storeWriter("writer-corrupt:invalid-kind");
     engine.database.prepare(`
