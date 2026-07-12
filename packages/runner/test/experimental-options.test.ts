@@ -10,8 +10,10 @@ import {
 import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
+  getServerPrimaryExecutionConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetServerPrimaryExecutionConfig,
 } from "@commonfabric/memory/v2";
 
 const signer = await Identity.fromPassphrase("test experimental");
@@ -26,6 +28,7 @@ describe("ExperimentalOptions", () => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
     resetPersistentSchedulerStateConfig();
+    resetServerPrimaryExecutionConfig();
   });
 
   describe("Runtime construction", () => {
@@ -38,12 +41,14 @@ describe("ExperimentalOptions", () => {
           modernCellRep: false,
           persistentSchedulerState: false,
           commitPreconditions: false,
+          serverPrimaryExecution: false,
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        serverPrimaryExecution: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -60,12 +65,14 @@ describe("ExperimentalOptions", () => {
         experimental: {
           modernCellRep: true,
           persistentSchedulerState: true,
+          serverPrimaryExecution: true,
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
         persistentSchedulerState: true,
         commitPreconditions: true,
+        serverPrimaryExecution: true,
         eagerSourceAnnotation: false,
       });
       await runtime.dispose();
@@ -83,6 +90,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: true,
         commitPreconditions: true,
+        serverPrimaryExecution: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -157,6 +165,23 @@ describe("ExperimentalOptions", () => {
       await sm.close();
     });
 
+    it("constructing Runtime with serverPrimaryExecution sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          serverPrimaryExecution: true,
+        },
+      });
+
+      expect(getServerPrimaryExecutionConfig()).toBe(true);
+      expect(runtime.experimental.serverPrimaryExecution).toBe(true);
+
+      await runtime.dispose();
+      await sm.close();
+    });
+
     it("constructing Runtime with explicit false sets config to false", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
@@ -204,6 +229,7 @@ describe("ExperimentalOptions", () => {
       expect(getModernCellRepConfig()).toBe(initial);
       expect(getPersistentSchedulerStateConfig()).toBe(true);
       expect(getCommitPreconditionsConfig()).toBe(true);
+      expect(getServerPrimaryExecutionConfig()).toBe(false);
     });
   });
 });
