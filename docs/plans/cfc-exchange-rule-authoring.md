@@ -606,8 +606,9 @@ Do not make the first acceptance test depend on unimplemented
 
 Place pure calculus cases in runner unit tests, compiler cases in transformer
 tests, and one complete compile→persist→reload→evaluate scenario in a runner or
-pattern integration test. Do not force every invariant through a slow browser
-test.
+pattern integration test. The compiler-backed cold path is pinned in
+`cfc-policy-of-label.test.ts`. Do not force every invariant through a slow
+browser test.
 
 ### WP4.3 — Verification gates
 
