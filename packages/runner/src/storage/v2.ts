@@ -563,6 +563,24 @@ const dropMaterializedSuffix = (
   }
 };
 
+export interface ActionTransactionRouteInput {
+  readonly space: MemorySpace;
+  readonly commit: ClientCommit;
+  /** Exact scheduler action object when this transaction came from a run. */
+  readonly sourceAction?: object;
+}
+
+export type ActionTransactionRoute =
+  | { readonly disposition: "upstream" }
+  | {
+    readonly disposition: "local";
+    readonly kind: "executor-shadow" | "claimed-overlay";
+  };
+
+export type ActionTransactionRouter = (
+  input: ActionTransactionRouteInput,
+) => ActionTransactionRoute | Promise<ActionTransactionRoute>;
+
 export interface Options {
   as: Signer;
   /**
@@ -591,6 +609,12 @@ export interface Options {
    * client storage must leave this false.
    */
   shadowWrites?: boolean;
+  /**
+   * Whole-action authority router. Executor runtimes use this to keep
+   * unclaimed transactions local while sending only an exact claimed rerun
+   * upstream. The same seam later hosts client claimed overlays.
+   */
+  actionTransactionRouter?: ActionTransactionRouter;
 }
 
 export const defaultSettings: IRemoteStorageProviderSettings = {
@@ -763,6 +787,7 @@ export class StorageManager implements IStorageManager {
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
   readonly #shadowWrites: boolean;
+  readonly #actionTransactionRouter?: ActionTransactionRouter;
   #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -808,6 +833,7 @@ export class StorageManager implements IStorageManager {
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
     this.#shadowWrites = options.shadowWrites === true;
+    this.#actionTransactionRouter = options.actionTransactionRouter;
     if (options.spaceIdentity) {
       this.registerSpaceIdentity(options.spaceIdentity);
     }
@@ -875,6 +901,7 @@ export class StorageManager implements IStorageManager {
         settings: this.#settings,
         subscription: this.#subscription,
         shadowWrites: this.#shadowWrites,
+        actionTransactionRouter: this.#actionTransactionRouter,
         supportsExecutionDemand:
           this.#sessionFactory.supportsExecutionDemand === true,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
@@ -1466,6 +1493,7 @@ type ProviderOptions = {
   settings: IRemoteStorageProviderSettings;
   subscription: IStorageSubscription;
   shadowWrites: boolean;
+  actionTransactionRouter?: ActionTransactionRouter;
   supportsExecutionDemand: boolean;
   createSession: () => Promise<ReplicaSessionHandle>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
@@ -1664,6 +1692,7 @@ class SpaceReplica implements ISpaceReplica {
   readonly #subscription: IStorageSubscription;
   readonly #createSession: () => Promise<ReplicaSessionHandle>;
   readonly #shadowWrites: boolean;
+  readonly #actionTransactionRouter?: ActionTransactionRouter;
   #sessionHandle?: Promise<ReplicaSessionHandle>;
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
@@ -1715,6 +1744,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
     this.#shadowWrites = options.shadowWrites;
+    this.#actionTransactionRouter = options.actionTransactionRouter;
   }
 
   did(): MemorySpace {
@@ -2544,13 +2574,15 @@ class SpaceReplica implements ISpaceReplica {
       if (schedulerObservation === undefined) {
         return { ok: {} };
       }
-      if (this.#shadowWrites) {
-        return { ok: {} };
+      if (this.#actionTransactionRouter === undefined) {
+        if (this.#shadowWrites) {
+          return { ok: {} };
+        }
+        return await this.enqueueSchedulerObservationCommit(
+          schedulerObservation,
+          source,
+        );
       }
-      return await this.enqueueSchedulerObservationCommit(
-        schedulerObservation,
-        source,
-      );
     }
 
     const localSeq = this.#nextLocalSeq++;
@@ -2593,6 +2625,7 @@ class SpaceReplica implements ISpaceReplica {
           : {}),
       }),
     );
+    const route = await this.routeActionTransaction(commit, source);
     const touched = operations.map((operation) => ({
       id: operation.id,
       scope: operation.scope,
@@ -2636,13 +2669,12 @@ class SpaceReplica implements ISpaceReplica {
       }
     });
 
-    // Validation workers need the optimistic values to discover the graph,
-    // but ordinary shadow execution has no authority to mutate shared state.
-    // Keep these versions pending in the private replica so later accepted
-    // input syncs rebase beneath them; the realm is discarded on hibernate or
-    // sponsor rotation. Scheduler observations and folded SQLite operations
-    // are intentionally swallowed with the semantic transaction.
-    if (this.#shadowWrites) {
+    // Local routes are deliberately not confirmed: executor validation needs
+    // the optimistic values to discover the graph, while claimed client
+    // overlays need the same layering until an ordered settlement arrives.
+    // In both cases the whole action remains local and no scheduler,
+    // precondition, SQLite, or semantic operation reaches the host.
+    if (route.disposition === "local") {
       return { ok: {} };
     }
 
@@ -2660,6 +2692,39 @@ class SpaceReplica implements ISpaceReplica {
     const result = await promise;
     this.#commitPromises.delete(promise);
     return result;
+  }
+
+  private async routeActionTransaction(
+    commit: ClientCommit,
+    source?: IStorageTransaction,
+  ): Promise<ActionTransactionRoute> {
+    const fallback: ActionTransactionRoute = this.#shadowWrites
+      ? { disposition: "local", kind: "executor-shadow" }
+      : { disposition: "upstream" };
+    if (this.#actionTransactionRouter === undefined) return fallback;
+    try {
+      const route = await this.#actionTransactionRouter({
+        space: this.#space,
+        commit,
+        ...(source?.sourceAction !== undefined
+          ? { sourceAction: source.sourceAction }
+          : {}),
+      });
+      if (route.disposition === "upstream") return route;
+      if (
+        route.disposition === "local" &&
+        (route.kind === "executor-shadow" ||
+          route.kind === "claimed-overlay")
+      ) {
+        return route;
+      }
+    } catch (error) {
+      logger.warn("execution-route", () => [
+        `Action transaction routing failed for ${this.#space}`,
+        error,
+      ]);
+    }
+    return fallback;
   }
 
   private async pushCommit(
