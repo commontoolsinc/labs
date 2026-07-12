@@ -380,6 +380,62 @@ describe("runner-owned factory materialization", () => {
     ).not.toThrow();
   });
 
+  it("warm-materializes an exactly carried recursive pattern schema", () => {
+    const recursiveArgumentSchema = {
+      type: "object",
+      properties: {
+        element: { $ref: "#/$defs/Notebook" },
+      },
+      required: ["element"],
+      $defs: {
+        Notebook: {
+          type: "object",
+          properties: {
+            children: {
+              type: "array",
+              items: { $ref: "#/$defs/Notebook" },
+            },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+    const base = pattern(
+      ({ element }: { element: unknown }) => ({ result: element }),
+      recursiveArgumentSchema,
+      RESULT_SCHEMA,
+    );
+    setDurableArtifactEntryRef(base, REFS.pattern);
+    const state = sealFactoryState(base);
+    warm.set(key(REFS.pattern.identity, REFS.pattern.symbol), base);
+
+    expect(() =>
+      materializeFactory(base, {
+        runtime,
+        artifactSpace,
+        expected: contractOf(state),
+      })
+    ).not.toThrow();
+    expect(() =>
+      materializeFactory(createFactoryShell(state), {
+        runtime,
+        artifactSpace,
+        expected: contractOf(state),
+      })
+    ).not.toThrow();
+
+    const forged = createFactoryShell({
+      ...state,
+      argumentSchema: {
+        ...recursiveArgumentSchema,
+        required: [],
+      },
+    });
+    expect(() => materializeFactory(forged, { runtime, artifactSpace }))
+      .toThrow(
+        "Factory materialization schema mismatch: pattern argumentSchema",
+      );
+  });
+
   it("fails closed for nonfactories, missing refs, wrong kinds, missing artifacts, and forged refs", async () => {
     expect(() => materializeFactory({}, { runtime, artifactSpace })).toThrow(
       "Factory materialization requires an admitted FabricFactory",

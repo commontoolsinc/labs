@@ -244,10 +244,15 @@ function symbolicFailure(
     return factoryContractFailure(expectedFactory, sourceFactory);
   }
   if (schema === true) return undefined;
-  if (sourceSchema === undefined) {
+  if (
+    sourceSchema === undefined ||
+    (isCell(value) && isPlainRecord(sourceSchema) &&
+      Object.keys(sourceSchema).length === 0)
+  ) {
     // Some trusted builder Cells (notably dynamic-schema builtin results such
-    // as wish().result paths) do not carry a local content schema at eager
-    // graph-construction time. The compiler-generated params schema remains
+    // as wish().result paths) carry no local content schema — represented as
+    // either undefined or the equivalent empty JSON Schema — at eager graph
+    // construction time. The compiler-generated params schema remains
     // authoritative for their eventual content; still enforce any declared
     // Cell/Stream kind and never extend this allowance to serialized links or
     // arbitrary reactive-shaped objects.

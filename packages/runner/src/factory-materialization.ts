@@ -183,6 +183,27 @@ function schemaAt(
   return (value as unknown as Record<string, JSONSchema | undefined>)[field];
 }
 
+/**
+ * Compare schemas at a boundary where both documents come from trusted,
+ * content-addressed metadata.
+ *
+ * Exact structure is sufficient even when semantic normalization cannot
+ * resolve a recursive or external `$ref`: there is no differing assertion to
+ * smuggle through that fast path. Non-identical documents still use the
+ * fail-closed semantic comparator.
+ */
+function trustedFactorySchemasEqual(
+  left: JSONSchema | undefined,
+  right: JSONSchema | undefined,
+): boolean {
+  try {
+    if (deepEqual(left, right)) return true;
+  } catch {
+    // Malformed cyclic object graphs are not valid JSON Schema documents.
+  }
+  return factorySchemasEqual(left, right);
+}
+
 function assertExpectedContract(
   actual: FactoryContract,
   expected: FactoryContract | undefined,
@@ -195,7 +216,10 @@ function assertExpectedContract(
   }
   for (const field of schemaFields(actual.kind)) {
     if (
-      !factorySchemasEqual(schemaAt(actual, field), schemaAt(expected, field))
+      !trustedFactorySchemasEqual(
+        schemaAt(actual, field),
+        schemaAt(expected, field),
+      )
     ) {
       throw new Error(
         `Factory materialization schema mismatch: expected ${actual.kind} ${field}`,
@@ -232,7 +256,7 @@ function assertCarriedSchemas(
     // metadata; final canonical-state equality rejects the forged addition.
     if (
       schemaLightByRef && carriedSchema === undefined ||
-      factorySchemasEqual(carriedSchema, trustedSchema)
+      trustedFactorySchemasEqual(carriedSchema, trustedSchema)
     ) {
       continue;
     }
@@ -252,7 +276,7 @@ function assertCarriedSchemas(
     if (
       carriedHasParamsSchema !== trustedHasParamsSchema ||
       carriedHasParamsSchema &&
-        !factorySchemasEqual(carried.paramsSchema, trustedParamsSchema)
+        !trustedFactorySchemasEqual(carried.paramsSchema, trustedParamsSchema)
     ) {
       throw new Error(
         "Factory materialization schema mismatch: pattern paramsSchema",

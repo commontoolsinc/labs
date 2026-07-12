@@ -1,7 +1,10 @@
 import { assertEquals, assertThrows } from "@std/assert";
+import { Identity } from "@commonfabric/identity";
 
 import { assertValidPatternParams } from "../src/builder/factory-params.ts";
 import { isReactiveMarker, type JSONSchema } from "../src/builder/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "../src/storage/cache.deno.ts";
 
 function symbolic(schema: JSONSchema): unknown {
   return {
@@ -175,4 +178,49 @@ Deno.test("pattern curry validates a symbolic Cell default when content schema i
     ),
     undefined,
   );
+});
+
+Deno.test("pattern curry trusts an empty deferred schema only on a real Cell", async () => {
+  const signer = await Identity.fromPassphrase(
+    "factory-params-deferred-cell-test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      candidates: {
+        type: "array",
+        items: { type: "object", properties: { title: { type: "string" } } },
+      },
+    },
+    required: ["candidates"],
+  } as const satisfies JSONSchema;
+
+  try {
+    const deferredCell = runtime.getCell(
+      signer.did(),
+      "factory-params-deferred-cell",
+      {},
+    );
+    assertEquals(
+      assertValidPatternParams({ candidates: deferredCell }, paramsSchema),
+      undefined,
+    );
+    assertThrows(
+      () =>
+        assertValidPatternParams(
+          { candidates: symbolic({}) },
+          paramsSchema,
+        ),
+      TypeError,
+      "symbolic binding schema mismatch",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
 });
