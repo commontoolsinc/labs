@@ -1090,6 +1090,32 @@ describe("WorkerController", () => {
     });
   });
 
+  it("terminates immediately when background authority is lost", async () => {
+    await withMockWorker(async () => {
+      const controller = new WorkerController({
+        did: TEST_DID,
+        toolshedUrl: "http://localhost:8000",
+        identity: await Identity.generate({ implementation: "noble" }),
+      });
+      await controller.initializeResolve;
+      const worker = MockWorker.instances.at(-1)!;
+      worker.respond = false;
+      const pending = controller.runPiece(
+        new FakeEntryCell(pieceEntry()) as never,
+      ).then(
+        () => "resolved",
+        (error) => error instanceof Error ? error.message : String(error),
+      );
+
+      controller.terminateNow("background execution authority lost");
+      controller.terminateNow("already terminated");
+
+      assertEquals(worker.terminated, true);
+      assertEquals(controller.isReady(), false);
+      assertEquals(await pending, "background execution authority lost");
+    });
+  });
+
   it("rejects requests when the worker returns an error response", async () => {
     await withMockWorker(async () => {
       const controller = new WorkerController({
