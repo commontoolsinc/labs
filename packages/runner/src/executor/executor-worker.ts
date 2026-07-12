@@ -22,6 +22,7 @@ import {
   isPermanentRejection,
   isTerminalRejection,
 } from "../storage/rejection.ts";
+import { prepareExecutorDemandPiece } from "./writer-discovery.ts";
 
 type WorkerRequest = {
   type:
@@ -48,6 +49,7 @@ const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
 let runtime: Runtime | null = null;
 let storage: HostStorageManager | null = null;
 let space: MemorySpace | null = null;
+let branch: BranchName = "";
 const demanded = new Map<string, Cell<unknown>>();
 const candidateActions = new Map<string, Action>();
 const claimsByAction = new WeakMap<object, ExecutionClaim>();
@@ -110,8 +112,15 @@ const replaceDemand = async (pieces: readonly string[]): Promise<void> => {
       entityIdFrom(normalizePieceId(pieceId)),
     );
     await cell.sync();
-    await runtime.start(cell);
+    const discovery = await prepareExecutorDemandPiece({
+      runtime,
+      branch,
+      pieceId,
+      target: cell,
+      instantiate: () => runtime!.start(cell),
+    });
     demanded.set(pieceId, cell);
+    worker.postMessage({ type: "writer-discovery", discovery });
   }
   await pullDemand();
 };
@@ -133,9 +142,10 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     throw new Error("invalid executor Worker initialization");
   }
   space = request.space as MemorySpace;
+  branch = request.branch ?? "";
   const actionTransactionRouter = createExecutorActionTransactionRouter({
     servedSpace: space,
-    branch: request.branch ?? "",
+    branch,
     claimForAction: (action) => claimsByAction.get(action),
     onCandidate: (candidate, sourceAction) => {
       candidateActions.set(
@@ -164,7 +174,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     port: request.port,
     principal: request.principal as MemorySpace,
     space,
-    branch: request.branch ?? "",
+    branch,
     protocolFlags: request.protocolFlags,
     shadowWrites: true,
     actionTransactionRouter,
@@ -234,6 +244,7 @@ const stop = async (): Promise<void> => {
   runtime = null;
   storage = null;
   space = null;
+  branch = "";
   demanded.clear();
   candidateActions.clear();
 };

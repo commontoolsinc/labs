@@ -59,6 +59,21 @@ export function startServerExecutionPool(runtime: Runtime): void {
       apiUrl: new URL(env.API_URL),
       patternApiUrl: new URL(env.API_URL),
       experimental: runtime.experimental,
+      onCandidateClaim: (candidate) =>
+        console.debug(
+          "Memory: Server execution candidate claim-ready",
+          candidate.claimKey,
+        ),
+      onCandidateDiagnostic: (diagnostic) =>
+        console.debug(
+          "Memory: Server execution candidate unserved",
+          diagnostic,
+        ),
+      onWriterDiscovery: (discovery) =>
+        console.debug(
+          "Memory: Server execution writer discovery",
+          discovery,
+        ),
     }),
   });
   executionPool.start();

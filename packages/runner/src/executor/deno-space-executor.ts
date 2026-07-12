@@ -16,6 +16,7 @@ import type {
   SpaceExecutorFactory,
   SpaceExecutorStartOptions,
 } from "./shared-execution-pool.ts";
+import type { ExecutorWriterDiscovery } from "./writer-discovery.ts";
 
 export interface ExecutorWorkerLike extends EventTarget {
   postMessage(message: unknown, transfer?: Transferable[]): void;
@@ -32,6 +33,7 @@ export interface DenoSpaceExecutorFactoryOptions {
    * the explicit claim-routing sub-capability controls that separately. */
   onCandidateClaim?: (candidate: CandidateClaim) => void;
   onCandidateDiagnostic?: (diagnostic: CandidateClaimDiagnostic) => void;
+  onWriterDiscovery?: (discovery: ExecutorWriterDiscovery) => void;
   createWorker?: () => ExecutorWorkerLike;
   createProvider?: (
     options: HostProviderChannelOptions,
@@ -57,11 +59,13 @@ type WorkerResponse = {
     | "candidate-claim"
     | "candidate-diagnostic"
     | "invalidated-claim"
+    | "writer-discovery"
     | "unserved-claim";
   requestId?: number;
   message?: string;
   candidate?: CandidateClaim;
   diagnostic?: CandidateClaimDiagnostic;
+  discovery?: ExecutorWriterDiscovery;
   claim?: ExecutionClaim;
   diagnosticCode?: string;
 };
@@ -74,6 +78,7 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
     message.type === "candidate-claim" ||
     message.type === "candidate-diagnostic" ||
     message.type === "invalidated-claim" ||
+    message.type === "writer-discovery" ||
     message.type === "unserved-claim") &&
     (message.requestId === undefined ||
       Number.isSafeInteger(message.requestId)) &&
@@ -82,11 +87,39 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
       isCandidateClaim(message.candidate)) &&
     (message.type !== "candidate-diagnostic" ||
       isCandidateClaimDiagnostic(message.diagnostic)) &&
+    (message.type !== "writer-discovery" ||
+      isExecutorWriterDiscovery(message.discovery)) &&
     ((message.type !== "unserved-claim" &&
       message.type !== "invalidated-claim") ||
       (isExecutionClaim(message.claim) &&
         typeof message.diagnosticCode === "string" &&
         message.diagnosticCode.length > 0));
+};
+
+const isExecutorWriterDiscovery = (
+  value: unknown,
+): value is ExecutorWriterDiscovery => {
+  if (typeof value !== "object" || value === null) return false;
+  const discovery = value as Record<string, unknown>;
+  return typeof discovery.pieceId === "string" &&
+    typeof discovery.indexMiss === "boolean" &&
+    Array.isArray(discovery.writers) && discovery.writers.every((value) => {
+      if (typeof value !== "object" || value === null) return false;
+      const writer = value as Record<string, unknown>;
+      return typeof writer.branch === "string" &&
+        (writer.ownerSpace === undefined ||
+          typeof writer.ownerSpace === "string") &&
+        typeof writer.pieceId === "string" &&
+        Number.isSafeInteger(writer.processGeneration) &&
+        typeof writer.actionId === "string" &&
+        (writer.actionKind === "computation" ||
+          writer.actionKind === "effect" ||
+          writer.actionKind === "event-handler") &&
+        typeof writer.implementationFingerprint === "string" &&
+        typeof writer.runtimeFingerprint === "string" &&
+        (writer.source === "live" || writer.source === "durable" ||
+          writer.source === "live+durable");
+    });
 };
 
 const isCandidateClaimDiagnostic = (
@@ -145,6 +178,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
   readonly #onCandidateDiagnostic?: (
     diagnostic: CandidateClaimDiagnostic,
   ) => void;
+  readonly #onWriterDiscovery?: (discovery: ExecutorWriterDiscovery) => void;
   readonly #claims = new Map<string, ExecutionClaim>();
   readonly #pending = new Map<
     number,
@@ -165,6 +199,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
       protocolFlags?: Partial<WireMemoryProtocolFlags>;
       onCandidateClaim?: (candidate: CandidateClaim) => void;
       onCandidateDiagnostic?: (diagnostic: CandidateClaimDiagnostic) => void;
+      onWriterDiscovery?: (discovery: ExecutorWriterDiscovery) => void;
     },
   ) {
     this.#worker = worker;
@@ -174,6 +209,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
     this.#protocolFlags = control.protocolFlags ?? {};
     this.#onCandidateClaim = control.onCandidateClaim;
     this.#onCandidateDiagnostic = control.onCandidateDiagnostic;
+    this.#onWriterDiscovery = control.onWriterDiscovery;
     this.#worker.addEventListener("message", this.#onMessage);
     this.#worker.addEventListener("error", this.#onError);
     this.#worker.addEventListener("messageerror", this.#onMessageError);
@@ -268,6 +304,10 @@ class DenoSpaceExecutor implements SpaceExecutor {
     }
     if (message.type === "candidate-diagnostic") {
       this.#onCandidateDiagnostic?.(message.diagnostic!);
+      return;
+    }
+    if (message.type === "writer-discovery") {
+      this.#onWriterDiscovery?.(message.discovery!);
       return;
     }
     if (
@@ -429,6 +469,7 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
       protocolFlags: this.options.protocolFlags,
       onCandidateClaim: this.options.onCandidateClaim,
       onCandidateDiagnostic: this.options.onCandidateDiagnostic,
+      onWriterDiscovery: this.options.onWriterDiscovery,
     });
     try {
       await executor.initialize({

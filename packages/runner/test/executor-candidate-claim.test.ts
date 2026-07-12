@@ -56,11 +56,17 @@ interface CandidateDiagnostic {
 interface WriterDiscovery {
   pieceId: string;
   indexMiss: boolean;
-  writers: Array<{
+  writers: readonly {
+    branch: string;
+    ownerSpace?: string;
     actionId: string;
     pieceId: string;
+    processGeneration: number;
     actionKind: "computation" | "effect" | "event-handler";
-  }>;
+    implementationFingerprint: string;
+    runtimeFingerprint: string;
+    source: "live" | "durable" | "live+durable";
+  }[];
 }
 
 type CandidateAwareFactoryOptions = DenoSpaceExecutorFactoryOptions & {
@@ -324,9 +330,15 @@ Deno.test("host records indexed executor writer discovery", async () => {
       pieceId: CLAIM_KEY.pieceId,
       indexMiss: false,
       writers: [{
+        branch: CLAIM_KEY.branch,
+        ownerSpace: CLAIM_KEY.space,
         actionId: CLAIM_KEY.actionId,
         pieceId: CLAIM_KEY.pieceId,
+        processGeneration: 0,
         actionKind: CLAIM_KEY.actionKind,
+        implementationFingerprint: CLAIM_KEY.implementationFingerprint,
+        runtimeFingerprint: CLAIM_KEY.runtimeFingerprint,
+        source: "live+durable",
       }],
     };
     worker.writerDiscovery(discovery);
