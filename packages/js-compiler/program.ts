@@ -83,7 +83,8 @@ export class HttpProgramResolver implements ProgramResolver {
   #fetchImpl: typeof globalThis.fetch;
   constructor(
     main: string | URL,
-    fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+    fetchImpl: typeof globalThis.fetch = (input, init) =>
+      globalThis.fetch(input, init),
   ) {
     this.#mainUrl = !(main instanceof URL) ? new URL(main) : main;
     this.#fetchImpl = fetchImpl;
