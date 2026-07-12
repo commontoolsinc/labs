@@ -1,7 +1,11 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
 import { parseClientMessage, Server } from "../v2/server.ts";
-import { decodeMemoryBoundary, encodeMemoryBoundary } from "../v2.ts";
+import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundary,
+  toDocumentPath,
+} from "../v2.ts";
 import {
   TEST_SESSION_OPEN_PRINCIPAL,
   testSessionOpenAuthFactory,
@@ -105,6 +109,11 @@ type ExecutionServer = Server & {
   expireExecutionClaims(now?: number): number;
   subscribeExecutionDemands(
     listener: (snapshot: ExecutionDemandSnapshot) => void,
+  ): () => void;
+  bindExecutionSession(
+    space: string,
+    sessionId: string,
+    authority: { leaseGeneration: number },
   ): () => void;
 };
 
@@ -686,6 +695,163 @@ Deno.test("committed settlement waits for its accepted data patch", async () => 
     unsubscribe();
     await writerClient.close();
     await observerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("accepted claimed runs derive provenance and settlements on the host", async () => {
+  const server = createControlServer("memory-v2-execution-provenance");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const settlements: ActionSettlement[] = [];
+  const unsubscribeControl = session.subscribeExecutionControl((event) => {
+    if (event.type === "session.execution.settlement") {
+      settlements.push(event.settlement);
+    }
+  });
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const claim = server.setExecutionClaim({
+      ...claimKey(POLICY_SPACE, "", "action:provenance"),
+      leaseGeneration: 17,
+    });
+    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
+      leaseGeneration: claim.leaseGeneration,
+    });
+
+    const source = await session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:provenance-source",
+        value: { value: { count: 1 } },
+      }],
+    });
+    const observation = {
+      version: 2 as const,
+      ownerSpace: POLICY_SPACE,
+      branch: "",
+      pieceId: claim.pieceId,
+      processGeneration: 1,
+      actionId: claim.actionId,
+      actionKind: claim.actionKind,
+      implementationFingerprint: claim.implementationFingerprint,
+      runtimeFingerprint: claim.runtimeFingerprint,
+      observedAtSeq: 0,
+      // Both fields are deliberately forged. The host must derive/overwrite
+      // them from accepted reads and authenticated session authority.
+      inputBasisSeq: 999_999,
+      executionProvenance: {
+        claim,
+        onBehalfOf: "did:key:forged",
+        leaseGeneration: 999,
+        claimGeneration: 999,
+        causedBy: [999_999],
+        inputBasisSeq: 999_999,
+      },
+      transactionKind: "action-run" as const,
+      reads: [{
+        space: POLICY_SPACE,
+        scope: "space" as const,
+        id: "of:provenance-source",
+        path: ["value", "count"],
+      }],
+      shallowReads: [],
+      actualChangedWrites: [{
+        space: POLICY_SPACE,
+        scope: "space" as const,
+        id: "of:provenance-output",
+        path: ["value", "answer"],
+      }],
+      currentKnownWrites: [{
+        space: POLICY_SPACE,
+        scope: "space" as const,
+        id: "of:provenance-output",
+        path: ["value"],
+      }],
+      materializerWriteEnvelopes: [],
+      status: "success" as const,
+    };
+
+    const committed = await session.transact({
+      localSeq: 3,
+      reads: {
+        confirmed: [{
+          id: "of:provenance-source",
+          path: toDocumentPath(["value", "count"]),
+          seq: source.seq,
+        }],
+        pending: [],
+      },
+      operations: [{
+        op: "set",
+        id: "of:provenance-output",
+        value: { value: { answer: 2 } },
+      }],
+      schedulerObservation: observation,
+    });
+
+    const snapshots = await session.listSchedulerActionSnapshots({
+      actionId: claim.actionId,
+      pieceId: claim.pieceId,
+      processGeneration: 1,
+    });
+    const stored = snapshots.snapshots[0]?.observation as {
+      inputBasisSeq?: number;
+      executionProvenance?: {
+        claim: ActionClaimKey;
+        onBehalfOf: string;
+        leaseGeneration: number;
+        claimGeneration: number;
+        causedBy: number[];
+        inputBasisSeq: number;
+      };
+    };
+    assertEquals(stored.inputBasisSeq, source.seq);
+    assertEquals(stored.executionProvenance, {
+      claim: claimKey(POLICY_SPACE, "", "action:provenance"),
+      onBehalfOf: TEST_SESSION_OPEN_PRINCIPAL,
+      leaseGeneration: claim.leaseGeneration,
+      claimGeneration: claim.claimGeneration,
+      causedBy: [source.seq],
+      inputBasisSeq: source.seq,
+    });
+    assertEquals(settlements, [{
+      branch: "",
+      claim,
+      inputBasisSeq: source.seq,
+      outcome: "committed",
+      acceptedCommitSeq: committed.seq,
+    }]);
+
+    await session.transact({
+      localSeq: 4,
+      reads: {
+        confirmed: [{
+          id: "of:provenance-source",
+          path: toDocumentPath(["value", "count"]),
+          seq: source.seq,
+        }],
+        pending: [],
+      },
+      operations: [],
+      schedulerObservation: {
+        ...observation,
+        actualChangedWrites: [],
+      },
+    });
+    assertEquals(settlements.at(-1), {
+      branch: "",
+      claim,
+      inputBasisSeq: source.seq,
+      outcome: "no-op",
+    });
+  } finally {
+    unbind();
+    unsubscribeControl();
+    await client.close();
     await server.close();
   }
 });
