@@ -384,6 +384,33 @@ export interface ExecutionClaim extends ActionClaimKey {
   expiresAt: number;
 }
 
+declare const inputBasisSeqBrand: unique symbol;
+declare const acceptedCommitSeqBrand: unique symbol;
+
+/** Maximum accepted input revision consumed by one action attempt. */
+export type InputBasisSeq = number & {
+  readonly [inputBasisSeqBrand]: "InputBasisSeq";
+};
+
+/** Semantic commit sequence assigned after canonical acceptance. */
+export type AcceptedCommitSeq = number & {
+  readonly [acceptedCommitSeqBrand]: "AcceptedCommitSeq";
+};
+
+export const toInputBasisSeq = (value: number): InputBasisSeq => {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError("input basis sequence must be a non-negative integer");
+  }
+  return value as InputBasisSeq;
+};
+
+export const toAcceptedCommitSeq = (value: number): AcceptedCommitSeq => {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError("accepted commit sequence must be a positive integer");
+  }
+  return value as AcceptedCommitSeq;
+};
+
 /**
  * Host-authored metadata for one accepted server action transaction.
  * `onBehalfOf` is execution authority, not semantic authorship. The host
@@ -396,7 +423,7 @@ export interface ActionExecutionProvenance {
   leaseGeneration: number;
   claimGeneration: number;
   causedBy: number[];
-  inputBasisSeq: number;
+  inputBasisSeq: InputBasisSeq;
 }
 
 export interface ExecutionClaimSetEvent {
@@ -416,15 +443,15 @@ export type ActionSettlement =
   | {
     branch: BranchName;
     claim: ExecutionClaim;
-    inputBasisSeq: number;
+    inputBasisSeq: InputBasisSeq;
     outcome: "committed";
-    acceptedCommitSeq: number;
+    acceptedCommitSeq: AcceptedCommitSeq;
     diagnosticCode?: never;
   }
   | {
     branch: BranchName;
     claim: ExecutionClaim;
-    inputBasisSeq: number;
+    inputBasisSeq: InputBasisSeq;
     outcome: "no-op" | "failed" | "unserved";
     acceptedCommitSeq?: never;
     diagnosticCode?: string;

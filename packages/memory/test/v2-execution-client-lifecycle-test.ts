@@ -8,6 +8,8 @@ import {
   type ActionSettlement,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  toAcceptedCommitSeq,
+  toInputBasisSeq,
 } from "../v2.ts";
 import {
   TEST_SESSION_OPEN_AUDIENCE,
@@ -112,9 +114,9 @@ Deno.test("buffered settlements are dropped when their claim is replaced before 
       server.publishActionSettlement({
         branch: "",
         claim: first,
-        inputBasisSeq: commit.seq,
+        inputBasisSeq: toInputBasisSeq(commit.seq),
         outcome: "committed",
-        acceptedCommitSeq: commit.seq,
+        acceptedCommitSeq: toAcceptedCommitSeq(commit.seq),
       }),
       true,
     );
