@@ -1700,7 +1700,7 @@ Deno.test("executor host provider preserves ACL denial and atomic rollback parit
     { ...host, watchAdds: undefined },
     { ...loopback, watchAdds: undefined },
   );
-  assertEquals(host.denial.name, "TransactionError");
+  assertEquals(host.denial.name, "AuthorizationError");
   assert(host.denial.message?.includes("lacks WRITE"));
   assertEquals(host.replicaValue, { value: { protected: true } });
   assertEquals(host.serverValue, { value: { protected: true } });
