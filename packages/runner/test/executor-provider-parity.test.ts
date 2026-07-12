@@ -2,7 +2,10 @@ import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
-import { Server } from "@commonfabric/memory/v2/server";
+import {
+  type AcceptedCommitEvent,
+  Server,
+} from "@commonfabric/memory/v2/server";
 import type { StorageNotification } from "../src/storage/interface.ts";
 import {
   createHostProviderChannel,
@@ -51,7 +54,6 @@ Deno.test("executor host provider commits through authenticated memory without a
     principal: hostSigner.did(),
     space,
   });
-
   try {
     const signing = await storage.as.sign(new Uint8Array() as never);
     assert(signing.error instanceof Error);
@@ -192,4 +194,186 @@ Deno.test("executor host provider refreshes from accepted commits without memory
     await writerClient.close();
     await server.close();
   }
+});
+
+Deno.test("executor host provider carries authenticated scheduler observations on its direct feed", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor observation provider ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const server = new WatchCountingServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-observation-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const writerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const writer = await writerClient.mount(
+    space,
+    {},
+    authorizeSessionOpen,
+  );
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    authorizeSessionOpen,
+  });
+  const storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: principal.did(),
+    space,
+  });
+  const accepted: AcceptedCommitEvent[] = [];
+  server.subscribeAcceptedCommits(space, (event) => {
+    accepted.push(event);
+  });
+
+  try {
+    const provider = storage.open(space);
+    assertEquals(
+      (await provider.sync("of:executor-provider:observation-root")).error,
+      undefined,
+    );
+    assertEquals(server.watchAddCount, 0);
+
+    const adopted = Promise.withResolvers<StorageNotification>();
+    const notifications: StorageNotification[] = [];
+    storage.subscribe({
+      next(notification) {
+        notifications.push(notification);
+        if (notification.type === "scheduler-observations") {
+          adopted.resolve(notification);
+        }
+        return { done: false };
+      },
+    });
+
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: {
+        version: 2,
+        ownerSpace: space,
+        branch: "",
+        pieceId: "space:of:executor-provider:piece",
+        processGeneration: 1,
+        actionId: "action:external",
+        actionKind: "computation",
+        implementationFingerprint: "impl:executor-provider",
+        runtimeFingerprint: "runtime:executor-provider",
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads: [],
+        shallowReads: [],
+        actualChangedWrites: [],
+        currentKnownWrites: [{
+          space,
+          id: "of:executor-provider:observation-root",
+          scope: "space",
+          path: [],
+        }],
+        declaredWrites: [{
+          space,
+          id: "of:executor-provider:observation-root",
+          scope: "space",
+          path: [],
+        }],
+        materializerWriteEnvelopes: [],
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          implementationFingerprint: "impl:executor-provider",
+          runtimeFingerprint: "runtime:executor-provider",
+          piece: {
+            space,
+            id: "of:executor-provider:piece",
+            scope: "space",
+            path: [],
+          },
+          reads: [],
+          writes: [{
+            space,
+            id: "of:executor-provider:observation-root",
+            scope: "space",
+            path: [],
+          }],
+          materializerWriteEnvelopes: [],
+          directOutputs: [{
+            space,
+            id: "of:executor-provider:observation-root",
+            scope: "space",
+            path: [],
+          }],
+        },
+        status: "success",
+      },
+    });
+    assertEquals(accepted.length, 1);
+    assertEquals(accepted[0]?.deliverySeq, 1);
+    assertEquals(accepted[0]?.originSessionId === storage.id, false);
+    const persisted = await writer.listSchedulerActionSnapshots({
+      sinceCommitSeq: 0,
+      throughCommitSeq: 1,
+    });
+    assertEquals(
+      (persisted.snapshots[0]?.observation as { actionId?: string })?.actionId,
+      "action:external",
+    );
+    assertEquals(persisted.snapshots[0]?.executionContextKey, "space");
+
+    const timer = setTimeout(
+      () =>
+        adopted.reject(
+          new Error(
+            "scheduler observation was not adopted; notifications=" +
+              notifications.map((notification) => notification.type).join(","),
+          ),
+        ),
+      1_000,
+    );
+    let notification: StorageNotification;
+    try {
+      notification = await adopted.promise;
+    } finally {
+      clearTimeout(timer);
+    }
+    assert(notification.type === "scheduler-observations");
+    assertEquals(
+      (notification.observations[0]?.observation as { actionId?: string })
+        ?.actionId,
+      "action:external",
+    );
+  } finally {
+    await storage.close();
+    await channel.dispose();
+    await writerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("executor host provider source has no engine mutation bypass", async () => {
+  const source = await Deno.readTextFile(
+    new URL("../src/storage/v2-host-provider.ts", import.meta.url),
+  );
+  assertEquals(source.includes("applyCommit"), false);
+  assertEquals(source.includes("/v2/engine"), false);
+  assertEquals(source.includes("this.session.watchAddSync"), false);
 });

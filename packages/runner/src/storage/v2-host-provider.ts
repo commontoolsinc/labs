@@ -8,6 +8,7 @@ import {
   type HelloOkMessage,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
+  type SchedulerActionSnapshotResult,
   type SchedulerSnapshotListResult,
   type SchedulerWritersForTargetsQuery,
   type SchedulerWritersForTargetsResult,
@@ -26,7 +27,6 @@ import {
   parseClientMessage,
   type Server,
 } from "@commonfabric/memory/v2/server";
-import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type { BranchName } from "@commonfabric/memory/v2";
 import { type Options, type SessionFactory, StorageManager } from "./v2.ts";
 import type { ReplicaSession } from "./v2-replica-session.ts";
@@ -34,7 +34,9 @@ import type { ReplicaSession } from "./v2-replica-session.ts";
 interface AcceptedCommitNotice {
   space: string;
   branch: BranchName;
-  seq: number;
+  order: number;
+  dataSeq: number;
+  deliverySeq: number;
   originSessionId?: string;
   revisions: {
     branch: BranchName;
@@ -89,7 +91,9 @@ const toAcceptedCommitNotice = (
 ): AcceptedCommitNotice => ({
   space: event.space,
   branch: event.commit.branch,
-  seq: event.commit.seq,
+  order: event.order,
+  dataSeq: event.commit.seq,
+  deliverySeq: event.deliverySeq,
   ...(event.originSessionId !== undefined
     ? { originSessionId: event.originSessionId }
     : {}),
@@ -417,6 +421,9 @@ class HostReplicaSession implements ReplicaSession {
   #view: MemoryClient.WatchView | null = null;
   #mutation = Promise.resolve();
   #appliedSeq: number;
+  #acceptedOrder = 0;
+  #schedulerDeliverySeq: number;
+  #seenObservationIds = new Set<number>();
   #closed = false;
 
   constructor(
@@ -425,11 +432,20 @@ class HostReplicaSession implements ReplicaSession {
     private readonly branch: BranchName,
   ) {
     this.#appliedSeq = session.serverSeq;
+    this.#schedulerDeliverySeq = session.serverSeq;
     transport.setAcceptedCommitReceiver((notice) => {
-      this.#mutation = this.#mutation.then(
+      const refresh = this.#mutation.then(
         () => this.refreshAcceptedCommit(notice),
         () => this.refreshAcceptedCommit(notice),
       );
+      this.#mutation = refresh.catch((error) => {
+        if (
+          !(error instanceof Error) ||
+          !error.message.includes("memory session closed")
+        ) {
+          console.warn("executor accepted-commit refresh failed", error);
+        }
+      });
     });
   }
 
@@ -445,7 +461,7 @@ class HostReplicaSession implements ReplicaSession {
     return this.session.serverSeq;
   }
 
-  transact(commit: ClientCommit): Promise<AppliedCommit> {
+  transact(commit: ClientCommit) {
     return this.session.transact({ ...commit, branch: this.branch });
   }
 
@@ -468,13 +484,23 @@ class HostReplicaSession implements ReplicaSession {
     return this.session.registerSqliteDiskSource(id, path);
   }
 
-  listSchedulerActionSnapshots(
+  async listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
-    return this.session.listSchedulerActionSnapshots({
+    const result = await this.session.listSchedulerActionSnapshots({
       ...query,
       branch: this.branch,
     });
+    for (const snapshot of result.snapshots) {
+      this.#seenObservationIds.add(snapshot.observationId);
+      if (snapshot.commitSeq !== null) {
+        this.#schedulerDeliverySeq = Math.max(
+          this.#schedulerDeliverySeq,
+          snapshot.commitSeq,
+        );
+      }
+    }
+    return result;
   }
 
   writersForTargets(
@@ -512,9 +538,17 @@ class HostReplicaSession implements ReplicaSession {
   ): Promise<void> {
     if (
       this.#closed || notice.space !== this.session.space ||
-      notice.branch !== this.branch || notice.seq <= this.#appliedSeq ||
-      this.#watches.size === 0
+      notice.branch !== this.branch || notice.order <= this.#acceptedOrder
     ) {
+      return;
+    }
+    const fromSeq = this.#appliedSeq;
+    const observations = notice.originSessionId === this.sessionId
+      ? []
+      : await this.adoptionObservations(notice.deliverySeq);
+    if (this.#watches.size === 0) {
+      this.#acceptedOrder = notice.order;
+      this.#appliedSeq = Math.max(this.#appliedSeq, notice.dataSeq);
       return;
     }
     const dirty = new Set(notice.revisions.map(snapshotKey));
@@ -532,20 +566,31 @@ class HostReplicaSession implements ReplicaSession {
         [...previous.keys()].some((key) => dirty.has(key));
       if (rootDirty || trackedDirty) affected.push(watchId);
     }
-    if (affected.length === 0) {
-      this.#appliedSeq = notice.seq;
+    if (notice.dataSeq <= this.#appliedSeq || affected.length === 0) {
+      this.#acceptedOrder = notice.order;
+      this.#appliedSeq = Math.max(this.#appliedSeq, notice.dataSeq);
+      if (observations.length > 0) {
+        this.#view?.applySync({
+          type: "sync",
+          fromSeq,
+          toSeq: this.#appliedSeq,
+          upserts: [],
+          removes: [],
+          observations,
+        }, true);
+      }
       return;
     }
 
     const before = this.allEntities();
-    const fromSeq = this.#appliedSeq;
-    await this.refreshWatches(affected, notice.seq);
-    this.#appliedSeq = notice.seq;
+    await this.refreshWatches(affected, notice.dataSeq);
+    this.#acceptedOrder = notice.order;
+    this.#appliedSeq = Math.max(this.#appliedSeq, notice.dataSeq);
     const after = this.allEntities();
     const sync: SessionSync = {
       type: "sync",
       fromSeq,
-      toSeq: notice.seq,
+      toSeq: this.#appliedSeq,
       upserts: [...after.values()].map(syncUpsert),
       removes: [...before.values()]
         .filter((snapshot) => !after.has(snapshotKey(snapshot)))
@@ -554,8 +599,39 @@ class HostReplicaSession implements ReplicaSession {
           id: snapshot.id,
           ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
         })),
+      ...(observations.length > 0 ? { observations } : {}),
     };
     this.#view?.applySync(sync, true);
+  }
+
+  private async adoptionObservations(
+    throughSeq: number,
+  ): Promise<SchedulerActionSnapshotResult[]> {
+    const snapshots: SchedulerActionSnapshotResult[] = [];
+    const sinceCommitSeq = throughSeq <= this.#schedulerDeliverySeq
+      ? Math.max(-1, throughSeq - 1)
+      : this.#schedulerDeliverySeq;
+    let cursor: SchedulerActionSnapshotQuery["cursor"];
+    do {
+      const page = await this.session.listSchedulerActionSnapshots({
+        branch: this.branch,
+        sinceCommitSeq,
+        throughCommitSeq: throughSeq,
+        limit: 1_000,
+        ...(cursor !== undefined ? { cursor } : {}),
+      });
+      for (const snapshot of page.snapshots) {
+        if (this.#seenObservationIds.has(snapshot.observationId)) continue;
+        this.#seenObservationIds.add(snapshot.observationId);
+        snapshots.push(snapshot);
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== undefined);
+    this.#schedulerDeliverySeq = Math.max(
+      this.#schedulerDeliverySeq,
+      throughSeq,
+    );
+    return snapshots;
   }
 
   private async refreshWatches(

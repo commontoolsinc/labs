@@ -363,6 +363,13 @@ type DirtyOrigin = {
  * carries rejected-commit catch-up and may coalesce several commits.
  */
 export interface AcceptedCommitEvent {
+  /** Ephemeral per-space callback order. W0.6 replaces this with the durable
+   *  reconnectable execution-feed sequence. */
+  order: number;
+  /** Data/adoption window through which this commit is visible. Metadata-only
+   *  scheduler observations may reserve a future delivery slot without
+   *  advancing the semantic branch head. */
+  deliverySeq: number;
   space: string;
   originSessionId?: string;
   commit: Engine.AppliedCommit;
@@ -879,6 +886,7 @@ export class Server {
   #refreshing: Promise<void> | null = null;
   #lastRefreshDurationMs = 0;
   #acceptedCommitListeners = new Map<string, Set<AcceptedCommitListener>>();
+  #acceptedCommitOrderBySpace = new Map<string, number>();
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
@@ -1289,6 +1297,7 @@ export class Server {
     this.#engines.clear();
     this.#connections.clear();
     this.#acceptedCommitListeners.clear();
+    this.#acceptedCommitOrderBySpace.clear();
     this.#readPool.close();
   }
 
@@ -1320,12 +1329,17 @@ export class Server {
     };
   }
 
-  #publishAcceptedCommit(event: AcceptedCommitEvent): void {
+  #publishAcceptedCommit(
+    event: Omit<AcceptedCommitEvent, "order">,
+  ): void {
+    const order = (this.#acceptedCommitOrderBySpace.get(event.space) ?? 0) + 1;
+    this.#acceptedCommitOrderBySpace.set(event.space, order);
+    const orderedEvent: AcceptedCommitEvent = { ...event, order };
     for (
       const listener of this.#acceptedCommitListeners.get(event.space) ?? []
     ) {
       try {
-        const result = listener(event);
+        const result = listener(orderedEvent);
         if (result instanceof Promise) {
           void result.catch((error) => {
             console.warn("accepted commit listener failed", error);
@@ -1409,7 +1423,11 @@ export class Server {
       new Map(),
       undefined,
     );
-    this.#publishAcceptedCommit({ space, commit });
+    this.#publishAcceptedCommit({
+      space,
+      deliverySeq: commit.seq,
+      commit,
+    });
     this.markSpaceDirty(space, [toDirtyKey(id)]);
     return commit;
   }
@@ -2151,6 +2169,12 @@ export class Server {
               detachDatabase(engine.database, alias);
             }
           }
+          const acceptedDeliverySeq = commitPayload.operations.length === 0 &&
+              commit.schedulerObservationResults?.some((result) =>
+                result.status === "kept"
+              )
+            ? Engine.serverSeq(engine) + 1
+            : commit.seq;
           if (aclTouched) {
             this.#invalidateAclCapabilities(message.space);
             // Pass the writing session so it isn't sent the terminal revocation
@@ -2173,6 +2197,7 @@ export class Server {
           this.#publishAcceptedCommit({
             space: message.space,
             originSessionId: message.sessionId,
+            deliverySeq: acceptedDeliverySeq,
             commit,
           });
           this.markSpaceDirty(
