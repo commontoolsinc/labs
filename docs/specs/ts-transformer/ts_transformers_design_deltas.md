@@ -86,6 +86,33 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
+### Addendum 2 (2026-07-10 phase-4 verification findings)
+
+Unratified language deltas found by adversarial verification of the
+target-language matrix (implementation vs normative spec; each needs a
+ratify-or-revert decision):
+
+- **Top-level eager-read carve-out (#3725, 2026-05-28).** Validation accepts
+  computation-feeding top-level `.get()` reads and auto-wraps the containing
+  expression lift-applied; terminal reads still reject. Golden-pinned
+  (`cell-get-binding-autowrap`, `with-reactive`;
+  `test/validation.test.ts:3179`). Matrix row still says Unsupported
+  unconditionally. Decision open: ratify a terminal-vs-computation-feeding
+  split in the matrix, or revert (breaks two goldens + one test).
+- **Optional-call accepted in JSX and compute callbacks.** `{maybeFn?.(1)}`
+  and `computed(() => maybeFn?.(1))` lower intact while the same shapes error
+  at top level, statement position, and in collection callbacks. Rider: the
+  lowering drops function-typed captures from the lift input schema (function
+  values are not schema-representable or cell-storable), so the accepted form
+  is dead code at runtime — which argues for rejecting it and keeping the
+  matrix row unqualified. Decision open.
+- **Residual pass-through emits runnable-looking output alongside errors.**
+  Both documented bucket-4 forms are alive: `forEach`-in-JSX survives
+  verbatim as plain JS and promise-`.then` gets compute-island-wrapped, in
+  each case *in addition to* the reported error — a consumer that ignores
+  diagnostics inherits residual semantics. Worth deciding whether error
+  programs should emit at all.
+
 ## D-001 Rename Context Terms (`safe` -> `compute` / `pattern`)
 
 **Current term:** `safe context` / `safe wrapper`\

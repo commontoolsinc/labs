@@ -139,7 +139,7 @@ by any repo test.
 | TypeScript input | Emitted schema | Source | Pinned by |
 | --- | --- | --- | --- |
 | `string` / `number` / `boolean` | `{ type: "string"/"number"/"boolean" }` | `primitive-formatter.ts:87-95` | many fixtures |
-| String/number literal | `{ type: …, enum: [v] }` (type path); `{ type: …, const: v }` (node path) | `primitive-formatter.ts:44-61`; `schema-generator.ts:881-886` | fixtures; node path untested for parity |
+| String/number literal | `{ type: …, enum: [v] }` (type path); `{ type: …, const: v }` (node path) | `primitive-formatter.ts:44-61`; `schema-generator.ts:881-886` | divergence pinned by `test/literal-encoding-paths.test.ts` (unions diverge structurally: `enum` list vs `anyOf` of `const`s); runner validation treats both alike but `schemasEqualIgnoringWriterStamp` (deepEqual, `cfc/prepare.ts:1014`) does not — a path flip defeats stored-schema reuse |
 | Boolean literal | `{ type: "boolean", enum: [true/false] }` via `intrinsicName` | `primitive-formatter.ts:62-70` | boolean-literals test |
 | `bigint` | `{ type: "integer" }` | `primitive-formatter.ts:96-98` | probe only |
 | bigint literal (`42n`) | `{ type: "integer", enum: [Number(v)] }` — converted through `Number`, so precision above 2^53 would be lost | `primitive-formatter.ts:71-79` | probe only |
@@ -160,7 +160,7 @@ by any repo test.
 | `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
 | Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }` and they participate in `required` | skip: `type-utils.ts:558-575`, `object-formatter.ts:233-238,259,269-287`; exception: `object-formatter.ts:44-67` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures |
 | TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts:176-214`; hoisting §5 | probe only — no repo test |
-| Single enum member type (`Mode.On`) | hoisted under the **bare member name**: `$defs: { On: { type: "string", enum: ["on"] } }` — two enums sharing a member name would collide on the `$defs` key (first wins); observed quirk, untested | probe only | — |
+| Single enum member type (`Mode.On`) | hoisted under the **bare member name**: `$defs: { On: { type: "string", enum: ["on"] } }` — two enums sharing a member name **collide** on the `$defs` key (first wins: the second property `$ref`s the wrong value set), and an enum member colliding with an interface name steals its `$ref` (order-dependent). KNOWN BUG | pinned: `test/enum-member-hoisting.test.ts` | — |
 | `Date` / `URL` / typed arrays / etc. | native table, §5.2 | `native-type-formatter.ts:5-28` | date-types fixture, native-type tests |
 | `Map`/`WeakMap`/`Set`/`WeakSet` | **throws** (§13) | `type-utils.ts:400-411` | schema-generator.test.ts:643-682 |
 | `Reactive<T>` | erases to `<T>`'s schema, **no marker** (§6.4) | — | capability-wrapper-types.test.ts:118-132 |
@@ -690,11 +690,27 @@ synthetic node resolution failure → `any` → `true`
 
 1. **Tuples lose positional structure** — no `prefixItems`/length bounds (§4);
    the empty-array-pruning safety argument (`union-formatter.ts:280-285`)
-   explicitly depends on this.
-2. **TS enums handled but untested** — hoisted `{ enum: […] }` defs with no
-   `type` key; enum members hoist under the bare member name with a cross-enum
-   `$defs` collision risk (§4, probe).
-3. **`widenLiterals` does not widen literal unions** (§14, probe); untested
+   explicitly depends on this. Sub-wart: `[string, number?]` leaks
+   `"undefined"` into `items.type`. Pinned by `test/tuple-emission.test.ts`.
+   Adoption note: the runner already consumes `prefixItems`
+   (`cfc.ts:528-536`, traversal in `cfc/schema-refs.ts:81` /
+   `schema-merge.ts:272`) and the api dialect declares it — emission here is
+   the missing half, gated on the pruning-safety argument above.
+2. **TS enums** — hoisted `{ enum: […] }` defs with no `type` key; enum
+   members hoist under the bare member name with a **confirmed** cross-enum
+   `$defs` collision (first wins, silent wrong-value schemas; cross-kind
+   collision with same-named interfaces confirmed order-dependent). KNOWN
+   BUG. Pinned by `test/enum-member-hoisting.test.ts` +
+   `test/enum-schema-rows.test.ts`.
+3. **`widenLiterals` is incoherent at the literal-union boundary** (§14;
+   pinned by `test/widen-literals.test.ts`): all-literal unions stay enums
+   under the flag while the same literals DO widen inside mixed unions, and a
+   single-literal property widens next to an unwidened literal-union sibling.
+   Compounding: `generateSchemaFromSyntheticTypeNode` takes no options, so
+   the flag is silently dropped whenever the consumer routes node-based; and
+   the transformer-side `widenLiteralType` (same name, schema-injection
+   pre-widening) DOES widen literal unions — the two mechanisms disagree.
+   Decide the policy (including nested enum-typed properties) before fixing;
    in-package.
 4. **bigint → `integer` via `Number`** — silent precision loss above 2^53
    (§4, probe); untested.

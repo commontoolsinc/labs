@@ -541,11 +541,14 @@ The real rule is:
 - ordinary opaque/reactive values should still prefer direct property access
   and canonical lowered traversal rather than authored `.get()`
 
-One important nuance: there are still transform-only continuity tests around
-explicitly typed `Writable` / `Cell` inputs and top-level `.key(...).get()`
-reads. Those tests preserve schema/input-shape behavior for invalid programs,
-but they do **not** promote direct top-level eager reads into the supported
-target language while validation still rejects them.
+One important nuance: the implementation has moved on this boundary since
+this spec's v1 — since #3725, validation accepts **computation-feeding**
+top-level eager reads (`{ value: count.get() * 2 }`) and auto-wraps them into
+lift-applied computations, while terminal reads (`{ value: count.get() }`)
+still reject. That carve-out is an unratified delta recorded in
+`ts_transformers_design_deltas.md` (2026-07-10): either this matrix gains the
+carve-out or the implementation reverts; per §1, do not treat the accident of
+acceptance as language policy in the meantime.
 
 ## 6. Non-Normative Hardening Follow-Ups
 

@@ -400,7 +400,16 @@ Compute wrappers override restrictions:
 Diagnostics emitted in all modes:
 
 - **Error** `pattern-context:get-call`
-  - `.get()` call in restricted reactive context
+  - a **terminal** `.get()` read in restricted reactive context — one whose
+    value is used directly (`{ value: count.get() }`,
+    `const v = count.get()`, `input.key("count").get()` at a return site)
+  - since #3725 (2026-05-28), a **computation-feeding** read at a lowerable
+    site (`{ value: count.get() * 2 }`) is NOT rejected: the containing
+    expression is auto-wrapped into a lift-applied computation
+    (`test/validation.test.ts:3179`; goldens `cell-get-binding-autowrap`,
+    `with-reactive`). This is an unratified delta from the target-language
+    matrix's unconditional "Unsupported" — see the design-deltas 2026-07-10
+    record
 - **Error** `pattern-context:function-creation`
   - function creation in pattern context unless inside compute
     wrappers/JSX/allowed callbacks
@@ -444,7 +453,16 @@ Diagnostics emitted in all modes:
   - message instructs the author to move the use into a nested
     `computed(() => ...)` or module-scope `lift()`
 - **Error** `pattern-context:optional-chaining`
-  - optional calls in restricted reactive context (outside JSX)
+  - optional calls in restricted reactive context **outside JSX and outside
+    explicit compute callbacks** — top-level (`input?.foo()`), statement
+    position, and collection callbacks (`items.map((item) =>
+    item?.toUpperCase())`) all error (`test/validation.test.ts:546,567,1509`)
+  - inside JSX expressions (`{maybeFn?.(1)}`, `{text?.trim()}`) and inside
+    `computed(...)` bodies the same shapes are accepted and lowered intact —
+    an unratified delta from the target-language matrix's unconditional
+    "Unsupported" (see the design-deltas 2026-07-10 record; note the
+    lowering drops function-typed captures from the lift input schema, so an
+    accepted reactive optional-call is dead code at runtime)
   - optional property / element access that appears outside a supported
     lowerable expression site
 - **Error** `pattern-context:computation`
@@ -1507,9 +1525,10 @@ source file the pipeline visits receives the guards, including:
 - files with no Common Fabric imports or builders at all, and
 - files that opted out via `/// <cf-disable-transform />` — the opt-out only
   suppresses the string-level helper injection (§2.1); the AST pipeline still
-  runs, and for such a file the guards are typically the *only* synthetic
-  addition (verified by direct pipeline probe; no committed fixture pins the
-  opt-out case).
+  runs, and for a **function-free** opted-out file the guards are the only
+  synthetic addition; an opted-out file with top-level functions still gets
+  stage-20 hardening (§17), which has no helper gate (verified by direct
+  pipeline probe; no committed fixture pins the opt-out case).
 
 The stage reads no cross-stage state and never reports diagnostics: its
 `transform()` touches only `context.factory` and `context.sourceFile`.
@@ -1792,7 +1811,7 @@ throws `Unsupported value type 'function'` on callables
 (`packages/runner/src/sandbox/plain-data.ts`), so the module fails at load.
 That is asserted end-to-end: the runner engine tests compile such a module,
 check the emitted `__cf_data(ChildManager)`, and expect evaluation to reject
-with exactly that error (`packages/runner/test/engine.test.ts`, "wraps
+with exactly that error (`packages/runner/test/engine-evaluate-record-graph.test.ts`, "wraps
 default-exported call-result wrappers in __cf_data" and "wraps nested and
 branched default-exported call-result wrappers"). Rationale (#3315): a plain
 function that forwards a builder-factory instantiation (e.g.
@@ -1801,7 +1820,7 @@ otherwise classify as an allowed direct-function default export and carry
 builder call results past the verifier's default-export rule; the wrap turns
 that shape into a deterministic load-time failure, while default-exported
 functions that only call plain local helpers stay allowed and callable
-(`engine.test.ts`, "allows default-exported functions that call plain local
+(`engine-evaluate-record-graph.test.ts`, "allows default-exported functions that call plain local
 helpers"). Relatedly, nothing `__cf_data` produces can launder builder trust:
 trust-requiring sites check the trusted brand, not the structural shape
 (`packages/runner/src/builder/pattern-metadata.ts`,
@@ -2450,8 +2469,8 @@ function h(...args: any[]) { return __cfHelpers.h.apply(null, args); }
 __cfHardenFn(h);
 ```
 
-And the trusted-binding statement form (non-exported handler; verified by
-direct pipeline run, matching `test/cfc-authoring.test.ts`):
+And the trusted-binding statement form (non-exported handler; pinned by
+`test/cfc-authoring.test.ts`, statement-form identity-annotation case):
 
 ```ts
 // Shown for illustration only.
@@ -2620,10 +2639,13 @@ pipeline. Current built-in behavior:
    intentionally omitted).
 2. Action and JSX inline handler callback extraction currently unwraps arrow
    functions only.
-3. Optional-call forms on opaque pattern roots are non-lowerable and report
-   `pattern-context:optional-chaining` diagnostics. Optional property/element
-   access is supported only in explicit lowerable expression sites; statement-
-   position optional access still errors.
+3. Optional-call forms on opaque pattern roots report
+   `pattern-context:optional-chaining` at top level, statement position, and
+   inside collection callbacks — but are accepted and lowered inside JSX
+   expressions and `computed(...)` bodies (see §6.5; unratified language
+   delta). Optional property/element access is supported only in explicit
+   lowerable expression sites; statement-position optional access still
+   errors.
 4. Non-static destructuring defaults, rest destructuring, and unsupported
    computed destructuring keys in pattern callbacks remain non-lowerable and
    produce pattern-context diagnostics.
