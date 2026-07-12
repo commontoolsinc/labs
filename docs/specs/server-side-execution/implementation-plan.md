@@ -499,12 +499,15 @@ passivity remain independently absent-false until W2.1 and W2.3.
    not advertise the capability; do not silently mix stale authority rules.
 2. Add session.execution.demand.set. A demand is bound to the authenticated
    connection, branch, space, and piece result roots. Replacement and disconnect
-   remove that connection's references automatically.
+   remove that connection's references automatically. Host listeners receive
+   `{space, branch, order, demands}` so the last empty snapshot remains
+   actionable. Demand remains policy-independent for Phase 1 shadow execution.
 3. Add branch-qualified claim set/revoke messages containing ActionClaimKey,
    leaseGeneration, monotonic per-ActionClaimKey claimGeneration, and
    server-controlled expiry. Revoke names the live claimGeneration. A later
    claim set uses the next value even if the worker lease generation is
-   unchanged.
+   unchanged. Expiry actively publishes revoke, removes snapshot authority, and
+   rejects later settlement.
 4. Add settlement messages keyed to the exact branch, leaseGeneration +
    claimGeneration and carrying outcome, inputBasisSeq, diagnostic code, and
    acceptedCommitSeq for `committed` outcomes. The settlement branch must equal
@@ -527,6 +530,9 @@ passivity remain independently absent-false until W2.1 and W2.3.
    policy-only commits; direct host writes cannot bypass that rule. Enabling is
    rejected while an incompatible session remains attached. Do not put claims,
    actor identity, heartbeat, exception lists, or epochs in it.
+   OWNER remains mandatory when ordinary ACL checks are off/observe. Positive
+   claims require the effective policy; disabling/deleting it revokes all live
+   claims without suppressing shadow demand.
 8. Gate all messages behind serverPrimaryExecution, default off.
    Negotiate absent-false `serverPrimaryExecutionClaimRoutingV1` and
    `serverPrimaryExecutionBuiltinPassivityV1` sub-capabilities while the WOs
@@ -546,8 +552,12 @@ passivity remain independently absent-false until W2.1 and W2.3.
 - [x] Spoofed connection id, principal, claim, or settlement is rejected.
 - [x] Revoke/re-claim within one lease gets a new claimGeneration, and a
       reordered old-generation settlement cannot clear the new claim.
+- [x] Expiry or policy disable publishes revoke, removes live/snapshot
+      authority, and rejects stale settlement.
 - [x] A committed settlement delivered before its data frame is buffered until
       the acceptedCommitSeq patch is applied.
+- [x] Reconnect neither double-delivers retained control events nor replays a
+      claim class excluded by the session's current sub-capabilities.
 - [x] Flag off produces no new protocol messages.
 
 ---

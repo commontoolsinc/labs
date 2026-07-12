@@ -153,7 +153,9 @@ of global hello equality. When the runtime flag is on and the default-branch,
 space-scoped `of:${space}:execution-policy` document is exactly
 `{ version: 1, serverPrimaryExecution: true }`, `session.open` rejects a peer
 that omitted the capability. With the runtime flag off, the same durable policy
-is inert so operators retain a real client-primary rollback.
+is inert so operators retain a real client-primary rollback. Negotiated flags
+are fixed for one physical connection; applying a changed deployment flag
+requires reconnecting clients (normally by restarting/redeploying the host).
 
 The two narrower capabilities are positive promises by the client:
 `serverPrimaryExecutionClaimRoutingV1` says it can route computation writes by
@@ -251,6 +253,10 @@ Rules:
   claim snapshot barrier first, reissues its connection-owned demand second,
   then replays retained commits; it only re-establishes the watch set if the
   session was reopened fresh
+- execution effects produced while a resumed `session.open` is still building
+  its catch-up are retained for that open barrier, never also pushed live
+- a `ProtocolError` reopening one space is terminal for that space session;
+  unrelated compatible space sessions on the connection still restore
 
 ## 4.2 Message Format
 
@@ -650,7 +656,10 @@ wire request may not contain a connection id, principal, sponsor, or
 `onBehalfOf`. Setting replaces only that connection/session/branch entry, an
 empty list removes it, and disconnect removes every reference owned by that
 connection. Demand requires READ; later sponsor selection separately requires
-WRITE.
+WRITE. Demand is policy-independent because Phase 1 consumes it for shadow
+execution while clients remain authoritative. The host subscription publishes
+`{space, branch, order, demands}` so the final empty snapshot still identifies
+the exact worker-pool slot to stop.
 
 Claims and settlements are server-generated `SessionSync.execution.events`:
 
@@ -675,12 +684,18 @@ type ExecutionControlEvent =
     };
 ```
 
-Every claim is branch-qualified, host-expiring, and has a per-action monotonic
+Every claim is branch-qualified, actively host-expiring, and has a per-action monotonic
 `claimGeneration` distinct from its worker `leaseGeneration`. Revoke names the
-live generation; a reclaim always mints the next generation. Settlements must
-match the exact branch, lease, and claim generation. `committed` requires
-`acceptedCommitSeq`; `no-op`, `failed`, and `unserved` forbid it. Client frames
-using these server-only message names are rejected by the strict parser.
+live generation; a reclaim always mints the next generation. Deadline expiry
+removes the live claim, publishes its revoke, excludes it from snapshots, and
+rejects later settlements. Positive claims require both the runtime flag and a
+currently enabled execution policy. Setting that policy false or deleting it
+revokes every live claim for the space; raw demand remains available for shadow
+execution. Settlements must match the exact branch, lease, and claim generation.
+`committed` requires `acceptedCommitSeq`; `no-op`, `failed`, and `unserved`
+forbid it. Client frames using these server-only message names are rejected by
+the strict parser. Retained events are filtered through the reconnecting
+session's current claim-routing/passivity sub-capabilities before replay.
 
 ## 4.4 Selectors
 
@@ -734,6 +749,11 @@ concrete (non-`"*"`) OWNER. Patch, deletion, mixed ACL/data commits, and
 last-owner removal are rejected. These shape and genesis rules are hard
 storage invariants in both `observe` and `enforce`; `observe` relaxes only
 ordinary capability shortfalls on an already valid ACL.
+
+Execution-policy mutation is a separate authority invariant: the effective
+principal must hold OWNER even when the general ACL rollout dial is `off` or
+`observe`. This prevents rollout configuration from turning the server-primary
+authority switch into an ordinary WRITE.
 
 Genesis remains an explicit transaction. For a fresh named space, the storage
 manager briefly authenticates as the derived space identity, writes
