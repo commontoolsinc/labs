@@ -20,7 +20,7 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-11. Each flag's section carries the date its status
+**Last reviewed:** 2026-07-12. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -29,6 +29,7 @@ was last checked against the code.
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (#3646) | graduate to always-on | implemented, on by default, rollback override retained |
+| [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
@@ -69,8 +70,8 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Five flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`eagerSourceAnnotation`, `systemPatternAutoUpdate`,
+Six flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+`serverPrimaryExecution`, `eagerSourceAnnotation`, `systemPatternAutoUpdate`,
 `systemPatternAutoUpdateHome`); `commitPreconditions` is deliberately mapped to
 `null` there, which records "not env-reachable" as a decision rather than an
 omission.
@@ -137,6 +138,35 @@ propagate](#how-flags-propagate).
 - **Path to removal.** Let the default-on posture soak and confirm rehydration
   falls back cleanly when observations are absent or stale; then fold the
   behavior into the base scheduler and delete the rollback flag.
+
+### `serverPrimaryExecution`
+
+- **Toggle via.** `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` environment variable
+  (through the canonical mapping), or
+  `RuntimeOptions.experimental.serverPrimaryExecution`. The ambient control
+  point is `setServerPrimaryExecutionConfig` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts), because both sides of
+  the memory handshake must advertise whether they participate.
+- **Added by.** Bernhard Seefeld, in server-primary execution W0.6
+  (2026-07-12).
+- **Purpose.** Gates the trusted-client server-primary execution protocol:
+  capability negotiation, demand, claims, settlements, claim-aware client
+  routing, and claimed-builtin passivity. A runtime with the flag off does not
+  publish or honor the new control messages. The memory handshake advertises
+  the optional `serverPrimaryExecutionV1` capability; a space policy may
+  require it before opening a session.
+- **Current default and planned end state.** Off by default in every runtime.
+  Both the server process and browser worker must enable it for a negotiated
+  connection. The planned end state is to graduate the protocol after the
+  phased authority rollout, then remove the flag once every supported client
+  obeys server-primary claims.
+- **Status on 2026-07-12.** Runtime, environment, browser-worker, background-
+  worker, and memory-handshake plumbing are implemented; off remains
+  client-primary behavior.
+- **Path to removal.** Complete the shadow, positive-claim, reconciliation,
+  and builtin-passivity rollout; confirm every supported deployment and client
+  speaks the protocol; make it unconditional; then delete the runtime flag,
+  environment/build wiring, and optional-capability negotiation.
 
 ### `commitPreconditions`
 
@@ -647,6 +677,7 @@ the per-epic implementation notes).
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
 `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE`,
+`EXPERIMENTAL_SERVER_PRIMARY_EXECUTION`,
 `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION`,
 `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
 `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME`) reach the runtime through the

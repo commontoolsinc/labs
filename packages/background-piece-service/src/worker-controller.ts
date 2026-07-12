@@ -27,6 +27,7 @@ export interface WorkerOptions {
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
+    serverPrimaryExecution?: boolean;
   };
 }
 

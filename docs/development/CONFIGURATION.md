@@ -245,6 +245,7 @@ The environment-backed flags (the only ones settable without editing code) are:
 |---|---|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
 | `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` |
+| `serverPrimaryExecution` | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` |
 | `eagerSourceAnnotation` | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` |
 
 The runtime-only flags (`commitPreconditions`, the CFC enforcement dials) and the
@@ -266,6 +267,7 @@ Most shell config is **build-time**: esbuild injects defines in
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for debugging. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | `EXPERIMENTAL.persistentSchedulerState` | _(unset = runtime on)_ | See experimental flags. |
+| `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` | `EXPERIMENTAL.serverPrimaryExecution` | _(unset = runtime off)_ | See experimental flags. |
 | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | `EXPERIMENTAL.eagerSourceAnnotation` | on in dev builds, off in production | See experimental flags. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 
@@ -324,6 +326,7 @@ Passed before the CLI args; rarely needed:
 | `API_URL` | `http://localhost:8000` | Toolshed URL the service calls. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | _(unset = runtime on)_ | See experimental flags. |
+| `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` | _(unset = runtime off)_ | See experimental flags. |
 | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | _(unset)_ | See experimental flags. |
 
 ---

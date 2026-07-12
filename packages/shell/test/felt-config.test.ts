@@ -44,11 +44,13 @@ describe("shell felt config", () => {
     const config = await withEnv({
       EXPERIMENTAL_MODERN_CELL_REP: "true",
       EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
+      EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
     }, importFreshConfig);
 
     expect(config.esbuild?.define).toMatchObject({
       $EXPERIMENTAL_MODERN_CELL_REP: "true",
       $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
     });
     const compileCacheVersion = config.esbuild?.define[
       "globalThis.__cfCompileCacheRuntimeVersion"

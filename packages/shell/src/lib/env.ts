@@ -4,6 +4,7 @@ declare global {
   var $COMMIT_SHA: string | undefined;
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
   var $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: string | undefined;
+  var $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: string | undefined;
   var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME: string | undefined;
@@ -23,6 +24,10 @@ const EXPERIMENTAL_MODERN_CELL_REP_DEFINE =
 const EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE =
   typeof $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE === "string"
     ? $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE
+    : undefined;
+const EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEFINE =
+  typeof $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION === "string"
+    ? $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION
     : undefined;
 const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
   typeof $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION === "string"
@@ -72,6 +77,10 @@ export const EXPERIMENTAL = {
   persistentSchedulerState: flagValue(
     "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
     EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE,
+  ),
+  serverPrimaryExecution: flagValue(
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION",
+    EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEFINE,
   ),
   // Debug `.src` source annotation: ON in development builds (so per-primitive
   // source locations keep working for debugging), OFF in production (it is the
