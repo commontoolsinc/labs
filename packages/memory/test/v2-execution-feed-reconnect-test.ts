@@ -1,5 +1,5 @@
 import { assertEquals, assertExists } from "@std/assert";
-import { Server } from "../v2/server.ts";
+import { type ExecutionLeaseHandle, Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
@@ -128,8 +128,40 @@ const claimInput = (
   actionKind,
   implementationFingerprint: "impl:v1",
   runtimeFingerprint: "runtime:v1",
-  leaseGeneration: 1,
 });
+
+const acquireSponsorLease = async (
+  server: Server,
+): Promise<{
+  connection: ReturnType<Server["connect"]>;
+  lease: ExecutionLeaseHandle;
+}> => {
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const auth = await hello(connection, messages);
+  const opened = await open(
+    connection,
+    messages,
+    "open-sponsor",
+    auth,
+    {},
+  );
+  assertExists(opened.ok);
+  await connection.receive(encodeMemoryBoundary({
+    type: "session.execution.demand.set",
+    requestId: "sponsor-demand",
+    space: SPACE,
+    sessionId: opened.ok.sessionId,
+    branch: "",
+    pieces: ["piece:one"],
+  }));
+  const response = shiftMessage(messages) as ResponseMessage<unknown>;
+  assertEquals(response.type, "response");
+  assertEquals(response.error, undefined);
+  const lease = await server.acquireExecutionLease(SPACE, "");
+  assertExists(lease);
+  return { connection, lease };
+};
 
 const beginBlockedResume = async (
   server: Server,
@@ -171,18 +203,21 @@ Deno.test("resumed open suppresses live execution effects until its response ins
   const server = createServer("memory-v2-execution-feed-open-barrier");
   const firstMessages: ServerMessage[] = [];
   const first = server.connect((message) => firstMessages.push(message));
+  let sponsor: Awaited<ReturnType<typeof acquireSponsorLease>> | undefined;
   try {
     const firstAuth = await hello(first, firstMessages);
     const opened = await open(first, firstMessages, "open", firstAuth, {});
     assertExists(opened.ok);
     assertExists(opened.ok.sync?.execution);
     await enablePolicy(first, firstMessages, opened.ok.sessionId);
+    sponsor = await acquireSponsorLease(server);
     const feedSeq = opened.ok.sync.execution.toFeedSeq;
     first.close();
 
     const resumed = await beginBlockedResume(server, opened.ok, feedSeq);
     try {
-      server.setExecutionClaim(
+      await server.setExecutionClaim(
+        sponsor.lease,
         claimInput("action:during-resume", "computation"),
       );
 
@@ -209,6 +244,7 @@ Deno.test("resumed open suppresses live execution effects until its response ins
       resumed.connection.close();
     }
   } finally {
+    sponsor?.connection.close();
     first.close();
     await server.close();
   }
@@ -218,18 +254,24 @@ Deno.test("resumed feed filters retained events through current execution subcap
   const server = createServer("memory-v2-execution-feed-resume-subcaps");
   const firstMessages: ServerMessage[] = [];
   const first = server.connect((message) => firstMessages.push(message));
+  let sponsor: Awaited<ReturnType<typeof acquireSponsorLease>> | undefined;
   try {
     const firstAuth = await hello(first, firstMessages);
     const opened = await open(first, firstMessages, "open", firstAuth, {});
     assertExists(opened.ok);
     assertExists(opened.ok.sync?.execution);
     await enablePolicy(first, firstMessages, opened.ok.sessionId);
+    sponsor = await acquireSponsorLease(server);
     const acknowledgedFeedSeq = opened.ok.sync.execution.toFeedSeq;
 
-    server.setExecutionClaim(
+    await server.setExecutionClaim(
+      sponsor.lease,
       claimInput("action:computation", "computation"),
     );
-    server.setExecutionClaim(claimInput("action:builtin", "effect"));
+    await server.setExecutionClaim(
+      sponsor.lease,
+      claimInput("action:builtin", "effect"),
+    );
     assertEquals(
       firstMessages.filter((message) => message.type === "session/effect")
         .length,
@@ -281,6 +323,7 @@ Deno.test("resumed feed filters retained events through current execution subcap
       second.close();
     }
   } finally {
+    sponsor?.connection.close();
     first.close();
     await server.close();
   }

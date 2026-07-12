@@ -87,6 +87,9 @@ Deno.test("buffered settlements are dropped when their claim is replaced before 
         },
       }],
     });
+    await observer.setExecutionDemand("", ["piece:one"]);
+    const lease = await server.acquireExecutionLease(CONTROL_SPACE, "");
+    if (lease === null) throw new Error("expected an execution lease");
     await observer.watchSet([{
       id: "derived",
       kind: "graph",
@@ -97,10 +100,10 @@ Deno.test("buffered settlements are dropped when their claim is replaced before 
         }],
       },
     }]);
-    const first = await server.setExecutionClaim({
-      ...claimKey(CONTROL_SPACE),
-      leaseGeneration: 7,
-    });
+    const first = await server.setExecutionClaim(
+      lease,
+      claimKey(CONTROL_SPACE),
+    );
     const commit = await writer.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
@@ -123,10 +126,10 @@ Deno.test("buffered settlements are dropped when their claim is replaced before 
     assertEquals(delivered, []);
 
     assertEquals(server.revokeExecutionClaim(first), true);
-    const replacement = await server.setExecutionClaim({
-      ...claimKey(CONTROL_SPACE),
-      leaseGeneration: 7,
-    });
+    const replacement = await server.setExecutionClaim(
+      lease,
+      claimKey(CONTROL_SPACE),
+    );
     assertEquals(replacement.claimGeneration, first.claimGeneration + 1);
     assertEquals(observer.executionClaims, [replacement]);
 

@@ -1,6 +1,10 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
-import { parseClientMessage, Server } from "../v2/server.ts";
+import {
+  type ExecutionLeaseHandle,
+  parseClientMessage,
+  Server,
+} from "../v2/server.ts";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -101,9 +105,15 @@ type ExecutionServer = Server & {
     space: string,
     branch: string,
   ): readonly AuthenticatedExecutionDemand[];
+  acquireExecutionLease(
+    space: string,
+    branch: string,
+    options?: { preferredOriginSessionId?: string },
+  ): Promise<ExecutionLeaseHandle | null>;
   setExecutionClaim(
-    claim: ActionClaimKey & { leaseGeneration: number },
-  ): ExecutionClaim;
+    lease: ExecutionLeaseHandle,
+    claim: ActionClaimKey,
+  ): Promise<ExecutionClaim>;
   revokeExecutionClaim(claim: ExecutionClaim): boolean;
   publishActionSettlement(settlement: ActionSettlement): boolean;
   listExecutionClaims(space: string): readonly ExecutionClaim[];
@@ -114,7 +124,7 @@ type ExecutionServer = Server & {
   bindExecutionSession(
     space: string,
     sessionId: string,
-    authority: { leaseGeneration: number },
+    lease: ExecutionLeaseHandle,
   ): () => void;
 };
 
@@ -341,6 +351,22 @@ const setPolicy = async (
   });
 };
 
+const demandAndAcquireLease = async (
+  server: ExecutionServer,
+  session: ExecutionSession,
+  branch = "",
+): Promise<ExecutionLeaseHandle> => {
+  await session.setExecutionDemand(branch, ["space:piece:one"]);
+  const lease = await server.acquireExecutionLease(
+    session.space,
+    branch,
+  );
+  if (lease === null) {
+    throw new Error(`expected an execution lease for branch ${branch}`);
+  }
+  return lease;
+};
+
 Deno.test("enabled execution policy rejects a stale client but disabled policy does not", async () => {
   const server = createServer(
     "memory-v2-execution-policy-capability",
@@ -519,7 +545,7 @@ Deno.test("one connection replaces demand independently on each branch", async (
   }
 });
 
-Deno.test("claims are branch-qualified and reclaim mints a fresh generation", async () => {
+Deno.test("claims are action-qualified and reclaim mints a fresh generation", async () => {
   const server = createControlServer("memory-v2-execution-claims");
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
@@ -529,26 +555,27 @@ Deno.test("claims are branch-qualified and reclaim mints a fresh generation", as
   );
   try {
     await setPolicy(session, true);
-    const main = await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, ""),
-      leaseGeneration: 7,
-    });
-    const feature = await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "feature"),
-      leaseGeneration: 7,
-    });
+    const lease = await demandAndAcquireLease(server, session);
+    const main = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, ""),
+    );
+    const sibling = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:sibling"),
+    );
     assertEquals(main.claimGeneration, 1);
-    assertEquals(feature.claimGeneration, 1);
-    assertEquals(session.executionClaims.map((claim) => claim.branch), [
-      "",
-      "feature",
+    assertEquals(sibling.claimGeneration, 1);
+    assertEquals(session.executionClaims.map((claim) => claim.actionId), [
+      "action:derive",
+      "action:sibling",
     ]);
 
     assertEquals(server.revokeExecutionClaim(main), true);
-    const reclaimed = await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, ""),
-      leaseGeneration: 7,
-    });
+    const reclaimed = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, ""),
+    );
     assertEquals(reclaimed.claimGeneration, 2);
 
     assertEquals(
@@ -581,8 +608,8 @@ Deno.test("claims are branch-qualified and reclaim mints a fresh generation", as
     );
     assertEquals(
       session.executionClaims.some((claim) =>
-        claim.branch === "feature" &&
-        claim.claimGeneration === feature.claimGeneration
+        claim.actionId === sibling.actionId &&
+        claim.claimGeneration === sibling.claimGeneration
       ),
       true,
     );
@@ -602,21 +629,22 @@ Deno.test("positive claims require enabled policy and disabling it revokes autho
     events.push(event);
   });
   try {
-    assertThrows(
+    const lease = await demandAndAcquireLease(server, session);
+    await assertRejects(
       () =>
-        server.setExecutionClaim({
-          ...claimKey(POLICY_SPACE, ""),
-          leaseGeneration: 1,
-        }),
+        server.setExecutionClaim(
+          lease,
+          claimKey(POLICY_SPACE, ""),
+        ),
       Error,
-      "execution policy is not enabled",
+      "execution lease is not active and authorized",
     );
 
     await setPolicy(session, true);
-    const claim = await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, ""),
-      leaseGeneration: 1,
-    });
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, ""),
+    );
     assertEquals(session.executionClaims.length, 1);
 
     await setPolicy(session, false, 2);
@@ -657,10 +685,11 @@ Deno.test("claim expiry timer revokes clients and rejects stale settlement", asy
   });
   try {
     await setPolicy(session, true);
-    const claim = await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, ""),
-      leaseGeneration: 2,
-    });
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, ""),
+    );
     await expired.promise;
 
     assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
@@ -694,10 +723,8 @@ Deno.test("closing a control server cancels a live claim deadline", async () => 
   const session = await mount(client) as ExecutionSession;
   try {
     await setPolicy(session, true);
-    server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, ""),
-      leaseGeneration: 2,
-    });
+    const lease = await demandAndAcquireLease(server, session);
+    await server.setExecutionClaim(lease, claimKey(POLICY_SPACE, ""));
     assertEquals(server.listExecutionClaims(POLICY_SPACE).length, 1);
   } finally {
     await client.close();
@@ -721,6 +748,7 @@ Deno.test("committed settlement waits for its accepted data patch", async () => 
   });
   try {
     await setPolicy(observer, true);
+    const lease = await demandAndAcquireLease(server, observer);
     await observer.watchSet([{
       id: "derived",
       kind: "graph",
@@ -731,10 +759,10 @@ Deno.test("committed settlement waits for its accepted data patch", async () => 
         }],
       },
     }]);
-    const claim = await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, ""),
-      leaseGeneration: 9,
-    });
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, ""),
+    );
     const commit = await writer.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
@@ -789,6 +817,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
   let unbind = () => {};
   try {
     await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
     await session.watchSet([{
       id: "provenance-output",
       kind: "graph",
@@ -799,13 +828,15 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
         }],
       },
     }]);
-    const claim = server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:provenance"),
-      leaseGeneration: 17,
-    });
-    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
-      leaseGeneration: claim.leaseGeneration,
-    });
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:provenance"),
+    );
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
 
     const source = await session.transact({
       localSeq: 2,
@@ -998,10 +1029,10 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       outcome: "no-op",
     });
 
-    const failedClaim = server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:provenance-failed"),
-      leaseGeneration: claim.leaseGeneration,
-    });
+    const failedClaim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:provenance-failed"),
+    );
     const failedObservation = {
       ...observation,
       actionId: failedClaim.actionId,
@@ -1083,18 +1114,21 @@ Deno.test("bound executor rejects a delayed attempt after claim replacement", as
   let unbind = () => {};
   try {
     await setPolicy(session, true);
-    const first = server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:stale-attempt"),
-      leaseGeneration: 31,
-    });
-    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
-      leaseGeneration: first.leaseGeneration,
-    });
+    const lease = await demandAndAcquireLease(server, session);
+    const first = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:stale-attempt"),
+    );
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
     assertEquals(server.revokeExecutionClaim(first), true);
-    const replacement = server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:stale-attempt"),
-      leaseGeneration: first.leaseGeneration,
-    });
+    const replacement = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:stale-attempt"),
+    );
     assertEquals(replacement.claimGeneration, first.claimGeneration + 1);
 
     await assertRejects(
@@ -1136,13 +1170,16 @@ Deno.test("bound executor never downgrades a revoked attempt to an ordinary writ
   let unbind = () => {};
   try {
     await setPolicy(session, true);
-    const claim = server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:revoked-attempt"),
-      leaseGeneration: 32,
-    });
-    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
-      leaseGeneration: claim.leaseGeneration,
-    });
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:revoked-attempt"),
+    );
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
     assertEquals(server.revokeExecutionClaim(claim), true);
 
     await assertRejects(
@@ -1184,13 +1221,16 @@ Deno.test("claimed executor rejects an effective context narrower than its claim
   let unbind = () => {};
   try {
     await setPolicy(session, true);
-    const claim = server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:context-fence"),
-      leaseGeneration: 33,
-    });
-    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
-      leaseGeneration: claim.leaseGeneration,
-    });
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:context-fence"),
+    );
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
     const incomplete = claimedSpaceObservation(
       claim,
       "of:context-fence-must-not-land",
@@ -1231,14 +1271,12 @@ Deno.test("detached resumable sessions cannot acquire executor authority", async
   const sessionId = session.sessionId;
   try {
     await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
     await client.close();
     assertThrows(
-      () =>
-        server.bindExecutionSession(POLICY_SPACE, sessionId, {
-          leaseGeneration: 34,
-        }),
+      () => server.bindExecutionSession(POLICY_SPACE, sessionId, lease),
       Error,
-      "live connection",
+      "sponsor is no longer attached",
     );
   } finally {
     await server.close();
@@ -1252,13 +1290,16 @@ Deno.test("an accepted claim replay stays idempotent after revoke", async () => 
   let unbind = () => {};
   try {
     await setPolicy(session, true);
-    const firstClaim = server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:replay-fence"),
-      leaseGeneration: 35,
-    });
-    unbind = server.bindExecutionSession(POLICY_SPACE, session.sessionId, {
-      leaseGeneration: firstClaim.leaseGeneration,
-    });
+    const lease = await demandAndAcquireLease(server, session);
+    const firstClaim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:replay-fence"),
+    );
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
     const commit = {
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
@@ -1280,10 +1321,10 @@ Deno.test("an accepted claim replay stays idempotent after revoke", async () => 
     assertEquals(replay.seq, accepted.seq);
     assertEquals(replay.actionAttempts, undefined);
 
-    const replacement = server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:replay-fence"),
-      leaseGeneration: firstClaim.leaseGeneration,
-    });
+    const replacement = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:replay-fence"),
+    );
     await assertRejects(
       () =>
         session.transact({
@@ -1309,10 +1350,11 @@ Deno.test("an unbound client claim assertion cannot create executor provenance",
   const session = await mount(client) as ExecutionSession;
   try {
     await setPolicy(session, true);
-    const claim = server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:unbound-assertion"),
-      leaseGeneration: 36,
-    });
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:unbound-assertion"),
+    );
     await assertRejects(
       () =>
         session.transact({
@@ -1381,24 +1423,19 @@ Deno.test("clients cannot spoof server execution claims or settlements", () => {
   );
 });
 
-Deno.test("host cannot publish claims while the rollout flag is off", async () => {
+Deno.test("host cannot acquire claim authority while the rollout flag is off", async () => {
   const server = createServer("memory-v2-execution-claims-off", false);
   try {
-    assertThrows(
-      () =>
-        server.setExecutionClaim({
-          ...claimKey(POLICY_SPACE, ""),
-          leaseGeneration: 1,
-        }),
-      Error,
-      "server-primary-execution-v1 is disabled",
+    assertEquals(
+      await server.acquireExecutionLease(POLICY_SPACE, ""),
+      null,
     );
   } finally {
     await server.close();
   }
 });
 
-Deno.test("reconnect applies the claim snapshot then restores connection demand", async () => {
+Deno.test("reconnect restores demand before a replacement sponsor claim", async () => {
   const server = createControlServer("memory-v2-execution-reconnect");
   const transport = new ReconnectableExecutionTransport(server);
   const client = await MemoryClient.connect({
@@ -1420,44 +1457,54 @@ Deno.test("reconnect applies the claim snapshot then restores connection demand"
   const unsubscribeDemand = server.subscribeExecutionDemands((demands) => {
     if (
       transport.connectionCount >= 2 && demands.demands.length === 1 &&
-      demands.branch === "feature"
+      demands.branch === ""
     ) {
       demandRestored.resolve();
     }
   });
   try {
     await setPolicy(session, true);
-    await session.setExecutionDemand("feature", ["piece:one"]);
-    const first = await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "feature"),
-      leaseGeneration: 3,
-    });
+    const firstLease = await demandAndAcquireLease(server, session);
+    const first = await server.setExecutionClaim(
+      firstLease,
+      claimKey(POLICY_SPACE, ""),
+    );
     assertEquals(first.claimGeneration, 1);
 
     transport.disconnect();
-    assertEquals(server.revokeExecutionClaim(first), true);
-    const second = await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "feature"),
-      leaseGeneration: 3,
-    });
+    await server.flushExecutionLeaseTasks();
+    const revoked = await server.finishExecutionLeaseDrain(firstLease);
+    assertEquals(revoked?.state, "revoked");
+    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+
+    await transport.reconnected;
+    await demandRestored.promise;
+    assertEquals(session.executionClaims, []);
+
+    const secondLease = await demandAndAcquireLease(server, session);
+    assertEquals(
+      secondLease.leaseGeneration,
+      firstLease.leaseGeneration + 1,
+    );
+    const second = await server.setExecutionClaim(
+      secondLease,
+      claimKey(POLICY_SPACE, ""),
+    );
+    assertEquals(second.claimGeneration, 2);
     assertEquals(
       server.publishActionSettlement({
-        branch: "feature",
+        branch: "",
         claim: second,
         inputBasisSeq: 0,
         outcome: "no-op",
       }),
       true,
     );
-
-    await transport.reconnected;
-    await demandRestored.promise;
-    assertEquals(session.executionClaims.length, 1);
-    assertEquals(session.executionClaims[0].claimGeneration, 2);
+    assertEquals(session.executionClaims, [second]);
     assertEquals(settlements.length, 1);
     assertEquals(settlements[0].claim.claimGeneration, 2);
     assertEquals(
-      server.listExecutionDemands(POLICY_SPACE, "feature").length,
+      server.listExecutionDemands(POLICY_SPACE, "").length,
       1,
     );
   } finally {
@@ -1474,12 +1521,13 @@ Deno.test("control-only claim frames advance one feed sequence without advancing
   const session = await mount(client) as ExecutionSession;
   try {
     await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
     const view = await session.watchSet([]);
     const syncs = view.subscribeSync();
-    const claim = await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, ""),
-      leaseGeneration: 11,
-    });
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, ""),
+    );
     const setFrame = await syncs.next();
     assertEquals(setFrame.done, false);
     assertEquals(setFrame.value.fromSeq, setFrame.value.toSeq);
@@ -1534,14 +1582,14 @@ Deno.test("server publishes only claim classes the client advertises", async () 
   ) as ExecutionSession;
   try {
     await setPolicy(computationOnly, true);
-    await server.setExecutionClaim({
-      ...claimKey(POLICY_SPACE, "", "action:computation"),
-      leaseGeneration: 1,
-    });
-    await server.setExecutionClaim({
+    const lease = await demandAndAcquireLease(server, computationOnly);
+    await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:computation"),
+    );
+    await server.setExecutionClaim(lease, {
       ...claimKey(POLICY_SPACE, "", "action:builtin"),
       actionKind: "effect",
-      leaseGeneration: 1,
     });
     assertEquals(noRouting.executionClaims, []);
     assertEquals(
