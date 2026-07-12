@@ -1,4 +1,5 @@
 import {
+  DEFAULT_GENERATE_OBJECT_MODELS,
   type LLMGenerateObjectRequest,
   type LLMGenerateObjectResponse,
 } from "@commonfabric/llm/types";
@@ -9,7 +10,6 @@ import {
   type ModelMessage,
 } from "ai";
 import { Ajv } from "ajv";
-import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commonfabric/llm";
 import { trace } from "@opentelemetry/api";
 import { normalizeSchemaForProvider } from "./schema.ts";
 
