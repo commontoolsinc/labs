@@ -1837,7 +1837,7 @@ Deno.test("scheduler writer lookup keeps its target index at 10k rows", async ()
       completeActionScopeSummary: {
         ...base.completeActionScopeSummary!,
         writes,
-        directOutputs: writes,
+        directOutputs: [writes[0]!],
       },
       currentKnownWrites: writes,
     }, ALICE_A);

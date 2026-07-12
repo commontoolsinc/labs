@@ -16,6 +16,7 @@ import {
   open as openEngine,
   principalOfSessionKey,
   resolveCommitSessionKey,
+  resolveScopeKey,
   type SchedulerActionObservation,
   serverSeq,
   upsertMirroredSchedulerObservation,
@@ -1963,6 +1964,22 @@ Deno.test("memory v2 writer lookup fails open on corrupt projections", async () 
     });
     assertEquals(lookup(mismatchedPayload.target), []);
 
+    const divergentSnapshot = storeWriter(
+      "writer-corrupt:divergent-snapshot",
+    );
+    engine.database.prepare(`
+      UPDATE scheduler_action_snapshot
+      SET payload = :payload
+      WHERE action_id = 'writer-corrupt:divergent-snapshot'
+    `).run({
+      payload: encodeMemoryBoundary({
+        ...divergentSnapshot.storedObservation,
+        status: "failed",
+        errorFingerprint: "forged-error",
+      }),
+    });
+    assertEquals(lookup(divergentSnapshot.target), []);
+
     const mismatchedAddress = storeWriter(
       "writer-corrupt:mismatched-address",
     );
@@ -1984,6 +2001,50 @@ Deno.test("memory v2 writer lookup fails open on corrupt projections", async () 
       WHERE action_id = 'writer-corrupt:mismatched-kind'
     `).run();
     assertEquals(lookup(mismatchedKind.target), []);
+
+    const scopedContext = {
+      principal: "did:key:scheduler-writer-corruption-owner",
+      sessionId: "session:scheduler-writer-corruption-owner",
+    };
+    for (const scope of ["user", "session"] as const) {
+      const actionId = `writer-corrupt:mismatched-${scope}-scope-key`;
+      const target = {
+        space: ownerSpace,
+        scope,
+        id: `of:${actionId}`,
+        path: ["value"],
+      };
+      const stored = upsertSchedulerObservation(engine, {
+        branch: "",
+        ownerSpace,
+        observedAtSeq: 1,
+        observation: observationForAction(actionId, {
+          ownerSpace,
+          currentKnownWrites: [target],
+        }),
+        scopeContext: scopedContext,
+      });
+      const forgedScopeKey = resolveScopeKey(scope, {
+        principal: "did:key:scheduler-writer-corruption-forged",
+        sessionId: "session:scheduler-writer-corruption-forged",
+      });
+      engine.database.prepare(`
+        UPDATE scheduler_write_index
+        SET write_scope_key = :write_scope_key
+        WHERE action_id = :action_id
+      `).run({
+        action_id: actionId,
+        write_scope_key: forgedScopeKey,
+      });
+      assertEquals(
+        writersForTargets(engine, {
+          branch: "",
+          targets: [{ ...target, scopeKey: forgedScopeKey }],
+          applicableExecutionContextKeys: [stored.executionContextKey],
+        }),
+        [],
+      );
+    }
 
     const invalidPath = storeWriter("writer-corrupt:invalid-path");
     engine.database.prepare(`
