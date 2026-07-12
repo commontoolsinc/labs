@@ -23,6 +23,12 @@ import {
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  type LegacyBackgroundExclusion,
+  type LegacyBackgroundExclusionAcquireRequest,
+  type LegacyBackgroundExclusionReleaseRequest,
+  type LegacyBackgroundExclusionReleaseResult,
+  type LegacyBackgroundExclusionRenewRequest,
+  type LegacyBackgroundExclusionStatusResult,
   type MemoryProtocolFlags,
   type Operation,
   parseMemoryProtocolFlags,
@@ -1028,6 +1034,56 @@ class Connection {
             parsed.sessionId,
             parsed.requestId,
             response,
+          );
+        }
+        return;
+      case "session.execution.legacy-background.acquire":
+      case "session.execution.legacy-background.renew":
+      case "session.execution.legacy-background.release":
+        if (!this.serverPrimaryExecutionV1) {
+          this.send({
+            type: "response",
+            requestId: parsed.requestId,
+            error: toError(
+              "UnsupportedProtocol",
+              "memory capability server-primary-execution-v1 was not negotiated",
+            ),
+          });
+          return;
+        }
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        if (
+          parsed.type === "session.execution.legacy-background.acquire"
+        ) {
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            await this.server.acquireLegacyBackgroundExclusion(parsed, this),
+          );
+        } else if (
+          parsed.type === "session.execution.legacy-background.renew"
+        ) {
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            await this.server.renewLegacyBackgroundExclusion(parsed, this),
+          );
+        } else {
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            await this.server.releaseLegacyBackgroundExclusion(parsed, this),
           );
         }
         return;
@@ -2453,6 +2509,206 @@ export class Server {
         message.requestId,
         toError(
           error instanceof Error ? error.name : "ExecutionDemandError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  #legacyBackgroundSession(
+    space: string,
+    sessionId: string,
+    connection: Connection,
+  ): SessionState | null {
+    const session = this.#sessions.get(space, sessionId);
+    if (
+      session === null || session.ownerConnectionId !== connection.id ||
+      session.principal === undefined ||
+      !session.serverPrimaryExecutionV1 ||
+      !this.#isServicePrincipal(session.principal)
+    ) {
+      return null;
+    }
+    return session;
+  }
+
+  #legacyBackgroundHolderId(session: SessionState): string {
+    return [
+      "legacy-background",
+      encodeURIComponent(this.#executionHostId),
+      encodeURIComponent(session.id),
+    ].join(":");
+  }
+
+  #legacyBackgroundAuthorize(
+    space: string,
+    session: SessionState,
+    connection: Connection,
+  ): () => boolean {
+    const sessionToken = session.sessionToken;
+    const principal = session.principal!;
+    return () =>
+      this.#sessions.get(space, session.id) === session &&
+      session.ownerConnectionId === connection.id &&
+      session.sessionToken === sessionToken &&
+      session.principal === principal && this.#isServicePrincipal(principal);
+  }
+
+  #legacyBackgroundToken(
+    message:
+      | LegacyBackgroundExclusionRenewRequest
+      | LegacyBackgroundExclusionReleaseRequest,
+    session: SessionState,
+  ): LegacyBackgroundExclusion {
+    return {
+      version: 1,
+      space: message.space,
+      branch: message.branch,
+      exclusionGeneration: message.exclusionGeneration,
+      holderId: this.#legacyBackgroundHolderId(session),
+      servicePrincipal: session.principal!,
+      // Engine exact-owner matching intentionally ignores the caller snapshot
+      // expiry. The server derives every authority-bearing field above.
+      expiresAt: 0,
+    };
+  }
+
+  async acquireLegacyBackgroundExclusion(
+    message: LegacyBackgroundExclusionAcquireRequest,
+    connection: Connection,
+  ): Promise<ResponseMessage<LegacyBackgroundExclusionStatusResult>> {
+    const session = this.#legacyBackgroundSession(
+      message.space,
+      message.sessionId,
+      connection,
+    );
+    if (session === null) {
+      return respondTypedError(
+        message.requestId,
+        toError(
+          "AuthorizationError",
+          "legacy background exclusion requires an attached service principal",
+        ),
+      );
+    }
+    try {
+      const engine = await this.openEngine(message.space);
+      const status = Engine.acquireLegacyBackgroundExclusion(engine, {
+        space: message.space,
+        branch: message.branch,
+        holderId: this.#legacyBackgroundHolderId(session),
+        servicePrincipal: session.principal!,
+        nowMs: () => this.#executionNowMs(),
+        ttlMs: this.#executionLeaseTtlMs(),
+        drainTtlMs: this.#executionDrainTimeoutMs(),
+        authorizeService: this.#legacyBackgroundAuthorize(
+          message.space,
+          session,
+          connection,
+        ),
+      });
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: { serverSeq: Engine.serverSeq(engine), status },
+      };
+    } catch (error) {
+      return respondTypedError(
+        message.requestId,
+        toError(
+          error instanceof Error ? error.name : "BackgroundExclusionError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async renewLegacyBackgroundExclusion(
+    message: LegacyBackgroundExclusionRenewRequest,
+    connection: Connection,
+  ): Promise<ResponseMessage<LegacyBackgroundExclusionStatusResult>> {
+    const session = this.#legacyBackgroundSession(
+      message.space,
+      message.sessionId,
+      connection,
+    );
+    if (session === null) {
+      return respondTypedError(
+        message.requestId,
+        toError(
+          "AuthorizationError",
+          "legacy background exclusion requires an attached service principal",
+        ),
+      );
+    }
+    try {
+      const engine = await this.openEngine(message.space);
+      const status = Engine.renewLegacyBackgroundExclusion(engine, {
+        exclusion: this.#legacyBackgroundToken(message, session),
+        nowMs: () => this.#executionNowMs(),
+        ttlMs: this.#executionLeaseTtlMs(),
+        drainTtlMs: this.#executionDrainTimeoutMs(),
+        authorizeService: this.#legacyBackgroundAuthorize(
+          message.space,
+          session,
+          connection,
+        ),
+      });
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: { serverSeq: Engine.serverSeq(engine), status },
+      };
+    } catch (error) {
+      return respondTypedError(
+        message.requestId,
+        toError(
+          error instanceof Error ? error.name : "BackgroundExclusionError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async releaseLegacyBackgroundExclusion(
+    message: LegacyBackgroundExclusionReleaseRequest,
+    connection: Connection,
+  ): Promise<ResponseMessage<LegacyBackgroundExclusionReleaseResult>> {
+    const session = this.#legacyBackgroundSession(
+      message.space,
+      message.sessionId,
+      connection,
+    );
+    if (session === null) {
+      return respondTypedError(
+        message.requestId,
+        toError(
+          "AuthorizationError",
+          "legacy background exclusion requires an attached service principal",
+        ),
+      );
+    }
+    try {
+      const engine = await this.openEngine(message.space);
+      const released = Engine.releaseLegacyBackgroundExclusion(engine, {
+        exclusion: this.#legacyBackgroundToken(message, session),
+        nowMs: () => this.#executionNowMs(),
+        authorizeService: this.#legacyBackgroundAuthorize(
+          message.space,
+          session,
+          connection,
+        ),
+      });
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: { serverSeq: Engine.serverSeq(engine), released },
+      };
+    } catch (error) {
+      return respondTypedError(
+        message.requestId,
+        toError(
+          error instanceof Error ? error.name : "BackgroundExclusionError",
           error instanceof Error ? error.message : String(error),
         ),
       );
@@ -5924,6 +6180,53 @@ export const parseClientMessage = (
       branch: parsed.branch,
       pieces: [...parsed.pieces] as string[],
     };
+  }
+
+  if (
+    parsed.type === "session.execution.legacy-background.acquire" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.branch === "string" && parsed.branch.length <= 256 &&
+    Object.keys(parsed).every((key) =>
+      key === "type" || key === "requestId" || key === "space" ||
+      key === "sessionId" || key === "branch"
+    )
+  ) {
+    return {
+      type: "session.execution.legacy-background.acquire",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      branch: parsed.branch,
+    };
+  }
+
+  if (
+    (parsed.type === "session.execution.legacy-background.renew" ||
+      parsed.type === "session.execution.legacy-background.release") &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.branch === "string" && parsed.branch.length <= 256 &&
+    typeof parsed.exclusionGeneration === "number" &&
+    isPositiveSafeInteger(parsed.exclusionGeneration) &&
+    Object.keys(parsed).every((key) =>
+      key === "type" || key === "requestId" || key === "space" ||
+      key === "sessionId" || key === "branch" ||
+      key === "exclusionGeneration"
+    )
+  ) {
+    return {
+      type: parsed.type,
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      branch: parsed.branch,
+      exclusionGeneration: parsed.exclusionGeneration,
+    } as
+      | LegacyBackgroundExclusionRenewRequest
+      | LegacyBackgroundExclusionReleaseRequest;
   }
 
   if (

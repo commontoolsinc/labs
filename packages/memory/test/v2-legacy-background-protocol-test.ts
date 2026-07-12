@@ -2,11 +2,7 @@ import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import * as MemoryClient from "../v2/client.ts";
 import { parseClientMessage, Server } from "../v2/server.ts";
-import {
-  encodeMemoryBoundary,
-  type LegacyBackgroundExclusion,
-  type LegacyBackgroundExclusionStatus,
-} from "../v2.ts";
+import { encodeMemoryBoundary } from "../v2.ts";
 
 const SPACE = "did:key:z6Mk-legacy-background-protocol-space";
 const SERVICE = "did:key:z6Mk-legacy-background-protocol-service";
@@ -162,6 +158,46 @@ Deno.test("background exclusion parser rejects caller-selected authority", () =>
   );
 });
 
+Deno.test("resumed service session renews its exact exclusion", async () => {
+  const directory = await Deno.makeTempDir();
+  let nowMs = 100;
+  const server = createServer(toFileUrl(`${directory}/`), true, () => nowMs);
+  const firstClient = await connect(server);
+  const first = await firstClient.mount(
+    SPACE,
+    {},
+    authFactoryFor(SERVICE),
+  );
+  let resumedClient: MemoryClient.Client | undefined;
+  try {
+    const acquired = await first.acquireLegacyBackgroundExclusion("");
+    assertExists(acquired);
+    assertExists(first.sessionToken);
+    const resume = {
+      sessionId: first.sessionId,
+      sessionToken: first.sessionToken,
+    };
+    await firstClient.close();
+
+    resumedClient = await connect(server);
+    const resumed = await resumedClient.mount(
+      SPACE,
+      resume,
+      authFactoryFor(SERVICE),
+    );
+    nowMs = 200;
+    const renewed = await resumed.renewLegacyBackgroundExclusion("", 1);
+    assertExists(renewed);
+    assertEquals(renewed.exclusion.exclusionGeneration, 1);
+    assertEquals(renewed.exclusion.expiresAt, 1_200);
+  } finally {
+    await resumedClient?.close();
+    await firstClient.close();
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("flag-off client preserves legacy background behavior", async () => {
   const directory = await Deno.makeTempDir();
   const server = createServer(toFileUrl(`${directory}/`), false);
@@ -170,7 +206,7 @@ Deno.test("flag-off client preserves legacy background behavior", async () => {
   try {
     assertEquals(
       await session.acquireLegacyBackgroundExclusion(""),
-      null,
+      undefined,
     );
   } finally {
     await client.close();
@@ -178,9 +214,3 @@ Deno.test("flag-off client preserves legacy background behavior", async () => {
     await Deno.remove(directory, { recursive: true });
   }
 });
-
-// Keep protocol result imports type-checked at this boundary.
-const _status: LegacyBackgroundExclusionStatus | null = null;
-const _exclusion: LegacyBackgroundExclusion | null = null;
-void _status;
-void _exclusion;

@@ -137,6 +137,7 @@ Deno.test("background exclusion uses exact monotonic generation fencing", async 
     const released = Engine.releaseLegacyBackgroundExclusion(engine, {
       exclusion: first.exclusion,
       nowMs: 102,
+      authorizeService: () => true,
     });
     assertExists(released);
     assertEquals(released.expiresAt, 102);
@@ -148,6 +149,7 @@ Deno.test("background exclusion uses exact monotonic generation fencing", async 
       Engine.releaseLegacyBackgroundExclusion(engine, {
         exclusion: first.exclusion,
         nowMs: 104,
+        authorizeService: () => true,
       }),
       null,
     );

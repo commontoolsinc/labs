@@ -597,6 +597,42 @@ export interface ExecutionDemandSetResult {
   references: number;
 }
 
+export interface LegacyBackgroundExclusionAcquireRequest {
+  type: "session.execution.legacy-background.acquire";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  branch: BranchName;
+}
+
+export interface LegacyBackgroundExclusionRenewRequest {
+  type: "session.execution.legacy-background.renew";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  branch: BranchName;
+  exclusionGeneration: number;
+}
+
+export interface LegacyBackgroundExclusionReleaseRequest {
+  type: "session.execution.legacy-background.release";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  branch: BranchName;
+  exclusionGeneration: number;
+}
+
+export interface LegacyBackgroundExclusionStatusResult {
+  serverSeq: number;
+  status: LegacyBackgroundExclusionStatus | null;
+}
+
+export interface LegacyBackgroundExclusionReleaseResult {
+  serverSeq: number;
+  released: LegacyBackgroundExclusion | null;
+}
+
 export interface TransactRequest {
   type: "transact";
   requestId: string;
@@ -923,6 +959,9 @@ export type ClientMessage =
   | SchedulerSnapshotListRequest
   | SchedulerWriterListRequest
   | ExecutionDemandSetRequest
+  | LegacyBackgroundExclusionAcquireRequest
+  | LegacyBackgroundExclusionRenewRequest
+  | LegacyBackgroundExclusionReleaseRequest
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage

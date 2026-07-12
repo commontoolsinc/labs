@@ -13,6 +13,10 @@ import {
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryResult,
+  type LegacyBackgroundExclusion,
+  type LegacyBackgroundExclusionReleaseResult,
+  type LegacyBackgroundExclusionStatus,
+  type LegacyBackgroundExclusionStatusResult,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
@@ -791,6 +795,64 @@ export class SpaceSession {
       this.#executionDemands.set(branch, Object.freeze([...pieces]));
     }
     return true;
+  }
+
+  async acquireLegacyBackgroundExclusion(
+    branch: string,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
+    this.#assertOpen();
+    if (!this.client.serverPrimaryExecutionV1) return undefined;
+    const result = await this.client.request<
+      LegacyBackgroundExclusionStatusResult
+    >({
+      type: "session.execution.legacy-background.acquire",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      branch,
+    });
+    this.noteResult(result.serverSeq);
+    return result.status;
+  }
+
+  async renewLegacyBackgroundExclusion(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
+    this.#assertOpen();
+    if (!this.client.serverPrimaryExecutionV1) return undefined;
+    const result = await this.client.request<
+      LegacyBackgroundExclusionStatusResult
+    >({
+      type: "session.execution.legacy-background.renew",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      branch,
+      exclusionGeneration,
+    });
+    this.noteResult(result.serverSeq);
+    return result.status;
+  }
+
+  async releaseLegacyBackgroundExclusion(
+    branch: string,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusion | null | undefined> {
+    this.#assertOpen();
+    if (!this.client.serverPrimaryExecutionV1) return undefined;
+    const result = await this.client.request<
+      LegacyBackgroundExclusionReleaseResult
+    >({
+      type: "session.execution.legacy-background.release",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      branch,
+      exclusionGeneration,
+    });
+    this.noteResult(result.serverSeq);
+    return result.released;
   }
 
   async watchSet(watches: WatchSpec[]): Promise<WatchView> {

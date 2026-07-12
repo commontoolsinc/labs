@@ -922,6 +922,7 @@ export interface RenewLegacyBackgroundExclusionOptions {
 export interface ReleaseLegacyBackgroundExclusionOptions {
   exclusion: LegacyBackgroundExclusion;
   nowMs: number | (() => number);
+  authorizeService?: (engine: Engine) => boolean;
 }
 
 /** Host-only authority checked against the durable row inside applyCommit. */
@@ -3435,6 +3436,7 @@ const releaseLegacyBackgroundExclusionTransaction = (
   options: ReleaseLegacyBackgroundExclusionOptions,
 ): LegacyBackgroundExclusion | null => {
   assertLegacyBackgroundExclusion(options.exclusion);
+  if (options.authorizeService?.(engine) !== true) return null;
   const nowMs = sampleLeaseClock(
     "legacy background exclusion server time",
     options.nowMs,
