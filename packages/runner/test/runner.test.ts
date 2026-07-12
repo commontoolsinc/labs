@@ -191,6 +191,92 @@ describe("runPattern", () => {
       .toThrow(directRootOutputBindingDiagnostic);
   });
 
+  it("rejects a computation without an output binding", () => {
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {},
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => undefined,
+          },
+          inputs: {},
+          outputs: {},
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects computation without output binding",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects a nested raw computation output binding", () => {
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {
+        output: { $alias: { partialCause: "output", path: [] } },
+      },
+      nodes: [
+        {
+          module: {
+            type: "raw",
+            implementation: () => () => undefined,
+          },
+          inputs: {},
+          outputs: {
+            nested: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects nested raw computation output binding",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
+  it("rejects a nested sub-pattern output binding", () => {
+    const childPattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    } as Pattern;
+    const pattern = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: {
+        output: { $alias: { partialCause: "output", path: [] } },
+      },
+      nodes: [
+        {
+          module: { type: "pattern", implementation: childPattern },
+          inputs: {},
+          outputs: {
+            nested: { $alias: { partialCause: "output", path: [] } },
+          },
+        },
+      ],
+    } as Pattern;
+
+    const resultCell = runtime.getCell(
+      space,
+      "rejects nested sub-pattern output binding",
+    );
+    expect(() => runTrusted(runtime, undefined, pattern, {}, resultCell))
+      .toThrow(directRootOutputBindingDiagnostic);
+  });
+
   it("rejects a nested passthrough output binding", () => {
     const pattern = {
       argumentSchema: {
