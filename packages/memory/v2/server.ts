@@ -1941,6 +1941,35 @@ export class Server {
     return capability !== null && isCapable(capability, "WRITE");
   }
 
+  /** Revalidate the sponsor captured when a lease was acquired without
+   * requiring its demand row to remain present. Explicit demand removal starts
+   * a host-coordinated graceful drain; the authenticated session, connection,
+   * token, and WRITE capability remain the authority during that bounded
+   * settle window. */
+  #executionLeaseSponsorCanWrite(
+    engine: Engine.Engine,
+    authority: OwnedExecutionLease,
+    session: SessionState,
+  ): boolean {
+    const lease = authority.handle;
+    if (
+      this.#sessions.get(lease.space, authority.sponsorSessionId) !== session ||
+      session.sessionToken !== authority.sponsorSessionToken ||
+      session.ownerConnectionId !== authority.sponsorConnectionId ||
+      session.principal !== lease.onBehalfOf ||
+      !session.serverPrimaryExecutionV1 ||
+      !this.#connections.has(authority.sponsorConnectionId)
+    ) {
+      return false;
+    }
+    const capability = this.#resolveCapability(
+      engine,
+      lease.space,
+      session.principal,
+    );
+    return capability !== null && isCapable(capability, "WRITE");
+  }
+
   #executionSponsorCandidates(
     space: string,
     branch: BranchName,
@@ -2241,20 +2270,18 @@ export class Server {
       authority.drainRequested
     ) return null;
     const sponsor = this.#sessions.get(lease.space, authority.sponsorSessionId);
-    const demand = this.#executionDemands.get(executionDemandKey(
-      authority.sponsorConnectionId,
-      lease.space,
-      authority.sponsorSessionId,
-      lease.branch,
-    ));
-    if (sponsor === null || demand === undefined) return null;
+    if (sponsor === null) return null;
     const engine = await this.openEngine(lease.space);
     const renewed = Engine.renewExecutionLease(engine, {
       lease: authority.handle,
       nowMs: () => this.#executionNowMs(),
       ttlMs: this.#executionLeaseTtlMs(),
       authorizeWrite: (transactionEngine) =>
-        this.#executionSponsorCanWrite(transactionEngine, demand, sponsor),
+        this.#executionLeaseSponsorCanWrite(
+          transactionEngine,
+          authority,
+          sponsor,
+        ),
     });
     if (renewed === null) return null;
     const handle = this.#replaceOwnedExecutionLease(authority, renewed);
@@ -2411,15 +2438,9 @@ export class Server {
         lease.state !== "active"
       ) continue;
       const sponsor = this.#sessions.get(space, authority.sponsorSessionId);
-      const demand = this.#executionDemands.get(executionDemandKey(
-        authority.sponsorConnectionId,
-        space,
-        authority.sponsorSessionId,
-        lease.branch,
-      ));
       if (
-        !options.policyDisabled && sponsor !== null && demand !== undefined &&
-        this.#executionSponsorCanWrite(engine, demand, sponsor)
+        !options.policyDisabled && sponsor !== null &&
+        this.#executionLeaseSponsorCanWrite(engine, authority, sponsor)
       ) continue;
       authority.drainRequested = true;
       this.#trackExecutionLeaseTask(
@@ -2503,12 +2524,6 @@ export class Server {
         this.#executionDemands.delete(key);
         this.#executionDemandRegistrationOrder.delete(key);
         this.#executionDemandSessionTokens.delete(key);
-        this.#drainExecutionLeasesForDemand(
-          connection.id,
-          message.space,
-          message.sessionId,
-          message.branch,
-        );
       } else {
         if (
           !this.#executionDemandRegistrationOrder.has(key) ||

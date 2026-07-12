@@ -34,6 +34,12 @@ type LeaseServer = Server & {
     space: string,
     branch: string,
   ): Promise<ExecutionLease | null>;
+  renewExecutionLease(
+    lease: ExecutionLeaseHandle,
+  ): Promise<ExecutionLeaseHandle | null>;
+  beginExecutionLeaseDrain(
+    lease: ExecutionLeaseHandle,
+  ): Promise<ExecutionLeaseHandle | null>;
   flushExecutionLeaseTasks(): Promise<void>;
   finishExecutionLeaseDrain(
     lease: ExecutionLeaseHandle,
@@ -180,6 +186,44 @@ Deno.test("one WRITE-capable requester acquires one sticky durable execution lea
       lease,
     );
     assertEquals(await server.currentExecutionLease(SPACE, ""), lease);
+  } finally {
+    await client.close();
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("explicit demand clear leaves the captured sponsor lease renewable for graceful drain", async () => {
+  const directory = await Deno.makeTempDir();
+  let now = 1_000;
+  const server = createLeaseServer(
+    toFileUrl(`${directory}/`),
+    "host:graceful-clear",
+    { nowMs: () => now, leaseTtlMs: 100 },
+  );
+  const client = await connect(server);
+  const session = await mount(client, OWNER);
+  try {
+    await session.setExecutionDemand("", ["space:of:piece"]);
+    const lease = await server.acquireExecutionLease(SPACE, "");
+    assertExists(lease);
+
+    await session.setExecutionDemand("", []);
+    await server.flushExecutionLeaseTasks();
+    assertEquals(
+      (await server.currentExecutionLease(SPACE, ""))?.state,
+      "active",
+    );
+
+    now += 50;
+    const renewed = await server.renewExecutionLease(lease);
+    assertExists(renewed);
+    assertEquals(renewed.state, "active");
+    assertEquals(renewed.expiresAt, now + 100);
+
+    const draining = await server.beginExecutionLeaseDrain(renewed);
+    assertExists(draining);
+    await server.finishExecutionLeaseDrain(draining);
   } finally {
     await client.close();
     await server.close();
