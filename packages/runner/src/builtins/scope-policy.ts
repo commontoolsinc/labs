@@ -1,8 +1,13 @@
 import type { Cell } from "../cell.ts";
 import { createCell } from "../cell.ts";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+} from "@commonfabric/data-model/fabric-factory";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
-import type { CellScope } from "../builder/types.ts";
+import type { CellScope, Pattern } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { resolveLink } from "../link-resolution.ts";
 import {
@@ -13,6 +18,7 @@ import { narrowestScope, scopeRank } from "../scope.ts";
 import {
   createSigilLinkFromParsedLink,
   getMetaLink,
+  isCellLink,
   parseLink,
 } from "../link-utils.ts";
 
@@ -76,6 +82,77 @@ export function narrowestCellScope(
         cell === undefined ? undefined : resolvedCellScope(runtime, tx, cell),
     ),
   );
+}
+
+/**
+ * Scope imposed by a canonical bound list callback's selected factory value.
+ *
+ * Filter and flatMap copy child decisions into their aggregate structure, so
+ * they must choose that container's scope before the first child is minted.
+ * The generic factory materializer has already authenticated the state; this
+ * walk only follows its value-bearing params/selector links to collect scope.
+ * Map intentionally does not use this helper: its outer list structure is
+ * independent of callback output, while each exposed row narrows separately.
+ */
+export function boundPatternFactoryScope(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  pattern: Pattern,
+  sourceLink: NormalizedFullLink,
+): CellScope {
+  const scopes: Array<CellScope | undefined> = [
+    resolvedCellScope(
+      runtime,
+      tx,
+      runtime.getCellFromLink(sourceLink, undefined, tx),
+    ),
+  ];
+  const seen = new Set<object>();
+
+  const visit = (value: unknown, base: NormalizedFullLink): void => {
+    if (value === null || value === undefined) return;
+    if (isCellLink(value)) {
+      const link = parseLink(value, base);
+      if (link?.space !== undefined && link.id !== undefined) {
+        scopes.push(resolveLink(runtime, tx, link as NormalizedFullLink).scope);
+      }
+      return;
+    }
+
+    if (isAdmittedFabricFactory(value)) {
+      const key = value as unknown as object;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const state = factoryStateOf(value);
+      if ("defaultScope" in state) scopes.push(state.defaultScope);
+      mapFactoryStateValues(state, (nested) => {
+        visit(nested, base);
+        return nested;
+      });
+      return;
+    }
+
+    if (typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const nested of value) visit(nested, base);
+      return;
+    }
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      visit(nested, base);
+    }
+  };
+
+  const state = factoryStateOf(pattern);
+  if (state.kind !== "pattern") {
+    throw new TypeError("bound list callback must carry pattern factory state");
+  }
+  scopes.push(state.defaultScope);
+  if ("params" in state) {
+    visit(state.params, sourceLink);
+  }
+  return narrowestScope(scopes);
 }
 
 /**

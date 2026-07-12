@@ -1421,6 +1421,19 @@ factor afterward updates `[22, 43]` to `[8, 15]` without identity churn. No
 production change was needed for this slice. The focused resume/list matrix
 passes `5 passed (8 steps)`.
 
+WP3.5 canonical CFC/scope slice (2026-07-11): the first red showed a bound
+user-scoped capture leaving filter's aggregate in space scope; after that was
+fixed, a second red showed the canonical selector's materialization read
+smearing `map-factory-secret` onto map's outer aggregate. Filter and flatMap now
+derive pre-mint aggregate scope from the authenticated factory's terminal
+source and value-bearing bound-param links. Map deliberately keeps list scope
+while its row cells narrow independently. The coordinator marks factory
+materialization as dependency seeding, and every child action rereads the
+stable binding so selector/capture labels reach map rows and filter/flatMap
+selection structure without sibling leakage. The warm, cold, replacement, and
+CFC matrix passes `4 passed (7 steps)`; all eight existing pointwise-flow steps
+also pass.
+
 ### WP3.6 — Preserve `FrameworkProvided` obligations through wrappers
 
 - [ ] Record trusted framework-provided paths in compiler/artifact metadata for

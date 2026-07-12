@@ -21,6 +21,7 @@ import type {
   IExtendedStorageTransaction,
   IStorageSubscription,
 } from "../storage/interface.ts";
+import { schedulerDependencyRead } from "../storage/reactivity-log.ts";
 
 function requirePattern(value: unknown, builtinName: string): Pattern {
   if (!isPattern(value)) {
@@ -47,6 +48,7 @@ export type MaterializedListPatternSelection = {
   pattern: Pattern;
   generation: number;
   factorySelectionLink: NormalizedFullLink;
+  factorySourceLink: NormalizedFullLink;
 };
 
 function canonicalSelection(value: unknown): unknown {
@@ -73,7 +75,16 @@ function readSelection(
     "value",
   );
   const sourceCell = runtime.getCellFromLink(resolvedOp, undefined, tx);
-  const raw = sourceCell.getRaw();
+  // The coordinator needs the value for generic materialization and reactive
+  // generation tracking, but callback output is authored by the child run.
+  // Each child rereads the stable binding through `factorySelectionLink`, so
+  // that consuming transaction receives the selector's CFC provenance. Keep
+  // this dependency-seeding read out of the coordinator's aggregate writes;
+  // otherwise map would smear code-selection labels onto its outer list.
+  const raw = tx.runWithAmbientReadMeta(
+    schedulerDependencyRead,
+    () => sourceCell.getRaw(),
+  );
   return {
     raw,
     canonical: canonicalSelection(raw),
@@ -235,6 +246,7 @@ export function createListPatternFactorySupervisor(
         pattern,
         generation,
         factorySelectionLink: bindingLink,
+        factorySourceLink: current.sourceLink,
       };
     },
   };

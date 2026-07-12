@@ -35,11 +35,13 @@ import {
 } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
+  boundPatternFactoryScope,
   cellIdentityKey,
   narrowestCellScope,
   outputSpotFromBinding,
   scopedCell,
 } from "./scope-policy.ts";
+import { narrowestScope } from "../scope.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
 import { createResumeRepublisher } from "./resume-republish.ts";
 import { createResumeRecovery } from "./resume-recover.ts";
@@ -218,6 +220,7 @@ export function flatMap(
     let opPattern: Pattern;
     let factoryGeneration: number | undefined;
     let factorySelectionLink: NormalizedFullLink | undefined;
+    let factorySourceLink: NormalizedFullLink | undefined;
     let argumentUsage: ListOpArgumentUsage;
     if (legacyInputs) {
       opPattern = resolveOpPattern(runtime, op.getRaw(), "flatMap");
@@ -231,6 +234,7 @@ export function flatMap(
       opPattern = selection.pattern;
       factoryGeneration = selection.generation;
       factorySelectionLink = selection.factorySelectionLink;
+      factorySourceLink = selection.factorySourceLink;
       argumentUsage = {
         usesElement: true,
         usesIndex: true,
@@ -238,11 +242,19 @@ export function flatMap(
         usesParams: false,
       };
     }
-    const outputScope = narrowestCellScope(runtime, tx, [
-      inputsCell.key("list"),
-      ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
-      argumentUsage.usesArray ? inputsCell.key("list") : undefined,
-      argumentUsage.usesParams ? inputsCell.key("params") : undefined,
+    const outputScope = narrowestScope([
+      narrowestCellScope(runtime, tx, [
+        inputsCell.key("list"),
+        ...(Array.isArray(list) && argumentUsage.usesElement ? list : []),
+        argumentUsage.usesArray ? inputsCell.key("list") : undefined,
+        argumentUsage.usesParams ? inputsCell.key("params") : undefined,
+      ]),
+      factorySourceLink === undefined ? undefined : boundPatternFactoryScope(
+        runtime,
+        tx,
+        opPattern,
+        factorySourceLink,
+      ),
     ]);
 
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
