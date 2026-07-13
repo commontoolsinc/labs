@@ -1380,8 +1380,10 @@ export class Server {
   readonly executionStats = {
     policyInactiveClaimAttempts: 0,
     claimsIssued: 0,
+    claimsReissued: 0,
     claimsRevoked: 0,
     acceptedActionAttempts: 0,
+    claimedActionConflicts: 0,
     settlementsPublished: 0,
     settlementsCommitted: 0,
     settlementsNoOp: 0,
@@ -3377,6 +3379,7 @@ export class Server {
     });
     this.#executionClaims.set(key, claim);
     this.executionStats.claimsIssued += 1;
+    if (claimGeneration > 1) this.executionStats.claimsReissued += 1;
     this.#publishExecutionControl(Object.freeze({
       type: "session.execution.claim.set",
       claim,
@@ -4524,6 +4527,7 @@ export class Server {
         if (message.commit.localSeq !== undefined) {
           span.setAttribute("commit.local_seq", message.commit.localSeq);
         }
+        let exactClaimedActionAttempt = false;
         try {
           const engine = await this.openEngine(message.space);
           // The session may be revoked or replaced while openEngine awaits.
@@ -4620,6 +4624,7 @@ export class Server {
             executionBinding,
             schedulerObservations,
           );
+          exactClaimedActionAttempt = executionClaims !== undefined;
           const previousReadSpaces = new Map<number, Set<string>>();
           for (const { localSeq, observation } of schedulerObservations) {
             const previousSnapshots = Engine.listSchedulerActionSnapshots(
@@ -4781,6 +4786,9 @@ export class Server {
           }
           let retryAfterSeq: number | undefined;
           if (error instanceof Engine.ConflictError) {
+            if (exactClaimedActionAttempt) {
+              this.executionStats.claimedActionConflicts += 1;
+            }
             span.setAttribute("ct.conflict", true);
             this.stageConflictRefreshDirtyIds(
               message.space,

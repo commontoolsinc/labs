@@ -9,6 +9,62 @@ import {
 
 const tags = ["Health"];
 
+const nonNegativeIntegerSchema = z.number().int().nonnegative();
+
+export const ServerExecutionPoolMetricsSchema = z.object({
+  activeLanes: nonNegativeIntegerSchema,
+  activeWorkers: nonNegativeIntegerSchema,
+  activeDemands: nonNegativeIntegerSchema,
+  states: z.object({
+    waiting: nonNegativeIntegerSchema,
+    excluded: nonNegativeIntegerSchema,
+    starting: nonNegativeIntegerSchema,
+    live: nonNegativeIntegerSchema,
+    draining: nonNegativeIntegerSchema,
+    backoff: nonNegativeIntegerSchema,
+  }).strict(),
+  demandSnapshots: nonNegativeIntegerSchema,
+  workersStarted: nonNegativeIntegerSchema,
+  workersStopped: nonNegativeIntegerSchema,
+  abruptStops: nonNegativeIntegerSchema,
+  leaseLosses: nonNegativeIntegerSchema,
+  leaseReplacements: nonNegativeIntegerSchema,
+  sponsorRotations: nonNegativeIntegerSchema,
+  crashes: nonNegativeIntegerSchema,
+  acceptedCommitNotifications: nonNegativeIntegerSchema,
+  acceptedCommitIndexDecisions: nonNegativeIntegerSchema,
+  suppressedUnrelatedCommits: nonNegativeIntegerSchema,
+  parkedWakeAttempts: nonNegativeIntegerSchema,
+  parkedWakeStarts: nonNegativeIntegerSchema,
+  demandEmptyHibernations: nonNegativeIntegerSchema,
+}).strict();
+
+export const ServerExecutionControlMetricsSchema = z.object({
+  policyInactiveClaimAttempts: nonNegativeIntegerSchema,
+  claimsIssued: nonNegativeIntegerSchema,
+  claimsReissued: nonNegativeIntegerSchema,
+  claimsRevoked: nonNegativeIntegerSchema,
+  acceptedActionAttempts: nonNegativeIntegerSchema,
+  claimedActionConflicts: nonNegativeIntegerSchema,
+  settlementsPublished: nonNegativeIntegerSchema,
+  settlementsCommitted: nonNegativeIntegerSchema,
+  settlementsNoOp: nonNegativeIntegerSchema,
+  settlementsFailed: nonNegativeIntegerSchema,
+  settlementsUnserved: nonNegativeIntegerSchema,
+  leaseFenceRejects: nonNegativeIntegerSchema,
+  actionFirewallRejects: nonNegativeIntegerSchema,
+}).strict();
+
+export const HealthStatsResponseSchema = z.object({
+  timestamp: z.number(),
+  serverStart: z.number(),
+  logCounts: z.any(),
+  timingStats: z.any(),
+  slowQueries: z.array(z.any()),
+  serverExecutionPool: ServerExecutionPoolMetricsSchema.nullable(),
+  serverExecutionControl: ServerExecutionControlMetricsSchema.nullable(),
+}).strict();
+
 export const index = createRoute({
   path: "/_health",
   method: "get",
@@ -27,15 +83,7 @@ export const stats = createRoute({
   tags,
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
-      z.object({
-        timestamp: z.number(),
-        serverStart: z.number(),
-        logCounts: z.any(),
-        timingStats: z.any(),
-        slowQueries: z.array(z.any()),
-        serverExecutionPool: z.any().nullable(),
-        serverExecutionControl: z.record(z.number()).nullable(),
-      }),
+      HealthStatsResponseSchema,
       "Logger counts and timing statistics",
     ),
   },

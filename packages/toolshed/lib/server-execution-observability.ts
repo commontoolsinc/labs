@@ -3,7 +3,21 @@ import type { ExecutionPoolMetricsSnapshot } from "@commonfabric/runner/executor
 export type ServerExecutionPoolMetricsProvider = () =>
   | ExecutionPoolMetricsSnapshot
   | null;
-export type ServerExecutionControlMetrics = Readonly<Record<string, number>>;
+export type ServerExecutionControlMetrics = Readonly<{
+  policyInactiveClaimAttempts: number;
+  claimsIssued: number;
+  claimsReissued: number;
+  claimsRevoked: number;
+  acceptedActionAttempts: number;
+  claimedActionConflicts: number;
+  settlementsPublished: number;
+  settlementsCommitted: number;
+  settlementsNoOp: number;
+  settlementsFailed: number;
+  settlementsUnserved: number;
+  leaseFenceRejects: number;
+  actionFirewallRejects: number;
+}>;
 export type ServerExecutionControlMetricsProvider = () =>
   | ServerExecutionControlMetrics
   | null;

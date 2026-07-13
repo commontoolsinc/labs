@@ -588,6 +588,7 @@ Deno.test("claims are action-qualified and reclaim mints a fresh generation", as
     );
     assertEquals(main.claimGeneration, 1);
     assertEquals(sibling.claimGeneration, 1);
+    assertEquals(server.executionStats.claimsReissued, 0);
     assertEquals(server.hasLiveExecutionClaim(main), true);
     assertEquals(session.executionClaims.map((claim) => claim.actionId), [
       "action:derive",
@@ -601,6 +602,7 @@ Deno.test("claims are action-qualified and reclaim mints a fresh generation", as
       claimKey(POLICY_SPACE, ""),
     );
     assertEquals(reclaimed.claimGeneration, 2);
+    assertEquals(server.executionStats.claimsReissued, 1);
 
     assertEquals(
       server.publishActionSettlement({
@@ -639,6 +641,157 @@ Deno.test("claims are action-qualified and reclaim mints a fresh generation", as
     );
   } finally {
     unsubscribe();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("execution stats count only conflicts from exact claimed action attempts", async () => {
+  const server = createControlServer("memory-v2-execution-claimed-conflicts");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const basis = await session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: "of:plain-conflict-source",
+          value: { value: { count: 1 } },
+        },
+        {
+          op: "set",
+          id: "of:claimed-conflict-source",
+          value: { value: { count: 1 } },
+        },
+      ],
+    });
+    const current = await session.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: "of:plain-conflict-source",
+          value: { value: { count: 2 } },
+        },
+        {
+          op: "set",
+          id: "of:claimed-conflict-source",
+          value: { value: { count: 2 } },
+        },
+      ],
+    });
+
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 4,
+          reads: {
+            confirmed: [{
+              id: "of:plain-conflict-source",
+              path: toDocumentPath(["value", "count"]),
+              seq: basis.seq,
+            }],
+            pending: [],
+          },
+          operations: [{
+            op: "set",
+            id: "of:plain-conflict-output",
+            value: { value: "must-not-land" },
+          }],
+        }),
+      Error,
+      "stale confirmed read",
+    );
+    assertEquals(server.executionStats.claimedActionConflicts, 0);
+
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:claimed-conflict"),
+    );
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+    const claimedRead = {
+      space: POLICY_SPACE,
+      scope: "space" as const,
+      id: "of:claimed-conflict-source",
+      path: ["value", "count"],
+    };
+    const baseObservation = claimedSpaceObservation(
+      claim,
+      "of:claimed-conflict-output",
+    );
+    const observation = {
+      ...baseObservation,
+      completeActionScopeSummary: {
+        ...baseObservation.completeActionScopeSummary,
+        reads: [claimedRead],
+      },
+      reads: [claimedRead],
+    };
+
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 5,
+          reads: {
+            confirmed: [{
+              id: claimedRead.id,
+              path: toDocumentPath(claimedRead.path),
+              seq: basis.seq,
+            }],
+            pending: [],
+          },
+          operations: [{
+            op: "set",
+            id: "of:claimed-conflict-output",
+            value: { value: "must-not-land" },
+          }],
+          schedulerObservation: observation,
+        }),
+      Error,
+      "stale confirmed read",
+    );
+    assertEquals(server.executionStats.claimedActionConflicts, 1);
+
+    await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 6,
+          reads: {
+            confirmed: [{
+              id: claimedRead.id,
+              path: toDocumentPath(claimedRead.path),
+              seq: current.seq,
+            }],
+            pending: [],
+          },
+          operations: [{
+            op: "set",
+            id: "of:claimed-conflict-output",
+            value: { value: "failed-must-not-land" },
+          }],
+          schedulerObservation: {
+            ...observation,
+            status: "failed",
+            errorFingerprint: "error:not-a-conflict",
+            actualChangedWrites: [],
+          },
+        }),
+      Error,
+      "failed claimed actions must not include semantic operations",
+    );
+    assertEquals(server.executionStats.claimedActionConflicts, 1);
+  } finally {
+    unbind();
     await client.close();
     await server.close();
   }
