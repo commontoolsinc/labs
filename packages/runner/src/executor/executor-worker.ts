@@ -576,8 +576,8 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       rejection.diagnosticCode,
     );
   });
-  // Executor shadows independently rerun remote invalidations to discover
-  // candidate authority. Initial durable rehydration does not use this guard.
+  // Executor shadows independently run durable clean computations at startup
+  // and rerun remote invalidations to discover candidate authority.
   runtime.scheduler.setActionObservationAdoptionGuard(() => true);
   selectiveWake = new SelectiveDemandWakeQueue((pieceIds) =>
     enqueue(() => pullDemand(new Set(pieceIds)))

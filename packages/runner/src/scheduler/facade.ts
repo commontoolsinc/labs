@@ -651,10 +651,10 @@ export class Scheduler {
     this.actionCommitRejectionHandler = handler;
   }
 
-  /** Host-only execution guard. A server shadow must independently rerun
-   * remote invalidations to assess current servability and candidate
-   * authority; incremental adoption must not erase that dirt. Initial durable
-   * snapshot rehydration uses a separate registration path. */
+  /** Host-only execution guard. A server shadow must independently run clean
+   * durable computations at startup and rerun remote invalidations to assess
+   * current servability and candidate authority. Neither initial rehydration
+   * nor incremental adoption may erase that work. */
   setActionObservationAdoptionGuard(
     guard: ((action: Action) => boolean) | undefined,
   ): void {
@@ -1014,6 +1014,19 @@ export class Scheduler {
       );
       if (!snapshot) {
         logger.debug("rehydrate/fallback-run/no-match", () => []);
+        return false;
+      }
+      if (
+        snapshot.observation.actionKind === "computation" &&
+        snapshot.observation.status === "success" &&
+        snapshot.directDirtySeq === undefined &&
+        snapshot.staleSeq === undefined &&
+        snapshot.unknownReason === undefined &&
+        this.actionObservationAdoptionGuard?.(action) === true
+      ) {
+        logger.debug("rehydrate/miss/authority-handoff", () => [
+          snapshot.observation.actionId,
+        ]);
         return false;
       }
       const addresses = observationAdoptionAddresses(snapshot.observation);

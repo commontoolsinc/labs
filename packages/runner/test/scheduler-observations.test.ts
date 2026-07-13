@@ -1408,6 +1408,184 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("executor authority reruns initial clean computations without replaying effects", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const scheduler = testRuntime.runtime.scheduler;
+      let computationRuns = 0;
+      let effectRuns = 0;
+      let dirtyComputationRuns = 0;
+      const computation = Object.assign(
+        function initialHandoffComputation() {
+          computationRuns++;
+        },
+        {
+          writes: [writeLink],
+          implementationHash: "cf:module/test:initial-handoff-computation",
+        },
+      );
+      const effect = Object.assign(
+        function initialHandoffEffect() {
+          effectRuns++;
+        },
+        {
+          writes: [writeLink],
+          implementationHash: "cf:module/test:initial-handoff-effect",
+        },
+      );
+      const dirtyComputation = Object.assign(
+        function initialDirtyHandoffComputation() {
+          dirtyComputationRuns++;
+        },
+        { implementationHash: "cf:module/test:initial-dirty-handoff" },
+      );
+      const snapshot = (
+        action: Action,
+        actionId: string,
+        actionKind: "computation" | "effect",
+        pieceId: string,
+      ): PersistedSchedulerObservationSnapshot => ({
+        // The fixture's read/write addresses intentionally use the shared
+        // scheduler-test address space, so this is a certified cross-space
+        // observation and requires the narrowest persisted context.
+        executionContextKey: "session:did%3Akey%3Aexecutor:authority-handoff",
+        observation: buildSchedulerActionObservation({
+          ownerSpace: space,
+          branch: "",
+          pieceId,
+          processGeneration: 0,
+          actionId,
+          actionKind,
+          implementationFingerprint: schedulerImplementationFingerprint(
+            action,
+            actionId,
+            undefined,
+          ),
+          runtimeFingerprint: schedulerRuntimeFingerprint(),
+          observedAtSeq: 5,
+          transactionKind: "action-run",
+          transactionLog: {
+            reads: [readAddress],
+            shallowReads: [],
+            writes: [writeAddress],
+          },
+          currentKnownWrites: [writeAddress],
+          completeActionScopeSummary: {
+            version: 1,
+            complete: true,
+            piece: {
+              space,
+              scope: "space",
+              id: pieceId.slice("space:".length) as IMemorySpaceAddress["id"],
+              path: [],
+            },
+            reads: [readAddress],
+            writes: [writeAddress],
+            materializerWriteEnvelopes: [],
+            directOutputs: [writeAddress],
+          },
+        }),
+      });
+
+      scheduler.setActionObservationAdoptionGuard(() => true);
+      scheduler.subscribe(computation, {
+        reads: [],
+        shallowReads: [],
+        writes: [writeAddress],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:of:initial-handoff-computation-piece",
+          processGeneration: 0,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            "cf:module/test:initial-handoff-computation",
+            [snapshot(
+              computation,
+              "cf:module/test:initial-handoff-computation",
+              "computation",
+              "space:of:initial-handoff-computation-piece",
+            )],
+          ]]),
+        },
+      });
+      scheduler.subscribe(effect, {
+        reads: [],
+        shallowReads: [],
+        writes: [writeAddress],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:of:initial-handoff-effect-piece",
+          processGeneration: 0,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            "cf:module/test:initial-handoff-effect",
+            [snapshot(
+              effect,
+              "cf:module/test:initial-handoff-effect",
+              "effect",
+              "space:of:initial-handoff-effect-piece",
+            )],
+          ]]),
+        },
+      });
+      scheduler.subscribe(dirtyComputation, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:of:initial-dirty-handoff-computation-piece",
+          processGeneration: 0,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            "cf:module/test:initial-dirty-handoff",
+            [{
+              ...snapshot(
+                dirtyComputation,
+                "cf:module/test:initial-dirty-handoff",
+                "computation",
+                "space:of:initial-dirty-handoff-computation-piece",
+              ),
+              directDirtySeq: 6,
+            }],
+          ]]),
+        },
+      });
+
+      const dirtyNode = scheduler.getGraphSnapshot().nodes.find((node) =>
+        node.id === "cf:module/test:initial-dirty-handoff"
+      );
+      expect(dirtyNode).toMatchObject({
+        type: "computation",
+        isDirty: true,
+      });
+      expect(dirtyNode?.writes).toContain(
+        `${writeAddress.space}/${writeAddress.id}/${writeAddress.scope}/${
+          writeAddress.path.join("/")
+        }`,
+      );
+      expect(scheduler.isDirty(computation)).toBe(true);
+      expect(scheduler.isDirty(effect)).toBe(false);
+
+      // Pull demand drives computations in production. Run the two invalid
+      // computations explicitly here after pinning their restored state; the
+      // clean effect must remain adopted and must never replay.
+      await scheduler.run(computation);
+      await scheduler.run(dirtyComputation);
+
+      await testRuntime.runtime.idle();
+      expect(computationRuns).toBe(1);
+      expect(effectRuns).toBe(0);
+      expect(dirtyComputationRuns).toBe(1);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("does not adopt a clean broad row past a dirty session candidate", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
