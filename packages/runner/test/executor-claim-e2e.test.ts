@@ -456,6 +456,212 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
         ?.value,
       18,
     );
+
+    // Phase 2 deliberately keeps client computation live for speculative UI
+    // latency. Its rollout gate is therefore exact action-run parity, not a
+    // timing claim: enabling authority must not increase lazy-client runs for
+    // the same constant-size graph. CPU sampling is a separate browser
+    // measurement because scheduler duration is elapsed time, not CPU time.
+    const actionId = clientSettlement.claim.actionId;
+    const isDerivedWireCommit = (commit: ClientCommit): boolean => {
+      const observation = commit.schedulerObservation as {
+        actionId?: string;
+        actionKind?: string;
+      } | undefined;
+      return observation?.actionId === actionId &&
+        observation.actionKind === "computation" &&
+        commit.operations.length > 0;
+    };
+    const resetClientActionTraces = (): void => {
+      for (const runtime of clientRuntimes) {
+        runtime.scheduler.setActionRunTraceEnabled(false);
+        runtime.scheduler.setActionRunTraceEnabled(true);
+      }
+    };
+    const clientActionRunCount = (): number =>
+      clientRuntimes.reduce(
+        (total, runtime) =>
+          total + runtime.scheduler.getActionRunTrace().filter((entry) =>
+            entry.actionId === actionId && entry.actionType === "computation"
+          ).length,
+        0,
+      );
+    const p95 = (samples: readonly number[]): number => {
+      const sorted = [...samples].sort((left, right) => left - right);
+      return sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
+    };
+
+    let observerLocalSeq = 4;
+    const writePolicy = async (enabled: boolean): Promise<void> => {
+      await observer.transact({
+        localSeq: ++observerLocalSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${space}:execution-policy`,
+          value: {
+            value: { version: 1, serverPrimaryExecution: enabled },
+          },
+        }],
+      });
+    };
+    const runInvalidation = async (value: number): Promise<number> => {
+      resetClientActionTraces();
+      const accepted = Promise.withResolvers<void>();
+      const unsubscribe = server.subscribeAcceptedCommits(space, (event) => {
+        if (event.revisions.some((revision) => revision.id === outputId)) {
+          accepted.resolve();
+        }
+      });
+      try {
+        await observer.transact({
+          localSeq: ++observerLocalSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: input.sourceURI,
+            value: { value },
+          }],
+        });
+        // Loopback clients do not own the host wake index. Pull the accepted
+        // source through each lazy replica so its normal scheduler path can
+        // run (or adopt the server observation) before waiting on the output.
+        for (const runtime of clientRuntimes) {
+          await runtime.storageManager.synced();
+          await runtime.getCellFromLink(resultLink).pull();
+          await runtime.settled();
+        }
+        await awaitBarrier(
+          accepted.promise,
+          `output ${value}`,
+          events,
+        );
+      } finally {
+        unsubscribe();
+      }
+
+      for (const runtime of clientRuntimes) {
+        await runtime.settled();
+        const visible = runtime.getCellFromLink(resultLink);
+        assertEquals(await visible.pull(), value * 2);
+        await runtime.settled();
+      }
+      assertEquals(
+        (await server.readDocument(space, outputId) as { value?: unknown })
+          ?.value,
+        value * 2,
+      );
+      return clientActionRunCount();
+    };
+    const runPhase = async (startValue: number): Promise<number[]> => {
+      const samples: number[] = [];
+      for (let offset = 0; offset < 20; offset++) {
+        samples.push(await runInvalidation(startValue + offset));
+      }
+      return samples;
+    };
+
+    const revoked = Promise.withResolvers<void>();
+    const unsubscribeRevoke = observer.subscribeExecutionControl((event) => {
+      if (
+        event.type === "session.execution.claim.revoke" &&
+        event.claim.actionId === actionId &&
+        event.leaseGeneration === clientSettlement.claim.leaseGeneration &&
+        event.claimGeneration === clientSettlement.claim.claimGeneration
+      ) {
+        revoked.resolve();
+      }
+    });
+    try {
+      await writePolicy(false);
+      await awaitBarrier(revoked.promise, "policy claim revoke", events);
+    } finally {
+      unsubscribeRevoke();
+    }
+    for (const runtime of clientRuntimes) {
+      await runtime.storageManager.synced();
+    }
+
+    // An unmeasured invalidation proves the disabled path has returned write
+    // authority to clients before the baseline trace starts.
+    clientDerivedCommits.length = 0;
+    await runInvalidation(100);
+    assertEquals(clientDerivedCommits.some(isDerivedWireCommit), true);
+    clientDerivedCommits.length = 0;
+    const disabledRuns = await runPhase(101);
+    assertEquals(disabledRuns.every((runs) => runs > 0), true);
+
+    // This test drives DenoSpaceExecutorFactory directly, outside the shared
+    // pool that normally renews the lease. Refresh the direct fixture's lease
+    // and generation before restoring policy so the comparison cannot become
+    // a lease-TTL test as its sample count grows.
+    assertExists(executor);
+    await executor.stop();
+    executor = null;
+    await server.flushExecutionLeaseTasks();
+    const drainingLease = await server.acquireExecutionLease(space, "");
+    assertExists(drainingLease);
+    assertEquals(drainingLease.state, "draining");
+    assertExists(await server.finishExecutionLeaseDrain(drainingLease));
+    const rolloutLease = await server.acquireExecutionLease(space, "");
+    assertExists(rolloutLease);
+    await writePolicy(true);
+    const reclaimed = Promise.withResolvers<void>();
+    let reclaimedGeneration = 0;
+    const unsubscribeReclaim = observer.subscribeExecutionControl((event) => {
+      if (
+        event.type === "session.execution.claim.set" &&
+        event.claim.actionId === actionId
+      ) {
+        reclaimedGeneration = event.claim.claimGeneration;
+        reclaimed.resolve();
+      }
+    });
+    try {
+      executor = await factory.start({
+        space,
+        branch: "",
+        lease: rolloutLease,
+        pieces: [result.sourceURI],
+        onCrash(error) {
+          events.push(`crash:${error}`);
+        },
+      });
+      // A persisted clean action has no reason to report itself merely because
+      // its Worker restarted. One excluded source invalidation drives normal
+      // discovery and the positive claim transition.
+      clientDerivedCommits.length = 0;
+      await runInvalidation(200);
+      await awaitBarrier(reclaimed.promise, "policy claim restore", events);
+    } finally {
+      unsubscribeReclaim();
+    }
+    assertEquals(
+      reclaimedGeneration > clientSettlement.claim.claimGeneration,
+      true,
+    );
+    for (const runtime of clientRuntimes) {
+      await runtime.storageManager.synced();
+    }
+
+    // Warm the new claim incarnation, then exclude that transition from both
+    // the exact-run samples and the client-wire assertion.
+    clientDerivedCommits.length = 0;
+    await runInvalidation(201);
+    assertEquals(clientDerivedCommits.some(isDerivedWireCommit), false);
+    clientDerivedCommits.length = 0;
+    const enabledRuns = await runPhase(202);
+    assertEquals(clientDerivedCommits.some(isDerivedWireCommit), false);
+
+    const disabledP95 = p95(disabledRuns);
+    const enabledP95 = p95(enabledRuns);
+    assertEquals(
+      enabledP95 <= disabledP95,
+      true,
+      `enabled p95 client action runs/invalidation ${enabledP95} exceeded disabled ${disabledP95}; disabled=${
+        disabledRuns.join(",")
+      }; enabled=${enabledRuns.join(",")}`,
+    );
   } finally {
     unsubscribeAccepted();
     unsubscribeControl();
