@@ -7,7 +7,7 @@ import {
   type Page,
   type RendererProcessCpuDelta,
   summarizeCPUProfile,
-  waitFor,
+  waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { Identity } from "@commonfabric/identity";
@@ -103,6 +103,31 @@ const controlCount = (
   health: ServerExecutionHealth,
   key: string,
 ): number => health.serverExecutionControl?.[key] ?? 0;
+
+async function waitForControlAdvance(
+  page: Page,
+  counters: ReadonlyArray<readonly [key: string, before: number]>,
+  timeout = TIMEOUT,
+): Promise<void> {
+  await waitForCondition(
+    page,
+    async (_probe, apiUrl: string, thresholds: Array<[string, number]>) => {
+      const response = await fetch(new URL("/api/health/stats", apiUrl));
+      if (!response.ok) return false;
+      const health = await response.json() as ServerExecutionHealth;
+      return thresholds.some(([key, before]) =>
+        (health.serverExecutionControl?.[key] ?? 0) > before
+      );
+    },
+    {
+      timeout,
+      args: [
+        API_URL,
+        counters.map(([key, before]) => [key, before] as [string, number]),
+      ],
+    },
+  );
+}
 
 async function resetActionTrace(page: Page): Promise<void> {
   await page.evaluate(async () => {
@@ -322,15 +347,10 @@ const p95 = (values: readonly number[]): number => {
             // browser idle. Give the host a bounded chance to make progress,
             // then invalidate again so a newly discovered candidate is
             // reoffered even when unrelated claims are already live.
-            await waitFor(
-              async () => {
-                const health = await executionHealth();
-                return controlCount(health, "claimsIssued") > issuedBefore ||
-                  controlCount(health, "acceptedActionAttempts") >
-                    acceptedBefore;
-              },
-              { timeout: 5_000, delay: 100 },
-            ).catch(() => {});
+            await waitForControlAdvance(actorPage, [
+              ["claimsIssued", issuedBefore],
+              ["acceptedActionAttempts", acceptedBefore],
+            ], 5_000).catch(() => {});
           }
           assert(
             exactClaimObserved,
@@ -347,12 +367,9 @@ const p95 = (values: readonly number[]): number => {
         }
 
         if (!policyEnabled && hadLiveClaims) {
-          await waitFor(
-            async () =>
-              controlCount(await executionHealth(), "claimsRevoked") >
-                claimsRevokedBefore,
-            { timeout: TIMEOUT, delay: 100 },
-          );
+          await waitForControlAdvance(actorPage, [
+            ["claimsRevoked", claimsRevokedBefore],
+          ]);
         }
 
         await resetActionTrace(actorPage);
@@ -497,14 +514,9 @@ const p95 = (values: readonly number[]): number => {
             "acceptedActionAttempts",
           );
           try {
-            await waitFor(
-              async () =>
-                controlCount(
-                  await executionHealth(),
-                  "acceptedActionAttempts",
-                ) > acceptedBefore,
-              { timeout: TIMEOUT, delay: 100 },
-            );
+            await waitForControlAdvance(actorPage, [
+              ["acceptedActionAttempts", acceptedBefore],
+            ]);
           } catch (cause) {
             const healthAfterTimeout = await executionHealth();
             const evidence = {
