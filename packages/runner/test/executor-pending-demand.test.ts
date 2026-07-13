@@ -6,6 +6,7 @@ import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { Server } from "@commonfabric/memory/v2/server";
 import { DenoSpaceExecutorFactory } from "../src/executor/deno-space-executor.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { parseLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   type Options,
@@ -298,6 +299,177 @@ Deno.test("executor retries pending demand only for its exact creation commit", 
     });
     await executor.settle();
     assertEquals(candidates.length, 1);
+    assertEquals(crashes, []);
+  } finally {
+    await executor?.stop().catch(() => undefined);
+    await observerClient?.close().catch(() => undefined);
+    await seedRuntime.dispose().catch(() => undefined);
+    await server.close();
+  }
+});
+
+Deno.test("executor isolates a cross-space root without poisoning its lane", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor cross-space isolation ${crypto.randomUUID()}`,
+  );
+  const foreignPrincipal = await Identity.fromPassphrase(
+    `executor cross-space isolation foreign ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const foreignSpace = foreignPrincipal.did();
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-executor-cross-space" },
+    protocolFlags: FLAGS,
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  const authorize: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: space },
+  });
+  const seedStorage = LoopbackStorageManager.connectTo(server, FLAGS, {
+    as: principal,
+  });
+  const seedRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: seedStorage,
+    experimental: {
+      persistentSchedulerState: true,
+      serverPrimaryExecution: true,
+    },
+  });
+  let observerClient: MemoryClient.Client | null = null;
+  let executor: Awaited<ReturnType<DenoSpaceExecutorFactory["start"]>> | null =
+    null;
+
+  try {
+    const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
+      space,
+    });
+    const foreignCompiled = await seedRuntime.patternManager.compilePattern(
+      PROGRAM,
+      { space: foreignSpace },
+    );
+
+    const foreignTx = seedRuntime.edit();
+    const foreignInput = seedRuntime.getCell<number>(
+      foreignSpace,
+      "cross-space-isolation-foreign-input",
+      undefined,
+      foreignTx,
+    );
+    foreignInput.set(5);
+    seedRuntime.prepareTxForCommit(foreignTx);
+    assertEquals((await foreignTx.commit()).error, undefined);
+
+    const foreignPieceTx = seedRuntime.edit();
+    const foreignRoot = seedRuntime.getCell<number>(
+      foreignSpace,
+      "cross-space-isolation-foreign-root",
+      undefined,
+      foreignPieceTx,
+    );
+    seedRuntime.run(
+      foreignPieceTx,
+      foreignCompiled,
+      { value: foreignInput },
+      foreignRoot,
+    );
+    seedRuntime.prepareTxForCommit(foreignPieceTx);
+    assertEquals((await foreignPieceTx.commit()).error, undefined);
+
+    const redirectTx = seedRuntime.edit();
+    const crossSpaceRoot = seedRuntime.getCell<unknown>(
+      space,
+      "cross-space-isolation-redirect-root",
+      undefined,
+      redirectTx,
+    );
+    crossSpaceRoot.setRaw(foreignRoot.getAsWriteRedirectLink());
+    assertEquals(
+      parseLink(crossSpaceRoot.getRaw(), crossSpaceRoot)?.space,
+      foreignSpace,
+    );
+    seedRuntime.prepareTxForCommit(redirectTx);
+    assertEquals((await redirectTx.commit()).error, undefined);
+
+    const sameSpaceTx = seedRuntime.edit();
+    const sameSpaceInput = seedRuntime.getCell<number>(
+      space,
+      "cross-space-isolation-local-input",
+      undefined,
+      sameSpaceTx,
+    );
+    sameSpaceInput.set(3);
+    const sameSpaceRoot = seedRuntime.getCell<number>(
+      space,
+      "cross-space-isolation-local-root",
+      undefined,
+      sameSpaceTx,
+    );
+    seedRuntime.run(
+      sameSpaceTx,
+      compiled,
+      { value: sameSpaceInput },
+      sameSpaceRoot,
+    );
+    seedRuntime.prepareTxForCommit(sameSpaceTx);
+    assertEquals((await sameSpaceTx.commit()).error, undefined);
+
+    observerClient = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: FLAGS,
+    });
+    const observer = await observerClient.mount(space, {}, authorize);
+    await observer.setExecutionDemand("", [
+      crossSpaceRoot.sourceURI,
+      sameSpaceRoot.sourceURI,
+    ]);
+    const lease = await server.acquireExecutionLease(space, "");
+    assertExists(lease);
+
+    const discoveries: string[] = [];
+    const candidates: string[] = [];
+    const crashes: unknown[] = [];
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      patternApiUrl: new URL("https://toolshed.example/"),
+      protocolFlags: FLAGS,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+      onWriterDiscovery: (discovery) => discoveries.push(discovery.pieceId),
+      onCandidateClaim: (candidate) =>
+        candidates.push(candidate.claimKey.pieceId),
+    });
+    executor = await factory.start({
+      space,
+      branch: "",
+      lease,
+      pieces: [crossSpaceRoot.sourceURI, sameSpaceRoot.sourceURI],
+      onCrash: (error) => crashes.push(error),
+    });
+    await executor.settle();
+
+    // The host-bound foreign sync becomes exact pending demand rather than a
+    // Worker failure. The next demanded root in the same lane must still
+    // instantiate and reach candidate discovery, while the redirect exports no
+    // server authority.
+    assertEquals(discoveries, [sameSpaceRoot.sourceURI]);
+    assertEquals(candidates, [`space:${sameSpaceRoot.sourceURI}`]);
     assertEquals(crashes, []);
   } finally {
     await executor?.stop().catch(() => undefined);
