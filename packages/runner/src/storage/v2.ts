@@ -5,6 +5,7 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
+import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -229,6 +230,15 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
+
+const activeCommitPreconditions = (
+  preconditions: readonly CommitPrecondition[] | undefined,
+): readonly CommitPrecondition[] =>
+  getCommitPreconditionsConfig()
+    ? (preconditions ?? [])
+    : (preconditions ?? []).filter((precondition) =>
+      precondition.kind === "entity-value-hash"
+    );
 
 const toExplicitDocument = (value: FabricValue): EntityDocument => {
   if (!isObject(value)) {
@@ -727,6 +737,18 @@ export class StorageManager implements IStorageManager {
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
+  /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
+  #telemetry?: TelemetrySink;
+
+  /**
+   * Attach the runtime's telemetry bus so replicas can emit the
+   * `storage.push/pull.*` markers. Late-bound and optional: the manager is
+   * constructed before (and independently of) the Runtime, and providers read
+   * it through a getter so spaces opened earlier still pick it up.
+   */
+  setTelemetry(telemetry: TelemetrySink): void {
+    this.#telemetry = telemetry;
+  }
 
   static open(options: Options) {
     const dynamicHosts = new Map<string, string>();
@@ -826,6 +848,7 @@ export class StorageManager implements IStorageManager {
             this.#sessionFactory.create(space, signer, {
               sessionId: this.#sessionId,
             }),
+        getTelemetry: () => this.#telemetry,
       });
       this.#providers.set(space, provider);
     }
@@ -1390,7 +1413,16 @@ type ProviderOptions = {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
+  /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
+  getTelemetry?: () => TelemetrySink | undefined;
 };
+
+/**
+ * Minimal marker sink — structurally the Runtime's `RuntimeTelemetry`.
+ * Kept structural (type-only import) so the storage layer takes no runtime
+ * dependency on the telemetry module.
+ */
+type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
 class Provider implements IStorageProviderWithReplica {
   readonly replica: SpaceReplica;
@@ -1574,6 +1606,7 @@ class SpaceReplica implements ISpaceReplica {
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
   #closed = false;
+  #getTelemetry: () => TelemetrySink | undefined;
   #caughtUpLocalSeq = 0;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
@@ -1590,6 +1623,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#space = options.space;
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
+    this.#getTelemetry = options.getTelemetry ?? (() => undefined);
   }
 
   did(): MemorySpace {
@@ -2029,9 +2063,7 @@ class SpaceReplica implements ISpaceReplica {
     const schedulerObservation = getPersistentSchedulerStateConfig()
       ? transaction.schedulerObservation
       : undefined;
-    const preconditions = getCommitPreconditionsConfig()
-      ? transaction.preconditions
-      : undefined;
+    const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
       () =>
@@ -2356,10 +2388,7 @@ class SpaceReplica implements ISpaceReplica {
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const emitCommitPreconditions = getCommitPreconditionsConfig();
-    const activePreconditions = emitCommitPreconditions
-      ? (preconditions ?? [])
-      : [];
+    const activePreconditions = activeCommitPreconditions(preconditions);
     if (
       operations.length === 0 && sqliteOps.length === 0 &&
       activePreconditions.length === 0
@@ -2534,6 +2563,18 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
     }
+    // The push marker window covers observation flush + (re)dial + send +
+    // confirm: the full client-side cost of durably landing this commit.
+    // (space.did, commit.local_seq) joins to the server's memory.transact span.
+    const telemetry = this.#getTelemetry();
+    const pushOpId = `push:${this.#space}:${localSeq}`;
+    telemetry?.submit({
+      type: "storage.push.start",
+      id: pushOpId,
+      operation: "transact",
+      localSeq,
+      spaceDid: this.#space,
+    });
     try {
       if (
         operations.length > 0 &&
@@ -2551,9 +2592,19 @@ class SpaceReplica implements ISpaceReplica {
       const { session } = await this.sessionHandle();
       const applied = await session.transact(commit);
       this.confirmPending(localSeq, operations, applied);
+      telemetry?.submit({
+        type: "storage.push.complete",
+        id: pushOpId,
+        sessionId: session.sessionId,
+      });
       return { ok: {} };
     } catch (error) {
       const rejection = toRejectedError(error, commit, this.#space);
+      telemetry?.submit({
+        type: "storage.push.error",
+        id: pushOpId,
+        error: rejection.name ?? "TransactionError",
+      });
       this.attachProviderReadyToRetry(rejection, localSeq);
       if (admissionMode !== "off" && rejection.name === "ConflictError") {
         this.recordStaleFloor(commit, localSeq);

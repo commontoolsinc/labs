@@ -9,6 +9,7 @@ import {
   StorageManager,
 } from "./engine-test-support.ts";
 import type { RuntimeProgram } from "./engine-test-support.ts";
+import { validateCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
 describe("Engine.evaluateRecordGraph()", () => {
   let runtime: Runtime;
   let engine: Engine;
@@ -44,6 +45,46 @@ describe("Engine.evaluateRecordGraph()", () => {
     expect(result.main).toBeDefined();
     expect(result.main!["default"]).toBe(42);
     expect(result.exportMap).toBeDefined();
+  });
+
+  it("carries compiler-verified policy manifests outside module exports", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import {
+            cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+          } from "commonfabric/cfc";
+          export const release = exchangeRule({
+            appliesTo: THIS_POLICY,
+            pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+            post: { addAlternatives: [cfcPattern.user(v("user"))] },
+          });
+          export const rules = exchangeRules([release]);
+        `,
+      }],
+    };
+
+    const compiled = await engine.compileToRecordGraph(program);
+    const module = compiled.modules[0]!;
+    const artifact = validateCfcPolicyArtifactManifest(
+      module.policyManifests?.[0],
+    );
+
+    expect(artifact.manifest.moduleIdentity).toBe(module.identity);
+    expect(artifact.manifest.symbol).toBe("rules");
+    expect(module.js).not.toContain(artifact.policyDigest);
+
+    const checked = await engine.typeCheckBatch([program]);
+    expect(checked.patternCount).toBe(1);
+    expect(checked.diagnostics).toEqual([]);
+
+    const recovered = await engine.compileResolvedToRecordGraph(
+      program.files,
+      program.main,
+    );
+    expect(recovered.modules[0]?.policyManifests).toHaveLength(1);
   });
 
   it("does not initialize the TypeScript compiler when evaluating a precompiled graph", async () => {

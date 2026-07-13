@@ -11,8 +11,8 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, computed, pattern, UI } from "commonfabric";
-import CozyPoll from "./main.tsx";
+import { action, computed, pattern, safeDateNow, UI } from "commonfabric";
+import CozyPoll, { dayKeyOf, type Option, type Vote } from "./main.tsx";
 
 const isRecord = (value: unknown): value is Record<PropertyKey, unknown> =>
   typeof value === "object" && value !== null;
@@ -63,8 +63,35 @@ const findNodeByProp = (
     .find((child) => child !== undefined);
 };
 
+const SEEDED_OPTION: Option = {
+  id: "opt-seeded",
+  title: "Leftover Café",
+  addedByName: "Stan",
+};
+
 export default pattern(() => {
   const poll = CozyPoll({});
+
+  // One-time clock reads at pattern-body init (module scope must stay plain
+  // data in SES mode): "yesterday" for the seeded stale vote, and the day key
+  // the pattern is expected to filter to.
+  const STALE_CAST_AT = safeDateNow() - 86_400_000;
+  const TODAY_KEY = dayKeyOf(safeDateNow());
+
+  // A vote cast "yesterday" — stored, but hidden by the current-day filter.
+  const STALE_VOTE: Vote = {
+    voterName: "Stan",
+    optionId: "opt-seeded",
+    voteType: "green",
+    castAt: STALE_CAST_AT,
+  };
+
+  // Second instance seeded with a stale vote, for the current-day filter
+  // scenario (castVote always stamps "now", so staleness must be seeded).
+  const stalePoll = CozyPoll({
+    options: [SEEDED_OPTION],
+    votes: [STALE_VOTE],
+  });
 
   // === Actions ===
 
@@ -198,7 +225,11 @@ export default pattern(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "green" &&
-      v?.voterName === "Alex";
+      v?.voterName === "Alex" &&
+      // A handler-cast vote is stamped with today's castAt, so it must also
+      // appear in the current-day view.
+      poll.todaysVotes.length === 1 &&
+      poll.todayVoteCount === 1;
   });
 
   // The "All options" overview renders one swatch per voter, sourced from a
@@ -297,6 +328,55 @@ export default pattern(() => {
     poll.voteHistoryCount === 0
   );
 
+  // === Current-day vote filter ===
+
+  // The header renders the session's date, and `todayDate` exposes the local
+  // day key the votes are filtered to.
+  const assert_today_header_renders = computed(() =>
+    findNodeByProp(poll[UI], "data-poll-today", true) !== undefined &&
+    poll.todayDate === TODAY_KEY
+  );
+
+  // The seeded stale vote is stored but hidden: absent from `todaysVotes`,
+  // the count, and the rendered swatches.
+  const assert_stale_vote_hidden = computed(() =>
+    stalePoll.votes.length === 1 &&
+    stalePoll.todaysVotes.length === 0 &&
+    stalePoll.todayVoteCount === 0 &&
+    findNodeByProp(stalePoll[UI], "data-vote-swatch-name", "Stan") ===
+      undefined
+  );
+
+  const action_stale_join_as_stan = action(() => {
+    stalePoll.joinAs.send({ name: "Stan" });
+  });
+
+  // Same color as the hidden stale vote.
+  const action_stale_vote_green = action(() => {
+    stalePoll.castVote.send({ optionId: "opt-seeded", voteType: "green" });
+  });
+
+  // A same-color click on a stale vote RE-CASTS it for today (fresh castAt)
+  // instead of toggling off a vote the voter cannot see; the vote becomes
+  // visible again (list, count, and swatch).
+  const assert_stale_recast_visible = computed(() => {
+    const v = stalePoll.todaysVotes[0];
+    return stalePoll.todaysVotes.length === 1 &&
+      v?.voterName === "Stan" &&
+      v?.voteType === "green" &&
+      typeof v?.castAt === "number" &&
+      dayKeyOf(v.castAt) === TODAY_KEY &&
+      stalePoll.todayVoteCount === 1 &&
+      findNodeByProp(stalePoll[UI], "data-vote-swatch-name", "Stan") !==
+        undefined;
+  });
+
+  // A second same-color click is the normal today-toggle-off.
+  const assert_stale_recast_cleared = computed(() =>
+    stalePoll.todaysVotes.length === 0 &&
+    stalePoll.todayVoteCount === 0
+  );
+
   return {
     tests: [
       // Admin-gated handlers are no-ops before anyone joins (myName empty).
@@ -388,7 +468,21 @@ export default pattern(() => {
       // Clear all → empty.
       { action: action_clear_history },
       { assertion: assert_history_cleared },
+
+      // === Current-day vote filter ===
+      // Header date + exposed day key.
+      { assertion: assert_today_header_renders },
+      // Seeded stale (yesterday) vote: stored but hidden everywhere.
+      { assertion: assert_stale_vote_hidden },
+      // Same-color click on the stale vote re-casts it for today…
+      { action: action_stale_join_as_stan },
+      { action: action_stale_vote_green },
+      { assertion: assert_stale_recast_visible },
+      // …and a second same-color click toggles today's vote off as usual.
+      { action: action_stale_vote_green },
+      { assertion: assert_stale_recast_cleared },
     ],
     poll,
+    stalePoll,
   };
 });

@@ -76,6 +76,23 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
   });
 
   describe("exchange-rule matching (matchAtomPattern)", () => {
+    it("matches a module-policy reference across a committed subject", () => {
+      const plain = cfcAtom.modulePolicyRef(
+        "sha256:module",
+        "releaseRules",
+        "sha256:manifest",
+        reader,
+      );
+      expect(matchAtomPattern(plain, {
+        ...plain,
+        subject: commitCfcFieldValue(reader),
+      })).not.toBeNull();
+      expect(matchAtomPattern(plain, {
+        ...plain,
+        subject: commitCfcFieldValue(stranger),
+      })).toBeNull();
+    });
+
     it("digest-matches a CONCRETE pattern value against a committed field", () => {
       const bindings = matchAtomPattern(
         { type: CFC_ATOM_TYPE.User, subject: reader },

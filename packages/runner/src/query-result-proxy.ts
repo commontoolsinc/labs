@@ -684,6 +684,38 @@ export function isCellResult(value: any): value is CellResult<any> {
 }
 
 /**
+ * Materializes a live query-result view as detached plain arrays/objects.
+ * Query proxies deliberately reject freeze/clone traps; validation and hashing
+ * boundaries use this snapshot instead of retaining a transaction-backed view.
+ */
+export function snapshotQueryResult<T>(value: T): T {
+  const seen = new WeakMap<object, unknown>();
+  const snapshot = (current: unknown): unknown => {
+    if (
+      current === null || typeof current !== "object" ||
+      current instanceof FabricPrimitive
+    ) return current;
+    const existing = seen.get(current);
+    if (existing !== undefined) return existing;
+    if (Array.isArray(current)) {
+      const array: unknown[] = [];
+      seen.set(current, array);
+      for (let index = 0; index < current.length; index++) {
+        array[index] = snapshot(current[index]);
+      }
+      return array;
+    }
+    const object: Record<string, unknown> = {};
+    seen.set(current, object);
+    for (const key of Object.keys(current)) {
+      object[key] = snapshot((current as Record<string, unknown>)[key]);
+    }
+    return object;
+  };
+  return snapshot(value) as T;
+}
+
+/**
  * Check if value is a cell value proxy. Return as type that allows
  * dereferencing, but not using the proxy.
  *

@@ -308,7 +308,10 @@ export async function runPullSchedulerSettleLoop(
   const settleIterStats: SettleIterationStats[] | undefined = collectSettleStats
     ? []
     : undefined;
-  const settleStartTime = collectSettleStats ? performance.now() : 0;
+  // Measured unconditionally (unlike the opt-in per-iteration stats): the
+  // scheduler.settle telemetry marker needs it on every pass.
+  const settleStartTime = performance.now();
+  let iterationsRun = 0;
 
   for (let settleIter = 0; settleIter < maxSettleIterations; settleIter++) {
     const iterStart = settleIterStats ? performance.now() : 0;
@@ -324,6 +327,7 @@ export async function runPullSchedulerSettleLoop(
       settledEarly = true;
       break;
     }
+    iterationsRun++;
 
     lastWorkSet = iteration.workSet;
     const iterationWorkSetSize = iteration.workSet.size;
@@ -403,6 +407,9 @@ export async function runPullSchedulerSettleLoop(
     maxSettleIterations,
     backoffApplied,
     backoffActionCount,
+    iterationsRun,
+    settleDurationMs: performance.now() - settleStartTime,
+    workSetSize: lastWorkSet.size,
     ...(backoffUntil !== undefined ? { backoffUntil } : {}),
     ...(settleStats ? { settleStats } : {}),
   };

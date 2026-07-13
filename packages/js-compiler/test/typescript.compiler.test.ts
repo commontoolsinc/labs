@@ -84,6 +84,38 @@ describe("TypeScriptCompiler", () => {
     expect(modules.get("/utils.ts")!.js).toContain("exports.add");
   });
 
+  it("carries transformer policy manifests beside emitted JavaScript", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.ts", {
+      "/main.ts": "export const value = 1;",
+    });
+    const resolved = await compiler.resolveProgram(program);
+    const manifest = {
+      policyDigest: "sha256:policy",
+      manifest: { version: 1 },
+    };
+    const modules = compiler.compileToModules(resolved, {
+      beforeTransformers: () => ({
+        factories: [],
+        getPolicyManifests: () => new Map([["/main.ts", [manifest]]]),
+      }),
+    });
+
+    expect(modules.get("/main.ts")?.policyManifests).toEqual([manifest]);
+    expect(modules.get("/main.ts")?.js).not.toContain("sha256:policy");
+
+    const collected = compiler.compileToModulesCollecting(resolved, {
+      beforeTransformers: () => ({
+        factories: [],
+        getPolicyManifests: () => new Map([["/main.ts", [manifest]]]),
+      }),
+    });
+    expect(collected.diagnostics).toEqual([]);
+    expect(collected.modules.get("/main.ts")?.policyManifests).toEqual([
+      manifest,
+    ]);
+  });
+
   it("compileToModulesInterleaved emits byte-identical output to compileToModules", async () => {
     // The interleaved driver only changes WHERE the event loop can run
     // (macrotask yields at module boundaries) — never what is emitted. Pin

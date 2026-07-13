@@ -1943,6 +1943,17 @@ export class Server {
         if (message.commit.branch !== undefined) {
           span.setAttribute("branch", message.commit.branch);
         }
+        // (space.did, session.id, commit.local_seq) is the deterministic join
+        // to the CLIENT half of this commit (the runner's storage.push span).
+        // Unlike request.id — minted per send attempt and re-minted on
+        // reconnect resends — localSeq is stable across retries and known
+        // before the response, so it also identifies rejected commits.
+        if (message.sessionId !== undefined) {
+          span.setAttribute("session.id", message.sessionId);
+        }
+        if (message.commit.localSeq !== undefined) {
+          span.setAttribute("commit.local_seq", message.commit.localSeq);
+        }
         try {
           const engine = await this.openEngine(message.space);
           // The session may be revoked or replaced while openEngine awaits.

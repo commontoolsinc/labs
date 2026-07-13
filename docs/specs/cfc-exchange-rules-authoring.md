@@ -1,30 +1,32 @@
 # CFC Exchange Rules — Pattern Authoring Surface
 
 How pattern code declares exchange rules (declassification policies) and
-raises confidentiality by referencing them — directly, or through a **concept
-reference** whose governing rules the data's owner keeps as defaults.
+raises confidentiality by referencing them directly. Concept-governed defaults
+remain a separately gated design described later in this document.
 
 ## Status
 
-Design proposal. No runtime or spec edits applied. A critical implementation
-review found unresolved identity, artifact-resolution, subject-binding, and
-concept-grant contracts; do not treat the sketches below as an implementation
-contract yet. The dependency-ordered corrections and first shipping slice are
-tracked in the
+The direct, digest-bound `PolicyOf<typeof rules>` slice is implemented. Static
+rule declarations, compiler-emitted manifests, destination-local durable
+manifest copies, label-time subject binding, and exact referenced-policy
+evaluation are current behavior. `ConceptOf`, concept grants/defaults, and the
+companion extensions are still proposals and must not be used as implemented
+API. The remaining dependency gates are tracked in the
 [`cfc-exchange-rule-authoring` implementation plan](../plans/cfc-exchange-rule-authoring.md).
 Companion spec-change items are SC-29..SC-37 in
 [`cfc-spec-changes.md`](./cfc-spec-changes.md); companion syntax sketches for
 the remaining surfaces are in
 [`cfc-exchange-rules-authoring-extensions.md`](./cfc-exchange-rules-authoring-extensions.md).
 
-The evaluator half already shipped: `packages/runner/src/cfc/exchange-eval.ts`
-(fuelled-fixpoint guarded rewrites, clause-local), label-carried `referenced`
+The evaluator and direct authoring path live in
+`packages/runner/src/cfc/exchange-eval.ts`, `packages/api/cfc.ts`, and the CFC
+transformer passes. The evaluator provides fuelled-fixpoint guarded rewrites
+with clause locality, label-carried `referenced`
 policy records with home-clause locality (CT-1874, #4652), and §4.3.5 grant
 records — `policyState` guards, reserved-path storage, single-use
-commit-precondition receipts (`grants.ts`, #4627 / #4649). But policy records
-enter evaluation only through deployment configuration
-(`RuntimeOptions.cfcPolicyRecords`, `policy.ts`); this design is the missing
-authoring half — authored modules declaring rules, and labels referencing them.
+commit-precondition receipts (`grants.ts`, #4627 / #4649). Ambient deployment
+records still use `RuntimeOptions.cfcPolicyRecords`; module-authored policies
+use their separate exact-manifest resolver and never enter that snapshot.
 
 ## Last Updated
 
@@ -35,11 +37,11 @@ authoring half — authored modules declaring rules, and labels referencing them
 Exchange rules are the spec's only declassification mechanism: integrity-
 guarded rewrites on hash-bound policy records that may rewrite only the
 clause(s) their policy principal appears in (spec §4.3.2, §4.4.5 home-clause
-locality). The shipped authoring surface (`packages/api/cfc.ts`) cannot
-express them: it stops at `Confidential<T, X>` atom lists, and declassification
-exists only as `declassifyConfidentiality={[...]}` attribute lists on trusted
-components — release paths that live in the *component* rather than in a
-policy record that travels with the *data*. Three needs:
+locality). Before this design landed, the authoring surface stopped at
+`Confidential<T, X>` atom lists and declassification existed only as
+`declassifyConfidentiality={[...]}` attribute lists on trusted components.
+The shipped `PolicyOf` and `exchangeRules` surface now supplies policy records
+whose release paths travel with the *data*. It addresses three needs:
 
 1. **Direct use.** A pattern raises confidentiality on data it produces and, in
    the same declaration, names the exchange rules that are that clause's
@@ -92,35 +94,37 @@ evaluates rules; trusted boundaries do.
 ### 1. Declaring rules
 
 ```ts
-// Shown for illustration only.
 import {
-  cfcAtom,
+  cfcPattern,
   exchangeRule,
   exchangeRules,
   THIS_POLICY,
   v,
-} from "commonfabric";
+} from "commonfabric/cfc";
+import type { PolicyOf } from "commonfabric/cfc";
+import type { Confidential } from "commonfabric";
 
-// "The owner may release a drift flag to an audience they picked in the
-//  trusted share surface." Endorsed intent is the guard (spec §3.8.4);
-//  the audience variable binds from the intent evidence (§4.3.3).
-export const releaseFlagToChosenAudience = exchangeRule({
+// Release this policy's home clause to a principal with reader evidence for
+// the concrete space bound as THIS_POLICY.subject.
+export const releaseFlagToReader = exchangeRule({
   appliesTo: THIS_POLICY, // target: the clause this rule set governs
   pre: {
-    integrity: [{
-      type: "https://commonfabric.org/cfc/atom/EndorsedIntent",
-      action: "share-drift-flag",
-      user: v("O"),
-      audience: v("A"),
-    }],
+    integrity: [
+      cfcPattern.hasRole(v("reader"), THIS_POLICY.subject, "reader"),
+    ],
   },
-  post: { addAlternatives: [cfcAtom.user(v("A"))] },
+  post: { addAlternatives: [cfcPattern.user(v("reader"))] },
 });
 
 export const driftFlagRules = exchangeRules([
-  releaseFlagToChosenAudience,
-  releaseFlagToWeeklyDigest,
+  releaseFlagToReader,
 ]);
+
+interface Flag {
+  value: boolean;
+}
+
+type DriftFlag = Confidential<Flag, [PolicyOf<typeof driftFlagRules>]>;
 ```
 
 - **Identity has three roles.** `{ identity, symbol }` content-addresses the
@@ -136,30 +140,24 @@ export const driftFlagRules = exchangeRules([
   containing exported `exchangeRules` artifact—not to the module as a
   singleton—and always occupies the `appliesTo` (target-pattern) position.
 - `v("X")` is the `{ var: "X" }` placeholder of spec §4.3.3.
-- Field names follow the **shipped evaluator dialect**
+- Field names follow the shipped authoring grammar and lower to the canonical
+  evaluator dialect
   (`packages/runner/src/cfc/policy.ts`, which documents its mapping to spec
   §4.3.2): `appliesTo` is the spec's target pattern
   (`preCondition.confidentiality[0]`); `pre` holds the remaining side
-  conditions — `confidentiality`, `integrity`, `boundary` (patterns over
-  `BoundaryContext` atoms, the shipped generalization of `allowedSink` /
-  `allowedPaths`), and `policyState` (grants); `post` is exactly one of
-  `addAlternatives` / `dropClause`. `preConfScope` defaults to
-  `"targetClause"`.
+  conditions — `confidentiality` and `integrity`; grant-backed state belongs in
+  `guard.policyState`. `post` is exactly one of `addAlternatives` /
+  `dropClause`. `preConfScope` defaults to `"targetClause"`. Unknown or dynamic
+  fields are compile errors.
 - Lowering rejects a general-surface rule unless it has a `pre.integrity`
-  pattern or `pre.policyState` grant guard. A `pre.boundary` pattern may narrow
-  where an otherwise-authorized rule applies, but boundary context alone is not
-  release authority; boundary-only authoring remains extensions-gated. If the
-  owner-self case is approved, it ships as a narrow trusted standard-profile
-  rule rather than a generic authoring exemption.
+  pattern or `guard.policyState` grant guard. Boundary-only authoring remains
+  extensions-gated. If the owner-self case is approved, it ships as a narrow
+  trusted standard-profile rule rather than a generic authoring exemption.
 
 ### 2a. Raising, direct
 
-```ts
-// Shown for illustration only.
-import type { Confidential, PolicyOf } from "commonfabric";
-
-type DriftFlag = Confidential<Flag, [PolicyOf<typeof driftFlagRules>]>;
-```
+The declaration above raises `DriftFlag` directly to the exact exported
+`driftFlagRules` artifact; no raw policy object or ambient name is involved.
 
 Lowering: the schema-time atom is a policy principal addressed by the module
 export, its portable manifest digest, and the invocation-relative subject —
@@ -209,7 +207,10 @@ authored rule is well formed. Whether a rule can actually rewrite an egress
 label remains a runtime decision because it depends on input labels, integrity
 evidence, grants, and boundary context.
 
-### 2b. Raising, indirect — concept references
+### 2b. Raising, indirect — concept references (not implemented)
+
+Everything in this subsection is future design. The public API does not expose
+`concept()`, `ConceptOf`, `ConceptGrant`, or `ConsumerIntent` authoring.
 
 ```ts
 // Shown for illustration only.
@@ -297,33 +298,69 @@ declaration in the consumer's module, e.g. `intents: ["care-coordination"]`).
 owner granted that" is then one grant plus one declaration, evaluated by the
 ordinary calculus. Default stays no-access.
 
-### 2c. Both at once
+### 2c. Composition
 
-Conjunctive by default — two clauses, two independent gates, ordinary CNF
-join:
+Multiple direct policies are conjunctive by default — two clauses, two
+independent gates, ordinary CNF join:
 
 ```ts
-// Shown for illustration only.
-type CareFlag = Confidential<Flag, [
-  ConceptOf<typeof health>,             // owner's defaults govern, AND
-  PolicyOf<typeof driftFlagRules>,      // the pattern's own constraint
+import type { Confidential } from "commonfabric";
+import {
+  cfcPattern,
+  exchangeRule,
+  exchangeRules,
+  THIS_POLICY,
+  v,
+} from "commonfabric/cfc";
+import type { AnyOf, PolicyOf } from "commonfabric/cfc";
+
+export const releaseRetention = exchangeRule({
+  appliesTo: THIS_POLICY,
+  pre: {
+    integrity: [
+      cfcPattern.hasRole(v("reader"), THIS_POLICY.subject, "reader"),
+    ],
+  },
+  post: { dropClause: true },
+});
+export const retentionRules = exchangeRules([releaseRetention]);
+
+export const releaseDrift = exchangeRule({
+  appliesTo: THIS_POLICY,
+  pre: {
+    integrity: [
+      cfcPattern.hasRole(v("reader"), THIS_POLICY.subject, "reader"),
+    ],
+  },
+  post: { dropClause: true },
+});
+export const driftFlagRules = exchangeRules([releaseDrift]);
+
+interface Flag {
+  value: boolean;
+}
+
+type CareFlag = Confidential<Flag, readonly [
+  PolicyOf<typeof retentionRules>,
+  PolicyOf<typeof driftFlagRules>,
+]>;
+
+type EitherPath = Confidential<Flag, readonly [
+  AnyOf<readonly [
+    PolicyOf<typeof retentionRules>,
+    PolicyOf<typeof driftFlagRules>,
+  ]>,
 ]>;
 ```
 
-Release needs a firing path through *each* clause — the pattern raise can only
-narrow what the concept alone would allow. The disjunctive form is an explicit
-opt-in via the authored-OR surface (spec §3.1.8):
-
-```ts
-// Shown for illustration only.
-type EitherPath = Confidential<Flag, [
-  AnyOf<[ConceptOf<typeof health>, PolicyOf<typeof driftFlagRules>]>,
-]>;
-```
+`CareFlag` needs a firing path through *each* clause. `EitherPath` is the
+explicit disjunctive opt-in via the authored-OR surface (spec §3.1.8).
 
 One clause, either path releases — and the clause's admissible rule set is the
-*union* over alternatives, so `AnyOf` raises are a weakening relative to the
-concept alone and should be linted accordingly.
+*union* over alternatives. `AnyOf` is an explicit weakening relative to the
+conjunctive spelling; use it only when either policy is independently
+sufficient. The existing authored-OR validation still rejects forbidden
+alternatives such as caveats and expiry atoms.
 
 ## Proposing rules is a workflow, not an API
 
@@ -362,17 +399,18 @@ parameters only from endorsed intent evidence.
 
 ## Enforcement summary
 
-1. Rules and concepts referenced from `PolicyOf` / `ConceptOf` must be
-   module-level exports (or `cf:` imports); the compiler lowers them
-   statically and rejects runtime-computed rule content (other than `v()`
-   variables and `THIS_POLICY`).
+1. Rules referenced from `PolicyOf` must be module-level exports (or pinned
+   `cf:` imports); the compiler lowers them statically and rejects
+   runtime-computed rule content other than `v()` variables and
+   `THIS_POLICY`. `ConceptOf` is not implemented.
 2. All rule firing happens in trusted boundaries (render boundary, sink gate,
    gated writes) via the fuelled fixpoint of spec §4.4.5, fail-closed.
 3. Observing contexts (preview/diagnostics) must not consume single-use
    grants (§4.3.5) — "would release" chrome renders without spending.
-4. Concept records resolve through owner-space discovery and fail closed on
-   hash mismatch; module-declared records are pinned by module identity plus
-   their canonical manifest digest.
+4. Module-declared records are pinned by defining module identity, export
+   symbol, and canonical manifest digest. Each destination persists the exact
+   verified manifest before committing a referencing label; missing or
+   mismatched local artifacts fail closed.
 
 ## Companion extensions
 

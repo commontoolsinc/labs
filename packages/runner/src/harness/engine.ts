@@ -92,6 +92,7 @@ import {
 } from "./verified-provenance.ts";
 import { FabricAwareResolver } from "./fabric-resolver.ts";
 import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
+import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("engine");
 
@@ -355,6 +356,7 @@ export class Engine extends EventTarget implements Harness {
       // Carry per-module source maps so the ESM loader can compose a per-load
       // bundle map (CFC verified-source / fn.src coordinate resolution).
       const precompiledSourceMaps = new Map<string, SourceMap>();
+      const precompiledPolicyManifests = new Map<string, readonly unknown[]>();
 
       if (fullHit) {
         logger.info("compile-cache-hit", () => ["compileToRecordGraph", id]);
@@ -365,6 +367,12 @@ export class Engine extends EventTarget implements Harness {
             precompiledSourceMaps.set(
               file.name,
               artifact.sourceMap as SourceMap,
+            );
+          }
+          if (artifact.policyManifests !== undefined) {
+            precompiledPolicyManifests.set(
+              file.name,
+              artifact.policyManifests,
             );
           }
           if (options.patternCoverage !== undefined) {
@@ -399,10 +407,12 @@ export class Engine extends EventTarget implements Harness {
             const pipeline = new (compilerStack()
               .CommonFabricTransformerPipeline)({
               patternCoverage,
+              moduleIdentities: identityByPath,
             });
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
+              getPolicyManifests: () => pipeline.getPolicyManifests(),
             };
           },
         };
@@ -425,6 +435,9 @@ export class Engine extends EventTarget implements Harness {
         for (const [name, out] of modules) {
           precompiledBodies.set(name, out.js);
           if (out.sourceMap) precompiledSourceMaps.set(name, out.sourceMap);
+          if (out.policyManifests) {
+            precompiledPolicyManifests.set(name, out.policyManifests);
+          }
         }
       }
       const { runtimeExports } = await this.getRuntimeInternals();
@@ -546,6 +559,10 @@ export class Engine extends EventTarget implements Harness {
           identityByPath,
           specifierAliases,
         );
+        const policyManifests = validatePolicyManifestsForModule(
+          identity,
+          precompiledPolicyManifests.get(file.name),
+        );
         return {
           identity,
           filename: storedFilenameFor(file.name, id, mounts),
@@ -555,9 +572,16 @@ export class Engine extends EventTarget implements Harness {
           ...(patternCoverageSpans === undefined
             ? {}
             : { patternCoverageSpans }),
+          ...(policyManifests === undefined ? {} : { policyManifests }),
           imports,
         };
       });
+      for (const module of modules) {
+        this.ctRuntime.registerCfcPolicyManifests(
+          undefined,
+          module.policyManifests ?? [],
+        );
+      }
 
       return {
         id,
@@ -631,8 +655,11 @@ export class Engine extends EventTarget implements Harness {
         runtimeModules: Engine.runtimeModuleNames(),
         beforeTransformers: runTransform
           ? (program) => {
+            const moduleIdentities = new Map(
+              [...unioned.keys()].map((name) => [name, `check:${name}`]),
+            );
             const pipeline = new (compilerStack()
-              .CommonFabricTransformerPipeline)();
+              .CommonFabricTransformerPipeline)({ moduleIdentities });
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
@@ -755,10 +782,13 @@ export class Engine extends EventTarget implements Harness {
       specifierAliases,
       beforeTransformers: (program) => {
         const pipeline = new (compilerStack()
-          .CommonFabricTransformerPipeline)();
+          .CommonFabricTransformerPipeline)({
+          moduleIdentities: identityByPath,
+        });
         return {
           factories: pipeline.toFactories(program),
           getDiagnostics: () => pipeline.getDiagnostics(),
+          getPolicyManifests: () => pipeline.getPolicyManifests(),
         };
       },
     });
@@ -776,21 +806,33 @@ export class Engine extends EventTarget implements Harness {
     });
     const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
       const out = emitted.get(file.name)!;
+      const identity = identityByPath.get(file.name)!;
       const imports = cacheableImportsFor(
         file.name,
         importEdges,
         identityByPath,
         specifierAliases,
       );
+      const policyManifests = validatePolicyManifestsForModule(
+        identity,
+        out.policyManifests,
+      );
       return {
-        identity: identityByPath.get(file.name)!,
+        identity,
         filename: storedFilenameFor(file.name, undefined, mounts),
         source: file.contents,
         js: out.js,
         ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+        ...(policyManifests === undefined ? {} : { policyManifests }),
         imports,
       };
     });
+    for (const module of modules) {
+      this.ctRuntime.registerCfcPolicyManifests(
+        undefined,
+        module.policyManifests ?? [],
+      );
+    }
     const entryIdentity = identityByPath.get(entryFilename)!;
     return { modules, entryIdentity };
   }
@@ -1454,6 +1496,21 @@ export class Engine extends EventTarget implements Harness {
     }
     return this.sesRuntime;
   }
+}
+
+function validatePolicyManifestsForModule(
+  moduleIdentity: string,
+  inputs: readonly unknown[] | undefined,
+): readonly unknown[] | undefined {
+  return inputs?.map((input) => {
+    const artifact = validateCfcPolicyArtifactManifest(input);
+    if (artifact.manifest.moduleIdentity !== moduleIdentity) {
+      throw new Error(
+        `policy manifest module identity mismatch for '${moduleIdentity}'`,
+      );
+    }
+    return artifact;
+  });
 }
 
 function computeId(program: Program): string {

@@ -59,6 +59,7 @@ export type {
   CfcTxState,
   CfcWriteFloorMode,
   ConsultedGrant,
+  ConsultedPolicyManifest,
   ConsumedRead,
   EntityDocumentWithCfc,
   IFCLabel,
@@ -111,6 +112,10 @@ export {
   preparedDigestFor,
 } from "./canonical.ts";
 export type { CfcConfClause, CfcOrClause } from "./clause.ts";
+export {
+  type CfcModulePolicyLoader,
+  createTxCfcModulePolicyResolver,
+} from "./policy-resolver.ts";
 export {
   clauseAlternatives,
   clausesEqual,

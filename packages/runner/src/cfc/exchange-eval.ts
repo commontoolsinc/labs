@@ -9,7 +9,10 @@ import {
   matchAtomPatternAgainstAtoms,
 } from "./atom-pattern.ts";
 import { isRecord } from "@commonfabric/utils/types";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import {
+  CFC_ATOM_TYPE,
+  type CfcModulePolicyRefAtom,
+} from "@commonfabric/api/cfc";
 import {
   type CfcConfClause,
   clauseAlternatives,
@@ -17,8 +20,18 @@ import {
   normalizeClause,
 } from "./clause.ts";
 import type { IFCLabel } from "./label-view-core.ts";
-import { isCfcFieldCommitment } from "./label-representation.ts";
-import type { ExchangeRule, PolicyRecord, PolicySnapshot } from "./policy.ts";
+import {
+  commitmentAwareEquals,
+  isCfcFieldCommitment,
+} from "./label-representation.ts";
+import {
+  type ExchangeRule,
+  lowerCfcPolicyTemplateRules,
+  type PolicyArtifactManifestV1,
+  type PolicyRecord,
+  type PolicySnapshot,
+  validateCfcPolicyArtifactManifest,
+} from "./policy.ts";
 import type { TrustResolver } from "./trust.ts";
 
 /**
@@ -129,6 +142,11 @@ export type CfcGrantResolver = (
   query: CfcGrantResolverQuery,
 ) => readonly unknown[];
 
+/** Cold-capable exact-digest lookup supplied by the runner-owned storage seam. */
+export type CfcModulePolicyResolver = (
+  reference: CfcModulePolicyRefAtom,
+) => unknown;
+
 export type ExchangeEvalContext = {
   /**
    * Integrity evidence available to rule guards BEYOND the label's own
@@ -154,12 +172,29 @@ export type ExchangeEvalContext = {
    * the same prepare pass. See {@link CfcGrantConsumptionContext}.
    */
   readonly grantConsumption?: CfcGrantConsumptionContext;
+  /**
+   * Exact module-manifest lookup. Absent or unsuccessful lookup fails the
+   * whole evaluation closed when the label selects a module policy.
+   */
+  readonly modulePolicyResolver?: CfcModulePolicyResolver;
+};
+
+export type ModulePolicyResolutionFailure = {
+  readonly reference: unknown;
+  readonly reason:
+    | "malformed-reference"
+    | "missing-resolver"
+    | "missing-manifest"
+    | "resolver-error"
+    | "invalid-manifest"
+    | "reference-mismatch";
 };
 
 export type ExchangeEvalResult = {
   readonly label: IFCLabel;
   readonly firings: readonly RuleFiring[];
   readonly exhausted: boolean;
+  readonly resolutionFailures: readonly ModulePolicyResolutionFailure[];
 };
 
 /**
@@ -247,6 +282,188 @@ const policyRefHomeClauses = (
     }
   }
   return homes;
+};
+
+const MODULE_POLICY_REF_KEYS = new Set([
+  "type",
+  "policyRefKind",
+  "moduleIdentity",
+  "symbol",
+  "policyDigest",
+  "subject",
+]);
+
+const isModulePolicyCandidate = (value: Record<string, unknown>): boolean =>
+  value.policyRefKind === "module" ||
+  ["moduleIdentity", "symbol", "policyDigest"].some((key) =>
+    Object.hasOwn(value, key)
+  );
+
+const isExactModulePolicyRef = (
+  value: unknown,
+): value is CfcModulePolicyRefAtom => {
+  if (!isRecord(value) || Array.isArray(value)) return false;
+  if (
+    value.type !== CFC_ATOM_TYPE.Policy || value.policyRefKind !== "module" ||
+    typeof value.moduleIdentity !== "string" ||
+    value.moduleIdentity.length === 0 || typeof value.symbol !== "string" ||
+    value.symbol.length === 0 || typeof value.policyDigest !== "string" ||
+    value.policyDigest.length === 0 ||
+    !(
+      (typeof value.subject === "string" && value.subject.length > 0) ||
+      isCfcFieldCommitment(value.subject)
+    )
+  ) {
+    return false;
+  }
+  return Object.keys(value).every((key) => MODULE_POLICY_REF_KEYS.has(key));
+};
+
+const collectSelectedModulePolicyRefs = (
+  confidentiality: readonly CfcConfClause[],
+): {
+  references: CfcModulePolicyRefAtom[];
+  failures: ModulePolicyResolutionFailure[];
+} => {
+  const references: CfcModulePolicyRefAtom[] = [];
+  const failures: ModulePolicyResolutionFailure[] = [];
+  for (const clause of confidentiality) {
+    for (const alternative of clauseAlternatives(clause)) {
+      if (!isRecord(alternative) || Array.isArray(alternative)) continue;
+      if (
+        alternative.type !== CFC_ATOM_TYPE.Policy &&
+        alternative.type !== CFC_ATOM_TYPE.Context
+      ) {
+        continue;
+      }
+      if (!isModulePolicyCandidate(alternative)) continue;
+      if (!isExactModulePolicyRef(alternative)) {
+        failures.push({
+          reference: alternative,
+          reason: "malformed-reference",
+        });
+        continue;
+      }
+      if (!references.some((existing) => deepEqual(existing, alternative))) {
+        references.push(alternative);
+      }
+    }
+  }
+  return { references, failures };
+};
+
+const modulePolicyRefMatches = (
+  expected: CfcModulePolicyRefAtom,
+  candidate: unknown,
+): boolean =>
+  isExactModulePolicyRef(candidate) &&
+  candidate.moduleIdentity === expected.moduleIdentity &&
+  candidate.symbol === expected.symbol &&
+  candidate.policyDigest === expected.policyDigest &&
+  commitmentAwareEquals(candidate.subject, expected.subject);
+
+const modulePolicyRefHomeClauses = (
+  reference: CfcModulePolicyRefAtom,
+  confidentiality: readonly CfcConfClause[],
+): ReadonlySet<number> => {
+  const homes = new Set<number>();
+  for (let index = 0; index < confidentiality.length; index++) {
+    if (
+      clauseAlternatives(confidentiality[index]).some((alternative) =>
+        modulePolicyRefMatches(reference, alternative)
+      )
+    ) {
+      homes.add(index);
+    }
+  }
+  return homes;
+};
+
+const isThisPolicyPattern = (value: unknown): boolean =>
+  isRecord(value) && Object.keys(value).length === 1 &&
+  value.thisPolicy === true;
+
+const isThisPolicySubjectPattern = (value: unknown): boolean =>
+  isRecord(value) && Object.keys(value).length === 1 &&
+  value.thisPolicyField === "subject";
+
+const bindThisPolicy = (
+  value: unknown,
+  reference: CfcModulePolicyRefAtom,
+): unknown => {
+  if (isThisPolicyPattern(value)) return reference;
+  if (isThisPolicySubjectPattern(value)) return reference.subject;
+  if (Array.isArray(value)) {
+    return value.map((entry) => bindThisPolicy(entry, reference));
+  }
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, field]) => [
+      key,
+      bindThisPolicy(field, reference),
+    ]),
+  );
+};
+
+const bindModuleRule = (
+  rule: ExchangeRule,
+  reference: CfcModulePolicyRefAtom,
+): ExchangeRule => bindThisPolicy(rule, reference) as ExchangeRule;
+
+type ResolvedModulePolicy = {
+  readonly reference: CfcModulePolicyRefAtom;
+  readonly artifact: PolicyArtifactManifestV1;
+  readonly recordId: string;
+};
+
+const resolveSelectedModulePolicies = (
+  references: readonly CfcModulePolicyRefAtom[],
+  resolver: CfcModulePolicyResolver | undefined,
+): {
+  policies: ResolvedModulePolicy[];
+  failures: ModulePolicyResolutionFailure[];
+} => {
+  const policies: ResolvedModulePolicy[] = [];
+  const failures: ModulePolicyResolutionFailure[] = [];
+  for (const reference of references) {
+    if (resolver === undefined) {
+      failures.push({ reference, reason: "missing-resolver" });
+      continue;
+    }
+    let resolved: unknown;
+    try {
+      resolved = resolver(reference);
+    } catch {
+      failures.push({ reference, reason: "resolver-error" });
+      continue;
+    }
+    if (resolved === undefined || resolved === null) {
+      failures.push({ reference, reason: "missing-manifest" });
+      continue;
+    }
+    let artifact: PolicyArtifactManifestV1;
+    try {
+      artifact = validateCfcPolicyArtifactManifest(resolved);
+    } catch {
+      failures.push({ reference, reason: "invalid-manifest" });
+      continue;
+    }
+    if (
+      artifact.policyDigest !== reference.policyDigest ||
+      artifact.manifest.moduleIdentity !== reference.moduleIdentity ||
+      artifact.manifest.symbol !== reference.symbol
+    ) {
+      failures.push({ reference, reason: "reference-mismatch" });
+      continue;
+    }
+    policies.push({
+      reference,
+      artifact,
+      recordId:
+        `${reference.moduleIdentity}#${reference.symbol}@${reference.policyDigest}`,
+    });
+  }
+  return { policies, failures };
 };
 
 /**
@@ -551,7 +768,37 @@ export const evaluateExchangeRules = (
   ctx: ExchangeEvalContext = {},
   fuel: number = DEFAULT_EXCHANGE_FUEL,
 ): ExchangeEvalResult => {
-  const rules: Array<{ record: PolicyRecord; rule: ExchangeRule }> = [];
+  const confidentialityInput = label.confidentiality ?? [];
+  const selected = collectSelectedModulePolicyRefs(confidentialityInput);
+  if (selected.failures.length > 0) {
+    return {
+      label,
+      firings: [],
+      exhausted: false,
+      resolutionFailures: selected.failures,
+    };
+  }
+  const resolved = resolveSelectedModulePolicies(
+    selected.references,
+    ctx.modulePolicyResolver,
+  );
+  if (resolved.failures.length > 0) {
+    return {
+      label,
+      firings: [],
+      exhausted: false,
+      resolutionFailures: resolved.failures,
+    };
+  }
+
+  type EvaluableRule = {
+    readonly recordId: string;
+    readonly rule: ExchangeRule;
+    readonly homeClauses?: (
+      confidentiality: readonly CfcConfClause[],
+    ) => ReadonlySet<number>;
+  };
+  const rules: EvaluableRule[] = [];
   if (snapshot !== undefined) {
     // Canonical UTF-8 code-point order (not JS `<`, which orders UTF-16 code
     // UNITS and disagrees on astral ids) so evaluation and diagnostic order
@@ -564,15 +811,43 @@ export const evaluateExchangeRules = (
       for (
         const rule of [...record.rules].sort((a, b) => utf8Compare(a.id, b.id))
       ) {
-        rules.push({ record, rule });
+        rules.push({
+          recordId: record.id,
+          rule,
+          ...(record.selection === "ambient" ? {} : {
+            homeClauses: (confidentiality: readonly CfcConfClause[]) =>
+              policyRefHomeClauses(record, confidentiality),
+          }),
+        });
       }
+    }
+  }
+  for (const policy of resolved.policies) {
+    for (
+      const rule of [...lowerCfcPolicyTemplateRules(
+        policy.artifact.manifest.template,
+      )].sort(
+        (a, b) => utf8Compare(a.id, b.id),
+      )
+    ) {
+      rules.push({
+        recordId: policy.recordId,
+        rule: bindModuleRule(rule, policy.reference),
+        homeClauses: (confidentiality: readonly CfcConfClause[]) =>
+          modulePolicyRefHomeClauses(policy.reference, confidentiality),
+      });
     }
   }
   if (
     rules.length === 0 || label.confidentiality === undefined ||
     label.confidentiality.length === 0
   ) {
-    return { label, firings: [], exhausted: false };
+    return {
+      label,
+      firings: [],
+      exhausted: false,
+      resolutionFailures: [],
+    };
   }
 
   const availableIntegrity = [
@@ -589,7 +864,7 @@ export const evaluateExchangeRules = (
 
   while (changed) {
     changed = false;
-    for (const { record, rule } of rules) {
+    for (const { recordId, rule, homeClauses: findHomeClauses } of rules) {
       // B2b selection scope: ambient records match every clause; anything
       // else is label-carried — in scope only where the CURRENT label
       // references it. The non-"ambient" (rather than === "referenced") arm
@@ -597,9 +872,7 @@ export const evaluateExchangeRules = (
       // NARROW path — degrading it to ambient would fire rules its author
       // scoped to references (the guard-degradation posture, cubic P1 on
       // #4627).
-      const homeClauses = record.selection === "ambient"
-        ? undefined
-        : policyRefHomeClauses(record, confidentiality);
+      const homeClauses = findHomeClauses?.(confidentiality);
       if (homeClauses !== undefined && homeClauses.size === 0) continue;
       const matches = matchRule(
         rule,
@@ -637,12 +910,17 @@ export const evaluateExchangeRules = (
           // The firings collected so far are returned for DIAGNOSTICS only
           // (which rules ping-ponged); their clause indices describe the
           // discarded intermediate state, and `label` is the original.
-          return { label, firings, exhausted: true };
+          return {
+            label,
+            firings,
+            exhausted: true,
+            resolutionFailures: [],
+          };
         }
         remainingFuel -= 1;
         confidentiality = applied.confidentiality;
         firings.push({
-          recordId: record.id,
+          recordId,
           ruleId: rule.id,
           ...applied.firing!,
         });
@@ -658,5 +936,6 @@ export const evaluateExchangeRules = (
     },
     firings,
     exhausted: false,
+    resolutionFailures: [],
   };
 };

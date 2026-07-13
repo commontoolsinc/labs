@@ -67,6 +67,10 @@ export function otelTracing(config: OtelConfig = {}): MiddlewareHandler {
       () =>
         obtainTracer().startActiveSpan(`${method} ${path}`, async (span) => {
           span.setAttribute("http.method", method);
+          // The concrete request path, in addition to any templated route the
+          // span name may carry — without it the target of e.g. a pattern
+          // fetch (`/api/patterns/<file>`) is unrecoverable from the span.
+          span.setAttribute("url.path", path);
           span.setAttribute("http.host", c.req.header("host") || "unknown");
           span.setAttribute(
             "http.user_agent",

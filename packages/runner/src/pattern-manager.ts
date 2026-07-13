@@ -682,12 +682,15 @@ export class PatternManager {
           }
           const bodies = new Map<string, CompiledModuleArtifact>();
           for (const [identity, doc] of closure) {
-            bodies.set(
-              identity,
-              doc.sourceMap === undefined
-                ? { js: doc.code }
-                : { js: doc.code, sourceMap: doc.sourceMap },
-            );
+            bodies.set(identity, {
+              js: doc.code,
+              ...(doc.sourceMap === undefined
+                ? {}
+                : { sourceMap: doc.sourceMap }),
+              ...(doc.policyManifests === undefined
+                ? {}
+                : { policyManifests: doc.policyManifests }),
+            });
           }
           warmHit = true;
           return bodies;

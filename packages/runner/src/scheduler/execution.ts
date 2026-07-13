@@ -130,6 +130,12 @@ export type SchedulerSettleResult = {
   backoffApplied: boolean;
   backoffActionCount: number;
   backoffUntil?: number;
+  /** Iterations that actually ran work (excludes the final settled check). */
+  iterationsRun: number;
+  /** Wall-clock of the settle loop, measured unconditionally. */
+  settleDurationMs: number;
+  /** Number of actions in the final non-empty settle work set. */
+  workSetSize: number;
   settleStats?: SettleStats;
 };
 

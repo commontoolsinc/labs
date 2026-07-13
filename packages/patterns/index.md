@@ -74,9 +74,9 @@ legacy), `habit-tracker/`, `lunch-poll/`, `profile-group-chat/`,
 
 CFC spec demos (intentionally verbose wiring): `cfc/`,
 `cfc-agent-prompt-injection-demo/`, `cfc-authorized-save/`,
-`cfc-authorship-chat/`, `cfc-group-chat-demo/`, `cfc-render-policy-demo/`,
-`cfc-row-label-mailbox/`, `cfc-row-label-records/`, `cfc-spec-gallery/`,
-`cfc-staged-publish/`, `cfc-trusted-component-examples/`,
+`cfc-exchange-rules/`, `cfc-authorship-chat/`, `cfc-group-chat-demo/`,
+`cfc-render-policy-demo/`, `cfc-row-label-mailbox/`, `cfc-row-label-records/`,
+`cfc-spec-gallery/`, `cfc-staged-publish/`, `cfc-trusted-component-examples/`,
 `cfc-trusted-surfaces/`.
 
 System patterns: `system/` — live, load-bearing product patterns (home,

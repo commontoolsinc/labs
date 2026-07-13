@@ -11,6 +11,7 @@ import {
   type BranchName,
   type CellScope,
   type ClientCommit,
+  commitPreconditionValueHash,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
@@ -5214,6 +5215,34 @@ const validateCommitPreconditions = (
           throw new PreconditionFailedError(
             "receipt-exists",
             `entity-absent precondition target already exists: ${precondition.id}`,
+          );
+        }
+        break;
+      }
+      case "entity-value-hash": {
+        if (
+          precondition.valueHash !== null &&
+          typeof precondition.valueHash !== "string"
+        ) {
+          throw new ProtocolError(
+            "malformed entity-value-hash precondition: valueHash must be a string or null",
+          );
+        }
+        const state = readState(engine, {
+          branch,
+          id: precondition.id,
+          scope: precondition.scope,
+          principal: scopeContext.principal,
+          sessionId: scopeContext.sessionId,
+        });
+        const currentHash = state?.document === null ||
+            state?.document === undefined ||
+            !Object.hasOwn(state.document, "value")
+          ? null
+          : commitPreconditionValueHash(state.document.value);
+        if (currentHash !== precondition.valueHash) {
+          throw new ConflictError(
+            `entity-value-hash precondition target changed: ${precondition.id}`,
           );
         }
         break;
