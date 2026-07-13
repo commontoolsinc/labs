@@ -2157,6 +2157,11 @@
           "npm:@opentelemetry/api@^1.9.0"
         ]
       },
+      "packages/patterns": {
+        "dependencies": [
+          "npm:@opentelemetry/api@^1.7.0"
+        ]
+      },
       "packages/runner": {
         "dependencies": [
           "npm:@opentelemetry/api@^1.7.0",

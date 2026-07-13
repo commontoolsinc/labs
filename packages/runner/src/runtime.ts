@@ -901,6 +901,12 @@ export class Runtime {
     });
 
     this.storageManager = options.storageManager;
+    // Hand the storage layer the telemetry bus so it can emit the
+    // storage.push/pull markers (duck-typed: only the v2 StorageManager
+    // implements it; emulated/test managers simply don't have the method).
+    (this.storageManager as {
+      setTelemetry?: (telemetry: RuntimeTelemetry) => void;
+    }).setTelemetry?.(this.telemetry);
     this.moduleByteCache = options.moduleByteCache;
     // Validated + digested + frozen before the trust-snapshot provider
     // default below, whose `revision` covers the config digest (a trust
