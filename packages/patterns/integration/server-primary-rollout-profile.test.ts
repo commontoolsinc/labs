@@ -473,6 +473,40 @@ const p95 = (values: readonly number[]): number => {
             false,
           );
           phases.push(enabledRepeat, baselineRepeat);
+          const cpuDiagnostics = phases.map((phase) => ({
+            label: phase.label,
+            events: phase.events,
+            rendererCpuUs:
+              phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs ?? 0,
+            rendererCpuUsPerEvent:
+              (phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs ?? 0) /
+              phase.events,
+            rendererProcesses:
+              phase.browserProcessCpu?.rendererDelta.renderers ?? [],
+            sampledUs: phase.cpu?.sampledUs ?? 0,
+            attributedWorkUs: phase.cpu?.attributedWorkUs ?? 0,
+            lazyActionRuns: phase.lazyActionRuns,
+          }));
+          console.log(
+            `lazy-browser CPU phases: ${JSON.stringify(cpuDiagnostics)}`,
+          );
+          if (PROFILE_DIR) {
+            await Deno.mkdir(PROFILE_DIR, { recursive: true });
+            await Deno.writeTextFile(
+              join(PROFILE_DIR, "server-primary-rollout-cpu-summary.json"),
+              JSON.stringify(
+                {
+                  capturedAt: new Date().toISOString(),
+                  space: SPACE_NAME,
+                  doubledEntityId,
+                  phases,
+                  cpuDiagnostics,
+                },
+                null,
+                2,
+              ),
+            );
+          }
           for (const phase of phases) {
             assert(
               (phase.cpu?.sampledUs ?? 0) > 0,
@@ -502,7 +536,9 @@ const p95 = (values: readonly number[]): number => {
           ]);
           assert(
             enabledAggregate <= baselineAggregate * 1.1,
-            `enabled lazy-browser renderer CPU/event ${enabledAggregate}us exceeded baseline ${baselineAggregate}us by more than 10%`,
+            `enabled lazy-browser renderer CPU/event ${enabledAggregate}us exceeded baseline ${baselineAggregate}us by more than 10%: ${
+              JSON.stringify(cpuDiagnostics)
+            }`,
           );
         }
 
