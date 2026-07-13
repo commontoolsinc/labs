@@ -20,6 +20,7 @@ import {
   startsWithStatementWord,
 } from "./compiled-js-identifiers.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { ModuleVerificationError } from "./module-verification-error.ts";
 import {
   isTrustedBuilder,
@@ -1286,7 +1287,7 @@ function verifyFrameworkProvidedPaths(
   }
 
   const canonical = [...new Set(keys)].sort((left, right) =>
-    left.localeCompare(right)
+    utf8Compare(left, right)
   );
   if (
     canonical.length !== keys.length ||

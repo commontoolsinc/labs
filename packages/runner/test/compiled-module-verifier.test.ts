@@ -143,6 +143,22 @@ exports.default = (0, commonfabric_1.handler)(
     expect(() => verify(body)).not.toThrow();
   });
 
+  it("accepts UTF-8 canonical FrameworkProvided metadata ordering", () => {
+    const body = `
+${IMPORT}
+exports.default = (0, commonfabric_1.pattern)(
+  (0, commonfabric_1.__cfHelpers.withFrameworkProvidedPaths)(
+    (argument) => argument,
+    [["z"], ["ä"], ["😊"]]
+  ),
+  true,
+  true
+);
+`;
+
+    expect(() => verify(body)).not.toThrow();
+  });
+
   it("rejects dynamic or malformed FrameworkProvided metadata paths", () => {
     const invalidPaths = [
       "paths",

@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
@@ -243,7 +244,7 @@ function normalizeFrameworkPaths(
     normalized.push(copy);
   }
   normalized.sort((left, right) =>
-    JSON.stringify(left).localeCompare(JSON.stringify(right))
+    utf8Compare(JSON.stringify(left), JSON.stringify(right))
   );
   return normalized;
 }

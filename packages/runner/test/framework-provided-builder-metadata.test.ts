@@ -75,6 +75,24 @@ Deno.test("FrameworkProvided metadata lives on all trusted builder artifacts", (
     );
   }));
 
+Deno.test("FrameworkProvided artifact metadata is ordered by UTF-8 bytes", () =>
+  withHelpers(({ pattern, withFrameworkProvidedPaths }) => {
+    const base = pattern(
+      withFrameworkProvidedPaths(
+        (input: Record<string, string>) => input,
+        [["😊"], ["ä"], ["z"]],
+      ),
+      INPUT_SCHEMA,
+      INPUT_SCHEMA,
+    );
+
+    assertEquals(getFrameworkProvidedPaths(base), [
+      ["z"],
+      ["ä"],
+      ["😊"],
+    ]);
+  }));
+
 Deno.test("authored functions cannot acquire FrameworkProvided artifact metadata", () => {
   assertThrows(
     () => setFrameworkProvidedPaths(() => undefined, [["sandboxId"]]),
