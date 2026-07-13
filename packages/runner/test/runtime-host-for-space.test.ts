@@ -145,9 +145,15 @@ describe("Runtime.fetchBuiltin", () => {
         "/api/local",
         new URL("http://host-a.test/api/local"),
       );
+      await runtime.fetchBuiltin(
+        "fetchJson",
+        "http://[",
+        undefined,
+      );
       expect(brokerUrls).toEqual([
         "http://host-b.test/api/value",
         "/api/local",
+        "http://[",
       ]);
     } finally {
       await runtime.dispose();

@@ -1963,16 +1963,27 @@ export class Runtime {
   fetchBuiltin(
     builtinId: ServerExecutableBuiltinId,
     rawUrl: string,
-    resolvedUrl: URL,
+    resolvedUrl: URL | undefined,
     init?: RequestInit,
   ): Promise<Response> {
     if (this.serverBuiltinFetch === undefined) {
+      if (resolvedUrl === undefined) {
+        throw new TypeError("builtin request URL is invalid");
+      }
       return this.fetch(resolvedUrl, init);
     }
-    const brokerUrl = new URL(rawUrl, this.#patternApiUrl).href ===
-        resolvedUrl.href
-      ? rawUrl
-      : resolvedUrl.href;
+    let brokerUrl = rawUrl;
+    if (resolvedUrl !== undefined) {
+      try {
+        brokerUrl = new URL(rawUrl, this.#patternApiUrl).href ===
+            resolvedUrl.href
+          ? rawUrl
+          : resolvedUrl.href;
+      } catch {
+        // Forward malformed raw input unchanged. The host egress classifier
+        // converts it into the permanent invalid-url servability result.
+      }
+    }
     return this.serverBuiltinFetch(builtinId, brokerUrl, init);
   }
 

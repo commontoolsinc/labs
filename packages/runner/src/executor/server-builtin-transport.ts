@@ -65,7 +65,15 @@ export function authorizeDefaultServerBuiltinRequest(
   request: AuthorizedServerBuiltinRequest,
   context: ServerBuiltinBrokerContext,
 ): void {
-  const target = new URL(request.fetch.url, context.servingOrigin);
+  let target: URL;
+  try {
+    target = new URL(request.fetch.url, context.servingOrigin);
+  } catch {
+    // URL syntax belongs to the egress classifier, which reports invalid-url
+    // as a permanent servability failure. Authorization only classifies valid
+    // first-party routes.
+    return;
+  }
   if (
     target.origin === context.servingOrigin.origin &&
     isProtectedToolshedFirstPartyRoute(

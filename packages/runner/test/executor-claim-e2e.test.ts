@@ -1466,6 +1466,11 @@ Deno.test("real Worker settles permanent builtin failures unserved but retains t
       forbiddenStoredError: "blocked destination fixture",
     },
     {
+      mode: "invalid-url" as const,
+      diagnosticCode: "server-builtin-egress-invalid-url",
+      forbiddenStoredError: "invalid URL fixture",
+    },
+    {
       mode: "causal-mismatch" as const,
       diagnosticCode: "builtin-causal-actor-mismatch",
       forbiddenStoredError:
@@ -1545,7 +1550,7 @@ Deno.test("real Worker settles permanent builtin failures unserved but retains t
           undefined,
           tx,
         );
-        input.set("/initial");
+        input.set(fixture.mode === "invalid-url" ? "http://[" : "/initial");
         const result = seedRuntime.getCell<Record<string, unknown>>(
           space,
           `executor-builtin-permanent-result-${fixture.mode}`,
@@ -1658,6 +1663,12 @@ Deno.test("real Worker settles permanent builtin failures unserved but retains t
                 throw new ServerBuiltinEgressError(
                   "blocked-destination",
                   "blocked destination fixture",
+                );
+              }
+              if (fixture.mode === "invalid-url") {
+                throw new ServerBuiltinEgressError(
+                  "invalid-url",
+                  "invalid URL fixture",
                 );
               }
               if (fixture.mode === "transient") {

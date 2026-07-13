@@ -88,3 +88,20 @@ Deno.test("default builtin authorization normalizes methods before classifying p
     "delegated user signing",
   );
 });
+
+Deno.test("default builtin authorization defers malformed URLs to the egress classifier", () => {
+  authorizeDefaultServerBuiltinRequest({
+    builtinId: "fetchJson",
+    claim: {} as never,
+    fetch: {
+      url: "http://[",
+      method: "GET",
+    },
+  }, {
+    space: "did:key:z6Mk-builtin-auth",
+    branch: "",
+    leaseGeneration: 1,
+    onBehalfOf: "did:key:z6Mk-user",
+    servingOrigin: new URL("https://toolshed.example/"),
+  });
+});

@@ -620,12 +620,21 @@ async function startFetch(
     // default memory host, so hostForSpace's fallback is NOT used here.
     const mappedHost = runtime.mappedHostFor(inputsCell.space);
     const apiBase = new URL(mappedHost ?? getPatternEnvironment().apiUrl);
-    const resolvedUrl = new URL(url!, apiBase);
-    const requestOptions = runtime.hasServerBuiltinFetch()
+    const hasServerBuiltinFetch = runtime.hasServerBuiltinFetch();
+    let resolvedUrl: URL | undefined;
+    try {
+      resolvedUrl = new URL(url!, apiBase);
+    } catch (error) {
+      // The host egress classifier owns URL syntax for server execution so a
+      // malformed request becomes a permanent unserved attempt. Preserve the
+      // ordinary client runtime's existing local failure behavior.
+      if (!hasServerBuiltinFetch) throw error;
+    }
+    const requestOptions = hasServerBuiltinFetch
       ? options
       : await signedToolshedFetchOptions(
         runtime,
-        resolvedUrl,
+        resolvedUrl!,
         apiBase,
         options,
       );
