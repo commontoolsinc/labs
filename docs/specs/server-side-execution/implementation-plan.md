@@ -397,7 +397,11 @@ that it settled.
    attempt rather than relabeling or downgrading it. Strip the assertion from
    accepted scheduler-state persistence, but retain it in the raw request's
    replay/original-commit identity. An exact accepted replay remains idempotent
-   after revoke.
+   after revoke. Once a session is bound as an executor, require exactly one
+   live claimed-action incarnation for every first-application semantic
+   transaction; assertion-free writes must fail atomically rather than
+   downgrading to the ordinary user path. Observation-only metadata remains
+   non-semantic.
 5. Carry provenance through the normal validated transaction path and store it
    with scheduler observation/commit diagnostics.
 6. Separate acceptedCommitSeq from inputBasisSeq in types and tests.
@@ -433,6 +437,9 @@ that it settled.
 - [x] A delayed attempt cannot be relabeled onto a replacement
       claimGeneration or downgraded after revoke; exact accepted replays remain
       idempotent and a changed assertion replay-mismatches.
+- [x] A bound executor cannot submit an assertion-free semantic write; the
+      lease transaction rejects it atomically while an exact accepted replay
+      still succeeds after revoke.
 - [x] Executor authority is bound to the exact live connection, session token,
       and principal, and an effective context narrower than the claim rolls the
       whole transaction back.
@@ -551,8 +558,12 @@ graduated sub-capability.
    feed-sequence barriers. For committed outcomes,
    acceptedCommitSeq is an additional data-application gate, not a replacement
    for control ordering. Bound each session's retained event suffix; reconnect
-   always carries a complete claim snapshot so cursors older than the suffix
-   resynchronize without unbounded server memory.
+   always carries a complete claim snapshot plus one coalesced successful
+   settlement frontier per exact live claim. The frontier records the maximum
+   covered input basis, newest successful feed sequence, and maximum committed
+   data gate newer than the acknowledged cursor. This lets cursors older than
+   the suffix resynchronize authority and overlay settlement without unbounded
+   server memory or duplicate retained-success delivery.
 6. Authorize demand using the session's existing READ access. Sponsor
    eligibility is a separate WRITE check in W1.1.
 7. Add optional executionPolicy owner doc support at
@@ -593,6 +604,10 @@ graduated sub-capability.
       the acceptedCommitSeq patch is applied.
 - [x] Reconnect neither double-delivers retained control events nor replays a
       claim class excluded by the session's current sub-capabilities.
+- [x] A successful settlement evicted from the bounded suffix is recovered
+      exactly once from the live claim's reconnect frontier; committed
+      frontiers still wait for accepted data, and ack/revoke/reclaim prune the
+      old frontier.
 - [x] Flag off produces no new protocol messages.
 
 ---
@@ -1007,7 +1022,8 @@ speculation coalescing.
 - [x] Revocation/expiry causes deterministic dirty rerun and convergence.
 - [x] Disconnect while another client keeps the server claim live queues no
       derived wire commit; reconnect claim-snapshot barrier prevents a stale
-      flush and then converges.
+      flush, replays any missed successful settlement frontier, and then
+      converges.
 - [x] Flag off has byte-identical commit and control traffic.
 - [x] Remote claimed invalidations coalesce behind a fixed leading deadline;
       local commits remain immediate, authority stalls fall open, and an early
@@ -1036,6 +1052,9 @@ named non-transitive chained-action divergence and convergence fixture.
    - failed retains pending only if the claim remains retryable;
    - unserved discards the attempt; the separately ordered claim.revoke control
      message restores client authority.
+   Apply reconnect settlement frontiers only after installing their exact live
+   claim snapshot. Treat the frontier's maximum committed sequence as the same
+   accepted-data barrier, and never apply it to a replacement incarnation.
 3. Reject settlements whose leaseGeneration or claimGeneration does not match
    the exact overlay incarnation.
 4. When confirmed server value differs from overlay, server wins and increment
@@ -1060,6 +1079,9 @@ named non-transitive chained-action divergence and convergence fixture.
 - [x] Old generation cannot clear new overlay.
 - [x] Delayed/reordered commit data keeps the overlay until the matching data
       frame is applied; settlement-first delivery cannot flash stale state.
+- [x] A bounded-feed reconnect cannot strand an overlay after its successful
+      settlement was evicted; the snapshot frontier applies exactly once and
+      preserves the committed data barrier.
 - [x] A chained-action fixture demonstrates the accepted non-transitive basis
       window, records divergence, and deterministically converges after the
       intermediate and downstream actions re-settle.

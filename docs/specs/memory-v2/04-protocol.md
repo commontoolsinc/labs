@@ -342,6 +342,12 @@ Live data delivery is not routed through the initiating request id.
 ```typescript
 // Shown at module scope.
 interface ExecutionClaim {}
+interface ExecutionSettlementFrontier {
+  claim: ExecutionClaim;
+  inputBasisSeq: number;
+  throughFeedSeq: number;
+  requiredAcceptedCommitSeq?: number;
+}
 type ExecutionControlEvent =
   | { type: "session.execution.claim.set" }
   | { type: "session.execution.claim.revoke" }
@@ -365,7 +371,10 @@ interface SessionSync {
   execution?: {
     fromFeedSeq: number;
     toFeedSeq: number;
-    snapshot?: { claims: ExecutionClaim[] };
+    snapshot?: {
+      claims: ExecutionClaim[];
+      settlementFrontiers?: ExecutionSettlementFrontier[];
+    };
     events: ExecutionControlEvent[];
   };
 }
@@ -382,6 +391,13 @@ Semantics:
   settlement outcome in one reconnectable per-logical-session sequence. A
   control-only batch leaves `fromSeq`/`toSeq` unchanged while advancing
   `fromFeedSeq`/`toFeedSeq`
+- reconnect installs the authoritative claim snapshot before applying its
+  settlement frontiers. For each exact live claim, a frontier coalesces
+  successful events newer than the acknowledged cursor using the maximum
+  covered `inputBasisSeq`, the newest `throughFeedSeq`, and the maximum
+  committed data gate. This bounded summary prevents an evicted settlement
+  from stranding a speculative overlay without replaying a retained success
+  twice
 - a committed settlement's `acceptedCommitSeq` is an additional data-
   application barrier: a client buffers it until the corresponding data cursor
   has reached that sequence
@@ -712,6 +728,11 @@ execution. Settlements must match the exact branch, lease, and claim generation.
 forbid it. Client frames using these server-only message names are rejected by
 the strict parser. Retained events are filtered through the reconnecting
 session's current claim-routing/passivity sub-capabilities before replay.
+Successful retained events are represented once by the reconnect snapshot's
+per-live-incarnation settlement frontier; failed and unserved outcomes remain
+ordinary ordered events. Revocation, replacement, and acknowledgement remove
+obsolete frontiers, so this recovery state is bounded by live claims rather
+than event history.
 
 For an accepted scheduler action observation, memory derives `inputBasisSeq`
 from the exact confirmed read preconditions that passed validation plus pending
@@ -727,6 +748,11 @@ effective context to the claim, derives `onBehalfOf` from the authenticated
 session, stores canonical `ActionExecutionProvenance` with the observation, and
 emits an accepted action attempt. A stale/missing incarnation rejects the whole
 new attempt, while an exact accepted replay remains idempotent after revoke.
+Once a session is host-bound as an executor, every first-application semantic
+transaction requires exactly one such live claim. An assertion-free set,
+patch, delete, or SQLite operation is rejected inside the same lease-fenced
+transaction rather than downgrading to an ordinary user write; observation-
+only metadata remains non-semantic.
 Canonical accepted payload is reloaded for replay mirror fan-out, never rebuilt
 from client-supplied host fields. The normal Server path turns that attempt into
 a committed, no-op, or failed settlement only after acceptance. A committed

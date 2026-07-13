@@ -485,11 +485,12 @@ interface ExecutionClaim {
 
 Claims ride the authenticated session/control feed and are not ordinary
 space documents. Each session retains only a bounded suffix of control
-history; reconnect always installs a complete claim snapshot, so a cursor
-older than that suffix resynchronizes authority instead of growing an
-unbounded queue. A durable policy may opt a space into server-primary
-execution, but runtime ownership, liveness, generations, and exceptions do
-not belong in mutable user data.
+history; reconnect always installs a complete claim snapshot plus a coalesced
+successful settlement frontier for each exact live claim. A cursor older than
+the suffix therefore resynchronizes both authority and overlay reconciliation
+instead of growing an unbounded queue. A durable policy may opt a space into
+server-primary execution, but runtime ownership, liveness, generations, and
+exceptions do not belong in mutable user data.
 
 The implemented opt-in is the default-branch, space-scoped document
 `of:${space}:execution-policy`, whose value is exactly
@@ -529,9 +530,10 @@ Connection loss is not proof that a claim ended: another requester may keep the
 shared Worker and claim alive. While disconnected, a client may continue local
 speculation but must not enqueue previously claimed derived writes. Reconnect
 first negotiates the capability and applies a complete claim snapshot for the
-exact branch at a feed-sequence barrier; only then may newly unclaimed work
-flush. Source, handler, and direct UI commits keep their existing offline
-behavior.
+exact branch at a feed-sequence barrier, followed by any missed successful
+settlement frontiers for those exact live incarnations; only then may newly
+unclaimed work flush. Source, handler, and direct UI commits keep their
+existing offline behavior.
 
 Trusted compatible clients cooperate with this split in the first iteration.
 Later server admission and CFC policy can reject commits that conflict with a
@@ -653,6 +655,13 @@ settlement is published only after the normal confirmed-read validation has
 accepted the data or observation-only transaction; `inputBasisSeq` is not an
 unverified Worker assertion. Commit patches, claim snapshots/revokes, and every
 settlement outcome share an ordered reconnectable feed with sequence barriers.
+A bounded reconnect snapshot coalesces successful outcomes newer than its
+acknowledged cursor per exact live incarnation: it carries the maximum covered
+input basis, the newest successful feed sequence, and the maximum committed
+data-application gate. Clients install claims first and apply that frontier
+once; ack, revoke, and reclaim prune it. Thus suffix eviction cannot strand an
+overlay or bypass `acceptedCommitSeq`, and retained successes are not delivered
+twice.
 A committed settlement always names its `acceptedCommitSeq`; if control arrives
 first, the client buffers it until its confirmed/feed cursor reaches that
 sequence. This is an additional data-application gate, not a substitute for
@@ -762,7 +771,11 @@ and is separately attributable. It never signs client-pulled work.
   next claim issuance increments it, so delayed settlement cannot target the
   new incarnation. The attempt's exact assertion also prevents a delayed write
   from being attributed to that new incarnation or silently becoming an
-  ordinary unclaimed write.
+  ordinary unclaimed write. More generally, every first-application semantic
+  transaction on a host-bound executor session must resolve exactly one live
+  claimed-action incarnation inside the lease-fenced transaction; assertion-
+  free semantic writes fail atomically. Exact accepted replay is checked first
+  and remains idempotent after revoke.
 - **Sponsor disconnect:** the lease enters a bounded teardown drain and fences
   every new first application immediately; exact accepted replays remain
   idempotent. The worker then restarts under another eligible requester. It
@@ -771,7 +784,8 @@ and is separately attributable. It never signs client-pulled work.
 - **Client offline:** source writes queue (pending commits) and local overlays
   keep the UI coherent, but previously claimed derived writes do not flush
   merely because the connection disappeared. Reconnect applies the
-  authoritative claim snapshot before derived work resumes. True offline
+  authoritative claim snapshot and any missed successful settlement frontier
+  before derived work resumes. True offline
   (persisted pending queue) remains a separate, orthogonal gap — the replica
   is in-memory today.
 - **Executor crash mid-settle:** observations persist per commit;

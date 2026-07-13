@@ -142,8 +142,9 @@ export class SessionRegistry {
         session.executionFeedSeq ?? 0,
       ),
     );
-    // Every reconnect carries a complete claim snapshot, so a client older
-    // than this retained suffix is safely restored through that snapshot.
+    // Every reconnect carries a complete claim snapshot plus successful
+    // settlement frontiers, so a client older than this retained suffix can
+    // restore both authority and overlay reconciliation state.
     const executionEvents = (existing?.executionEvents ?? []).filter((entry) =>
       entry.feedSeq > executionFeedAckSeq
     ).slice(-this.#maxExecutionEvents);
