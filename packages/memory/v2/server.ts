@@ -2544,12 +2544,13 @@ export class Server {
     );
   }
 
-  #drainIneligibleExecutionLeases(
+  async #drainIneligibleExecutionLeases(
     engine: Engine.Engine,
     space: string,
     options: { policyDisabled?: boolean } = {},
-  ): ReadonlySet<BranchName> {
+  ): Promise<ReadonlySet<BranchName>> {
     const affectedBranches = new Set<BranchName>();
+    const drains: Promise<void>[] = [];
     for (const authority of this.#ownedExecutionLeases.values()) {
       const lease = authority.handle;
       if (
@@ -2563,10 +2564,14 @@ export class Server {
       ) continue;
       authority.drainRequested = true;
       affectedBranches.add(lease.branch);
-      this.#trackExecutionLeaseTask(
-        this.beginExecutionLeaseDrain(lease).then(() => undefined),
-      );
+      const drain = this.beginExecutionLeaseDrain(lease).then(() => undefined);
+      this.#trackExecutionLeaseTask(drain);
+      drains.push(drain);
     }
+    // The policy/ACL commit is already durable, so lifecycle failures remain
+    // contained by the tracked-task logger. Successful drains, however, must
+    // reach durable `draining` before replacement demand is reconciled.
+    await Promise.allSettled(drains);
     return affectedBranches;
   }
 
@@ -4724,7 +4729,7 @@ export class Server {
               message.sessionId,
             );
             for (
-              const branch of this.#drainIneligibleExecutionLeases(
+              const branch of await this.#drainIneligibleExecutionLeases(
                 engine,
                 message.space,
               )
@@ -4735,7 +4740,7 @@ export class Server {
           if (executionPolicyTouched) {
             if (!this.#reconcileExecutionPolicy(engine, message.space)) {
               for (
-                const branch of this.#drainIneligibleExecutionLeases(
+                const branch of await this.#drainIneligibleExecutionLeases(
                   engine,
                   message.space,
                   { policyDisabled: true },

@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
 import { Server } from "../v2/server.ts";
 
@@ -52,6 +52,78 @@ const connect = (
       serverPrimaryExecutionBuiltinPassivityV1: capable,
     },
   }).then((client) => ({ client, auth: authFactory(principal) }));
+
+class GatedDrainServer extends Server {
+  readonly drainStarted = Promise.withResolvers<void>();
+  readonly releaseDrain = Promise.withResolvers<void>();
+
+  override async beginExecutionLeaseDrain(
+    lease: Parameters<Server["beginExecutionLeaseDrain"]>[0],
+  ): ReturnType<Server["beginExecutionLeaseDrain"]> {
+    this.drainStarted.resolve();
+    await this.releaseDrain.promise;
+    return await super.beginExecutionLeaseDrain(lease);
+  }
+}
+
+Deno.test("policy disable waits for the old lease to enter draining before responding", async () => {
+  const server = new GatedDrainServer({
+    store: new URL("memory://execution-policy-drain-barrier"),
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: { audience: AUDIENCE },
+    acl: { mode: "off", serviceDids: [OWNER] },
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+    },
+  });
+  const ownerConnection = await connect(server, OWNER, true);
+  const owner = await ownerConnection.client.mount(
+    SPACE,
+    {},
+    ownerConnection.auth,
+  );
+  let disableSettled = false;
+  let disable: Promise<unknown> | undefined;
+  try {
+    await owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: POLICY_ID,
+        value: { value: { version: 1, serverPrimaryExecution: true } },
+      }],
+    });
+    await owner.setExecutionDemand("", ["space:of:policy-drain-piece"]);
+    assertExists(await server.acquireExecutionLease(SPACE, ""));
+
+    disable = owner.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: POLICY_ID,
+        value: { value: { version: 1, serverPrimaryExecution: false } },
+      }],
+    }).finally(() => {
+      disableSettled = true;
+    });
+    await server.drainStarted.promise;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assertEquals(disableSettled, false);
+  } finally {
+    server.releaseDrain.resolve();
+    await disable?.catch(() => undefined);
+    await ownerConnection.client.close();
+    await server.close();
+  }
+});
 
 Deno.test("execution policy is strict, owner-managed, and cannot be enabled around a stale session", async () => {
   const server = createServer();
