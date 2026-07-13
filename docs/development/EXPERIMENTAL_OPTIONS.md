@@ -34,7 +34,7 @@ was last checked against the code.
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
 | [`systemPatternAutoUpdateHome`](#systempatternautoupdatehome) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` env / shell build define, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#4611) | on after the home.tsx stable-addressing audit | implemented, off by default |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 (redesigned: `computed:` URI scheme) |
-| [`computedDropPolicy`](#computeddroppolicy) | `EXPERIMENTAL_COMPUTED_DROP_POLICY` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on together with `computedCellIds`, then delete both | in development on robin/feat-computed-cell-identity-p2 |
+| [`computedDropPolicy`](#computeddroppolicy) | `EXPERIMENTAL_COMPUTED_DROP_POLICY` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on together with `computedCellIds`, then delete both | in development on robin/feat-computed-drop-policy (stacked on the minting branch) |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -69,9 +69,10 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Six flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+Seven flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
 `eagerSourceAnnotation`, `systemPatternAutoUpdate`,
-`systemPatternAutoUpdateHome`, `computedCellIds`); `commitPreconditions` is
+`systemPatternAutoUpdateHome`, `computedCellIds`, `computedDropPolicy`);
+`commitPreconditions` is
 deliberately mapped to `null` there, which records "not env-reachable" as a
 decision rather than an omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
