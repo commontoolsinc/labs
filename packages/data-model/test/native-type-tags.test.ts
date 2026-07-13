@@ -37,6 +37,23 @@ describe("native-type-tags", () => {
       expect(tagFromNativeValue(exotic)).toBe(NATIVE_TAGS.Error);
     });
 
+    it("retains the native Error brand check after SES removes the static", () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
+      try {
+        Object.defineProperty(Error, "isError", {
+          ...descriptor,
+          value: undefined,
+        });
+        expect(tagFromNativeValue(new DOMException("locked down"))).toBe(
+          NATIVE_TAGS.Error,
+        );
+      } finally {
+        if (descriptor !== undefined) {
+          Object.defineProperty(Error, "isError", descriptor);
+        }
+      }
+    });
+
     it("returns `Map` tag for `Map` instances", () => {
       expect(tagFromNativeValue(new Map())).toBe(NATIVE_TAGS.Map);
     });

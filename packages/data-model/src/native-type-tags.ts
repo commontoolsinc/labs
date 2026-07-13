@@ -5,6 +5,12 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
+// SES lockdown replaces/tames selected intrinsics, including removing newer
+// Error statics. Capture the host-realm brand check while the module graph is
+// initialized so async builtin error writebacks can still recognize errors
+// after a Runtime installs SES.
+const isNativeError = Error.isError.bind(Error);
+
 /**
  * Tags identifying classes that the fabric system recognizes for dispatch.
  * These are distinct from wire-format `TAGS` -- they identify *what the value
@@ -155,7 +161,7 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   // Fallbacks for values whose constructor wasn't recognized (tag === null).
   if (tag === null) {
     // Exotic `Error` subclasses (e.g. `DOMException`).
-    if (Error.isError(value)) return NATIVE_TAGS.Error;
+    if (isNativeError(value)) return NATIVE_TAGS.Error;
 
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
