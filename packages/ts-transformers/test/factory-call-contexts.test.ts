@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 
+import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { callsNamed, literalToValue, parseModule } from "./transformed-ast.ts";
 import { transformSource } from "./utils.ts";
@@ -109,6 +110,105 @@ Deno.test(
       output.includes("asFactory"),
       "scheduled callback schemas must retain factory contracts",
     );
+  },
+);
+
+for (
+  const [label, declaration] of [
+    [
+      "arrow",
+      `const callback = (input: ScheduledInput) =>
+        input.operation({ value: input.value });`,
+    ],
+    [
+      "function expression",
+      `const callback = function (input: ScheduledInput) {
+        return input.operation({ value: input.value });
+      };`,
+    ],
+    [
+      "function declaration",
+      `function callback(input: ScheduledInput) {
+        return input.operation({ value: input.value });
+      }`,
+    ],
+  ] as const
+) {
+  Deno.test(
+    `factory parameters delivered to a referenced ${label} lift callback remain direct`,
+    async () => {
+      const diagnostics: TransformationDiagnostic[] = [];
+      const output = await transformSource(
+        `
+        import { lift, type PatternFactory } from "commonfabric";
+
+        interface Input { value: number }
+        interface Output { result: number }
+        interface ScheduledInput {
+          operation: PatternFactory<Input, Output>;
+          value: number;
+        }
+
+        ${declaration}
+        export const apply = lift(callback);
+      `,
+        {
+          types: COMMONFABRIC_TYPES,
+          typeCheck: true,
+          pipelineDiagnostics: diagnostics,
+        },
+      );
+
+      assertEquals(
+        diagnostics.filter((diagnostic) =>
+          diagnostic.type === "factory-call:untransformable-symbolic-proxy"
+        ),
+        [],
+      );
+      assertEquals(
+        invokeFactoryContracts(output),
+        [],
+        "referenced scheduled callbacks receive runner-materialized factories",
+      );
+      assert(output.includes("asFactory"));
+    },
+  );
+}
+
+Deno.test(
+  "a referenced handler callback receives materialized factory parameters",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+      import { handler, type ModuleFactory } from "commonfabric";
+
+      interface Input { value: number }
+      interface Output { result: number }
+      function callback(
+        event: { value: number },
+        context: { operation: ModuleFactory<Input, Output> },
+      ) {
+        return context.operation({ value: event.value });
+      }
+
+      export const react = handler(callback);
+    `,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(
+      diagnostics.filter((diagnostic) =>
+        diagnostic.type === "factory-call:untransformable-symbolic-proxy"
+      ),
+      [],
+    );
+    assertEquals(invokeFactoryContracts(output), []);
+    assert(output.includes("asFactory"));
   },
 );
 

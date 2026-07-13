@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import {
   detectCallKind,
@@ -20,6 +21,9 @@ import {
 } from "../policy/framework-provided.ts";
 
 type FunctionExpression = ts.ArrowFunction | ts.FunctionExpression;
+type ResolvedFunction =
+  | FunctionExpression
+  | (ts.FunctionDeclaration & { readonly body: ts.Block });
 
 /** Structurally forward protected aliases before symbolic call lowering. */
 export class FrameworkProvidedForwardingTransformer
@@ -116,7 +120,7 @@ export class FrameworkProvidedTransformer extends HelpersOnlyTransformer {
 }
 
 function frameworkPathsForCallback(
-  callback: FunctionExpression,
+  callback: ResolvedFunction,
   context: TransformationContext,
 ): readonly FrameworkProvidedPath[] {
   const paths: FrameworkProvidedPath[] = [];
@@ -180,7 +184,7 @@ function resolveFunction(
   expression: ts.Expression,
   checker: ts.TypeChecker,
   seen = new Set<ts.Symbol>(),
-): FunctionExpression | undefined {
+): ResolvedFunction | undefined {
   const target = unwrapExpression(expression);
   if (ts.isArrowFunction(target) || ts.isFunctionExpression(target)) {
     return target;
@@ -193,6 +197,11 @@ function resolveFunction(
     symbol = checker.getAliasedSymbol(symbol);
   }
   for (const declaration of symbol.getDeclarations() ?? []) {
+    if (ts.isFunctionDeclaration(declaration) && declaration.body) {
+      return declaration as ts.FunctionDeclaration & {
+        readonly body: ts.Block;
+      };
+    }
     if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
       const resolved = resolveFunction(declaration.initializer, checker, seen);
       if (resolved) return resolved;
@@ -740,7 +749,7 @@ function mergePaths(
   const byKey = new Map<string, FrameworkProvidedPath>();
   for (const path of groups.flat()) byKey.set(JSON.stringify(path), [...path]);
   return [...byKey.values()].sort((a, b) =>
-    JSON.stringify(a).localeCompare(JSON.stringify(b))
+    utf8Compare(JSON.stringify(a), JSON.stringify(b))
   );
 }
 

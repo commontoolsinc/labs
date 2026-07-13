@@ -2,7 +2,7 @@ import { assertEquals, assertStringIncludes } from "@std/assert";
 
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
-import { callsNamed, parseModule } from "./transformed-ast.ts";
+import { callsNamed, literalToValue, parseModule } from "./transformed-ast.ts";
 import { transformSource, validateSource } from "./utils.ts";
 
 const FRAMEWORK_PROVIDED_WRAPPER =
@@ -148,6 +148,37 @@ export const privilegedHandler = handler<
       callsNamed(parseModule(output), "withFrameworkProvidedPaths").length,
       3,
     );
+  },
+);
+
+Deno.test(
+  "compiler orders FrameworkProvided metadata by UTF-8 bytes",
+  async () => {
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+export const privilegedPattern = pattern<{
+  z: FrameworkProvided<string>;
+  ä: FrameworkProvided<string>;
+  "😊": FrameworkProvided<string>;
+}>((input) => input);
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+      },
+    );
+
+    const [metadata] = callsNamed(
+      parseModule(output),
+      "withFrameworkProvidedPaths",
+    );
+    assertEquals(literalToValue(metadata!.arguments[1]!), [
+      ["z"],
+      ["ä"],
+      ["😊"],
+    ]);
   },
 );
 

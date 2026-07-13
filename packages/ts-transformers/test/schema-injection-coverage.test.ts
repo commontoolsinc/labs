@@ -573,6 +573,21 @@ Deno.test("handler resolves a referenced function declaration callback", async (
   assert(Object.keys(state.properties as Obj).includes("count"));
 });
 
+Deno.test("pattern resolves a referenced function declaration callback", async () => {
+  const output = await t([
+    "/// <cts-enable />",
+    'import { pattern } from "commonfabric";',
+    "function callback(input: { value: number }) {",
+    "  return { result: input.value };",
+    "}",
+    "export const operation = pattern(callback);",
+  ].join("\n"));
+  const [input, result] = callSchemas(parseModule(output), "pattern");
+
+  assertEquals((input.properties as Obj).value.type, "number");
+  assertEquals((result.properties as Obj).result.type, "number");
+});
+
 // ---------------------------------------------------------------------------
 // cell scope: call form cell.perSession(...), and PerSession contextual scope
 // ---------------------------------------------------------------------------

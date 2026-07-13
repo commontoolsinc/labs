@@ -16,6 +16,16 @@ export type FactoryValueOrigin =
 
 export type FactoryCallExposure = "symbolic" | "runtime-materialized";
 
+type ScheduledCallback =
+  | ts.ArrowFunction
+  | ts.FunctionExpression
+  | ts.FunctionDeclaration;
+
+const referencedScheduledCallbackCache = new WeakMap<
+  ts.TypeChecker,
+  WeakMap<ScheduledCallback, boolean>
+>();
+
 export interface FactoryCalleeClassification {
   readonly members: readonly FactoryTypeInfo[];
   readonly hasNonFactoryMember: boolean;
@@ -87,7 +97,17 @@ export function classifyFactoryCallExposure(
 ): FactoryCallExposure | undefined {
   let current: ts.Node | undefined = node.parent;
   while (current) {
-    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+    if (
+      ts.isArrowFunction(current) || ts.isFunctionExpression(current) ||
+      ts.isFunctionDeclaration(current)
+    ) {
+      if (isReferencedScheduledCallback(current, checker)) {
+        return "runtime-materialized";
+      }
+      if (ts.isFunctionDeclaration(current)) {
+        current = current.parent;
+        continue;
+      }
       const semantics = getCallbackBoundarySemantics(current, checker);
       if (semantics.decision.kind === "supported") {
         switch (semantics.decision.boundaryKind) {
@@ -273,9 +293,16 @@ function classifyParameterOrigin(
   checker: ts.TypeChecker,
 ): FactoryValueOrigin {
   const owner = parameter.parent;
-  if (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner)) {
+  if (
+    !ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner) &&
+    !ts.isFunctionDeclaration(owner)
+  ) {
     return "unknown";
   }
+  if (isReferencedScheduledCallback(owner, checker)) {
+    return "runtime-materialized";
+  }
+  if (ts.isFunctionDeclaration(owner)) return "unknown";
   const semantics = getCallbackBoundarySemantics(owner, checker);
   if (semantics.decision.kind !== "supported") return "unknown";
 
@@ -293,6 +320,107 @@ function classifyParameterOrigin(
     default:
       return "unknown";
   }
+}
+
+/**
+ * Referenced callbacks are not syntactically nested in their owning builder
+ * call, so the ordinary ancestor-based callback-boundary policy cannot see
+ * them. Resolve stable local callback references at their scheduled builder
+ * use site and give their parameters the same runner-materialized exposure as
+ * an equivalent inline callback.
+ */
+function isReferencedScheduledCallback(
+  callback: ScheduledCallback,
+  checker: ts.TypeChecker,
+): boolean {
+  let checkerCache = referencedScheduledCallbackCache.get(checker);
+  if (!checkerCache) {
+    checkerCache = new WeakMap();
+    referencedScheduledCallbackCache.set(checker, checkerCache);
+  }
+  const cached = checkerCache.get(callback);
+  if (cached !== undefined) return cached;
+
+  let scheduled = false;
+  let symbolic = false;
+  const visit = (node: ts.Node): void => {
+    if (scheduled && symbolic) return;
+    if (ts.isCallExpression(node)) {
+      const callKind = detectCallKind(node, checker);
+      if (
+        callKind?.kind === "builder" &&
+        (callKind.builderName === "lift" ||
+          callKind.builderName === "handler" ||
+          callKind.builderName === "computed" ||
+          callKind.builderName === "action" ||
+          callKind.builderName === "pattern" ||
+          callKind.builderName === "render")
+      ) {
+        const ownsCallback = node.arguments.some((argument) =>
+          resolveCallbackReference(argument, checker, new Set()) === callback
+        );
+        if (ownsCallback) {
+          if (
+            callKind.builderName === "pattern" ||
+            callKind.builderName === "render"
+          ) {
+            symbolic = true;
+          } else {
+            scheduled = true;
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(callback.getSourceFile());
+  const materializedOnly = scheduled && !symbolic;
+  checkerCache.set(callback, materializedOnly);
+  return materializedOnly;
+}
+
+function resolveCallbackReference(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seen: Set<ts.Node>,
+): ScheduledCallback | undefined {
+  const target = unwrapExpression(expression);
+  if (seen.has(target)) return undefined;
+  seen.add(target);
+
+  if (ts.isArrowFunction(target) || ts.isFunctionExpression(target)) {
+    return target;
+  }
+  if (
+    ts.isCallExpression(target) && target.arguments.length === 1 &&
+    ts.isIdentifier(unwrapExpression(target.expression)) &&
+    (unwrapExpression(target.expression) as ts.Identifier).text.startsWith(
+      "__cfHardenFn",
+    )
+  ) {
+    return resolveCallbackReference(target.arguments[0]!, checker, seen);
+  }
+  if (!ts.isIdentifier(target)) return undefined;
+
+  let symbol = checker.getSymbolAtLocation(target);
+  if (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    try {
+      symbol = checker.getAliasedSymbol(symbol);
+    } catch {
+      return undefined;
+    }
+  }
+  const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+  if (declaration && ts.isFunctionDeclaration(declaration)) {
+    return declaration;
+  }
+  if (
+    declaration && ts.isVariableDeclaration(declaration) &&
+    declaration.initializer
+  ) {
+    return resolveCallbackReference(declaration.initializer, checker, seen);
+  }
+  return undefined;
 }
 
 function findOwningParameter(

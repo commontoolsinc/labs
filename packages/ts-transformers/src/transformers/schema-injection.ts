@@ -3574,14 +3574,16 @@ function handlePatternSchemaInjection(
   const argsArray = Array.from(node.arguments);
 
   const callbackDescriptor = getPatternBuilderCallbackDescriptor(node, checker);
-  if (!callbackDescriptor) {
+  const callbackArgument = node.arguments[0];
+  const builderFunction = callbackDescriptor?.callback ??
+    resolveFunctionLikeExpression(callbackArgument, checker, sourceFile);
+  if (!builderFunction || !callbackArgument) {
     return undefined; // No function found - skip transformation
   }
   const builderFunctionArg = {
-    expression: callbackDescriptor.argument,
-    callback: callbackDescriptor.callback,
+    expression: callbackDescriptor?.argument ?? callbackArgument,
+    callback: builderFunction,
   };
-  const builderFunction = callbackDescriptor.callback;
   const patternReturnExpr = getCallbackReturnExpression(builderFunction);
   const unwrappedPatternReturnExpr = patternReturnExpr
     ? unwrapExpression(patternReturnExpr)

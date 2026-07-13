@@ -204,6 +204,43 @@ export const apply = lift((input: {
 );
 
 Deno.test(
+  "a privileged dynamic factory call inside a referenced lift callback fails closed",
+  async () => {
+    const { diagnostics } = await validateSource(
+      `
+import {
+  lift,
+  type FrameworkProvided,
+  type PatternFactory,
+} from "commonfabric";
+
+type Privileged = PatternFactory<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>;
+
+function callback(input: {
+  operation: Privileged;
+  command: string;
+}) {
+  return input.operation({ command: input.command } as any);
+}
+
+export const apply = lift(callback);
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+      },
+    );
+
+    const failures = diagnosticsOfType(diagnostics, SCHEDULED_FACTORY_CALL);
+    assertEquals(failures.length, 1);
+    assertStringIncludes(failures[0]!.message, "sandboxId");
+  },
+);
+
+Deno.test(
   "a widened scheduled factory boundary emits an explicitly unprivileged call contract",
   async () => {
     const { diagnostics, output } = await validateSource(
