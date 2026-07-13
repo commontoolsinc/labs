@@ -1,8 +1,10 @@
 # Server-Primary Execution
 
-Status: Phases 0–2 and W2.4's local rollout gates are implemented behind the
-default-off flag. The deployed-staging enable/disable drill remains pending;
-Phases 3+ remain design. Author: design session
+Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
+and deterministic failure gates are locally validated, while its long-run
+browser/CPU gate is blocked on a claim-readiness failure and the deployed-
+staging enable/disable drill remains pending; Phases 3+ remain design. Author:
+design session
 2026-07-06; revised 2026-07-07 (doc-centric demand, SQLite-primary state,
 transient executor passes, reactive interpreter de-scoped); revised
 2026-07-11 after implementation review (scheduler-v2 as the base, user-
@@ -1270,15 +1272,17 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   transfer plus indexed parked-reader wake (G0/G2/G3/G4). Background-registry
   consolidation is deferred, but legacy-owned spaces are excluded immediately
   so a second server Worker cannot start.
-- **Phase 2 — positive B claims (implemented and locally validated,
-  default-off).** Add client overlay routing, ephemeral
+- **Phase 2 — positive B claims (implemented; local rollout validation in
+  progress, default-off).** Add client overlay routing, ephemeral
   `ExecutionClaim`, `ActionSettlement.inputBasisSeq`, whole-action scope
   firewall, passive claimed builtins, and egress parity (G5/G10/G11). Measure
   conflict rate, multi-client action volume, divergence, revocations, and
-  fallback latency. Fallback is claim removal. The operator runbook, literal
-  multi-client product fixtures, deterministic local enable/disable and failure
-  drills, and browser CPU measurement are complete. A deployed-staging policy
-  drill remains to be recorded. The browser measurement is recorded in the
+  fallback latency. Fallback is claim removal. The operator runbook,
+  product-derived/literal multi-client fixtures, and deterministic local
+  enable/disable and failure drills are complete. The long-run browser gate
+  currently exposes a claim-readiness failure, so CPU acceptance and a
+  deployed-staging policy drill remain pending. The initial, superseded
+  occupancy-proxy measurement is retained only as a historical snapshot in the
   [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md).
 - **Phase 3 — background demand + narrower feeds.** Fold existing background
   registrations into the same lower-priority pool and retire graph-query

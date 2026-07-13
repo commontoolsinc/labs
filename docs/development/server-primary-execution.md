@@ -142,8 +142,11 @@ HEADLESS=1 \
 deno task integration patterns server-primary-rollout-profile
 ```
 
-The local A/B/B/A browser measurement and its limitations are recorded in the
-[Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-12.md).
-Phase 2 removes duplicate wire writes and external effects while deliberately
-leaving speculative browser compute in place. Complete-closure client-compute
+The initial A/B/B/A sampling snapshot and its limitations are retained in the
+[historical Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-12.md),
+but it is not current CPU acceptance evidence. The reliable renderer-process
+gate remains blocked until a claimed long-run phase cannot suppress client
+writes without a corresponding server attempt and settlement. Phase 2 removes
+duplicate wire writes and external effects while deliberately leaving
+speculative browser compute in place. Complete-closure client-compute
 suppression remains the separately gated Phase 3 optimization.

@@ -167,7 +167,8 @@ propagate](#how-flags-propagate).
   policy, and the ordered reconnectable
   claim/settlement feed are implemented. Exact claim routing, causal client
   overlays, claimed-builtin passivity, failure drills, and the local Phase 2
-  product/browser rollout gates are also implemented; off remains
+  product-derived/literal rollout gates are also implemented. The long-run
+  browser/CPU gate remains blocked on claim readiness; off remains
   client-primary behavior. The narrower
   `serverPrimaryExecutionClaimRoutingV1` and
   `serverPrimaryExecutionBuiltinPassivityV1` capabilities now advertise with

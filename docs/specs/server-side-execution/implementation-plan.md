@@ -3,9 +3,11 @@
 Companion to [README.md](./README.md). Read the design first; this plan turns
 it into reviewable, red-green work orders.
 
-Status: Phases 0–2 and W2.4's local rollout gates are implemented behind the
-default-off flag. The deployed-staging enable/disable drill remains pending.
-Later background, feed, scoped, and handler work is outlined only.
+Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
+and deterministic failure gates are locally validated; its browser/CPU gate is
+blocked on a claim-readiness failure, and the deployed-staging enable/disable
+drill remains pending. Later background, feed, scoped, and handler work is
+outlined only.
 
 Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
 its facade, commit-gated starts, cancellation semantics, bounded settle,
@@ -1069,11 +1071,12 @@ per-action sink authority decision and pre-claim in-flight handoff.
 
 **Depends on:** W1.5, W2.2, W2.3.
 
-**Status:** implemented and locally validated, with one operational gate still
-pending. The owner CLI, runbook,
-bounded-cardinality health/latency signals, literal-product multi-client
-fixtures, deterministic authority/failure drills, and browser CPU measurement
-are present. A deployed-staging enable/disable drill is not yet recorded.
+**Status:** implementation and local validation are in progress. The owner CLI,
+runbook, bounded-cardinality health/latency signals, product-derived/literal
+multi-client fixtures, and deterministic authority/failure drills are present.
+The long-run browser gate currently exposes a claim-readiness failure (clients
+suppress while the live server lane produces no attempt or settlement), so CPU
+acceptance remains pending along with the deployed-staging enable/disable drill.
 
 **Deliverable:** perf fixtures, operational metrics, and an enable/disable
 runbook using serverPrimaryExecution plus optional executionPolicy.
@@ -1090,14 +1093,17 @@ runbook using serverPrimaryExecution plus optional executionPolicy.
 
 **Success criteria:**
 
-- [x] Multi-client literal lunch-poll/group-chat fixtures prove the Phase 2
-      authority split (`server-execution-rollout-products.test.ts`): a
-      claimable lunch-poll action gets one server attempt per invalidation and
-      zero client-derived wire writes; group-chat's entity-backed room-count
-      action gets an exact `unserved` settlement and revoke, then converges via
-      deterministic client-primary fallback with no committed/no-op server
-      settlement. Static claim surfaces for both full transformed products are
-      also certified by `server-execution-product-fixtures.test.ts`.
+- [x] Multi-client product-derived/literal fixtures prove the Phase 2 authority
+      split (`server-execution-rollout-products.test.ts`): a directly demanded
+      lunch-poll-derived PerSpace `voteCount` scalar gets one shared server
+      attempt per invalidation and zero client-derived wire writes across three
+      client demands; literal group-chat's nested entity-backed room-name
+      projection gets an exact `unserved` settlement and revoke, then converges
+      via deterministic three-client fallback with no committed/no-op server
+      settlement. The positive lunch case is intentionally not described as
+      full-product root behavior: the unchanged full transformed lunch-poll and
+      group-chat claim/firewall surfaces are certified separately by
+      `server-execution-product-fixtures.test.ts`.
 - [x] Pure-computation output and derived-wire-commit counts remain identical
       under flag-off/flag-on runs for unclaimed PerSpace, PerUser, PerSession,
       and cross-space cases (`server-execution-rollout-products.test.ts`).
@@ -1107,9 +1113,12 @@ runbook using serverPrimaryExecution plus optional executionPolicy.
       migration"); a deployed-staging CLI drill and record are still required.
 - [x] Kill/restart/sponsor-loss drills demonstrate fail-open authority and no
       duplicate worker commits (`executor-drain-barrier.test.ts`).
-- [x] Browser compute and lazy-client CPU are measured; the first local
-      A/B/B/A rollout is no worse, and later complete-closure suppression is
-      tracked explicitly in Phase 3. See the
+- [ ] Browser compute and lazy-client CPU are measured with a reliable
+      lazy-browser renderer-process counter, but no A/B/B/A result is accepted
+      while the long-run claimed phase can suppress client writes without a
+      server attempt or settlement. Fix that authority-readiness failure, then
+      demonstrate the first rollout is no worse; later complete-closure
+      suppression remains tracked explicitly in Phase 3. See the
       [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md)
       and `server-primary-rollout-profile.test.ts`.
 
