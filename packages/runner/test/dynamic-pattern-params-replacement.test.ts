@@ -168,10 +168,11 @@ describe("dynamic pattern params replacement", () => {
     releasePending = [];
     runtime.patternManager.artifactFromIdentitySync = (identity, symbol) =>
       warmArtifacts.get(refKey(identity, symbol));
+    // Destination durability and this runtime's warm artifact cache are
+    // independent. Both refs are already published in the destination; later
+    // deleting A from warmArtifacts exercises cold local loading only.
     runtime.patternManager.isArtifactAvailableInSpace = (identity) =>
-      [...warmArtifacts.keys()].some((candidate) =>
-        candidate.startsWith(`${identity}#`)
-      );
+      identity === REFS.a.identity || identity === REFS.b.identity;
   });
 
   afterEach(async () => {

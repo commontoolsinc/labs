@@ -565,6 +565,10 @@ Publication preserves the memory system's optimistic local-commit contract:
 4. Wire submission for that logical session is held until preparation finishes.
    Later transactions may build on the speculative overlay, but their wire
    commits cannot pass the blocked lower `localSeq`.
+   An absent or already-released predecessor is not an asynchronous gate: a
+   warm unblocked commit enters the session's causal chain with the established
+   commit timing, including conflict-response ownership during concurrent
+   shutdown.
 5. The server applies the artifact ensures and the containing value atomically.
    A deterministic preparation or integrity failure rejects the containing
    commit and follows ordinary speculative-revert and dependent-commit rules.

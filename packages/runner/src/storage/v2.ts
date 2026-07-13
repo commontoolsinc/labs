@@ -1744,7 +1744,7 @@ class SpaceReplica implements ISpaceReplica {
   #watchRefreshFlushing = false;
   // Wire sends are released in localSeq order. A cold artifact preparation may
   // hold one turn without delaying later transactions' optimistic local apply.
-  #wireSendTail: Promise<void> = Promise.resolve();
+  #wireSendTail: Promise<void> | undefined;
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
@@ -2716,9 +2716,12 @@ class SpaceReplica implements ISpaceReplica {
       if (turnReleased) return;
       turnReleased = true;
       turn.resolve();
+      if (this.#wireSendTail === turn.promise) {
+        this.#wireSendTail = undefined;
+      }
     };
     const releaseTurnInOrder = async () => {
-      await predecessor;
+      if (predecessor !== undefined) await predecessor;
       releaseTurn();
     };
     // Strategy 1: a commit whose read set lands on a still-catching-up id.
@@ -2813,7 +2816,7 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
       const { session } = await this.sessionHandle();
-      await predecessor;
+      if (predecessor !== undefined) await predecessor;
       const submitted = session.transact(submittedCommit);
       // Release the next localSeq as soon as this commit has entered the
       // session's causal chain; confirmation is intentionally not serialized.

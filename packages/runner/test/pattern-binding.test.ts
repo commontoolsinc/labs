@@ -275,6 +275,11 @@ describe("pattern-binding", () => {
 
   describe("sendValueToBinding", () => {
     it("writes an admitted factory atomically through a redirect binding", () => {
+      // This seam test uses a fabricated ref without a source closure. Model a
+      // valid already-published artifact so the binding assertion is not also
+      // testing the publication trust gate.
+      runtime.patternManager.isArtifactAvailableInSpace = (identity) =>
+        identity === FACTORY_REF.identity;
       const testCell = runtime.getCell<{ factory?: unknown }>(
         space,
         "factory redirect binding",
