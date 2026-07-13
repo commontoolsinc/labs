@@ -64,6 +64,10 @@ type FactoryContractHint = NonNullable<
   SchemaHint["factoryContracts"]
 >[number];
 type CellScope = "space" | "user" | "session";
+type SchemaCallback =
+  | ts.ArrowFunction
+  | ts.FunctionExpression
+  | ts.FunctionDeclaration;
 
 const SCOPE_ALIAS_TO_CELL_SCOPE: ReadonlyMap<string, CellScope | "any"> =
   new Map([
@@ -154,7 +158,7 @@ function extractCellLikeInnerTypeNode(
 }
 
 function parameterUsesCellLikeMethods(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: SchemaCallback,
   index: number,
 ): boolean {
   const parameter = fn.parameters[index];
@@ -168,7 +172,7 @@ function parameterUsesCellLikeMethods(
   const visit = (node: ts.Node): void => {
     if (usesCellLikeMethods) return;
     if (
-      node !== fn && (ts.isArrowFunction(node) || ts.isFunctionExpression(node))
+      node !== fn && ts.isFunctionLike(node)
     ) {
       return;
     }
@@ -242,7 +246,7 @@ function capabilitySummaryMemoFor(
 }
 
 function findCapabilitySummaryForParameter(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: SchemaCallback,
   index: number,
   context?: TransformationContext,
   options?: {
@@ -293,7 +297,7 @@ function findCapabilitySummaryForParameter(
 }
 
 function applyCapabilitySummaryToArgument(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: SchemaCallback,
   argumentNode: ts.TypeNode | undefined,
   argumentType: ts.Type | undefined,
   checker: ts.TypeChecker,
@@ -362,7 +366,7 @@ function applyCapabilitySummaryToArgument(
 }
 
 function applyCapabilitySummaryToParameter(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: SchemaCallback,
   parameterIndex: number,
   parameterNode: ts.TypeNode | undefined,
   parameterType: ts.Type | undefined,
@@ -422,7 +426,7 @@ function applyCapabilitySummaryToParameter(
 }
 
 function collectFunctionSchemaTypeNodes(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: SchemaCallback,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
@@ -852,7 +856,7 @@ function resolveNonPatternFactorySchemaContract(
  */
 export function resolvePatternFactorySchemaContract(
   node: ts.CallExpression,
-  callback: ts.ArrowFunction | ts.FunctionExpression,
+  callback: SchemaCallback,
   context: TransformationContext,
 ): PatternFactorySchemaContractHint | undefined {
   const { checker, sourceFile, factory } = context;
@@ -1527,7 +1531,7 @@ function registerInjectedCallResultType(
 }
 
 function applyCallbackBuilderArgumentCapabilitySummary(
-  callback: ts.ArrowFunction | ts.FunctionExpression | undefined,
+  callback: SchemaCallback | undefined,
   argumentTypeNode: ts.TypeNode,
   argumentTypeValue: ts.Type | undefined,
   checker: ts.TypeChecker,
@@ -1567,7 +1571,7 @@ function applyCallbackBuilderArgumentCapabilitySummary(
 }
 
 function resolveDualSchemaBuilderTypes(
-  callback: ts.ArrowFunction | ts.FunctionExpression | undefined,
+  callback: SchemaCallback | undefined,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
@@ -1956,8 +1960,9 @@ function inferLiftFactoryResultType(
 }
 
 function getCallbackReturnExpression(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: SchemaCallback,
 ): ts.Expression | undefined {
+  if (!fn.body) return undefined;
   if (ts.isExpression(fn.body)) {
     return fn.body;
   }
@@ -1972,7 +1977,7 @@ function getCallbackReturnExpression(
 }
 
 function getDirectProjectionPropertyName(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: SchemaCallback,
 ): string | undefined {
   const parameter = fn.parameters[0];
   if (!parameter || !ts.isIdentifier(parameter.name)) {
@@ -2029,7 +2034,7 @@ function findTypeLiteralPropertyTypeNode(
 }
 
 function recoverProjectedResultSchema(
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: SchemaCallback,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
   argumentNode: ts.TypeNode | undefined,
@@ -3059,7 +3064,7 @@ function getParameterSchemaType(
  */
 function inferParameterSchemaType(
   factory: ts.NodeFactory,
-  fn: ts.ArrowFunction | ts.FunctionExpression,
+  fn: SchemaCallback,
   paramIndex: number,
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile,
@@ -3282,7 +3287,7 @@ function resolveLiftAppliedInputAndCallback(
   sourceFile: ts.SourceFile,
 ): {
   input: ts.Expression;
-  callback: ts.ArrowFunction | ts.FunctionExpression;
+  callback: SchemaCallback;
 } | undefined {
   const callKind = detectCallKind(call, checker);
   if (callKind?.kind !== "lift-applied") {
@@ -3313,7 +3318,7 @@ function resolveFunctionLikeExpression(
   expression: ts.Expression | undefined,
   checker: ts.TypeChecker,
   sourceFile?: ts.SourceFile,
-): ts.ArrowFunction | ts.FunctionExpression | undefined {
+): SchemaCallback | undefined {
   return resolveFunctionLikeExpressionInner(
     expression,
     checker,
@@ -3327,7 +3332,7 @@ function resolveFunctionLikeExpressionInner(
   checker: ts.TypeChecker,
   sourceFile: ts.SourceFile | undefined,
   seen: Set<ts.Node>,
-): ts.ArrowFunction | ts.FunctionExpression | undefined {
+): SchemaCallback | undefined {
   if (!expression) {
     return undefined;
   }
@@ -3350,6 +3355,35 @@ function resolveFunctionLikeExpressionInner(
       sourceFile,
       seen,
     );
+  }
+
+  if (ts.isIdentifier(unwrapped)) {
+    const initializer = getVariableInitializer(unwrapped, checker);
+    if (initializer) {
+      return resolveFunctionLikeExpressionInner(
+        initializer,
+        checker,
+        sourceFile,
+        seen,
+      );
+    }
+
+    let symbol = checker.getSymbolAtLocation(unwrapped);
+    if (symbol && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+      try {
+        symbol = checker.getAliasedSymbol(symbol);
+      } catch {
+        return undefined;
+      }
+    }
+    const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+    if (
+      declaration && ts.isFunctionDeclaration(declaration) &&
+      declaration.body &&
+      (sourceFile === undefined || declaration.getSourceFile() === sourceFile)
+    ) {
+      return declaration;
+    }
   }
 
   return undefined;

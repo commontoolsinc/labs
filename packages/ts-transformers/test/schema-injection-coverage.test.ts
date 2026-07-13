@@ -532,6 +532,47 @@ Deno.test("handler(fn) with an underscore-prefixed unused event param yields a f
   assertEquals(values[0], false);
 });
 
+for (
+  const [label, declaration] of [
+    [
+      "arrow",
+      "const callback = (input: { value: number }) => ({ result: input.value });",
+    ],
+    [
+      "function expression",
+      "const callback = function (input: { value: number }) { return { result: input.value }; };",
+    ],
+  ] as const
+) {
+  Deno.test(`lift resolves a referenced ${label} callback`, async () => {
+    const output = await t([
+      "/// <cts-enable />",
+      'import { lift } from "commonfabric";',
+      declaration,
+      "export const operation = lift(callback);",
+    ].join("\n"));
+    const [input, result] = callSchemas(parseModule(output), "lift");
+
+    assertEquals((input.properties as Obj).value.type, "number");
+    assertEquals((result.properties as Obj).result.type, "number");
+  });
+}
+
+Deno.test("handler resolves a referenced function declaration callback", async () => {
+  const output = await t([
+    "/// <cts-enable />",
+    'import { handler, Cell } from "commonfabric";',
+    "function callback(event: { delta: number }, ctx: { count: Cell<number> }) {",
+    "  ctx.count.set(event.delta);",
+    "}",
+    "export const action = handler(callback);",
+  ].join("\n"));
+  const [event, state] = callSchemas(parseModule(output), "handler");
+
+  assertEquals((event.properties as Obj).delta.type, "number");
+  assert(Object.keys(state.properties as Obj).includes("count"));
+});
+
 // ---------------------------------------------------------------------------
 // cell scope: call form cell.perSession(...), and PerSession contextual scope
 // ---------------------------------------------------------------------------
