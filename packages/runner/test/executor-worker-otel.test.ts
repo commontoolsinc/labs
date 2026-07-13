@@ -1,6 +1,9 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
 import type { OtelBridgeOptions } from "../src/telemetry-otel-bridge.ts";
-import { maybeAttachExecutorOtelBridge } from "../src/executor/worker-otel.ts";
+import {
+  disposeExecutorRuntimeAndTelemetry,
+  maybeAttachExecutorOtelBridge,
+} from "../src/executor/worker-otel.ts";
 
 const runtimeStub = () => {
   const telemetry = new EventTarget();
@@ -172,4 +175,26 @@ Deno.test("executor worker OTel contains cleanup failure after partial attach", 
   assertEquals(detach, undefined);
   assertEquals(detaches, 1);
   assertEquals(warnings.length, 2);
+});
+
+Deno.test("executor worker disposes Runtime before telemetry and preserves cleanup", async () => {
+  const calls: string[] = [];
+  const runtimeError = new Error("runtime dispose failed");
+  const warnings: unknown[][] = [];
+
+  const error = await disposeExecutorRuntimeAndTelemetry({
+    dispose() {
+      calls.push("runtime.dispose");
+      return Promise.reject(runtimeError);
+    },
+  }, () => {
+    calls.push("otel.detach");
+    throw new Error("bridge detach failed");
+  }, {
+    warn: (...args: unknown[]) => warnings.push(args),
+  });
+
+  assertEquals(calls, ["runtime.dispose", "otel.detach"]);
+  assertStrictEquals(error, runtimeError);
+  assertEquals(warnings.length, 1);
 });
