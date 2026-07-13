@@ -2201,9 +2201,6 @@ class SpaceReplica implements ISpaceReplica {
       }
       const { session } = await this.sessionHandle();
       const applied = await session.transact(commit);
-      if (applied.droppedComputed !== undefined) {
-        return this.finalizeDroppedComputed(localSeq, operations, source);
-      }
       this.confirmPending(localSeq, operations, applied);
       return { ok: {} };
     } catch (error) {
@@ -2233,70 +2230,6 @@ class SpaceReplica implements ISpaceReplica {
         rejection,
       );
     }
-  }
-
-  // Success tail for a commit the server acknowledged-as-committed but
-  // DROPPED under the computed-cell conflict policy (its reads were stale and
-  // every operation targeted a computed-kind entity). The commit SUCCEEDED
-  // for bookkeeping — localSeq consumed, dependents satisfied — but no
-  // revision was written, so the optimistic pending value must NOT be
-  // promoted into confirmed state: confirmPending would stamp it at the acked
-  // commit seq, and the monotonic guard in applySessionSync would then shadow
-  // the server's authoritative value indefinitely. Instead drop the pending
-  // write (confirmed keeps the entity's real seq) and emit a revert
-  // notification. No retry is scheduled: the newer input revisions that made
-  // the reads stale arrive through the normal watch flow, dirty the reader,
-  // and the recompute writes a fresh commit — re-running now would only
-  // reproduce the same stale write. See docs/specs/computed-cell-identity.md.
-  private finalizeDroppedComputed(
-    localSeq: number,
-    operations: NativeCommitOperation[],
-    source: IStorageTransaction | undefined,
-  ): Result<Unit, StorageTransactionRejected> {
-    const touched = operations.map((operation) => ({
-      id: operation.id,
-      scope: operation.scope,
-    }));
-    const hasSemanticOperations = operations.length > 0;
-    const shouldNotifySubscribers = hasSemanticOperations &&
-      this.hasNotificationSubscribers();
-    const shouldNotifySinks = hasSemanticOperations &&
-      this.hasSinkSubscribers(touched);
-    const before = shouldNotifySubscribers
-      ? Differential.checkout(
-        this,
-        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
-      )
-      : undefined;
-    this.dropPending(localSeq);
-    logger.debug("commit-dropped-computed", () => [
-      `computed commit acknowledged-and-dropped (stale reads)`,
-      { localSeq, operations: operations.length },
-    ]);
-    if (before !== undefined) {
-      const changes = before.compare(this);
-      this.#subscription.next({
-        type: "revert",
-        space: this.#space,
-        changes,
-        // Not a conflict (isConflictRejection is false by name), so no
-        // consumer schedules a retry off this notification; same synthetic
-        // cast idiom as toRejectedError's TransactionError fallback.
-        reason: {
-          name: "DroppedComputedCommit",
-          message:
-            "computed commit acknowledged and dropped: reads were stale; " +
-            "recompute from the newer inputs supersedes this write",
-        } as unknown as StorageTransactionRejected,
-        source,
-      });
-      if (shouldNotifySinks) {
-        this.notifySinks(changes);
-      }
-    } else if (shouldNotifySinks) {
-      this.notifySinksForIds(touched);
-    }
-    return { ok: {} };
   }
 
   // Shared rejection tail for both real conflicts and pre-empted commits: wait

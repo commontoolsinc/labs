@@ -242,11 +242,12 @@ the per-epic implementation notes).
   throw on such ids arriving via sync, so it must not graduate until every
   syncing client carries the readers (old servers are safe — an unknown
   scheme parses as no kind and stays strict).
-- **Status on 2026-07-09.** In development on
+- **Status on 2026-07-12.** In development on
   `robin/feat-computed-cell-identity-p2`: phase 1 (kind-schemed minting,
-  redesigned from a retired kind-in-hash-tag format that never shipped) and
-  phase 2 (ack-and-drop of stale all-computed commits) implemented behind
-  the flag.
+  redesigned from a retired kind-in-hash-tag format that never shipped)
+  implemented behind the flag. Phase 2 (ack-and-drop of stale all-computed
+  commits) is split into its own follow-up PR with its own flag, so this
+  branch changes no conflict semantics.
 
 ### `cfcEnforcementMode`
 

@@ -1691,37 +1691,25 @@ export class Server {
               message.sessionId,
             );
           }
-          // An acknowledged-but-dropped computed commit wrote no revisions:
-          // nothing to broadcast to other sessions, and its scheduler
-          // observation was deliberately not persisted, so there are no side
-          // effects to run.
-          if (commit.droppedComputed !== undefined) {
-            // Telemetry parity with ct.conflict: drops must be visible in
-            // traces, or a misclassified cell (state writes silently
-            // dropped) is undiagnosable from the server side.
-            span.setAttribute("ct.droppedComputed", true);
-          }
-          if (commit.droppedComputed === undefined) {
-            await this.runPostCommitSchedulerSideEffects(
-              message.space,
-              commit,
-              schedulerObservations,
-              previousReadSpaces,
-              session,
-            );
-            this.markSpaceDirty(
-              message.space,
-              message.commit.operations
-                .filter((operation) => operation.op !== "sqlite")
-                .map((operation) =>
-                  toDirtyKey(operation.id, declaredScope(operation.scope))
-                ),
-              {
-                sessionId: message.sessionId,
-                seq: commit.seq,
-              },
-            );
-          }
+          await this.runPostCommitSchedulerSideEffects(
+            message.space,
+            commit,
+            schedulerObservations,
+            previousReadSpaces,
+            session,
+          );
+          this.markSpaceDirty(
+            message.space,
+            message.commit.operations
+              .filter((operation) => operation.op !== "sqlite")
+              .map((operation) =>
+                toDirtyKey(operation.id, declaredScope(operation.scope))
+              ),
+            {
+              sessionId: message.sessionId,
+              seq: commit.seq,
+            },
+          );
           span.setAttribute("commit.seq", commit.seq);
           span.setAttribute(
             "entity.count",
