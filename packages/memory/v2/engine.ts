@@ -1,5 +1,6 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
+import { valueEqual } from "@commonfabric/data-model/fabric-value";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatch,
@@ -5064,7 +5065,7 @@ const applyCommitTransaction = (
       principal,
       sessionId,
     });
-    revisions.push(revision);
+    if (revision !== undefined) revisions.push(revision);
   }
 
   validateStoredSyncSchemaRefs(engine, branch, revisions, original);
@@ -5207,7 +5208,7 @@ const writeOperation = (
     principal?: string;
     sessionId: SessionId;
   },
-): AppliedRevision => {
+): AppliedRevision | undefined => {
   const { branch, seq, opIndex, operation, principal, sessionId } = options;
   const scope = normalizeScope(operation.scope);
   const scopeKey = resolveScopeKey(operation.scope, { principal, sessionId });
@@ -5215,6 +5216,74 @@ const writeOperation = (
     ? { scopeKey }
     : { scope, scopeKey };
   switch (operation.op) {
+    case "ensure": {
+      if (!isEntityDocument(operation.value)) {
+        throw new Error(
+          "memory v2 ensure operations require explicit document objects",
+        );
+      }
+      // Read the current local row directly so an ensure also observes an
+      // earlier operation on the same entity in this still-open commit. The
+      // branch head is deliberately advanced only after every operation.
+      const localRow = engine.statements.selectCurrentLocal.get({
+        branch,
+        id: operation.id,
+        scope_key: scopeKey,
+      }) as ReadRow | undefined;
+      const existing = localRow === undefined
+        ? readStateForScopeKey(engine, {
+          id: operation.id,
+          scope,
+          scopeKey,
+          branch,
+        })?.document
+        : localRow.op === "set"
+        ? decodeStoredDocument(localRow.data)
+        : localRow.op === "patch"
+        ? reconstructPatchedDocument(engine, {
+          id: operation.id,
+          scopeKey,
+          branch,
+          seq: localRow.seq,
+          opIndex: localRow.op_index,
+        })
+        : null;
+      if (existing !== null && existing !== undefined) {
+        if (valueEqual(existing, operation.value)) return undefined;
+        throw new Error(
+          `content-addressed ensure mismatch for ${operation.id}`,
+        );
+      }
+      engine.statements.insertRevision.run({
+        branch,
+        id: operation.id,
+        scope_key: scopeKey,
+        seq,
+        op_index: opIndex,
+        // Ensure is a wire-time precondition. Once admitted, its durable
+        // history is an ordinary set so all existing readers can replay it.
+        op: "set",
+        data: encodeMemoryBoundary(operation.value),
+        commit_seq: seq,
+      });
+      engine.statements.upsertHead.run({
+        branch,
+        id: operation.id,
+        scope_key: scopeKey,
+        seq,
+        op_index: opIndex,
+      });
+      return {
+        id: operation.id,
+        ...revisionScopeFields,
+        branch,
+        seq,
+        opIndex,
+        commitSeq: seq,
+        op: "set",
+        document: operation.value,
+      };
+    }
     case "set": {
       if (!isEntityDocument(operation.value)) {
         throw new Error(

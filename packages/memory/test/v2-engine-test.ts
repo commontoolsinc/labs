@@ -87,6 +87,64 @@ const toEntityDocument = (
   return document as EntityDocument;
 };
 
+Deno.test("memory v2 ensure is idempotent and rejects identity mismatches", async () => {
+  const { engine, path } = await createEngine();
+  const expected = toEntityDocument({ source: "artifact source" });
+
+  try {
+    const created = applyCommit(engine, {
+      sessionId: "session:artifact-publisher",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "ensure",
+          id: "artifact:closure",
+          value: expected,
+        }],
+      },
+    });
+    assertEquals(created.revisions.length, 1);
+    assertEquals(read(engine, { id: "artifact:closure" }), expected);
+
+    const alreadyPresent = applyCommit(engine, {
+      sessionId: "session:artifact-publisher",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "ensure",
+          id: "artifact:closure",
+          value: expected,
+        }],
+      },
+    });
+    assertEquals(alreadyPresent.revisions, []);
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:artifact-publisher",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "ensure",
+              id: "artifact:closure",
+              value: toEntityDocument({ source: "different source" }),
+            }],
+          },
+        }),
+      Error,
+      "content-addressed ensure mismatch",
+    );
+    assertEquals(read(engine, { id: "artifact:closure" }), expected);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine reserves sync schema reference strings", async () => {
   const { engine, path } = await createEngine();
   const id = "entity:reserved-sync-schema-ref";

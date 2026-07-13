@@ -23,6 +23,12 @@ interface SetOperation {
   value: EntityDocument;
 }
 
+interface EnsureOperation {
+  op: "ensure";
+  id: EntityId;
+  value: EntityDocument;
+}
+
 interface PatchWriteOperation {
   op: "patch";
   id: EntityId;
@@ -34,7 +40,11 @@ interface DeleteOperation {
   id: EntityId;
 }
 
-type Operation = SetOperation | PatchWriteOperation | DeleteOperation;
+type Operation =
+  | SetOperation
+  | EnsureOperation
+  | PatchWriteOperation
+  | DeleteOperation;
 ```
 
 Operations do not include parent hashes or other version identifiers. The server
@@ -42,6 +52,15 @@ validates the read set, assigns a canonical `seq`, and records one or more
 sequenced revisions. `set` carries a logical `EntityDocument`; `patch` carries
 path-targeted edits whose leaf values use the shared FabricValue surface, not
 just a JSON subset.
+
+`ensure` is the idempotent content-addressed publication primitive. If the
+target is absent, the server records an ordinary `set` revision. If the target
+already contains the exact same Fabric value, the operation is a no-op and
+records no entity revision. If the target contains different data, the server
+rejects the complete commit as an integrity failure. This comparison is by
+Fabric-value content, including codec-backed values, rather than by JavaScript
+object identity or enumerable properties. It is intentionally not a
+last-writer-wins mutation and an equal pre-existing value is not a conflict.
 
 ## 3.2 Transaction Structure
 

@@ -409,6 +409,12 @@ issue one request per message in this pass.
 
 ### 4.3.1 `transact` — Write Operations
 
+In addition to ordinary `set`, `patch`, and `delete` operations, a transaction
+may carry `ensure`. `ensure` atomically installs an absent content-addressed
+document, accepts an identical existing document as a no-op, and rejects a
+different existing document as an integrity failure. On success, the containing
+write and all of its ensures share one transaction boundary.
+
 ```typescript
 // Shown at module scope.
 interface TransactRequest {

@@ -112,6 +112,18 @@ export interface SetOperation {
   value: EntityDocument;
 }
 
+/**
+ * Idempotently install content-addressed data. An absent entity is written as a
+ * normal set revision, an equal entity is a no-op, and a different entity is
+ * an integrity failure that rejects the whole commit.
+ */
+export interface EnsureOperation {
+  op: "ensure";
+  id: EntityId;
+  scope?: CellScope;
+  value: EntityDocument;
+}
+
 export interface PatchOperation {
   op: "patch";
   id: EntityId;
@@ -140,6 +152,7 @@ export interface SqliteOperation {
 
 export type Operation =
   | SetOperation
+  | EnsureOperation
   | PatchOperation
   | DeleteOperation
   | SqliteOperation;
