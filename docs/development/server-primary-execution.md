@@ -94,9 +94,12 @@ metric labels. The current bounded-cardinality sources are:
 The browser rollout fixture additionally consumes a bounded, piece-scoped
 routing snapshot from the runtime client. It rejects feed gaps, truncation,
 multiple action records, pending overlays/settlements, claim-incarnation
-mismatches, and any enabled phase whose exact action lacks one settlement per
-claimed overlay route. This is test diagnostics, not output from
-`cf execution status`.
+mismatches, and any enabled phase whose exact action lacks a successful current-
+incarnation settlement covering every claimed overlay route. Several rapid
+source commits may correctly coalesce into one settlement at their latest
+basis; the fixture therefore requires exact route/drop counts and between one
+and N successful settlements for N events. This is test diagnostics, not output
+from `cf execution status`.
 
 Feed latency has no server timestamp in v1. The host's
 `execution.control/invalidation-settlement` sample joins process-local start
