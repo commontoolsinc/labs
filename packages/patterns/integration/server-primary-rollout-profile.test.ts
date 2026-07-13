@@ -1033,27 +1033,45 @@ const assertRendererCountersContinue = (
             assert(total !== undefined, `${phase.label} omitted renderer CPU`);
             return total / phase.events;
           });
+          const cpuPhases = phases.map((phase) => ({
+            label: phase.label,
+            policyEnabled: phase.policyEnabled,
+            rendererCpuUs: phase.browserProcessCpu?.rendererDelta
+              .totalCpuTimeUs,
+            renderers: phase.browserProcessCpu?.rendererDelta.renderers,
+            lazyActionRuns: phase.lazyActionRuns,
+            clientDerivedSuppressed: phase.clientDerivedSuppressed,
+            clientDerivedUpstreamCommits: phase.clientDerivedUpstreamCommits,
+          }));
+          console.log(
+            `authoritative lazy-browser CPU phases before gate: ${
+              JSON.stringify({ cpuPerEvent, phases: cpuPhases })
+            }`,
+          );
+          if (PROFILE_DIR) {
+            await Deno.mkdir(PROFILE_DIR, { recursive: true });
+            await Deno.writeTextFile(
+              join(PROFILE_DIR, "server-primary-rollout-cpu-phases.json"),
+              JSON.stringify(
+                {
+                  capturedAt: new Date().toISOString(),
+                  explicitlyPreGate: true,
+                  measuredEventsPerPhase: CPU_EVENTS,
+                  cpuPerEvent,
+                  phases: cpuPhases,
+                },
+                null,
+                2,
+              ),
+            );
+          }
           cpuAnalysis = assertCounterbalancedRendererCpu(cpuPerEvent, {
             maximumEnabledRatio: 1.1,
             maximumReplicateSpread: 0.15,
           });
           console.log(
-            `authoritative lazy-browser CPU phases: ${
-              JSON.stringify({
-                cpuPerEvent,
-                analysis: cpuAnalysis,
-                phases: phases.map((phase) => ({
-                  label: phase.label,
-                  policyEnabled: phase.policyEnabled,
-                  rendererCpuUs: phase.browserProcessCpu?.rendererDelta
-                    .totalCpuTimeUs,
-                  renderers: phase.browserProcessCpu?.rendererDelta.renderers,
-                  lazyActionRuns: phase.lazyActionRuns,
-                  clientDerivedSuppressed: phase.clientDerivedSuppressed,
-                  clientDerivedUpstreamCommits:
-                    phase.clientDerivedUpstreamCommits,
-                })),
-              })
+            `authoritative lazy-browser CPU analysis: ${
+              JSON.stringify(cpuAnalysis)
             }`,
           );
         }
