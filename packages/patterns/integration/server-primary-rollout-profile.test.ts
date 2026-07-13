@@ -54,6 +54,7 @@ type PhaseResult = {
   policyEnabled: boolean;
   events: number;
   actionRuns: number[];
+  lazyActionRuns: number;
   clientDerivedSuppressed: number;
   clientDerivedUpstreamCommits: number;
   serverAcceptedActionAttempts: number;
@@ -320,7 +321,10 @@ const p95 = (values: readonly number[]): number => {
           );
         }
 
-        await resetActionTrace(actorPage);
+        await Promise.all([
+          resetActionTrace(actorPage),
+          resetActionTrace(lazyPage),
+        ]);
         const loadBefore = await collectBrowserLoadSummary(
           actorPage,
           `${label}-before`,
@@ -346,6 +350,12 @@ const p95 = (values: readonly number[]): number => {
           );
         }
         if (profiler) profile = await profiler.stop();
+        // Query the profiled lazy Worker only after sampling stops. Per-event
+        // trace RPCs would themselves contaminate the CPU profile.
+        const lazyActionRuns =
+          (await actionTrace(lazyPage)).filter((entry) =>
+            entry.actualWrites.length > 0
+          ).length;
         if (policyEnabled) {
           const acceptedBefore = controlCount(
             healthBefore,
@@ -370,6 +380,7 @@ const p95 = (values: readonly number[]): number => {
           policyEnabled,
           events: CPU_EVENTS,
           actionRuns,
+          lazyActionRuns,
           clientDerivedSuppressed: loadAfter.churn.clientDerivedSuppressed -
             loadBefore.churn.clientDerivedSuppressed,
           clientDerivedUpstreamCommits:
@@ -407,9 +418,15 @@ const p95 = (values: readonly number[]): number => {
         );
         assert(
           p95(enabled.actionRuns) <= p95(baseline.actionRuns),
-          `enabled lazy-client p95 action runs ${
+          `enabled actor-client p95 action runs ${
             p95(enabled.actionRuns)
           } exceeded baseline ${p95(baseline.actionRuns)}`,
+        );
+        // A pure observer may consume the confirmed result without running its
+        // producer locally. The rollout must not add lazy-client action runs.
+        assert(
+          enabled.lazyActionRuns <= baseline.lazyActionRuns,
+          `enabled lazy-client action runs ${enabled.lazyActionRuns} exceeded baseline ${baseline.lazyActionRuns}`,
         );
         assert(
           enabled.clientDerivedSuppressed > 0,
