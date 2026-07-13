@@ -228,13 +228,11 @@ export function createExecutorActionTransactionRouter(
         ]);
       }
       const encoded = JSON.stringify(claimKey);
-      if (reported.get(sourceAction) !== encoded) {
-        reported.set(sourceAction, encoded);
-        options.onCandidate({
-          claimKey,
-          ...(builtinId !== undefined ? { builtinId } : {}),
-        }, sourceAction);
-      }
+      reported.set(sourceAction, encoded);
+      options.onCandidate({
+        claimKey,
+        ...(builtinId !== undefined ? { builtinId } : {}),
+      }, sourceAction);
       return local;
     }
 

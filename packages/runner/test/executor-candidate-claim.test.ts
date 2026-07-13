@@ -290,7 +290,7 @@ Deno.test("shadow executors report CandidateClaim diagnostics without publishing
   }
 });
 
-Deno.test("policy-inactive candidates remain shadow without crashing", async () => {
+Deno.test("policy-inactive candidates remain shadow and later acquire authority", async () => {
   const diagnostics: CandidateDiagnostic[] = [];
   const { worker, server, crashes, executor } = await startExecutor({
     routing: true,
@@ -315,6 +315,27 @@ Deno.test("policy-inactive candidates remain shadow without crashing", async () 
       ),
       false,
     );
+    assertEquals(crashes, []);
+
+    server.claimAvailable = true;
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+    assertEquals(server.claimRequests, [{
+      lease: LEASE,
+      claimKey: CLAIM_KEY,
+    }, {
+      lease: LEASE,
+      claimKey: CLAIM_KEY,
+    }]);
+    assertEquals(worker.messages.at(-1), {
+      type: "run-claimed-action",
+      claim: CLAIM,
+      assertion: {
+        contextKey: "space",
+        leaseGeneration: LEASE.leaseGeneration,
+        claimGeneration: CLAIM.claimGeneration,
+      },
+    });
     assertEquals(crashes, []);
   } finally {
     await executor.stop();
