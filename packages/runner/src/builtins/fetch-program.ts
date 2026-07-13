@@ -136,6 +136,7 @@ export function fetchProgram(
   let cellScope: CellScope | undefined;
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
+  let claimedRerunRequested = false;
   const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
   // This is called when the pattern containing this node is being stopped.
@@ -269,7 +270,24 @@ export function fetchProgram(
     // Get current state for this input hash
     const allEntries = cache.withTx(tx).get();
     const cacheEntry = allEntries[inputHash];
-    const state: FetchState = cacheEntry?.state ?? { type: "idle" };
+    let state: FetchState = cacheEntry?.state ?? { type: "idle" };
+    // A shadow incarnation can leave durable pending/error state without a
+    // live request after claim activation aborts its local work. Keep the
+    // marker through an initial idle->fetching transition so a suppressed
+    // shadow outbox entry can be re-opened on the following run. Normal client
+    // incarnations must not take over another incarnation's in-flight fetch.
+    const reopenClaimedWork = claimedRerunRequested && state.type !== "idle" &&
+      (state.type === "error" ||
+        (state.type === "fetching" && myRequestId !== state.requestId));
+    if (claimedRerunRequested && state.type !== "idle") {
+      claimedRerunRequested = false;
+    }
+    if (reopenClaimedWork) {
+      state = { type: "idle" };
+      cache.withTx(tx).update({
+        [inputHash]: { inputHash, state },
+      });
+    }
 
     // State machine transitions
     if (state.type === "idle") {
@@ -336,7 +354,15 @@ export function fetchProgram(
 
     sendResult(tx, { pending, result, error });
   };
-  return Object.assign(action, { serverBuiltinRuntimeWrites });
+  return Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    prepareClaimedRerun: () => {
+      abortController?.abort("fetchProgram claim incarnation changed");
+      abortController = undefined;
+      myRequestId = undefined;
+      claimedRerunRequested = true;
+    },
+  });
 }
 
 /**

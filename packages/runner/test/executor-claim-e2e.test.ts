@@ -85,6 +85,29 @@ const ASYNC_BUILTIN_PROGRAM: RuntimeProgram = {
   }],
 };
 
+const DISTINCT_ASYNC_BUILTIN_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "/// <cts-enable />",
+      "import { pattern, fetchProgram, generateObject } from 'commonfabric';",
+      "export default pattern<{ programUrl: string; prompt: string }>",
+      "  (({ programUrl, prompt }) => ({",
+      "    program: fetchProgram({ url: programUrl }),",
+      "    object: generateObject<{ title: string }>({",
+      "      prompt,",
+      "      schema: {",
+      "        type: 'object',",
+      "        properties: { title: { type: 'string' } },",
+      "        required: ['title'],",
+      "      },",
+      "    }),",
+      "  }));",
+    ].join("\n"),
+  }],
+};
+
 const FETCH_BUILTIN_PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
   files: [{
@@ -2675,6 +2698,291 @@ Deno.test("claimed builtins use host broker while client sinks observe pending a
     for (const cancel of clientSinkCancels) cancel();
     for (const runtime of clientRuntimes) await runtime.dispose();
     for (const storage of clientStorages) await storage.close();
+    await executor?.stop();
+    await seedRuntime.dispose();
+    await seedStorage.close();
+    await observerClient?.close();
+    await server.close();
+  }
+});
+
+Deno.test("claimed fetchProgram and generateObject complete once through deterministic host brokers", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor distinct builtin e2e ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const servingOrigin = new URL("https://toolshed.example/");
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-distinct-builtin-e2e",
+    },
+    protocolFlags: BUILTIN_FLAGS,
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  const authorize: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: space },
+  });
+  const seedStorage = LoopbackStorageManager.connectTo(
+    server,
+    BUILTIN_FLAGS,
+    { as: principal },
+  );
+  const seedRuntime = new Runtime({
+    apiUrl: servingOrigin,
+    patternEnvironment: { apiUrl: servingOrigin },
+    storageManager: seedStorage,
+    fetch: () => Promise.reject(new Error("seed must not fetch")),
+    externalSinkDisposition: "suppress",
+    experimental: {
+      persistentSchedulerState: true,
+      serverPrimaryExecution: true,
+    },
+  });
+  let executor: Awaited<ReturnType<DenoSpaceExecutorFactory["start"]>> | null =
+    null;
+  let observerClient: MemoryClient.Client | null = null;
+  let unsubscribeAccepted = () => {};
+  let unsubscribeControl = () => {};
+  const events: string[] = [];
+  const brokerUrls: string[] = [];
+  const authorized: Array<{
+    builtinId: string;
+    claim: ExecutionClaim;
+  }> = [];
+  try {
+    const compiled = await seedRuntime.patternManager.compilePattern(
+      DISTINCT_ASYNC_BUILTIN_PROGRAM,
+      { space },
+    );
+    const tx = seedRuntime.edit();
+    const programUrl = seedRuntime.getCell<string>(
+      space,
+      "executor-distinct-builtin-program-url",
+      undefined,
+      tx,
+    );
+    programUrl.set("/program.ts");
+    const prompt = seedRuntime.getCell<string>(
+      space,
+      "executor-distinct-builtin-prompt",
+      undefined,
+      tx,
+    );
+    prompt.set("produce the deterministic object");
+    const result = seedRuntime.getCell<Record<string, unknown>>(
+      space,
+      "executor-distinct-builtin-result",
+      undefined,
+      tx,
+    );
+    const handle = seedRuntime.run(
+      tx,
+      compiled,
+      { programUrl, prompt },
+      result,
+    );
+    assertEquals((await tx.commit()).error, undefined);
+    await handle.pull();
+    await seedRuntime.settled();
+    await seedRuntime.storageManager.synced();
+    await seedRuntime.dispose();
+
+    observerClient = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: BUILTIN_FLAGS,
+    });
+    const observer = await observerClient.mount(space, {}, authorize);
+    await observer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${space}:execution-policy`,
+        value: { value: { version: 1, serverPrimaryExecution: true } },
+      }],
+    });
+    await observer.setExecutionDemand("", [result.sourceURI]);
+    await observer.watchSet([{
+      id: "executor-distinct-builtin-piece",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: result.sourceURI,
+          selector: { path: [], schema: true },
+        }],
+      },
+    }]);
+
+    const expectedBuiltins = ["fetchProgram", "generateObject"] as const;
+    const builtinForClaim = (claim: ExecutionClaim) =>
+      expectedBuiltins.find((builtinId) =>
+        claim.implementationFingerprint.includes(builtinId)
+      );
+    const claims = new Map<string, ExecutionClaim>();
+    const claimsReady = Promise.withResolvers<void>();
+    const settlements = new Set<string>();
+    const settlementsReady = Promise.withResolvers<void>();
+    unsubscribeControl = observer.subscribeExecutionControl((event) => {
+      events.push(event.type);
+      if (event.type === "session.execution.claim.revoke") {
+        events.push(`revoke:${event.claim.actionId}`);
+      }
+      if (event.type === "session.execution.claim.set") {
+        const builtinId = builtinForClaim(event.claim);
+        if (builtinId !== undefined) claims.set(builtinId, event.claim);
+        if (claims.size === expectedBuiltins.length) claimsReady.resolve();
+      }
+      if (event.type === "session.execution.settlement") {
+        const builtinId = builtinForClaim(event.settlement.claim);
+        if (
+          builtinId !== undefined &&
+          (event.settlement.outcome === "committed" ||
+            event.settlement.outcome === "no-op")
+        ) {
+          settlements.add(builtinId);
+        }
+        if (settlements.size === expectedBuiltins.length) {
+          settlementsReady.resolve();
+        }
+      }
+    });
+
+    const acceptedResults = new Set<string>();
+    const resultsReady = Promise.withResolvers<void>();
+    unsubscribeAccepted = server.subscribeAcceptedCommits(space, (event) => {
+      for (const revision of event.revisions) {
+        void server.readDocument(space, revision.id).then((document) => {
+          const value = (document as { value?: unknown } | undefined)?.value;
+          if (containsStoredValue(value, "export default 7;\n")) {
+            acceptedResults.add("fetchProgram");
+            events.push("accepted:fetchProgram");
+          }
+          if (containsStoredValue(value, "deterministic title")) {
+            acceptedResults.add("generateObject");
+            events.push("accepted:generateObject");
+          }
+          if (acceptedResults.size === expectedBuiltins.length) {
+            resultsReady.resolve();
+          }
+        });
+      }
+    });
+
+    const lease = await server.acquireExecutionLease(space, "");
+    assertExists(lease);
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: servingOrigin,
+      patternApiUrl: servingOrigin,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+      createBuiltinBroker: () => ({
+        fetch(request) {
+          brokerUrls.push(request.url);
+          events.push(`broker:${request.url}`);
+          if (request.url === "/program.ts") {
+            return Promise.resolve({
+              response: new Response("export default 7;\n", {
+                headers: { "content-type": "text/typescript" },
+              }),
+              finalUrl: new URL(request.url, servingOrigin),
+              redirectCount: 0,
+            });
+          }
+          if (request.url === "/api/ai/llm/generateObject") {
+            return Promise.resolve({
+              response: Response.json({
+                object: { title: "deterministic title" },
+                id: "server-generate-object-e2e",
+              }),
+              finalUrl: new URL(request.url, servingOrigin),
+              redirectCount: 0,
+            });
+          }
+          return Promise.reject(
+            new Error(`unexpected server builtin URL: ${request.url}`),
+          );
+        },
+      }),
+      authorizeBuiltinRequest(request) {
+        authorized.push({
+          builtinId: request.builtinId,
+          claim: request.claim,
+        });
+      },
+      onCandidateClaim: (candidate) =>
+        events.push(`candidate:${candidate.builtinId}`),
+      onCandidateDiagnostic: (diagnostic) =>
+        events.push(
+          `diagnostic:${diagnostic.claimKey?.actionId ?? "ownerless"}:` +
+            diagnostic.diagnosticCode,
+        ),
+    });
+    executor = await factory.start({
+      space,
+      branch: "",
+      lease,
+      pieces: [result.sourceURI],
+      onCrash(error) {
+        events.push(`crash:${error}`);
+      },
+    });
+
+    await awaitBarrier(claimsReady.promise, "distinct builtin claims", events);
+    await awaitBarrier(
+      resultsReady.promise,
+      "distinct builtin results",
+      events,
+    );
+    await awaitBarrier(
+      settlementsReady.promise,
+      "distinct builtin settlements",
+      events,
+    );
+    await executor.settle();
+
+    assertEquals([...claims.keys()].sort(), [...expectedBuiltins].sort());
+    assertEquals([...acceptedResults].sort(), [...expectedBuiltins].sort());
+    assertEquals([...settlements].sort(), [...expectedBuiltins].sort());
+    assertEquals(
+      authorized.map((entry) => entry.builtinId).sort(),
+      [...expectedBuiltins].sort(),
+    );
+    for (const entry of authorized) {
+      assertEquals(entry.claim, claims.get(entry.builtinId));
+    }
+    assertEquals(brokerUrls.sort(), [
+      "/api/ai/llm/generateObject",
+      "/program.ts",
+    ]);
+    assertEquals(events.some((event) => event.startsWith("crash:")), false);
+
+    const requestCount = brokerUrls.length;
+    await executor.wake();
+    await executor.settle();
+    assertEquals(
+      brokerUrls.length,
+      requestCount,
+      "an unchanged wake must not duplicate either external effect",
+    );
+  } finally {
+    unsubscribeControl();
+    unsubscribeAccepted();
     await executor?.stop();
     await seedRuntime.dispose();
     await seedStorage.close();

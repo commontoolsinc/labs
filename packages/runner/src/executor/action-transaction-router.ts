@@ -29,6 +29,7 @@ import {
   type ServerBuiltinActionDescriptor,
   serverBuiltinImplementationHash,
 } from "../builtins/server-execution.ts";
+import { isCellLink, parseLink } from "../link-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("execution.executor", {
@@ -443,16 +444,29 @@ function synthesizeBuiltinContinuationObservation(
   if (summary === undefined || template === undefined) return undefined;
   const writes = commitWriteAddresses(input);
   const canonicalSchemaWrites = canonicalSchemaDocumentWriteAddresses(input);
-  if (canonicalSchemaWrites.length > 0) {
+  const materializedDocuments = sameTransactionMaterializedDocuments(
+    input,
+    summary,
+  );
+  if (
+    canonicalSchemaWrites.length > 0 || materializedDocuments.length > 0
+  ) {
     // CFC persistence may materialize a content-addressed schema document only
     // when an async model result is written. Its id can depend on the result's
     // post-call confidentiality envelope, so it cannot always be listed by the
-    // pre-call builtin descriptor. Admit only a set operation whose payload
-    // re-hashes to the claimed cid; all semantic writes remain bounded by the
-    // descriptor's pre-effect surface.
+    // pre-call builtin descriptor. Structured builtin results may likewise
+    // split fresh entity documents that are linked from an already-authorized
+    // write in this same transaction. Admit only canonical schema documents or
+    // fresh same-transaction linked materializations; all semantic writes
+    // remain bounded by the descriptor's pre-effect surface.
     summary = {
       ...summary,
-      writes: dedupeAddresses([...summary.writes, ...canonicalSchemaWrites]),
+      reads: dedupeAddresses([...summary.reads, ...materializedDocuments]),
+      writes: dedupeAddresses([
+        ...summary.writes,
+        ...canonicalSchemaWrites,
+        ...materializedDocuments,
+      ]),
     };
     summaries.set(sourceAction, summary);
   }
@@ -469,6 +483,134 @@ function synthesizeBuiltinContinuationObservation(
     status: "success",
     executionClaimAssertion: undefined,
   };
+}
+
+/**
+ * Return fresh entity documents materialized by a claimed builtin
+ * continuation. A document is admitted only when all of these hold:
+ *
+ * - an already-authorized operation contains a direct link to it;
+ * - the same commit creates it with a whole-document set; and
+ * - the commit proves absence with seq-0 document reads.
+ *
+ * Following links transitively supports arrays/objects split across multiple
+ * fresh documents without turning an arbitrary side write into a declared
+ * surface.
+ */
+function sameTransactionMaterializedDocuments(
+  input: ActionTransactionRouteInput,
+  summary: CompleteActionScopeSummary,
+): IMemorySpaceAddress[] {
+  const writeEnvelopes = [
+    ...summary.writes,
+    ...summary.materializerWriteEnvelopes,
+    ...summary.directOutputs,
+  ];
+  const operationKey = (operation: {
+    id: string;
+    scope?: "space" | "user" | "session";
+  }) => `${operation.scope ?? "space"}:${operation.id}`;
+  const provesFreshDocument = (operation: {
+    id: string;
+    scope?: "space" | "user" | "session";
+  }): boolean => {
+    const reads = input.commit.reads.confirmed.filter((read) =>
+      read.id === operation.id &&
+      (read.scope ?? "space") === (operation.scope ?? "space") &&
+      read.seq === 0
+    );
+    return reads.some((read) => read.path.length === 0) ||
+      ["cfc", "value"].every((field) =>
+        reads.some((read) => read.path.length === 1 && read.path[0] === field)
+      );
+  };
+  const freshSetOperations = new Map(
+    input.commit.operations.flatMap((operation) => {
+      if (
+        operation.op !== "set" ||
+        (operation.scope ?? "space") !== "space" ||
+        !operation.id.startsWith("of:") ||
+        !provesFreshDocument(operation)
+      ) {
+        return [];
+      }
+      return [[operationKey(operation), operation] as const];
+    }),
+  );
+  const materialized = new Map<string, IMemorySpaceAddress>();
+  const pendingValues: Array<{
+    value: unknown;
+    base: IMemorySpaceAddress;
+  }> = [];
+
+  const enqueueOperationValues = (
+    operation: ActionTransactionRouteInput["commit"]["operations"][number],
+  ): void => {
+    if (operation.op === "sqlite") return;
+    const base = addressOf({
+      space: input.space,
+      id: operation.id,
+      scope: operation.scope ?? "space",
+      path: [],
+    });
+    if (operation.op === "set") {
+      pendingValues.push({ value: operation.value, base });
+    } else if (operation.op === "patch") {
+      for (const patch of operation.patches) {
+        if ("value" in patch) pendingValues.push({ value: patch.value, base });
+        if (patch.op === "splice") {
+          pendingValues.push({ value: patch.add, base });
+        }
+      }
+    }
+  };
+
+  for (const operation of input.commit.operations) {
+    if (operation.op === "sqlite") continue;
+    const operationAddress = addressOf({
+      space: input.space,
+      id: operation.id,
+      scope: operation.scope ?? "space",
+      path: [],
+    });
+    if (
+      writeEnvelopes.some((envelope) =>
+        envelope.id === operationAddress.id &&
+        (envelope.scope ?? "space") === operationAddress.scope
+      )
+    ) {
+      enqueueOperationValues(operation);
+    }
+  }
+
+  const visit = (value: unknown, base: IMemorySpaceAddress): void => {
+    if (isCellLink(value)) {
+      const link = parseLink(value, base);
+      if (
+        link?.space !== input.space || link.path.length !== 0 ||
+        (link.scope ?? "space") !== "space"
+      ) return;
+      const key = `space:${link.id}`;
+      const setOperation = freshSetOperations.get(key);
+      if (setOperation === undefined || materialized.has(key)) return;
+      materialized.set(key, addressOf({ ...link, path: [] }));
+      enqueueOperationValues(setOperation);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry, base);
+      return;
+    }
+    if (typeof value === "object" && value !== null) {
+      for (const entry of Object.values(value)) visit(entry, base);
+    }
+  };
+
+  for (let index = 0; index < pendingValues.length; index++) {
+    const pending = pendingValues[index]!;
+    visit(pending.value, pending.base);
+  }
+  return [...materialized.values()];
 }
 
 function canonicalSchemaDocumentWriteAddresses(

@@ -579,7 +579,7 @@ const isExactDerivedCommit = (
 for (const product of PRODUCT_CASES) {
   const testName = product.name === "group-chat"
     ? "group-chat revokes an unserved literal rooms action and converges client-primary"
-    : "lunch-poll-derived scalar uses one shared action attempt for three client demands";
+    : "ten lunch-poll demands share one real Worker and one claimed attempt per invalidation";
   Deno.test(testName, async () => {
     const principal = await Identity.fromPassphrase(
       `server execution rollout ${product.name} ${crypto.randomUUID()}`,
@@ -609,6 +609,7 @@ for (const product of PRODUCT_CASES) {
       authorization: { principal: space },
     });
     const clients: ProductClientWorker[] = [];
+    const demandOnlyClients: MemoryClient.Client[] = [];
     let observerClient: MemoryClient.Client | undefined;
     let pool: SharedExecutionPool | undefined;
     let unsubscribeControl = () => {};
@@ -742,6 +743,22 @@ for (const product of PRODUCT_CASES) {
             targetLink: seeded.targetLink,
             authorizeSessionOpen,
           }),
+        );
+      };
+      const startDemandOnlyClient = async (index: number) => {
+        const client = await MemoryClient.connect({
+          transport: MemoryClient.loopback(server),
+          protocolFlags: FLAGS,
+        });
+        demandOnlyClients.push(client);
+        const session = await client.mount(
+          space,
+          { sessionId: `product-${product.name}-demand-only-${index}` },
+          authorizeSessionOpen,
+        );
+        assertEquals(
+          await session.setExecutionDemand("", [seeded.resultLink.id]),
+          true,
         );
       };
       if (product.name !== "group-chat") {
@@ -1014,10 +1031,18 @@ for (const product of PRODUCT_CASES) {
         await startClient(index);
       }
       for (const client of clients) await client.reannounceDemand();
+      await Promise.all(
+        Array.from(
+          { length: 10 - clients.length },
+          (_, index) => startDemandOnlyClient(index),
+        ),
+      );
       await pool.idle();
-      assertEquals(pool.metrics().activeDemands, 3);
-      assertEquals(pool.snapshot(space, "")?.referenceCount, 3);
+      assertEquals(pool.metrics().activeDemands, 10);
+      assertEquals(pool.snapshot(space, "")?.referenceCount, 10);
+      assertEquals(server.listExecutionDemands(space, "").length, 10);
       assertEquals(pool.metrics().activeWorkers, 1);
+      assertEquals(pool.metrics().workersStarted, 1);
       const integratedClaims = await waitWithin(
         Promise.all(
           clients.map((client) => client.request("observe", claim)),
@@ -1121,6 +1146,7 @@ for (const product of PRODUCT_CASES) {
       await Promise.allSettled(clients.map((client) => client.quiesce()));
       await Promise.allSettled(clients.map((client) => client.drain()));
       for (const client of clients) await client.dispose();
+      for (const client of demandOnlyClients) await client.close();
       await observerClient?.close().catch(() => undefined);
       await server.close();
     }

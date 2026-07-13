@@ -9,6 +9,10 @@ import {
   ServerBuiltinEgressError,
   type ServerBuiltinFetchBroker,
 } from "../src/executor/server-builtin-egress.ts";
+import {
+  SERVER_EXECUTABLE_BUILTIN_IDS,
+  serverBuiltinImplementationHash,
+} from "../src/builtins/server-execution.ts";
 
 const SPACE = "did:key:z6Mk-server-builtin-channel";
 const ACTOR = "did:key:z6Mk-server-builtin-actor";
@@ -26,7 +30,7 @@ const claim: ExecutionClaim = {
   expiresAt: Date.now() + 30_000,
 };
 
-Deno.test("builtin broker channel preserves raw relative URLs and binds the host actor", async () => {
+Deno.test("builtin broker channel serves every canonical builtin without adding ambient fetch", async () => {
   const channel = new MessageChannel();
   const requests: unknown[] = [];
   const authorizations: unknown[] = [];
@@ -61,23 +65,48 @@ Deno.test("builtin broker channel preserves raw relative URLs and binds the host
   });
   const client = createServerBuiltinBrokerClient({
     port: channel.port2,
-    claimForRequest: () => claim,
+    claimForRequest: (builtinId) => ({
+      ...claim,
+      actionId: `action:${builtinId}`,
+      implementationFingerprint: `impl:${
+        serverBuiltinImplementationHash(builtinId)
+      }`,
+    }),
   });
 
   try {
-    const response = await client.fetch("fetchText", "/api/value", {
-      method: "POST",
-      headers: { "content-type": "text/plain" },
-      body: "hello",
-    });
-    assertEquals(response.status, 201);
-    assertEquals(response.headers.get("x-broker"), "yes");
-    assertEquals(await response.text(), "brokered");
-    assertEquals((requests[0] as { url: string }).url, "/api/value");
+    for (const builtinId of SERVER_EXECUTABLE_BUILTIN_IDS) {
+      const response = await client.fetch(
+        builtinId,
+        `/api/value/${builtinId}`,
+        {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: "hello",
+        },
+      );
+      assertEquals(response.status, 201);
+      assertEquals(response.headers.get("x-broker"), "yes");
+      assertEquals(await response.text(), "brokered");
+    }
     assertEquals(
-      (authorizations[0] as { context: { onBehalfOf: string } }).context
-        .onBehalfOf,
-      ACTOR,
+      requests.map((request) => (request as { url: string }).url),
+      SERVER_EXECUTABLE_BUILTIN_IDS.map((id) => `/api/value/${id}`),
+    );
+    assertEquals(
+      authorizations.map((authorization) =>
+        (authorization as {
+          request: { builtinId: string };
+        }).request.builtinId
+      ),
+      [...SERVER_EXECUTABLE_BUILTIN_IDS],
+    );
+    assertEquals(
+      authorizations.every((authorization) =>
+        (authorization as { context: { onBehalfOf: string } }).context
+          .onBehalfOf === ACTOR
+      ),
+      true,
     );
   } finally {
     client.dispose();

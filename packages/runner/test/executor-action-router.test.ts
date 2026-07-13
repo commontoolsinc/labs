@@ -11,8 +11,23 @@ import {
   createExecutorActionTransactionRouter,
   type ExecutorCandidateDiagnostic,
 } from "../src/executor/action-transaction-router.ts";
+import {
+  isServerExecutableBuiltinId,
+  SERVER_EXECUTABLE_BUILTIN_IDS,
+  serverBuiltinImplementationHash,
+  type ServerExecutableBuiltinId,
+} from "../src/builtins/server-execution.ts";
 
 const SPACE = "did:key:z6Mk-action-router";
+const EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS = [
+  "fetchBinary",
+  "fetchText",
+  "fetchJson",
+  "fetchJsonUnchecked",
+  "fetchProgram",
+  "generateText",
+  "generateObject",
+] as const satisfies readonly ServerExecutableBuiltinId[];
 const action = {};
 const output = {
   space: SPACE,
@@ -333,37 +348,32 @@ Deno.test("executor action router keeps broker-required effects local", async ()
   assertStrictEquals(diagnostics[0]?.diagnosticCode, "broker-required");
 });
 
-Deno.test("executor action router candidates only a canonical supported builtin when its broker is available", async () => {
-  const effectAction = Object.assign({}, {
-    serverBuiltin: {
-      version: 1 as const,
-      id: "fetchText" as const,
-      piece: {
-        space: SPACE,
-        scope: "space" as const,
-        id: "of:action-router-piece",
-        path: [],
-      },
-      reads: [{
-        space: SPACE,
-        scope: "space" as const,
-        id: "of:action-router-input",
-        path: [],
-      }],
-      writes: [{ ...output, path: [] }],
-      runtimeWrites: [{ ...output, path: [] }],
-      directOutputs: [{ ...output, path: [] }],
-    },
-  });
-  const effectCommit = commit();
-  const effectObservation = effectCommit.schedulerObservation as Record<
-    string,
-    unknown
-  >;
-  effectObservation.actionKind = "effect";
-  effectObservation.implementationFingerprint =
-    "impl:cf:builtin/fetchText:server-v1";
-  delete effectObservation.completeActionScopeSummary;
+Deno.test("server executable builtin registry is exact and excludes ambient capabilities", () => {
+  assertEquals(
+    SERVER_EXECUTABLE_BUILTIN_IDS,
+    EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS,
+  );
+  assertEquals(
+    EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS.map((id) =>
+      serverBuiltinImplementationHash(id)
+    ),
+    EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS.map((id) =>
+      `cf:builtin/${id}:server-v1`
+    ),
+  );
+  assertEquals(
+    EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS.every(
+      isServerExecutableBuiltinId,
+    ),
+    true,
+  );
+  assertEquals(
+    ["fetch", "generateImage", "llm"].map(isServerExecutableBuiltinId),
+    [false, false, false],
+  );
+});
+
+Deno.test("executor action router candidates every canonical supported builtin when its broker is available", async () => {
   const candidates: Array<{ builtinId?: string; claimKey: ActionClaimKey }> =
     [];
   const router = createExecutorActionTransactionRouter({
@@ -374,19 +384,60 @@ Deno.test("executor action router candidates only a canonical supported builtin 
     onCandidate: (candidate) => candidates.push(candidate),
   });
 
-  const route = await router({
-    space: SPACE,
-    commit: effectCommit,
-    sourceAction: effectAction,
-  });
-  assertEquals(route.disposition, "local");
-  if (route.disposition !== "local") throw new Error("expected local");
-  assertEquals(route.kind, "executor-shadow");
-  assertEquals(candidates, []);
-  if (route.kind === "executor-shadow") route.afterLocalApply?.();
-  assertEquals(candidates.length, 1);
-  assertEquals(candidates[0]?.builtinId, "fetchText");
-  assertEquals(candidates[0]?.claimKey.actionKind, "effect");
+  for (const id of EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS) {
+    const effectAction = Object.assign({}, {
+      serverBuiltin: {
+        version: 1 as const,
+        id,
+        piece: {
+          space: SPACE,
+          scope: "space" as const,
+          id: "of:action-router-piece",
+          path: [],
+        },
+        reads: [{
+          space: SPACE,
+          scope: "space" as const,
+          id: "of:action-router-input",
+          path: [],
+        }],
+        writes: [{ ...output, path: [] }],
+        runtimeWrites: [{ ...output, path: [] }],
+        directOutputs: [{ ...output, path: [] }],
+      },
+    });
+    const effectCommit = commit();
+    const effectObservation = effectCommit.schedulerObservation as Record<
+      string,
+      unknown
+    >;
+    effectObservation.actionKind = "effect";
+    effectObservation.implementationFingerprint = `impl:${
+      serverBuiltinImplementationHash(id)
+    }`;
+    delete effectObservation.completeActionScopeSummary;
+
+    const candidateCount = candidates.length;
+    const route = await router({
+      space: SPACE,
+      commit: effectCommit,
+      sourceAction: effectAction,
+    });
+    assertEquals(route.disposition, "local");
+    if (route.disposition !== "local") throw new Error("expected local");
+    assertEquals(route.kind, "executor-shadow");
+    assertEquals(candidates.length, candidateCount);
+    if (route.kind === "executor-shadow") route.afterLocalApply?.();
+    assertEquals(candidates.length, candidateCount + 1);
+  }
+  assertEquals(
+    candidates.map((candidate) => candidate.builtinId),
+    [...EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS],
+  );
+  assertEquals(
+    candidates.every((candidate) => candidate.claimKey.actionKind === "effect"),
+    true,
+  );
 });
 
 Deno.test("executor action router never candidates an unsupported effect even with a broker", async () => {
@@ -529,6 +580,76 @@ Deno.test("executor action router carries an accepted builtin claim across async
       contextKey: "space",
       leaseGeneration: 3,
       claimGeneration: 4,
+    },
+  );
+
+  const materializedId = "of:fid1:claimed-builtin-materialized-child";
+  const materialized = commit();
+  materialized.reads.confirmed.push(
+    {
+      id: materializedId,
+      scope: "space",
+      path: toDocumentPath(["cfc"]),
+      seq: 0,
+    },
+    {
+      id: materializedId,
+      scope: "space",
+      path: toDocumentPath(["value"]),
+      seq: 0,
+    },
+  );
+  materialized.operations = [{
+    op: "patch",
+    id: output.id,
+    scope: "space",
+    patches: [{
+      op: "add",
+      path: "/value/messages/0",
+      value: {
+        "/": { "link@1": { id: materializedId, path: [] } },
+      },
+    }],
+  }, {
+    op: "set",
+    id: materializedId,
+    scope: "space",
+    value: { value: { role: "assistant", content: "broker result" } },
+  }];
+  materialized.schedulerObservation = undefined;
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: materialized,
+      sourceAction: effectAction,
+    }),
+    { disposition: "upstream" },
+  );
+
+  const unlinkedId = "of:fid1:claimed-builtin-unlinked-child";
+  const unlinked = commit();
+  unlinked.reads.confirmed.push({
+    id: unlinkedId,
+    scope: "space",
+    path: toDocumentPath([]),
+    seq: 0,
+  });
+  unlinked.operations = [{
+    op: "set",
+    id: unlinkedId,
+    scope: "space",
+    value: { value: "must remain outside the claimed surface" },
+  }];
+  unlinked.schedulerObservation = undefined;
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: unlinked,
+      sourceAction: effectAction,
+    }),
+    {
+      disposition: "unserved",
+      diagnosticCode: "dynamic-read-outside-static-surface",
     },
   );
 
