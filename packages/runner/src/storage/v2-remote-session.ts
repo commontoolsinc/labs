@@ -87,7 +87,7 @@ export const createStorageAddressResolver = (
   };
 };
 
-class WebSocketTransport implements MemoryClient.Transport {
+export class WebSocketTransport implements MemoryClient.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #socket: WebSocket | null = null;

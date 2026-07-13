@@ -3,6 +3,7 @@ import ts from "typescript";
 import { transformSource } from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import {
+  calleeName,
   callsMatching,
   extractedCallbackBody,
   hasKeyPathRead,
@@ -11,13 +12,16 @@ import {
 } from "./transformed-ast.ts";
 
 // `emitCallExpression` has a dedicated branch for an authored zero-argument
-// inline IIFE — `(() => ...)()` — that appears inside a reactive array-method
-// callback. That branch (and its receiver-scanning helpers) runs today only as
-// a side effect of patterns compiling through the transformer in CI's
-// pattern-integration jobs, because reaching it needs the in-place expression
-// rewrite that array-method callback lowering performs. These tests place such
-// an IIFE inside a `.map()`/`.filter()` callback and assert on how the branch
-// treats it.
+// inline IIFE — `(() => ...)()` — that reads a cell from a reactive position.
+// Outside these tests the branch is reached only as a side effect of patterns
+// compiling through the transformer in CI's pattern-integration jobs, so its
+// coverage flaps in the coverage-debt gate whenever those jobs' compile cache is
+// warm. These tests reach it deterministically from two reactive positions and
+// assert on how it treats the IIFE. Which sub-path runs depends on whether the
+// reactive-wrapper builder can bind the IIFE's receiver: an element cell from a
+// `.map()`/`.filter()` callback lets it succeed and rewrite the read in place,
+// while a top-level cell inside an `ifElse` conditional makes it decline and
+// fall through to the `createLiftAppliedCall` path.
 //
 // The assertions parse the transformer output back into an AST and inspect real
 // nodes (a `__cfLift*` wrapper call, an immediately-invoked function, a
@@ -134,5 +138,80 @@ Deno.test(
     // returned unchanged and not wrapped in a lift.
     assertEquals(iifeCalls(body).length, 1);
     assertEquals(callsMatching(body, /^__cfLift/).length, 0);
+  },
+);
+
+// This test covers the `createLiftAppliedCall` sub-path directly: a zero-arg
+// IIFE reading a top-level pattern cell inside an `ifElse` branch, which the
+// array-method tests above never reach.
+Deno.test(
+  "zero-arg IIFE reading a top-level cell inside an ifElse branch wraps the whole IIFE in a lift applied to that cell",
+  async () => {
+    const output = parseModule(
+      await transformSource(
+        `/// <cts-enable />
+import { Cell, ifElse, pattern, UI, VNode } from "commonfabric";
+interface Input { enabled: Cell<boolean>; show: Cell<boolean>; }
+interface Output { [UI]: VNode; }
+export default pattern<Input, Output>(({ enabled, show }) => ({
+  [UI]: (
+    <div>
+      {ifElse(
+        show,
+        <div>
+          {(() => {
+            const rawEnabled = enabled.get();
+            return typeof rawEnabled === "boolean" ? rawEnabled : true;
+          })()}
+        </div>,
+        null,
+      )}
+    </div>
+  ),
+}));`,
+        { types: COMMONFABRIC_TYPES },
+      ),
+    );
+
+    // The authored IIFE was lowered to a `__cfLift*` wrapper applied with the
+    // top-level `enabled` cell hoisted as its input (passed by identifier, not
+    // as an element `.key(...)` path read as the array-method path produces).
+    const appliedWithEnabled = callsMatching(output, /^__cfLift/).filter(
+      (call) => {
+        const arg = call.arguments[0];
+        return !!arg && ts.isObjectLiteralExpression(arg) &&
+          arg.properties.some((p) =>
+            !!p.name && ts.isIdentifier(p.name) && p.name.text === "enabled"
+          );
+      },
+    );
+    assertEquals(appliedWithEnabled.length, 1);
+    const appliedCall = appliedWithEnabled[0]!;
+
+    // That applied lift sits inside a reactive `ifElse` conditional — the
+    // position that makes the wrapper builder decline (no element receiver to
+    // bind) and fall through to `createLiftAppliedCall`.
+    let ancestor: ts.Node | undefined = appliedCall.parent;
+    let insideIfElse = false;
+    while (ancestor) {
+      if (ts.isCallExpression(ancestor) && calleeName(ancestor) === "ifElse") {
+        insideIfElse = true;
+        break;
+      }
+      ancestor = ancestor.parent;
+    }
+    assert(
+      insideIfElse,
+      "expected the lift application inside an ifElse branch",
+    );
+
+    // The matching lift definition preserves the whole authored IIFE: its
+    // factory body is still an immediately-invoked function. This is the
+    // `createLiftAppliedCall` fallback wrapping the IIFE wholesale, in contrast
+    // to the array-method path above, which decomposes the IIFE away.
+    const liftName = calleeName(appliedCall);
+    assert(liftName, "expected a named lift wrapper");
+    const liftBody = extractedCallbackBody(output, liftName);
+    assertEquals(iifeCalls(liftBody).length, 1);
   },
 );
