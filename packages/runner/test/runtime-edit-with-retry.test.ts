@@ -122,6 +122,26 @@ describe("Runtime.editWithRetry", () => {
     expect(attempts).toBe(1);
   });
 
+  it("does not retry a stale execution lease fence", async () => {
+    let attempts = 0;
+    const { error } = await runtime.editWithRetry((t) => {
+      attempts++;
+      Object.defineProperty(t, "commit", {
+        configurable: true,
+        value: () =>
+          Promise.resolve({
+            error: {
+              name: "ExecutionLeaseFenceError",
+              message: "claimed action authority is stale",
+            },
+          }),
+      });
+    }, 5);
+
+    expect(error?.name).toBe("ExecutionLeaseFenceError");
+    expect(attempts).toBe(1);
+  });
+
   it("still retries a conflict after terminal rejection handling", async () => {
     let attempts = 0;
     const { ok, error } = await runtime.editWithRetry((t) => {

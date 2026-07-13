@@ -10,6 +10,7 @@ import type {
 } from "../storage/interface.ts";
 import {
   isConflictRejection,
+  isExecutionLeaseFenceRejection,
   isPermanentRejection,
   isTerminalRejection,
 } from "../storage/rejection.ts";
@@ -195,17 +196,22 @@ export function watchReactiveActionCommit(state: {
       return;
     }
 
-    // Permanent (precondition) and terminal (deterministic commit-rule refusal —
-    // `isTerminalRejection`) rejections are never retried: re-running recomputes
-    // the identical refused write, and the doomed re-runs would starve
-    // concurrent siblings. This definitively ENDS the current retry sequence, so
-    // clear the counter — exactly like the success path above — before returning:
-    // a later re-run triggered by changed inputs is a fresh sequence that must
-    // keep its full bounded budget for a genuinely transient failure, not inherit
-    // a count accumulated by earlier transient attempts or the terminal one.
-    // Resubscribe still happens (finalizeReactiveActionCommit), so a real input
-    // change re-triggers.
-    if (isPermanentRejection(error) || isTerminalRejection(error)) {
+    // Permanent (precondition), terminal (deterministic commit-rule refusal —
+    // `isTerminalRejection`), and exact execution-authority fence rejections are
+    // never retried. The first two would recompute the identical refused write;
+    // the fence names a lease/claim incarnation that can never become current
+    // again. Doomed re-runs would only starve concurrent siblings. This
+    // definitively ENDS the current retry sequence, so clear the counter —
+    // exactly like the success path above — before returning: a later re-run
+    // triggered by changed inputs is a fresh sequence that must keep its full
+    // bounded budget for a genuinely transient failure, not inherit a count
+    // accumulated by earlier transient attempts or the terminal one. Resubscribe
+    // still happens (finalizeReactiveActionCommit), so a real input change
+    // re-triggers and may receive a fresh claim.
+    if (
+      isPermanentRejection(error) || isTerminalRejection(error) ||
+      isExecutionLeaseFenceRejection(error)
+    ) {
       reportRejection("abandoned");
       state.retries.delete(state.action);
       return;

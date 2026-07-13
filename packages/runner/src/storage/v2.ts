@@ -4582,7 +4582,12 @@ const toRejectedError = (
   commit: unknown,
   space: MemorySpace,
 ): StorageTransactionRejected => {
-  const message = error instanceof Error ? error.message : String(error);
+  const structuredMessage = (error as { message?: unknown })?.message;
+  const message = typeof structuredMessage === "string"
+    ? structuredMessage
+    : error instanceof Error
+    ? error.message
+    : String(error);
   const name = error instanceof Error
     ? error.name
     : (error as { name?: unknown })?.name;
@@ -4645,12 +4650,10 @@ const toRejectedError = (
     return rejected;
   }
 
-  // A terminal commit rejection (a deterministic server-side refusal of the
-  // committed data — today `RowLabelCommitError`, storage/rejection.ts
-  // `isTerminalRejection`): preserve the wire name so the scheduler classifies
-  // it as non-retryable instead of collapsing it into a generic, bounded-retry
-  // TransactionError. Re-running the identical handler recomputes the identical
-  // refused write, so the doomed re-runs would only starve sibling commits.
+  // Preserve stable non-retryable wire names instead of collapsing them into a
+  // generic, bounded-retry TransactionError. Terminal data refusals recompute
+  // the same rejected write; an execution fence asserts a stale lease/claim
+  // incarnation that the same attempt can never recover.
   if (name === "ExecutionActionFirewallError") {
     const diagnosticCode = executionFirewallDiagnostic(error) ??
       "unknown-firewall-rejection";
@@ -4669,6 +4672,14 @@ const toRejectedError = (
       name,
       message,
       cause: { name: "SystemError", message, code: 500 },
+      transaction: commit as Transaction,
+    } as unknown as TransactionError;
+  }
+  if (name === "ExecutionLeaseFenceError") {
+    return {
+      name,
+      message,
+      cause: { name: "SystemError", message, code: 409 },
       transaction: commit as Transaction,
     } as unknown as TransactionError;
   }

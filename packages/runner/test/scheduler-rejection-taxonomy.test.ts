@@ -2,6 +2,7 @@
 // where the engine can actually emit precondition failures.
 import { describe, expect, it } from "./scheduler-test-utils.ts";
 import {
+  isExecutionLeaseFenceRejection,
   isPermanentRejection,
   isTerminalRejection,
 } from "../src/storage/rejection.ts";
@@ -52,5 +53,12 @@ describe("scheduler rejection taxonomy", () => {
     expect(isTerminalRejection({ name: "PreconditionFailedError" })).toBe(
       false,
     );
+  });
+
+  it("classifies stale execution authority separately from data refusal", () => {
+    const rejection = { name: "ExecutionLeaseFenceError" };
+    expect(isExecutionLeaseFenceRejection(rejection)).toBe(true);
+    expect(isPermanentRejection(rejection)).toBe(false);
+    expect(isTerminalRejection(rejection)).toBe(false);
   });
 });

@@ -4808,6 +4808,8 @@ export class Server {
           const responseError = preconditionError ? preconditionError : toError(
             error instanceof Engine.ConflictError
               ? "ConflictError"
+              : error instanceof Engine.ExecutionLeaseFenceError
+              ? error.name
               : error instanceof Engine.ExecutionActionFirewallError
               ? error.name
               : error instanceof Engine.ProtocolError

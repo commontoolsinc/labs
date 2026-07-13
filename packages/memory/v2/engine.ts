@@ -824,6 +824,11 @@ export class ProtocolError extends Error {
   }
 }
 
+/**
+ * Stable rejection for a claimed executor transaction whose exact lease or
+ * claim authority is no longer current. Retrying the same attempt cannot
+ * restore that incarnation; a later run must obtain fresh authority.
+ */
 export class ExecutionLeaseFenceError extends Error {
   constructor(message: string) {
     super(message);
@@ -7559,7 +7564,7 @@ const acceptedSchedulerObservation = (
   const claim = options.executionClaim;
   if (claim === undefined) {
     if (assertedClaim !== undefined || unservedAttempt !== undefined) {
-      throw new ProtocolError(
+      throw new ExecutionLeaseFenceError(
         "execution claim incarnation is not live for this action attempt",
       );
     }
@@ -7588,7 +7593,7 @@ const acceptedSchedulerObservation = (
     observation.actionKind === "event-handler" ||
     observation.transactionKind !== "action-run"
   ) {
-    throw new ProtocolError(
+    throw new ExecutionLeaseFenceError(
       "execution claim incarnation does not match the accepted scheduler action",
     );
   }
@@ -7981,7 +7986,7 @@ const applySchedulerObservationOnlyCommit = (
     observationResult.executionContextKey !==
       accepted.provenance.claim.contextKey
   ) {
-    throw new ProtocolError(
+    throw new ExecutionLeaseFenceError(
       "execution claim context does not match the effective scheduler context",
     );
   }

@@ -109,4 +109,14 @@ Deno.test("claimed rejection keeps active retries but releases abandoned attempt
       diagnosticCode: "commit-rejected:StorageTransactionAborted",
     },
   );
+  assertEquals(
+    claimedAttemptRejection(
+      { name: "ExecutionLeaseFenceError" },
+      "retrying",
+    ),
+    {
+      release: true,
+      diagnosticCode: "commit-rejected:ExecutionLeaseFenceError",
+    },
+  );
 });

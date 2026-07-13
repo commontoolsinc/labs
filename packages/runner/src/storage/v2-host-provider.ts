@@ -38,6 +38,9 @@ import {
   StorageManager,
 } from "./v2.ts";
 import type { ReplicaClient, ReplicaSession } from "./v2-replica-session.ts";
+import {
+  installHostConflictRetryBarrier,
+} from "./v2-host-conflict-readiness.ts";
 
 export interface AcceptedCommitNotice {
   space: string;
@@ -715,25 +718,19 @@ class HostReplicaSession implements ReplicaSession {
     try {
       return await this.session.transact({ ...commit, branch: this.branch });
     } catch (error) {
-      const readyToRetry = (error as { readyToRetry?: unknown })
-        ?.readyToRetry;
-      if (
-        error instanceof Error && error.name === "ConflictError" &&
-        typeof readyToRetry === "function"
-      ) {
-        (error as Error & { readyToRetry: () => Promise<void> }).readyToRetry =
-          async () => {
-            await Promise.resolve(readyToRetry.call(error));
-            this.#view?.applySync({
-              type: "sync",
-              fromSeq: this.session.serverSeq,
-              toSeq: this.session.serverSeq,
-              caughtUpLocalSeq: commit.localSeq,
-              upserts: [],
-              removes: [],
-            }, true);
-          };
-      }
+      installHostConflictRetryBarrier(error, {
+        acceptedCommitsSettled: () => this.acceptedCommitsSettled(),
+        markCaughtUp: () => {
+          this.#view?.applySync({
+            type: "sync",
+            fromSeq: this.#appliedSeq,
+            toSeq: this.#appliedSeq,
+            caughtUpLocalSeq: commit.localSeq,
+            upserts: [],
+            removes: [],
+          }, true);
+        },
+      });
       throw error;
     }
   }

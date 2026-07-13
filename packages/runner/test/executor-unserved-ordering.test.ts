@@ -154,3 +154,28 @@ Deno.test("conflicted unserved settlement retains the claim for retry", async ()
     await storage.close();
   }
 });
+
+Deno.test("execution lease fence identity survives runner normalization", async () => {
+  const factory = new ScriptedSessionFactory(() =>
+    Promise.reject(rejected(
+      "ExecutionLeaseFenceError",
+      "execution claim incarnation is stale",
+    ))
+  );
+  const storage = ScriptedStorageManager.connectTo(factory, () => {});
+  try {
+    const result = await storage.open(SPACE).replica.commitNative!({
+      operations: [{
+        op: "set",
+        id: OUTPUT,
+        type: "application/json",
+        value: { value: "must-not-land" },
+      }],
+    });
+
+    assertEquals(result.error?.name, "ExecutionLeaseFenceError");
+    assertEquals(factory.commits.length, 1);
+  } finally {
+    await storage.close();
+  }
+});

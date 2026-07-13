@@ -1946,7 +1946,7 @@ Deno.test("bound executor rejects a delayed attempt after claim replacement", as
     );
     assertEquals(replacement.claimGeneration, first.claimGeneration + 1);
 
-    await assertRejects(
+    const staleError = await assertRejects(
       () =>
         session.transact({
           localSeq: 2,
@@ -1964,6 +1964,7 @@ Deno.test("bound executor rejects a delayed attempt after claim replacement", as
       Error,
       "execution claim incarnation",
     );
+    assertEquals(staleError.name, "ExecutionLeaseFenceError");
     assertEquals(
       await server.readDocument(
         POLICY_SPACE,

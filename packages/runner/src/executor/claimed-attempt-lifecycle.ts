@@ -4,6 +4,7 @@ import {
 } from "@commonfabric/memory/v2";
 import type { ActionCommitRejectionDisposition } from "../scheduler/run.ts";
 import {
+  isExecutionLeaseFenceRejection,
   isPermanentRejection,
   isTerminalRejection,
 } from "../storage/rejection.ts";
@@ -129,7 +130,7 @@ export function claimedAttemptRejection(
   const name = named?.name ?? "unknown";
   const immediatelyInvalidating = name === "StorageTransactionAborted" ||
     name === "AuthorizationError" || isPermanentRejection(named) ||
-    isTerminalRejection(named);
+    isTerminalRejection(named) || isExecutionLeaseFenceRejection(named);
   if (immediatelyInvalidating) {
     return { release: true, diagnosticCode: `commit-rejected:${name}` };
   }

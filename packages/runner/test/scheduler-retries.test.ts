@@ -184,6 +184,16 @@ describe("reactive retries", () => {
   );
 
   it(
+    "does not retry a stale execution lease fence and clears the retry budget",
+    async () => {
+      const r = await runWatcher("ExecutionLeaseFenceError", 3);
+      expect(r.queued).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
+      expect(r.rejectionDispositions).toEqual(["abandoned"]);
+    },
+  );
+
+  it(
     "retries a transient reactive rejection within the bounded budget",
     async () => {
       // A generic transient error keeps the bounded retry path: it re-queues and

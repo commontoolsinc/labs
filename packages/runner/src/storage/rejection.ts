@@ -10,6 +10,19 @@ export function isPermanentRejection(
 }
 
 /**
+ * A claimed executor commit lost the exact lease/claim authority it asserted.
+ * This is neither a data refusal nor a transient storage failure: the same
+ * attempt can never become authorized again, while a future action run may
+ * receive a new claim incarnation. Callers must abandon this attempt without
+ * consuming a retry budget and release only its exact claim.
+ */
+export function isExecutionLeaseFenceRejection(
+  error: { name?: string } | undefined | null,
+): boolean {
+  return error?.name === "ExecutionLeaseFenceError";
+}
+
+/**
  * The wire names of terminal commit rejections: a server-side commit-time
  * evaluation that DETERMINISTICALLY refused the committed data itself, so
  * re-running the identical handler recomputes the identical refused write and
