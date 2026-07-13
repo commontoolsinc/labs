@@ -67,7 +67,7 @@ export function authorizeDefaultServerBuiltinRequest(
     target.origin === context.servingOrigin.origin &&
     isProtectedToolshedFirstPartyRoute(
       target,
-      request.fetch.method ?? "GET",
+      (request.fetch.method ?? "GET").trim(),
     )
   ) {
     throw new Error(

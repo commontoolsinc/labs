@@ -163,3 +163,58 @@ Deno.test("builtin broker channel propagates abort and cancels host work", async
     host.dispose();
   }
 });
+
+Deno.test("builtin broker channel cancels while an asynchronous claim check is pending", async () => {
+  const channel = new MessageChannel();
+  const claimCheck = Promise.withResolvers<boolean>();
+  const claimCheckStarted = Promise.withResolvers<void>();
+  let calls = 0;
+  const host = createServerBuiltinBrokerHost({
+    port: channel.port1,
+    context: {
+      space: SPACE,
+      branch: "",
+      leaseGeneration: 4,
+      onBehalfOf: ACTOR,
+      servingOrigin: new URL("https://toolshed.example/"),
+    },
+    broker: {
+      fetch() {
+        calls++;
+        return Promise.resolve({
+          response: new Response("must not execute"),
+          finalUrl: new URL("https://toolshed.example/slow"),
+          redirectCount: 0,
+        });
+      },
+    },
+    isClaimLive: () => {
+      claimCheckStarted.resolve();
+      return claimCheck.promise;
+    },
+  });
+  const client = createServerBuiltinBrokerClient({
+    port: channel.port2,
+    claimForRequest: () => claim,
+  });
+  const controller = new AbortController();
+
+  try {
+    const pending = client.fetch("fetchText", "/slow", {
+      signal: controller.signal,
+    });
+    await claimCheckStarted.promise;
+    controller.abort(new Error("caller stopped during claim check"));
+    await assertRejects(
+      () => pending,
+      Error,
+      "caller stopped during claim check",
+    );
+    claimCheck.resolve(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(calls, 0);
+  } finally {
+    client.dispose();
+    host.dispose();
+  }
+});

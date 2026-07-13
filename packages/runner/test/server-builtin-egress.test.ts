@@ -106,6 +106,31 @@ Deno.test("an origin-changing redirect is reclassified before connecting", async
   assertEquals(requests, 1);
 });
 
+Deno.test("malformed redirects cancel their response body before failing", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array([1]));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const broker = createServerBuiltinEgressBroker({
+    servingOrigin: "https://fabric.example",
+    resolveHostAddresses: () => Promise.resolve(["93.184.216.34"]),
+    transport: transportFrom(() =>
+      response(302, { location: "http://[" }, body)
+    ),
+  });
+
+  await expectEgressError(
+    broker.fetch({ url: "https://example.com/start" }),
+    "invalid-url",
+  );
+  assertEquals(cancelled, true);
+});
+
 Deno.test("absolute local, private, metadata, and disallowed-scheme targets are denied", async (t) => {
   const blocked = [
     "http://localhost/admin",

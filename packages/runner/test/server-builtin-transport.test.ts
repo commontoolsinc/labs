@@ -61,3 +61,25 @@ Deno.test("default builtin authorization fails closed for protected first-party 
     "delegated user signing",
   );
 });
+
+Deno.test("default builtin authorization normalizes methods before classifying protected routes", () => {
+  assertThrows(
+    () =>
+      authorizeDefaultServerBuiltinRequest({
+        builtinId: "fetchJson",
+        claim: {} as never,
+        fetch: {
+          url: "/api/agent-tools/web-read",
+          method: " POST ",
+        },
+      }, {
+        space: "did:key:z6Mk-builtin-auth",
+        branch: "",
+        leaseGeneration: 1,
+        onBehalfOf: "did:key:z6Mk-user",
+        servingOrigin: new URL("https://toolshed.example/"),
+      }),
+    Error,
+    "delegated user signing",
+  );
+});

@@ -117,12 +117,13 @@ export function createServerBuiltinBrokerHost(
     const requestId = wireRequestId(value);
     try {
       const request = parseFetchWireRequest(value);
+      const controller = new AbortController();
+      inflight.set(request.requestId, controller);
       validateClaimForRequest(request, options.context);
       if (!await options.isClaimLive(request.claim)) {
         throw new Error("server builtin request requires an exact live claim");
       }
-      const controller = new AbortController();
-      inflight.set(request.requestId, controller);
+      if (controller.signal.aborted) throw abortReason(controller.signal);
       const fetchRequest = {
         url: request.url,
         ...(request.method !== undefined ? { method: request.method } : {}),
@@ -146,6 +147,7 @@ export function createServerBuiltinBrokerHost(
         fetch: fetchRequest,
       } satisfies AuthorizedServerBuiltinRequest;
       await options.authorize?.(authorized, options.context);
+      if (controller.signal.aborted) throw abortReason(controller.signal);
       const result = await options.broker.fetch({
         ...fetchRequest,
         signal: controller.signal,

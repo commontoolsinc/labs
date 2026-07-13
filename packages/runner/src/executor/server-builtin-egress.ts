@@ -714,9 +714,11 @@ export const createServerBuiltinEgressBroker = (
         );
       };
       if (request.signal?.aborted) onCallerAbort();
-      else {request.signal?.addEventListener("abort", onCallerAbort, {
+      else {
+        request.signal?.addEventListener("abort", onCallerAbort, {
           once: true,
-        });}
+        });
+      }
       const cancelTimeout = scheduleTimeout(() => {
         controller.abort(
           new ServerBuiltinEgressError(
@@ -783,7 +785,13 @@ export const createServerBuiltinEgressBroker = (
             );
           }
 
-          const nextUrl = parseTargetUrl(location, target.url);
+          let nextUrl: URL;
+          try {
+            nextUrl = parseTargetUrl(location, target.url);
+          } catch (error) {
+            await cancelBody(response.body, controller.signal);
+            throw error;
+          }
           const sameOrigin = nextUrl.origin === target.url.origin;
           const remainsTrusted = target.trustedServingOrigin &&
             nextUrl.origin === servingOrigin.origin;
