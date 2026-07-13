@@ -33,6 +33,9 @@ export type ExperimentalRuntimeFlags = {
   eagerSourceAnnotation?: boolean;
   systemPatternAutoUpdate?: boolean;
   systemPatternAutoUpdateHome?: boolean;
+  /** Reactive interpreter (#4514): run pure pattern regions through the
+   * graph-compression interpreter in the worker runtime. */
+  experimentalInterpreter?: boolean;
 };
 
 export type RuntimeCfcEnforcementMode = NonNullable<

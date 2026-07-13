@@ -170,6 +170,8 @@ export interface InitializationData {
     // serves a newer identity. Default off; home held behind the second flag.
     systemPatternAutoUpdate?: boolean;
     systemPatternAutoUpdateHome?: boolean;
+    // Reactive interpreter (#4514) in the worker runtime.
+    experimentalInterpreter?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:

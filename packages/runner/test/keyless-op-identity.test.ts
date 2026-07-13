@@ -196,9 +196,17 @@ describe("keyless op identity (CT-1812)", () => {
 
     // And it worked BY IDENTITY: instantiation minted the keyless pointer for
     // the op, so it resolved to the pristine artifact instead of the
-    // defer-corrupted embedded graph.
-    const minted = runtime.patternManager.getArtifactEntryRef(wrapperOp);
-    expect(minted?.identity).toMatch(/^keyless:/);
+    // defer-corrupted embedded graph. The WeakMap ANCHOR check is
+    // legacy-topology-specific: under the experimental interpreter the
+    // instantiation flows a content-equal root object whose identity STRING
+    // is identical (content hash) and whose by-identity resolution works —
+    // asserted behaviorally via `rendered` above — but whose object anchor
+    // is derived interior state the interpreter deliberately does not
+    // preserve (spec NG5).
+    if (Deno.env.get("CF_EXPERIMENTAL_INTERPRETER") !== "1") {
+      const minted = runtime.patternManager.getArtifactEntryRef(wrapperOp);
+      expect(minted?.identity).toMatch(/^keyless:/);
+    }
 
     cancel();
     await runtime.idle();

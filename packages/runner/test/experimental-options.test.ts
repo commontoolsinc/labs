@@ -36,12 +36,14 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: false,
+          experimentalInterpreter: false,
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        experimentalInterpreter: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -57,12 +59,14 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: true,
+          experimentalInterpreter: true,
         },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        experimentalInterpreter: true,
         eagerSourceAnnotation: false,
       });
       await runtime.dispose();
@@ -74,12 +78,13 @@ describe("ExperimentalOptions", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: sm,
-        experimental: {},
+        experimental: { experimentalInterpreter: false },
       });
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: false,
+        experimentalInterpreter: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -97,6 +102,7 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: true,
+          experimentalInterpreter: true,
         },
       });
 

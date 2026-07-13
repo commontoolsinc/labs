@@ -5,7 +5,10 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
+import {
+  getArtifactEntryRef,
+  noteDerivedCopy,
+} from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -494,6 +497,55 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
       }
       // TODO(@ubik2) - we may never get here -- see if this can be removed
       return { $alias: alias };
+    } else if (isPattern(binding)) {
+      // A referenced pattern is NOT traversed or copied here: it is represented
+      // by its content-addressed `{ identity, symbol }` entry ref and resolved
+      // back to its live canonical at instantiation (`resolveStoredPattern` /
+      // `resolveOpPattern`). The live canonical is the exact object the builder
+      // keyed its reactive-interpreter ROG on, so instantiating it is a strict
+      // `getBuiltRog` WeakMap hit. (Because these copies are gone at the source,
+      // the interpreter needs no derived-copy recovery path — a strict miss
+      // just runs legacy.) This generalizes the former
+      // `Runner.substituteOpPatternRefs` — which did the same for the
+      // `map`/`filter`/`flatMap` `op` input only — to the whole binding
+      // channel, including the directly-invoked-sub-pattern node. (Its
+      // CT-1812 keyless arm stays runner-side and `op`-scoped —
+      // `Runner.substituteOpKeylessPatternRef`.)
+      const ref = getArtifactEntryRef(binding);
+      if (ref !== undefined) {
+        // Match `patternToJSON`'s JSON-boundary form EXACTLY (json-utils.ts):
+        // the ref PLUS the two schemas. The schemas "ride along so consumers
+        // can read them without resolving" (e.g. llm-dialog tool schemas) and,
+        // critically, satisfy the `Pattern` schema — `{ argumentSchema,
+        // resultSchema }` are required there, so a bare `{ $patternRef }` bound
+        // into a pattern-typed field would fail validation and stall the
+        // action/handler that reads it.
+        return {
+          $patternRef: { identity: ref.identity, symbol: ref.symbol },
+          argumentSchema: binding.argumentSchema,
+          resultSchema: binding.resultSchema,
+        };
+      }
+      // No entry ref: a manually-constructed / bare-Engine pattern with no
+      // live canonical to resolve to. Preserve the legacy behavior — a
+      // callable pattern passes through unchanged; an object pattern is
+      // structurally copied (one alias level unwrapped) and linked to its
+      // original so trust and any later-indexed ref still resolve. (For the
+      // list builtins' `op` input specifically, the runner then mints a
+      // keyless session identity for copies with a live trusted original —
+      // `Runner.substituteOpKeylessPatternRef`, CT-1812. That stays scoped to
+      // `op`: minting every bound pattern value would hand sentinels to
+      // consumers that read pattern fields structurally, e.g. the llm-dialog
+      // tool catalog.)
+      if (typeof binding !== "object") return binding;
+      const copy: Record<string | symbol, unknown> = Object.fromEntries(
+        Object.entries(binding).map(([key, value]) => [
+          key,
+          convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
+        ]),
+      );
+      noteDerivedCopy(copy, binding);
+      return copy;
     } else if (Array.isArray(binding)) {
       return binding.map((value, index) =>
         convert(
@@ -502,17 +554,12 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         )
       );
     } else if (isRecord(binding)) {
-      const result: Record<string | symbol, unknown> = Object.fromEntries(
+      return Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [
           key,
           convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
         ]),
       );
-      // Carry the derivation link (trust + content-addressed entry ref) onto
-      // the bound copy so a pattern value re-bound here still resolves its
-      // `{ identity, symbol }` and stays trusted.
-      if (isPattern(binding)) noteDerivedCopy(result, binding);
-      return result;
     } else return binding;
   }
   return convert(binding, options?.targetSchema) as T;

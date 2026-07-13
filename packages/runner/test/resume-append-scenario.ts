@@ -152,9 +152,21 @@ export interface AppendScenario {
 async function build(scenario: AppendScenario): Promise<void> {
   const { signer, space, server, program, cellId, items } = scenario;
   const sm = GatedStorageManager.make(signer, server);
+  // Build the durable aggregate through the LEGACY coordinator, even under the
+  // interpreter flag. The gate window this harness forces (below) holds each
+  // element's per-element RESULT document as it streams in on resume — but only
+  // the legacy coordinator persists those documents. The flag-on inline filter
+  // evaluates its predicates in-segment and keeps the ORIGINAL element
+  // references, so it never writes a streamable per-element result doc; a
+  // flag-on inline build would leave the gate with nothing to hold and
+  // `firstHeld` would never resolve (the same reason map is not gated here).
+  // The RESUME runtime keeps the ambient flag: the interpreter refuses resumed
+  // collections and falls back to the legacy coordinator, so the resume path —
+  // the actual subject of these tests — is still exercised flag-on.
   const rt = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: sm,
+    experimental: { experimentalInterpreter: false },
   });
   const compiled = await rt.patternManager.compilePattern(program, { space });
   const tx0 = rt.edit();
@@ -176,6 +188,10 @@ async function build(scenario: AppendScenario): Promise<void> {
   expect(scenario.read(rc)).toEqual(scenario.buildExpected);
   rt.scheduler.dispose();
   await rt.dispose();
+  // Close the build session's storage manager (sibling harnesses close theirs in
+  // afterEach): a per-element result watch can otherwise keep a transport promise
+  // pending past process end, which the op sanitizer reports as a leak.
+  await sm.close();
 }
 
 /**
@@ -264,5 +280,6 @@ export async function runResumeAppendScenario(
     return { output: scenario.read(rc2), heldCount };
   } finally {
     await rt2.dispose();
+    await sm2.close();
   }
 }

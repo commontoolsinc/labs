@@ -7,6 +7,7 @@ declare global {
   var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME: string | undefined;
+  var $EXPERIMENTAL_INTERPRETER: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -35,6 +36,10 @@ const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE =
 const EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME_DEFINE =
   typeof $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME === "string"
     ? $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME
+    : undefined;
+const EXPERIMENTAL_INTERPRETER_DEFINE =
+  typeof $EXPERIMENTAL_INTERPRETER === "string"
+    ? $EXPERIMENTAL_INTERPRETER
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -75,4 +80,9 @@ export const EXPERIMENTAL = {
   systemPatternAutoUpdateHome: flagValue(
     EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME_DEFINE,
   ),
+  // Reactive interpreter (#4514): default off; the felt define normalizes
+  // CF_EXPERIMENTAL_INTERPRETER=1 to "true" so one env var flips the whole
+  // stack (Deno realms read the env directly; browser realms only see this
+  // define).
+  experimentalInterpreter: flagValue(EXPERIMENTAL_INTERPRETER_DEFINE),
 };

@@ -344,7 +344,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // is only ever served when nothing has been written since the cached read.
   // This is a Map rather than a WeakMap, but the transaction owns it and writes
   // drop it wholesale, bounding retention to reads-without-writes in one tx.
-  private readResultCache = new Map<string, Map<string, { value: unknown }>>();
+  private readResultCache = new Map<
+    string,
+    Map<string, { value: unknown; narrowestReadScope?: CellScope }>
+  >();
   private readResultCacheHits = 0;
   private readResultCacheMisses = 0;
   private readResultCacheSets = 0;
@@ -805,7 +808,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   private recordReadScope(address: IMemorySpaceAddress): void {
-    const scope = normalizeCellScope(address.scope);
+    this.noteReadScope(normalizeCellScope(address.scope));
+  }
+
+  private noteReadScope(scope: CellScope): void {
     if (scopeRank(scope) > scopeRank(this.narrowestReadScope)) {
       this.narrowestReadScope = scope;
     }
@@ -814,12 +820,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   getCachedReadResult(
     key: string,
     variant: string,
-  ): { value: unknown } | undefined {
+  ): { value: unknown; narrowestReadScope?: CellScope } | undefined {
     const cached = this.readResultCache.get(key)?.get(variant);
     if (cached === undefined) {
       this.readResultCacheMisses++;
     } else {
       this.readResultCacheHits++;
+      // Scope-accuracy on hits: the elided traversal READ scoped docs when
+      // the entry was filled — replay that observation, or scope-narrowing
+      // derivation (legacy narrowest-read routing AND the interpreter's
+      // per-op tracking) goes blind exactly when the cache warms up.
+      if (cached.narrowestReadScope !== undefined) {
+        this.noteReadScope(cached.narrowestReadScope);
+      }
     }
     return cached;
   }
@@ -828,13 +841,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     key: string,
     variant: string,
     value: unknown,
+    narrowestReadScope?: CellScope,
   ): void {
     let byVariant = this.readResultCache.get(key);
     if (byVariant === undefined) {
       byVariant = new Map();
       this.readResultCache.set(key, byVariant);
     }
-    byVariant.set(variant, { value });
+    byVariant.set(
+      variant,
+      narrowestReadScope !== undefined && narrowestReadScope !== "space"
+        ? { value, narrowestReadScope }
+        : { value },
+    );
     this.readResultCacheSets++;
   }
 

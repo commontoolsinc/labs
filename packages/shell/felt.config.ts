@@ -69,6 +69,15 @@ const config: Config = {
       "$EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME": Deno.env.get(
         "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
       ),
+      // Reactive interpreter (#4514). Accepts the family spelling
+      // (EXPERIMENTAL_INTERPRETER=true/false) and normalizes the Deno-side
+      // spelling (CF_EXPERIMENTAL_INTERPRETER=1) so one env var turns the
+      // WHOLE stack on — a browser realm silently running flag-off while
+      // the servers run flag-on is a capability skew.
+      "$EXPERIMENTAL_INTERPRETER": Deno.env.get("EXPERIMENTAL_INTERPRETER") ??
+        (Deno.env.get("CF_EXPERIMENTAL_INTERPRETER") === "1"
+          ? "true"
+          : undefined),
       "globalThis.__cfCompileCacheRuntimeVersion":
         COMPILE_CACHE_RUNTIME_VERSION,
     },

@@ -1,5 +1,6 @@
 import { BuiltInLLMDialogState } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { markStrInterpolation } from "../reactive-interpreter/builtin-markers.ts";
 import { createNodeFactory, lift } from "./module.ts";
 import type {
   FactoryInput,
@@ -489,6 +490,12 @@ export function str(
       (result, str, i) => result + str + (i < values.length ? values[i] : ""),
       "",
     );
+
+  // Identity-mark the (deliberately per-call — hoisting changes serialized
+  // module identity and broke compiled patterns) closure so the ROG
+  // front-end lowers this node to a native `interpolate` op instead of an
+  // opaque leaf. The WeakSet mark is invisible to serialization.
+  markStrInterpolation(interpolatedString);
 
   return lift(interpolatedString)({ strings, values });
 }

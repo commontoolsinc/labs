@@ -1,0 +1,445 @@
+/**
+ * W3c — the differential oracle for the flag-on dispatch: the SAME
+ * builder-built pattern runs through the REAL runtime with the interpreter
+ * flag off and on; results must be deep-equal, reactivity (argument edit →
+ * recompute) must match, and the census must show the pattern actually
+ * INTERPRETED flag-on (never green-via-fallback — the v1 proxy-metric
+ * lesson, made executable).
+ */
+import { assert, assertEquals } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+import { Identity } from "@commonfabric/identity";
+import { pattern, popFrame, pushFrame } from "../../src/builder/pattern.ts";
+import { lift } from "../../src/builder/module.ts";
+import { ifElse, str } from "../../src/builder/built-in.ts";
+import type { Pattern } from "../../src/builder/types.ts";
+import { Runtime } from "../../src/runtime.ts";
+import { StorageManager } from "../../src/storage/cache.deno.ts";
+import {
+  getDispatchCensus,
+  resetDispatchCensus,
+} from "../../src/reactive-interpreter/dispatch.ts";
+import { trustExecutable } from "../support/trusted-builder.ts";
+import { pullSnapshot } from "../support/pull-snapshot.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
+
+interface RunOutcome {
+  initial: unknown;
+  afterEdit: unknown;
+}
+
+/** Build the pattern INSIDE a runtime frame, run it, pull the result, apply
+ * an argument edit, pull again — one flag state per call. */
+async function runOnce(
+  interpreter: boolean,
+  buildPattern: () => Pattern,
+  argument: Record<string, unknown>,
+  edit: { path: string[]; value: unknown },
+): Promise<RunOutcome> {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    experimental: { experimentalInterpreter: interpreter },
+  });
+  const frame = pushFrame({
+    space,
+    generatedIdCounter: 0,
+    reactives: new Set(),
+    runtime,
+  });
+  try {
+    const factory = buildPattern();
+    const resultCell = runtime.getCell(
+      space,
+      `ri2-dispatch-differential-${interpreter}`,
+    );
+    const result = runtime.run(
+      undefined,
+      trustExecutable(runtime, factory) as never,
+      argument as never,
+      resultCell as never,
+    );
+    // Snapshot IMMEDIATELY: pull() returns a live view that would otherwise
+    // reflect the post-edit state by the time we serialize.
+    const initial = await pullSnapshot(result);
+
+    // Reactivity: edit the argument, let the graph settle, re-read.
+    const argCell = resultCell.getArgumentCell()!;
+    const tx = runtime.edit();
+    let target = argCell.withTx(tx) as unknown as {
+      key: (k: string) => unknown;
+      set: (v: unknown) => void;
+    };
+    for (const key of edit.path) {
+      target = (target as { key: (k: string) => unknown }).key(key) as never;
+    }
+    (target as { set: (v: unknown) => void }).set(edit.value);
+    tx.commit();
+    await runtime.idle();
+    const afterEdit = await pullSnapshot(result);
+
+    return { initial, afterEdit };
+  } finally {
+    popFrame(frame);
+    await runtime.dispose();
+    await storageManager.close();
+  }
+}
+
+describe("interpreter dispatch differential (W3c)", () => {
+  it("pure lift+str pattern: flag-on == flag-off, and it interprets", async () => {
+    const buildPattern = () =>
+      pattern<{ a: number; b: number }>((input) => {
+        const sum = lift(({ a, b }: { a: number; b: number }) => a + b)({
+          a: input.a,
+          b: input.b,
+        });
+        const doubled = lift((v: { s: number }) => v.s * 2)({ s: sum });
+        const label = str`sum=${sum}, doubled=${doubled}`;
+        return { sum, doubled, label };
+      }) as unknown as Pattern;
+
+    const argument = { a: 2, b: 3 };
+    const edit = { path: ["a"], value: 10 };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    // The oracle: byte-equal results, initial and after the reactive edit.
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+
+    // Sanity on the actual values (not just mutual equality).
+    assertEquals(legacy.initial, {
+      sum: 5,
+      doubled: 10,
+      label: "sum=5, doubled=10",
+    });
+    assertEquals(legacy.afterEdit, {
+      sum: 13,
+      doubled: 26,
+      label: "sum=13, doubled=26",
+    });
+
+    // Never green-via-fallback: the flag-on run must have interpreted.
+    assert(
+      census.interpreted >= 1,
+      `expected interpreted>=1, census=${JSON.stringify(census)}`,
+    );
+  });
+
+  it("control FUSES into the segment; branch lifts gate; flips still propagate", async () => {
+    // Before native control emission (W8) this pattern split into two
+    // segments around a preserved ifElse boundary. Now the control fuses:
+    // ONE segment, demand-driven — the branch lifts (consumed only through
+    // then/else) are GATED (alias writes elided; evaluated only when their
+    // side is taken), while `picked` (retained in the result) materializes.
+    // Values stay byte-equal to legacy, including through a predicate flip
+    // that must read the now-taken branch fresh.
+    const buildPattern = () =>
+      pattern<{ flag: boolean; a: number; b: number }>((input) => {
+        const doubled = lift((v: { a: number }) => v.a * 2)({ a: input.a });
+        const tripled = lift((v: { b: number }) => v.b * 3)({ b: input.b });
+        const picked = ifElse(input.flag, doubled, tripled);
+        const label = str`picked=${picked}`;
+        const shifted = lift((v: { p: number }) => v.p + 100)({ p: picked });
+        return { picked, label, shifted };
+      }) as unknown as Pattern;
+
+    const argument = { flag: true, a: 1, b: 2 };
+    const edit = { path: ["flag"], value: false };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, {
+      picked: 2,
+      label: "picked=2",
+      shifted: 102,
+    });
+    assertEquals(legacy.afterEdit, {
+      picked: 6,
+      label: "picked=6",
+      shifted: 106,
+    });
+    assert(
+      census.interpreted >= 1,
+      `expected interpretation, census=${JSON.stringify(census)}`,
+    );
+    assert(
+      census.controlsFused >= 1,
+      `expected the control to FUSE (W8), census=${JSON.stringify(census)}`,
+    );
+    assertEquals(
+      census.boundariesByKind["control"] ?? 0,
+      0,
+      `no preserved control boundary expected, census=${
+        JSON.stringify(census)
+      }`,
+    );
+    assert(
+      census.controlOpsGated >= 2,
+      `expected the two branch lifts gated, census=${JSON.stringify(census)}`,
+    );
+    assert(
+      census.nodeOpsCollapsed >= 5,
+      `expected >=5 collapsed node ops (control included), census=${
+        JSON.stringify(census)
+      }`,
+    );
+  });
+
+  it("consumed-as-value nested pattern inlines; result-retained stays a piece", async () => {
+    // `inner` is consumed as a VALUE (only a downstream lift reads it) →
+    // inlines, zero child docs. `retainedInner` is aliased DIRECTLY into
+    // the result → its result cell is the observable piece → boundary.
+    const buildPattern = () =>
+      pattern<{ y: number; z: number }>((input) => {
+        const inner = pattern<{ x: number }>((i) => ({
+          doubled: lift((v: { x: number }) => v.x * 2)({ x: i.x }),
+        }));
+        const retainedInner = pattern<{ x: number }>((i) => ({
+          tripled: lift((v: { x: number }) => v.x * 3)({ x: i.x }),
+        }));
+        const valueConsumed = inner({ x: input.y });
+        const final = lift((v: { d: number }) => v.d + 1)({
+          d: (valueConsumed as unknown as { doubled: number }).doubled,
+        });
+        return { final, retained: retainedInner({ x: input.z }) };
+      }) as unknown as Pattern;
+
+    const argument = { y: 20, z: 5 };
+    const edit = { path: ["y"], value: 100 };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, { final: 41, retained: { tripled: 15 } });
+    assertEquals(legacy.afterEdit, {
+      final: 201,
+      retained: { tripled: 15 },
+    });
+    assert(
+      census.interpreted >= 1,
+      `expected interpretation, census=${JSON.stringify(census)}`,
+    );
+    // The retained child stays a preserved pattern boundary; the
+    // value-consumed child is NOT among the boundaries (it inlined).
+    assert(
+      (census.boundariesByKind["pattern"] ?? 0) === 1,
+      `expected exactly one pattern boundary, census=${JSON.stringify(census)}`,
+    );
+  });
+
+  it("inline filter: predicate-kept originals, byte-equal, reactive", async () => {
+    const buildPattern = () =>
+      pattern<{ items: { n: number }[] }>((input) => {
+        const IsBig = pattern<{ element: { n: number } }>(
+          (i) => lift((v: { n: number }) => v.n > 10)({ n: i.element.n }),
+          {
+            type: "object",
+            properties: {
+              element: {
+                type: "object",
+                properties: { n: { type: "number" } },
+                required: ["n"],
+              },
+            },
+            required: ["element"],
+          },
+        );
+        const big = (input.items as unknown as {
+          filterWithPattern: (op: unknown, params: unknown) => unknown;
+        }).filterWithPattern(IsBig as unknown, {}) as never;
+        return { big };
+      }) as unknown as Pattern;
+
+    const argument = { items: [{ n: 5 }, { n: 20 }, { n: 7 }, { n: 30 }] };
+    // Flip element 0 across the predicate threshold.
+    const edit = {
+      path: ["items"],
+      value: [{ n: 50 }, { n: 20 }, { n: 7 }, { n: 30 }],
+    };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, { big: [{ n: 20 }, { n: 30 }] });
+    assertEquals(legacy.afterEdit, {
+      big: [{ n: 50 }, { n: 20 }, { n: 30 }],
+    });
+    assert(
+      (census.boundariesByKind["collection-inlined"] ?? 0) >= 1,
+      `expected inline filter engagement, census=${JSON.stringify(census)}`,
+    );
+  });
+
+  const ELEMENT_SCHEMA = {
+    type: "object",
+    properties: {
+      element: {
+        type: "object",
+        properties: { n: { type: "number" } },
+        required: ["n"],
+      },
+    },
+    required: ["element"],
+  } as const;
+
+  it("transient chained filter→map: segment-resident, zero collection boundaries", async () => {
+    // Only `total` is retained; the filter AND map outputs are transient →
+    // both evaluate in-memory inside the segment (no containers, no
+    // per-element docs, no coordinators) — D-V2-TRANSIENT-COLLECTIONS.
+    const buildPattern = () =>
+      pattern<{ items: { n: number }[] }>((input) => {
+        const IsBig = pattern<{ element: { n: number } }>(
+          (i) => lift((v: { n: number }) => v.n > 10)({ n: i.element.n }),
+          ELEMENT_SCHEMA,
+        );
+        const Double = pattern<{ element: { n: number } }>(
+          (i) => ({
+            d: lift((v: { n: number }) => v.n * 2)({ n: i.element.n }),
+          }),
+          ELEMENT_SCHEMA,
+        );
+        const kept = (input.items as unknown as {
+          filterWithPattern: (op: unknown, params: unknown) => unknown;
+        }).filterWithPattern(IsBig as unknown, {});
+        const doubled = (kept as unknown as {
+          mapWithPattern: (op: unknown, params: unknown) => unknown;
+        }).mapWithPattern(Double as unknown, {});
+        const total = lift((v: { xs: { d: number }[] }) =>
+          v.xs.reduce((a, x) => a + x.d, 0)
+        )({ xs: doubled as never });
+        return { total };
+      }) as unknown as Pattern;
+
+    const argument = { items: [{ n: 5 }, { n: 20 }, { n: 7 }, { n: 30 }] };
+    // Flip element 0 across the threshold: total 100 → 200.
+    const edit = {
+      path: ["items"],
+      value: [{ n: 50 }, { n: 20 }, { n: 7 }, { n: 30 }],
+    };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, { total: 100 });
+    assertEquals(legacy.afterEdit, { total: 200 });
+    assert(
+      census.transientCollections >= 2,
+      `expected both collection ops transient, census=${
+        JSON.stringify(census)
+      }`,
+    );
+    // NO materialized collection boundary of either kind for this pattern.
+    assertEquals(census.boundariesByKind["collection"] ?? 0, 0);
+    assertEquals(census.boundariesByKind["collection-inlined"] ?? 0, 0);
+  });
+
+  it("transient flatMap: unlocked in-memory (materialized stays legacy)", async () => {
+    const buildPattern = () =>
+      pattern<{ items: { n: number }[] }>((input) => {
+        // The child result IS the per-element array (legacy spreads it).
+        const Fan = pattern<{ element: { n: number } }>(
+          (i) =>
+            lift((v: { n: number }) => [v.n, v.n * 10])({
+              n: i.element.n,
+            }),
+          ELEMENT_SCHEMA,
+        );
+        const fanned = (input.items as unknown as {
+          flatMapWithPattern: (op: unknown, params: unknown) => unknown;
+        }).flatMapWithPattern(Fan as unknown, {});
+        const sum = lift((v: { xs: number[] }) =>
+          v.xs.reduce((a, x) => a + x, 0)
+        )({ xs: fanned as never });
+        return { sum };
+      }) as unknown as Pattern;
+
+    const argument = { items: [{ n: 1 }, { n: 2 }] };
+    const edit = { path: ["items"], value: [{ n: 1 }, { n: 2 }, { n: 3 }] };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, { sum: 33 });
+    assertEquals(legacy.afterEdit, { sum: 66 });
+    assert(
+      census.transientCollections >= 1,
+      `expected transient flatMap, census=${JSON.stringify(census)}`,
+    );
+  });
+
+  it("retained map output stays MATERIALIZED even when also value-consumed", async () => {
+    // `doubled` is aliased into the result AND consumed by a lift: the
+    // retention walk must keep it a materialized coordinator (the piece
+    // contract) — no transient admission.
+    const buildPattern = () =>
+      pattern<{ items: { n: number }[] }>((input) => {
+        const Double = pattern<{ element: { n: number } }>(
+          (i) => ({
+            d: lift((v: { n: number }) => v.n * 2)({ n: i.element.n }),
+          }),
+          ELEMENT_SCHEMA,
+        );
+        const doubled = (input.items as unknown as {
+          mapWithPattern: (op: unknown, params: unknown) => unknown;
+        }).mapWithPattern(Double as unknown, {});
+        const count = lift((v: { xs: unknown[] }) => v.xs.length)({
+          xs: doubled as never,
+        });
+        return { doubled, count };
+      }) as unknown as Pattern;
+
+    const argument = { items: [{ n: 1 }, { n: 2 }] };
+    const edit = { path: ["items"], value: [{ n: 1 }, { n: 2 }, { n: 3 }] };
+
+    const legacy = await runOnce(false, buildPattern, argument, edit);
+    resetDispatchCensus();
+    const interpreted = await runOnce(true, buildPattern, argument, edit);
+    const census = getDispatchCensus();
+
+    assertEquals(interpreted.initial, legacy.initial);
+    assertEquals(interpreted.afterEdit, legacy.afterEdit);
+    assertEquals(legacy.initial, {
+      doubled: [{ d: 2 }, { d: 4 }],
+      count: 2,
+    });
+    assertEquals(legacy.afterEdit, {
+      doubled: [{ d: 2 }, { d: 4 }, { d: 6 }],
+      count: 3,
+    });
+    assertEquals(census.transientCollections, 0);
+    assert(
+      (census.boundariesByKind["collection-inlined"] ?? 0) >= 1,
+      `expected the map to stay materialized, census=${JSON.stringify(census)}`,
+    );
+  });
+});

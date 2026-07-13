@@ -96,6 +96,13 @@ import {
   isTrustedBuilderArtifact,
   resolveOriginal,
 } from "./builder/pattern-metadata.ts";
+import {
+  isPatternRefSentinel,
+  type PatternRefSentinel,
+  resolveStoredPattern,
+} from "./builtins/op-pattern-ref.ts";
+import { planInterpreterDispatch } from "./reactive-interpreter/dispatch.ts";
+import { ri2GetOutputScopes } from "./reactive-interpreter/builtin-markers.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
@@ -726,6 +733,34 @@ export class Runner {
     | undefined {
     let resolvedPatternOrModule = patternOrModule;
 
+    // A pattern read raw from a cell arrives as its JSON boundary serialization
+    // (refs-only since identity E4): `{ $patternRef, argumentSchema,
+    // resultSchema }` with NO `nodes`/`result`/`derivedInternalCells`. Resolve
+    // it back to the live canonical pattern (the object carrying the full graph
+    // the reactive interpreter keyed its ROG on) BEFORE any graph field is read
+    // downstream (`entryRefForPattern`, `patternNeedsOneShotPull`, node
+    // instantiation). The CLI's direct pattern-tool invocation
+    // (`cf piece call <patternToolField>`, packages/cli/lib/callable.ts) hands
+    // such a stored value straight to `run`/`setup`; llm-dialog's tool
+    // invocation performs the same resolution (via `resolveStoredPatternAsync`)
+    // before it calls `runtime.run`. Sync resolution hits in-session by
+    // construction — the boundary form is only stamped for a pattern the
+    // session-lifetime artifact index already carries.
+    if (isPatternRefSentinel(resolvedPatternOrModule)) {
+      const resolved = resolveStoredPattern(
+        this.runtime,
+        resolvedPatternOrModule,
+      );
+      if (!resolved) {
+        const { identity, symbol } = resolvedPatternOrModule.$patternRef;
+        throw new Error(
+          `Unknown pattern: ${identity}#${symbol} did not resolve to a live ` +
+            `canonical in this session`,
+        );
+      }
+      resolvedPatternOrModule = resolved;
+    }
+
     // No pattern in hand: resolve the previously-stored `{ identity, symbol }`
     // pointer synchronously from the in-session artifact index (the module is
     // live this session — the reload path loaded it before reaching here).
@@ -1244,13 +1279,52 @@ export class Runner {
           options.awaitSyncBeforeInitialRun,
         );
       try {
-        for (const node of pattern.nodes) {
+        // Reactive Interpreter v2 (flag-gated, fail-closed): when the pattern
+        // carries a complete builder-born ROG and the partition admits it,
+        // instantiate the interpreter's synthetic node plan instead of the
+        // per-node legacy loop. Any fallback reason → legacy, side-effect-free
+        // (planning is pure; nothing is written before the decision).
+        const interpreterPlan =
+          this.runtime.experimental.experimentalInterpreter
+            ? planInterpreterDispatch(pattern, {
+              // The exact liveTrusted test from resolveJavaScriptFunction: a
+              // live fn is trusted iff it carries module-eval provenance or an
+              // entry ref THIS runtime's engine resolves back to the same
+              // function. Untrusted → legacy (its SES fallback sandboxes it).
+              leafTrust: (fn) =>
+                getVerifiedProvenance(fn) !== undefined ||
+                (() => {
+                  const ref = getArtifactEntryRef(fn);
+                  return ref !== undefined &&
+                    this.runtime.harness.getVerifiedImplementation?.(
+                        ref.identity,
+                        ref.symbol,
+                      ) === fn;
+                })(),
+              actionFrame: (frameTx, cause) =>
+                this.createPatternFrame(
+                  cause,
+                  pattern,
+                  resultCell,
+                  frameTx,
+                  false,
+                ),
+              // Resumed-from-synced-state: inline collection coordinators
+              // refuse so the ORIGINAL legacy nodes instantiate (their
+              // resume/recovery machinery is the battle-tested path).
+              resumed: !!options.awaitSyncBeforeInitialRun,
+            })
+            : undefined;
+        const nodesToInstantiate = interpreterPlan?.kind === "interpret"
+          ? interpreterPlan.nodes
+          : pattern.nodes;
+        for (const node of nodesToInstantiate) {
           const baseCell = resultCell.withTx(actualTx);
           this.instantiateNode(
             actualTx,
             node.module,
-            node.inputs,
-            node.outputs,
+            node.inputs as FabricValue,
+            node.outputs as FabricValue,
             baseCell,
             addNodeCancel,
             pattern,
@@ -3870,48 +3944,25 @@ export class Runner {
   }
 
   /**
-   * CT-1623: for the list builtins (`map`/`filter`/`flatMap`), annotate the `op`
-   * input with its content-addressed `{ identity, symbol }` entry ref (when
-   * known) so the builtin can resolve the live canonical pattern by identity
-   * instead of deserializing the embedded graph. Mutates `inputBindings` in
-   * place: `op` becomes `{ $patternRef }`.
-   *
-   * Only the `op` key is rewritten — it is the sole pattern-valued input the
-   * builtins rehydrate (`resolveOpPattern`). Rewriting other inputs (e.g. a
-   * pattern captured in `params`) would leave an unresolved `$patternRef` object
-   * that nothing reads back.
-   *
-   * The sentinel carries NO embedded fallback graph (identity E4): the artifact
-   * index is session-lifetime, and the op's module evaluated in this session by
-   * construction (the sentinel is stamped from its live artifact right here),
-   * so the builtin's sync resolution cannot miss short of a bug — and a bug
-   * should be loud, not silently served a stale graph. `inputBindings` here is
-   * the freshly bound (mutable, unfrozen) copy produced by
-   * `unwrapOneLevelAndBindtoDoc`; its pattern values carry their derivation
-   * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
-   * (assigned post-eval by `registerEvaluatedModules`).
-   *
-   * An op with NO known ref but a LIVE trusted original is a KEYLESS pattern
-   * — hand-built through the in-process builder DSL, or evaluated through the
-   * bare non-registering `Engine.compileAndEvaluateModules` — whose serialized
-   * copy carries a derivation link to its pristine in-memory pattern. It is
-   * minted its content-hash session identity right here (the same pointer
-   * `entryRefForPattern` mints for a keyless ROOT pattern), so it rides a
-   * `$patternRef` to that pristine artifact. Leaving it embedded instead
-   * would send it through the immutable-cell JSON round-trip, which corrupts
-   * a nested sub-pattern's output-alias `defer` levels (CT-1812 — the
-   * CT-1811 corruption, reachable ref-lessly). The trust gate stays intact:
-   * minting BRANDS, so only a value whose original is already a trusted
-   * builder pattern is minted.
-   *
-   * An op with no ref AND no live original — a plain deserialized graph,
-   * i.e. a STORED no-entry-ref pattern value (the live keyless writer path
-   * pinned by stored-pattern-rehydration.test.ts) — is left embedded: there
-   * is no pristine artifact in existence to point at, and re-rooting the
-   * graph bind-free is exactly the defer surgery CT-1812 records as the
-   * residual there. Such an op takes the builtin's legacy graph path.
+   * CT-1812 (the keyless arm of main's `substituteOpPatternRefs`; the
+   * ref-HAVING arm is generalized into `unwrapOneLevelAndBindtoDoc`'s
+   * `$patternRef` binding): for the list builtins (`map`/`filter`/
+   * `flatMap`), a bound `op` that is still an embedded pattern graph but
+   * whose derivation original is a LIVE trusted builder pattern gets its
+   * keyless content-hash session identity minted here and rides a
+   * `$patternRef` to the pristine artifact. The embedded copy's
+   * immutable-cell JSON round-trip corrupts a nested sub-pattern's
+   * output-alias `defer` levels (the CT-1811 mechanism, reachable
+   * ref-lessly). Minting BRANDS, so only an op whose original is already a
+   * trusted builder pattern is minted; a stored no-entry-ref graph (no live
+   * original) stays embedded (stored-pattern-rehydration.test.ts pins that
+   * path). Deliberately scoped to the builtins' `op` key — the one
+   * pattern-valued input the builtins rehydrate (`resolveOpPattern`);
+   * minting every bound pattern value would hand `$patternRef` sentinels to
+   * consumers that read pattern fields structurally (e.g. the llm-dialog
+   * tool catalog reads `.pattern.argumentSchema`).
    */
-  private substituteOpPatternRefs(
+  private substituteOpKeylessPatternRef(
     moduleRefName: string | undefined,
     inputBindings: FabricValue,
   ): void {
@@ -3923,19 +3974,13 @@ export class Runner {
     }
     if (!isRecord(inputBindings)) return;
     const op = (inputBindings as Record<string, unknown>).op;
-    if (!isRecord(op)) return;
-    let ref = this.runtime.patternManager.getArtifactEntryRef(
-      op as unknown as object,
-    );
-    if (!ref) {
-      const original = resolveOriginal(op as unknown as object);
-      if (isTrustedBuilderArtifact(original) && isPattern(original)) {
-        ref = this.runtime.patternManager.ensureKeylessPatternIdentity(
-          original as unknown as Pattern,
-        );
-      }
-    }
-    if (ref) {
+    // Already a sentinel (the ref-having path bound it) — nothing to do.
+    if (!isRecord(op) || "$patternRef" in op) return;
+    const original = resolveOriginal(op as unknown as object);
+    if (isTrustedBuilderArtifact(original) && isPattern(original)) {
+      const ref = this.runtime.patternManager.ensureKeylessPatternIdentity(
+        original as unknown as Pattern,
+      );
       (inputBindings as Record<string, unknown>).op = {
         $patternRef: { identity: ref.identity, symbol: ref.symbol },
       };
@@ -3980,15 +4025,24 @@ export class Runner {
       { derivedInternalCells: pattern.derivedInternalCells },
     );
 
-    // CT-1623: for the list builtins, replace a pattern-valued input (the `op`)
-    // with a compact `{ $patternRef }` sentinel when its content-addressed entry
-    // ref is known. This is the post-eval moment where the in-memory op object
-    // (linked to its original via `noteDerivedCopy`, preserved through binding)
-    // carries its `{ identity, symbol }`; the sentinel then survives the immutable-cell
-    // JSON round-trip, so the builtin resolves the live canonical pattern by
-    // identity instead of deserializing the embedded graph.
-    this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);
+    // CT-1812: the keyless arm of the op-sentinel substitution — the
+    // ref-having arm already bound `op` as a `$patternRef` inside
+    // `unwrapOneLevelAndBindtoDoc`. A flag-on inline coordinator is a
+    // synthetic raw module with no ref name; it carries the builtin name as
+    // `ri2ListBuiltin` (a ref-less op must mint the same identity either way).
+    this.substituteOpKeylessPatternRef(
+      moduleRefName ??
+        (module as unknown as { ri2ListBuiltin?: string }).ri2ListBuiltin,
+      mappedInputBindings,
+    );
 
+    // CT-1623: a pattern-valued input (the list builtins' `op`, an inline
+    // collection node's op, or a sub-pattern passed as an argument) has already
+    // been replaced with a compact `{ $patternRef }` sentinel by
+    // `unwrapOneLevelAndBindtoDoc` (see `convert` in pattern-binding.ts). The
+    // sentinel survives the immutable-cell JSON round-trip, so the builtin
+    // resolves the live canonical pattern by identity (`resolveOpPattern`)
+    // instead of deserializing the embedded graph.
     const inputCells = findAllWriteRedirectCells(
       mappedInputBindings,
       processCell,
@@ -4063,18 +4117,63 @@ export class Runner {
             tx,
             result,
           );
-          sendValueToBinding(
-            tx,
-            resultCell,
-            argumentCellLink!,
-            mappedOutputBindings,
-            resultForRawBuiltinOutputBinding(
-              result,
-              outputBindingSchema,
-              builtinIdentity,
-            ),
-            { preserveLinkOutput: true },
-          );
+          // PER-OP effective-scope routing for reactive-interpreter segment
+          // nodes (scope flow-tracking): the segment derives one scope per
+          // collapsed op from the values THAT op consumed; each top-level
+          // output key routes at its own scope — legacy runs one action per
+          // node, so this is the per-node scope routing segments must
+          // reproduce (one tx-ambient scope would over-narrow siblings).
+          // Fallback for a missing entry is the tx ambient (the OVER-narrow,
+          // fail-safe direction: scoped data must never widen to space).
+          const perOpScopes = (module as { ri2PerOpOutputScopes?: boolean })
+              .ri2PerOpOutputScopes
+            ? ri2GetOutputScopes(result)
+            : undefined;
+          if (
+            perOpScopes && isRecord(mappedOutputBindings) && isRecord(result)
+          ) {
+            const ambient = tx.getNarrowestReadScope();
+            for (
+              const [key, binding] of Object.entries(
+                mappedOutputBindings as Record<string, unknown>,
+              )
+            ) {
+              sendValueToBinding(
+                tx,
+                resultCell,
+                argumentCellLink!,
+                binding,
+                (result as Record<string, unknown>)[key],
+                {
+                  preserveLinkOutput: true,
+                  narrowestReadScope:
+                    (perOpScopes[key] as CellScope | undefined) ?? ambient,
+                },
+              );
+            }
+          } else {
+            sendValueToBinding(
+              tx,
+              resultCell,
+              argumentCellLink!,
+              mappedOutputBindings,
+              resultForRawBuiltinOutputBinding(
+                result,
+                outputBindingSchema,
+                builtinIdentity,
+              ),
+              {
+                preserveLinkOutput: true,
+                // Opt-in effective-scope threading (legacy javascript actions
+                // pass the tx's narrowest read scope; no legacy raw builtin
+                // sets this marker, so the default path is byte-identical).
+                ...((module as { ri2ThreadNarrowestReadScope?: boolean })
+                    .ri2ThreadNarrowestReadScope
+                  ? { narrowestReadScope: tx.getNarrowestReadScope() }
+                  : {}),
+              },
+            );
+          }
         },
         addCancel,
         {
@@ -4286,13 +4385,33 @@ export class Runner {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
-    const patternImpl = unwrapOneLevelAndBindtoDoc(
+    // The bound sub-pattern is a `{ $patternRef }` sentinel when
+    // `module.implementation` carries a content-addressed entry ref (the common
+    // case: the transformer hoists every sub-pattern to module scope and indexes
+    // it). Resolve it back to the live canonical pattern — the object the
+    // reactive interpreter's ROG WeakMap is keyed on — so `this.run` below hands
+    // the interpreter a strict `getBuiltRog` hit rather than a derived copy.
+    // A ref-less (manually-constructed) sub-pattern binds to a plain graph, which
+    // `resolveStoredPattern` returns unchanged.
+    const boundPatternImpl = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
+    const patternImpl = resolveStoredPattern(this.runtime, boundPatternImpl);
+    if (!patternImpl) {
+      const ref = (boundPatternImpl as {
+        $patternRef?: PatternRefSentinel["$patternRef"];
+      })
+        .$patternRef;
+      throw new Error(
+        `instantiatePatternNode: sub-pattern ${
+          ref ? `${ref.identity}#${ref.symbol}` : ""
+        } did not resolve to a live canonical in this session`,
+      );
+    }
     const inputs = unwrapOneLevelAndBindtoDoc(
       this.runtime.cfc,
       inputBindings,

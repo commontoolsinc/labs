@@ -216,6 +216,11 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
+  /** Reactive Interpreter v2: dispatch eligible patterns through the ROG
+   * interpreter (docs/specs/reactive-interpreter/). Default off; env
+   * fallback `CF_EXPERIMENTAL_INTERPRETER=1`. Fail-closed: anything the
+   * interpreter cannot represent falls back to legacy instantiation. */
+  experimentalInterpreter?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
@@ -818,18 +823,34 @@ export class Runtime {
       modernCellRep: undefined,
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
+      experimentalInterpreter: undefined,
       eagerSourceAnnotation: undefined,
       ...options.experimental,
     };
-
-    // Log any overridden experimental flags.
+    // Log any overridden experimental flags (caller-passed only — env
+    // fallbacks resolve below this block so ambient env vars don't spam a
+    // line into every subprocess's stderr).
     const overrideFlags = Object.entries(this.experimental)
       .filter(([_, v]) => v !== undefined)
       .map(([k, v]) => `${k}=${v}`);
     if (overrideFlags.length > 0) {
-      console.log(
+      // stderr, not stdout: stdout-JSON consumers (the CLI dev pipeline)
+      // must stay clean — same idiom as the CLI's own override log.
+      console.error(
         `Experimental flag overrides: ${overrideFlags.join(", ")}`,
       );
+    }
+
+    if (this.experimental.experimentalInterpreter === undefined) {
+      // Env fallback (CF_EXPERIMENTAL_INTERPRETER=1). Materialize only when
+      // enabled; undefined reads as off.
+      try {
+        if (Deno.env.get("CF_EXPERIMENTAL_INTERPRETER") === "1") {
+          this.experimental.experimentalInterpreter = true;
+        }
+      } catch {
+        // No env access (browser/sandbox): stays undefined = off.
+      }
     }
 
     // Propagate experimental flags to their ambient control points, then read

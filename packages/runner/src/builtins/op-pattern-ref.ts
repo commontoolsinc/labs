@@ -5,14 +5,15 @@ import type { Runtime } from "../runtime.ts";
 
 /**
  * Compact reference to a pattern by its content-addressed `{ identity, symbol }`
- * entry ref, used in place of an embedded pattern graph for the `op` input of
- * `map`/`filter`/`flatMap` nodes.
+ * entry ref, used in place of an embedded pattern graph anywhere a pattern is
+ * bound as a value — the `op` input of `map`/`filter`/`flatMap` nodes, a
+ * directly-invoked sub-pattern node, or a pattern passed as an argument.
  *
- * The runner substitutes this sentinel for the serialized op graph at node
- * instantiation (see `Runner.substituteOpPatternRefs`), once the op pattern's
- * entry ref is known. Because it is plain data (no symbol keys), it survives the
- * `getImmutableCell` JSON round-trip that strips the in-memory
- * derivation backref — so the builtin reads it back intact and
+ * Binding substitutes this sentinel for the embedded pattern graph, once the
+ * pattern's entry ref is known: see `convert` in `pattern-binding.ts`
+ * (`unwrapOneLevelAndBindtoDoc`). Because it is plain data (no symbol keys), it
+ * survives the `getImmutableCell` JSON round-trip that strips the in-memory
+ * derivation backref — so the builtin/runner reads it back intact and
  * resolves the live canonical pattern directly by its `{ identity, symbol }`
  * entry ref, without deserializing a graph or remapping functions through a
  * serialized reference.
@@ -50,8 +51,9 @@ export function isPatternRefSentinel(
  * - Otherwise `op` is an embedded pattern graph, used as-is. Post-CT-1812
  *   this is ONLY the stored-keyless remnant: a live op whose original is a
  *   trusted builder pattern gets a `keyless:` identity minted at node
- *   instantiation (`Runner.substituteOpPatternRefs`) and arrives here as a
- *   sentinel; what still arrives embedded is a graph deserialized from a
+ *   instantiation (`Runner.substituteOpKeylessPatternRef`) and arrives here
+ *   as a sentinel; what still arrives embedded is a graph deserialized
+ *   from a
  *   stored no-entry-ref pattern VALUE (the live keyless writer path pinned
  *   by stored-pattern-rehydration.test.ts), for which no pristine artifact
  *   exists to resolve instead. CT-1812 residual: for THAT form, a nested

@@ -75,7 +75,17 @@ function newRuntime(sm: ReturnType<typeof StorageManager.emulate>) {
   return new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager: sm,
-    experimental: { persistentSchedulerState: true },
+    // Interpreter pinned OFF: this harness characterizes the LEGACY
+    // module-action minting layer (cf:module/<hash> ids off content-addressed
+    // provenance). Under the reactive interpreter these computeds collapse
+    // into ROG segment actions (`raw:ri2:seg…`) that never mint from module
+    // identity, making the module-id byte-equality vacuous (zero cf:module
+    // actions). Segment-id stability across reloads is covered flag-ON by
+    // reload-sibling-overdirty.test.ts.
+    experimental: {
+      persistentSchedulerState: true,
+      experimentalInterpreter: false,
+    },
   });
 }
 
