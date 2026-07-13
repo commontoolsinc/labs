@@ -211,7 +211,66 @@ function sourceSchemaContainsExpected(
   expected: unknown,
   source: unknown,
   keyword?: string,
+  expectedRoot?: JSONSchema,
+  sourceRoot?: JSONSchema,
+  seenRefs = new Set<string>(),
 ): boolean {
+  if (
+    expectedRoot === undefined &&
+    (typeof expected === "boolean" || isRecord(expected))
+  ) {
+    expectedRoot = expected as JSONSchema;
+  }
+  if (
+    sourceRoot === undefined &&
+    (typeof source === "boolean" || isRecord(source))
+  ) {
+    sourceRoot = source as JSONSchema;
+  }
+  if (
+    isRecord(expected) && typeof expected.$ref === "string" &&
+    expected.$ref.startsWith("#/") && expectedRoot !== undefined
+  ) {
+    const sourceRef = isRecord(source) && typeof source.$ref === "string"
+      ? source.$ref
+      : "<inline>";
+    const refPair = `expected:${expected.$ref}|source:${sourceRef}`;
+    if (seenRefs.has(refPair)) return true;
+    const resolved = schemaAtRef(expected as JSONSchema, expectedRoot);
+    if (resolved === undefined || resolved === expected) return false;
+    const nextSeen = new Set(seenRefs);
+    nextSeen.add(refPair);
+    return sourceSchemaContainsExpected(
+      resolved,
+      source,
+      keyword,
+      expectedRoot,
+      sourceRoot,
+      nextSeen,
+    );
+  }
+  if (
+    isRecord(source) && typeof source.$ref === "string" &&
+    source.$ref.startsWith("#/") && sourceRoot !== undefined
+  ) {
+    const expectedRef = isRecord(expected) && typeof expected.$ref === "string"
+      ? expected.$ref
+      : "<inline>";
+    const refPair = `expected:${expectedRef}|source:${source.$ref}`;
+    if (seenRefs.has(refPair)) return true;
+    const resolved = schemaAtRef(source as JSONSchema, sourceRoot);
+    if (resolved === undefined || resolved === source) return false;
+    const nextSeen = new Set(seenRefs);
+    nextSeen.add(refPair);
+    return sourceSchemaContainsExpected(
+      expected,
+      resolved,
+      keyword,
+      expectedRoot,
+      sourceRoot,
+      nextSeen,
+    );
+  }
   if (expected === true) return true;
   if (source === false) return true;
   if (expected === false) return expected === source;
@@ -228,7 +287,14 @@ function sourceSchemaContainsExpected(
     }
     return expected.length === source.length &&
       expected.every((entry, index) =>
-        sourceSchemaContainsExpected(entry, source[index])
+        sourceSchemaContainsExpected(
+          entry,
+          source[index],
+          undefined,
+          expectedRoot,
+          sourceRoot,
+          seenRefs,
+        )
       );
   }
   if (isRecord(expected)) {
@@ -236,7 +302,16 @@ function sourceSchemaContainsExpected(
     for (const [key, expectedValue] of Object.entries(expected)) {
       if (key === "$defs" || key === "definitions") continue;
       if (!Object.hasOwn(source, key)) return false;
-      if (!sourceSchemaContainsExpected(expectedValue, source[key], key)) {
+      if (
+        !sourceSchemaContainsExpected(
+          expectedValue,
+          source[key],
+          key,
+          expectedRoot,
+          sourceRoot,
+          seenRefs,
+        )
+      ) {
         return false;
       }
     }

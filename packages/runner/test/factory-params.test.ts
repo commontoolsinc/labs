@@ -5,6 +5,7 @@ import { assertValidPatternParams } from "../src/builder/factory-params.ts";
 import { isReactiveMarker, type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 function symbolic(schema: JSONSchema): unknown {
   return {
@@ -197,6 +198,72 @@ Deno.test("pattern curry accepts a capability-shrunk stream event schema", () =>
     TypeError,
     "cell kind mismatch",
   );
+});
+
+Deno.test("pattern curry resolves nested refs for a capability-shrunk stream", async () => {
+  const signer = await Identity.fromPassphrase(
+    "factory-params-nested-stream-ref-test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const itemSchema = {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      indent: { type: "number", default: 0 },
+    },
+    required: ["title", "indent"],
+  } as const satisfies JSONSchema;
+  const sourceEventSchema = {
+    type: "object",
+    properties: {
+      item: {
+        type: "object",
+        properties: { indent: { type: "number", default: 0 } },
+        required: ["indent"],
+      },
+    },
+    required: ["item"],
+  } as const satisfies JSONSchema;
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      removeItem: {
+        type: "object",
+        properties: { item: { $ref: "#/$defs/Item" } },
+        required: ["item"],
+        asCell: ["stream"],
+      },
+    },
+    required: ["removeItem"],
+    $defs: { Item: itemSchema },
+  } as const satisfies JSONSchema;
+
+  try {
+    const { pattern, handler } = createTrustedBuilder(runtime).commonfabric;
+    pattern(
+      () => {
+        const removeItem = handler(
+          sourceEventSchema,
+          true,
+          () => undefined,
+        )({});
+        assertEquals(
+          assertValidPatternParams({ removeItem }, paramsSchema),
+          undefined,
+        );
+        return {};
+      },
+      true,
+      true,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
 });
 
 Deno.test("pattern curry accepts the same rooted ref from a stricter source schema", () => {
