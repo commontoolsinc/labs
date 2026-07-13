@@ -71,7 +71,6 @@ let demandGeneration = 0;
 let selectiveWake: SelectiveDemandWakeQueue | null = null;
 let work = Promise.resolve();
 let stopped = false;
-let pendingDemandRetry: number | null = null;
 
 const denyExternalBuiltinFetch: typeof globalThis.fetch = () =>
   Promise.reject(
@@ -130,18 +129,6 @@ const activateDemand = async (
   }
 };
 
-const schedulePendingDemandRetry = (): void => {
-  if (
-    stopped || pendingDemandRetry !== null ||
-    instantiatedDemand.size === demanded.size
-  ) return;
-  pendingDemandRetry = setTimeout(() => {
-    pendingDemandRetry = null;
-    if (stopped) return;
-    void enqueue(pullDemand).catch(postFatal);
-  }, 100) as unknown as number;
-};
-
 const pullDemand = async (
   schedulerPieceIds?: ReadonlySet<string>,
 ): Promise<void> => {
@@ -155,7 +142,6 @@ const pullDemand = async (
     if (!(await activateDemand(pieceId, cell))) continue;
     await cell.pull();
   }
-  schedulePendingDemandRetry();
 };
 
 const replaceDemand = async (
@@ -304,7 +290,10 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   selectiveWake = new SelectiveDemandWakeQueue((pieceIds) =>
     enqueue(() => pullDemand(new Set(pieceIds)))
   );
-  await replaceDemand(request.pieces);
+  // Serialize initial activation with commit-feed retries. A piece-creation
+  // commit can arrive while its first sync is in flight; the retry must run
+  // after this attempt rather than instantiate the same root concurrently.
+  await enqueue(() => replaceDemand(request.pieces!));
 };
 
 const runClaimedAction = async (claim: ExecutionClaim): Promise<void> => {
@@ -354,8 +343,6 @@ const stop = async (): Promise<void> => {
   space = null;
   branch = "";
   selectiveWake = null;
-  if (pendingDemandRetry !== null) clearTimeout(pendingDemandRetry);
-  pendingDemandRetry = null;
   demanded.clear();
   instantiatedDemand.clear();
   candidateActions.clear();
