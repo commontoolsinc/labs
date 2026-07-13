@@ -117,11 +117,16 @@ async function readMountedPieceMeta(
   };
 }
 
-// The macOS NFS client serves a cached parent directory listing without a
+// FUSE-T serves mounts through the macOS NFS client and ignores the entry
+// and attribute cache timeouts the filesystem implementation returns, so
+// the fuse bridge cannot shorten or disable the client's caching from its
+// side. The NFS client answers a negative name lookup from its cache for
+// tens of seconds, and serves a cached parent directory listing without a
 // daemon round-trip for up to about three seconds after the directory was
-// last listed. A listing miss is only authoritative once that validity
-// window has passed since the miss was first observed, so this wait must
-// exceed the window; it includes margin over the observed three seconds.
+// last listed. A listing miss is therefore only authoritative once that
+// validity window has passed since the miss was first observed, so this
+// wait must exceed the window; it includes margin over the observed three
+// seconds.
 const DIR_LISTING_RECHECK_DELAY_MS = 3500;
 
 async function parentListingHasFile(
