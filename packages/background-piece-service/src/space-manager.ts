@@ -58,6 +58,7 @@ export class SpaceManager {
   private workerOptions: WorkerOptions;
   private isRunning = false;
   private isStopping = false;
+  private desiredRunning = false;
   private stopPromise: Promise<void> | null = null;
   private workerGeneration = 0;
   private readonly backgroundExclusionControl?:
@@ -182,14 +183,11 @@ export class SpaceManager {
   }
 
   start(): void {
+    this.desiredRunning = true;
     if (this.isRunning) {
       return;
     }
     if (this.isStopping) {
-      const stopping = this.stopPromise;
-      if (stopping !== null) {
-        void stopping.then(() => this.start(), () => {});
-      }
       return;
     }
     this.isRunning = true;
@@ -205,13 +203,25 @@ export class SpaceManager {
   }
 
   stop(): Promise<void> {
+    this.desiredRunning = false;
     if (this.stopPromise !== null) return this.stopPromise;
     console.log(`${this.did} Stopping piece scheduler...`);
     this.isRunning = false;
     this.isStopping = true;
 
-    this.stopPromise = this.stopLifecycle();
-    return this.stopPromise;
+    const stopping = this.stopLifecycle();
+    this.stopPromise = stopping;
+    void stopping.then(
+      () => {
+        if (this.desiredRunning) this.start();
+      },
+      (error) => {
+        console.error(
+          `${this.did} Piece scheduler stop failed; restart blocked: ${error}`,
+        );
+      },
+    );
+    return stopping;
   }
 
   private async stopLifecycle(): Promise<void> {

@@ -767,6 +767,7 @@ describe("SpaceManager", () => {
   it("defers a restart until an overlapping stop lifecycle finishes", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const firstShutdown = Promise.withResolvers<void>();
+    const secondShutdown = Promise.withResolvers<void>();
     let generation = 0;
     let workers = 0;
     const releases: number[] = [];
@@ -811,8 +812,11 @@ describe("SpaceManager", () => {
           removeEventListener: () => {},
           isReady: () => true,
           runPiece: () => Promise.resolve(),
-          shutdown: () =>
-            worker === 1 ? firstShutdown.promise : Promise.resolve(),
+          shutdown: () => {
+            if (worker === 1) return firstShutdown.promise;
+            if (worker === 2) return secondShutdown.promise;
+            return Promise.resolve();
+          },
           terminateNow: () => {},
         } as never;
       },
@@ -846,7 +850,25 @@ describe("SpaceManager", () => {
       2,
     );
 
-    await manager.stop();
+    const secondStopping = manager.stop();
+    manager.start();
+    const finalStopping = manager.stop();
+    secondShutdown.resolve();
+    await Promise.all([secondStopping, finalStopping]);
+    await manager.idle();
+
+    assertEquals(
+      (manager as never as { isRunning: boolean }).isRunning,
+      false,
+    );
+    assertEquals(workers, 2);
+    assertEquals(releases, [1, 2]);
+    assertEquals(
+      (manager as never as {
+        backgroundExclusion: LegacyBackgroundExclusion | null;
+      }).backgroundExclusion,
+      null,
+    );
   });
 
   it("waits for client drain and hard-fences renewal loss", async () => {
