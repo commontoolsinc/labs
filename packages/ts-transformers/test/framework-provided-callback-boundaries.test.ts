@@ -203,6 +203,68 @@ export const apply = lift((input: {
   },
 );
 
+Deno.test(
+  "a widened scheduled factory boundary emits an explicitly unprivileged call contract",
+  async () => {
+    const { diagnostics, output } = await validateSource(
+      `
+import {
+  lift,
+  pattern,
+  type FrameworkProvided,
+  type PatternFactory,
+} from "commonfabric";
+
+type Ordinary = PatternFactory<{
+  command: string;
+  sandboxId: string;
+}, { ok: boolean }>;
+
+const privileged = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+
+export const apply = lift((input: {
+  operation: Ordinary;
+  command: string;
+  sandboxId: string;
+}) => input.operation({
+  command: input.command,
+  sandboxId: input.sandboxId,
+}));
+
+export default pattern<{ command: string; sandboxId: string }>((input) =>
+  apply({
+    operation: privileged as Ordinary,
+    command: input.command,
+    sandboxId: input.sandboxId,
+  })
+);
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+      },
+    );
+
+    assertEquals(diagnostics, []);
+    const liftCall = callsNamed(parseModule(output), "lift")[0]!;
+    const inputSchema = literalToValue(liftCall.arguments[1]!) as {
+      $defs: {
+        Ordinary: {
+          asFactory: { frameworkProvidedPaths?: unknown };
+        };
+      };
+    };
+    assertEquals(
+      inputSchema.$defs.Ordinary.asFactory.frameworkProvidedPaths,
+      undefined,
+      "authored asFactory schemas must never carry compiler authority",
+    );
+  },
+);
+
 for (
   const [source, boundary] of [
     ["event", "handler event"],
