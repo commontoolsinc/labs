@@ -118,6 +118,15 @@ describe("legacyFetchResultMarker", () => {
       .toBeUndefined();
   });
 
+  it("preserves native errors when repairing persisted terminal state", () => {
+    const native = new TypeError("legacy native failure");
+    const repaired = legacyFetchResultMarker(undefined, false, native);
+
+    expect(repaired?.reason).toBe("error");
+    expect(repaired?.error?.type).toBe("TypeError");
+    expect(repaired?.error?.message).toBe("legacy native failure");
+  });
+
   it("never replaces a current usable value or marker", () => {
     expect(legacyFetchResultMarker("usable", true, new Error("old")))
       .toBeUndefined();
