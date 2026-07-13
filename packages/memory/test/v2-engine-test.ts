@@ -90,6 +90,10 @@ const toEntityDocument = (
 Deno.test("memory v2 ensure is idempotent and rejects identity mismatches", async () => {
   const { engine, path } = await createEngine();
   const expected = toEntityDocument({ source: "artifact source" });
+  const stored = toEntityDocument({
+    source: "artifact source",
+    annotations: { name: "existing product annotation" },
+  });
 
   try {
     const created = applyCommit(engine, {
@@ -100,12 +104,12 @@ Deno.test("memory v2 ensure is idempotent and rejects identity mismatches", asyn
         operations: [{
           op: "ensure",
           id: "artifact:closure",
-          value: expected,
+          value: stored,
         }],
       },
     });
     assertEquals(created.revisions.length, 1);
-    assertEquals(read(engine, { id: "artifact:closure" }), expected);
+    assertEquals(read(engine, { id: "artifact:closure" }), stored);
 
     const alreadyPresent = applyCommit(engine, {
       sessionId: "session:artifact-publisher",
@@ -116,6 +120,7 @@ Deno.test("memory v2 ensure is idempotent and rejects identity mismatches", asyn
           op: "ensure",
           id: "artifact:closure",
           value: expected,
+          ignore: [toDocumentPath(["value", "annotations"])],
         }],
       },
     });
@@ -132,13 +137,14 @@ Deno.test("memory v2 ensure is idempotent and rejects identity mismatches", asyn
               op: "ensure",
               id: "artifact:closure",
               value: toEntityDocument({ source: "different source" }),
+              ignore: [toDocumentPath(["value", "annotations"])],
             }],
           },
         }),
       Error,
       "content-addressed ensure mismatch",
     );
-    assertEquals(read(engine, { id: "artifact:closure" }), expected);
+    assertEquals(read(engine, { id: "artifact:closure" }), stored);
   } finally {
     close(engine);
     await Deno.remove(path);

@@ -27,6 +27,7 @@ interface EnsureOperation {
   op: "ensure";
   id: EntityId;
   value: EntityDocument;
+  ignore?: DocumentPath[];
 }
 
 interface PatchWriteOperation {
@@ -61,6 +62,11 @@ rejects the complete commit as an integrity failure. This comparison is by
 Fabric-value content, including codec-backed values, rather than by JavaScript
 object identity or enumerable properties. It is intentionally not a
 last-writer-wins mutation and an equal pre-existing value is not a conflict.
+Runner-owned content-addressed formats may name incidental metadata paths in
+`ignore`; those paths are removed from both sides before comparison. The paths
+are part of the trusted operation, not inferred from the stored value. Factory
+artifact publication uses this only for non-normative product annotations and
+runtime-maintained metadata that do not participate in the artifact identity.
 
 ## 3.2 Transaction Structure
 

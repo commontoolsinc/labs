@@ -122,6 +122,8 @@ export interface EnsureOperation {
   id: EntityId;
   scope?: CellScope;
   value: EntityDocument;
+  /** Incidental metadata excluded from the content-identity comparison. */
+  ignore?: DocumentPath[];
 }
 
 export interface PatchOperation {

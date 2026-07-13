@@ -413,7 +413,9 @@ In addition to ordinary `set`, `patch`, and `delete` operations, a transaction
 may carry `ensure`. `ensure` atomically installs an absent content-addressed
 document, accepts an identical existing document as a no-op, and rejects a
 different existing document as an integrity failure. On success, the containing
-write and all of its ensures share one transaction boundary.
+write and all of its ensures share one transaction boundary. An `ensure` may
+carry trusted `ignore` document paths for incidental metadata excluded from the
+content identity; clients must not derive those paths from authored values.
 
 ```typescript
 // Shown at module scope.

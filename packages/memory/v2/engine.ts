@@ -1,6 +1,9 @@
 import { Database } from "@db/sqlite";
-import type { FabricValue } from "@commonfabric/api";
-import { valueEqual } from "@commonfabric/data-model/fabric-value";
+import {
+  cloneWithoutValueAtPath,
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatch,
@@ -5249,7 +5252,13 @@ const writeOperation = (
         })
         : null;
       if (existing !== null && existing !== undefined) {
-        if (valueEqual(existing, operation.value)) return undefined;
+        let actualIdentity = existing as FabricValue;
+        let expectedIdentity = operation.value as FabricValue;
+        for (const path of operation.ignore ?? []) {
+          actualIdentity = cloneWithoutValueAtPath(actualIdentity, path);
+          expectedIdentity = cloneWithoutValueAtPath(expectedIdentity, path);
+        }
+        if (valueEqual(actualIdentity, expectedIdentity)) return undefined;
         throw new Error(
           `content-addressed ensure mismatch for ${operation.id}`,
         );
