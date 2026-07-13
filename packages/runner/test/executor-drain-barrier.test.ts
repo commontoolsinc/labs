@@ -2,9 +2,13 @@ import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import type {
+  ActionSettlement,
   BranchName,
+  ClientCommit,
+  ExecutionClaim,
   ExecutionLease,
   MemoryProtocolFlags,
+  TransactRequest,
 } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
@@ -52,6 +56,7 @@ class LoopbackSessionFactory implements SessionFactory {
   constructor(
     private readonly server: Server,
     private readonly flags: Partial<MemoryProtocolFlags>,
+    private readonly onCommit?: (commit: ClientCommit) => void,
   ) {}
 
   async create(
@@ -74,6 +79,13 @@ class LoopbackSessionFactory implements SessionFactory {
         authorization: { principal: signer?.did() },
       }),
     );
+    if (this.onCommit !== undefined) {
+      const transact = session.transact.bind(session);
+      session.transact = (commit) => {
+        this.onCommit!(structuredClone(commit));
+        return transact(commit);
+      };
+    }
     return { client, session };
   }
 }
@@ -83,10 +95,11 @@ class LoopbackStorageManager extends StorageManager {
     server: Server,
     flags: Partial<MemoryProtocolFlags>,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
+    onCommit?: (commit: ClientCommit) => void,
   ): LoopbackStorageManager {
     return new LoopbackStorageManager(
       { ...options, memoryHost: new URL("memory://executor-drain-barrier") },
-      new LoopbackSessionFactory(server, flags),
+      new LoopbackSessionFactory(server, flags, onCommit),
     );
   }
 }
@@ -117,6 +130,59 @@ class DrainWindowServer extends Server {
     return await super.finishExecutionLeaseDrain(lease);
   }
 }
+
+class ClaimedAttemptGateServer extends Server {
+  #armed = false;
+  #release = Promise.withResolvers<void>();
+  #started = Promise.withResolvers<void>();
+  #response = Promise.withResolvers<
+    Awaited<ReturnType<Server["transact"]>>
+  >();
+
+  armClaimedAttempt(): {
+    started: Promise<void>;
+    release: () => void;
+    response: Promise<Awaited<ReturnType<Server["transact"]>>>;
+  } {
+    this.#armed = true;
+    this.#release = Promise.withResolvers<void>();
+    this.#started = Promise.withResolvers<void>();
+    this.#response = Promise.withResolvers<
+      Awaited<ReturnType<Server["transact"]>>
+    >();
+    return {
+      started: this.#started.promise,
+      release: () => this.#release.resolve(),
+      response: this.#response.promise,
+    };
+  }
+
+  override async transact(message: TransactRequest) {
+    if (this.#armed && hasExecutionClaimAssertion(message.commit)) {
+      this.#armed = false;
+      this.#started.resolve();
+      await this.#release.promise;
+      const response = await super.transact(message);
+      this.#response.resolve(response);
+      return response;
+    }
+    return await super.transact(message);
+  }
+}
+
+const hasExecutionClaimAssertion = (commit: ClientCommit): boolean => {
+  const observations = [
+    commit.schedulerObservation,
+    ...(commit.schedulerObservationBatch ?? []).map((entry) =>
+      entry.schedulerObservation
+    ),
+  ];
+  return observations.some((observation) =>
+    typeof observation === "object" && observation !== null &&
+    "executionClaimAssertion" in observation &&
+    observation.executionClaimAssertion !== undefined
+  );
+};
 
 const within = async <T>(promise: Promise<T>, label: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -314,6 +380,408 @@ Deno.test("real executor recovers a source commit accepted between settle and te
   } finally {
     unsubscribeAccepted();
     await pool?.close();
+    await seedRuntime.dispose();
+    await seedStorage.close();
+    await observerClient?.close();
+    await server.close();
+  }
+});
+
+Deno.test("real executor crash rejects stale work and converges once through client fallback and replacement", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor crash drill ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const server = new ClaimedAttemptGateServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-executor-crash-drill" },
+    protocolFlags: FLAGS,
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  const authorize: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: space },
+  });
+  const seedStorage = LoopbackStorageManager.connectTo(server, FLAGS, {
+    as: principal,
+  });
+  const seedRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: seedStorage,
+    experimental: {
+      persistentSchedulerState: true,
+      serverPrimaryExecution: true,
+    },
+  });
+  let observerClient: MemoryClient.Client | null = null;
+  let clientStorage: LoopbackStorageManager | null = null;
+  let clientRuntime: Runtime | null = null;
+  let pool: SharedExecutionPool | null = null;
+  let unsubscribeAccepted = () => {};
+  let unsubscribeControl = () => {};
+
+  try {
+    const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
+      space,
+    });
+    const tx = seedRuntime.edit();
+    const input = seedRuntime.getCell<number>(
+      space,
+      "executor-crash-input",
+      undefined,
+      tx,
+    );
+    input.set(5);
+    const result = seedRuntime.getCell<number>(
+      space,
+      "executor-crash-result",
+      undefined,
+      tx,
+    );
+    const resultLink = result.getAsNormalizedFullLink();
+    const handle = seedRuntime.run(tx, compiled, { value: input }, result);
+    assertEquals((await tx.commit()).error, undefined);
+    assertEquals(await handle.pull(), 10);
+    await seedRuntime.settled();
+    await seedRuntime.storageManager.synced();
+    const pieceDocument = await server.readDocument(space, result.sourceURI) as
+      & Record<string, unknown>
+      & { value: { "/": { "link@1": { id: string } } } };
+    const outputId = pieceDocument.value["/"]["link@1"].id;
+    await seedRuntime.dispose();
+
+    observerClient = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: FLAGS,
+    });
+    const observer = await observerClient.mount(space, {}, authorize);
+    await observer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${space}:execution-policy`,
+        value: { value: { version: 1, serverPrimaryExecution: true } },
+      }],
+    });
+    await observer.watchSet([{
+      id: "executor-crash-drill-piece",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: result.sourceURI,
+          selector: { path: [], schema: true },
+        }],
+      },
+    }]);
+
+    const clientCommits: ClientCommit[] = [];
+    clientStorage = LoopbackStorageManager.connectTo(
+      server,
+      FLAGS,
+      { as: principal },
+      (commit) => clientCommits.push(commit),
+    );
+    clientRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: clientStorage,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+    });
+    await clientRuntime.patternManager.compilePattern(PROGRAM, { space });
+    const resumed = clientRuntime.getCellFromLink<number>(resultLink);
+    await resumed.sync();
+    assertEquals(await clientRuntime.start(resumed), true);
+    await resumed.pull();
+    await clientRuntime.settled();
+
+    const claims: ExecutionClaim[] = [];
+    const settlements: ActionSettlement[] = [];
+    const claimWaiters: {
+      predicate: (claim: ExecutionClaim) => boolean;
+      resolve: (claim: ExecutionClaim) => void;
+    }[] = [];
+    const settlementWaiters: {
+      predicate: (settlement: ActionSettlement) => boolean;
+      resolve: (settlement: ActionSettlement) => void;
+    }[] = [];
+    const revoked = Promise.withResolvers<void>();
+    let firstClaim: ExecutionClaim | undefined;
+    unsubscribeControl = observer.subscribeExecutionControl((event) => {
+      if (event.type === "session.execution.claim.set") {
+        claims.push(event.claim);
+        for (const waiter of [...claimWaiters]) {
+          if (waiter.predicate(event.claim)) waiter.resolve(event.claim);
+        }
+      } else if (event.type === "session.execution.settlement") {
+        settlements.push(event.settlement);
+        for (const waiter of [...settlementWaiters]) {
+          if (waiter.predicate(event.settlement)) {
+            waiter.resolve(event.settlement);
+          }
+        }
+      } else if (
+        event.type === "session.execution.claim.revoke" &&
+        firstClaim !== undefined &&
+        event.leaseGeneration === firstClaim.leaseGeneration &&
+        event.claimGeneration === firstClaim.claimGeneration
+      ) {
+        revoked.resolve();
+      }
+    });
+    const waitForClaim = (
+      predicate: (claim: ExecutionClaim) => boolean,
+    ): Promise<ExecutionClaim> => {
+      const existing = claims.find(predicate);
+      if (existing !== undefined) return Promise.resolve(existing);
+      const result = Promise.withResolvers<ExecutionClaim>();
+      claimWaiters.push({ predicate, resolve: result.resolve });
+      return result.promise;
+    };
+    const waitForSettlement = (
+      predicate: (settlement: ActionSettlement) => boolean,
+    ): Promise<ActionSettlement> => {
+      const existing = settlements.find(predicate);
+      if (existing !== undefined) return Promise.resolve(existing);
+      const result = Promise.withResolvers<ActionSettlement>();
+      settlementWaiters.push({ predicate, resolve: result.resolve });
+      return result.promise;
+    };
+
+    const outputWaiters = new Map<number, PromiseWithResolvers<void>>();
+    let countOutputRevisions = false;
+    let countedOutputRevisions = 0;
+    unsubscribeAccepted = server.subscribeAcceptedCommits(space, (event) => {
+      if (!event.revisions.some((revision) => revision.id === outputId)) return;
+      if (countOutputRevisions) countedOutputRevisions++;
+      void server.readDocument(space, outputId).then((document) => {
+        const value = (document as { value?: unknown } | null)?.value;
+        if (typeof value === "number") outputWaiters.get(value)?.resolve();
+      });
+    });
+    const waitForOutput = (value: number): Promise<void> => {
+      const waiter = Promise.withResolvers<void>();
+      outputWaiters.set(value, waiter);
+      return waiter.promise;
+    };
+
+    const workers: Worker[] = [];
+    const denoFactory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      patternApiUrl: new URL("https://toolshed.example/"),
+      protocolFlags: FLAGS,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+      createWorker: () => {
+        const worker = new Worker(
+          new URL("../src/executor/executor-worker.ts", import.meta.url).href,
+          { type: "module", name: "executor-crash-drill" },
+        );
+        workers.push(worker);
+        return worker;
+      },
+    });
+    let nextTimer = 0;
+    const timers = new Map<
+      number,
+      { callback: () => void; delayMs: number; cleared: boolean }
+    >();
+    pool = new SharedExecutionPool({
+      control: server,
+      factory: denoFactory,
+      crashBackoffBaseMs: 17,
+      crashBackoffMaxMs: 17,
+      setTimer: (callback, delayMs) => {
+        const timer = ++nextTimer;
+        timers.set(timer, { callback, delayMs, cleared: false });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        const record = timers.get(timer);
+        if (record !== undefined) record.cleared = true;
+      },
+    });
+    pool.start();
+    await observer.setExecutionDemand("" as BranchName, [result.sourceURI]);
+    await pool.idle();
+
+    const initialClaim = waitForClaim(() => true);
+    const baselineOutput = waitForOutput(12);
+    const baselineSource = await observer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 6 },
+      }],
+    });
+    firstClaim = await within(initialClaim, "initial executor claim");
+    await within(baselineOutput, "baseline claimed output");
+    await within(
+      waitForSettlement((settlement) =>
+        settlement.claim.leaseGeneration === firstClaim!.leaseGeneration &&
+        settlement.inputBasisSeq >= baselineSource.seq
+      ),
+      "baseline claimed settlement",
+    );
+
+    const gate = server.armClaimedAttempt();
+    const fallbackOutput = waitForOutput(14);
+    clientCommits.length = 0;
+    countedOutputRevisions = 0;
+    countOutputRevisions = true;
+    await observer.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 7 },
+      }],
+    });
+    await within(gate.started, "gated stale claimed attempt");
+    workers[0]!.dispatchEvent(
+      new ErrorEvent("error", {
+        message: "controlled executor crash",
+        error: new Error("controlled executor crash"),
+      }),
+    );
+    await within(revoked.promise, "crashed claim revoke");
+    await pool.idle();
+    assertEquals(pool.snapshot(space, "")?.state, "backoff");
+    await resumed.pull();
+    await clientRuntime.settled();
+    await within(fallbackOutput, "client fail-open output");
+    gate.release();
+    const staleResponse = await within(
+      gate.response,
+      "stale executor rejection",
+    );
+    countOutputRevisions = false;
+
+    assertEquals("error" in staleResponse, true);
+    assertEquals(countedOutputRevisions, 1);
+    const fallbackCommit = clientCommits.find((commit) =>
+      commit.operations.some((operation) =>
+        operation.op !== "sqlite" && operation.id === outputId
+      )
+    );
+    assertEquals(fallbackCommit !== undefined, true);
+    const fallbackObservation = fallbackCommit?.schedulerObservation as
+      | { executionClaimAssertion?: unknown }
+      | undefined;
+    assertEquals(fallbackObservation?.executionClaimAssertion, undefined);
+    const fallbackSnapshots = await observer.listSchedulerActionSnapshots({
+      actionId: firstClaim.actionId,
+      pieceId: firstClaim.pieceId,
+    });
+    const fallbackProvenance = fallbackSnapshots.snapshots.at(-1)
+      ?.observation as
+        | { executionProvenance?: unknown }
+        | undefined;
+    assertEquals(fallbackProvenance?.executionProvenance, undefined);
+
+    const backoff = [...timers.values()].find((timer) =>
+      !timer.cleared && timer.delayMs === 17
+    );
+    if (backoff === undefined) throw new Error("missing crash backoff timer");
+    backoff.callback();
+    await pool.idle();
+    assertEquals(workers.length, 2);
+    assertEquals(pool.snapshot(space, "")?.state, "live");
+    const replacementClaimPending = waitForClaim((claim) =>
+      claim.leaseGeneration > firstClaim!.leaseGeneration
+    );
+    const reacquisitionOutput = waitForOutput(16);
+    countedOutputRevisions = 0;
+    countOutputRevisions = true;
+    await observer.transact({
+      localSeq: 4,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 8 },
+      }],
+    });
+    const replacementClaim = await within(
+      replacementClaimPending,
+      "replacement executor claim",
+    );
+    await within(reacquisitionOutput, "replacement reacquisition output");
+    await clientRuntime.settled();
+    countOutputRevisions = false;
+    assertEquals(countedOutputRevisions, 1);
+    assertEquals(
+      replacementClaim.leaseGeneration,
+      firstClaim.leaseGeneration + 1,
+    );
+
+    const replacementOutput = waitForOutput(18);
+    countedOutputRevisions = 0;
+    countOutputRevisions = true;
+    const replacementSource = await observer.transact({
+      localSeq: 5,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 9 },
+      }],
+    });
+    await within(replacementOutput, "replacement executor output");
+    const replacementSettlement = await within(
+      waitForSettlement((settlement) =>
+        settlement.claim.leaseGeneration ===
+          replacementClaim.leaseGeneration &&
+        settlement.inputBasisSeq >= replacementSource.seq
+      ),
+      "replacement executor settlement",
+    );
+    countOutputRevisions = false;
+    assertEquals(replacementSettlement.outcome, "committed");
+    assertEquals(countedOutputRevisions, 1);
+    const replacementSnapshots = await observer.listSchedulerActionSnapshots({
+      actionId: replacementClaim.actionId,
+      pieceId: replacementClaim.pieceId,
+    });
+    const replacementProvenance = replacementSnapshots.snapshots.at(-1)
+      ?.observation as {
+        executionProvenance?: {
+          onBehalfOf?: string;
+          leaseGeneration?: number;
+        };
+      } | undefined;
+    assertEquals(replacementProvenance?.executionProvenance?.onBehalfOf, space);
+    assertEquals(
+      replacementProvenance?.executionProvenance?.leaseGeneration,
+      replacementClaim.leaseGeneration,
+    );
+    assertEquals(pool.metrics().crashes, 1);
+    assertEquals(pool.metrics().abruptStops, 1);
+  } finally {
+    unsubscribeAccepted();
+    unsubscribeControl();
+    await pool?.close();
+    await clientRuntime?.dispose();
+    await clientStorage?.close();
     await seedRuntime.dispose();
     await seedStorage.close();
     await observerClient?.close();
