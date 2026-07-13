@@ -3596,6 +3596,7 @@ const assertExecutionLeaseFenceTransaction = (
     branch: BranchName;
     principal?: string;
     claims: readonly ExecutionClaim[];
+    requireExactClaim?: boolean;
   },
 ): void => {
   const fence = options.fence;
@@ -3608,6 +3609,11 @@ const assertExecutionLeaseFenceTransaction = (
   ) {
     throw new ExecutionLeaseFenceError(
       "execution lease does not match the commit lane and principal",
+    );
+  }
+  if (options.requireExactClaim === true && options.claims.length !== 1) {
+    throw new ExecutionLeaseFenceError(
+      "bound executor semantic transaction requires one exact execution claim incarnation",
     );
   }
   if (fence.authorize?.(engine) !== true) {
@@ -7316,6 +7322,7 @@ const applyCommitTransaction = (
     branch,
     principal,
     claims: executionClaims === undefined ? [] : [...executionClaims.values()],
+    requireExactClaim: commit.operations.length > 0,
   });
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;

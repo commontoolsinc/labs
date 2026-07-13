@@ -2,6 +2,7 @@ import { assert, assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
   type ClientCommit,
+  type ExecutionClaim,
   type ExecutionLease,
   toDocumentPath,
 } from "../v2.ts";
@@ -264,11 +265,6 @@ Deno.test("execution lease acquisition rejects missing and deleted branches", as
 Deno.test("stale lease commits apply nothing while accepted replay survives revoke", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
-  const accepted: ClientCommit = {
-    localSeq: 1,
-    reads: { confirmed: [], pending: [] },
-    operations: [{ op: "set", id: "of:accepted", value: { value: 1 } }],
-  };
   try {
     const first = acquire(engine, {
       hostId: "host:first",
@@ -276,11 +272,76 @@ Deno.test("stale lease commits apply nothing while accepted replay survives revo
       ttlMs: 1_000,
     });
     assertExists(first);
+    const claim: ExecutionClaim = {
+      branch: "",
+      space: SPACE,
+      contextKey: "space",
+      pieceId: "space:of:lease-fence-piece",
+      actionId: "action:lease-fence",
+      actionKind: "computation",
+      implementationFingerprint: "impl:lease-fence",
+      runtimeFingerprint: "runtime:lease-fence",
+      leaseGeneration: first.leaseGeneration,
+      claimGeneration: 1,
+      expiresAt: first.expiresAt,
+    };
+    const output = {
+      space: SPACE,
+      scope: "space" as const,
+      id: "of:accepted",
+      path: ["value"],
+    };
+    const accepted: ClientCommit = {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{ op: "set", id: output.id, value: { value: 1 } }],
+      schedulerObservation: {
+        version: 2,
+        ownerSpace: SPACE,
+        branch: "",
+        pieceId: claim.pieceId,
+        processGeneration: 1,
+        actionId: claim.actionId,
+        actionKind: claim.actionKind,
+        implementationFingerprint: claim.implementationFingerprint,
+        runtimeFingerprint: claim.runtimeFingerprint,
+        executionClaimAssertion: {
+          contextKey: claim.contextKey,
+          leaseGeneration: claim.leaseGeneration,
+          claimGeneration: claim.claimGeneration,
+        },
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads: [],
+        shallowReads: [],
+        actualChangedWrites: [output],
+        currentKnownWrites: [output],
+        materializerWriteEnvelopes: [],
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          implementationFingerprint: claim.implementationFingerprint,
+          runtimeFingerprint: claim.runtimeFingerprint,
+          piece: {
+            space: SPACE,
+            scope: "space",
+            id: claim.pieceId.slice("space:".length),
+            path: [],
+          },
+          reads: [],
+          writes: [output],
+          materializerWriteEnvelopes: [],
+          directOutputs: [output],
+        },
+        status: "success",
+      },
+    };
     const applied = Engine.applyCommit(engine, {
       sessionId: "executor-session",
       space: SPACE,
       principal: PRINCIPAL,
       commit: accepted,
+      executionClaims: new Map([[accepted.localSeq, claim]]),
       executionLeaseFence: {
         lease: first,
         nowMs: nowMs + 1,

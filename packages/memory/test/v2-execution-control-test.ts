@@ -1284,12 +1284,6 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       lease,
       claimKey(POLICY_SPACE, "", "action:provenance"),
     );
-    unbind = server.bindExecutionSession(
-      POLICY_SPACE,
-      session.sessionId,
-      lease,
-    );
-
     const source = await session.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
@@ -1299,6 +1293,11 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
         value: { value: { count: 1 } },
       }],
     });
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
     const observation = {
       version: 2 as const,
       ownerSpace: POLICY_SPACE,
@@ -1648,6 +1647,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
   const server = createControlServer("memory-v2-execution-caused-by");
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
+  const writerClient = await connectControlClient(server);
+  const writer = await mount(writerClient) as ExecutionSession;
   let unbind = () => {};
   try {
     await setPolicy(session, true);
@@ -1662,8 +1663,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
       id: "of:caused-by-source",
       path: ["value", "count"],
     };
-    const initialSource = await session.transact({
-      localSeq: 2,
+    const initialSource = await writer.transact({
+      localSeq: 1,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -1706,8 +1707,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
         "invalidation-settlement"
       ]?.count ?? 0;
 
-    const firstCause = await session.transact({
-      localSeq: 4,
+    const firstCause = await writer.transact({
+      localSeq: 2,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -1715,8 +1716,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
         value: { value: { count: 1 } },
       }],
     });
-    const secondCause = await session.transact({
-      localSeq: 5,
+    const secondCause = await writer.transact({
+      localSeq: 3,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -1768,8 +1769,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
     );
 
     unbind();
-    const laterCause = await session.transact({
-      localSeq: 7,
+    const laterCause = await writer.transact({
+      localSeq: 4,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -1838,8 +1839,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
       ...sourceAddress,
       id: "of:caused-by-future-source",
     };
-    const initialFutureSource = await session.transact({
-      localSeq: 10,
+    const initialFutureSource = await writer.transact({
+      localSeq: 5,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -1875,8 +1876,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
         actualChangedWrites: [],
       },
     });
-    const coveredCause = await session.transact({
-      localSeq: 12,
+    const coveredCause = await writer.transact({
+      localSeq: 6,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -1884,8 +1885,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
         value: { value: { count: 4 } },
       }],
     });
-    const futureCause = await session.transact({
-      localSeq: 13,
+    const futureCause = await writer.transact({
+      localSeq: 7,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -1956,8 +1957,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
     unbind();
     let overflowFrontier = laterCause;
     for (let index = 0; index < 65; index++) {
-      overflowFrontier = await session.transact({
-        localSeq: 16 + index,
+      overflowFrontier = await writer.transact({
+        localSeq: 8 + index,
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "set",
@@ -1986,8 +1987,8 @@ Deno.test("claimed provenance retains every source commit after the read surface
     assertEquals(overflowed.actionAttempts?.[0]?.provenance.causedBy, []);
 
     unbind();
-    const afterOverflow = await session.transact({
-      localSeq: 82,
+    const afterOverflow = await writer.transact({
+      localSeq: 73,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -2066,6 +2067,7 @@ Deno.test("claimed provenance retains every source commit after the read surface
     assertEquals(afterSelfWrite.actionAttempts?.[0]?.provenance.causedBy, []);
   } finally {
     unbind();
+    await writerClient.close();
     await client.close();
     await server.close();
   }
@@ -2302,11 +2304,6 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
       lease,
       claimKey(POLICY_SPACE, "", "action:unserved-attempt"),
     );
-    unbind = server.bindExecutionSession(
-      POLICY_SPACE,
-      session.sessionId,
-      lease,
-    );
     const confirmed = await session.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
@@ -2325,6 +2322,11 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
         value: { value: 2 },
       }],
     });
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
 
     const base = claimedSpaceObservation(
       claim,
@@ -2541,6 +2543,51 @@ Deno.test("bound executor never downgrades a revoked attempt to an ordinary writ
       await server.readDocument(
         POLICY_SPACE,
         "of:revoked-attempt-must-not-land",
+      ),
+      null,
+    );
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("bound executor semantic writes require an exact claimed action assertion", async () => {
+  const server = createControlServer(
+    "memory-v2-execution-bound-semantic-guard",
+  );
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+
+    const error = await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 2,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:bound-assertion-free-must-not-land",
+            value: { value: true },
+          }],
+        }),
+      Error,
+      "exact execution claim incarnation",
+    );
+    assertEquals(error.name, "ExecutionLeaseFenceError");
+    assertEquals(
+      await server.readDocument(
+        POLICY_SPACE,
+        "of:bound-assertion-free-must-not-land",
       ),
       null,
     );
