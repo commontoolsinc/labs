@@ -1,13 +1,19 @@
 import { assertEquals, assertExists } from "@std/assert";
-import { type ExecutionLeaseHandle, Server } from "../v2/server.ts";
+import {
+  type ExecutionLeaseHandle,
+  Server,
+  SessionRegistry,
+} from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
+  type ExecutionControlEvent,
   getMemoryProtocolFlags,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
   type SessionDescriptor,
+  type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionOpenResult,
 } from "../v2.ts";
@@ -25,10 +31,14 @@ const serverFlags = {
   serverPrimaryExecutionBuiltinPassivityV1: true,
 };
 
-const createServer = (name: string): Server =>
+const createServer = (
+  name: string,
+  options: { maxExecutionEvents?: number } = {},
+): Server =>
   new Server({
     ...testSessionOpenServerOptions,
     store: new URL(`memory://${name}`),
+    sessions: new SessionRegistry(options),
     protocolFlags: serverFlags,
     acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
   });
@@ -128,6 +138,11 @@ const claimInput = (
   implementationFingerprint: "impl:v1",
   runtimeFingerprint: "runtime:v1",
 });
+
+const eventActionId = (event: ExecutionControlEvent): string =>
+  event.type === "session.execution.settlement"
+    ? event.settlement.claim.actionId
+    : event.claim.actionId;
 
 const acquireSponsorLease = async (
   server: Server,
@@ -243,6 +258,106 @@ Deno.test("resumed open suppresses live execution effects until its response ins
       resumed.connection.close();
     }
   } finally {
+    sponsor?.connection.close();
+    first.close();
+    await server.close();
+  }
+});
+
+Deno.test("resume behind a bounded execution suffix installs an exact snapshot and advances", async () => {
+  const server = createServer("memory-v2-execution-feed-bounded-resume", {
+    maxExecutionEvents: 2,
+  });
+  const firstMessages: ServerMessage[] = [];
+  const first = server.connect((message) => firstMessages.push(message));
+  let sponsor: Awaited<ReturnType<typeof acquireSponsorLease>> | undefined;
+  let second: ReturnType<Server["connect"]> | undefined;
+  try {
+    const firstAuth = await hello(first, firstMessages);
+    const opened = await open(first, firstMessages, "open", firstAuth, {});
+    assertExists(opened.ok);
+    assertExists(opened.ok.sync?.execution);
+    await enablePolicy(first, firstMessages, opened.ok.sessionId);
+    sponsor = await acquireSponsorLease(server);
+    const acknowledgedFeedSeq = opened.ok.sync.execution.toFeedSeq;
+    first.close();
+
+    const stale = await server.setExecutionClaim(
+      sponsor.lease,
+      claimInput("action:stale", "computation"),
+    );
+    assertExists(stale);
+    assertEquals(server.revokeExecutionClaim(stale), true);
+    const liveOne = await server.setExecutionClaim(
+      sponsor.lease,
+      claimInput("action:live-one", "computation"),
+    );
+    const liveTwo = await server.setExecutionClaim(
+      sponsor.lease,
+      claimInput("action:live-two", "computation"),
+    );
+    assertExists(liveOne);
+    assertExists(liveTwo);
+
+    const secondMessages: ServerMessage[] = [];
+    second = server.connect((message) => secondMessages.push(message));
+    const secondAuth = await hello(second, secondMessages);
+    const resumed = await open(
+      second,
+      secondMessages,
+      "resume",
+      secondAuth,
+      {
+        sessionId: opened.ok.sessionId,
+        sessionToken: opened.ok.sessionToken,
+        seenSeq: opened.ok.serverSeq,
+        executionFeedSeq: acknowledgedFeedSeq,
+      },
+    );
+    assertExists(resumed.ok?.sync?.execution);
+    const resumedBatch = resumed.ok.sync.execution;
+    assertEquals(resumedBatch.fromFeedSeq, acknowledgedFeedSeq);
+    // Four detached events overflow the two-entry suffix; the resume snapshot
+    // itself advances one more feed barrier.
+    assertEquals(resumedBatch.toFeedSeq, acknowledgedFeedSeq + 5);
+    assertEquals(
+      resumedBatch.events.map(eventActionId),
+      ["action:live-one", "action:live-two"],
+    );
+    const byActionId = <T extends { actionId: string }>(left: T, right: T) =>
+      left.actionId.localeCompare(right.actionId);
+    assertEquals(
+      resumedBatch.snapshot?.claims.toSorted(byActionId),
+      [liveOne, liveTwo].toSorted(byActionId),
+    );
+    assertEquals(
+      resumedBatch.events.some((event) =>
+        eventActionId(event) === "action:stale"
+      ),
+      false,
+    );
+    assertEquals(secondMessages, []);
+
+    const liveThree = await server.setExecutionClaim(
+      sponsor.lease,
+      claimInput("action:live-three", "computation"),
+    );
+    assertExists(liveThree);
+    const effect = shiftMessage(secondMessages) as SessionEffectMessage;
+    assertEquals(effect.type, "session/effect");
+    assertEquals(effect.effect.execution?.fromFeedSeq, resumedBatch.toFeedSeq);
+    assertEquals(
+      effect.effect.execution?.toFeedSeq,
+      resumedBatch.toFeedSeq + 1,
+    );
+    assertEquals(
+      effect.effect.execution?.events.map(eventActionId),
+      ["action:live-three"],
+    );
+    assertEquals(effect.effect.execution?.snapshot, undefined);
+    assertEquals(secondMessages, []);
+  } finally {
+    second?.close();
     sponsor?.connection.close();
     first.close();
     await server.close();
