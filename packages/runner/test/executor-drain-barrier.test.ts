@@ -2,14 +2,15 @@ import { assertEquals } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
-import type {
-  ActionSettlement,
-  BranchName,
-  ClientCommit,
-  ExecutionClaim,
-  ExecutionLease,
-  MemoryProtocolFlags,
-  TransactRequest,
+import {
+  type ActionSettlement,
+  type BranchName,
+  type ClientCommit,
+  type ExecutionClaim,
+  executionClaimIncarnationKey,
+  type ExecutionLease,
+  type MemoryProtocolFlags,
+  type TransactRequest,
 } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
@@ -213,6 +214,76 @@ const within = async <T>(promise: Promise<T>, label: string): Promise<T> => {
     if (timer !== undefined) clearTimeout(timer);
   }
 };
+
+async function waitForExactClientClaim(
+  session: MemoryClient.SpaceSession,
+  storage: StorageManager,
+  space: MemorySpace,
+  claim: ExecutionClaim,
+): Promise<void> {
+  const isExact = (candidate: ExecutionClaim): boolean =>
+    executionClaimIncarnationKey(candidate) ===
+      executionClaimIncarnationKey(claim);
+  if (!session.executionClaims.some(isExact)) {
+    const observed = Promise.withResolvers<void>();
+    const unsubscribe = session.subscribeExecutionControl((event) => {
+      if (
+        event.type === "session.execution.claim.set" && isExact(event.claim)
+      ) {
+        observed.resolve();
+      }
+    });
+    try {
+      // Close the read-then-subscribe race before waiting for the ordered
+      // claim.set event.
+      if (!session.executionClaims.some(isExact)) {
+        await within(observed.promise, "writer client replacement claim");
+      }
+    } finally {
+      unsubscribe();
+    }
+  }
+
+  // The session enqueues the same control sync to the replica before emitting
+  // claim.set. Wait until that queued sync is actually applied, then pin the
+  // exact incarnation through the public routing diagnostics.
+  for (let attempt = 0; attempt < 1_000; attempt++) {
+    const diagnostics = storage.getExecutionRoutingDiagnostics({
+      space,
+      branch: claim.branch,
+      pieceId: claim.pieceId,
+      actionId: claim.actionId,
+    });
+    if (diagnostics.claims.some(isExact)) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  const diagnostics = storage.getExecutionRoutingDiagnostics({
+    space,
+    branch: claim.branch,
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  });
+  assertEquals(
+    diagnostics.claims.some((candidate) =>
+      executionClaimIncarnationKey(candidate) ===
+        executionClaimIncarnationKey(claim)
+    ),
+    true,
+    `client did not integrate replacement claim: ${
+      JSON.stringify(diagnostics)
+    }`,
+  );
+}
+
+const outputCommitCount = (
+  commits: readonly ClientCommit[],
+  outputId: string,
+): number =>
+  commits.filter((commit) =>
+    commit.operations.some((operation) =>
+      operation.op !== "sqlite" && operation.id === outputId
+    )
+  ).length;
 
 Deno.test("real executor recovers a source commit accepted between settle and terminate", async () => {
   const principal = await Identity.fromPassphrase(
@@ -705,13 +776,15 @@ Deno.test("persistent host restart rehydrates one fenced replacement without dup
       inputBasisSeq: number,
     ): Promise<ActionSettlement> => {
       const existing = settlementsB.find((settlement) =>
+        settlement.outcome === "committed" &&
         settlement.inputBasisSeq >= inputBasisSeq
       );
       if (existing !== undefined) return Promise.resolve(existing);
       const waiter = Promise.withResolvers<ActionSettlement>();
       settlementWaiters.push(waiter);
       return waiter.promise.then((settlement) =>
-        settlement.inputBasisSeq >= inputBasisSeq
+        settlement.outcome === "committed" &&
+          settlement.inputBasisSeq >= inputBasisSeq
           ? settlement
           : waitForSettlementAfter(inputBasisSeq)
       );
@@ -942,6 +1015,7 @@ Deno.test("real executor crash rejects stale work and converges once through cli
   let observerClient: MemoryClient.Client | null = null;
   let clientStorage: LoopbackStorageManager | null = null;
   let clientRuntime: Runtime | null = null;
+  let clientSession: MemoryClient.SpaceSession | null = null;
   let pool: SharedExecutionPool | null = null;
   let unsubscribeAccepted = () => {};
   let unsubscribeControl = () => {};
@@ -1007,6 +1081,8 @@ Deno.test("real executor crash rejects stale work and converges once through cli
       FLAGS,
       { as: principal },
       (commit) => clientCommits.push(commit),
+      undefined,
+      (session) => clientSession = session,
     );
     clientRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -1249,6 +1325,20 @@ Deno.test("real executor crash rejects stale work and converges once through cli
       firstClaim.leaseGeneration + 1,
     );
 
+    // The observer sees the replacement claim before the writer client's
+    // ordered control feed necessarily does. Force a fresh sync and prove the
+    // exact incarnation is integrated before testing post-replacement
+    // authority; runtime.settled() alone drains local work, not unsolicited
+    // control-feed catch-up.
+    await waitForExactClientClaim(
+      clientSession!,
+      clientStorage,
+      space,
+      replacementClaim,
+    );
+    await clientRuntime.settled();
+    clientCommits.length = 0;
+
     const replacementOutput = waitForOutput(18);
     countedOutputRevisions = 0;
     countOutputRevisions = true;
@@ -1262,17 +1352,36 @@ Deno.test("real executor crash rejects stale work and converges once through cli
       }],
     });
     await within(replacementOutput, "replacement executor output");
+    assertEquals(
+      outputCommitCount(clientCommits, outputId),
+      0,
+      `replacement window emitted a client-derived output commit: ${
+        JSON.stringify(clientCommits)
+      }`,
+    );
     const replacementSettlement = await within(
       waitForSettlement((settlement) =>
         settlement.claim.leaseGeneration ===
           replacementClaim.leaseGeneration &&
+        settlement.outcome === "committed" &&
         settlement.inputBasisSeq >= replacementSource.seq
       ),
       "replacement executor settlement",
     );
     countOutputRevisions = false;
-    assertEquals(replacementSettlement.outcome, "committed");
+    assertEquals(
+      replacementSettlement.outcome,
+      "committed",
+      `unexpected replacement settlement sequence: ${
+        JSON.stringify(settlements)
+      }`,
+    );
     assertEquals(countedOutputRevisions, 1);
+    assertEquals(
+      outputCommitCount(clientCommits, outputId),
+      0,
+      "replacement window emitted a client-derived output commit",
+    );
     const replacementSnapshots = await observer.listSchedulerActionSnapshots({
       actionId: replacementClaim.actionId,
       pieceId: replacementClaim.pieceId,
@@ -1689,6 +1798,15 @@ Deno.test("real sponsor loss fences A and resumes exactly once on behalf of B", 
     countOutputRevisions = false;
     assertEquals(countedOutputRevisions, 1);
 
+    await waitForExactClientClaim(
+      sessionB!,
+      storageB,
+      space,
+      replacementClaim,
+    );
+    await runtimeB.settled();
+    commitsB.length = 0;
+
     const authoritativeOutput = waitForOutput(18);
     countedOutputRevisions = 0;
     countOutputRevisions = true;
@@ -1702,17 +1820,34 @@ Deno.test("real sponsor loss fences A and resumes exactly once on behalf of B", 
       }],
     });
     await within(authoritativeOutput, "sponsor B authoritative output");
+    assertEquals(
+      outputCommitCount(commitsB, outputId),
+      0,
+      `sponsor replacement window emitted a client-derived output commit: ${
+        JSON.stringify(commitsB)
+      }`,
+    );
     const authoritativeSettlement = await within(
       waitForSettlement((settlement) =>
         settlement.claim.leaseGeneration ===
           replacementClaim.leaseGeneration &&
+        settlement.outcome === "committed" &&
         settlement.inputBasisSeq >= authoritativeSource.seq
       ),
       "sponsor B authoritative settlement",
     );
     countOutputRevisions = false;
-    assertEquals(authoritativeSettlement.outcome, "committed");
+    assertEquals(
+      authoritativeSettlement.outcome,
+      "committed",
+      `unexpected sponsor settlement sequence: ${JSON.stringify(settlements)}`,
+    );
     assertEquals(countedOutputRevisions, 1);
+    assertEquals(
+      outputCommitCount(commitsB, outputId),
+      0,
+      "sponsor replacement window emitted a client-derived output commit",
+    );
     const snapshots = await observer.listSchedulerActionSnapshots({
       actionId: replacementClaim.actionId,
       pieceId: replacementClaim.pieceId,
