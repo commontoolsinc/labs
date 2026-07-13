@@ -10,6 +10,7 @@ import {
   SharedExecutionPool,
 } from "@commonfabric/runner/executor";
 import { DenoSpaceExecutorFactory } from "@commonfabric/runner/executor/deno";
+import { setServerExecutionPoolMetricsProvider } from "@/lib/server-execution-observability.ts";
 
 const memoryAudience = identity.did();
 
@@ -53,6 +54,8 @@ export function serverExecutionPoolMetrics():
   | null {
   return executionPool?.metrics() ?? null;
 }
+
+setServerExecutionPoolMetricsProvider(serverExecutionPoolMetrics);
 
 /** Start client-demand execution after runtime flags are installed, but before
  * the HTTP server accepts connections. */

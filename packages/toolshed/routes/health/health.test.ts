@@ -19,4 +19,16 @@ Deno.test("health routes", async (t) => {
     assertEquals(json.status, "OK");
     assertEquals(typeof json.timestamp, "number");
   });
+
+  await t.step(
+    "GET /api/health/stats exposes server execution pool metrics",
+    async () => {
+      const response = await app.request("/api/health/stats");
+      assertEquals(response.status, 200);
+
+      const json = await response.json();
+      assertEquals("serverExecutionPool" in json, true);
+      assertEquals(json.serverExecutionPool, null);
+    },
+  );
 });

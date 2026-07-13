@@ -14,6 +14,7 @@ import {
   getLoggerCountsBreakdown,
   getTimingStatsBreakdown,
 } from "@commonfabric/utils/logger";
+import { getServerExecutionPoolMetrics } from "@/lib/server-execution-observability.ts";
 
 export const HealthResponseSchema = z.object({
   status: z.literal("OK"),
@@ -55,6 +56,7 @@ export const stats: AppRouteHandler<StatsRoute> = (c) => {
     logCounts: getLoggerCountsBreakdown(),
     timingStats: getTimingStatsBreakdown(),
     slowQueries: [...getSlowQueries()],
+    serverExecutionPool: getServerExecutionPoolMetrics(),
   }, HttpStatusCodes.OK);
 };
 
