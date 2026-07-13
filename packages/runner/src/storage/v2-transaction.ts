@@ -3,7 +3,6 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { unclaimed } from "@commonfabric/memory/fact";
 import type {
   CommitPrecondition,
   PatchOp,
@@ -84,6 +83,7 @@ import {
   isUiInputBlindWriteTx,
 } from "./reactivity-log.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
+import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   buildMergeableIntent,
   foldMergeableIntent,
@@ -150,6 +150,15 @@ type DoneState = {
 };
 
 type TxState = ReadyState | DoneState | PendingState;
+
+// A schema traversal can discover thousands of paths in one document. Keep
+// that batch compact internally and expand it only for inspection consumers.
+type BatchedReadActivity = Omit<IReadActivity, "path" | "journalIndex"> & {
+  paths: readonly (readonly string[])[];
+  journalIndex: number;
+};
+
+type RecordedReadActivity = IReadActivity | BatchedReadActivity;
 
 const logger = getLogger("storage.v2.transaction", {
   enabled: false,
@@ -866,7 +875,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   #state: TxState = { status: "ready" };
   #branches = new Map<MemorySpace, SpaceBranch>();
-  #readActivities: IReadActivity[] = [];
+  #readActivities: RecordedReadActivity[] = [];
   // Per-transaction monotonic activity clock, shared between read activities
   // and write attempts so their relative order (the read|write interleaving)
   // is recoverable without a journal scan — V2 journals don't support
@@ -944,8 +953,24 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { status: "ready", journal: this.journal };
   }
 
-  getReadActivities() {
-    return this.#readActivities;
+  *getReadActivities(): IterableIterator<IReadActivity> {
+    for (const read of this.#readActivities) {
+      if (!("paths" in read)) {
+        yield read;
+        continue;
+      }
+      for (let i = 0; i < read.paths.length; i++) {
+        yield {
+          space: read.space,
+          scope: read.scope,
+          id: read.id,
+          path: read.paths[i],
+          meta: read.meta,
+          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
+          journalIndex: read.journalIndex + i,
+        };
+      }
+    }
   }
 
   getWriteAttemptLog(): readonly IWriteAttempt[] {
@@ -1382,17 +1407,16 @@ export class V2StorageTransaction implements IStorageTransaction {
       ? { ...readMeta, ...ignoreReadForCommit }
       : readMeta;
     const scope = normalizeCellScope(address.scope);
-    for (const path of paths) {
-      this.#readActivities.push({
-        space: address.space,
-        scope,
-        id: address.id,
-        path,
-        meta: activityMeta,
-        ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
-        journalIndex: this.#activityClock++,
-      });
-    }
+    this.#readActivities.push({
+      space: address.space,
+      scope,
+      id: address.id,
+      paths,
+      meta: activityMeta,
+      ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
+      journalIndex: this.#activityClock,
+    });
+    this.#activityClock += paths.length;
     if (!skipCommitPrecondition) doc.validated = true;
     this.invalidateReactivityLog();
     return { ok: {} };
@@ -2121,17 +2145,20 @@ export class V2StorageTransaction implements IStorageTransaction {
     const shallowReads: IMemorySpaceAddress[] = [];
     let attemptedWrites: IMemorySpaceAddress[] | undefined;
 
-    for (const read of this.#readActivities) {
+    const recordRead = (
+      read: Omit<IReadActivity, "path">,
+      path: readonly string[],
+    ) => {
       const meta = read.meta ?? EMPTY_META;
       if (isReadIgnoredForScheduling(meta)) {
-        continue;
+        return;
       }
 
       const address = {
         space: read.space,
         scope: read.scope,
         id: read.id,
-        path: read.path,
+        path,
       };
 
       if (read.nonRecursive === true) {
@@ -2143,6 +2170,14 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (isReadMarkedAsAttemptedWrite(meta)) {
         attemptedWrites ??= [];
         attemptedWrites.push(address);
+      }
+    };
+
+    for (const read of this.#readActivities) {
+      if ("paths" in read) {
+        for (const path of read.paths) recordRead(read, path);
+      } else {
+        recordRead(read, read.path);
       }
     }
 
@@ -2282,15 +2317,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { root: loaded.ok as RootAttestation };
     }
 
-    const state = branch.replica.get({
-      id: address.id,
-      type,
-      scope: address.scope,
-    }) ?? unclaimed({
-      of: address.id,
-      the: type,
-    });
-    const seq = (state as { since?: unknown }).since;
+    const value = toTransactionDocumentValue(
+      branch.replica.getDocument(address.id, address.scope),
+    );
 
     return {
       root: {
@@ -2300,9 +2329,8 @@ export class V2StorageTransaction implements IStorageTransaction {
           path: [],
           scope: normalizeCellScope(address.scope),
         },
-        value: state.is,
+        value,
       },
-      ...(typeof seq === "number" ? { seq } : {}),
     };
   }
 
