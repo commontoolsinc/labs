@@ -68,6 +68,7 @@ class FailingSchedulerListServer extends WatchCountingServer {
 }
 
 class GatedGraphServer extends WatchCountingServer {
+  graphQueryCount = 0;
   graphQueryStarted = Promise.withResolvers<void>();
   releaseGraphQuery = Promise.withResolvers<void>();
   #gateNextGraphQuery = false;
@@ -81,6 +82,7 @@ class GatedGraphServer extends WatchCountingServer {
   override async graphQuery(
     message: Parameters<Server["graphQuery"]>[0],
   ): ReturnType<Server["graphQuery"]> {
+    this.graphQueryCount++;
     const response = await super.graphQuery(message);
     if (this.#gateNextGraphQuery) {
       this.#gateNextGraphQuery = false;
@@ -1391,6 +1393,122 @@ Deno.test("executor host provider reports accepted commits only after replica in
     assertEquals(notice.deliverySeq, 2);
     assertEquals(valueAtCallback, { value: { integrated: true } });
     assertEquals(await storage.acceptedCommitsSettled(), 2);
+  } finally {
+    server.releaseGraphQuery.resolve();
+    await storage.close();
+    await channel.dispose();
+    await writerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("executor host provider coalesces accepted-commit refresh bursts", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor provider accepted burst ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const server = new GatedGraphServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-accepted-burst-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const writerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const writer = await writerClient.mount(space, {}, authorizeSessionOpen);
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    authorizeSessionOpen,
+  });
+  const uri = "of:executor-provider:accepted-burst" as URI;
+  const address = {
+    id: uri,
+    type: "application/json" as MIME,
+    path: [],
+  };
+  const integratedSeqs: number[] = [];
+  const storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: principal.did(),
+    space,
+    onAcceptedCommitIntegrated(notice) {
+      integratedSeqs.push(notice.dataSeq);
+    },
+  });
+
+  try {
+    const provider = storage.open(space);
+    assertEquals((await provider.sync(uri)).error, undefined);
+    await writer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { revision: 1 } },
+      }],
+    });
+    assertEquals(await storage.acceptedCommitsSettled(), 1);
+    integratedSeqs.length = 0;
+    const graphQueriesBeforeBurst = server.graphQueryCount;
+
+    server.gateNextGraphQuery();
+    const first = writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { revision: 2 } },
+      }],
+    });
+    await server.graphQueryStarted.promise;
+
+    const burstEvents = 20;
+    for (let localSeq = 3; localSeq <= burstEvents + 1; localSeq++) {
+      await writer.transact({
+        localSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: uri,
+          value: { value: { revision: localSeq } },
+        }],
+      });
+    }
+    server.releaseGraphQuery.resolve();
+    await first;
+    assertEquals(await storage.acceptedCommitsSettled(), burstEvents + 1);
+
+    assertEquals(
+      server.graphQueryCount - graphQueriesBeforeBurst,
+      2,
+      "one in-flight refresh and one final refresh should cover the burst",
+    );
+    assertEquals(
+      integratedSeqs,
+      Array.from({ length: burstEvents }, (_, index) => index + 2),
+    );
+    assertEquals(provider.replica.get(address)?.is, {
+      value: { revision: burstEvents + 1 },
+    });
   } finally {
     server.releaseGraphQuery.resolve();
     await storage.close();

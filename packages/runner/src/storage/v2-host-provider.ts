@@ -605,6 +605,8 @@ class HostReplicaSession implements ReplicaSession {
   #mutation = Promise.resolve();
   #appliedSeq: number;
   #acceptedOrder = 0;
+  #pendingAcceptedCommits: AcceptedCommitNotice[] = [];
+  #acceptedCommitDeliveryScheduled = false;
   #schedulerDeliverySeq: number;
   #executionDeliverySeq: number;
   #pendingExecutionEvents: ExecutionControlEvent[] = [];
@@ -640,21 +642,7 @@ class HostReplicaSession implements ReplicaSession {
     this.#schedulerDeliverySeq = session.serverSeq;
     this.#executionDeliverySeq = session.executionFeedSeq;
     transport.setAcceptedCommitReceiver((notice) => {
-      const refresh = this.#mutation.then(
-        () => this.refreshAndNotifyAcceptedCommit(notice),
-        () => this.refreshAndNotifyAcceptedCommit(notice),
-      );
-      this.#mutation = refresh.catch((error) => {
-        if (
-          !(error instanceof Error) ||
-          (!error.message.includes("memory session closed") &&
-            !error.message.includes("memory client closed") &&
-            !error.message.includes("memory client is closed") &&
-            !error.message.includes("transport closed"))
-        ) {
-          console.warn("executor accepted-commit refresh failed", error);
-        }
-      });
+      this.queueAcceptedCommit(notice);
     });
     if (supportsExecutionDemand) {
       this.setExecutionDemand = (branch, pieces) =>
@@ -676,17 +664,64 @@ class HostReplicaSession implements ReplicaSession {
       .then(() => this.#appliedSeq);
   }
 
-  private async refreshAndNotifyAcceptedCommit(
-    notice: AcceptedCommitNotice,
-  ): Promise<void> {
-    if (!await this.refreshAcceptedCommit(notice)) return;
+  private queueAcceptedCommit(notice: AcceptedCommitNotice): void {
+    if (this.#closed) return;
+    this.#pendingAcceptedCommits.push(notice);
+    this.scheduleAcceptedCommitDelivery();
+  }
+
+  private scheduleAcceptedCommitDelivery(): void {
+    if (
+      this.#closed || this.#acceptedCommitDeliveryScheduled ||
+      this.#pendingAcceptedCommits.length === 0
+    ) return;
+    this.#acceptedCommitDeliveryScheduled = true;
+    const refresh = this.#mutation.then(
+      () => this.flushAcceptedCommits(),
+      () => this.flushAcceptedCommits(),
+    );
+    this.#mutation = refresh.catch((error) => {
+      if (
+        !(error instanceof Error) ||
+        (!error.message.includes("memory session closed") &&
+          !error.message.includes("memory client closed") &&
+          !error.message.includes("memory client is closed") &&
+          !error.message.includes("transport closed"))
+      ) {
+        console.warn("executor accepted-commit refresh failed", error);
+      }
+    });
+  }
+
+  private async flushAcceptedCommits(): Promise<void> {
     try {
-      this.onAcceptedCommitIntegrated?.(notice);
-    } catch (error) {
-      // The replica is already integrated and the commit durable. A selective
-      // wake observer is diagnostic/control-plane work and cannot roll either
-      // fact back or poison later accepted notices.
-      console.warn("executor accepted-commit observer failed", error);
+      while (this.#pendingAcceptedCommits.length > 0) {
+        const batch = this.#pendingAcceptedCommits.splice(0);
+        await this.refreshAndNotifyAcceptedCommits(batch);
+      }
+    } finally {
+      this.#acceptedCommitDeliveryScheduled = false;
+      this.scheduleAcceptedCommitDelivery();
+    }
+  }
+
+  private async refreshAndNotifyAcceptedCommits(
+    notices: readonly AcceptedCommitNotice[],
+  ): Promise<void> {
+    const integrated = await this.refreshAcceptedCommits(notices);
+    // Preserve one ordered control-plane callback per accepted commit. A
+    // coalesced batch deliberately exposes its newest integrated replica state
+    // to every callback instead of rematerializing transient intermediate
+    // document states.
+    for (const notice of integrated) {
+      try {
+        this.onAcceptedCommitIntegrated?.(notice);
+      } catch (error) {
+        // The replica is already integrated and the commit durable. A
+        // selective wake observer is diagnostic/control-plane work and cannot
+        // roll either fact back or poison later accepted notices.
+        console.warn("executor accepted-commit observer failed", error);
+      }
     }
   }
 
@@ -814,35 +849,51 @@ class HostReplicaSession implements ReplicaSession {
     return this.#mutation.then(() => result);
   }
 
-  private async refreshAcceptedCommit(
-    notice: AcceptedCommitNotice,
-  ): Promise<boolean> {
-    if (
-      this.#closed || notice.space !== this.session.space ||
-      notice.branch !== this.branch || notice.order <= this.#acceptedOrder
-    ) {
-      return false;
+  private async refreshAcceptedCommits(
+    notices: readonly AcceptedCommitNotice[],
+  ): Promise<AcceptedCommitNotice[]> {
+    if (this.#closed) return [];
+    const accepted: AcceptedCommitNotice[] = [];
+    let acceptedOrder = this.#acceptedOrder;
+    for (const notice of notices) {
+      if (
+        notice.space !== this.session.space || notice.branch !== this.branch ||
+        notice.order <= acceptedOrder
+      ) continue;
+      accepted.push(notice);
+      acceptedOrder = notice.order;
     }
-    try {
-      this.onAcceptedCommitWillIntegrate?.(notice);
-    } catch (error) {
-      // Causal attribution is control-plane state. A failing observer must not
-      // suppress integration of an already accepted durable commit.
-      console.warn(
-        "executor accepted-commit pre-integrate observer failed",
-        error,
-      );
+    if (accepted.length === 0) return [];
+    for (const notice of accepted) {
+      try {
+        this.onAcceptedCommitWillIntegrate?.(notice);
+      } catch (error) {
+        // Causal attribution is control-plane state. A failing observer must
+        // not suppress integration of an already accepted durable commit.
+        console.warn(
+          "executor accepted-commit pre-integrate observer failed",
+          error,
+        );
+      }
     }
     const fromSeq = this.#appliedSeq;
+    const dataSeq = Math.max(...accepted.map((notice) => notice.dataSeq));
+    const deliverySeq = Math.max(
+      ...accepted.map((notice) => notice.deliverySeq),
+    );
     let observations: SchedulerActionSnapshotResult[] = [];
-    if (
-      notice.originSessionId !== this.sessionId &&
-      notice.schedulerUpdateIds.length > 0
-    ) {
+    const schedulerUpdateIds = new Set(
+      accepted.flatMap((notice) =>
+        notice.originSessionId === this.sessionId
+          ? []
+          : notice.schedulerUpdateIds
+      ),
+    );
+    if (schedulerUpdateIds.size > 0) {
       try {
         observations = await this.adoptionObservations(
-          notice.deliverySeq,
-          new Set(notice.schedulerUpdateIds),
+          deliverySeq,
+          schedulerUpdateIds,
         );
       } catch (error) {
         // Scheduler adoption is optional. Keep its cursor unchanged and still
@@ -851,11 +902,13 @@ class HostReplicaSession implements ReplicaSession {
       }
     }
     if (this.#watches.size === 0) {
-      this.#acceptedOrder = notice.order;
-      this.#appliedSeq = Math.max(this.#appliedSeq, notice.dataSeq);
-      return true;
+      this.#acceptedOrder = acceptedOrder;
+      this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
+      return accepted;
     }
-    const dirty = new Set(notice.revisions.map(dirtyEntityKey));
+    const dirty = new Set(
+      accepted.flatMap((notice) => notice.revisions.map(dirtyEntityKey)),
+    );
     const affected: string[] = [];
     for (const [watchId, watch] of this.#watches) {
       const previous = this.#watchEntities.get(watchId);
@@ -875,10 +928,10 @@ class HostReplicaSession implements ReplicaSession {
     // refreshed through that sequence. An unrelated point read can advance it
     // while this notice still names a changed entity held at an older revision.
     // Accepted-notice order already deduplicates work, so refresh every affected
-    // watch even when the global watermark has reached notice.dataSeq.
+    // watch even when the global watermark has reached this batch's dataSeq.
     if (affected.length === 0) {
-      this.#acceptedOrder = notice.order;
-      this.#appliedSeq = Math.max(this.#appliedSeq, notice.dataSeq);
+      this.#acceptedOrder = acceptedOrder;
+      this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
       if (observations.length > 0) {
         this.#view?.applySync({
           type: "sync",
@@ -892,13 +945,16 @@ class HostReplicaSession implements ReplicaSession {
         // microtask. Cross that hand-off before reporting integration.
         await Promise.resolve();
       }
-      return true;
+      return accepted;
     }
 
     const before = this.allEntities();
-    await this.refreshWatches(affected, notice.dataSeq);
-    this.#acceptedOrder = notice.order;
-    this.#appliedSeq = Math.max(this.#appliedSeq, notice.dataSeq);
+    // Query the last durable data sequence once. Every earlier revision in the
+    // batch is causally included, so this preserves the newest replica state
+    // while avoiding one full graph refresh per burst event.
+    await this.refreshWatches(affected, dataSeq);
+    this.#acceptedOrder = acceptedOrder;
+    this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
     const after = this.allEntities();
     const sync: SessionSync = {
       type: "sync",
@@ -918,7 +974,7 @@ class HostReplicaSession implements ReplicaSession {
     // `applySync(..., true)` resolves the replica consumer's pending iterator;
     // its continuation applies the sync synchronously in the next microtask.
     await Promise.resolve();
-    return true;
+    return accepted;
   }
 
   /** HostReplicaSession owns a synthetic WatchView, so the underlying memory
@@ -997,6 +1053,7 @@ class HostReplicaSession implements ReplicaSession {
     if (this.#closed) return;
     this.#closed = true;
     this.#unsubscribeExecutionControl();
+    this.#pendingAcceptedCommits.length = 0;
     this.#pendingExecutionEvents.length = 0;
     this.#pendingExecutionBatches.length = 0;
   }
