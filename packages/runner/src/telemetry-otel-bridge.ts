@@ -40,6 +40,12 @@ export interface OtelBridgeOptions {
    */
   attributes?: Attributes;
   /**
+   * Attributes stamped on SPANS ONLY, merged over `attributes`. Use this for
+   * high-cardinality context such as space and user DIDs that is valuable in
+   * traces but must not become a metric label.
+   */
+  spanAttributes?: Attributes;
+  /**
    * Attributes stamped on METRICS ONLY, merged over `attributes`. Backends
    * don't map OTel resource attributes onto metric datapoint labels, so pass
    * service.name / deployment.environment here to make metrics scopable by
@@ -97,8 +103,11 @@ export function createRuntimeTelemetryOtelBridge(
   const { tracer, meter } = options;
   const actionRunSpanThresholdMs = options.actionRunSpanThresholdMs ?? 10;
   const base = options.attributes ?? {};
+  const sbase = options.spanAttributes
+    ? { ...base, ...options.spanAttributes }
+    : base;
   const attrs = (extra?: Attributes): Attributes =>
-    extra ? { ...base, ...extra } : base;
+    extra ? { ...sbase, ...extra } : sbase;
   // Metric datapoints get the extra scoping labels; spans keep `base` only.
   const mbase = options.metricAttributes
     ? { ...base, ...options.metricAttributes }

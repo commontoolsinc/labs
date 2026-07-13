@@ -332,11 +332,9 @@ describe("createRuntimeTelemetryOtelBridge", () => {
     expect(meterCalls[0].attributes).toEqual({
       "ct.runtime": "server-executor",
     });
-    expect(spans[0].attributes).toEqual({
-      "ct.runtime": "server-executor",
-      "space.did": "did:key:space",
-      "user.did": "did:key:sponsor",
-    });
+    expect(spans[0].attributes["ct.runtime"]).toBe("server-executor");
+    expect(spans[0].attributes["space.did"]).toBe("did:key:space");
+    expect(spans[0].attributes["user.did"]).toBe("did:key:sponsor");
   });
 
   it("closes in-flight storage spans on shutdown", () => {

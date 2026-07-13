@@ -19,7 +19,7 @@ type ExecutorOtelDependencies = {
 type ExecutorOtelOptions = {
   envGet?: (name: string) => string | undefined;
   load?: () => Promise<ExecutorOtelDependencies>;
-  attributes?: OtelBridgeOptions["attributes"];
+  spanAttributes?: OtelBridgeOptions["spanAttributes"];
   warn?: (...args: unknown[]) => void;
 };
 
@@ -73,9 +73,11 @@ export async function maybeAttachExecutorOtelBridge(
       tracer: dependencies.tracer,
       meter: dependencies.meter,
       attributes: {
-        ...options.attributes,
         "ct.runtime": "server-executor",
       },
+      ...(options.spanAttributes !== undefined
+        ? { spanAttributes: options.spanAttributes }
+        : {}),
       ...(Object.keys(metricAttributes).length > 0 ? { metricAttributes } : {}),
     });
     runtime.scheduler.setEventPreflightTelemetryEnabled(true);

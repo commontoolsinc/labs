@@ -51,7 +51,7 @@ Deno.test("executor worker OTel bridges its isolated runtime and detaches", asyn
   };
   const detach = await maybeAttachExecutorOtelBridge(runtime, {
     envGet: (name: string) => values[name],
-    attributes: {
+    spanAttributes: {
       "space.did": "did:key:z6Mk-space",
       "user.did": "did:key:z6Mk-sponsor",
     },

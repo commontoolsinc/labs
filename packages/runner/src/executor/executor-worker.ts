@@ -499,7 +499,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
         : "suppress",
   }));
   detachOtelBridge = await maybeAttachExecutorOtelBridge(runtime, {
-    attributes: {
+    spanAttributes: {
       "space.did": space,
       "user.did": request.principal,
     },
