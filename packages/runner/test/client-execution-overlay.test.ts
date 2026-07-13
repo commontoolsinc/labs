@@ -217,12 +217,13 @@ class OverlaySessionFactory implements SessionFactory {
     _space: MemorySpace,
     _signer?: Signer,
   ): Promise<ReplicaSessionHandle> {
+    const executionClaims = () => [...this.claims];
     const session = {
       sessionId: "session:client-overlay",
       sessionToken: undefined,
       serverSeq: 0,
       get executionClaims() {
-        return [...thisFactory.claims];
+        return executionClaims();
       },
       transact: async (commit: ClientCommit): Promise<AppliedCommit> => {
         this.commits.push(structuredClone(commit));
@@ -235,19 +236,19 @@ class OverlaySessionFactory implements SessionFactory {
           revisions: [],
         };
       },
-      watchAddSync: async () => ({
-        view: this.view,
-        sync: emptySync({
-          execution: {
-            fromFeedSeq: 0,
-            toFeedSeq: 1,
-            snapshot: { claims: [...this.claims] },
-            events: [],
-          },
+      watchAddSync: () =>
+        Promise.resolve({
+          view: this.view,
+          sync: emptySync({
+            execution: {
+              fromFeedSeq: 0,
+              toFeedSeq: 1,
+              snapshot: { claims: [...this.claims] },
+              events: [],
+            },
+          }),
         }),
-      }),
     } as unknown as ReplicaSession;
-    const thisFactory = this;
     return Promise.resolve({
       client: {
         serverFlags: {

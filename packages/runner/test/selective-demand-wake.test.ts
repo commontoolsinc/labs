@@ -3,8 +3,9 @@ import { SelectiveDemandWakeQueue } from "../src/executor/selective-demand-wake.
 
 Deno.test("selective demand wakes coalesce rapid stale piece batches", async () => {
   const batches: string[][] = [];
-  const queue = new SelectiveDemandWakeQueue(async (pieceIds) => {
+  const queue = new SelectiveDemandWakeQueue((pieceIds) => {
     batches.push([...pieceIds]);
+    return Promise.resolve();
   });
 
   queue.push(["space:of:b", "space:of:a"]);
