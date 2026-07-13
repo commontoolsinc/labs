@@ -46,6 +46,7 @@ const FLAGS = {
   serverPrimaryExecutionBuiltinPassivityV1: true,
 } as const satisfies Partial<MemoryProtocolFlags>;
 
+const PACKAGES_ROOT = join(import.meta.dirname!, "../..");
 const PATTERNS_ROOT = join(import.meta.dirname!, "../../patterns");
 
 type ProductCase = {
@@ -64,17 +65,17 @@ type ProductCase = {
 const PRODUCT_CASES: readonly ProductCase[] = [{
   name: "lunch-poll",
   sourcePath: join(
-    PATTERNS_ROOT,
-    "lunch-poll/main.tsx",
+    import.meta.dirname!,
+    "fixtures/server-execution-lunch-poll-derived-scalar.tsx",
   ),
-  resolverRoot: PATTERNS_ROOT,
-  inputName: "adminName",
+  resolverRoot: PACKAGES_ROOT,
+  inputName: "voteCount",
   rootPiece: true,
-  initialValue: "",
-  warmValue: "Alice",
-  measuredValue: "Bob",
-  warmTargetValue: "Alice",
-  measuredTargetValue: "Bob",
+  initialValue: 0,
+  warmValue: 1,
+  measuredValue: 2,
+  warmTargetValue: 1,
+  measuredTargetValue: 2,
 }, {
   name: "group-chat",
   sourcePath: join(
@@ -94,8 +95,8 @@ const PRODUCT_CASES: readonly ProductCase[] = [{
       { name: "Planning", messages: [], createdAt: 2 },
     ],
   },
-  warmTargetValue: "1 room",
-  measuredTargetValue: "2 rooms",
+  warmTargetValue: "Ops",
+  measuredTargetValue: "Ops · Planning",
 }];
 
 class LoopbackSessionFactory implements SessionFactory {
@@ -278,9 +279,10 @@ async function seedProduct(
     await storage.synced();
 
     // Drive real product inputs, then select the claim-ready computation whose
-    // direct output proves that input was consumed. Lunch uses its PerSpace
-    // admin name. Group chat uses its real PerSpace rooms list and selects the
-    // room-count label; entity-backed room-name traversal remains outside v1.
+    // direct output proves that input was consumed. Lunch uses a directly
+    // demanded projection of its PerSpace vote-count scalar. Group chat uses
+    // its real PerSpace rooms list and selects the nested room-list label; its
+    // entity-backed room-name traversal exercises deterministic fail-open.
     commits.length = 0;
     const selectionTx = runtime.edit();
     source.withTx(selectionTx).set(product.warmValue);
@@ -495,7 +497,7 @@ class ProductClientWorker {
   }
 
   request(
-    type: "reset" | "measure",
+    type: "reset" | "measure" | "observe",
     claim: ExecutionClaim,
   ): Promise<Record<string, unknown>> {
     const requestId = ++this.#nextRequestId;
@@ -517,6 +519,24 @@ class ProductClientWorker {
     this.#worker.postMessage({ type: "reannounce-demand", requestId });
     const result = await pending.promise;
     assertEquals(result.accepted, true);
+  }
+
+  async quiesce(): Promise<void> {
+    const requestId = ++this.#nextRequestId;
+    const pending = Promise.withResolvers<Record<string, unknown>>();
+    this.#pending.set(requestId, pending);
+    this.#worker.postMessage({ type: "quiesce", requestId });
+    const result = await pending.promise;
+    assertEquals(result.quiesced, true);
+  }
+
+  async drain(): Promise<void> {
+    const requestId = ++this.#nextRequestId;
+    const pending = Promise.withResolvers<Record<string, unknown>>();
+    this.#pending.set(requestId, pending);
+    this.#worker.postMessage({ type: "drain", requestId });
+    const result = await pending.promise;
+    assertEquals(result.drained, true);
   }
 
   waitForCommit(
@@ -559,7 +579,7 @@ const isExactDerivedCommit = (
 for (const product of PRODUCT_CASES) {
   const testName = product.name === "group-chat"
     ? "group-chat revokes an unserved literal rooms action and converges client-primary"
-    : "lunch-poll uses one shared literal action attempt for three client demands";
+    : "lunch-poll-derived scalar uses one shared action attempt for three client demands";
   Deno.test(testName, async () => {
     const principal = await Identity.fromPassphrase(
       `server execution rollout ${product.name} ${crypto.randomUUID()}`,
@@ -654,6 +674,7 @@ for (const product of PRODUCT_CASES) {
       });
 
       const executorCommits: ClientCommit[] = [];
+      const selectedCandidate = Promise.withResolvers<void>();
       const denoFactory = new DenoSpaceExecutorFactory({
         server,
         apiUrl: new URL("https://toolshed.example/"),
@@ -676,6 +697,9 @@ for (const product of PRODUCT_CASES) {
         },
         onCandidateClaim(candidate) {
           events.push(`candidate:${candidate.claimKey.actionId}`);
+          if (candidate.claimKey.actionId === seeded.actionId) {
+            selectedCandidate.resolve();
+          }
         },
         onCandidateDiagnostic(diagnostic) {
           events.push(
@@ -706,13 +730,7 @@ for (const product of PRODUCT_CASES) {
         // client path independently of the lower-priority registry cleanup.
         legacyBackgroundActive: () => false,
       });
-      if (product.name !== "group-chat") {
-        // Lunch must let the executor adopt the seed's changed-output
-        // certificate before client no-op resumes refresh that snapshot.
-        pool.start();
-      }
-
-      for (let index = 0; index < 3; index++) {
+      const startClient = async (index: number) => {
         clients.push(
           await ProductClientWorker.start({
             server,
@@ -725,18 +743,34 @@ for (const product of PRODUCT_CASES) {
             authorizeSessionOpen,
           }),
         );
+      };
+      if (product.name !== "group-chat") {
+        // Lunch must let the executor adopt the seed's changed-output
+        // certificate before client no-op resumes refresh that snapshot.
+        pool.start();
+      }
+
+      // Establish authority with one requesting client before compiling the two
+      // additional clients. Their later claim-integration barrier still proves
+      // the measured three-client split without racing candidate adoption.
+      const initialClientCount = 1;
+      for (let index = 0; index < initialClientCount; index++) {
+        await startClient(index);
       }
       if (product.name === "group-chat") {
-        // This second heavyweight product runs after lunch in the same Deno
-        // process. Compile its three clients first, then re-advertise one root
-        // after subscription; the host snapshot contains all three stable
-        // session demands without compiling four Workers concurrently.
+        // Bootstrap the shared executor from one real client demand. Waiting
+        // for the selected action's candidate and exact settlement below is the
+        // authority barrier; the remaining clients join only after fail-open,
+        // so this heavyweight fixture never compiles four Workers concurrently.
         pool.start();
         await clients[0].reannounceDemand();
       }
       await pool.idle();
-      assertEquals(pool.metrics().activeDemands, 3);
-      assertEquals(pool.snapshot(space, "")?.referenceCount, 3);
+      assertEquals(pool.metrics().activeDemands, initialClientCount);
+      assertEquals(
+        pool.snapshot(space, "")?.referenceCount,
+        initialClientCount,
+      );
       assertEquals(
         pool.metrics().activeWorkers,
         1,
@@ -778,20 +812,14 @@ for (const product of PRODUCT_CASES) {
       await liveExecutor.settle();
       await liveExecutor.wake();
       await liveExecutor.settle();
-      const claimEvent = await waitWithin(
-        waitForControl((event): event is Extract<
-          ExecutionControlEvent,
-          { type: "session.execution.claim.set" }
-        > =>
-          event.type === "session.execution.claim.set" &&
-          event.claim.actionId === seeded.actionId
-        ),
-        `${product.name} selected claim`,
+      await waitWithin(
+        selectedCandidate.promise,
+        `${product.name} selected product candidate`,
         events,
       );
-      const claim = claimEvent.claim;
       const exactSettlement = (
         event: ExecutionControlEvent,
+        claim: ExecutionClaim,
         sourceSeq: number,
       ): event is Extract<
         ExecutionControlEvent,
@@ -804,18 +832,30 @@ for (const product of PRODUCT_CASES) {
         event.settlement.inputBasisSeq >= sourceSeq;
 
       if (product.name === "group-chat") {
-        // Recomputing the literal room-count path establishes the claim, but
-        // v1 admission rejects its additional collection read.
+        // Recomputing the literal room-list path establishes the claim, but v1
+        // admission rejects its additional entity-backed collection read.
         const unserved = await waitWithin(
           waitForControl((event): event is Extract<
             ExecutionControlEvent,
             { type: "session.execution.settlement" }
           > =>
-            exactSettlement(event, initialSource.seq) &&
+            event.type === "session.execution.settlement" &&
+            event.settlement.claim.actionId === seeded.actionId &&
+            event.settlement.inputBasisSeq >= initialSource.seq &&
             event.settlement.outcome === "unserved"
           ),
-          "group-chat unserved rooms settlement",
+          "group-chat unserved room-list settlement",
           events,
+        );
+        const claim = unserved.settlement.claim;
+        assert(
+          controlEvents.some((event) =>
+            event.type === "session.execution.claim.set" &&
+            event.claim.actionId === claim.actionId &&
+            event.claim.leaseGeneration === claim.leaseGeneration &&
+            event.claim.claimGeneration === claim.claimGeneration
+          ),
+          "the exact unserved attempt must have crossed claim authority",
         );
         assertEquals(unserved.settlement.diagnosticCode, "unobserved-read");
         await waitWithin(
@@ -831,12 +871,17 @@ for (const product of PRODUCT_CASES) {
           "group-chat unserved claim revoke",
           events,
         );
-        // The literal room-count path materializes the non-empty entity list,
+        // The literal room-list path materializes the non-empty entity list,
         // which v1 rejects at admission. Stop that shared executor after the
         // canonical revoke so the same three clients deterministically resume
         // ordinary client-primary ownership.
         await pool.close();
         pool = undefined;
+        for (let index = clients.length; index < 3; index++) {
+          await startClient(index);
+        }
+        for (const client of clients) await client.reannounceDemand();
+        assertEquals(server.listExecutionDemands(space, "").length, 3);
         for (const client of clients) {
           client.commits.length = 0;
           await client.request("reset", claim);
@@ -874,7 +919,7 @@ for (const product of PRODUCT_CASES) {
         }
         const measurements = await waitWithin(
           Promise.all(
-            clients.map((client) => client.request("measure", claim)),
+            clients.map((client) => client.request("observe", claim)),
           ),
           "group-chat accepted target convergence",
           events,
@@ -883,7 +928,7 @@ for (const product of PRODUCT_CASES) {
           (event): event is Extract<
             ExecutionControlEvent,
             { type: "session.execution.settlement" }
-          > => exactSettlement(event, roomsSourceSeq),
+          > => exactSettlement(event, claim, roomsSourceSeq),
         );
         assertEquals(
           exactSettlements.filter((event) =>
@@ -931,6 +976,19 @@ for (const product of PRODUCT_CASES) {
         return;
       }
 
+      const claimEvent = await waitWithin(
+        waitForControl((event): event is Extract<
+          ExecutionControlEvent,
+          { type: "session.execution.claim.set" }
+        > =>
+          event.type === "session.execution.claim.set" &&
+          event.claim.actionId === seeded.actionId
+        ),
+        `${product.name} selected claim`,
+        events,
+      );
+      const claim = claimEvent.claim;
+
       const warmSource = await writeSource(product.warmValue);
       await liveExecutor.settle();
       await liveExecutor.wake();
@@ -942,7 +1000,7 @@ for (const product of PRODUCT_CASES) {
         waitForControl((event): event is Extract<
           ExecutionControlEvent,
           { type: "session.execution.settlement" }
-        > => exactSettlement(event, warmSource.seq)),
+        > => exactSettlement(event, claim, warmSource.seq)),
         `${product.name} warm settlement`,
         events,
       );
@@ -951,6 +1009,25 @@ for (const product of PRODUCT_CASES) {
         assertEquals(measurement.claimIntegrated, true);
       }
       await liveExecutor.settle();
+
+      for (let index = clients.length; index < 3; index++) {
+        await startClient(index);
+      }
+      for (const client of clients) await client.reannounceDemand();
+      await pool.idle();
+      assertEquals(pool.metrics().activeDemands, 3);
+      assertEquals(pool.snapshot(space, "")?.referenceCount, 3);
+      assertEquals(pool.metrics().activeWorkers, 1);
+      const integratedClaims = await waitWithin(
+        Promise.all(
+          clients.map((client) => client.request("observe", claim)),
+        ),
+        "lunch-poll three-client claim integration",
+        events,
+      );
+      for (const measurement of integratedClaims) {
+        assertEquals(measurement.claimIntegrated, true);
+      }
 
       for (const client of clients) {
         client.commits.length = 0;
@@ -969,7 +1046,7 @@ for (const product of PRODUCT_CASES) {
         waitForControl((event): event is Extract<
           ExecutionControlEvent,
           { type: "session.execution.settlement" }
-        > => exactSettlement(event, measuredSource.seq)),
+        > => exactSettlement(event, claim, measuredSource.seq)),
         `${product.name} measured settlement`,
         events,
       );
@@ -981,7 +1058,7 @@ for (const product of PRODUCT_CASES) {
         (event): event is Extract<
           ExecutionControlEvent,
           { type: "session.execution.settlement" }
-        > => exactSettlement(event, measuredSource.seq),
+        > => exactSettlement(event, claim, measuredSource.seq),
       );
       assertEquals(exactSettlements.length, 1);
       assertEquals(
@@ -992,9 +1069,8 @@ for (const product of PRODUCT_CASES) {
         measuredSettlement.settlement.outcome === "committed" ||
           measuredSettlement.settlement.outcome === "no-op",
       );
-      // The literal products can legitimately dirty other actions from the
-      // same primitive update. Count only the selected claimed action here:
-      // it gets exactly one executor wire attempt and one accepted settlement.
+      // Count only the selected claimed scalar action: it gets exactly one
+      // executor wire attempt and one accepted settlement.
       assertEquals(
         executorCommits.filter((commit) =>
           isExactDerivedCommit(commit, seeded.actionId)
@@ -1038,6 +1114,12 @@ for (const product of PRODUCT_CASES) {
       // Worker may be starting, which creates teardown-only restart churn and
       // can leak CPU into the next product case in this same Deno process.
       await pool?.close().catch(() => undefined);
+      // Stop every client runner while all transports remain open, then cross
+      // a second collective barrier. A per-client dispose barrier cannot order
+      // commits accepted from a different client, so closing clients one at a
+      // time otherwise leaves a narrow adoption-vs-close race.
+      await Promise.allSettled(clients.map((client) => client.quiesce()));
+      await Promise.allSettled(clients.map((client) => client.drain()));
       for (const client of clients) await client.dispose();
       await observerClient?.close().catch(() => undefined);
       await server.close();

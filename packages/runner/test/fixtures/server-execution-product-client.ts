@@ -25,7 +25,14 @@ type InitRequest = {
 };
 
 type CommandRequest = {
-  type: "reset" | "measure" | "reannounce-demand" | "dispose";
+  type:
+    | "reset"
+    | "measure"
+    | "observe"
+    | "quiesce"
+    | "drain"
+    | "reannounce-demand"
+    | "dispose";
   requestId: number;
   actionId?: string;
   claim?: ExecutionClaim;
@@ -113,6 +120,11 @@ async function handleRequest(
   if (request.type === "dispose") {
     cancelTargetSink?.();
     cancelTargetSink = undefined;
+    // Cross the host's accepted-commit barrier before Runtime closes the
+    // underlying memory client. Otherwise an already-delivered scheduler
+    // adoption can resume against that closed client during the next product
+    // case in this same Deno process.
+    await storage?.acceptedCommitsSettled();
     await runtime?.dispose();
     runtime = undefined;
     storage = undefined;
@@ -146,6 +158,33 @@ async function handleRequest(
     });
     return;
   }
+  if (request.type === "quiesce") {
+    cancelTargetSink?.();
+    cancelTargetSink = undefined;
+    await runtime.settled();
+    runtime.runner.stopAll();
+    await runtime.runner.executionDemandSettled();
+    await runtime.scheduler.idle();
+    await runtime.storageManager.synced();
+    await storage.acceptedCommitsSettled();
+    worker.postMessage({
+      type: "response",
+      requestId: request.requestId,
+      ok: { quiesced: true },
+    });
+    return;
+  }
+  if (request.type === "drain") {
+    await runtime.scheduler.idle();
+    await runtime.storageManager.synced();
+    await storage.acceptedCommitsSettled();
+    worker.postMessage({
+      type: "response",
+      requestId: request.requestId,
+      ok: { drained: true },
+    });
+    return;
+  }
   if (typeof request.actionId !== "string") {
     throw new Error("product client command is missing actionId");
   }
@@ -166,10 +205,12 @@ async function handleRequest(
   }
 
   await storage.acceptedCommitsSettled();
-  await runtime.storageManager.synced();
-  await runtime.getCellFromLink(targetLink).pull();
-  await runtime.settled();
-  await storage.acceptedCommitsSettled();
+  if (request.type === "measure") {
+    await runtime.storageManager.synced();
+    await runtime.getCellFromLink(targetLink).pull();
+    await runtime.settled();
+    await storage.acceptedCommitsSettled();
+  }
   const value = runtime.getCellFromLink(targetLink).get();
   const runs =
     runtime.scheduler.getActionRunTrace().filter((entry) =>
