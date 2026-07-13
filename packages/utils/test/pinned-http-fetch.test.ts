@@ -215,6 +215,28 @@ describe("fetchPinnedHttp", () => {
     expect(fake.isClosed()).toBe(true);
   });
 
+  it("bounds informational responses before the final response", async () => {
+    const fake = createFakeHttpConnection([
+      ...Array.from(
+        { length: 17 },
+        () => "HTTP/1.1 103 Early Hints\r\n\r\n",
+      ),
+      "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+    ].join(""));
+
+    await withDenoConnect(
+      (() => Promise.resolve(fake.conn)) as unknown as typeof Deno.connect,
+      async () => {
+        await expect(fetchPinnedHttp(
+          new URL("http://example.com/too-many-informational"),
+          "93.184.216.34",
+        )).rejects.toThrow("too many informational responses");
+      },
+    );
+
+    expect(fake.isClosed()).toBe(true);
+  });
+
   it("returns a null body for HEAD without waiting for response bytes", async () => {
     const fake = createFakeHttpConnection(
       "HTTP/1.1 200 OK\r\nContent-Length: 99\r\n\r\n",
