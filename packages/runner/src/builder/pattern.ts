@@ -667,27 +667,16 @@ function asCellGrantsWritableHere(
 }
 
 /**
- * Recursively true if a schema grants a write-capable cell handle anywhere in
- * its subtree (an `asCell` entry whose kind is not provably read-only). Used
- * as the conservative fallback for value/schema subtrees the aligned walk in
- * `assignComputedCellKinds` cannot model — deliberately over-broad (a value
- * coincidentally containing an `asCell` key inside a `default` also trips
- * it); the failure direction is only a missed optimization.
- */
-function schemaGrantsWritableHandles(schema: unknown): boolean {
-  if (Array.isArray(schema)) return schema.some(schemaGrantsWritableHandles);
-  if (!isRecord(schema)) return false;
-  if (asCellGrantsWritableHere(schema)) return true;
-  return Object.values(schema).some(schemaGrantsWritableHandles);
-}
-
-/**
- * Like {@link schemaGrantsWritableHandles}, but also true when the subtree
- * contains a `$ref`/`$dynamicRef`: the referenced schema is not inline, so a
- * writable grant could hide behind it. This is the ONLY safe "provably
- * handle-free" test for the input-side walk — an inline-only grant scan would
- * fail OPEN on a `$ref` whose target (e.g. under the root `$defs`) grants a
- * handle, and under-collection here means silently dropped user writes.
+ * Recursively true if a schema may grant a write-capable cell handle anywhere
+ * in its subtree: an `asCell` entry whose kind is not provably read-only, or
+ * a `$ref`/`$dynamicRef` — the referenced schema is not inline, so a writable
+ * grant could hide behind it. Deliberately over-broad (a value coincidentally
+ * containing an `asCell` key inside a `default` also trips it); the failure
+ * direction is only a missed optimization. Counting `$ref`s is what makes
+ * this a safe "provably handle-free" test for the input-side walk — an
+ * inline-only grant scan would fail OPEN on a `$ref` whose target (e.g. under
+ * the root `$defs`) grants a handle, and under-collection here means silently
+ * dropped user writes.
  */
 function schemaMayGrantWritableHandles(schema: unknown): boolean {
   if (Array.isArray(schema)) return schema.some(schemaMayGrantWritableHandles);

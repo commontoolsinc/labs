@@ -224,7 +224,9 @@ on the flag. Its polarity is **computed by default**: an internal cell with
 a writer is tagged `computed` unless something disqualifies it — even when
 its computation involves writes, because a replayable writer
 deterministically reproduces every write it makes, so dropping one loses
-nothing. A cell is tagged iff:
+nothing. (The authored escape hatches `safeDateNow()` / `nonPrivateRandom()`
+can break this determinism inside an otherwise-qualifying compute; handling
+is undecided — see Open Questions.) A cell is tagged iff:
 
 - **It has at least one writer** — a node listing its root under
   `node.outputs`. Zero-writer cells are seeded state and are never tagged.
@@ -248,7 +250,12 @@ nothing. A cell is tagged iff:
   practice, the one-line fallback is to move `"pattern"` to the
   disqualifying set.
 - **Its root is never handed WRITABLE into another node**
-  (`collectInputDisqualifiedRoots`). Per node type:
+  (`collectInputDisqualifiedRoots`). The graph's input/output labeling is
+  not a write-capability boundary: any node holding a writable handle can
+  write through its *inputs* (handlers through their `$ctx` captures,
+  `llmDialog` through its `messages` binding), and those writes never
+  appear under `outputs`. So writes must be audited by capability — who
+  holds a writable handle — not by writer labels alone. Per node type:
   - *Schema-carrying handlers*: the bound `$ctx` value is walked in
     parallel with `argumentSchema.properties.$ctx`
     (`collectWritablyBoundRoots`), collecting the roots at positions whose
@@ -529,6 +536,18 @@ this proposal onto persistent-scheduler-state:
   re-reading against ack-and-drop.
 - Whether CFC flow-label derivation needs to observe dropped writes, or is
   indifferent to them.
+- Authored nondeterminism escape hatches: `safeDateNow()` and
+  `nonPrivateRandom()` are callable inside `computed()`/`lift()` bodies, so
+  a `javascript` compute can be nondeterministic while still qualifying as
+  a computed writer — no layer scans callback source for these calls.
+  Today this rests on the nondeterminism invariant (first-wins plus
+  sync-down correction; the failure mode is value flapping, never
+  divergence or data loss). Undecided how to handle them: keep that
+  stance, or fail closed by tainting modules that call the escape hatches
+  so their output cells stay strict — the transformer's capability
+  analysis (`capability-analysis.ts`) is the natural place to detect the
+  calls, including through module-scope helpers via its interprocedural
+  summaries.
 - Deferred tooling gap: `SchedulerGraphView.extractEntityId` (shell) groups
   graph nodes by scheme-stripped entity id, so an `of:` doc and a
   `computed:` doc minted from the same cause would be conflated into one
