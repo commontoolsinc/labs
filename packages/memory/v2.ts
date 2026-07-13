@@ -551,7 +551,46 @@ export type ExecutionControlEvent =
 
 export interface ExecutionClaimSnapshot {
   claims: ExecutionClaim[];
+  /**
+   * Successful settlement summaries newer than the reconnect cursor. The
+   * server coalesces them by exact live claim incarnation so bounded event
+   * retention cannot strand speculative overlays.
+   */
+  settlementFrontiers?: ExecutionSettlementFrontier[];
 }
+
+/**
+ * Reconnect-only causal summary of successful settlements for one exact live
+ * claim. `inputBasisSeq` is the strongest covered basis, while
+ * `requiredAcceptedCommitSeq` preserves every committed data-application gate
+ * contributing to the summary. `throughFeedSeq` is the newest summarized
+ * successful control event.
+ */
+export interface ExecutionSettlementFrontier {
+  branch: BranchName;
+  claim: ExecutionClaim;
+  inputBasisSeq: InputBasisSeq;
+  throughFeedSeq: number;
+  requiredAcceptedCommitSeq?: AcceptedCommitSeq;
+}
+
+export const actionSettlementFromFrontier = (
+  frontier: ExecutionSettlementFrontier,
+): ActionSettlement =>
+  frontier.requiredAcceptedCommitSeq === undefined
+    ? {
+      branch: frontier.branch,
+      claim: frontier.claim,
+      inputBasisSeq: frontier.inputBasisSeq,
+      outcome: "no-op",
+    }
+    : {
+      branch: frontier.branch,
+      claim: frontier.claim,
+      inputBasisSeq: frontier.inputBasisSeq,
+      outcome: "committed",
+      acceptedCommitSeq: frontier.requiredAcceptedCommitSeq,
+    };
 
 export interface ExecutionFeedBatch {
   fromFeedSeq: number;

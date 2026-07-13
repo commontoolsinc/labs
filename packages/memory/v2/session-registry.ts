@@ -1,5 +1,8 @@
-import type {
+import {
+  actionClaimMapKey,
+  executionClaimIncarnationKey,
   ExecutionControlEvent,
+  type ExecutionSettlementFrontier,
   SessionDescriptor,
   SessionToken,
   WatchSpec,
@@ -33,6 +36,8 @@ export type SessionState = {
     feedSeq: number;
     event: ExecutionControlEvent;
   }>;
+  /** One dominant unacknowledged successful frontier per exact claim. */
+  executionSettlementFrontiers: Map<string, ExecutionSettlementFrontier>;
 };
 
 type ExecutionEventEntry = SessionState["executionEvents"][number];
@@ -142,6 +147,11 @@ export class SessionRegistry {
     const executionEvents = (existing?.executionEvents ?? []).filter((entry) =>
       entry.feedSeq > executionFeedAckSeq
     ).slice(-this.#maxExecutionEvents);
+    const executionSettlementFrontiers = new Map(
+      [...(existing?.executionSettlementFrontiers ?? new Map())].filter(
+        ([, frontier]) => frontier.throughFeedSeq > executionFeedAckSeq,
+      ),
+    );
     const next: SessionState = {
       id: sessionId,
       space,
@@ -166,6 +176,7 @@ export class SessionRegistry {
       executionFeedSeq,
       executionFeedAckSeq,
       executionEvents,
+      executionSettlementFrontiers,
     };
     this.#sessions.set(key, next);
     return {
@@ -236,6 +247,7 @@ export class SessionRegistry {
     const toFeedSeq = fromFeedSeq + 1;
     session.executionFeedSeq = toFeedSeq;
     session.executionEvents.push({ feedSeq: toFeedSeq, event });
+    this.#updateExecutionSettlementFrontier(session, event, toFeedSeq);
     const excess = session.executionEvents.length - this.#maxExecutionEvents;
     if (excess > 0) session.executionEvents.splice(0, excess);
     return { fromFeedSeq, toFeedSeq };
@@ -252,6 +264,70 @@ export class SessionRegistry {
     session.executionEvents = session.executionEvents.filter((entry) =>
       entry.feedSeq > session.executionFeedAckSeq
     ).slice(-this.#maxExecutionEvents);
+    session.executionSettlementFrontiers = new Map(
+      [...session.executionSettlementFrontiers].filter(([, frontier]) =>
+        frontier.throughFeedSeq > session.executionFeedAckSeq
+      ),
+    );
+  }
+
+  #updateExecutionSettlementFrontier(
+    session: SessionState,
+    event: ExecutionControlEvent,
+    feedSeq: number,
+  ): void {
+    if (event.type === "session.execution.claim.set") {
+      const actionKey = actionClaimMapKey(event.claim);
+      const incarnation = executionClaimIncarnationKey(event.claim);
+      for (const [key, frontier] of session.executionSettlementFrontiers) {
+        if (
+          actionClaimMapKey(frontier.claim) === actionKey && key !== incarnation
+        ) {
+          session.executionSettlementFrontiers.delete(key);
+        }
+      }
+      return;
+    }
+    if (event.type === "session.execution.claim.revoke") {
+      const actionKey = actionClaimMapKey(event.claim);
+      for (const [key, frontier] of session.executionSettlementFrontiers) {
+        if (
+          actionClaimMapKey(frontier.claim) === actionKey &&
+          frontier.claim.leaseGeneration === event.leaseGeneration &&
+          frontier.claim.claimGeneration === event.claimGeneration
+        ) {
+          session.executionSettlementFrontiers.delete(key);
+        }
+      }
+      return;
+    }
+    if (
+      event.settlement.outcome !== "committed" &&
+      event.settlement.outcome !== "no-op"
+    ) {
+      return;
+    }
+    const key = executionClaimIncarnationKey(event.settlement.claim);
+    const current = session.executionSettlementFrontiers.get(key);
+    const requiredAcceptedCommitSeq = event.settlement.outcome === "committed"
+      ? current?.requiredAcceptedCommitSeq === undefined ||
+          event.settlement.acceptedCommitSeq >
+            current.requiredAcceptedCommitSeq
+        ? event.settlement.acceptedCommitSeq
+        : current.requiredAcceptedCommitSeq
+      : current?.requiredAcceptedCommitSeq;
+    session.executionSettlementFrontiers.set(key, {
+      branch: event.settlement.branch,
+      claim: event.settlement.claim,
+      inputBasisSeq: current === undefined ||
+          event.settlement.inputBasisSeq > current.inputBasisSeq
+        ? event.settlement.inputBasisSeq
+        : current.inputBasisSeq,
+      throughFeedSeq: feedSeq,
+      ...(requiredAcceptedCommitSeq === undefined
+        ? {}
+        : { requiredAcceptedCommitSeq }),
+    });
   }
 
   detach(space: string, sessionId: string, ownerConnectionId: string): void {

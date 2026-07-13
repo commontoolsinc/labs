@@ -1,6 +1,7 @@
 import {
   actionClaimMapKey,
   type ActionSettlement,
+  actionSettlementFromFrontier,
   type ClientCommit,
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
@@ -1365,10 +1366,15 @@ export class SpaceSession {
       this.#prunePendingSettlements();
       return;
     }
-    for (const event of batch.events) {
-      this.#applyExecutionEvent(event);
-    }
     if (batch.snapshot !== undefined) {
+      // Claim changes precede the authoritative snapshot barrier. Settlement
+      // events are replayed only after the snapshot installs the exact live
+      // incarnations they are allowed to reconcile.
+      for (const event of batch.events) {
+        if (event.type !== "session.execution.settlement") {
+          this.#applyExecutionEvent(event);
+        }
+      }
       const next = new Map(
         batch.snapshot.claims.map((claim) => [actionClaimMapKey(claim), claim]),
       );
@@ -1403,6 +1409,20 @@ export class SpaceSession {
             claim,
           });
         }
+      }
+      for (const frontier of batch.snapshot.settlementFrontiers ?? []) {
+        this.#deliverOrBufferSettlement(
+          actionSettlementFromFrontier(frontier),
+        );
+      }
+      for (const event of batch.events) {
+        if (event.type === "session.execution.settlement") {
+          this.#applyExecutionEvent(event);
+        }
+      }
+    } else {
+      for (const event of batch.events) {
+        this.#applyExecutionEvent(event);
       }
     }
     this.#executionFeedSeq = batch.toFeedSeq;

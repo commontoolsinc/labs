@@ -5,6 +5,7 @@ import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  type ExecutionClaim,
   getMemoryProtocolFlags,
   type GraphQueryResult,
   type HelloOkMessage,
@@ -14,6 +15,8 @@ import {
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionSync,
+  toAcceptedCommitSeq,
+  toInputBasisSeq,
 } from "../v2.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
 
@@ -355,6 +358,123 @@ Deno.test("memory v2 session registry bounds unacknowledged execution events", (
     session.executionEvents.map((entry) => entry.feedSeq),
     [5, 6],
   );
+});
+
+Deno.test("memory v2 session registry coalesces and fences successful settlement frontiers", () => {
+  const space = "did:key:z6Mk-settlement-frontier";
+  const sessions = new SessionRegistry({ maxExecutionEvents: 2 });
+  const opened = sessions.open(space, {
+    sessionId: "session:settlement-frontier",
+  }, 0);
+  const session = sessions.get(space, opened.sessionId);
+  assertExists(session);
+  const first: ExecutionClaim = {
+    branch: "",
+    space,
+    contextKey: "space",
+    pieceId: "piece:frontier",
+    actionId: "action:frontier",
+    actionKind: "computation",
+    implementationFingerprint: "impl:frontier",
+    runtimeFingerprint: "runtime:frontier",
+    leaseGeneration: 1,
+    claimGeneration: 1,
+    expiresAt: 10_000,
+  };
+
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.set",
+    claim: first,
+  });
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.settlement",
+    settlement: {
+      branch: "",
+      claim: first,
+      inputBasisSeq: toInputBasisSeq(100),
+      outcome: "committed",
+      acceptedCommitSeq: toAcceptedCommitSeq(20),
+    },
+  });
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.settlement",
+    settlement: {
+      branch: "",
+      claim: first,
+      inputBasisSeq: toInputBasisSeq(50),
+      outcome: "no-op",
+    },
+  });
+  assertEquals([...session.executionSettlementFrontiers.values()], [{
+    branch: "",
+    claim: first,
+    inputBasisSeq: toInputBasisSeq(100),
+    throughFeedSeq: 3,
+    requiredAcceptedCommitSeq: toAcceptedCommitSeq(20),
+  }]);
+
+  // Acking the stronger older settlement must not discard the later lower-
+  // basis success summarized by the same frontier watermark.
+  sessions.pruneExecutionEvents(session, 2);
+  assertEquals(session.executionSettlementFrontiers.size, 1);
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.set",
+    claim: { ...first, actionId: "action:noise-one" },
+  });
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.set",
+    claim: { ...first, actionId: "action:noise-two" },
+  });
+  assertEquals(
+    session.executionEvents.some((entry) =>
+      entry.event.type === "session.execution.settlement"
+    ),
+    false,
+  );
+  assertEquals(session.executionSettlementFrontiers.size, 1);
+  sessions.pruneExecutionEvents(session, 3);
+  assertEquals(session.executionSettlementFrontiers.size, 0);
+
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.settlement",
+    settlement: {
+      branch: "",
+      claim: first,
+      inputBasisSeq: toInputBasisSeq(110),
+      outcome: "no-op",
+    },
+  });
+  const replacement = { ...first, claimGeneration: 2 };
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.set",
+    claim: replacement,
+  });
+  assertEquals(session.executionSettlementFrontiers.size, 0);
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.settlement",
+    settlement: {
+      branch: "",
+      claim: replacement,
+      inputBasisSeq: toInputBasisSeq(120),
+      outcome: "no-op",
+    },
+  });
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.revoke",
+    branch: "",
+    claim: first,
+    leaseGeneration: first.leaseGeneration,
+    claimGeneration: first.claimGeneration,
+  });
+  assertEquals(session.executionSettlementFrontiers.size, 1);
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.revoke",
+    branch: "",
+    claim: replacement,
+    leaseGeneration: replacement.leaseGeneration,
+    claimGeneration: replacement.claimGeneration,
+  });
+  assertEquals(session.executionSettlementFrontiers.size, 0);
 });
 
 Deno.test("memory v2 server consumes a challenged session open", async () => {

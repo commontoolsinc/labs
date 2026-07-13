@@ -22,6 +22,7 @@ import {
   type ActionClaimKey,
   actionClaimMapKey,
   type ActionSettlement,
+  actionSettlementFromFrontier,
   type BranchName,
   canonicalActionClaimKey,
   type CellScope,
@@ -4391,8 +4392,14 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     // A snapshot is authoritative even when a replaced session restarts its
-    // feed sequence below the previous session's cursor.
-    for (const event of batch.events) this.applyExecutionControlEvent(event);
+    // feed sequence below the previous session's cursor. Apply claim changes
+    // before the snapshot, then reconcile settlements against its exact live
+    // incarnation map.
+    for (const event of batch.events) {
+      if (event.type !== "session.execution.settlement") {
+        this.applyExecutionControlEvent(event);
+      }
+    }
     const next = new Map(
       batch.snapshot.claims.map((claim) => [actionClaimMapKey(claim), claim]),
     );
@@ -4416,6 +4423,17 @@ class SpaceReplica implements ISpaceReplica {
     for (const [key, value] of next) this.#executionClaims.set(key, value);
     this.#executionFeedSeq = batch.toFeedSeq;
     this.#executionSnapshotRequired = false;
+    for (const frontier of batch.snapshot.settlementFrontiers ?? []) {
+      this.applyExecutionControlEvent({
+        type: "session.execution.settlement",
+        settlement: actionSettlementFromFrontier(frontier),
+      });
+    }
+    for (const event of batch.events) {
+      if (event.type === "session.execution.settlement") {
+        this.applyExecutionControlEvent(event);
+      }
+    }
   }
 
   private applyExecutionControlEvent(event: ExecutionControlEvent): void {

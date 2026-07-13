@@ -2,7 +2,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import * as MemoryClient from "../v2/client.ts";
-import { Server } from "../v2/server.ts";
+import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   type ActionClaimKey,
   type ActionSettlement,
@@ -233,6 +233,101 @@ const withTimeout = async <T>(promise: Promise<T>, message: string) => {
     realClearTimeout(timer);
   }
 };
+
+const waitForCondition = async (check: () => boolean): Promise<void> => {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (check()) return;
+    await new Promise((resolve) => realSetTimeout(resolve, 0));
+  }
+  throw new Error("condition did not become true");
+};
+
+Deno.test("client reconnect delivers an evicted successful settlement frontier exactly once", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://execution-client-settlement-frontier"),
+    sessions: new SessionRegistry({ maxExecutionEvents: 2 }),
+    protocolFlags: executionProtocolFlags,
+    acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
+  });
+  const sponsorClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+    protocolFlags: executionProtocolFlags,
+  });
+  const sponsor = await sponsorClient.mount(
+    CONTROL_SPACE,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const transport = new GatedReconnectTransport(server);
+  const observerClient = await MemoryClient.connect({
+    transport,
+    protocolFlags: executionProtocolFlags,
+  });
+  const observer = await observerClient.mount(
+    CONTROL_SPACE,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const delivered: ActionSettlement[] = [];
+  const unsubscribe = observer.subscribeExecutionControl((event) => {
+    if (event.type === "session.execution.settlement") {
+      delivered.push(event.settlement);
+    }
+  });
+
+  try {
+    await observer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${CONTROL_SPACE}:execution-policy`,
+        value: { value: { version: 1, serverPrimaryExecution: true } },
+      }],
+    });
+    await sponsor.setExecutionDemand("", ["piece:one"]);
+    const lease = await server.acquireExecutionLease(CONTROL_SPACE, "");
+    if (lease === null) throw new Error("expected execution lease");
+    const live = await server.setExecutionClaim(
+      lease,
+      claimKey(CONTROL_SPACE),
+    );
+    await waitForCondition(() => observer.executionClaims.length === 1);
+
+    transport.disconnect();
+    await withTimeout(
+      transport.reconnectStarted.promise,
+      "observer reconnect did not start",
+    );
+    const settlement: ActionSettlement = {
+      branch: "",
+      claim: live,
+      inputBasisSeq: toInputBasisSeq(0),
+      outcome: "no-op",
+    };
+    assertEquals(server.publishActionSettlement(settlement), true);
+    const noise = await server.setExecutionClaim(lease, {
+      ...claimKey(CONTROL_SPACE),
+      actionId: "action:noise",
+    });
+    assertEquals(server.revokeExecutionClaim(noise), true);
+    transport.releaseReconnect();
+
+    await withTimeout(
+      waitForCondition(() => delivered.length === 1),
+      "evicted successful settlement frontier was not delivered",
+    );
+    assertEquals(delivered, [settlement]);
+    assertEquals(observer.executionClaims, [live]);
+  } finally {
+    transport.releaseReconnect();
+    unsubscribe();
+    await observerClient.close();
+    await sponsorClient.close();
+    await server.close();
+  }
+});
 
 Deno.test("a reopen ProtocolError closes only the incompatible space session", async () => {
   using time = new FakeTime();

@@ -16,6 +16,7 @@ import {
   encodeMemoryBoundary,
   type EntityDocument,
   type ExecutionClaim,
+  executionClaimIncarnationKey,
   type ExecutionControlEvent,
   type ExecutionDemandSetRequest,
   type ExecutionDemandSetResult,
@@ -3199,12 +3200,38 @@ export class Server {
     const fromFeedSeq = snapshotFrom === undefined
       ? session.executionFeedSeq
       : Math.max(0, Math.min(snapshotFrom, session.executionFeedSeq));
-    const events = snapshotFrom === undefined ? [] : session.executionEvents
-      .filter((entry) =>
-        entry.feedSeq > fromFeedSeq &&
-        this.#sessionAcceptsClaim(session, this.#eventClaim(entry.event))
-      )
-      .map((entry) => entry.event);
+    const eventEntries = snapshotFrom === undefined
+      ? []
+      : session.executionEvents
+        .filter((entry) =>
+          entry.feedSeq > fromFeedSeq &&
+          this.#sessionAcceptsClaim(session, this.#eventClaim(entry.event))
+        );
+    // A reconnect snapshot summarizes successful settlements below. Retained
+    // failed/unserved outcomes remain ordinary ordered events; replaying a
+    // successful event as well as its frontier would reconcile it twice.
+    const events = eventEntries
+      .map((entry) => entry.event)
+      .filter((event) =>
+        event.type !== "session.execution.settlement" ||
+        (event.settlement.outcome !== "committed" &&
+          event.settlement.outcome !== "no-op")
+      );
+    const claims = snapshotFrom === undefined
+      ? []
+      : this.#executionClaimsForSession(session);
+    const liveIncarnations = new Set(
+      claims.map(executionClaimIncarnationKey),
+    );
+    const settlementFrontiers = snapshotFrom === undefined
+      ? []
+      : [...session.executionSettlementFrontiers.values()]
+        .filter((frontier) =>
+          frontier.throughFeedSeq > fromFeedSeq &&
+          liveIncarnations.has(executionClaimIncarnationKey(frontier.claim)) &&
+          this.#sessionAcceptsClaim(session, frontier.claim)
+        )
+        .toSorted((left, right) => left.throughFeedSeq - right.throughFeedSeq);
     const toFeedSeq = session.executionFeedSeq + 1;
     session.executionFeedSeq = toFeedSeq;
     return {
@@ -3215,7 +3242,10 @@ export class Server {
         ...(snapshotFrom !== undefined
           ? {
             snapshot: {
-              claims: this.#executionClaimsForSession(session),
+              claims,
+              ...(settlementFrontiers.length > 0
+                ? { settlementFrontiers }
+                : {}),
             },
           }
           : {}),

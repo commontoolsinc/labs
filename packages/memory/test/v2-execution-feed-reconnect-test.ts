@@ -16,6 +16,7 @@ import {
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionOpenResult,
+  toInputBasisSeq,
 } from "../v2.ts";
 import {
   TEST_SESSION_OPEN_PRINCIPAL,
@@ -356,6 +357,99 @@ Deno.test("resume behind a bounded execution suffix installs an exact snapshot a
     );
     assertEquals(effect.effect.execution?.snapshot, undefined);
     assertEquals(secondMessages, []);
+  } finally {
+    second?.close();
+    sponsor?.connection.close();
+    first.close();
+    await server.close();
+  }
+});
+
+Deno.test("resume carries a successful settlement frontier evicted from the bounded suffix", async () => {
+  const server = createServer("memory-v2-execution-feed-settlement-frontier", {
+    maxExecutionEvents: 2,
+  });
+  const firstMessages: ServerMessage[] = [];
+  const first = server.connect((message) => firstMessages.push(message));
+  let sponsor: Awaited<ReturnType<typeof acquireSponsorLease>> | undefined;
+  let second: ReturnType<Server["connect"]> | undefined;
+  try {
+    const firstAuth = await hello(first, firstMessages);
+    const opened = await open(first, firstMessages, "open", firstAuth, {});
+    assertExists(opened.ok?.sync?.execution);
+    await enablePolicy(first, firstMessages, opened.ok.sessionId);
+    sponsor = await acquireSponsorLease(server);
+    const acknowledgedFeedSeq = opened.ok.sync.execution.toFeedSeq;
+    first.close();
+
+    const live = await server.setExecutionClaim(
+      sponsor.lease,
+      claimInput("action:settled", "computation"),
+    );
+    assertExists(live);
+    const settlement = {
+      branch: "" as const,
+      claim: live,
+      inputBasisSeq: toInputBasisSeq(7),
+      outcome: "no-op" as const,
+    };
+    assertEquals(server.publishActionSettlement(settlement), true);
+
+    // Evict both the original claim.set and its settlement while leaving the
+    // exact claim live. The reconnect snapshot must carry enough settlement
+    // state to reconcile an overlay held by the disconnected client.
+    const noise = await server.setExecutionClaim(
+      sponsor.lease,
+      claimInput("action:noise", "computation"),
+    );
+    assertExists(noise);
+    assertEquals(server.revokeExecutionClaim(noise), true);
+
+    const secondMessages: ServerMessage[] = [];
+    second = server.connect((message) => secondMessages.push(message));
+    const secondAuth = await hello(second, secondMessages);
+    const resumed = await open(
+      second,
+      secondMessages,
+      "resume",
+      secondAuth,
+      {
+        sessionId: opened.ok.sessionId,
+        sessionToken: opened.ok.sessionToken,
+        seenSeq: opened.ok.serverSeq,
+        executionFeedSeq: acknowledgedFeedSeq,
+      },
+    );
+    assertExists(resumed.ok?.sync?.execution?.snapshot);
+    const resumedBatch = resumed.ok.sync.execution;
+    const snapshot = resumedBatch.snapshot;
+    assertExists(snapshot);
+    assertEquals(snapshot.claims, [live]);
+    assertEquals(
+      snapshot.settlementFrontiers,
+      [{
+        branch: "",
+        claim: live,
+        inputBasisSeq: toInputBasisSeq(7),
+        throughFeedSeq: acknowledgedFeedSeq + 2,
+      }],
+    );
+    const frontier = snapshot.settlementFrontiers?.[0];
+    assertExists(frontier);
+    assertEquals(
+      frontier.throughFeedSeq > acknowledgedFeedSeq,
+      true,
+    );
+    assertEquals(
+      frontier.throughFeedSeq < resumedBatch.toFeedSeq,
+      true,
+    );
+    assertEquals(
+      resumedBatch.events.some((event) =>
+        event.type === "session.execution.settlement"
+      ),
+      false,
+    );
   } finally {
     second?.close();
     sponsor?.connection.close();

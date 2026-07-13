@@ -1403,6 +1403,133 @@ Deno.test("execution feed gap freezes known authority until an authoritative sna
   }
 });
 
+Deno.test("reconnect snapshot applies an evicted successful settlement to a live overlay", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "settled-while-disconnected");
+    assertEquals(visibleOutput(storage), "settled-while-disconnected");
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 6,
+        snapshot: {
+          claims: [claim],
+          settlementFrontiers: [{
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            throughFeedSeq: 5,
+          }],
+        },
+        events: [],
+      },
+    }));
+
+    await waitFor(() => visibleOutput(storage) === undefined);
+    assertEquals(factory.commits, []);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("reconnect installs a claim before its retained settlement exactly once", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  factory.claims = [];
+  const storage = OverlayStorageManager.connect(factory);
+  const query = {
+    space: SPACE,
+    branch: "",
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 3,
+        snapshot: { claims: [claim] },
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 3
+    );
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics(query).actions[0]?.settlements
+        .noOp,
+      1,
+    );
+
+    await writeClaimedOutput(storage, "late-after-retained-settlement");
+    await waitFor(() => visibleOutput(storage) === undefined);
+    const diagnostics = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(diagnostics.actions[0]?.settlements.noOp, 1);
+    assertEquals(diagnostics.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(factory.commits, []);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("committed reconnect frontier preserves its accepted data barrier", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "held-for-frontier-data");
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 4,
+        snapshot: {
+          claims: [claim],
+          settlementFrontiers: [{
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            throughFeedSeq: 3,
+            requiredAcceptedCommitSeq: 5 as AcceptedCommitSeq,
+          }],
+        },
+        events: [],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(visibleOutput(storage), "held-for-frontier-data");
+
+    factory.view.push(emptySync({
+      toSeq: 5,
+      upserts: [{
+        branch: "",
+        id: OUTPUT,
+        seq: 5,
+        doc: { value: "frontier-server-output" },
+      }],
+    }));
+    await waitFor(() => visibleOutput(storage) === "frontier-server-output");
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
 Deno.test("execution feed gap keeps an exact claimed builtin passive", async () => {
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory(true);
