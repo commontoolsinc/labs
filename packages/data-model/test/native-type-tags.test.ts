@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { createNativeErrorBrandCheck } from "@/native-error-brand.ts";
 
 import {
   NATIVE_TAGS,
@@ -42,6 +43,7 @@ describe("native-type-tags", () => {
       try {
         Object.defineProperty(Error, "isError", {
           ...descriptor,
+          configurable: true,
           value: undefined,
         });
         expect(tagFromNativeValue(new DOMException("locked down"))).toBe(
@@ -50,8 +52,17 @@ describe("native-type-tags", () => {
       } finally {
         if (descriptor !== undefined) {
           Object.defineProperty(Error, "isError", descriptor);
+        } else {
+          Reflect.deleteProperty(Error, "isError");
         }
       }
+    });
+
+    it("falls back when Error.isError is absent during initialization", () => {
+      const fallback = createNativeErrorBrandCheck(undefined);
+      expect(fallback(new Error("browser"))).toBe(true);
+      expect(fallback(new DOMException("browser"))).toBe(true);
+      expect(fallback({ message: "not branded" })).toBe(false);
     });
 
     it("returns `Map` tag for `Map` instances", () => {

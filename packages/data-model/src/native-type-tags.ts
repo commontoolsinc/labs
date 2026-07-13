@@ -4,12 +4,16 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
+import { createNativeErrorBrandCheck } from "./native-error-brand.ts";
 
 // SES lockdown replaces/tames selected intrinsics, including removing newer
 // Error statics. Capture the host-realm brand check while the module graph is
 // initialized so async builtin error writebacks can still recognize errors
-// after a Runtime installs SES.
-const isNativeError = Error.isError.bind(Error);
+// after a Runtime installs SES. Browsers without Error.isError use the
+// cross-realm Object.prototype brand for Error and DOMException values.
+const isNativeError = createNativeErrorBrandCheck(
+  typeof Error.isError === "function" ? Error.isError.bind(Error) : undefined,
+);
 
 /**
  * Tags identifying classes that the fabric system recognizes for dispatch.
