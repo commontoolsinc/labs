@@ -24,6 +24,7 @@ export interface PinnedHttpFetchInit {
 type Bytes = Uint8Array<ArrayBuffer>;
 
 const DEFAULT_MAX_RESPONSE_HEADER_BYTES = 64 * 1024;
+const MAX_INFORMATIONAL_RESPONSES = 16;
 const MAX_CHUNKED_LINE_BYTES = 4096;
 const MAX_CHUNKED_TRAILER_BYTES = 16 * 1024;
 const MAX_CHUNKED_TRAILER_LINES = 100;
@@ -284,17 +285,38 @@ const readHttpResponseHead = async (
   errorLabel: string,
 ): Promise<HttpResponseHead> => {
   let buffered: Bytes = new Uint8Array();
-  while (buffered.byteLength <= maxResponseHeaderBytes) {
+  let informationalResponses = 0;
+  while (true) {
     const headerEnd = findHeaderEnd(buffered);
     if (headerEnd !== -1) {
       if (headerEnd > maxResponseHeaderBytes) {
         break;
       }
       const headerBytes = buffered.slice(0, headerEnd);
+      const parsed = parseHttpResponseHead(headerBytes, errorLabel);
+      const remainder = buffered.slice(headerEnd + 4);
+      if (parsed.status >= 100 && parsed.status < 200) {
+        if (parsed.status === 101) {
+          throw new Error(
+            `${errorLabel} received unsupported HTTP status 101`,
+          );
+        }
+        informationalResponses++;
+        if (informationalResponses > MAX_INFORMATIONAL_RESPONSES) {
+          throw new Error(
+            `${errorLabel} received too many informational responses`,
+          );
+        }
+        buffered = remainder;
+        continue;
+      }
       return {
-        ...parseHttpResponseHead(headerBytes, errorLabel),
-        bodyPrefix: buffered.slice(headerEnd + 4),
+        ...parsed,
+        bodyPrefix: remainder,
       };
+    }
+    if (buffered.byteLength > maxResponseHeaderBytes) {
+      break;
     }
     const chunk = await readConnChunk(conn, signal);
     if (chunk === undefined) {
@@ -321,7 +343,7 @@ const parseHttpResponseHead = (
     throw new Error(`${errorLabel} received an invalid HTTP status line`);
   }
   const status = Number(statusMatch[1]);
-  if (status < 200 || status > 599) {
+  if (status < 100 || status > 599) {
     throw new Error(`${errorLabel} received unsupported HTTP status ${status}`);
   }
   const headers = new Headers();

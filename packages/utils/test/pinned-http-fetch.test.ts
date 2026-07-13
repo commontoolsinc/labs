@@ -165,6 +165,56 @@ describe("fetchPinnedHttp", () => {
     expect(fake.isClosed()).toBe(true);
   });
 
+  it("reads through informational responses to the final response", async () => {
+    const fake = createFakeHttpConnection([
+      "HTTP/1.1 100 Continue\r\n",
+      "\r\n",
+      "HTTP/1.1 103 Early Hints\r\n",
+      "Link: </style.css>; rel=preload\r\n",
+      "\r\n",
+      "HTTP/1.1 200 OK\r\n",
+      "Content-Length: 2\r\n",
+      "\r\n",
+      "ok",
+    ].join(""));
+
+    await withDenoConnect(
+      (() => Promise.resolve(fake.conn)) as unknown as typeof Deno.connect,
+      async () => {
+        const response = await fetchPinnedHttp(
+          new URL("http://example.com/informational"),
+          "93.184.216.34",
+        );
+        expect(response.status).toBe(200);
+        expect(response.headers.get("link")).toBeNull();
+        expect(await response.text()).toBe("ok");
+      },
+    );
+
+    expect(fake.isClosed()).toBe(true);
+  });
+
+  it("rejects protocol upgrades instead of parsing upgraded bytes as HTTP", async () => {
+    const fake = createFakeHttpConnection([
+      "HTTP/1.1 101 Switching Protocols\r\n",
+      "Connection: Upgrade\r\n",
+      "Upgrade: websocket\r\n",
+      "\r\n",
+    ].join(""));
+
+    await withDenoConnect(
+      (() => Promise.resolve(fake.conn)) as unknown as typeof Deno.connect,
+      async () => {
+        await expect(fetchPinnedHttp(
+          new URL("http://example.com/upgrade"),
+          "93.184.216.34",
+        )).rejects.toThrow("unsupported HTTP status 101");
+      },
+    );
+
+    expect(fake.isClosed()).toBe(true);
+  });
+
   it("returns a null body for HEAD without waiting for response bytes", async () => {
     const fake = createFakeHttpConnection(
       "HTTP/1.1 200 OK\r\nContent-Length: 99\r\n\r\n",
