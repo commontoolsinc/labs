@@ -172,7 +172,12 @@ function parameterUsesCellLikeMethods(
   const visit = (node: ts.Node): void => {
     if (usesCellLikeMethods) return;
     if (
-      node !== fn && ts.isFunctionLike(node)
+      node !== fn &&
+      (
+        ts.isArrowFunction(node) ||
+        ts.isFunctionExpression(node) ||
+        ts.isFunctionDeclaration(node)
+      )
     ) {
       return;
     }

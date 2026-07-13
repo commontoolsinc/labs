@@ -1209,3 +1209,25 @@ Deno.test("lift-applied untyped callback using Cell.get on a Cell input recovers
   assertEquals((input.properties as Obj).n.type, "number");
   assertEquals(input.asCell, ["readonly"]);
 });
+
+Deno.test("lift-applied cell-like recovery traverses local object method bodies", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { cell, lift } from "commonfabric";',
+    "const c = cell({ n: 5 });",
+    "type Cellish = { n: number; get(): { n: number } };",
+    "const read: (x: Cellish) => number = (x) => {",
+    "  const reader = { read() { return x.get().n; } };",
+    "  return reader.read();",
+    "};",
+    "const d = lift(read)(c);",
+  ].join("\n");
+  const output = await t(source);
+  const [input] = callSchemas(parseModule(output), "lift");
+
+  assertEquals((input.properties as Obj).n.type, "number");
+  // Capability analysis deliberately treats local method bodies as a nested
+  // boundary, so this remains conservatively opaque. The cell-like recovery
+  // pass must still traverse the method and preserve the Cell wrapper.
+  assertEquals(input.asCell, ["opaque"]);
+});
