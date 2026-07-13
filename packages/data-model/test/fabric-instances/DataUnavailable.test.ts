@@ -86,6 +86,12 @@ describe("DataUnavailable", () => {
     expect(isDeepFrozen(error)).toBe(true);
   });
 
+  it("rejects values which are not native or Fabric errors", () => {
+    expect(() => DataUnavailable.error("not an error" as never)).toThrow(
+      "DataUnavailable.error() requires an Error",
+    );
+  });
+
   it("projects ergonomic boolean fields from reason", () => {
     expect(DataUnavailable.pending()).toMatchObject({
       reason: "pending",
@@ -140,6 +146,32 @@ describe("DataUnavailable", () => {
       expect(Object.isFrozen(clone)).toBe(false);
       expect(Object.isFrozen(pending)).toBe(true);
       expect(clone.deepClone(true)).toBe(pending);
+    });
+
+    it("uses the instance protocols for fresh unavailable values", () => {
+      const pending = new DataUnavailable({ reason: "pending" });
+      const shallow = pending.shallowClone(false) as DataUnavailable;
+
+      expect(shallow).not.toBe(pending);
+      expect(shallow.reason).toBe("pending");
+      expect(Object.isFrozen(shallow)).toBe(false);
+
+      const frozenWithMutableState = Object.freeze(pending);
+      expect(isDeepFrozen(frozenWithMutableState)).toBe(false);
+
+      const deeplyFrozen = Object.freeze(
+        new DataUnavailable(Object.freeze({ reason: "pending" })),
+      );
+      expect(isDeepFrozen(deeplyFrozen)).toBe(true);
+    });
+
+    it("canonicalizes fresh non-error variants when cloning frozen", () => {
+      expect(
+        new DataUnavailable({ reason: "syncing" }).deepClone(true),
+      ).toBe(DataUnavailable.syncing());
+      expect(
+        new DataUnavailable({ reason: "schema-mismatch" }).deepClone(true),
+      ).toBe(DataUnavailable.schemaMismatch());
     });
 
     it("deep-clones the nested FabricError", () => {
