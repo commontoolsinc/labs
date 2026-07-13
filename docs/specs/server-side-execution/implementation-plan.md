@@ -873,8 +873,10 @@ cross-user handoff, and crash drill evidence remains part of W2.4 rollout.
 **Unblocks:** efficient rollout.
 
 **Status:** implemented. Aggregate pool lifecycle metrics are exposed through
-`SharedExecutionPool.metrics()`; the integrated settle/terminate drill remains
-rollout evidence.
+`SharedExecutionPool.metrics()`. A real-Worker drain fixture accepts a source
+commit after the first settle, observes the old generation terminate before
+recomputing it, and proves the persisted dirty scheduler row is recovered by
+the replacement generation.
 
 **Steps:**
 
@@ -896,7 +898,7 @@ rollout evidence.
 
 - [x] Relevant write wakes/re-runs only its demanded readers.
 - [x] Unrelated write performs one indexed lookup and no Worker/action work.
-- [ ] Commit in the settle→terminate window is not lost.
+- [x] Commit in the settle→terminate window is not lost.
 - [x] Rapid commits and demands coalesce without duplicate Worker generations.
 - [x] Cold resume rehydrates only context-appropriate scheduler rows.
 
@@ -971,8 +973,8 @@ claim snapshots, and local pending-layer overlays.
 
 **Depends on:** W0.4, W2.1.
 
-**Status:** implemented for the v1 direct-read scalar basis. The explicitly
-accepted non-transitive chained-action window still needs its named fixture.
+**Status:** implemented for the v1 direct-read scalar basis, including the
+named non-transitive chained-action divergence and convergence fixture.
 
 **Steps:**
 
@@ -1012,7 +1014,7 @@ accepted non-transitive chained-action window still needs its named fixture.
 - [x] Old generation cannot clear new overlay.
 - [x] Delayed/reordered commit data keeps the overlay until the matching data
       frame is applied; settlement-first delivery cannot flash stale state.
-- [ ] A chained-action fixture demonstrates the accepted non-transitive basis
+- [x] A chained-action fixture demonstrates the accepted non-transitive basis
       window, records divergence, and deterministically converges after the
       intermediate and downstream actions re-settle.
 - [x] Rigged divergence records one event and shows server value.
@@ -1041,7 +1043,7 @@ per-action sink authority decision and pre-claim in-flight handoff.
 
 - [x] Three clients plus one server claim produce one external request per
       supported builtin action.
-- [ ] Pending→result UI transition arrives through overlay/feed.
+- [x] Pending→result UI transition arrives through overlay/feed.
 - [x] No claim behaves identically to current client builtin execution.
 - [x] Permanent revoke releases client work without busy waiting.
 
