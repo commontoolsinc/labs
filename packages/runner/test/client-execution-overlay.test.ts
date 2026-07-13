@@ -1243,6 +1243,8 @@ Deno.test("a pre-claim client builtin attempt keeps all continuations upstream",
 Deno.test("execution routing diagnostics expose exact settlement barriers and reset only history", async () => {
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();
+  const sourceApplied = Promise.withResolvers<AppliedCommit>();
+  factory.onTransact = () => sourceApplied.promise;
   const storage = OverlayStorageManager.connect(factory);
   const query = {
     space: SPACE,
@@ -1252,7 +1254,9 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
   };
   try {
     await storage.open(SPACE).sync(INPUT);
-    await writeClaimedOutput(storage, "speculative-diagnostic");
+    const sourceCommit = beginSourceInputWrite(storage, "pending-diagnostic");
+    await waitFor(() => factory.commits.length === 1);
+    await writeClaimedOutput(storage, "speculative-diagnostic", true);
 
     const routed = storage.getExecutionRoutingDiagnostics(query);
     assertEquals(routed.space, SPACE);
@@ -1268,13 +1272,13 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
     assertEquals(routed.actions[0]?.upstreamRoutes, 0);
     assertEquals(routed.actions[0]?.claimedOverlayRoutes, 1);
     assertEquals(routed.actions[0]?.pendingOverlayCount, 1);
-    assertEquals(routed.actions[0]?.unresolvedBasisOverlayCount, 0);
+    assertEquals(routed.actions[0]?.unresolvedBasisOverlayCount, 1);
     assertEquals(routed.actions[0]?.pendingSettlementCount, 0);
 
     const settlement: ActionSettlement = {
       branch: "",
       claim,
-      inputBasisSeq: toInputBasisSeq(0),
+      inputBasisSeq: toInputBasisSeq(6),
       outcome: "committed",
       acceptedCommitSeq: 7 as AcceptedCommitSeq,
     };
@@ -1317,7 +1321,21 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
       unserved: 0,
     });
     assertEquals(reset.actions[0]?.pendingOverlayCount, 1);
+    assertEquals(reset.actions[0]?.unresolvedBasisOverlayCount, 1);
     assertEquals(reset.actions[0]?.pendingSettlementCount, 1);
+    assertEquals(reset.actions[0]?.lastSettlement, settlement);
+
+    sourceApplied.resolve({ seq: 6, branch: "", revisions: [] });
+    await sourceCommit;
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).actions[0]
+        ?.unresolvedBasisOverlayCount === 0
+    );
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics(query).actions[0]
+        ?.pendingSettlementCount,
+      1,
+    );
 
     factory.view.push(emptySync({
       toSeq: 7,
@@ -1365,6 +1383,7 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
     });
     assertEquals(outcomes.actions[0]?.lastSettlement?.outcome, "unserved");
   } finally {
+    sourceApplied.resolve({ seq: 6, branch: "", revisions: [] });
     await storage.close();
     resetServerPrimaryExecutionConfig();
   }

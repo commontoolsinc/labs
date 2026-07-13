@@ -6,6 +6,7 @@ import type {
 } from "@commonfabric/api";
 import type {
   ActionClaimKey,
+  ActionSettlement,
   BranchName,
   CommitPrecondition,
   EntityDocument,
@@ -136,6 +137,59 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
   | StorageValue<T>
   | undefined;
 
+/** Read-only filter for one space replica's execution-routing diagnostics. */
+export interface ExecutionRoutingDiagnosticsQuery {
+  readonly space: MemorySpace;
+  readonly branch: BranchName;
+  readonly pieceId?: string;
+  readonly actionId?: string;
+  /** Clear bounded historical counters before taking the snapshot. Live
+   * claims, overlays, and pending settlements are never reset. */
+  readonly resetCounters?: boolean;
+}
+
+/** Bounded outcome counters for settlements accepted by the replica's exact
+ * live claim incarnation. */
+export interface ExecutionRoutingSettlementCounts {
+  readonly committed: number;
+  readonly noOp: number;
+  readonly failed: number;
+  readonly unserved: number;
+}
+
+/** Exact-action execution-routing state and bounded historical counters. */
+export interface ExecutionRoutingActionDiagnostics {
+  readonly key: ActionClaimKey;
+  readonly liveClaim?: ExecutionClaim;
+  readonly upstreamRoutes: number;
+  readonly claimedOverlayRoutes: number;
+  readonly settlements: ExecutionRoutingSettlementCounts;
+  /** Overlays removed only after settlement basis coverage and, for committed
+   * outcomes, accepted data application. */
+  readonly basisCoveredOverlayDrops: number;
+  /** Overlays discarded because their captured authority or source basis was
+   * no longer valid. */
+  readonly nonAuthoritativeOverlayDrops: number;
+  readonly pendingOverlayCount: number;
+  /** Number of pending overlays still awaiting source-basis translation. */
+  readonly unresolvedBasisOverlayCount: number;
+  readonly pendingSettlementCount: number;
+  readonly lastSettlement?: ActionSettlement;
+}
+
+/** Bounded, read-only view of one space/branch execution-routing replica. */
+export interface ExecutionRoutingDiagnostics {
+  readonly space: MemorySpace;
+  readonly branch: BranchName;
+  readonly executionFeedSeq: number;
+  readonly executionAppliedSeq: number;
+  readonly snapshotRequired: boolean;
+  readonly claims: readonly ExecutionClaim[];
+  readonly actions: readonly ExecutionRoutingActionDiagnostics[];
+  /** Number of historical action records evicted since the last reset. */
+  readonly truncatedActionRecords: number;
+}
+
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
 
@@ -177,6 +231,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   ): ExecutionClaim | undefined;
   beginClientExecutionEffect?(action: object): void;
   endClientExecutionEffect?(action: object): void;
+
+  /** Return a bounded exact-action execution-routing snapshot when supported.
+   * This capability is diagnostic only and must not open a space or mutate
+   * execution authority. */
+  getExecutionRoutingDiagnostics?(
+    query: ExecutionRoutingDiagnosticsQuery,
+  ): ExecutionRoutingDiagnostics;
 
   /**
    * Close all storage providers

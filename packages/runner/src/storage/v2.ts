@@ -23,6 +23,7 @@ import {
   actionClaimMapKey,
   type ActionSettlement,
   type BranchName,
+  canonicalActionClaimKey,
   type CellScope,
   type ClientCommit,
   type CommitPrecondition,
@@ -77,6 +78,9 @@ import type { Cancel } from "../cancel.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
+  ExecutionRoutingActionDiagnostics,
+  ExecutionRoutingDiagnostics,
+  ExecutionRoutingDiagnosticsQuery,
   IMemoryAddress,
   IMemorySpaceAddress,
   IMergedChanges,
@@ -113,6 +117,7 @@ import {
 } from "./reactivity-log.ts";
 import { routeClientActionTransaction } from "../client-execution/action-transaction-router.ts";
 import { isSchedulerActionObservation } from "../scheduler/persistent-observation.ts";
+import { actionClaimKeyFromObservation } from "../scheduler/servability.ts";
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
 // part of the write; that read is dropped from its conflict set.
@@ -989,6 +994,25 @@ export class StorageManager implements IStorageManager {
     else this.#clientExecutionEffects.set(action, current - 1);
   }
 
+  getExecutionRoutingDiagnostics(
+    query: ExecutionRoutingDiagnosticsQuery,
+  ): ExecutionRoutingDiagnostics {
+    const replica = this.#providers.get(query.space)?.replica;
+    if (replica !== undefined) {
+      return replica.getExecutionRoutingDiagnostics(query);
+    }
+    return {
+      space: query.space,
+      branch: query.branch,
+      executionFeedSeq: 0,
+      executionAppliedSeq: 0,
+      snapshotRequired: false,
+      claims: [],
+      actions: [],
+      truncatedActionRecords: 0,
+    };
+  }
+
   private clientExecutionEffectInFlight(action: object): boolean {
     return (this.#clientExecutionEffects.get(action) ?? 0) > 0;
   }
@@ -1803,6 +1827,23 @@ type ClaimedOverlayGeneration = {
   readonly touched: readonly { id: URI; scope?: CellScope }[];
 };
 
+type ExecutionRoutingDiagnosticRecord = {
+  readonly key: ActionClaimKey;
+  upstreamRoutes: number;
+  claimedOverlayRoutes: number;
+  readonly settlements: {
+    committed: number;
+    noOp: number;
+    failed: number;
+    unserved: number;
+  };
+  basisCoveredOverlayDrops: number;
+  nonAuthoritativeOverlayDrops: number;
+  lastSettlement?: ActionSettlement;
+};
+
+const EXECUTION_ROUTING_DIAGNOSTIC_ACTION_LIMIT = 128;
+
 type SchedulerObservationBatchEntry = {
   commit: SchedulerObservationCommit;
   pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
@@ -1821,6 +1862,11 @@ class SpaceReplica implements ISpaceReplica {
   readonly #shadowLocalSeqsByAction = new WeakMap<object, Set<number>>();
   readonly #executionClaims = new Map<string, ExecutionClaim>();
   readonly #claimedOverlays = new Map<number, ClaimedOverlayGeneration>();
+  readonly #executionRoutingDiagnostics = new Map<
+    string,
+    ExecutionRoutingDiagnosticRecord
+  >();
+  #truncatedExecutionRoutingDiagnosticRecords = 0;
   readonly #confirmedSeqByLocalSeq = new Map<number, number>();
   #pendingExecutionSettlements: ActionSettlement[] = [];
   #executionFeedSeq = 0;
@@ -2098,6 +2144,97 @@ class SpaceReplica implements ISpaceReplica {
       return undefined;
     }
     return this.#executionClaims.get(actionClaimMapKey(key));
+  }
+
+  getExecutionRoutingDiagnostics(
+    query: ExecutionRoutingDiagnosticsQuery,
+  ): ExecutionRoutingDiagnostics {
+    if (query.space !== this.#space) {
+      throw new TypeError(
+        `Execution diagnostics for ${query.space} requested from ${this.#space}`,
+      );
+    }
+    if (query.resetCounters === true) {
+      this.#executionRoutingDiagnostics.clear();
+      this.#truncatedExecutionRoutingDiagnosticRecords = 0;
+    }
+
+    const matchesQuery = (key: ActionClaimKey): boolean =>
+      key.space === query.space && key.branch === query.branch &&
+      (query.pieceId === undefined || key.pieceId === query.pieceId) &&
+      (query.actionId === undefined || key.actionId === query.actionId);
+    const actionKeys = new Map<string, ActionClaimKey>();
+    const addActionKey = (key: ActionClaimKey): void => {
+      if (!matchesQuery(key)) return;
+      actionKeys.set(actionClaimMapKey(key), canonicalActionClaimKey(key));
+    };
+
+    for (const record of this.#executionRoutingDiagnostics.values()) {
+      addActionKey(record.key);
+    }
+    for (const liveClaim of this.#executionClaims.values()) {
+      addActionKey(liveClaim);
+    }
+    for (const overlay of this.#claimedOverlays.values()) {
+      addActionKey(overlay.claim);
+    }
+    for (const settlement of this.#pendingExecutionSettlements) {
+      addActionKey(settlement.claim);
+    }
+
+    const claims = [...this.#executionClaims.values()]
+      .filter(matchesQuery)
+      .sort((left, right) =>
+        actionClaimMapKey(left).localeCompare(actionClaimMapKey(right))
+      )
+      .map((claim) => structuredClone(claim));
+    const actions: ExecutionRoutingActionDiagnostics[] = [...actionKeys]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([mapKey, key]) => {
+        const record = this.#executionRoutingDiagnostics.get(mapKey);
+        const liveClaim = this.#executionClaims.get(mapKey);
+        const overlays = [...this.#claimedOverlays.values()].filter((overlay) =>
+          actionClaimMapKey(overlay.claim) === mapKey
+        );
+        const pendingSettlements = this.#pendingExecutionSettlements.filter(
+          (settlement) => actionClaimMapKey(settlement.claim) === mapKey,
+        );
+        const lastSettlement = record?.lastSettlement ??
+          pendingSettlements.at(-1);
+        return {
+          key,
+          ...(liveClaim !== undefined
+            ? { liveClaim: structuredClone(liveClaim) }
+            : {}),
+          upstreamRoutes: record?.upstreamRoutes ?? 0,
+          claimedOverlayRoutes: record?.claimedOverlayRoutes ?? 0,
+          settlements: record === undefined
+            ? { committed: 0, noOp: 0, failed: 0, unserved: 0 }
+            : { ...record.settlements },
+          basisCoveredOverlayDrops: record?.basisCoveredOverlayDrops ?? 0,
+          nonAuthoritativeOverlayDrops: record?.nonAuthoritativeOverlayDrops ??
+            0,
+          pendingOverlayCount: overlays.length,
+          unresolvedBasisOverlayCount: overlays.filter((overlay) =>
+            overlay.unresolvedBasisLocalSeqs.size > 0
+          ).length,
+          pendingSettlementCount: pendingSettlements.length,
+          ...(lastSettlement !== undefined
+            ? { lastSettlement: structuredClone(lastSettlement) }
+            : {}),
+        };
+      });
+
+    return {
+      space: this.#space,
+      branch: query.branch,
+      executionFeedSeq: this.#executionFeedSeq,
+      executionAppliedSeq: this.#executionAppliedSeq,
+      snapshotRequired: this.#executionSnapshotRequired,
+      claims,
+      actions,
+      truncatedActionRecords: this.#truncatedExecutionRoutingDiagnosticRecords,
+    };
   }
 
   async close(): Promise<void> {
@@ -2782,6 +2919,7 @@ class SpaceReplica implements ISpaceReplica {
         ? { disposition: "local", kind: "executor-shadow" } as const
         : this.routeClientActionTransaction(commit, source))
       : await this.routeActionTransaction(commit, source);
+    this.noteExecutionTransactionRoute(commit, route, source?.sourceAction);
     const routedObservation = commit.schedulerObservation;
     if (
       route.disposition === "upstream" && !this.#shadowWrites &&
@@ -3014,6 +3152,31 @@ class SpaceReplica implements ISpaceReplica {
         ]);
       },
     });
+  }
+
+  private noteExecutionTransactionRoute(
+    commit: ClientCommit,
+    route: ActionTransactionRoute,
+    sourceAction: object | undefined,
+  ): void {
+    if (
+      sourceAction === undefined ||
+      (route.disposition !== "upstream" &&
+        (route.disposition !== "local" ||
+          route.kind !== "claimed-overlay"))
+    ) {
+      return;
+    }
+    const observation = commit.schedulerObservation;
+    if (!isSchedulerActionObservation(observation)) return;
+    const key = actionClaimKeyFromObservation(observation);
+    if (key === undefined || key.space !== this.#space) return;
+    const record = this.executionRoutingDiagnosticRecord(key);
+    if (route.disposition === "upstream") {
+      record.upstreamRoutes++;
+    } else {
+      record.claimedOverlayRoutes++;
+    }
   }
 
   private async publishUnservedAttempt(
@@ -3945,6 +4108,49 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
+  private executionRoutingDiagnosticRecord(
+    key: ActionClaimKey,
+  ): ExecutionRoutingDiagnosticRecord {
+    const mapKey = actionClaimMapKey(key);
+    const existing = this.#executionRoutingDiagnostics.get(mapKey);
+    if (existing !== undefined) {
+      // Refresh insertion order so inactive actions are evicted first.
+      this.#executionRoutingDiagnostics.delete(mapKey);
+      this.#executionRoutingDiagnostics.set(mapKey, existing);
+      return existing;
+    }
+    if (
+      this.#executionRoutingDiagnostics.size >=
+        EXECUTION_ROUTING_DIAGNOSTIC_ACTION_LIMIT
+    ) {
+      const oldest = this.#executionRoutingDiagnostics.keys().next().value;
+      if (oldest !== undefined) {
+        this.#executionRoutingDiagnostics.delete(oldest);
+        this.#truncatedExecutionRoutingDiagnosticRecords++;
+      }
+    }
+    const record: ExecutionRoutingDiagnosticRecord = {
+      key: canonicalActionClaimKey(key),
+      upstreamRoutes: 0,
+      claimedOverlayRoutes: 0,
+      settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+      basisCoveredOverlayDrops: 0,
+      nonAuthoritativeOverlayDrops: 0,
+    };
+    this.#executionRoutingDiagnostics.set(mapKey, record);
+    return record;
+  }
+
+  private noteExecutionSettlement(settlement: ActionSettlement): void {
+    const record = this.executionRoutingDiagnosticRecord(settlement.claim);
+    if (settlement.outcome === "no-op") {
+      record.settlements.noOp++;
+    } else {
+      record.settlements[settlement.outcome]++;
+    }
+    record.lastSettlement = structuredClone(settlement);
+  }
+
   private recordClaimedOverlay(
     localSeq: number,
     claim: ExecutionClaim,
@@ -4117,6 +4323,7 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     if (this.settlementMatchesLiveClaim(event.settlement)) {
+      this.noteExecutionSettlement(event.settlement);
       if (this.reconcileExecutionSettlement(event.settlement)) {
         this.#pendingExecutionSettlements.push(event.settlement);
       }
@@ -4211,6 +4418,16 @@ class SpaceReplica implements ISpaceReplica {
   ): void {
     const dropped = [...this.#claimedOverlays.values()].filter(predicate);
     if (dropped.length === 0) return;
+    const basisCovered = options.diagnosticCode === "claim-committed" ||
+      options.diagnosticCode === "claim-no-op";
+    for (const overlay of dropped) {
+      const record = this.executionRoutingDiagnosticRecord(overlay.claim);
+      if (basisCovered) {
+        record.basisCoveredOverlayDrops++;
+      } else if (options.dirtyProducer) {
+        record.nonAuthoritativeOverlayDrops++;
+      }
+    }
     const localSeqs = new Set(dropped.map((overlay) => overlay.localSeq));
     const touched = [
       ...new Map(
