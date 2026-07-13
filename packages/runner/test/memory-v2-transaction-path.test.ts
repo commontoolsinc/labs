@@ -10,6 +10,10 @@ import {
   unmarkUiInputBlindWriteTx,
 } from "../src/storage/reactivity-log.ts";
 import { ManagedStorageTransaction } from "../src/traverse.ts";
+import {
+  fixtureDocKey,
+  TraverseCaptureRecorder,
+} from "../src/traverse-recorder.ts";
 import { getTransactionWriteDetails } from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-transaction-path");
@@ -208,6 +212,31 @@ describe("memory v2 transaction path semantics", () => {
     expect(failingFallback.trackReadPaths!(address, [path]).error).toEqual(
       inactiveError,
     );
+  });
+
+  it("captures documents reached only through batched read tracking", async () => {
+    const address = {
+      space,
+      scope: "space" as const,
+      id: "of:tracked-read-capture" as URI,
+      type: "application/json" as const,
+    };
+    const seedTx = runtime.edit();
+    seedTx.writeValueOrThrow({ ...address, path: [] }, {
+      nested: { value: 1 },
+    });
+    await seedTx.commit();
+
+    const recorder = new TraverseCaptureRecorder();
+    const readTx = runtime.edit();
+    const capturedTx = recorder.wrapTx(readTx);
+    capturedTx.trackReadPaths!(address, [["value", "nested", "value"]], {
+      nonRecursive: true,
+    });
+
+    const fixture = recorder.toFixture("batched-read", "test");
+    expect(fixtureDocKey(address) in fixture.docs).toBe(true);
+    readTx.abort();
   });
 
   it("creates missing parent objects without clobbering siblings", async () => {
