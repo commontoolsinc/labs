@@ -1562,6 +1562,25 @@ export class Scheduler {
   }
 
   /**
+   * At-least-once repair for the executor's durable stale-reader feed. The
+   * ordinary replica differential remains the primary invalidation path; an
+   * exact host wake may repeat it after integration so a refresh racing local
+   * scheduler bookkeeping cannot strand a clean action. Repeated calls are
+   * safe: invalid state and the queued execution turn both coalesce.
+   */
+  invalidateActionForHostWake(action: Action): boolean {
+    if (this.nodes.get(action) === undefined) return false;
+    this.markActionInvalid(action);
+    // staleDemandedReaders is stronger than an ordinary replica
+    // differential: the host's durable index says this exact action is still
+    // demanded. Preserve that proof for the next execution pass even when the
+    // local dependency graph happens to consider the action dormant.
+    this.pending.add(action);
+    this.queueExecution();
+    return true;
+  }
+
+  /**
    * Returns the set of actions that depend on this action's output.
    */
   getDependents(action: Action): Set<Action> {

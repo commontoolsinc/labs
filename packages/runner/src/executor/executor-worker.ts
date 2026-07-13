@@ -19,7 +19,6 @@ import {
   Runtime,
   runtimePresets,
 } from "../index.ts";
-import type { TelemetryAnnotations } from "../scheduler/types.ts";
 import {
   CellDataUnavailableError,
   type UnavailableCellAddress,
@@ -42,6 +41,10 @@ import {
 } from "./server-builtin-channel.ts";
 import { getTransactionSourceAction } from "../storage/transaction-source-context.ts";
 import { SelectiveDemandWakeQueue } from "./selective-demand-wake.ts";
+import {
+  schedulerIdentityKeyForAction,
+  schedulerIdentityKeyForStaleReader,
+} from "./scheduler-wake-identity.ts";
 
 type WorkerRequest = {
   type:
@@ -109,54 +112,6 @@ const normalizePieceId = (pieceId: string): string =>
 
 const claimKey = (claim: ActionClaimKey): string => actionClaimMapKey(claim);
 
-const schedulerIdentityKey = (identity: {
-  branch: string;
-  ownerSpace: string;
-  pieceId: string;
-  processGeneration: number;
-  actionId: string;
-  executionContextKey: string;
-}): string =>
-  JSON.stringify([
-    identity.branch,
-    identity.ownerSpace,
-    identity.pieceId,
-    identity.processGeneration,
-    identity.actionId,
-    identity.executionContextKey,
-  ]);
-
-const schedulerIdentityKeyForAction = (
-  action: object,
-  key: ActionClaimKey,
-): string | undefined => {
-  const identity = (action as Partial<TelemetryAnnotations>)
-    .schedulerObservationIdentity;
-  if (identity?.ownerSpace === undefined) return undefined;
-  return schedulerIdentityKey({
-    branch: identity.branch ?? "",
-    ownerSpace: identity.ownerSpace,
-    pieceId: identity.pieceId,
-    processGeneration: identity.processGeneration ?? 0,
-    actionId: key.actionId,
-    executionContextKey: key.contextKey,
-  });
-};
-
-const schedulerIdentityKeyForStaleReader = (
-  reader: AcceptedCommitNotice["staleDemandedReaders"][number],
-): string | undefined => {
-  if (reader.ownerSpace === undefined) return undefined;
-  return schedulerIdentityKey({
-    branch: reader.branch,
-    ownerSpace: reader.ownerSpace,
-    pieceId: reader.pieceId,
-    processGeneration: reader.processGeneration,
-    actionId: reader.actionId,
-    executionContextKey: reader.executionContextKey,
-  });
-};
-
 const noteAcceptedCommitCausalActors = (
   notice: AcceptedCommitNotice,
 ): void => {
@@ -176,13 +131,19 @@ const noteAcceptedCommitCausalActors = (
   }
 };
 
-const registerCandidateCausalActor = (
+const registerCandidateSchedulerIdentity = (
   candidate: { claimKey: ActionClaimKey; builtinId?: string },
   action: Action,
-): boolean => {
+): string => {
   const identity = schedulerIdentityKeyForAction(action, candidate.claimKey);
-  if (identity === undefined) return false;
   actionsBySchedulerIdentity.set(identity, action);
+  return identity;
+};
+
+const registerCandidateCausalActor = (
+  identity: string,
+  action: Action,
+): boolean => {
   const matchesSponsor = pendingCausalActorMatches.get(identity) ?? true;
   pendingCausalActorMatches.delete(identity);
   causalActorMatchesByAction.set(action, matchesSponsor);
@@ -423,16 +384,15 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     claimForAction: (action) => claimsByAction.get(action),
     permanentUnservedReasonForAction,
     onCandidate: (candidate, sourceAction) => {
+      const action = sourceAction as Action;
       candidateActions.set(
         claimKey(candidate.claimKey),
-        sourceAction as Action,
+        action,
       );
+      const identity = registerCandidateSchedulerIdentity(candidate, action);
       const causalActorMatchesSponsor = candidate.builtinId === undefined
         ? undefined
-        : registerCandidateCausalActor(
-          candidate,
-          sourceAction as Action,
-        );
+        : registerCandidateCausalActor(identity, action);
       worker.postMessage({
         type: "candidate-claim",
         candidate: {
@@ -484,9 +444,18 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       noteAcceptedCommitCausalActors(notice);
     },
     onAcceptedCommitIntegrated(notice) {
-      selectiveWake?.push(
-        notice.staleDemandedReaders.map((reader) => reader.pieceId),
-      );
+      const stalePieceIds = new Set<string>();
+      for (const reader of notice.staleDemandedReaders) {
+        stalePieceIds.add(reader.pieceId);
+        const identity = schedulerIdentityKeyForStaleReader(reader);
+        const action = identity === undefined
+          ? undefined
+          : actionsBySchedulerIdentity.get(identity);
+        if (action !== undefined) {
+          runtime?.scheduler.invalidateActionForHostWake(action);
+        }
+      }
+      selectiveWake?.push([...stalePieceIds]);
       if (pendingDemand.size > 0) {
         const revised = new Set(notice.revisions.map(revisionKey));
         const ready = new Set<string>();
@@ -605,7 +574,7 @@ const startClaimedAction = async (
   const attempt = claimedAttempts.start(claim, action);
   try {
     const identity = schedulerIdentityKeyForAction(action, claim);
-    if (identity !== undefined) pendingCausalActorMatches.delete(identity);
+    pendingCausalActorMatches.delete(identity);
     storage.discardShadowWritesForAction(space, action);
     claimsByAction.set(action, claim);
     (action as Action & { prepareClaimedRerun?: () => void })
