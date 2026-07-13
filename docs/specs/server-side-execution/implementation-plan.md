@@ -145,6 +145,7 @@ Parallelizable start set after #4288: W0.1, W0.2, W0.4, W0.5, W0.6.
 ### W0.1 — Qualify durable scheduler state by effective execution context
 
 **Priority:** first standalone prerequisite. It may be folded into #4288.
+**Status:** implemented in the updated #4288 baseline.
 
 **Problem:** cell facts are partitioned by effective scope key, but scheduler
 snapshots, action state, and read/write index ownership are currently keyed by
@@ -213,23 +214,23 @@ not overlap.
 
 **Success criteria:**
 
-- [ ] Red→green headline: Alice and Bob run the same PerUser action; both
+- [x] Red→green headline: Alice and Bob run the same PerUser action; both
       snapshots, action-state rows, read rows, and write rows remain present
       and independently rehydrate.
-- [ ] Two sessions for one principal retain distinct PerSession metadata.
-- [ ] Alice's scoped write dirties Alice's matching reader and not Bob's.
-- [ ] Running or clearing Alice's dirty action does not clear Bob's state.
-- [ ] A proven space-only action has one shared row that either principal can
+- [x] Two sessions for one principal retain distinct PerSession metadata.
+- [x] Alice's scoped write dirties Alice's matching reader and not Bob's.
+- [x] Running or clearing Alice's dirty action does not clear Bob's state.
+- [x] A proven space-only action has one shared row that either principal can
       rehydrate.
-- [ ] A dynamic `space`→`user` or `user`→`session` violation cannot leave a
+- [x] A dynamic `space`→`user` or `user`→`session` violation cannot leave a
       broadly adoptable snapshot; the incompatible broader row is removed and
       the next runtime fails open by running.
-- [ ] Observed space-only behavior without a complete static summary remains
+- [x] Observed space-only behavior without a complete static summary remains
       session-keyed; it cannot promote itself to a shared row.
-- [ ] Narrowing Alice's user row never removes Bob's independent user/session
+- [x] Narrowing Alice's user row never removes Bob's independent user/session
       row.
-- [ ] Existing space-only persistent scheduler tests remain green.
-- [ ] Query plans still use indexed target lookup at 10k rows.
+- [x] Existing space-only persistent scheduler tests remain green.
+- [x] Query plans still use indexed target lookup at 10k rows.
 
 **Review checklist:** inspect every action-key WHERE, DELETE, UPSERT, and JOIN.
 A partial migration is worse than no migration. writerSessionId remains
@@ -436,7 +437,7 @@ that it settled.
       whole transaction back.
 - [x] Replay fan-out reloads the canonical accepted basis/provenance rather than
       mirroring request-forged host fields.
-- [ ] Cross-space input attempts are rejected by W1.3 rather than collapsed
+- [x] Cross-space input attempts are rejected by W1.3 rather than collapsed
       into this scalar.
 - [x] Handler execution emits no new scheduler observation in this phase and
       preserves existing authenticated event/source provenance.
@@ -849,7 +850,7 @@ cross-user handoff, and crash drill evidence remains part of W2.4 rollout.
 
 **Success criteria:**
 
-- [ ] Relative /api/... reaches the configured serving host in local and
+- [x] Relative /api/... reaches the configured serving host in local and
       deployed fixtures.
 - [x] A relative request may follow an absolute same-serving-origin redirect;
       an origin-changing redirect is reclassified and blocked when private.
@@ -858,11 +859,11 @@ cross-user handoff, and crash drill evidence remains part of W2.4 rollout.
 - [x] Raw fetch remains unavailable in a pattern SES test.
 - [x] Supported fetch and generate actions execute once on the claimed server
       path in a multi-client fixture.
-- [ ] A request produced by user B is never signed/executed as sticky sponsor A;
+- [x] A request produced by user B is never signed/executed as sticky sponsor A;
       it stays unclaimed or performs a fenced handoff.
 - [x] Unsupported builtin/action stays client-primary without first causing an
       external request.
-- [ ] Claim loss/crash behavior is no worse than today's client mutex tests.
+- [x] Claim loss/crash behavior is no worse than today's client mutex tests.
 
 ---
 
@@ -954,12 +955,12 @@ claim snapshots, and local pending-layer overlays.
 - [x] Unclaimed action produces byte-identical commits to current behavior.
 - [x] Mixed-scope claimed action commits whole from client; no partial
       suppression.
-- [ ] Two actions in one piece can independently be server- and client-primary.
-- [ ] Identical action identities on two branches route independently; a claim,
+- [x] Two actions in one piece can independently be server- and client-primary.
+- [x] Identical action identities on two branches route independently; a claim,
       revoke, reconnect snapshot, or settlement on branch A never affects
       branch B.
 - [x] Revocation/expiry causes deterministic dirty rerun and convergence.
-- [ ] Disconnect while another client keeps the server claim live queues no
+- [x] Disconnect while another client keeps the server claim live queues no
       derived wire commit; reconnect claim-snapshot barrier prevents a stale
       flush and then converges.
 - [x] Flag off has byte-identical commit and control traffic.
@@ -1041,8 +1042,8 @@ per-action sink authority decision and pre-claim in-flight handoff.
 - [x] Three clients plus one server claim produce one external request per
       supported builtin action.
 - [ ] Pending→result UI transition arrives through overlay/feed.
-- [ ] No claim behaves identically to current client builtin execution.
-- [ ] Permanent revoke releases client work without busy waiting.
+- [x] No claim behaves identically to current client builtin execution.
+- [x] Permanent revoke releases client work without busy waiting.
 
 ---
 

@@ -226,17 +226,14 @@ basis and settlement acknowledgement (§5.B.4).
 
 #### 3.2.1 Prerequisite: context-qualify durable scheduler state
 
-The #4288 schema keys action snapshots and action state by branch, owner
-space, piece, generation, and action identity, but not by the effective
-user/session context. Cell revisions remain correctly partitioned by their
-effective `scope_key`; the bug is in the scheduler projection. Two users or
-sessions running the same scoped action can replace each other's snapshot,
-read/write-index rows, and dirty marker. #4288's fail-open rehydration guard
-prevents adopting another principal's scoped snapshot, but cannot preserve
-the row that was overwritten.
+The updated #4288 baseline fixes the scheduler-projection bug that originally
+left action snapshots, action state, and read/write-index ownership
+unqualified by effective user/session context. Cell revisions were already
+partitioned by effective `scope_key`; the scheduler tables now preserve that
+same separation instead of allowing two users or sessions running the same
+scoped action to replace each other's metadata.
 
-Fix this before server execution relies on these tables for ownership or
-wake decisions:
+The implementation:
 
 - derive an action `context_key` on the server using the shareability lattice
   `space < user < session`, where moving right is narrower;
@@ -259,9 +256,10 @@ Within one action fingerprint, runtime evidence may only narrow context.
 principal's user row without deleting another principal's independent row.
 Broader classification requires a new implementation/runtime fingerprint.
 
-Regression coverage must run the same action as two users and as two
-sessions, prove their scoped snapshots/index rows/dirty markers coexist, and
-also prove space-only observations continue to coalesce.
+Regression coverage runs the same action as two users and as two sessions,
+proves their scoped snapshots/index rows/dirty markers coexist, proves
+monotonic narrowing and unknown-summary fallback, and keeps a 10k-row indexed
+lookup guard while space-only observations continue to coalesce.
 
 ### 3.3 Producer lookup: durable writer index, not creation provenance
 
