@@ -56,10 +56,7 @@ const CPU_EVENTS = CPU_BENCH
   )
   : 4;
 const AUTHORITY_PREFLIGHT_EVENTS = 2;
-// Each policy gets two equal blocks. A 250-event block brings both the normal
-// upstream path and the claimed-overlay/scheduler path through their lazy
-// renderer warm-up before the first authoritative 500-event sample.
-const WARMUP_EVENTS_PER_BLOCK = CPU_BENCH ? 250 : 1;
+const WARMUP_EVENTS_PER_BLOCK = CPU_BENCH ? 25 : 1;
 const PROFILE_DIR = Deno.env.get("CF_CPUPROFILE_DIR");
 const TIMEOUT = 60_000;
 const MEASURED_OBSERVER_TIMEOUT = CPU_BENCH
@@ -875,7 +872,7 @@ const assertRendererCountersContinue = (
       };
 
       // Unmeasured ABBA warmup gives both policies the same event count and
-      // cold/warm positions before either CPU block starts (500 events per mode
+      // cold/warm positions before either CPU block starts (50 events per mode
       // in CPU mode). Each block's two authority-preflight events remain
       // separate.
       for (const policyEnabled of [false, true, true, false]) {
