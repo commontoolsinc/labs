@@ -302,6 +302,7 @@ async function exercisePoolAuthorityTransition(
     },
   });
   let observerClient: MemoryClient.Client | null = null;
+  const raceObserverClients: MemoryClient.Client[] = [];
   let clientStorage: LoopbackStorageManager | null = null;
   let clientRuntime: Runtime | null = null;
   let coldStorage: LoopbackStorageManager | null = null;
@@ -378,6 +379,20 @@ async function exercisePoolAuthorityTransition(
     const observer = await observerClient.mount(space, {
       sessionId: `session:pool-transition-observer:${crypto.randomUUID()}`,
     }, authorize);
+    let raceObserver: typeof observer | undefined;
+    let raceObserverLocalSeq = 0;
+    const getRaceObserver = async (): Promise<typeof observer> => {
+      if (raceObserver !== undefined) return raceObserver;
+      const client = await MemoryClient.connect({
+        transport: MemoryClient.loopback(server),
+        protocolFlags: FLAGS,
+      });
+      raceObserverClients.push(client);
+      raceObserver = await client.mount(space, {
+        sessionId: `session:pool-transition-race:${crypto.randomUUID()}`,
+      }, authorize);
+      return raceObserver;
+    };
     await observer.watchSet([{
       id: "executor-pool-transition-piece",
       kind: "graph",
@@ -497,7 +512,10 @@ async function exercisePoolAuthorityTransition(
         }],
       });
     };
-    const runSource = async (value: number): Promise<number> => {
+    const runSource = async (
+      value: number,
+      settleClient = true,
+    ): Promise<number> => {
       const outputAccepted = Promise.withResolvers<void>();
       const unsubscribeAccepted = server.subscribeAcceptedCommits(
         space,
@@ -530,9 +548,11 @@ async function exercisePoolAuthorityTransition(
           }],
         });
         sourceSeq = source.seq;
-        await clientStorage!.synced();
-        await visibleResult.pull();
-        await clientRuntime!.settled();
+        if (settleClient) {
+          await clientStorage!.synced();
+          await visibleResult.pull();
+          await clientRuntime!.settled();
+        }
         await awaitBarrier(
           outputAccepted.promise,
           `pool transition output ${value}`,
@@ -541,9 +561,11 @@ async function exercisePoolAuthorityTransition(
       } finally {
         unsubscribeAccepted();
       }
-      await clientStorage!.synced();
-      assertEquals(await visibleResult.pull() as unknown, value * 2);
-      await clientRuntime!.settled();
+      if (settleClient) {
+        await clientStorage!.synced();
+        assertEquals(await visibleResult.pull() as unknown, value * 2);
+        await clientRuntime!.settled();
+      }
       assertEquals(
         (await server.readDocument(space, stableOutputId) as {
           value?: unknown;
@@ -566,6 +588,7 @@ async function exercisePoolAuthorityTransition(
       value: number,
       template: ClientCommit,
       verifyClient = true,
+      sourceSession = observer,
     ): Promise<number> => {
       assertExists(template.schedulerObservation);
       const outputAccepted = Promise.withResolvers<void>();
@@ -585,8 +608,10 @@ async function exercisePoolAuthorityTransition(
         },
       );
       try {
-        const source = await observer.transact({
-          localSeq: ++observerLocalSeq,
+        const source = await sourceSession.transact({
+          localSeq: sourceSession === observer
+            ? ++observerLocalSeq
+            : ++raceObserverLocalSeq,
           reads: { confirmed: [], pending: [] },
           operations: [{
             op: "set",
@@ -664,21 +689,17 @@ async function exercisePoolAuthorityTransition(
       assertExists(remoteObservationTemplate);
     }
 
-    if (options.replaceShadowWorker === true) {
-      // Model the browser rollout failure deterministically: generation 1 has
-      // already discovered the writer in shadow mode, then loses its lease.
-      // Republishing the same demand makes the pool fence it and start a fresh
-      // realm from durable scheduler state before policy promotion.
-      if (
-        options.initialCleanSnapshotRace || options.initialCleanSnapshotClaim
-      ) {
-        await writePolicy(true);
-      }
-      if (options.initialCleanSnapshotRace) {
-        server.gateNextSchedulerList();
-      }
-      executionNow += executionLeaseTtlMs + 1;
-      const replacement = observer.setExecutionDemand("", [stableResultId]);
+    if (
+      options.initialCleanSnapshotRace || options.initialCleanSnapshotClaim
+    ) {
+      // Enabling rotates the shadow lease before the server republishes the
+      // unchanged demand. The replacement's clean startup is therefore the
+      // candidate-proof boundary, without replaying effects or builtins.
+      const sourceSession = options.initialCleanSnapshotRace
+        ? await getRaceObserver()
+        : observer;
+      if (options.initialCleanSnapshotRace) server.gateNextSchedulerList();
+      const enable = writePolicy(true);
       let racedSourceSeq: number | undefined;
       if (options.initialCleanSnapshotRace) {
         await server.schedulerListStarted.promise;
@@ -686,10 +707,11 @@ async function exercisePoolAuthorityTransition(
           7,
           remoteObservationTemplate!,
           false,
+          sourceSession,
         );
         server.releaseSchedulerList.resolve();
       }
-      await replacement;
+      await enable;
       await pool.idle();
       assertEquals(pool.snapshot(space, ""), {
         state: "live",
@@ -697,9 +719,7 @@ async function exercisePoolAuthorityTransition(
         pieces: [stableResultId],
         leaseGeneration: 2,
       });
-      // The reconcile observes loss, then the stale handle also fails the
-      // best-effort drain fence.
-      assertEquals(pool.metrics().leaseLosses, 2);
+      assertEquals(pool.metrics().leaseLosses, 1);
       assertEquals(pool.metrics().leaseReplacements, 1);
       assertEquals(pool.metrics().workersStarted, 2);
 
@@ -739,45 +759,73 @@ async function exercisePoolAuthorityTransition(
         return;
       }
 
-      if (options.initialCleanSnapshotRace) {
-        assertExists(racedSourceSeq);
-        const racedClaim = await waitForControl(
-          (event): event is Extract<
-            ExecutionControlEvent,
-            { type: "session.execution.claim.set" }
-          > =>
-            event.type === "session.execution.claim.set" &&
-            event.claim.actionId === candidateActionId &&
-            event.claim.leaseGeneration === 2,
-          "initial clean snapshot replacement claim",
-        );
-        await waitForControl(
-          (event): event is Extract<
-            ExecutionControlEvent,
-            { type: "session.execution.settlement" }
-          > =>
-            event.type === "session.execution.settlement" &&
-            event.settlement.claim.claimGeneration ===
-              racedClaim.claim.claimGeneration &&
-            event.settlement.inputBasisSeq >= racedSourceSeq!,
-          "initial clean snapshot replacement settlement",
-        );
-        return;
-      }
+      assertExists(racedSourceSeq);
+      const racedClaim = await waitForControl(
+        (event): event is Extract<
+          ExecutionControlEvent,
+          { type: "session.execution.claim.set" }
+        > =>
+          event.type === "session.execution.claim.set" &&
+          event.claim.actionId === candidateActionId &&
+          event.claim.leaseGeneration === 2,
+        "initial clean snapshot replacement claim",
+      );
+      await waitForControl(
+        (event): event is Extract<
+          ExecutionControlEvent,
+          { type: "session.execution.settlement" }
+        > =>
+          event.type === "session.execution.settlement" &&
+          event.settlement.claim.claimGeneration ===
+            racedClaim.claim.claimGeneration &&
+          event.settlement.inputBasisSeq >= racedSourceSeq,
+        "initial clean snapshot replacement settlement",
+      );
+      return;
     }
 
-    // Enable in place. The first invalidation promotes the already-running
-    // shadow Worker; no piece or document is recreated.
+    if (options.replaceShadowWorker === true) {
+      // Preserve a separate pre-promotion replacement case: generation 1 has
+      // discovered the writer while shadowing, then expires. The policy
+      // transition below must rotate this generation 2 once more.
+      executionNow += executionLeaseTtlMs + 1;
+      await observer.setExecutionDemand("", [stableResultId]);
+      await pool.idle();
+      assertEquals(pool.snapshot(space, ""), {
+        state: "live",
+        referenceCount: 1,
+        pieces: [stableResultId],
+        leaseGeneration: 2,
+      });
+      assertEquals(pool.metrics().leaseLosses, 2);
+      assertEquals(pool.metrics().leaseReplacements, 1);
+      assertEquals(pool.metrics().workersStarted, 2);
+    }
+
+    // Enable by fencing the shadow generation and starting one clean
+    // replacement. No piece or document is recreated.
+    const workersBeforeEnable = pool.metrics().workersStarted;
+    const leaseGenerationBeforeEnable = pool.snapshot(space, "")
+      ?.leaseGeneration;
+    assertExists(leaseGenerationBeforeEnable);
     await writePolicy(true);
+    assertEquals(pool.snapshot(space, ""), {
+      state: "live",
+      referenceCount: 1,
+      pieces: [stableResultId],
+      leaseGeneration: leaseGenerationBeforeEnable + 1,
+    });
+    assertEquals(pool.metrics().workersStarted, workersBeforeEnable + 1);
     clientCommits.length = 0;
-    const promotionSeq = await runSource(7);
+    const promotionSeq = await runSource(7, false);
     const claimEvent = await waitForControl(
       (event): event is Extract<
         ExecutionControlEvent,
         { type: "session.execution.claim.set" }
       > =>
         event.type === "session.execution.claim.set" &&
-        event.claim.actionId === candidateActionId,
+        event.claim.actionId === candidateActionId &&
+        event.claim.leaseGeneration === leaseGenerationBeforeEnable + 1,
       "pool transition claim",
     );
     const claim = claimEvent.claim;
@@ -793,12 +841,10 @@ async function exercisePoolAuthorityTransition(
       "pool transition promotion settlement",
     );
     await clientStorage.synced();
+    await visibleResult.pull();
     await clientRuntime.settled();
+    assertEquals(await visibleResult.pull() as unknown, 14);
     assertEquals(server.listExecutionClaims(space), [claim]);
-    assertEquals(
-      pool.metrics().workersStarted,
-      options.replaceShadowWorker === true ? 2 : 1,
-    );
 
     // A subsequent invalidation measures the stable claimed posture: only the
     // server writes, any client speculation is local and settles away.
@@ -806,7 +852,7 @@ async function exercisePoolAuthorityTransition(
     const overlaysDroppedBefore = loggerCount("execution-overlay-dropped");
     const settlementsBefore = server.executionStats.settlementsPublished;
     clientCommits.length = 0;
-    const claimedSeq = await runSource(8);
+    const claimedSeq = await runSource(8, false);
     const claimedSettlement = await waitForControl(
       (event): event is Extract<
         ExecutionControlEvent,
@@ -822,8 +868,34 @@ async function exercisePoolAuthorityTransition(
         claimedSettlement.settlement.outcome === "no-op",
       true,
     );
+    const snapshots = await observer.listSchedulerActionSnapshots({
+      actionId: claim.actionId,
+      pieceId: claim.pieceId,
+    });
+    const acceptedObservation = snapshots.snapshots.find((snapshot) => {
+      const observation = snapshot.observation as {
+        executionProvenance?: {
+          leaseGeneration?: number;
+          claimGeneration?: number;
+        };
+      };
+      return snapshot.executionContextKey === claim.contextKey &&
+        observation.executionProvenance?.leaseGeneration ===
+          claim.leaseGeneration &&
+        observation.executionProvenance?.claimGeneration ===
+          claim.claimGeneration;
+    })?.observation as {
+      executionProvenance?: { onBehalfOf?: string };
+    } | undefined;
+    assertExists(
+      acceptedObservation,
+      `missing claimed snapshot: ${JSON.stringify(snapshots.snapshots)}`,
+    );
+    assertEquals(acceptedObservation.executionProvenance?.onBehalfOf, space);
     await clientStorage.synced();
+    await visibleResult.pull();
     await clientRuntime.settled();
+    assertEquals(await visibleResult.pull() as unknown, 16);
     assertEquals(clientCommits.some(isDerivedWireCommit), false);
     assertEquals(
       server.executionStats.settlementsPublished > settlementsBefore,
@@ -831,14 +903,6 @@ async function exercisePoolAuthorityTransition(
     );
     const overlaysCreated = loggerCount("execution-overlay-created") -
       overlaysCreatedBefore;
-    const snapshots = await observer.listSchedulerActionSnapshots({
-      actionId: claim.actionId,
-      pieceId: claim.pieceId,
-    });
-    const acceptedObservation = snapshots.snapshots.at(-1)?.observation as {
-      executionProvenance?: { onBehalfOf?: string };
-    };
-    assertEquals(acceptedObservation.executionProvenance?.onBehalfOf, space);
 
     // Disable in place. Revocation clears claim authority and the policy
     // commit does not return until the pool has fenced the old lease and
@@ -889,14 +953,48 @@ async function exercisePoolAuthorityTransition(
     assertEquals(server.listExecutionClaims(space), []);
     assertEquals(pool.metrics().crashes, 0);
 
-    // Re-enable the already-live replacement realm. Its first invalidation
-    // installs a new claim incarnation; the next one proves stable ownership
-    // returned to the server without crashing on the drained lease.
-    await writePolicy(true);
+    // Re-enable by rotating the live shadow realm once more. For the remote
+    // observation race, hold replacement rehydration while the client commit
+    // lands so startup must prove the computation before adopting it.
+    const workersBeforeReenable = pool.metrics().workersStarted;
+    const leaseGenerationBeforeReenable = pool.snapshot(space, "")
+      ?.leaseGeneration;
+    assertExists(leaseGenerationBeforeReenable);
+    if (remoteObservationTemplate !== undefined) {
+      server.gateNextSchedulerList();
+    }
+    const sourceSession = remoteObservationTemplate === undefined
+      ? observer
+      : await getRaceObserver();
     clientCommits.length = 0;
-    const reclaimSeq = remoteObservationTemplate === undefined
-      ? await runSource(10)
-      : await runRemoteObservedSource(10, remoteObservationTemplate);
+    const reenable = writePolicy(true);
+    let reclaimSeq: number;
+    if (remoteObservationTemplate === undefined) {
+      await reenable;
+      reclaimSeq = await runSource(10);
+    } else {
+      await server.schedulerListStarted.promise;
+      reclaimSeq = await runRemoteObservedSource(
+        10,
+        remoteObservationTemplate,
+        false,
+        sourceSession,
+      );
+      server.releaseSchedulerList.resolve();
+      await reenable;
+      await clientStorage.synced();
+      await input.pull();
+      await visibleResult.pull();
+      await clientRuntime.settled();
+      assertEquals(await visibleResult.pull() as unknown, 20);
+    }
+    assertEquals(pool.snapshot(space, ""), {
+      state: "live",
+      referenceCount: 1,
+      pieces: [stableResultId],
+      leaseGeneration: leaseGenerationBeforeReenable + 1,
+    });
+    assertEquals(pool.metrics().workersStarted, workersBeforeReenable + 1);
     const reclaimEvent = await waitForControl(
       (event): event is Extract<
         ExecutionControlEvent,
@@ -919,7 +1017,10 @@ async function exercisePoolAuthorityTransition(
         event.settlement.inputBasisSeq >= reclaimSeq,
       "pool transition replacement settlement",
     );
-    assertEquals(reclaimed.leaseGeneration, leaseGenerationBeforeDisable! + 1);
+    assertEquals(
+      reclaimed.leaseGeneration,
+      leaseGenerationBeforeReenable + 1,
+    );
     assertEquals(server.listExecutionClaims(space), [reclaimed]);
     clientCommits.length = 0;
     await runSource(11);
@@ -987,6 +1088,9 @@ async function exercisePoolAuthorityTransition(
     }
     if (!seedStorageClosed) await seedStorage.close().catch(() => undefined);
     await observerClient?.close().catch(() => undefined);
+    for (const client of raceObserverClients) {
+      await client.close().catch(() => undefined);
+    }
     await server.close();
   }
 }
@@ -1649,9 +1753,9 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     );
 
     // This test drives DenoSpaceExecutorFactory directly, outside the shared
-    // pool that normally renews the lease. Refresh the direct fixture's lease
-    // and generation before restoring policy so the comparison cannot become
-    // a lease-TTL test as its sample count grows.
+    // pool that normally rotates the shadow lease at the policy boundary.
+    // Finish the disabled generation, enable with no live lease, then acquire
+    // the exact generation the replacement Worker will use.
     assertExists(executor);
     await executor.stop();
     executor = null;
@@ -1660,9 +1764,9 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     assertExists(drainingLease);
     assertEquals(drainingLease.state, "draining");
     assertExists(await server.finishExecutionLeaseDrain(drainingLease));
+    await writePolicy(true);
     const rolloutLease = await server.acquireExecutionLease(space, "");
     assertExists(rolloutLease);
-    await writePolicy(true);
     const reclaimed = Promise.withResolvers<void>();
     let reclaimedGeneration = 0;
     const unsubscribeReclaim = observer.subscribeExecutionControl((event) => {
