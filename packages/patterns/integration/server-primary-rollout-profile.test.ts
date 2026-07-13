@@ -129,6 +129,32 @@ async function actionTrace(page: Page): Promise<ActionTraceEntry[]> {
   });
 }
 
+async function actionRunCounts(page: Page): Promise<Record<string, number>> {
+  return await page.evaluate(async () => {
+    const rt = (globalThis as typeof globalThis & {
+      commonfabric?: {
+        rt?: {
+          getGraphSnapshot(): Promise<{
+            nodes: Array<{
+              id: string;
+              stats?: { runCount: number };
+            }>;
+          }>;
+        };
+      };
+    }).commonfabric?.rt;
+    if (!rt) throw new Error("runtime graph snapshot is unavailable");
+    const { nodes } = await rt.getGraphSnapshot();
+    const counts: Record<string, number> = {};
+    for (const node of nodes) {
+      if (node.stats) {
+        counts[node.id] = Math.max(counts[node.id] ?? 0, node.stats.runCount);
+      }
+    }
+    return counts;
+  });
+}
+
 const p95 = (values: readonly number[]): number => {
   const sorted = [...values].sort((left, right) => left - right);
   return sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
@@ -329,14 +355,12 @@ const p95 = (values: readonly number[]): number => {
           );
         }
 
-        await Promise.all([
-          resetActionTrace(actorPage),
-          resetActionTrace(lazyPage),
-        ]);
+        await resetActionTrace(actorPage);
         const loadBefore = await collectBrowserLoadSummary(
           actorPage,
           `${label}-before`,
         );
+        const lazyActionRunsBefore = await actionRunCounts(lazyPage);
         const healthBefore = await executionHealth();
         let profile: CPUProfile | undefined;
         let processCpuBefore: BrowserProcessMetrics | undefined;
@@ -345,21 +369,30 @@ const p95 = (values: readonly number[]): number => {
           processCpuBefore = await profiler.readBrowserProcessMetrics();
         }
         const actionRuns: number[] = [];
+        const observedActionIds = new Set<string>();
         const observedActionWrites = new Set<string>();
         for (let index = 0; index < CPU_EVENTS; index++) {
+          // The exact trace is a 2,000-entry diagnostic ring. Reset between
+          // batches so long benchmark phases cannot make a constant ring
+          // length look like a missed action.
+          if (index > 0 && index % 100 === 0) {
+            await resetActionTrace(actorPage);
+          }
           const traceBefore = (await actionTrace(actorPage)).length;
           await clickAndSettle();
           const delta = (await actionTrace(actorPage)).slice(traceBefore);
-          for (const entry of delta) {
+          const writingEntries = delta.filter((entry) =>
+            entry.actualWrites.length > 0
+          );
+          for (const entry of writingEntries) {
+            observedActionIds.add(entry.actionId);
             for (const write of entry.actualWrites) {
               observedActionWrites.add(
                 `${entry.actionId}:${write.entityId}:${write.path.join("/")}`,
               );
             }
           }
-          actionRuns.push(
-            delta.filter((entry) => entry.actualWrites.length > 0).length,
-          );
+          actionRuns.push(writingEntries.length);
         }
         let browserProcessCpu: PhaseResult["browserProcessCpu"];
         if (profiler) {
@@ -416,12 +449,23 @@ const p95 = (values: readonly number[]): number => {
             JSON.stringify(profile),
           );
         }
-        // Query the profiled lazy Worker only after sampling stops. Per-event
-        // trace RPCs would themselves contaminate the CPU profile.
-        const lazyActionRuns =
-          (await actionTrace(lazyPage)).filter((entry) =>
-            entry.actualWrites.length > 0
-          ).length;
+        // Query cumulative graph counters only after sampling stops. This
+        // keeps lazy-worker RPC and trace instrumentation outside the CPU
+        // bracket while avoiding the finite action-trace ring entirely.
+        const lazyActionRunsAfter = await actionRunCounts(lazyPage);
+        const lazyActionRuns = [...observedActionIds].reduce(
+          (total, actionId) => {
+            const before = lazyActionRunsBefore[actionId] ?? 0;
+            const after = lazyActionRunsAfter[actionId] ?? 0;
+            if (after < before) {
+              throw new Error(
+                `lazy action ${actionId} run count decreased from ${before} to ${after}`,
+              );
+            }
+            return total + after - before;
+          },
+          0,
+        );
         const loadAfter = await collectBrowserLoadSummary(
           actorPage,
           `${label}-after`,
@@ -494,7 +538,25 @@ const p95 = (values: readonly number[]): number => {
           }
         }
         const healthAfter = await executionHealth();
-        return buildResult(healthAfter);
+        const result = buildResult(healthAfter);
+        if (PROFILE_DIR) {
+          await Deno.mkdir(PROFILE_DIR, { recursive: true });
+          await Deno.writeTextFile(
+            join(PROFILE_DIR, `${label}-phase.json`),
+            JSON.stringify(
+              {
+                capturedAt: new Date().toISOString(),
+                phase: result,
+                healthBefore,
+                healthAfterBracket,
+                healthAfter,
+              },
+              null,
+              2,
+            ),
+          );
+        }
+        return result;
       };
 
       try {
