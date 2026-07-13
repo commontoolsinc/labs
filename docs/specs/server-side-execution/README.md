@@ -953,6 +953,13 @@ preempt a background generation.
 Registry cleanup is not a prerequisite, but preventing two server runtimes is.
 A subprocess tier remains optional for hard isolation.
 
+When OpenTelemetry export is active, each executor Worker attaches its own
+Runtime telemetry bus to the process OTel globals and enables scheduler
+preflight markers. The bridge is fail-open, carries `ct.runtime=server-executor`
+plus the served space and sponsor DID on spans, and detaches only after the
+Worker Runtime is disposed. Attaching only the toolshed's process-global
+Runtime would miss the isolated executor's scheduler and storage markers.
+
 Threading note: the engine's SQLite reads are synchronous FFI on the engine
 thread; executor workers do **not** open the database. They talk to the
 engine over an in-process channel (below). This respects the single-writer
@@ -967,6 +974,12 @@ key nor raw `Engine` access crosses into the Worker. Reads and commits therefore
 traverse the canonical protocol path, preserving session authentication, ACL
 and CFC validation, conflict handling, scheduler-state updates, and post-commit
 hooks. In-process means transport-efficient, not policy-bypassing.
+
+Every physical provider transaction has its own client-side `storage.push`
+telemetry span, joined to the memory host by space and stable local sequence.
+That includes the observation-only canonical settlement written after a
+claimed action is rejected as unserved: the rejected action attempt and its
+settlement are two transactions with separate terminal markers.
 
 The provider does not install a `session.watch` graph query. Instead, the
 server's host-only accepted-commit callback reports successful canonical

@@ -212,6 +212,11 @@ Off by default; flip `OTEL_ENABLED=true` to start exporting.
 | `OTEL_TRACES_SAMPLER` | `always_on` |
 | `OTEL_TRACES_SAMPLER_ARG` | `1.0` |
 
+Server executor Workers inherit these settings and bridge their isolated
+Runtime telemetry when either `OTEL_ENABLED` or Deno's native `OTEL_DENO` is
+`true`/`1`. Attachment is fail-open; spans identify the executor Runtime,
+served space, and sponsoring user.
+
 ---
 
 ## Build info
