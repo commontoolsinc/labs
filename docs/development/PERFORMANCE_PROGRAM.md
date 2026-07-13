@@ -54,10 +54,11 @@ step, and we'll ratchet targets down as we improve.
 ## What We Know (and Don't Know)
 
 **What exists today:**
-- 14 micro-benchmark files across runner, memory, utils
+- Dozens of micro-benchmark files across runner, memory, utils, and other
+  packages
 - CI benchmarks every four hours on main (dedicated runner group), JSON
   artifacts with 90-day retention, charted on the team ops dashboard's /bench
-  page
+  page (see [BENCHMARKS.md](BENCHMARKS.md))
 - Per-PR performance gate comparing CI timings against recent main runs
   (median + 3σ or +50%)
 - Recent wins: compilation cache (~100-500ms saved), schema freeze caching,
