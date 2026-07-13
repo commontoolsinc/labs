@@ -16,6 +16,7 @@ import {
   TEST_MEMORY_SERVER_AUTH,
   testPrincipalSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
+import { shouldAwaitResumedListInput } from "../src/builtins/list-resume-state.ts";
 
 // awaitInputThenSettle path in the list builtins (filter/flatMap/map).
 //
@@ -118,6 +119,37 @@ describe("list builtin resume input-settle", () => {
   });
   afterEach(async () => {
     await server.close();
+  });
+
+  it("holds a persisted unavailable result while its list input resyncs", () => {
+    expect(
+      shouldAwaitResumedListInput(
+        true,
+        DataUnavailable.pending(),
+        undefined,
+        0,
+      ),
+    ).toBe(true);
+    expect(
+      shouldAwaitResumedListInput(
+        true,
+        DataUnavailable.error(new Error("request failed")),
+        [],
+        0,
+      ),
+    ).toBe(true);
+
+    // Fresh runs and initialized empty containers retain the ordinary list
+    // semantics; the guard is only for durable resume state.
+    expect(
+      shouldAwaitResumedListInput(
+        false,
+        DataUnavailable.pending(),
+        undefined,
+        0,
+      ),
+    ).toBe(false);
+    expect(shouldAwaitResumedListInput(true, [], undefined, 0)).toBe(false);
   });
 
   async function run(

@@ -54,6 +54,7 @@ import {
   preferDataUnavailable,
   readAvailabilityAwareCell,
 } from "../data-unavailability.ts";
+import { shouldAwaitResumedListInput } from "./list-resume-state.ts";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
 
@@ -340,8 +341,12 @@ export function flatMap(
     // empty input clears the result. Outside resume the flag is clear, so a list
     // set undefined at runtime still runs the cleanup below.
     if (
-      elementAwaitSync && priorLen > 0 &&
-      (list === undefined || (Array.isArray(list) && list.length === 0))
+      shouldAwaitResumedListInput(
+        elementAwaitSync,
+        rawResult,
+        list,
+        priorLen,
+      )
     ) {
       awaitInputThenSettle(inputsCell.key("list").withTx(tx).resolveAsCell());
       return;
