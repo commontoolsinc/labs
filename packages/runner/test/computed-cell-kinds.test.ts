@@ -385,6 +385,7 @@ describe("computed cell kinds", () => {
         "navigateTo",
         "wish",
         "sqliteQuery",
+        "inspectConfLabel",
       ]);
 
       // Every registered builtin must be recorded in the replayability
