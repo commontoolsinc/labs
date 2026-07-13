@@ -1,17 +1,10 @@
-// PROPOSED HOME: packages/schema-generator/test/enum-schema-mapping.test.ts
-//
 // Pins the TS-enum rows of docs/specs/schema-generator/ts_to_json_schema_mapping.md
-// (§4), currently marked "probe only — no repo test":
+// (§4):
 //
 //   - enum declarations hoist under the enum name with NO `type` key
 //     (all-literal union path): numeric -> { enum: [0,1,2] },
 //     string -> { enum: ["on","off"] }, with $ref at non-root occurrences;
-//   - a single enum member type hoists under the BARE member name;
-//   - two enums sharing a member name COLLIDE on the $defs key, first wins —
-//     the second property silently receives the FIRST enum's schema. This is
-//     an observed wrong-schema hazard; this test pins the current behavior so
-//     any fix (or accidental change) is visible. If the collision is fixed,
-//     update the mapping spec row in the same change (§4 and §16 item 2).
+//   - root enum occurrences stay inline.
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

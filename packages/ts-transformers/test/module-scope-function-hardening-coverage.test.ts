@@ -24,6 +24,44 @@ function variableNamed(
   );
 }
 
+/** Index of a top-level helper-call statement whose first argument is `name`. */
+function helperCallStatementIndex(
+  root: ts.SourceFile,
+  helper: string,
+  name: string,
+): number {
+  return root.statements.findIndex((statement) => {
+    if (!ts.isExpressionStatement(statement)) return false;
+    const expression = statement.expression;
+    if (
+      !ts.isCallExpression(expression) ||
+      !ts.isIdentifier(expression.expression) ||
+      expression.expression.text !== helper
+    ) {
+      return false;
+    }
+    const first = expression.arguments[0];
+    return !!first && ts.isIdentifier(first) && first.text === name;
+  });
+}
+
+/** Index of a top-level function or variable declaration named `name`. */
+function declarationStatementIndex(
+  root: ts.SourceFile,
+  name: string,
+): number {
+  return root.statements.findIndex((statement) => {
+    if (
+      ts.isFunctionDeclaration(statement) && statement.name?.text === name
+    ) {
+      return true;
+    }
+    return collect(statement, ts.isVariableDeclaration).some((declaration) =>
+      ts.isIdentifier(declaration.name) && declaration.name.text === name
+    );
+  });
+}
+
 // Module-scope function hardening freezes every top-level callable and, for
 // callables a `WriteAuthorizedBy` / `TrustedActionWrite` type references,
 // stamps a verified-binding identity onto them. The existing
@@ -143,6 +181,100 @@ Deno.test(
     assert(
       callsNamed(root, "__cfHardenFn").some(argIsSaveTitle),
       "expected a separate __cfHardenFn(saveTitle) hardening call",
+    );
+
+    const declarationIndex = declarationStatementIndex(root, "saveTitle");
+    const annotationIndex = helperCallStatementIndex(
+      root,
+      "__cfBindVerifiedBinding",
+      "saveTitle",
+    );
+    const hardeningIndex = helperCallStatementIndex(
+      root,
+      "__cfHardenFn",
+      "saveTitle",
+    );
+    assert(
+      declarationIndex < annotationIndex && annotationIndex < hardeningIndex,
+      "expected declaration, identity annotation, then hardening",
+    );
+  },
+);
+
+Deno.test(
+  "trusted named function is annotated before it is hardened",
+  async () => {
+    const output = await transform(
+      `/// <cts-enable />\n` +
+        `import { pattern, WriteAuthorizedBy } from "commonfabric";\n` +
+        `function saveTitle(): string { return "x"; }\n` +
+        `interface Input { title: string; }\n` +
+        `interface Output { savedTitle: WriteAuthorizedBy<string, typeof saveTitle>; }\n` +
+        `export default pattern<Input, Output>(({ title }) => ({ savedTitle: title }));\n`,
+    );
+
+    const root = parseModule(output);
+    const declarationIndex = declarationStatementIndex(root, "saveTitle");
+    const annotationIndex = helperCallStatementIndex(
+      root,
+      "__cfBindVerifiedBinding",
+      "saveTitle",
+    );
+    const hardeningIndex = helperCallStatementIndex(
+      root,
+      "__cfHardenFn",
+      "saveTitle",
+    );
+    assert(
+      declarationIndex >= 0 && annotationIndex >= 0 && hardeningIndex >= 0,
+      "expected declaration, identity annotation, and hardening statements",
+    );
+    assert(
+      declarationIndex < annotationIndex && annotationIndex < hardeningIndex,
+      "identity must be stamped while the function is still extensible",
+    );
+  },
+);
+
+Deno.test(
+  "exported trusted direct function nests annotation inside hardening",
+  async () => {
+    const output = await transform(
+      `/// <cts-enable />\n` +
+        `import { pattern, WriteAuthorizedBy } from "commonfabric";\n` +
+        `export const writeFn = (value: string): string => value;\n` +
+        `interface Input { title: string; }\n` +
+        `interface Output { savedTitle: WriteAuthorizedBy<string, typeof writeFn>; }\n` +
+        `export default pattern<Input, Output>(({ title }) => ({ savedTitle: title }));\n`,
+    );
+
+    const root = parseModule(output);
+    const writeFn = variableNamed(root, "writeFn");
+    assert(writeFn?.initializer && ts.isCallExpression(writeFn.initializer));
+    const hardening = writeFn.initializer;
+    assert(
+      ts.isIdentifier(hardening.expression) &&
+        hardening.expression.text === "__cfHardenFn",
+      "expected the hardener to be the outer call",
+    );
+    const annotation = hardening.arguments[0];
+    assert(annotation && ts.isCallExpression(annotation));
+    assert(
+      ts.isIdentifier(annotation.expression) &&
+        annotation.expression.text === "__cfBindVerifiedBinding",
+      "expected identity annotation before the value is frozen",
+    );
+    assert(
+      annotation.arguments[0] && ts.isArrowFunction(annotation.arguments[0]),
+      "expected the direct function value inside the annotation",
+    );
+    assert(
+      helperCallStatementIndex(
+        root,
+        "__cfBindVerifiedBinding",
+        "writeFn",
+      ) === -1,
+      "exported bindings should use inline annotation, not a later statement",
     );
   },
 );

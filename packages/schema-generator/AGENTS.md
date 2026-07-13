@@ -11,7 +11,7 @@ subpath exports. Entry point is `src/index.ts` (not `mod.ts`).
 
 | Question                                                                 | Read                                                                                                       |
 | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Full type→schema mapping rules                                           | `docs/specs/schema-generator/` mapping spec (sources-of-truth table first)                                 |
+| Full type→schema mapping rules                                           | `docs/specs/schema-generator/ts_to_json_schema_mapping.md` (sources-of-truth table first)                  |
 | The runtime schema dialect (asCell, ifc, additionalProperties tri-state) | `docs/specs/json_schema.md` + the `JSONSchema` type in `packages/api/index.ts` (the type is authoritative) |
 | Wrapper vocabulary (spelling vs resolved kind)                           | `src/typescript/wrapper-names.ts` (header comment) + `src/typescript/cell-brand.ts`                        |
 | Cross-package contract with ts-transformers                              | bare WeakMaps `typeRegistry` / `schemaHints` — see ts-transformers `src/core/cross-stage-state.ts` header  |
@@ -47,11 +47,13 @@ subpath exports. Entry point is `src/index.ts` (not `mod.ts`).
 
 ## Test workflow
 
-`deno task test`. Golden fixtures support `UPDATE_GOLDENS=1`, single-fixture
-`FIXTURE=<name>`, and `SKIP_INPUT_CHECK` (see `deno.jsonc` test task's env
-allowlist). End-to-end emission is also pinned by ts-transformers fixtures
-(`schema-transform/`, `schema-injection/` suites) — behavior changes here fail
-that package's goldens too; run both.
+`deno task check` and `deno task test`. The check task excludes raw fixture
+inputs because the fixture runner supplies their synthetic wrapper prelude.
+Golden fixtures support `UPDATE_GOLDENS=1`, single-fixture `FIXTURE=<name>`, and
+`SKIP_INPUT_CHECK` (see `deno.jsonc` test task's env allowlist). End-to-end
+emission is also pinned by ts-transformers fixtures (`schema-transform/`,
+`schema-injection/` suites) — behavior changes here fail that package's goldens
+too; run both.
 
 ## When you change behavior
 

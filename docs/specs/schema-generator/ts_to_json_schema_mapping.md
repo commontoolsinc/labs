@@ -2,9 +2,8 @@
 
 **Status:** Descriptive (current behavior; on conflict, code/tests win — §1)\
 **Package:** `@commonfabric/schema-generator`\
-**Last verified against:** workspace tree `e8516c636` / origin/main
-`ce0e54322`, 2026-07-04 documentation audit (the branch diff does not touch
-this package, so this document describes `main` as of 2026-07)\
+**Last verified against:** origin/main `94e00a62f` plus this documentation and
+test branch, 2026-07-13 verification\
 **Related:** `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 (§10, §12 describe the consumer side; its §6.8/§12 CFC-lowering account was
 corrected in the same 2026-07 audit that produced this document) and
@@ -84,8 +83,8 @@ synthetic (`pos === -1 && end === -1`) and resolved to `any`, or (b) the
 real-position type arg *contains* an `any`/`unknown` keyword anywhere
 (`containsAnyOrUnknownTypeNode`), "so the checker does not recover a wider
 semantic type"
-(`ts-transformers/src/transformers/schema-generator.ts:84-101,485-500`).
-Trigger (b) is absent from the ts-transformers spec §12 as of this writing.
+(`ts-transformers/src/transformers/schema-generator.ts:84-101,485-500`). Both
+triggers are documented in the ts-transformers behavior spec §12.
 
 **The node-based analyzer** (`analyzeTypeNodeStructure`,
 `src/schema-generator.ts:751-959`) handles: `TypeLiteral` nodes (properties
@@ -103,8 +102,8 @@ resolve-else-`true` fallback (`:950-958`).
 `const` (`{ type: "string", const: "x" }`, `:881-895`); the type path emits
 single-value `enum` (`{ type: "string", enum: ["x"] }`,
 `src/formatters/primitive-formatter.ts:44-70`). Both spellings appear in
-emitted schemas depending on the producing path; no in-package test pins
-const-vs-enum parity as of this writing.
+emitted schemas depending on the producing path. The distinction is pinned by
+`test/literal-encoding-paths.test.ts`.
 
 ## 3. Formatter Chain
 
@@ -145,21 +144,21 @@ by any repo test.
 | bigint literal (`42n`) | `{ type: "integer", enum: [Number(v)] }` — converted through `Number`, so precision above 2^53 would be lost | `primitive-formatter.ts:71-79` | probe only |
 | Template literal type | `{ type: "string" }` | `primitive-formatter.ts:82-84` | probe only |
 | `null` | `{ type: "null" }` | `primitive-formatter.ts:99-101` | fixtures |
-| `undefined` | `{ type: "undefined" }` — non-standard, deliberate (`api/index.ts:1482`) | `primitive-formatter.ts:102-105`; node `schema-generator.ts:934-936` | fixtures |
+| `undefined` | `{ type: "undefined" }` — non-standard, deliberate (`api/index.ts:1551`) | `primitive-formatter.ts:102-105`; node `schema-generator.ts:934-936` | fixtures |
 | `void` | `{ asCell: ["opaque"] }` ("matches anything, but we will not access the cell") | `primitive-formatter.ts:106-109`; node `schema-generator.ts:942-944` | void-type.test.ts ×3 |
 | `never` | `false` (boolean schema); `never[]` → `items: false`; `false` members dropped from `anyOf` | `primitive-formatter.ts:110-114`; `array-formatter.ts:59-62`; `union-formatter.ts:1043-1046` | array-special-types |
 | `any` | `true`; `any[]` → `items: true` | `primitive-formatter.ts:115-118`; `array-formatter.ts:49-52` | tests |
-| `unknown` | `{ type: "unknown" }` — non-standard (`api/index.ts:1483`); `unknown[]` → `items: { type: "unknown" }` | `primitive-formatter.ts:119-122`; `array-formatter.ts:54-57` | array-special-types |
+| `unknown` | `{ type: "unknown" }` — non-standard (`api/index.ts:1552`); `unknown[]` → `items: { type: "unknown" }` | `primitive-formatter.ts:119-122`; `array-formatter.ts:54-57` | array-special-types |
 | TS `object` keyword | `{ type: "object", additionalProperties: true }` | `object-formatter.ts:200-207` | probe only |
 | Uninstantiated type parameter | constraint if any, else default, else `{}` | `schema-generator.ts:351-362` | untested at generator level; the pipeline substitutes `unknown` nodes before generation (ts-transformers spec §10.5), so `{}` is the *local* behavior |
 | Conditional type | `{}` | `schema-generator.ts:369-371` | untested |
 | `T[]` / `Array<T>` / `ReadonlyArray<T>` / aliases | `{ type: "array", items: <T> }`; node-first element detection, then Reference/typeArguments, then numeric index | `type-utils.ts:589-747`; `array-formatter.ts` | fixtures |
-| Tuple (`[string, number]`) | `{ type: "array", items: <merged element union> }` — e.g. `items: { type: ["number","string"] }`. **No `prefixItems`, no length bounds**; positional structure is lost (numeric-index fallback, `type-utils.ts:735-744`; grep confirms `prefixItems` appears only in a comment) | `type-utils.ts:735-744` | probe only |
+| Tuple (`[string, number]`) | `{ type: "array", items: <merged element union> }` — e.g. `items: { type: ["number","string"] }`. **No `prefixItems`, no length bounds**; positional structure is lost (numeric-index fallback, `type-utils.ts:735-744`; grep confirms `prefixItems` appears only in a comment) | `type-utils.ts:735-744` | `test/tuple-emission.test.ts` |
 | Dictionary with both string and number index | treated as object map, not array | `type-utils.ts:716-733` | untested directly |
 | Index signatures on objects | `additionalProperties: <value schema>`; string index takes precedence over number; JSDoc from index-signature declarations propagates (conflicts → keep first + `$comment`) | `object-formatter.ts:334-379`; node path `schema-generator.ts:793-825` (no JSDoc) | descriptions-index* fixtures |
 | `Record<K,V>` with finite literal-union `K` | expands to concrete `properties` (checker-driven property enumeration) | via `ObjectFormatter`; fixture `record-union-keys` | record-mapped-types.test.ts |
 | Functions / callables / constructables | property skipped entirely (not in `properties`, not in `required`) — **except** callable properties whose call signature returns `Stream`/`Cell`/`SqliteDb` (ModuleFactory/HandlerFactory shapes): kept as `{ asCell: ["stream"/"cell"/"sqlite"] }` and they participate in `required` | skip: `type-utils.ts:558-575`, `object-formatter.ts:233-238,259,269-287`; exception: `object-formatter.ts:44-67` (only those three kinds; capability cells like `ReadonlyCell` returns are *not* kept) | pattern-with-types fixtures |
-| TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts:176-214`; hoisting §5 | probe only — no repo test |
+| TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts:176-214`; hoisting §5 | `test/enum-schema-rows.test.ts` |
 | Single enum member type (`Mode.On`) | hoisted under the **bare member name**: `$defs: { On: { type: "string", enum: ["on"] } }` — two enums sharing a member name **collide** on the `$defs` key (first wins: the second property `$ref`s the wrong value set), and an enum member colliding with an interface name steals its `$ref` (order-dependent). KNOWN BUG | pinned: `test/enum-member-hoisting.test.ts` | — |
 | `Date` / `URL` / typed arrays / etc. | native table, §5.2 | `native-type-formatter.ts:5-28` | date-types fixture, native-type tests |
 | `Map`/`WeakMap`/`Set`/`WeakSet` | **throws** (§13) | `type-utils.ts:400-411` | schema-generator.test.ts:643-682 |
@@ -303,7 +302,7 @@ both tested by `circular-alias-error.test.ts`).
 
 ### 6.2 Emission
 
-`applyWrapperSemantics` (`common-fabric-formatter.ts:2031-2050`) maps the
+`applyWrapperSemantics` (`common-fabric-formatter.ts:2053-2072`) maps the
 resolved kind to a brand (`wrapperKindToBrand`, `cell-brand.ts:171-193`) and
 **prepends** one entry to a single `asCell` array on the inner schema:
 `Cell` (and the `Writable` spelling) → `"cell"`, `Stream` → `"stream"`,
@@ -315,11 +314,11 @@ Nesting prepends: `Stream<Cell<number>>` → `{ type: "number", asCell:
 opaque). Boolean inner schemas: `true` → `{ asCell: [brand] }`; `false` →
 `{ asCell: [brand], not: true }` (`:2041-2045`).
 
-Entry shapes (`packages/api/index.ts:234-239`): `AsCellEntry = CellKind |
+Entry shapes (`packages/api/index.ts:240-258`): `AsCellEntry = CellKind |
 { kind: CellKind; scope?: SchemaScope }`, `CellKind` being the seven brand
 strings (`:221-228`). The object form is produced only by scope wrapping
 (§10). `Cell<Cell<T>>` → `asCell: ["cell","cell"]` is representable per the
-api comment (`api/index.ts:1485-1487`), but no fixture pins direct
+api comment (`api/index.ts:1554-1556`), but no fixture pins direct
 cell-in-cell nesting as of this writing; the pinned nested pair is
 `["stream","cell"]`.
 
@@ -328,8 +327,7 @@ them only in two stale comments; the api `JSONSchemaObj` has no such members.
 The single-array cleanup landed in #3732 (2026-05-29, verified in git), also
 the README's last commit. Legacy *readers* of `asStream` survive in
 `packages/runner/src/` (`schema.ts`, `traverse.ts`, `link-utils.ts`, …) for
-pre-cleanup schemas; the ts-transformers spec §12 still uses `asCell`/
-`asStream` wording and should be corrected.
+pre-cleanup schemas.
 
 ### 6.3 Node/type interplay
 
@@ -358,7 +356,7 @@ pre-cleanup schemas; the ts-transformers spec §12 still uses `asCell`/
 
 `Reactive<T>` emits **no wrapper marker of any kind**. Evidence chain:
 
-1. `Reactive<T> = T` is an identity alias (`packages/api/index.ts:1247`) — no
+1. `Reactive<T> = T` is an identity alias (`packages/api/index.ts:1316`) — no
    runtime wrapper, no structural brand, so structural detection cannot see it
    (explicit comment, `common-fabric-formatter.ts:828-834`).
 2. Node-level detection deliberately excludes the spelling:
@@ -377,9 +375,9 @@ pre-cleanup schemas; the ts-transformers spec §12 still uses `asCell`/
 Hoisting nuance: `getNamedTypeKey` suppresses a key when the aliasSymbol
 survives as `Reactive` (`type-utils.ts:440-447`); commonly the checker resolves
 the identity alias to the inner type object itself (no aliasSymbol), so inner
-named types still hoist, as the fixture shows. Where other documents disagree:
-the ts-transformers spec §12 is right in substance ("does not emit asOpaque");
-any doc claiming `Reactive` emits `asCell: ["opaque"]` is wrong on this tree.
+named types still hoist, as the fixture shows. The ts-transformers behavior
+spec §12 uses the same single-`asCell` vocabulary. Any doc claiming `Reactive`
+emits `asCell: ["opaque"]` is wrong on this tree.
 
 ## 7. `Default<T,V>` And `DeepDefault<V>`
 
@@ -394,7 +392,7 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
 **V extraction**, in priority order:
 
 1. **Node-based** (`extractDefaultValueFromNode` + expression walk,
-   `common-fabric-formatter.ts:1770-2017`; union-side twin
+   `common-fabric-formatter.ts:1792-2039`; union-side twin
    `union-formatter.ts:818-990`): literal nodes, tuple nodes, object-literal
    type nodes, `Record<K, never>` → `{}`, and `typeof CONST` queries resolved
    through import aliases to the variable initializer (unwrapping
@@ -500,7 +498,7 @@ Default paths of §7:
 ## 10. Scope Wrappers
 
 `PerSpace` / `PerUser` / `PerSession` / `PerAny` (api: optional
-`SCOPE_BRAND`-typed intersections, `packages/api/index.ts:241-248`) lower to a
+`SCOPE_BRAND`-typed intersections, `packages/api/index.ts:260-269`) lower to a
 `scope` key with values `"space" | "user" | "session" | "any"`
 (`SCOPE_WRAPPER_SCOPES`, `common-fabric-formatter.ts:31-36`). Detection is by
 node name or aliasSymbol name (`:81-92,122-131,182-206`). Placement
@@ -518,14 +516,11 @@ both survive: `PerUser<Cell<PerSession<string>>>` → `{ asCell: [{ kind:
 
 ## 11. CFC Alias Lowering (`ifc` Metadata)
 
-The generator lowers all 21 canonical CFC alias names to `ifc.*` metadata.
-This landed 2026-04-14 (#3263, verified in git — the commit adds
-`test/schema/cfc-authoring.test.ts`) and directly contradicts the
-ts-transformers spec §12/§14.6 claim of no `ifc.*` emission on `main`; that
-sentence needs correction, not this behavior. Alias set:
-`CFC_CANONICAL_ALIAS_NAMES` (`packages/api/cfc.ts:259-281`), consumed at
-`common-fabric-formatter.ts:30`. Payload map (`buildIfcMetadataForAlias`,
-`common-fabric-formatter.ts:1289-1418`), as of this writing:
+The canonical authoring surface contains 18 names. The inventory is
+`CFC_CANONICAL_ALIAS_NAMES` (`packages/api/cfc.ts`), consumed by
+`CommonFabricFormatter`. Sixteen aliases lower the wrapped value and attach an
+`ifc` payload; `AnyOf` and `PolicyOf` are label-expression markers interpreted
+inside those payloads.
 
 | Alias | `ifc` payload |
 | --- | --- |
@@ -537,25 +532,23 @@ sentence needs correction, not this behavior. Alias set:
 | `AuthoredByCurrentUser<T>` | `{ addIntegrity: [{ kind: "authored-by", subject: { __ctCurrentPrincipal: true } }] }` |
 | `RequiresIntegrity<T, I>` | `{ requiredIntegrity: I }` |
 | `MaxConfidentiality<T, C>` | `{ maxConfidentiality: C }` |
-| `ExactCopy<T, S>` | `{ exactCopyOf: S }` |
-| `OpaqueInput<T, O?>` | `{ opaque: O ?? true }` |
-| `WriteAuthorizedBy<T, typeof b>` | `{ writeAuthorizedBy: { __ctWriterIdentityOf: { file, path: [binding] } } }` (`:1470-1528`) |
-| `TrustedActionWriteWithIntegrity<…>` | writeAuthorizedBy metadata + `uiContract { helper: "UiAction", action, trustedPattern, requiredEventIntegrity }` (`:1481-1504`) |
+| `AnyOf<X>` | when nested in an IFC label tuple, one atom `{ anyOf: X }` |
+| `PolicyOf<typeof rules>` | when nested in an IFC label tuple, a policy atom carrying a compile-time module-binding marker; the ts-transformer resolves it to `{ type, policyRefKind: "module", subject, moduleIdentity, symbol, policyDigest }` |
+| `WriteAuthorizedBy<T, typeof b>` | `{ writeAuthorizedBy: { __ctWriterIdentityOf: { file, path: [binding] } } }` (`:1444-1532`) |
+| `TrustedActionWriteWithIntegrity<…>` | writeAuthorizedBy metadata + `uiContract { helper: "UiAction", action, trustedPattern, requiredEventIntegrity }` (`:1340-1347,1455-1478`) |
 | `TrustedActionWrite<…>` | same, with `requiredEventIntegrity` defaulting to `[trustedPattern]` (`:1349-1358`) |
 | `TrustedActionUiContract<…>` | `{ uiContract: { helper: "UiAction", action, trustedPattern, requiredEventIntegrity? } }` (`:1359-1371`) |
-| `LengthPreservedFrom<T, S>` | `{ collection: { sourceCollection: S, lengthPreserved: true } }` |
-| `FilteredFrom<T, S>` | `{ collection: { filteredFrom: S } }` |
-| `SubsetOf<T, S>` | `{ collection: { subsetOf: S } }` |
-| `PermutationOf<T, S>` | `{ collection: { permutationOf: S } }` |
+| `ExactCopy<T, S>` | `{ exactCopyOf: S }` |
 | `ProjectionPath<T, F, P>` | `{ projection: { from: F, path: P } }` (`:1397-1402`) |
 | `ProjectionOf<T, P>` / `Projection<T, P>` | `{ projection: { from: "/", path: P } }` (`:1403-1414`) |
 
 Mechanics:
 
-- Detection is **name-only** — `CFC_ALIAS_NAMES.has(aliasName)` with no
-  declaring-source check (`:132-134,1070-1071`). Any user alias named
-  `Confidential`, `Projection`, etc. will lower. Asymmetric with `Default`'s
-  source-checked alias detection (§7); observed foot-gun, collision untested.
+- Detection is **canonical-name keyed** — `CFC_ALIAS_NAMES.has(aliasName)`.
+  Imported aliases are resolved back to their exported name, so renamed
+  imports of `AnyOf` / `PolicyOf` work. A local declaration using a canonical
+  name also lowers; unlike `Default`, there is no declaring-package guard
+  (§7), so name collisions remain an untested foot-gun.
 - User alias chains are followed with type-parameter node substitution until a
   canonical name is reached (`resolveCfcAliasFromDeclaration` /
   `substituteTypeNode`, `:1092-1287`); unresolvable expansions fall back to
@@ -563,34 +556,48 @@ Mechanics:
 - Metadata values come from type-level literals: literal nodes, tuples, type
   literals, `typeof` value reads, alias-parameter substitution, and
   tuple/object **types** via the checker when nodes are gone
-  (`extractLiteralLikeValue`, `:1615-1768`). Projection paths encode as JSON
-  Pointers with `~0`/`~1` escaping (`encodeJsonPointerPath`, `:1595-1613`).
+  (`extractLiteralLikeValue`, `:1592-1789`). That extraction recognizes
+  `AnyOf<X>` as
+  `{ anyOf: X }` and `PolicyOf<typeof rules>` as a policy atom containing
+  `__ctPolicyIdentityOf: { file, path }`. Projection paths encode as JSON
+  Pointers with `~0`/`~1` escaping (`encodeJsonPointerPath`, `:1572-1590`).
 - `ifc` merges shallowly into the base schema's existing `ifc`
-  (`mergeIfcMetadata`, `:1577-1593`); boolean schemas become `{ ifc }` /
+  (`mergeIfcMetadata`, `:1554-1570`); boolean schemas become `{ ifc }` /
   `{ not: true, ifc }`.
 - `WriteAuthorizedBy` writer identity resolves through import aliases to the
   declaring file; the file name is normalized (backslashes → `/`, first path
-  segment stripped — `normalizeWriterIdentityFile`, `:2215-2219`). The
+  segment stripped — `normalizeWriterIdentityFile`, `:2237-2241`). The
   transformer **duplicates** this attachment for
   `toSchema<WriteAuthorizedBy<T, typeof b>>()`
   (`ts-transformers/.../schema-generator.ts:29-40,126-131,347-428`), with a
   marker AST form so the identity survives literal emission (`:170-171,
   399-422`).
+- `SchemaGeneratorTransformer.resolvePolicyOfMarkers` replaces a valid policy
+  marker with the compiled module identity, exported symbol, and policy digest.
+  If it cannot match a compiler-verified exported `exchangeRules()` binding,
+  it reports a `cfc-policy-of` diagnostic and leaves the marker unresolved.
 - `uiContract` also arrives via the hints channel (§13), produced by
   `ts-transformers/src/transformers/ui-helper-lowering.ts:219`.
 
-In-package coverage: `test/schema/cfc-authoring.test.ts` (11 tests).
-End-to-end fixture:
-`ts-transformers/test/fixtures/schema-transform/opaque-input-lowering.expected.jsx`
-(`ifc: { opaque: true }`).
+In-package coverage: `test/schema/cfc-authoring.test.ts` (13 tests), including
+renamed `AnyOf` / `PolicyOf` imports. Transformer-side policy compilation and
+diagnostics are pinned by `packages/ts-transformers/test/cfc-authoring.test.ts`.
+
+The collection/opaque helpers `LengthPreservedFrom`, `FilteredFrom`,
+`SubsetOf`, `PermutationOf`, and `OpaqueInput` were removed from
+`@commonfabric/api/cfc`: the runner rejects those unsupported IFC keys
+fail-closed. A hand-authored `Cfc<T, M>` still structurally passes through an
+arbitrary record `M`; that low-level escape hatch does not make the removed
+helpers part of the supported authoring surface.
 
 The emitted key set aligns with the api's `JSONSchemaObj.ifc` member
-(`packages/api/index.ts:1579-1607`): `confidentiality`, `integrity`,
+(`packages/api/index.ts`): `confidentiality`, `integrity`,
 `addIntegrity`, `requiredIntegrity`, `maxConfidentiality`, `ownerPrincipal`,
-`writeAuthorizedBy`, `exactCopyOf`, `projection`, `collection`, `uiContract`.
-`ownerPrincipal` has no producing alias in this package as of this writing.
+`writeAuthorizedBy`, `exactCopyOf`, `projection`, `observes`, and `uiContract`.
+`ownerPrincipal` and `observes` have no direct producing alias in this package
+as of this writing.
 The api type also declares `[ID]`/`[ID_FIELD]` extension keys
-(`api/index.ts:162-163,1570-1571`); this package never emits them (grep).
+(`api/index.ts:1639-1640`); this package never emits them (grep).
 
 ## 12. Doc Comments → `description` / `tags` / `$comment`
 
@@ -649,9 +656,9 @@ Exactly one generation option exists as of this writing: `widenLiterals`
 (`primitive-formatter.ts:44-79`; bigint literals → `{ type: "integer" }`);
 (2) structurally-identical-modulo-enum union members merge recursively
 (`union-formatter.ts:220-222,996-1246`). It does **not** widen all-literal
-unions (§8, probe) and has no other effects. No in-package test exercises it;
-consumer-side it is extracted from `toSchema` options and exercised via
-ts-transformers' injection paths
+unions (§8) and has no other effects. `test/widen-literals.test.ts` pins the
+in-package behavior; consumer-side it is extracted from `toSchema` options and
+exercised via ts-transformers' injection paths
 (`ts-transformers/.../schema-generator.ts:67-82`).
 
 ## 15. Fail-Loud Inventory And Silent Degradations
@@ -679,12 +686,12 @@ Everything that throws, with source (test-pinned unless noted):
 
 Silent degradations: `safe*` wrappers `console.warn` and continue
 (`type-utils.ts:113-169,199-205`); type parameters / conditionals → `{}` (§4);
-conditional/type-parameter wrapper-union members skipped (`cff:2113-2121`);
+conditional/type-parameter wrapper-union members skipped (`cff:2135-2144`);
 synthetic node resolution failure → `any` → `true`
 (`schema-generator.ts:950-958`); unsupported intersections → permissive object
 + `$comment` (§9); the `{ type: "string", enum: ["unknown"] }` sentinel (§4);
 `applyWrapperSemantics` with an unmappable kind returns the schema unchanged
-(`cff:2035-2039`).
+(`cff:2057-2061`).
 
 ## 16. Known Limits And Observed Quirks
 
@@ -710,8 +717,8 @@ synthetic node resolution failure → `any` → `true`
    the flag is silently dropped whenever the consumer routes node-based; and
    the transformer-side `widenLiteralType` (same name, schema-injection
    pre-widening) DOES widen literal unions — the two mechanisms disagree.
-   Decide the policy (including nested enum-typed properties) before fixing;
-   in-package.
+   Decide the policy (including nested enum-typed properties) before changing
+   the in-package behavior.
 4. **bigint → `integer` via `Number`** — silent precision loss above 2^53
    (§4, probe); untested.
 5. **CFC alias detection is name-keyed**, no source check (§11); untested
@@ -735,7 +742,9 @@ synthetic node resolution failure → `any` → `true`
 ## 17. Test Workflow
 
 - `deno task test` from `packages/schema-generator/` (env knobs allow-listed
-  in `deno.jsonc:16-21`); `deno task check` type-checks src+test.
+  in `deno.jsonc:16-21`); `deno task check` type-checks source, harnesses, and
+  test suites while excluding raw fixture inputs. Those inputs depend on the
+  synthetic declarations supplied by the fixture runner and are checked there.
 - **Fixture runner** (`test/fixtures-runner.test.ts`): drives
   `test/fixtures/schema/*.input.ts` → `*.expected.json`; the root type is the
   fixture's `SchemaRoot` (`:22`). Env knobs: `FIXTURE=<baseName>` filter
@@ -754,12 +763,14 @@ synthetic node resolution failure → `any` → `true`
   `isDefaultAliasSymbol`/property-name serves consumer test environments that
   register api types under that synthetic path.
 - **Cross-package pinning**: the ts-transformers `schema-transform` and
-  `schema-injection` fixture suites (ts-transformers spec §15) exercise this
-  package end-to-end through `SchemaGeneratorTransformer`; changes here surface
-  as golden diffs there.
+  `schema-injection` fixture suites (ts-transformers behavior spec §12 and §20)
+  exercise this package end-to-end through `SchemaGeneratorTransformer`;
+  changes here surface as golden diffs there.
 - In-package unit suites (as of this writing): brand-payload-defaults, plugin,
-  intersection-formatter, native-type-parameters, schema-generator,
-  scope-wrappers, typescript/cell-brand, and the `test/schema/` family
+  enum-member-hoisting, enum-schema-rows, intersection-formatter,
+  literal-encoding-paths, native-type-parameters, schema-generator,
+  scope-wrappers, tuple-emission, widen-literals, typescript/cell-brand, and the
+  `test/schema/` family
   (arrays, booleans, capability wrappers, cell types, CFC authoring, circular
   aliases, defaults ×5, factory inputs, nested wrappers, records/mapped types,
   recursion, aliases, type-to-schema, void).
@@ -780,16 +791,16 @@ canonical; update prose from it, not the other way around. Paths relative to
 | Node-wrapper participation (§6.1, §6.4) | `NODE_WRAPPER_SPELLINGS` (`src/type-utils.ts:60-72`) | compile-time table |
 | Brand values / kind↔brand maps (§6.2) | `CellBrand` / `wrapperKindToBrand` (`src/typescript/cell-brand.ts:5-12,171-193`) | capability-wrapper-types tests |
 | Capability-kind subset (§6.3) | `CELL_CAPABILITY_KIND_MAP` (`src/formatters/common-fabric-formatter.ts:68-77`) | exhaustive over `CellWrapperKind` |
-| `asCell` entry shape (§6.2, §10) | `AsCellEntry` / `CellKind` / `SchemaScope` (`packages/api/index.ts:221-239`) | — |
+| `asCell` entry shape (§6.2, §10) | `AsCellEntry` / `CellKind` / `SchemaScope` (`packages/api/index.ts:240-258`) | — |
 | Scope wrapper map (§10) | `SCOPE_WRAPPER_SCOPES` (`src/formatters/common-fabric-formatter.ts:31-36`) | scoped-wrappers fixture |
-| CFC alias set (§11) | `CFC_CANONICAL_ALIAS_NAMES` (`packages/api/cfc.ts:259-281`) | — |
-| CFC payload map (§11) | `buildIfcMetadataForAlias` switch (`src/formatters/common-fabric-formatter.ts:1289-1418`) | cfc-authoring tests |
-| `ifc` key vocabulary (§11) | `JSONSchemaObj.ifc` (`packages/api/index.ts:1579-1607`) | — |
+| CFC alias set (§11) | `CFC_CANONICAL_ALIAS_NAMES` (`packages/api/cfc.ts:765-784`) | — |
+| CFC payload map (§11) | `buildIfcMetadataForAlias` switch (`src/formatters/common-fabric-formatter.ts:1292-1392`) | cfc-authoring tests |
+| `ifc` key vocabulary (§11) | `JSONSchemaObj.ifc` (`packages/api/index.ts:1648-1678`) | — |
 | Hint shape (§13) | `GenerationContext["schemaHints"]` (`src/interface.ts:46-60`) | note plugin.ts drift (§2) |
 | Generation options (§14) | `GenerationContext["widenLiterals"]` (`src/interface.ts:43-44`) | sole option as of this writing |
 | Throw inventory (§15) | grep `throw new Error` under `src/` | messages quoted above verified this snapshot |
 | Fixture env knobs (§17) | `test/fixtures-runner.test.ts:26-101`; `packages/test-support/src/fixture-runner.ts:119` | — |
 
-A drift-resistant habit (mirroring the ts-transformers spec §16.1): when
+A drift-resistant habit (mirroring the ts-transformers spec §21.1): when
 editing a set above, update this document from the canonical source and keep
 prose lists labeled "as of this writing."

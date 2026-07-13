@@ -70,7 +70,8 @@ per-package working guides: doc maps, instruments, conventions).
    `docs/history/` per the repo-wide live/historical rules (`docs/README.md`)
    — they do not linger unlabeled.
 4. Periodic verification: run the `spec-audit` skill (`skills/spec-audit/`)
-   after major landings or quarterly — it fans out claim-level checks of this
-   corpus against the code and reports drift. The 2026-07 audit found the
+   after major landings or quarterly. It maps claim-level checks of this corpus
+   to the relevant authority, code, tests, fixtures, and runtime seams. The
+   2026-07 audit found the
    corpus denying a subsystem (`ifc.*` lowering) that had been implemented and
    fixture-pinned for ~3 months; assume drift accumulates silently.

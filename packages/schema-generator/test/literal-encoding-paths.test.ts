@@ -1,5 +1,3 @@
-// Proposed location: packages/schema-generator/test/literal-encoding-paths.test.ts
-//
 // Pins the KNOWN QUIRK in mapping spec §2/§16.7: the two analysis paths
 // encode literals differently for the SAME authored type.
 //   type path  (generateSchema):                 { type, enum: [v] }

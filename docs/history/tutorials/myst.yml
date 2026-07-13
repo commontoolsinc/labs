@@ -17,6 +17,7 @@ project:
     - file: using-defaults.md
     - file: making-lists.md
     - file: common_ui.md
+    - file: cts.md
 
 site:
   template: book-theme

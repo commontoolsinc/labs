@@ -1,5 +1,3 @@
-// Proposed location: packages/schema-generator/test/enum-member-hoisting.test.ts
-//
 // Pins TS enum handling (mapping spec §4) and the KNOWN BUG in spec §16.2:
 // single enum-member types hoist into $defs under the BARE member name with
 // no disambiguation, so two enums sharing a member name — or an enum member
@@ -21,28 +19,7 @@ async function generate(code: string, typeName: string) {
   return generator.generateSchema(type, checker, typeNode);
 }
 
-describe("TS enum hoisting", () => {
-  it("hoists whole enums under the enum name (no member defs)", async () => {
-    const schema = await generate(
-      `enum AlphaMode { On = "alpha-on", Off = "alpha-off" }
-       enum BetaMode { On = "beta-on", Off = "beta-off" }
-       interface State { a: AlphaMode; b: BetaMode; }`,
-      "State",
-    );
-    expect(schema).toEqual({
-      type: "object",
-      properties: {
-        a: { $ref: "#/$defs/AlphaMode" },
-        b: { $ref: "#/$defs/BetaMode" },
-      },
-      required: ["a", "b"],
-      $defs: {
-        AlphaMode: { enum: ["alpha-on", "alpha-off"] },
-        BetaMode: { enum: ["beta-on", "beta-off"] },
-      },
-    });
-  });
-
+describe("TS enum member hoisting collisions", () => {
   it("hoists a single enum-member type under the bare member name", async () => {
     const schema = await generate(
       `enum Mode { On = "on", Off = "off" }

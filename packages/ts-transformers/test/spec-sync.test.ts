@@ -9,8 +9,16 @@ import { CFC_TRANSFORMER_STAGE_NAMES } from "../src/cf-pipeline.ts";
 // (see docs/development/skill-authoring.md: "make load-bearing facts
 // testable"). This suite pins the restatements to their sources so drift
 // fails CI instead of misleading the next reader.
-const SPEC_URL = new URL(
+const BEHAVIOR_SPEC_URL = new URL(
   "../../../docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md",
+  import.meta.url,
+);
+const ARRAY_METHOD_PIPELINE_URL = new URL(
+  "../docs/array-method-callback-pipeline.md",
+  import.meta.url,
+);
+const DERIVE_TO_LIFT_DESIGN_URL = new URL(
+  "../docs/derive-to-lift-design.md",
   import.meta.url,
 );
 
@@ -36,7 +44,7 @@ function parseBacktickedOrderedList(sectionBody: string): string[] {
 
 describe("current-behavior spec stays in sync with canonical constants", () => {
   it("§3 pipeline order matches CFC_TRANSFORMER_STAGE_NAMES", async () => {
-    const specText = await Deno.readTextFile(SPEC_URL);
+    const specText = await Deno.readTextFile(BEHAVIOR_SPEC_URL);
     const section = extractSection(specText, "## 3. Pipeline Order");
     const specStages = parseBacktickedOrderedList(section);
 
@@ -51,5 +59,50 @@ describe("current-behavior spec stays in sync with canonical constants", () => {
         "change in the surrounding prose.",
       ].join("\n"),
     );
+  });
+
+  it("named prose stage references use their canonical ordinal", async () => {
+    const ordinalByName = new Map(
+      CFC_TRANSFORMER_STAGE_NAMES.map((name, index) => [name, index + 1]),
+    );
+
+    for (
+      const url of [
+        BEHAVIOR_SPEC_URL,
+        ARRAY_METHOD_PIPELINE_URL,
+        DERIVE_TO_LIFT_DESIGN_URL,
+      ]
+    ) {
+      const specText = await Deno.readTextFile(url);
+      for (
+        const match of specText.matchAll(
+          /`([A-Za-z0-9_]+Transformer)`[^\n]*?\b[Ss]tage (\d+)/g,
+        )
+      ) {
+        const [, name, ordinalText] = match;
+        const expected = ordinalByName.get(name!);
+        if (expected === undefined) continue;
+        assertEquals(
+          Number(ordinalText),
+          expected,
+          `${url.pathname}: ${name} is stage ${expected}`,
+        );
+      }
+
+      for (
+        const match of specText.matchAll(
+          /^(\d+)\.\s+([A-Za-z0-9_]+Transformer)\b/gm,
+        )
+      ) {
+        const [, ordinalText, name] = match;
+        const expected = ordinalByName.get(name!);
+        if (expected === undefined) continue;
+        assertEquals(
+          Number(ordinalText),
+          expected,
+          `${url.pathname}: ${name} is stage ${expected}`,
+        );
+      }
+    }
   });
 });

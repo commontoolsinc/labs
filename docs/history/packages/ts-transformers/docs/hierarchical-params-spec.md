@@ -1,11 +1,10 @@
 ---
 status: historical
-created: 2025-12-01
-archived: 2026-07-10
+created: 2025-10-21
+archived: 2026-07-12
 reason: "Historical design rationale for the hierarchical capture model; current model documented in the behavior spec."
+superseded-by: docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md
 ---
-
-> **ARCHIVED (2026-07-04).** Historical design rationale for the hierarchical capture model (derive-era examples; fixture anchors verified present at archiving). The current capture model is documented in the current-behavior spec §9. Kept for the why, not the what.
 
 # Hierarchical Params Refactor – Implementation Summary
 

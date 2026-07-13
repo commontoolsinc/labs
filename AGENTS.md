@@ -128,8 +128,9 @@ If you are developing runtime code, read the following documentation:
   troubleshooting
 - `docs/specs/ts-transformer/README.md` - **CTS transformer specs**: map of the
   pattern-language spec, lowering contract, and behavior spec (schema mapping:
-  `docs/specs/schema-generator/`). Working in those packages? Start at
-  `packages/ts-transformers/AGENTS.md` / `packages/schema-generator/AGENTS.md`
+  `docs/specs/schema-generator/ts_to_json_schema_mapping.md`). Working in those
+  packages? Start at `packages/ts-transformers/AGENTS.md` /
+  `packages/schema-generator/AGENTS.md`
 
 When investigating transformer behavior, inspect the emitted output directly
 before inferring from source code alone:

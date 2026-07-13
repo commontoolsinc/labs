@@ -1,5 +1,3 @@
-// Proposed location: packages/schema-generator/test/tuple-emission.test.ts
-//
 // Pins fixed-length tuple emission (mapping spec §4, quirk §16.1): tuples
 // emit { type: "array", items: <merged element union> } via the
 // numeric-index fallback (type-utils.ts getArrayElementInfo). Positional

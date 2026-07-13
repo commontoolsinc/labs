@@ -44,7 +44,8 @@ rewriting, schema hint synthesis, and builder/runtime helper code.
 
 ## JSX Rewrite Contract
 
-`CfcJsxTransformer` owns the compile-time rewrite.
+`JsxExpressionSiteRouterTransformer`, through
+`src/transformers/ui-helper-lowering.ts`, owns the compile-time rewrite.
 
 Given a recognized helper element:
 
@@ -76,7 +77,7 @@ authored use and transformed use converge.
 The helper rewrite also has a schema side effect.
 
 When the helper's required semantic props are compile-time string literals,
-`CfcJsxTransformer` must attach a node-local schema hint of the form:
+The router must attach a node-local schema hint of the form:
 
 ```ts
 // Shown for illustration only.

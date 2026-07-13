@@ -87,6 +87,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
+  ts-transformers/schema-generator documentation audit, July 2026.
 - [cfc-spec-audit.md](cfc-spec-audit.md) — the CFC spec versus the
   packages/runner implementation, June 2026.
 - [invalid-state-representations-report.md](future-tasks/code-quality-tasks/invalid-state-representations-report.md)
@@ -181,6 +183,11 @@ One line per archived document; each document's header carries the fuller
   migration.
 - [unified-storage-stack.md](future-tasks/unified-storage-stack.md) —
   DocImpl-era storage-unification plan, superseded by the v2 stack.
+- [hierarchical-params-spec.md](packages/ts-transformers/docs/hierarchical-params-spec.md)
+  — hierarchical-capture implementation rationale, superseded by the behavior
+  spec.
+- [pr3154-review-guide.md](specs/ts-transformer/pr3154-review-guide.md) —
+  reviewer entrypoint for the shipped PR-3154 transformer architecture.
 
 ### Investigations, journals, and working notes
 

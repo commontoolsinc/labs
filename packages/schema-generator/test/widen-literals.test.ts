@@ -1,5 +1,3 @@
-// Proposed location: packages/schema-generator/test/widen-literals.test.ts
-//
 // Pins the CURRENT behavior of the `widenLiterals` generation option
 // (mapping spec §8/§14; quirk §16.3). The flag is consulted by
 // PrimitiveFormatter (single literals) and by the anyOf merge pass

@@ -1,13 +1,13 @@
 ---
 status: historical
 created: 2026-07-04
-archived: 2026-07-10
+archived: 2026-07-12
 reason: "Audit snapshot of the ts-transformers/schema-generator documentation corpus against the implementation; its fixes landed on the gideon/cts-docs-audit branch."
 ---
 
 # CTS documentation audit — ts-transformers & schema-generator
 **Date:** 2026-07-04 · **Tree:** E-cf-repos/labs @ e8516c636 (= origin/main ce0e54322 of 2026-07-01 + 1 unrelated commit; both packages identical to origin/main)
-**Method:** orchestrator read the full spec corpus + core sources in main context; 6 read-only audit agents (inventory, schema-generator claim audit, in-package triage, spec-corpus verification, coverage inversion, cross-layer consistency) verified claims against code/tests/fixtures/git; orchestrator independently re-verified every headline finding. Full agent reports live beside this file.
+**Method:** orchestrator read the full spec corpus + core sources in main context; 6 read-only audit agents (inventory, schema-generator claim audit, in-package triage, spec-corpus verification, coverage inversion, cross-layer consistency) verified claims against code/tests/fixtures/git; orchestrator independently re-verified every headline finding. The individual agent reports were not committed with this snapshot.
 **Prior art this extends (not restarts):** #4075 spec reconciliation (6/12), cfc-spec-audit remediation waves #3970–#4056, docs overhaul #3979/#3980, docs CI-typecheck gate #4317, tests-consolidation #4380.
 
 ---
