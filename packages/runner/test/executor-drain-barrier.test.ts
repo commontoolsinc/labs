@@ -686,10 +686,20 @@ Deno.test("persistent host restart rehydrates one fenced replacement without dup
         }
       }
     });
-    const waitForNextClaim = (): Promise<ExecutionClaim> => {
+    const waitForClaimAfterGeneration = (
+      leaseGeneration: number,
+    ): Promise<ExecutionClaim> => {
+      const existing = claimsB.find((claim) =>
+        claim.leaseGeneration > leaseGeneration
+      );
+      if (existing !== undefined) return Promise.resolve(existing);
       const waiter = Promise.withResolvers<ExecutionClaim>();
       claimWaiters.push(waiter);
-      return waiter.promise;
+      return waiter.promise.then((claim) =>
+        claim.leaseGeneration > leaseGeneration
+          ? claim
+          : waitForClaimAfterGeneration(leaseGeneration)
+      );
     };
     const waitForSettlementAfter = (
       inputBasisSeq: number,
@@ -794,7 +804,9 @@ Deno.test("persistent host restart rehydrates one fenced replacement without dup
       firstClaim.leaseGeneration + 1,
     );
 
-    const replacementClaimPending = waitForNextClaim();
+    const replacementClaimPending = waitForClaimAfterGeneration(
+      firstClaim.leaseGeneration,
+    );
     const coldOutput = waitForOutput(14);
     outputRevisionsB = 0;
     countOutputRevisionsB = true;
