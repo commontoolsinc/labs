@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
@@ -1526,5 +1526,24 @@ Deno.test("execution routing diagnostics bound historical action records", async
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("execution routing diagnostics reject an unopened space without mounting it", async () => {
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    assertThrows(
+      () =>
+        storage.getExecutionRoutingDiagnostics({
+          space: SPACE,
+          branch: "",
+        }),
+      Error,
+      "has not been opened",
+    );
+    assertEquals(factory.commits, []);
+  } finally {
+    await storage.close();
   }
 });

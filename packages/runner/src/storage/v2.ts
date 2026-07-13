@@ -998,19 +998,12 @@ export class StorageManager implements IStorageManager {
     query: ExecutionRoutingDiagnosticsQuery,
   ): ExecutionRoutingDiagnostics {
     const replica = this.#providers.get(query.space)?.replica;
-    if (replica !== undefined) {
-      return replica.getExecutionRoutingDiagnostics(query);
+    if (replica === undefined) {
+      throw new Error(
+        `Execution diagnostics space ${query.space} has not been opened`,
+      );
     }
-    return {
-      space: query.space,
-      branch: query.branch,
-      executionFeedSeq: 0,
-      executionAppliedSeq: 0,
-      snapshotRequired: false,
-      claims: [],
-      actions: [],
-      truncatedActionRecords: 0,
-    };
+    return replica.getExecutionRoutingDiagnostics(query);
   }
 
   private clientExecutionEffectInFlight(action: object): boolean {
