@@ -57,6 +57,8 @@ class LoopbackSessionFactory implements SessionFactory {
     private readonly server: Server,
     private readonly flags: Partial<MemoryProtocolFlags>,
     private readonly onCommit?: (commit: ClientCommit) => void,
+    private readonly onClient?: (client: MemoryClient.Client) => void,
+    private readonly onSession?: (session: MemoryClient.SpaceSession) => void,
   ) {}
 
   async create(
@@ -68,6 +70,7 @@ class LoopbackSessionFactory implements SessionFactory {
       transport: MemoryClient.loopback(this.server),
       protocolFlags: this.flags,
     });
+    this.onClient?.(client);
     const session = await client.mount(
       space,
       mountOptions,
@@ -79,6 +82,7 @@ class LoopbackSessionFactory implements SessionFactory {
         authorization: { principal: signer?.did() },
       }),
     );
+    this.onSession?.(session);
     if (this.onCommit !== undefined) {
       const transact = session.transact.bind(session);
       session.transact = (commit) => {
@@ -96,10 +100,18 @@ class LoopbackStorageManager extends StorageManager {
     flags: Partial<MemoryProtocolFlags>,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
     onCommit?: (commit: ClientCommit) => void,
+    onClient?: (client: MemoryClient.Client) => void,
+    onSession?: (session: MemoryClient.SpaceSession) => void,
   ): LoopbackStorageManager {
     return new LoopbackStorageManager(
       { ...options, memoryHost: new URL("memory://executor-drain-barrier") },
-      new LoopbackSessionFactory(server, flags, onCommit),
+      new LoopbackSessionFactory(
+        server,
+        flags,
+        onCommit,
+        onClient,
+        onSession,
+      ),
     );
   }
 }
@@ -785,6 +797,452 @@ Deno.test("real executor crash rejects stale work and converges once through cli
     await seedRuntime.dispose();
     await seedStorage.close();
     await observerClient?.close();
+    await server.close();
+  }
+});
+
+Deno.test("real sponsor loss fences A and resumes exactly once on behalf of B", async () => {
+  const owner = await Identity.fromPassphrase(
+    `executor sponsor owner ${crypto.randomUUID()}`,
+  );
+  const writerA = await Identity.fromPassphrase(
+    `executor sponsor A ${crypto.randomUUID()}`,
+  );
+  const writerB = await Identity.fromPassphrase(
+    `executor sponsor B ${crypto.randomUUID()}`,
+  );
+  const space = owner.did();
+  const server = new ClaimedAttemptGateServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-executor-sponsor-drill" },
+    protocolFlags: FLAGS,
+    acl: { mode: "enforce", serviceDids: [space] },
+  });
+  const ownerAuthorize: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: space },
+  });
+  const seedStorage = LoopbackStorageManager.connectTo(server, FLAGS, {
+    as: owner,
+  });
+  const seedRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: seedStorage,
+    experimental: {
+      persistentSchedulerState: true,
+      serverPrimaryExecution: true,
+    },
+  });
+  let ownerClient: MemoryClient.Client | null = null;
+  let runtimeA: Runtime | null = null;
+  let runtimeB: Runtime | null = null;
+  let storageA: LoopbackStorageManager | null = null;
+  let storageB: LoopbackStorageManager | null = null;
+  let connectionA: MemoryClient.Client | null = null;
+  let sessionA: MemoryClient.SpaceSession | null = null;
+  let sessionB: MemoryClient.SpaceSession | null = null;
+  let pool: SharedExecutionPool | null = null;
+  let unsubscribeAccepted = () => {};
+  let unsubscribeControl = () => {};
+  let allowReplacementOnCleanup = () => {};
+
+  try {
+    ownerClient = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: FLAGS,
+    });
+    const observer = await ownerClient.mount(space, {}, ownerAuthorize);
+    await observer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${space}`,
+        value: {
+          value: {
+            [space]: "OWNER",
+            [writerA.did()]: "WRITE",
+            [writerB.did()]: "WRITE",
+          },
+        },
+      }],
+    });
+    await observer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${space}:execution-policy`,
+        value: { value: { version: 1, serverPrimaryExecution: true } },
+      }],
+    });
+
+    const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
+      space,
+    });
+    const tx = seedRuntime.edit();
+    const input = seedRuntime.getCell<number>(
+      space,
+      "executor-sponsor-input",
+      undefined,
+      tx,
+    );
+    input.set(5);
+    const result = seedRuntime.getCell<number>(
+      space,
+      "executor-sponsor-result",
+      undefined,
+      tx,
+    );
+    const resultLink = result.getAsNormalizedFullLink();
+    const handle = seedRuntime.run(tx, compiled, { value: input }, result);
+    assertEquals((await tx.commit()).error, undefined);
+    assertEquals(await handle.pull(), 10);
+    await seedRuntime.settled();
+    await seedRuntime.storageManager.synced();
+    const pieceDocument = await server.readDocument(space, result.sourceURI) as
+      & Record<string, unknown>
+      & { value: { "/": { "link@1": { id: string } } } };
+    const outputId = pieceDocument.value["/"]["link@1"].id;
+    await seedRuntime.dispose();
+    await observer.watchSet([{
+      id: "executor-sponsor-drill-piece",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: result.sourceURI,
+          selector: { path: [], schema: true },
+        }],
+      },
+    }]);
+
+    const claims: ExecutionClaim[] = [];
+    const settlements: ActionSettlement[] = [];
+    const claimWaiters: {
+      predicate: (claim: ExecutionClaim) => boolean;
+      resolve: (claim: ExecutionClaim) => void;
+    }[] = [];
+    const settlementWaiters: {
+      predicate: (settlement: ActionSettlement) => boolean;
+      resolve: (settlement: ActionSettlement) => void;
+    }[] = [];
+    const revoked = Promise.withResolvers<void>();
+    let firstClaim: ExecutionClaim | undefined;
+    unsubscribeControl = observer.subscribeExecutionControl((event) => {
+      if (event.type === "session.execution.claim.set") {
+        claims.push(event.claim);
+        for (const waiter of [...claimWaiters]) {
+          if (waiter.predicate(event.claim)) waiter.resolve(event.claim);
+        }
+      } else if (event.type === "session.execution.settlement") {
+        settlements.push(event.settlement);
+        for (const waiter of [...settlementWaiters]) {
+          if (waiter.predicate(event.settlement)) {
+            waiter.resolve(event.settlement);
+          }
+        }
+      } else if (
+        event.type === "session.execution.claim.revoke" &&
+        firstClaim !== undefined &&
+        event.leaseGeneration === firstClaim.leaseGeneration &&
+        event.claimGeneration === firstClaim.claimGeneration
+      ) {
+        revoked.resolve();
+      }
+    });
+    const waitForClaim = (
+      predicate: (claim: ExecutionClaim) => boolean,
+    ): Promise<ExecutionClaim> => {
+      const existing = claims.find(predicate);
+      if (existing !== undefined) return Promise.resolve(existing);
+      const result = Promise.withResolvers<ExecutionClaim>();
+      claimWaiters.push({ predicate, resolve: result.resolve });
+      return result.promise;
+    };
+    const waitForSettlement = (
+      predicate: (settlement: ActionSettlement) => boolean,
+    ): Promise<ActionSettlement> => {
+      const existing = settlements.find(predicate);
+      if (existing !== undefined) return Promise.resolve(existing);
+      const result = Promise.withResolvers<ActionSettlement>();
+      settlementWaiters.push({ predicate, resolve: result.resolve });
+      return result.promise;
+    };
+    const outputWaiters = new Map<number, PromiseWithResolvers<void>>();
+    let countOutputRevisions = false;
+    let countedOutputRevisions = 0;
+    unsubscribeAccepted = server.subscribeAcceptedCommits(space, (event) => {
+      if (!event.revisions.some((revision) => revision.id === outputId)) return;
+      if (countOutputRevisions) countedOutputRevisions++;
+      void server.readDocument(space, outputId).then((document) => {
+        const value = (document as { value?: unknown } | null)?.value;
+        if (typeof value === "number") outputWaiters.get(value)?.resolve();
+      });
+    });
+    const waitForOutput = (value: number): Promise<void> => {
+      const waiter = Promise.withResolvers<void>();
+      outputWaiters.set(value, waiter);
+      return waiter.promise;
+    };
+
+    const startSponsors: string[] = [];
+    const replacementStart = Promise.withResolvers<void>();
+    const allowReplacement = Promise.withResolvers<void>();
+    allowReplacementOnCleanup = allowReplacement.resolve;
+    const denoFactory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      patternApiUrl: new URL("https://toolshed.example/"),
+      protocolFlags: FLAGS,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+    });
+    const factory: SpaceExecutorFactory = {
+      async start(options) {
+        startSponsors.push(options.lease.onBehalfOf);
+        if (startSponsors.length > 1) {
+          replacementStart.resolve();
+          await allowReplacement.promise;
+        }
+        return await denoFactory.start(options);
+      },
+    };
+    pool = new SharedExecutionPool({ control: server, factory });
+    pool.start();
+
+    const commitsB: ClientCommit[] = [];
+    const startWriterRuntime = async (
+      identity: Identity,
+      onCommit?: (commit: ClientCommit) => void,
+      onClient?: (client: MemoryClient.Client) => void,
+      onSession?: (session: MemoryClient.SpaceSession) => void,
+    ) => {
+      const storage = LoopbackStorageManager.connectTo(
+        server,
+        FLAGS,
+        { as: identity },
+        onCommit,
+        onClient,
+        onSession,
+      );
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+        experimental: {
+          persistentSchedulerState: true,
+          serverPrimaryExecution: true,
+        },
+      });
+      await runtime.patternManager.compilePattern(PROGRAM, { space });
+      const resumed = runtime.getCellFromLink<number>(resultLink);
+      await resumed.sync();
+      assertEquals(await runtime.start(resumed), true);
+      await resumed.pull();
+      await runtime.settled();
+      return { storage, runtime, resumed };
+    };
+    const clientA = await startWriterRuntime(
+      writerA,
+      undefined,
+      (client) => connectionA = client,
+      (session) => sessionA = session,
+    );
+    storageA = clientA.storage;
+    runtimeA = clientA.runtime;
+    await sessionA!.setExecutionDemand("", [result.sourceURI]);
+    await pool.idle();
+    const clientB = await startWriterRuntime(
+      writerB,
+      (commit) => commitsB.push(commit),
+      undefined,
+      (session) => sessionB = session,
+    );
+    storageB = clientB.storage;
+    runtimeB = clientB.runtime;
+    await sessionB!.setExecutionDemand("", [result.sourceURI]);
+    await pool.idle();
+    assertEquals(
+      server.listExecutionDemands(space, "").map((demand) => demand.principal)
+        .sort(),
+      [writerA.did(), writerB.did()].sort(),
+    );
+    assertEquals(startSponsors, [writerA.did()]);
+
+    const initialClaimPending = waitForClaim(() => true);
+    const baselineOutput = waitForOutput(12);
+    const baselineSource = await observer.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 6 },
+      }],
+    });
+    firstClaim = await within(initialClaimPending, "sponsor A claim");
+    await within(baselineOutput, "sponsor A baseline output");
+    await within(
+      waitForSettlement((settlement) =>
+        settlement.claim.leaseGeneration === firstClaim!.leaseGeneration &&
+        settlement.inputBasisSeq >= baselineSource.seq
+      ),
+      "sponsor A baseline settlement",
+    );
+    const firstLease = await server.currentExecutionLease(space, "");
+    assertEquals(firstLease?.onBehalfOf, writerA.did());
+
+    const gate = server.armClaimedAttempt();
+    const fallbackOutput = waitForOutput(14);
+    commitsB.length = 0;
+    countedOutputRevisions = 0;
+    countOutputRevisions = true;
+    await observer.transact({
+      localSeq: 4,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 7 },
+      }],
+    });
+    await within(gate.started, "gated sponsor A attempt");
+    await connectionA!.close();
+    connectionA = null;
+    await within(revoked.promise, "sponsor A claim revoke");
+    await within(replacementStart.promise, "sponsor B replacement start");
+    await clientB.resumed.pull();
+    await runtimeB.settled();
+    await within(fallbackOutput, "sponsor-loss client fallback");
+    gate.release();
+    const staleResponse = await within(
+      gate.response,
+      "stale sponsor A rejection",
+    );
+    countOutputRevisions = false;
+    assertEquals("error" in staleResponse, true);
+    assertEquals(countedOutputRevisions, 1);
+    const fallbackCommit = commitsB.find((commit) =>
+      commit.operations.some((operation) =>
+        operation.op !== "sqlite" && operation.id === outputId
+      )
+    );
+    assertEquals(fallbackCommit !== undefined, true);
+    const fallbackObservation = fallbackCommit?.schedulerObservation as
+      | { executionClaimAssertion?: unknown }
+      | undefined;
+    assertEquals(fallbackObservation?.executionClaimAssertion, undefined);
+    const fallbackSnapshots = await observer.listSchedulerActionSnapshots({
+      actionId: firstClaim.actionId,
+      pieceId: firstClaim.pieceId,
+    });
+    const fallbackProvenance = fallbackSnapshots.snapshots.at(-1)
+      ?.observation as { executionProvenance?: unknown } | undefined;
+    assertEquals(fallbackProvenance?.executionProvenance, undefined);
+
+    allowReplacement.resolve();
+    await pool.idle();
+    assertEquals(startSponsors, [writerA.did(), writerB.did()]);
+    const replacementLease = await server.currentExecutionLease(space, "");
+    assertEquals(replacementLease?.onBehalfOf, writerB.did());
+    assertEquals(
+      replacementLease?.leaseGeneration,
+      firstClaim.leaseGeneration + 1,
+    );
+
+    const replacementClaimPending = waitForClaim((claim) =>
+      claim.leaseGeneration > firstClaim!.leaseGeneration
+    );
+    const reacquisitionOutput = waitForOutput(16);
+    countedOutputRevisions = 0;
+    countOutputRevisions = true;
+    await observer.transact({
+      localSeq: 5,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 8 },
+      }],
+    });
+    const replacementClaim = await within(
+      replacementClaimPending,
+      "sponsor B replacement claim",
+    );
+    await within(reacquisitionOutput, "sponsor B reacquisition output");
+    await runtimeB.settled();
+    countOutputRevisions = false;
+    assertEquals(countedOutputRevisions, 1);
+
+    const authoritativeOutput = waitForOutput(18);
+    countedOutputRevisions = 0;
+    countOutputRevisions = true;
+    const authoritativeSource = await observer.transact({
+      localSeq: 6,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 9 },
+      }],
+    });
+    await within(authoritativeOutput, "sponsor B authoritative output");
+    const authoritativeSettlement = await within(
+      waitForSettlement((settlement) =>
+        settlement.claim.leaseGeneration ===
+          replacementClaim.leaseGeneration &&
+        settlement.inputBasisSeq >= authoritativeSource.seq
+      ),
+      "sponsor B authoritative settlement",
+    );
+    countOutputRevisions = false;
+    assertEquals(authoritativeSettlement.outcome, "committed");
+    assertEquals(countedOutputRevisions, 1);
+    const snapshots = await observer.listSchedulerActionSnapshots({
+      actionId: replacementClaim.actionId,
+      pieceId: replacementClaim.pieceId,
+    });
+    const provenance = snapshots.snapshots.at(-1)?.observation as {
+      executionProvenance?: {
+        onBehalfOf?: string;
+        leaseGeneration?: number;
+      };
+    } | undefined;
+    assertEquals(
+      provenance?.executionProvenance?.onBehalfOf,
+      writerB.did(),
+    );
+    assertEquals(
+      provenance?.executionProvenance?.leaseGeneration,
+      replacementClaim.leaseGeneration,
+    );
+    assertEquals(pool.metrics().sponsorRotations, 1);
+    assertEquals(pool.metrics().leaseReplacements, 1);
+  } finally {
+    unsubscribeAccepted();
+    unsubscribeControl();
+    await (connectionA as MemoryClient.Client | null)?.close();
+    allowReplacementOnCleanup();
+    await pool?.close();
+    await runtimeA?.dispose();
+    await runtimeB?.dispose();
+    await storageA?.close();
+    await storageB?.close();
+    await seedRuntime.dispose();
+    await seedStorage.close();
+    await ownerClient?.close();
     await server.close();
   }
 });
