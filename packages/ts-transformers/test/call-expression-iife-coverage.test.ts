@@ -200,7 +200,10 @@ export default pattern<Input, Output>(({ enabled, show }) => ({
       }
       ancestor = ancestor.parent;
     }
-    assert(insideIfElse, "expected the lift application inside an ifElse branch");
+    assert(
+      insideIfElse,
+      "expected the lift application inside an ifElse branch",
+    );
 
     // The matching lift definition preserves the whole authored IIFE: its
     // factory body is still an immediately-invoked function. This is the

@@ -2,11 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
 import { SchemaGenerator } from "../src/schema-generator.ts";
-import {
-  asObjectSchema,
-  createTestProgram,
-  getTypeFromCode,
-} from "./utils.ts";
+import { asObjectSchema, createTestProgram, getTypeFromCode } from "./utils.ts";
 
 // The branches exercised here otherwise run only when a pattern compiles
 // "cold" through the transformer. When the compile cache is warm those code
@@ -107,7 +103,9 @@ interface Root<T> { field: Narrow<T>; }
     const generator = new SchemaGenerator();
 
     const trueNode = ts.factory.createLiteralTypeNode(ts.factory.createTrue());
-    const falseNode = ts.factory.createLiteralTypeNode(ts.factory.createFalse());
+    const falseNode = ts.factory.createLiteralTypeNode(
+      ts.factory.createFalse(),
+    );
 
     expect(
       generator.generateSchemaFromSyntheticTypeNode(trueNode, checker),

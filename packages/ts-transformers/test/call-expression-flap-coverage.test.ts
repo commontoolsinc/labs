@@ -140,7 +140,8 @@ export default pattern<Input, Output>(() => ({
   const call = find(
     sourceFile,
     ts.isCallExpression,
-    (node) => ts.isIdentifier(node.expression) && node.expression.text === "plus",
+    (node) =>
+      ts.isIdentifier(node.expression) && node.expression.text === "plus",
   );
 
   const { result, dataFlowCount } = withContext(
