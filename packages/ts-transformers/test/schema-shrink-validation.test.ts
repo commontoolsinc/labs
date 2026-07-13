@@ -205,6 +205,30 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "errors when referenced lift callback passes unknown to opaque function",
+    async () => {
+      const source = [
+        'import { lift } from "commonfabric";',
+        "",
+        "const callback = (state: unknown) => console.log(state);",
+        "const fn = lift(callback);",
+      ].join("\n");
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const shrinkErrors = errors.filter(
+        (e) => e.type === "schema:unknown-type-access",
+      );
+      assertGreater(
+        shrinkErrors.length,
+        0,
+        "Expected referenced callbacks to retain unknown-type validation",
+      );
+    },
+  );
+
+  await t.step(
     "no error when any parameter is passed to opaque function in lift",
     async () => {
       const source = [
