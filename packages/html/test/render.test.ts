@@ -1,5 +1,13 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
-import { UI, VNode } from "@commonfabric/runtime-client";
+import {
+  $conn,
+  CellHandle,
+  type CellRef,
+  type RuntimeClient,
+  UI,
+  VNode,
+} from "@commonfabric/runtime-client";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { render, renderImpl } from "../src/render.ts";
 import { sanitizeEvent } from "../src/render-utils.ts";
 import * as assert from "./assert.ts";
@@ -17,6 +25,26 @@ class SynthesizedEvent extends Event {
 class KeyboardEvent extends SynthesizedEvent {}
 class InputEvent extends SynthesizedEvent {}
 class MouseEvent extends SynthesizedEvent {}
+
+function reactiveChild<T>(initial: T): CellHandle<T> {
+  const connection = {
+    signal: new AbortController().signal,
+    subscribe: () => {},
+    unsubscribe: () => Promise.resolve(),
+    request: () => Promise.resolve({}),
+  };
+  const runtime = {
+    [$conn]: () => connection,
+  } as unknown as RuntimeClient;
+  const ref = {
+    space: "did:key:html-test",
+    id: "reactive-child",
+    path: [],
+    type: "application/json",
+    schema: {},
+  } as unknown as CellRef;
+  return new CellHandle(runtime, ref, initial);
+}
 
 beforeEach(() => {
   mock = new MockDoc(
@@ -1128,6 +1156,34 @@ describe("children rendering", () => {
   // the actual renderer. Note: Testing reactive reordering (changing children
   // after initial render) requires a runtime with CellHandles, which is covered
   // by integration tests in packages/generated-patterns/integration/.
+
+  it("preserves the last usable child while a legacy-rendered CellHandle is unavailable", async () => {
+    const { renderOptions, document } = mock;
+    const child = reactiveChild<string | DataUnavailable>(
+      DataUnavailable.pending(),
+    );
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [child],
+    };
+    const parent = document.getElementById("root")!;
+
+    const cancel = renderImpl(parent, vnode as unknown as VNode, renderOptions);
+    const div = parent.getElementsByTagName("div")[0]!;
+    assert.equal(div.innerHTML, "");
+
+    await child.set("Ready");
+    assert.equal(div.innerHTML, "Ready");
+
+    await child.set(DataUnavailable.schemaMismatch());
+    assert.equal(div.innerHTML, "Ready");
+
+    await child.set("Updated");
+    assert.equal(div.innerHTML, "Updated");
+    cancel();
+  });
 
   it("renders children in correct order [A, B]", () => {
     const { renderOptions, document } = mock;

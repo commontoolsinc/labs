@@ -7,6 +7,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime, UI } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -732,6 +733,110 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     assertEquals(updateTextOps.length, 1, "Should emit update-text");
     assertEquals((updateTextOps[0] as any).text, "World");
   });
+
+  await t.step(
+    "holds the last usable root while its Cell is unavailable",
+    async () => {
+      const collector = createOpsCollector();
+      const errors: Error[] = [];
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+        onError: (error) => errors.push(error),
+      });
+      const rootCell = new MockCell(DataUnavailable.pending());
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(collector.getOps().length, 0);
+      assertEquals(errors, []);
+
+      rootCell.set({
+        type: "vnode",
+        name: "div",
+        props: { id: "ready" },
+        children: ["Ready"],
+      } satisfies WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("create-element").some((op) =>
+          "tagName" in op && op.tagName === "div"
+        ),
+        true,
+      );
+      collector.clear();
+
+      rootCell.set(DataUnavailable.error(new Error("temporarily unavailable")));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(collector.getOps().length, 0);
+      assertEquals(errors, []);
+
+      rootCell.set({
+        type: "vnode",
+        name: "div",
+        props: { id: "updated" },
+        children: ["Updated"],
+      } satisfies WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("set-prop").some((op) =>
+          "key" in op && op.key === "id" && "value" in op &&
+          op.value === "updated"
+        ),
+        true,
+      );
+    },
+  );
+
+  await t.step(
+    "holds the last usable child while its Cell is unavailable",
+    async () => {
+      const collector = createOpsCollector();
+      const childCell = new MockCell(DataUnavailable.pending());
+      const rootCell = new MockCell({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell as unknown as WorkerRenderNode],
+      } satisfies WorkerVNode);
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("create-text").length,
+        0,
+        "an initially unavailable child renders no marker text",
+      );
+      collector.clear();
+
+      childCell.set("Ready");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("create-text").some((op) =>
+          "text" in op && op.text === "Ready"
+        ),
+        true,
+      );
+      collector.clear();
+
+      childCell.set(DataUnavailable.syncing());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOps().length,
+        0,
+        "unavailability preserves the existing child",
+      );
+
+      childCell.set("Updated");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("update-text").some((op) =>
+          "text" in op && op.text === "Updated"
+        ),
+        true,
+      );
+    },
+  );
 
   await t.step(
     "updates same-shape slotted header cell VNode children",

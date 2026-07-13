@@ -31,6 +31,7 @@ import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type {
   ChildNodeState,
   NodeState,
@@ -243,8 +244,11 @@ export class WorkerReconciler {
       const rootWatchedSpaces = new Set<string>();
       const renderRoot = (resolvedVnode: unknown) => {
         logger.debug("root-cell-update", () => ({ resolvedVnode }));
-        lastRootValue = resolvedVnode;
-        rootHasRendered = true;
+        const unavailable = isDataUnavailable(resolvedVnode);
+        if (!unavailable) {
+          lastRootValue = resolvedVnode;
+          rootHasRendered = true;
+        }
         this.watchCellMembership(
           vnode as Cell<unknown>,
           rootWatchedSpaces,
@@ -272,6 +276,11 @@ export class WorkerReconciler {
           this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
           return;
         }
+        // Availability markers behave like suspense. Before the first usable
+        // value the wrapper remains empty; after one, keep its rendered tree
+        // until a usable replacement arrives. Policy checks deliberately run
+        // first so an unavailable update can never preserve newly-blocked data.
+        if (unavailable) return;
         // Validate that the resolved value is a valid render node
         if (!this.isValidRenderNode(resolvedVnode)) {
           this.onError?.(
@@ -3476,16 +3485,18 @@ export class WorkerReconciler {
 
     const renderResolved = (resolvedChild: unknown, forced = false) => {
       const isInitialRender = childState.nodeId === -1;
+      const unavailable = isDataUnavailable(resolvedChild);
 
       // Dedupe updates. A forced re-eval (an ACL sync/change) bypasses the
       // value-identity check: the value is unchanged but the render DECISION
       // may have flipped.
       if (
-        !forced && !isInitialRender && resolvedChild === childState.currentValue
+        !forced && !unavailable && !isInitialRender &&
+        resolvedChild === childState.currentValue
       ) {
         return;
       }
-      childState.currentValue = resolvedChild;
+      if (!unavailable) childState.currentValue = resolvedChild;
       this.watchCellMembership(
         cell,
         watchedSpaces,
@@ -3525,6 +3536,11 @@ export class WorkerReconciler {
         }]);
         return;
       }
+
+      // Keep the current child (or the initial empty slot) while its value is
+      // unavailable. As above, the cell-level policy gate runs before this so
+      // suspense never bypasses a confidentiality decision.
+      if (unavailable) return;
 
       if (this.shouldBlockTextFromCell(resolvedChild, cell, policy)) {
         if (!isInitialRender) {

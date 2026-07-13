@@ -27,6 +27,7 @@ import {
   styleObjectToCssString,
 } from "./render-utils.ts";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { VDomRenderer } from "./main/renderer.ts";
 //import { animate } from "./debug-element.ts";
 
@@ -194,15 +195,17 @@ function renderLegacy(
 
   const optionsWithCell = rootCell ? { ...options, rootCell } : options;
 
+  let cancelRendered: Cancel | undefined;
   const cancelEffect = effect(view as VNode, (value: VNode | undefined) => {
-    if (!value) {
-      return;
-    }
+    if (isDataUnavailable(value)) return;
+    cancelRendered?.();
+    cancelRendered = undefined;
+    if (!value) return;
     const visited = new Set<object>();
     if (rootCell) {
       visited.add(rootCell);
     }
-    return renderImpl(parent, value, optionsWithCell, visited);
+    cancelRendered = renderImpl(parent, value, optionsWithCell, visited);
   });
 
   return () => {
@@ -211,6 +214,7 @@ function renderLegacy(
       activeRenders.delete(parent);
     }
     cancelEffect();
+    cancelRendered?.();
   };
 }
 
@@ -263,8 +267,12 @@ function renderNode(
 
   if (isCellHandle(node)) {
     const wrapper = doc.createElement("cf-internal-fill-element");
+    let cancelRendered: Cancel | undefined;
     addCancel(
       effect(node as CellHandle<VNode>, (resolvedNode) => {
+        if (isDataUnavailable(resolvedNode)) return;
+        cancelRendered?.();
+        cancelRendered = undefined;
         wrapper.innerHTML = "";
         if (!resolvedNode) return;
         const [childElement, childCancel] = renderNode(
@@ -276,9 +284,10 @@ function renderNode(
           wrapper.appendChild(childElement);
           //animate(childElement, "created");
         }
-        return childCancel;
+        cancelRendered = childCancel;
       }),
     );
+    addCancel(() => cancelRendered?.());
 
     return [wrapper, cancel];
   }
@@ -406,6 +415,7 @@ const bindChildren = (
 
 class VdomChildNode {
   private cancel: Cancel | undefined;
+  private renderedCancel: Cancel | undefined;
   private _element: ChildNode | null = null;
   private document: Document;
   private options: RenderOptions;
@@ -454,6 +464,13 @@ class VdomChildNode {
   }
 
   onEffect = (childValue: RenderNode): Cancel | undefined => {
+    if (isDataUnavailable(childValue)) {
+      // A child must always own a DOM position synchronously. The empty text
+      // node is invisible until the first usable value and remains the stable
+      // placeholder if availability changes before then.
+      this._element ??= this.document.createTextNode("") as ChildNode;
+      return;
+    }
     let element;
     let cancel;
     if (isCellHandle(childValue)) {
@@ -488,13 +505,15 @@ class VdomChildNode {
       element = this.document.createTextNode(text) as ChildNode;
     }
 
+    this.renderedCancel?.();
+    this.renderedCancel = undefined;
     if (this._element && element) {
       this._element.replaceWith(element);
     } else if (this._element) {
       this._element.remove();
     }
     this._element = element;
-    return cancel;
+    this.renderedCancel = cancel;
   };
 
   element(): ChildNode {
@@ -511,6 +530,7 @@ class VdomChildNode {
 
   dispose() {
     if (this.cancel) this.cancel();
+    if (this.renderedCancel) this.renderedCancel();
     if (this._element) this._element.remove();
   }
 }
