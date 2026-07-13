@@ -332,7 +332,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     expect(
       entriesOf(outId).some((e) => e.origin === "label-metadata"),
     ).toBe(true);
-    const before = JSON.stringify(entriesOf(outId));
+    const before = structuredClone(entriesOf(outId));
 
     const again = rt.edit();
     again.readOrThrow(readAddress(criteriaId, []));
@@ -353,7 +353,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     );
     expect(wroteCfc).toBe(false);
     expect((await again.commit()).ok).toBeDefined();
-    expect(JSON.stringify(entriesOf(outId))).toEqual(before);
+    expect(entriesOf(outId)).toEqual(before);
   });
 
   // Stage-A composition: the membership templates a declared list
