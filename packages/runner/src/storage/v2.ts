@@ -3913,7 +3913,7 @@ class SpaceReplica implements ISpaceReplica {
       localSeq,
       claim,
       sourceAction,
-      createdAt: Date.now(),
+      createdAt: performance.now(),
       basisSeq,
       unresolvedBasisLocalSeqs,
       touched: [...new Map(touched.map((entry) => [
@@ -4175,7 +4175,14 @@ class SpaceReplica implements ISpaceReplica {
     for (const overlay of dropped) {
       this.#claimedOverlays.delete(overlay.localSeq);
     }
-    const now = Date.now();
+    const now = performance.now();
+    for (const overlay of dropped) {
+      logger.time(
+        overlay.createdAt,
+        now,
+        "execution-overlay-held",
+      );
+    }
     logger.debug("execution-overlay-dropped", () => [
       "Claimed overlay dropped",
       {

@@ -20,7 +20,10 @@ import type {
 } from "../src/storage/v2-replica-session.ts";
 import { type SessionFactory, StorageManager } from "../src/storage/v2.ts";
 import type { StorageNotification } from "../src/storage/interface.ts";
-import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import {
+  getLoggerCountsBreakdown,
+  getTimingStatsBreakdown,
+} from "@commonfabric/utils/logger";
 
 const signer = await Identity.fromPassphrase(
   "client execution overlay test principal",
@@ -537,6 +540,9 @@ Deno.test("matching no-op settlement clears a claimed overlay", async () => {
   const droppedBaseline = getLoggerCountsBreakdown()["storage.v2"]?.[
     "execution-overlay-dropped"
   ]?.debug ?? 0;
+  const heldTimingBaseline = getTimingStatsBreakdown()["storage.v2"]?.[
+    "execution-overlay-held"
+  ]?.count ?? 0;
   try {
     await storage.open(SPACE).sync(INPUT);
     await writeClaimedOutput(storage, "local-overlay");
@@ -563,6 +569,12 @@ Deno.test("matching no-op settlement clears a claimed overlay", async () => {
         "execution-overlay-dropped"
       ]?.debug ?? 0,
       droppedBaseline + 1,
+    );
+    assertEquals(
+      getTimingStatsBreakdown()["storage.v2"]?.[
+        "execution-overlay-held"
+      ]?.count ?? 0,
+      heldTimingBaseline + 1,
     );
   } finally {
     await storage.close();
