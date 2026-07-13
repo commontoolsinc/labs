@@ -372,6 +372,9 @@ Deno.test("claimed client computation stays visible locally with zero wire commi
   const counts = getLoggerCountsBreakdown()["storage.v2"] ?? {};
   const suppressedBaseline = counts["execution-client-derived-suppressed"]
     ?.debug ?? 0;
+  const upstreamBaseline = counts[
+    "execution-client-derived-upstream-commit"
+  ]?.debug ?? 0;
   const createdBaseline = counts["execution-overlay-created"]?.debug ?? 0;
   try {
     await storage.open(SPACE).sync(INPUT);
@@ -382,6 +385,10 @@ Deno.test("claimed client computation stays visible locally with zero wire commi
     assertEquals(
       updated["execution-client-derived-suppressed"]?.debug ?? 0,
       suppressedBaseline + 1,
+    );
+    assertEquals(
+      updated["execution-client-derived-upstream-commit"]?.debug ?? 0,
+      upstreamBaseline,
     );
     assertEquals(
       updated["execution-overlay-created"]?.debug ?? 0,
@@ -398,6 +405,9 @@ Deno.test("ordered revoke drops the matching overlay and resumes upstream author
   const factory = new OverlaySessionFactory();
   const storage = OverlayStorageManager.connect(factory);
   const notifications: StorageNotification[] = [];
+  const upstreamBaseline = getLoggerCountsBreakdown()["storage.v2"]?.[
+    "execution-client-derived-upstream-commit"
+  ]?.debug ?? 0;
   storage.subscribe({
     next(notification) {
       notifications.push(notification);
@@ -440,6 +450,12 @@ Deno.test("ordered revoke drops the matching overlay and resumes upstream author
       scope: "space",
       value: { value: "client-authoritative" },
     });
+    assertEquals(
+      getLoggerCountsBreakdown()["storage.v2"]?.[
+        "execution-client-derived-upstream-commit"
+      ]?.debug ?? 0,
+      upstreamBaseline + 1,
+    );
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();

@@ -112,6 +112,7 @@ import {
   isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
 import { routeClientActionTransaction } from "../client-execution/action-transaction-router.ts";
+import { isSchedulerActionObservation } from "../scheduler/persistent-observation.ts";
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
 // part of the write; that read is dropped from its conflict set.
@@ -2764,6 +2765,24 @@ class SpaceReplica implements ISpaceReplica {
         ? { disposition: "local", kind: "executor-shadow" } as const
         : this.routeClientActionTransaction(commit, source))
       : await this.routeActionTransaction(commit, source);
+    const routedObservation = commit.schedulerObservation;
+    if (
+      route.disposition === "upstream" && !this.#shadowWrites &&
+      this.#actionTransactionRouter === undefined &&
+      isSchedulerActionObservation(routedObservation) &&
+      routedObservation.transactionKind === "action-run" &&
+      (routedObservation.actionKind === "computation" ||
+        routedObservation.actionKind === "effect")
+    ) {
+      logger.debug("execution-client-derived-upstream-commit", () => [
+        "Client derived action transaction sent upstream",
+        {
+          actionId: routedObservation.actionId,
+          actionKind: routedObservation.actionKind,
+          operations: commit.operations.length,
+        },
+      ]);
+    }
     if (route.disposition === "unserved") {
       return await this.publishUnservedAttempt(commit, route);
     }
