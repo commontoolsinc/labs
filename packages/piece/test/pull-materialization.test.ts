@@ -1414,7 +1414,7 @@ describe("piece pull materialization", () => {
     let rootPulls = 0;
     let childPulls = 0;
     const child = {
-      async pull() {
+      pull() {
         childPulls++;
       },
       get() {
@@ -1425,7 +1425,7 @@ describe("piece pull materialization", () => {
       },
     };
     const root = {
-      async pull() {
+      pull() {
         rootPulls++;
       },
       get() {
