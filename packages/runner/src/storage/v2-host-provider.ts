@@ -871,7 +871,12 @@ class HostReplicaSession implements ReplicaSession {
         );
       if (rootDirty || trackedDirty) affected.push(watchId);
     }
-    if (notice.dataSeq <= this.#appliedSeq || affected.length === 0) {
+    // #appliedSeq is a global space watermark, not proof that every watch was
+    // refreshed through that sequence. An unrelated point read can advance it
+    // while this notice still names a changed entity held at an older revision.
+    // Accepted-notice order already deduplicates work, so refresh every affected
+    // watch even when the global watermark has reached notice.dataSeq.
+    if (affected.length === 0) {
       this.#acceptedOrder = notice.order;
       this.#appliedSeq = Math.max(this.#appliedSeq, notice.dataSeq);
       if (observations.length > 0) {

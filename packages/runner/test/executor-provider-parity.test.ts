@@ -91,6 +91,29 @@ class GatedGraphServer extends WatchCountingServer {
   }
 }
 
+class PreGatedGraphServer extends WatchCountingServer {
+  graphQueryStarted = Promise.withResolvers<void>();
+  releaseGraphQuery = Promise.withResolvers<void>();
+  #gateNextGraphQuery = false;
+
+  gateNextGraphQuery(): void {
+    this.graphQueryStarted = Promise.withResolvers<void>();
+    this.releaseGraphQuery = Promise.withResolvers<void>();
+    this.#gateNextGraphQuery = true;
+  }
+
+  override async graphQuery(
+    message: Parameters<Server["graphQuery"]>[0],
+  ): ReturnType<Server["graphQuery"]> {
+    if (this.#gateNextGraphQuery) {
+      this.#gateNextGraphQuery = false;
+      this.graphQueryStarted.resolve();
+      await this.releaseGraphQuery.promise;
+    }
+    return await super.graphQuery(message);
+  }
+}
+
 class LifecycleServer extends GatedGraphServer {
   acceptedCommitSubscriptions = 0;
 
@@ -331,9 +354,6 @@ Deno.test("executor host provider binds accepted action provenance to its authen
     },
   };
   await observer.setExecutionDemand("", [baseObservation.pieceId]);
-  const lease = await server.acquireExecutionLease(space, "");
-  assertExists(lease);
-  assertEquals(lease.onBehalfOf, principal.did());
   await observer.transact({
     localSeq: 1,
     reads: { confirmed: [], pending: [] },
@@ -343,6 +363,9 @@ Deno.test("executor host provider binds accepted action provenance to its authen
       value: { value: { version: 1, serverPrimaryExecution: true } },
     }],
   });
+  const lease = await server.acquireExecutionLease(space, "");
+  assertExists(lease);
+  assertEquals(lease.onBehalfOf, principal.did());
   await observer.watchSet([{
     id: "executor-provenance-output",
     kind: "graph",
@@ -1316,8 +1339,7 @@ Deno.test("executor host provider reports accepted commits only after replica in
   }>();
   let callbackRan = false;
   let valueAtCallback: unknown;
-  let storage!: HostStorageManager;
-  storage = HostStorageManager.connect({
+  const storage = HostStorageManager.connect({
     port: channel.port,
     principal: principal.did(),
     space,
@@ -1369,6 +1391,110 @@ Deno.test("executor host provider reports accepted commits only after replica in
     assertEquals(notice.deliverySeq, 2);
     assertEquals(valueAtCallback, { value: { integrated: true } });
     assertEquals(await storage.acceptedCommitsSettled(), 2);
+  } finally {
+    server.releaseGraphQuery.resolve();
+    await storage.close();
+    await channel.dispose();
+    await writerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("executor host provider refreshes affected watches at an already reached global sequence", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor provider equal-seq refresh ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const server = new PreGatedGraphServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-equal-seq-refresh-test",
+    },
+  });
+  const authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: principal.did() },
+  });
+  const writerClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+  });
+  const writer = await writerClient.mount(space, {}, authorizeSessionOpen);
+  const sourceUri = "of:executor-provider:equal-seq-source" as URI;
+  const unrelatedUri = "of:executor-provider:equal-seq-unrelated" as URI;
+  const sourceAddress = {
+    id: sourceUri,
+    type: "application/json" as MIME,
+    path: [],
+  };
+  await writer.transact({
+    localSeq: 1,
+    reads: { confirmed: [], pending: [] },
+    operations: [{
+      op: "set",
+      id: sourceUri,
+      value: { value: { revision: 1 } },
+    }, {
+      op: "set",
+      id: unrelatedUri,
+      value: { value: { stable: true } },
+    }],
+  });
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    authorizeSessionOpen,
+  });
+  let valueAtCallback: unknown;
+  const storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: principal.did(),
+    space,
+    onAcceptedCommitIntegrated(notice) {
+      if (notice.dataSeq !== 2) return;
+      const state = storage.open(space).replica.get(sourceAddress);
+      valueAtCallback = state?.is;
+    },
+  });
+
+  try {
+    const provider = storage.open(space);
+    assertEquals((await provider.sync(sourceUri)).error, undefined);
+    assertEquals(provider.replica.get(sourceAddress)?.is, {
+      value: { revision: 1 },
+    });
+
+    server.gateNextGraphQuery();
+    const unrelatedSync = provider.sync(unrelatedUri);
+    await server.graphQueryStarted.promise;
+    const sourceCommit = writer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sourceUri,
+        value: { value: { revision: 2 } },
+      }],
+    });
+    await sourceCommit;
+    server.releaseGraphQuery.resolve();
+    assertEquals((await unrelatedSync).error, undefined);
+    assertEquals(await storage.acceptedCommitsSettled(), 2);
+
+    assertEquals(provider.replica.get(sourceAddress)?.is, {
+      value: { revision: 2 },
+    });
+    assertEquals(valueAtCallback, { value: { revision: 2 } });
   } finally {
     server.releaseGraphQuery.resolve();
     await storage.close();
@@ -1455,8 +1581,7 @@ Deno.test("lease-bound accepted commits expose only sponsor-match causality befo
     notice: AcceptedCommitNotice;
     value: unknown;
   }[] = [];
-  let storage!: HostStorageManager;
-  storage = HostStorageManager.connect({
+  const storage = HostStorageManager.connect({
     port: channel.port,
     principal: sponsorIdentity.did(),
     space,
