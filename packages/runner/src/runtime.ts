@@ -612,6 +612,15 @@ export class Runtime {
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
+  // Schema-shaped ambient reads use a fresh read transaction on every get(),
+  // so the transaction-local Cell cache cannot help them. Keep immutable
+  // array results here until storage reports any local or remote change.
+  // Entries are keyed by the same stable Cell view hash as the transaction
+  // cache; the nested variant distinguishes read options.
+  #ambientSchemaReadCache = new Map<
+    string,
+    Map<string, { value: unknown }>
+  >();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
 
@@ -1470,6 +1479,31 @@ export class Runtime {
       return tx;
     }
     return this.createReadTx();
+  }
+
+  getCachedAmbientSchemaReadResult(
+    key: string,
+    variant: string,
+  ): { value: unknown } | undefined {
+    return this.#ambientSchemaReadCache.get(key)?.get(variant);
+  }
+
+  setCachedAmbientSchemaReadResult(
+    key: string,
+    variant: string,
+    value: unknown,
+  ): void {
+    let byVariant = this.#ambientSchemaReadCache.get(key);
+    if (byVariant === undefined) {
+      byVariant = new Map();
+      this.#ambientSchemaReadCache.set(key, byVariant);
+    }
+    byVariant.set(variant, { value });
+  }
+
+  /** Clear immutable ambient reads before processing a storage change. */
+  invalidateAmbientSchemaReadCache(): void {
+    this.#ambientSchemaReadCache.clear();
   }
 
   private createReadTx(): IExtendedStorageTransaction {

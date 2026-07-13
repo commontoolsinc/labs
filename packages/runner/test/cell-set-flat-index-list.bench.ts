@@ -12,8 +12,8 @@
  *
  *   1. write cost + stored bytes + docs created for one flat array in ONE
  *      doc vs one doc PER ITEM, as f(N)
- *   2. read cost: first get(), repeated get() (does anything memoize?), and
- *      get() through a JSON schema (the validateAndTransform path), as f(N)
+ *   2. read cost: first get(), repeated schemaless get(), and repeated get()
+ *      through a JSON schema after one warm materialization, as f(N)
  *   3. update cost: whole-array re-set with one item changed vs a targeted
  *      per-index write — bytes written per transaction (history growth)
  *
@@ -249,7 +249,7 @@ for (const N of SIZES) {
 }
 
 // =============================================================================
-// 3. READ: first get(), repeated get() x100, and schema get() x100
+// 3. READ: first get(), repeated get() x100, and cached schema get() x100
 // =============================================================================
 for (const N of SIZES) {
   Deno.bench({

@@ -909,6 +909,16 @@ export interface ValidateAndTransformOptions {
   synced?: boolean;
 }
 
+/**
+ * Whether a schema-shaped read returns any Cell values instead of plain data.
+ * Ambient read results containing Cells keep transaction-bound handles, so
+ * callers must not reuse them across fresh read transactions.
+ */
+export function schemaHasAsCell(schema: JSONSchema | undefined): boolean {
+  const resolved = resolveSchema(schema);
+  return resolved !== undefined && SchemaObjectTraverser.hasAsCell(resolved);
+}
+
 export function validateAndTransform(
   runtime: Runtime,
   tx: IExtendedStorageTransaction | undefined,

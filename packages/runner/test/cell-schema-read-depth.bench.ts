@@ -1,26 +1,20 @@
 /**
- * Decomposes the schema-path read cost by schema DEPTH on one unchanged doc.
+ * Guards repeated schema-read cost across schema DEPTH on one unchanged doc.
  *
- * Companion to cell-set-flat-index-list.bench.ts: that bench showed schema
- * get() of an unchanged N-item list costs ~19µs/item PER READ (~63× the
- * schemaless path, no memoization). This bench answers WHERE that cost
- * lives by reading the SAME stored 1000-item list through schemas of
- * increasing depth:
+ * Each iteration seeds one list and performs one warm get() outside the timed
+ * window. Explicit plain-data array schemas should then reuse that immutable
+ * materialization until storage reports a change; the timed loop measures the
+ * cache-hit path through schemas of increasing depth:
  *
  *   - schemaless            → the baseline proxy path
  *   - items: true           → schema path entered, zero per-item validation
  *   - items: {type:object}  → permissive object schema (no properties)
  *   - full item schema      → every field declared
  *
- * Result shape (M-series MacBook): schemaless ~0.6ms/read; items:true
- * ~18ms/read — i.e. merely ENTERING the schema path costs ~32× even when
- * validating nothing per item; a PERMISSIVE object schema is the worst
- * case (~40ms/read, full recursive walk per element); the fully-declared
- * schema is cheaper than permissive (~28ms). Field validation is not the
- * cost — the per-node traversal machinery (tracked reads, link handling,
- * freeze-discipline checks, fresh result allocation; GC ≈ 39% of ticks
- * under profile) is. A V8 profile of the same loop bottoms out in
- * validateAndTransform → traverse → deep-freeze checkValue.
+ * The warm read still exercises the full validateAndTransform → traverse →
+ * deep-freeze path during benchmark setup. If a schema variant falls out of
+ * ambient-cache eligibility, its timed result immediately returns to scaling
+ * with N and schema depth.
  *
  * Environment controls:
  * - SCHEMA_READ_DEPTH_N: list size, default 1000
