@@ -119,3 +119,38 @@ describe("Runtime.hostForSpace", () => {
     }
   });
 });
+
+describe("Runtime.fetchBuiltin", () => {
+  it("preserves mapped-host resolution when routing through the server broker", async () => {
+    const runtime = new Runtime({
+      apiUrl: new URL("http://host-a.test/"),
+      patternEnvironment: { apiUrl: new URL("http://host-a.test/") },
+      spaceHostMap: { [spaceB]: "http://host-b.test" },
+      storageManager: StorageManager.emulate({ as: signer }),
+      experimental: { serverPrimaryExecution: true },
+    });
+    const brokerUrls: string[] = [];
+    runtime.installServerBuiltinFetch((_builtinId, url) => {
+      brokerUrls.push(url);
+      return Promise.resolve(new Response("ok"));
+    });
+    try {
+      await runtime.fetchBuiltin(
+        "fetchJson",
+        "/api/value",
+        new URL("http://host-b.test/api/value"),
+      );
+      await runtime.fetchBuiltin(
+        "fetchJson",
+        "/api/local",
+        new URL("http://host-a.test/api/local"),
+      );
+      expect(brokerUrls).toEqual([
+        "http://host-b.test/api/value",
+        "/api/local",
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+});

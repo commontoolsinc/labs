@@ -609,6 +609,8 @@ export class Runtime {
   /** Resolved committed-write backpressure policy (all fields present). */
   readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
+  /** Base used by the server builtin broker for authored relative URLs. */
+  readonly #patternApiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
   /** This client build's git sha; see RuntimeOptions.clientVersion. */
   readonly clientVersion?: string;
@@ -899,6 +901,9 @@ export class Runtime {
     this.clientVersion = options.clientVersion;
     this.#onVersionSkew = options.onVersionSkew;
     this.apiUrl = new URL(options.apiUrl);
+    this.#patternApiUrl = new URL(
+      options.patternEnvironment?.apiUrl ?? options.apiUrl,
+    );
     // Validate eagerly, mirroring the storage layer's resolver: a
     // malformed host should fail at configuration time naming the
     // space, not mid-builtin as a bare Invalid URL.
@@ -1959,9 +1964,14 @@ export class Runtime {
     resolvedUrl: URL,
     init?: RequestInit,
   ): Promise<Response> {
-    return this.serverBuiltinFetch !== undefined
-      ? this.serverBuiltinFetch(builtinId, rawUrl, init)
-      : this.fetch(resolvedUrl, init);
+    if (this.serverBuiltinFetch === undefined) {
+      return this.fetch(resolvedUrl, init);
+    }
+    const brokerUrl = new URL(rawUrl, this.#patternApiUrl).href ===
+        resolvedUrl.href
+      ? rawUrl
+      : resolvedUrl.href;
+    return this.serverBuiltinFetch(builtinId, brokerUrl, init);
   }
 
   /**
