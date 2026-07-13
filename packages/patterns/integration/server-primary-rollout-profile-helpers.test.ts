@@ -185,6 +185,24 @@ Deno.test("routing phases wait for an accepted commit to reach the data sequence
   );
 });
 
+Deno.test("routing phase failures use fabric-safe snapshot diagnostics", () => {
+  const withFabricDebugValue = {
+    ...diagnostics({ executionAppliedSeq: 18 }),
+    debugBigInt: 7n,
+  } as ExecutionRoutingDiagnostics;
+
+  assertThrows(
+    () =>
+      assertExactRoutingPhase(withFabricDebugValue, {
+        key,
+        policyEnabled: true,
+        events: 4,
+      }),
+    Error,
+    '"debugBigInt":7n',
+  );
+});
+
 Deno.test("enabled preflight requires a post-reset settlement", () => {
   assertEnabledPreflightSettlement(diagnostics(), key);
 
@@ -200,6 +218,23 @@ Deno.test("enabled preflight requires a post-reset settlement", () => {
       ),
     Error,
     "post-reset committed/no-op settlement",
+  );
+});
+
+Deno.test("preflight failures use fabric-safe snapshot diagnostics", () => {
+  const withFabricDebugValue = {
+    ...diagnostics({
+      actions: [action({
+        settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+      })],
+    }),
+    debugBigInt: 11n,
+  } as ExecutionRoutingDiagnostics;
+
+  assertThrows(
+    () => assertEnabledPreflightSettlement(withFabricDebugValue, key),
+    Error,
+    '"debugBigInt":11n',
   );
 });
 

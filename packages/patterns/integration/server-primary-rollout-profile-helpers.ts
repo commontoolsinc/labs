@@ -4,6 +4,7 @@ import {
   type ExecutionClaim,
   executionClaimIncarnationKey,
 } from "@commonfabric/memory/v2";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type { ExecutionRoutingDiagnostics } from "@commonfabric/runner/shared";
 
 export interface RolloutActionTraceEntry {
@@ -181,7 +182,7 @@ export function assertEnabledPreflightSettlement(
     throw new Error(
       `enabled preflight did not establish current authority: ${
         issues.join("; ")
-      }. Snapshot: ${JSON.stringify(diagnostics)}`,
+      }. Snapshot: ${toCompactDebugString(diagnostics)}`,
     );
   }
 }
@@ -339,7 +340,7 @@ export function assertExactRoutingPhase(
   if (issues.length > 0) {
     throw new Error(
       `exact routing phase was not authoritative: ${issues.join("; ")}. ` +
-        `Snapshot: ${JSON.stringify(diagnostics)}`,
+        `Snapshot: ${toCompactDebugString(diagnostics)}`,
     );
   }
 }
