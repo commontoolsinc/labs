@@ -338,6 +338,8 @@ Deno.test("accepted commit cold-starts parked demand on behalf of its origin", a
   const factory = new FakeExecutorFactory();
   const pool = new SharedExecutionPool({ control, factory });
   pool.start();
+  const timingBefore = getTimingStatsBreakdown()["execution.pool"] ?? {};
+  const wakeBefore = timingBefore.wake?.count ?? 0;
 
   try {
     control.acquisitionSucceeds = false;
@@ -363,6 +365,15 @@ Deno.test("accepted commit cold-starts parked demand on behalf of its origin", a
       undefined,
       { preferredOriginSessionId: "session:2" },
     ]);
+    assertEquals(pool.metrics().acceptedCommitNotifications, 1);
+    assertEquals(pool.metrics().acceptedCommitIndexDecisions, 1);
+    assertEquals(pool.metrics().suppressedUnrelatedCommits, 0);
+    assertEquals(pool.metrics().parkedWakeAttempts, 1);
+    assertEquals(pool.metrics().parkedWakeStarts, 1);
+    assertEquals(
+      getTimingStatsBreakdown()["execution.pool"]?.wake?.count,
+      wakeBefore + 1,
+    );
 
     // A live Worker owns the accepted-commit feed for its realm. The pool
     // must neither duplicate that wake nor start another generation.
@@ -373,9 +384,14 @@ Deno.test("accepted commit cold-starts parked demand on behalf of its origin", a
     await pool.idle();
     assertEquals(factory.starts.length, 1);
     assertEquals(factory.executors[0]?.wakes, 0);
+    assertEquals(pool.metrics().acceptedCommitNotifications, 2);
+    assertEquals(pool.metrics().acceptedCommitIndexDecisions, 2);
+    assertEquals(pool.metrics().parkedWakeAttempts, 1);
+    assertEquals(pool.metrics().parkedWakeStarts, 1);
 
     await pool.close();
     assertEquals(control.acceptedCommitListenerCount(), 0);
+    assertEquals(pool.metrics().demandEmptyHibernations, 0);
   } finally {
     await pool.close();
   }
@@ -407,6 +423,11 @@ Deno.test("accepted commit wake ignores wrong-branch and unstale events", async 
 
     assertEquals(control.acquired, 1);
     assertEquals(factory.starts.length, 0);
+    assertEquals(pool.metrics().acceptedCommitNotifications, 2);
+    assertEquals(pool.metrics().acceptedCommitIndexDecisions, 1);
+    assertEquals(pool.metrics().suppressedUnrelatedCommits, 1);
+    assertEquals(pool.metrics().parkedWakeAttempts, 0);
+    assertEquals(pool.metrics().parkedWakeStarts, 0);
   } finally {
     await pool.close();
   }
@@ -417,6 +438,8 @@ Deno.test("accepted commit wake honors settle watermark and coalesces replacemen
   const factory = new FakeExecutorFactory();
   const pool = new SharedExecutionPool({ control, factory });
   pool.start();
+  const timingBefore = getTimingStatsBreakdown()["execution.pool"] ?? {};
+  const wakeBefore = timingBefore.wake?.count ?? 0;
 
   try {
     const active = [
@@ -466,6 +489,52 @@ Deno.test("accepted commit wake honors settle watermark and coalesces replacemen
     assertEquals(control.acquisitionOptions[1], {
       preferredOriginSessionId: "session:2",
     });
+    assertEquals(pool.metrics().acceptedCommitNotifications, 4);
+    assertEquals(pool.metrics().acceptedCommitIndexDecisions, 4);
+    assertEquals(pool.metrics().suppressedUnrelatedCommits, 0);
+    assertEquals(pool.metrics().parkedWakeAttempts, 1);
+    assertEquals(pool.metrics().parkedWakeStarts, 1);
+
+    // A later successful generation reporting an older sequence must not move
+    // the lane's coverage barrier backward.
+    const second = factory.executors[1]!;
+    second.settleResult = 5;
+    const secondSettleGate = Promise.withResolvers<void>();
+    second.settleGate = secondSettleGate.promise;
+    control.emit(4, []);
+    await second.settleStarted.promise;
+    const redemandedAgain = control.emit(5, active);
+    control.legacyOwned = true;
+    secondSettleGate.resolve();
+    await redemandedAgain;
+    await pool.idle();
+
+    control.legacyOwned = false;
+    await control.emitAccepted(acceptedCommit({
+      dataSeq: 10,
+      originSessionId: "session:1",
+    }));
+    await pool.idle();
+    assertEquals(control.acquired, 2);
+    assertEquals(factory.starts.length, 2);
+    assertEquals(pool.metrics().parkedWakeAttempts, 1);
+
+    await control.emitAccepted(acceptedCommit({
+      dataSeq: 14,
+      originSessionId: "session:2",
+    }));
+    await pool.idle();
+    assertEquals(control.acquired, 3);
+    assertEquals(factory.starts.length, 3);
+    assertEquals(pool.metrics().acceptedCommitNotifications, 6);
+    assertEquals(pool.metrics().acceptedCommitIndexDecisions, 6);
+    assertEquals(pool.metrics().parkedWakeAttempts, 2);
+    assertEquals(pool.metrics().parkedWakeStarts, 2);
+    assertEquals(pool.metrics().demandEmptyHibernations, 0);
+    assertEquals(
+      getTimingStatsBreakdown()["execution.pool"]?.wake?.count,
+      wakeBefore + 2,
+    );
   } finally {
     await pool.close();
   }
@@ -476,6 +545,8 @@ Deno.test("shared execution pool unions ten client references into one worker", 
   const factory = new FakeExecutorFactory();
   const pool = new SharedExecutionPool({ control, factory });
   pool.start();
+  const timingBefore = getTimingStatsBreakdown()["execution.pool"] ?? {};
+  const hibernateBefore = timingBefore.hibernate?.count ?? 0;
 
   try {
     const demands = Array.from(
@@ -513,6 +584,12 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       leaseReplacements: 0,
       sponsorRotations: 0,
       crashes: 0,
+      acceptedCommitNotifications: 0,
+      acceptedCommitIndexDecisions: 0,
+      suppressedUnrelatedCommits: 0,
+      parkedWakeAttempts: 0,
+      parkedWakeStarts: 0,
+      demandEmptyHibernations: 0,
     });
 
     await control.emit(2, demands.slice(1));
@@ -546,7 +623,17 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       leaseReplacements: 0,
       sponsorRotations: 0,
       crashes: 0,
+      acceptedCommitNotifications: 0,
+      acceptedCommitIndexDecisions: 0,
+      suppressedUnrelatedCommits: 0,
+      parkedWakeAttempts: 0,
+      parkedWakeStarts: 0,
+      demandEmptyHibernations: 1,
     });
+    assertEquals(
+      getTimingStatsBreakdown()["execution.pool"]?.hibernate?.count,
+      hibernateBefore + 1,
+    );
   } finally {
     await pool.close();
   }
@@ -832,6 +919,7 @@ Deno.test("shared execution pool fences and abruptly stops a worker that fails t
       "finish-drain",
     ]);
     assertEquals(factory.executors[0]?.stopOptions, [{ abrupt: true }]);
+    assertEquals(pool.metrics().demandEmptyHibernations, 0);
   } finally {
     await pool.close();
   }
@@ -994,6 +1082,7 @@ Deno.test("shared execution pool retains demand that arrives during drain", asyn
       "piece:a",
       "piece:b",
     ]]);
+    assertEquals(pool.metrics().demandEmptyHibernations, 0);
   } finally {
     await pool.close();
   }

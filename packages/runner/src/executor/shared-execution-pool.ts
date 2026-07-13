@@ -107,6 +107,23 @@ export interface ExecutionPoolMetricsSnapshot {
   readonly leaseReplacements: number;
   readonly sponsorRotations: number;
   readonly crashes: number;
+  /** Per-lane accepted-commit callbacks received while the lane remains
+   * mapped, including callbacks later rejected by branch/state filters. */
+  readonly acceptedCommitNotifications: number;
+  /** Exact-lane host-index results inspected from notifications. This does
+   * not issue another index query. */
+  readonly acceptedCommitIndexDecisions: number;
+  /** Exact-lane host-index results with no stale demanded readers. */
+  readonly suppressedUnrelatedCommits: number;
+  /** Coalesced reconciliation passes queued for indexed-relevant
+   * executor-null/draining lanes. */
+  readonly parkedWakeAttempts: number;
+  /** Worker generations made live after cold acquisition began with a pending
+   * indexed-relevant commit wake. */
+  readonly parkedWakeStarts: number;
+  /** Demand-empty drains that remained empty and gracefully settled, stopped,
+   * and released their lease. */
+  readonly demandEmptyHibernations: number;
 }
 
 type Slot = {
@@ -130,6 +147,7 @@ type Slot = {
   unsubscribeAcceptedCommits: (() => void) | null;
   lastSettledSeq: number;
   pendingWakeSeq: number | null;
+  pendingWakeStartedAt: number | null;
   preferredOriginSessionId?: string;
   acceptedWakeQueued: boolean;
   tail: Promise<void>;
@@ -177,6 +195,12 @@ export class SharedExecutionPool {
     leaseReplacements: 0,
     sponsorRotations: 0,
     crashes: 0,
+    acceptedCommitNotifications: 0,
+    acceptedCommitIndexDecisions: 0,
+    suppressedUnrelatedCommits: 0,
+    parkedWakeAttempts: 0,
+    parkedWakeStarts: 0,
+    demandEmptyHibernations: 0,
   };
   #unsubscribe: (() => void) | null = null;
   #closed = false;
@@ -265,7 +289,9 @@ export class SharedExecutionPool {
     }
     await this.idle();
     const stops = [...this.#slots.values()].map((slot) =>
-      this.#enqueue(slot, () => this.#shutdown(slot, false))
+      this.#enqueue(slot, async () => {
+        await this.#shutdown(slot, false);
+      })
     );
     await Promise.allSettled(stops);
     await this.idle();
@@ -296,6 +322,7 @@ export class SharedExecutionPool {
         unsubscribeAcceptedCommits: null,
         lastSettledSeq: 0,
         pendingWakeSeq: null,
+        pendingWakeStartedAt: null,
         acceptedWakeQueued: false,
         tail: Promise.resolve(),
       };
@@ -326,14 +353,28 @@ export class SharedExecutionPool {
     slot: Slot,
     event: AcceptedCommitEvent,
   ): Promise<void> {
+    if (this.#closed || this.#slots.get(slot.key) !== slot) {
+      return Promise.resolve();
+    }
+    this.#metrics.acceptedCommitNotifications++;
+    if (event.space !== slot.space || event.branch !== slot.branch) {
+      return Promise.resolve();
+    }
+    // Server already performed the indexed stale-reader lookup. Inspecting
+    // its bounded scalar result here must not be described as a second query.
+    this.#metrics.acceptedCommitIndexDecisions++;
+    if (event.staleDemandedReaders.length === 0) {
+      this.#metrics.suppressedUnrelatedCommits++;
+      return Promise.resolve();
+    }
     if (
-      this.#closed || this.#slots.get(slot.key) !== slot ||
-      event.space !== slot.space || event.branch !== slot.branch ||
-      event.staleDemandedReaders.length === 0 ||
       event.dataSeq <= slot.lastSettledSeq ||
       (slot.executor !== null && slot.state !== "draining")
     ) return Promise.resolve();
 
+    if (slot.pendingWakeSeq === null) {
+      slot.pendingWakeStartedAt = performance.now();
+    }
     if (slot.pendingWakeSeq === null || event.dataSeq > slot.pendingWakeSeq) {
       slot.pendingWakeSeq = event.dataSeq;
       if (event.originSessionId !== undefined) {
@@ -348,6 +389,7 @@ export class SharedExecutionPool {
 
     if (slot.acceptedWakeQueued) return slot.tail;
     slot.acceptedWakeQueued = true;
+    this.#metrics.parkedWakeAttempts++;
     return this.#enqueue(slot, async () => {
       try {
         if (this.#closed || this.#slots.get(slot.key) !== slot) return;
@@ -355,20 +397,17 @@ export class SharedExecutionPool {
           slot.pendingWakeSeq === null ||
           slot.pendingWakeSeq <= slot.lastSettledSeq
         ) {
-          slot.pendingWakeSeq = null;
-          slot.preferredOriginSessionId = undefined;
+          this.#clearPendingWake(slot);
           return;
         }
         if (slot.executor !== null && slot.state !== "draining") {
-          slot.pendingWakeSeq = null;
-          slot.preferredOriginSessionId = undefined;
+          this.#clearPendingWake(slot);
           return;
         }
         if (
           slot.demands.length === 0 || unionPieces(slot.demands).length === 0
         ) {
-          slot.pendingWakeSeq = null;
-          slot.preferredOriginSessionId = undefined;
+          this.#clearPendingWake(slot);
           return;
         }
         await this.#reconcile(slot);
@@ -376,6 +415,12 @@ export class SharedExecutionPool {
         slot.acceptedWakeQueued = false;
       }
     });
+  }
+
+  #clearPendingWake(slot: Slot): void {
+    slot.pendingWakeSeq = null;
+    slot.pendingWakeStartedAt = null;
+    slot.preferredOriginSessionId = undefined;
   }
 
   #unsubscribeAcceptedCommits(slot: Slot): void {
@@ -408,8 +453,15 @@ export class SharedExecutionPool {
     const nextPieces = unionPieces(slot.demands);
     if (slot.demands.length === 0 || nextPieces.length === 0 || this.#closed) {
       const drainOrder = slot.order;
+      const hibernateStartedAt = performance.now();
       this.#cancelBackoff(slot);
-      await this.#shutdown(slot, false);
+      const shutdown = await this.#shutdown(slot, false);
+      if (shutdown.graceful && slot.demands.length === 0) {
+        this.#metrics.demandEmptyHibernations++;
+        // Fixed-key duration from demand-empty reconciliation through the
+        // completed settle/stop/lease-release sequence.
+        logger.time(hibernateStartedAt, "hibernate");
+      }
       // Demand snapshots mutate the slot before their queued reconciliation
       // runs. A newer non-empty snapshot may therefore arrive while stop() is
       // awaiting runtime settlement. Keep the mapped lane in that case so the
@@ -479,6 +531,14 @@ export class SharedExecutionPool {
       }
     }
 
+    if (
+      slot.pendingWakeSeq !== null &&
+      slot.pendingWakeSeq <= slot.lastSettledSeq
+    ) {
+      this.#clearPendingWake(slot);
+    }
+    const wakingFromAcceptedCommit = slot.pendingWakeSeq !== null;
+    const wakeStartedAt = slot.pendingWakeStartedAt;
     slot.state = "waiting";
     const acquired = await this.#control.acquireExecutionLease(
       slot.space,
@@ -539,8 +599,13 @@ export class SharedExecutionPool {
       slot.executor = executor;
       slot.pieces = nextPieces;
       slot.state = "live";
-      slot.pendingWakeSeq = null;
-      slot.preferredOriginSessionId = undefined;
+      if (wakingFromAcceptedCommit) {
+        this.#metrics.parkedWakeStarts++;
+        // Fixed-key duration from the first coalesced relevant notification
+        // until its cold replacement generation is live.
+        if (wakeStartedAt !== null) logger.time(wakeStartedAt, "wake");
+      }
+      this.#clearPendingWake(slot);
       this.#scheduleRenewal(slot, token);
       if (slot.crashToken === token) {
         await this.#reconcile(slot);
@@ -726,19 +791,31 @@ export class SharedExecutionPool {
     return { graceful: false, lease };
   }
 
-  async #shutdown(slot: Slot, abrupt: boolean): Promise<void> {
+  async #shutdown(
+    slot: Slot,
+    abrupt: boolean,
+  ): Promise<{ graceful: boolean }> {
     this.#cancelRenewal(slot);
     this.#cancelBackoff(slot);
     const executor = slot.executor;
     let lease = slot.lease;
     const leaseGeneration = lease?.leaseGeneration;
-    if (executor === null && lease === null) return;
+    if (executor === null && lease === null) {
+      return { graceful: false };
+    }
+    let stopFailed = false;
+    let finishFailed = false;
     slot.state = "draining";
 
     if (!abrupt && executor !== null) {
       const settled = await this.#settleWhileRenewing(slot, executor, lease);
       lease = settled.lease;
-      if (settled.graceful) slot.lastSettledSeq = settled.sequence;
+      if (settled.graceful) {
+        slot.lastSettledSeq = Math.max(
+          slot.lastSettledSeq,
+          settled.sequence,
+        );
+      }
       abrupt = !settled.graceful;
     }
     if (lease !== null && lease.state === "active") {
@@ -766,16 +843,19 @@ export class SharedExecutionPool {
         await executor.stop(abrupt ? { abrupt: true } : undefined);
       } catch (error) {
         console.warn("executor Worker teardown failed", error);
+        stopFailed = true;
       }
       this.#metrics.workersStopped++;
       if (abrupt) this.#metrics.abruptStops++;
     }
     if (lease !== null) {
       try {
-        await this.#control.finishExecutionLeaseDrain(lease);
+        const finished = await this.#control.finishExecutionLeaseDrain(lease);
+        if (finished === null) finishFailed = true;
       } catch (error) {
         console.warn("execution lease drain completion failed", error);
         this.#metrics.leaseLosses++;
+        finishFailed = true;
       }
     }
     if (slot.executor === executor) slot.executor = null;
@@ -784,5 +864,8 @@ export class SharedExecutionPool {
     }
     slot.generationToken = null;
     slot.crashToken = null;
+    return {
+      graceful: executor !== null && !abrupt && !stopFailed && !finishFailed,
+    };
   }
 }
