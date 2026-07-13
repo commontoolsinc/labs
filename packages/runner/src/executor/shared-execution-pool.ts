@@ -417,7 +417,6 @@ export class SharedExecutionPool {
       slot.executor = executor;
       slot.pieces = nextPieces;
       slot.state = "live";
-      slot.crashAttempts = 0;
       this.#scheduleRenewal(slot, token);
       if (slot.crashToken === token) {
         await this.#reconcile(slot);
@@ -451,6 +450,11 @@ export class SharedExecutionPool {
           return;
         }
         slot.lease = renewed;
+        // A successful boot alone is not a health boundary: a realm that
+        // repeatedly initializes and immediately crashes must still escalate
+        // its backoff. Surviving through an authority renewal proves this
+        // generation stayed live long enough to reset the crash streak.
+        slot.crashAttempts = 0;
         this.#scheduleRenewal(slot, token);
       });
     }, Math.max(1, Math.floor(remaining / 2)));

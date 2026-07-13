@@ -173,6 +173,45 @@ class FakeExecutorFactory implements SpaceExecutorFactory {
   }
 }
 
+class ManualTimers {
+  readonly records = new Map<
+    number,
+    { callback: () => void; delayMs: number; cleared: boolean; fired: boolean }
+  >();
+  #next = 0;
+
+  readonly setTimer = (callback: () => void, delayMs: number): number => {
+    const timer = ++this.#next;
+    this.records.set(timer, {
+      callback,
+      delayMs,
+      cleared: false,
+      fired: false,
+    });
+    return timer;
+  };
+
+  readonly clearTimer = (timer: number): void => {
+    const record = this.records.get(timer);
+    if (record !== undefined) record.cleared = true;
+  };
+
+  fire(predicate: (delayMs: number) => boolean): void {
+    const timer = [...this.records.values()].find((timer) =>
+      !timer.cleared && !timer.fired && predicate(timer.delayMs)
+    );
+    if (timer === undefined) throw new Error("missing expected timer");
+    timer.fired = true;
+    timer.callback();
+  }
+
+  hasActive(delayMs: number): boolean {
+    return [...this.records.values()].some((timer) =>
+      !timer.cleared && !timer.fired && timer.delayMs === delayMs
+    );
+  }
+}
+
 Deno.test("shared execution pool unions ten client references into one worker", async () => {
   const control = new FakeExecutionControl();
   const factory = new FakeExecutorFactory();
@@ -686,6 +725,69 @@ Deno.test("shared execution pool fences a crashed worker before replacement", as
     assertEquals(factory.starts[1]?.lease.leaseGeneration, 2);
     assertEquals(pool.metrics().crashes, 1);
     assertEquals(pool.metrics().leaseReplacements, 1);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool escalates backoff across repeated live crashes", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const timers = new ManualTimers();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    factory.starts[0]?.onCrash(new Error("first live crash"));
+    await pool.idle();
+    timers.fire((delayMs) => delayMs === 1_000);
+    await pool.idle();
+
+    factory.starts[1]?.onCrash(new Error("second live crash"));
+    await pool.idle();
+    assertEquals(timers.hasActive(2_000), true);
+    assertEquals(pool.metrics().crashes, 2);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool resets crash backoff after a healthy renewal", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const timers = new ManualTimers();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    factory.starts[0]?.onCrash(new Error("first live crash"));
+    await pool.idle();
+    timers.fire((delayMs) => delayMs === 1_000);
+    await pool.idle();
+
+    // Surviving until the replacement renews its authority establishes the
+    // health boundary for this crash streak.
+    timers.fire((delayMs) => delayMs > 2_000);
+    await pool.idle();
+    factory.starts[1]?.onCrash(new Error("post-renewal crash"));
+    await pool.idle();
+
+    assertEquals(timers.hasActive(1_000), true);
+    assertEquals(control.renewals, 1);
   } finally {
     await pool.close();
   }
