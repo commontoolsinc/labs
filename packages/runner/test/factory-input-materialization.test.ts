@@ -442,17 +442,8 @@ describe("scheduled Factory@1 input materialization", () => {
     }
   });
 
-  it("does not discover factories through non-root-definition refs", () => {
-    let factoryReads = 0;
-    const payload = Object.create(null) as Record<string, unknown>;
-    Object.defineProperty(payload, "factory", {
-      enumerable: true,
-      get() {
-        factoryReads++;
-        throw new Error("non-canonical ref must remain opaque");
-      },
-    });
-    const ordinary = { payload };
+  it("discovers factories through arbitrary local JSON Pointer refs", () => {
+    const selected = selectFactory("module", space, true);
     const schema = {
       type: "object",
       properties: {
@@ -473,13 +464,57 @@ describe("scheduled Factory@1 input materialization", () => {
       );
 
       expect(
-        materializeScheduledFactoryInputs(ordinary, schema, {
-          runtime,
-          tx,
-          inputsCell,
-        }),
-      ).toBe(ordinary);
-      expect(factoryReads).toBe(0);
+        materializeScheduledFactoryInputs(
+          { payload: { factory: selected.shell } },
+          schema,
+          {
+            runtime,
+            tx,
+            inputsCell,
+          },
+        ),
+      ).toEqual({ payload: { factory: selected.live } });
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
+  it("discovers chained definitions refs with escaped pointer segments", () => {
+    const selected = selectFactory("pattern", space, true);
+    const schema = {
+      type: "object",
+      properties: {
+        payload: { $ref: "#/definitions/factory~1alias" },
+      },
+      definitions: {
+        "factory/alias": { $ref: "#/definitions/nested/properties/value" },
+        nested: {
+          properties: {
+            value: {
+              type: "object",
+              properties: { factory: { asFactory: CONTRACTS.pattern } },
+              required: ["factory"],
+            },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "definitions-factory-ref-input",
+        schema,
+        tx,
+      );
+
+      expect(
+        materializeScheduledFactoryInputs(
+          { payload: { factory: selected.shell } },
+          schema,
+          { runtime, tx, inputsCell },
+        ),
+      ).toEqual({ payload: { factory: selected.live } });
     } finally {
       tx.abort(new Error("test cleanup"));
     }

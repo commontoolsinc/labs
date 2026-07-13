@@ -29,6 +29,11 @@ export interface FactoryInputPreparationContext {
 const MAX_FACTORY_READINESS_ATTEMPTS = 3;
 const FACTORY_READINESS_BACKOFF_MS = [5, 20] as const;
 
+function inputLinkAtPath(root: Cell<unknown>, path: readonly string[]) {
+  const rootLink = root.getAsNormalizedFullLink();
+  return { ...rootLink, path: [...rootLink.path, ...path] };
+}
+
 function retryReadinessOf(
   error: unknown,
 ): (() => Promise<unknown>) | undefined {
@@ -70,17 +75,6 @@ async function waitForFactoryReadiness(
       );
     }
   }
-}
-
-function cellAtPath(
-  root: Cell<unknown>,
-  path: readonly string[],
-): Cell<unknown> {
-  let cell = root;
-  for (const segment of path) {
-    cell = cell.key(segment as never) as Cell<unknown>;
-  }
-  return cell;
 }
 
 /**
@@ -136,17 +130,13 @@ function resolveFactoryDiscoverySchema(
   const seen = new Set<string>();
   while (
     isRecord(current) && typeof current.$ref === "string" &&
-    /^#\/\$defs\/[^/]+$/.test(current.$ref) && isRecord(root)
+    !("asFactory" in current) && root !== undefined
   ) {
-    if (seen.has(current.$ref)) return current;
-    seen.add(current.$ref);
-    let target: unknown = root;
-    for (const encoded of current.$ref.slice(2).split("/")) {
-      if (!isRecord(target)) return current;
-      const key = encoded.replaceAll("~1", "/").replaceAll("~0", "~");
-      target = target[key];
-    }
-    if (typeof target !== "boolean" && !isRecord(target)) return current;
+    const ref = current.$ref;
+    if (seen.has(ref)) return current;
+    seen.add(ref);
+    const target = resolveFactoryDiscoveryRef(ref, root);
+    if (target === undefined) return current;
     const { $ref: _, ...siblings } = current;
     if (target === false) return false;
     if (target === true) {
@@ -156,12 +146,44 @@ function resolveFactoryDiscoverySchema(
     current = {
       ...target,
       ...siblings,
-      ...(target.$defs === undefined && root.$defs !== undefined
+      ...(isRecord(root) && target.$defs === undefined &&
+          root.$defs !== undefined
         ? { $defs: root.$defs }
+        : {}),
+      ...(isRecord(root) && target.definitions === undefined &&
+          root.definitions !== undefined
+        ? { definitions: root.definitions }
         : {}),
     };
   }
   return current;
+}
+
+function resolveFactoryDiscoveryRef(
+  ref: string,
+  root: JSONSchema,
+): JSONSchema | undefined {
+  if (ref === "#") return root;
+  if (!ref.startsWith("#/")) return undefined;
+
+  let pointer: string;
+  try {
+    pointer = decodeURIComponent(ref.slice(2));
+  } catch {
+    return undefined;
+  }
+
+  let target: unknown = root;
+  for (const encoded of pointer.split("/")) {
+    if (/~(?:[^01]|$)/.test(encoded)) return undefined;
+    if (!isRecord(target)) return undefined;
+    const key = encoded.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (!Object.hasOwn(target, key)) return undefined;
+    target = target[key];
+  }
+  return typeof target === "boolean" || isRecord(target)
+    ? target as JSONSchema
+    : undefined;
 }
 
 /**
@@ -284,7 +306,7 @@ export function materializeScheduledFactoryInputs(
       const resolvedInput = resolveLink(
         context.runtime,
         context.tx,
-        cellAtPath(context.inputsCell, path).getAsNormalizedFullLink(),
+        inputLinkAtPath(context.inputsCell, path),
       );
       const materializationContext = {
         runtime: context.runtime,
