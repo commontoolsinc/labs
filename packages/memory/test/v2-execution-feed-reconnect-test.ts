@@ -8,7 +8,6 @@ import {
   type ResponseMessage,
   type ServerMessage,
   type SessionDescriptor,
-  type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionOpenResult,
 } from "../v2.ts";
@@ -250,7 +249,7 @@ Deno.test("resumed open suppresses live execution effects until its response ins
   }
 });
 
-Deno.test("resumed feed filters retained events through current execution subcapabilities", async () => {
+Deno.test("policy-enabled resume rejects missing graduated execution subcapabilities", async () => {
   const server = createServer("memory-v2-execution-feed-resume-subcaps");
   const firstMessages: ServerMessage[] = [];
   const first = server.connect((message) => firstMessages.push(message));
@@ -299,26 +298,13 @@ Deno.test("resumed feed filters retained events through current execution subcap
           executionFeedSeq: acknowledgedFeedSeq,
         },
       );
-      assertExists(resumed.ok?.sync?.execution);
+      assertEquals(resumed.ok, undefined);
+      assertEquals(resumed.error?.name, "ProtocolError");
       assertEquals(
-        resumed.ok.sync.execution.snapshot?.claims.map((claim) =>
-          claim.actionKind
-        ),
-        ["computation"],
+        resumed.error?.message.includes("builtin-passivity-v1"),
+        true,
       );
-      assertEquals(
-        resumed.ok.sync.execution.events.map((event) => {
-          if (event.type !== "session.execution.claim.set") return event.type;
-          return event.claim.actionKind;
-        }),
-        ["computation"],
-      );
-      assertEquals(
-        secondMessages.filter((message): message is SessionEffectMessage =>
-          message.type === "session/effect"
-        ),
-        [],
-      );
+      assertEquals(secondMessages, []);
     } finally {
       second.close();
     }
