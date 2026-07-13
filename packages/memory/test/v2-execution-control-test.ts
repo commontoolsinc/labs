@@ -909,8 +909,20 @@ Deno.test("positive claims require enabled policy and disabling it revokes autho
     );
 
     await setPolicy(session, true);
+    assertEquals(
+      (await server.currentExecutionLease(POLICY_SPACE, ""))?.state,
+      "draining",
+    );
+    await server.finishExecutionLeaseDrain(lease);
+    const promotedLease = await server.acquireExecutionLease(
+      POLICY_SPACE,
+      "",
+    );
+    if (promotedLease === null) {
+      throw new Error("expected a replacement execution lease after enable");
+    }
     const claim = await server.setExecutionClaim(
-      lease,
+      promotedLease,
       claimKey(POLICY_SPACE, ""),
     );
     assertEquals(session.executionClaims.length, 1);

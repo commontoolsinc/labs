@@ -2547,7 +2547,7 @@ export class Server {
   async #drainIneligibleExecutionLeases(
     engine: Engine.Engine,
     space: string,
-    options: { policyDisabled?: boolean } = {},
+    options: { policyDisabled?: boolean; rotateActive?: boolean } = {},
   ): Promise<ReadonlySet<BranchName>> {
     const affectedBranches = new Set<BranchName>();
     const drains: Promise<void>[] = [];
@@ -2559,7 +2559,7 @@ export class Server {
       ) continue;
       const sponsor = this.#sessions.get(space, authority.sponsorSessionId);
       if (
-        !options.policyDisabled && sponsor !== null &&
+        !options.policyDisabled && !options.rotateActive && sponsor !== null &&
         this.#executionLeaseSponsorCanWrite(engine, authority, sponsor)
       ) continue;
       authority.drainRequested = true;
@@ -4581,6 +4581,8 @@ export class Server {
             message.commit.operations,
             message.space,
           );
+          const executionPolicyWasEnabled = executionPolicyTouched &&
+            this.#executionPolicyEnabled(engine, message.space);
           const deny = executionPolicyTouched
             ? this.#authorizeExecutionPolicyOwner(
               engine,
@@ -4738,12 +4740,18 @@ export class Server {
             }
           }
           if (executionPolicyTouched) {
-            if (!this.#reconcileExecutionPolicy(engine, message.space)) {
+            const executionPolicyEnabled = this.#reconcileExecutionPolicy(
+              engine,
+              message.space,
+            );
+            if (executionPolicyEnabled !== executionPolicyWasEnabled) {
               for (
                 const branch of await this.#drainIneligibleExecutionLeases(
                   engine,
                   message.space,
-                  { policyDisabled: true },
+                  executionPolicyEnabled
+                    ? { rotateActive: true }
+                    : { policyDisabled: true },
                 )
               ) {
                 reconciledExecutionBranches.add(branch);

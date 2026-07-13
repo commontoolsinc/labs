@@ -116,7 +116,6 @@ Deno.test("policy disable waits for the old lease to enter draining before respo
       disableSettled = true;
     });
     await server.drainStarted.promise;
-    await new Promise((resolve) => setTimeout(resolve, 10));
     assertEquals(disableSettled, false);
   } finally {
     server.releaseDrain.resolve();

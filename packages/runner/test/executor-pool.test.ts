@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 import type { BranchName, ExecutionLease } from "@commonfabric/memory/v2";
+import * as MemoryClient from "@commonfabric/memory/v2/client";
 import type {
   AcceptedCommitEvent,
   AcceptedCommitListener,
@@ -9,6 +10,7 @@ import type {
   ExecutionDemandSnapshot,
   ExecutionLeaseHandle,
 } from "@commonfabric/memory/v2/server";
+import { Server } from "@commonfabric/memory/v2/server";
 import {
   type ExecutionPoolControl,
   SharedExecutionPool,
@@ -19,6 +21,10 @@ import {
 
 const SPACE = "did:key:z6Mk-shared-execution-pool";
 const BRANCH = "" as BranchName;
+const POLICY_SPACE = "did:key:z6Mk-shared-execution-policy-transition";
+const POLICY_OWNER = "did:key:z6Mk-shared-execution-policy-owner";
+const POLICY_AUDIENCE = "did:key:z6Mk-shared-execution-policy-audience";
+const POLICY_ID = `of:${POLICY_SPACE}:execution-policy`;
 
 const lease = (generation = 1): ExecutionLeaseHandle => ({
   version: 1,
@@ -294,6 +300,40 @@ class FakeExecutorFactory implements SpaceExecutorFactory {
   }
 }
 
+class GatedPolicyTransitionServer extends Server {
+  readonly transitionDrainStarted = Promise.withResolvers<void>();
+  readonly releaseTransitionDrain = Promise.withResolvers<void>();
+  readonly drainCalls: ExecutionLeaseHandle[] = [];
+  #gateFirstDrain = true;
+
+  override async beginExecutionLeaseDrain(
+    lease: ExecutionLeaseHandle,
+  ): Promise<ExecutionLeaseHandle | null> {
+    this.drainCalls.push(lease);
+    if (this.#gateFirstDrain) {
+      this.#gateFirstDrain = false;
+      this.transitionDrainStarted.resolve();
+      await this.releaseTransitionDrain.promise;
+    }
+    return await super.beginExecutionLeaseDrain(lease);
+  }
+}
+
+class GatedReplacementFactory extends FakeExecutorFactory {
+  readonly replacementStarted = Promise.withResolvers<void>();
+  readonly releaseReplacement = Promise.withResolvers<void>();
+
+  override async start(
+    options: Parameters<SpaceExecutorFactory["start"]>[0],
+  ): Promise<SpaceExecutor> {
+    if (this.starts.length === 1) {
+      this.replacementStarted.resolve();
+      await this.releaseReplacement.promise;
+    }
+    return await super.start(options);
+  }
+}
+
 class ManualTimers {
   readonly records = new Map<
     number,
@@ -332,6 +372,108 @@ class ManualTimers {
     );
   }
 }
+
+Deno.test("policy transitions rotate the shadow pool exactly once", async () => {
+  const flags = {
+    serverPrimaryExecutionV1: true,
+    serverPrimaryExecutionClaimRoutingV1: true,
+    serverPrimaryExecutionBuiltinPassivityV1: true,
+  } as const;
+  const server = new GatedPolicyTransitionServer({
+    store: new URL("memory://shared-execution-policy-transition"),
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: { audience: POLICY_AUDIENCE },
+    acl: { mode: "off", serviceDids: [POLICY_OWNER] },
+    protocolFlags: flags,
+  });
+  const client = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+    protocolFlags: flags,
+  });
+  const session = await client.mount(
+    POLICY_SPACE,
+    {},
+    (_space, _session, context) => ({
+      invocation: {
+        aud: context.audience,
+        challenge: context.challenge.value,
+      },
+      authorization: { principal: POLICY_OWNER },
+    }),
+  );
+  const factory = new GatedReplacementFactory();
+  const pool = new SharedExecutionPool({ control: server, factory });
+  pool.start();
+  let localSeq = 1;
+  let enableSettled = false;
+  let enable: Promise<unknown> | undefined;
+  const writePolicy = (enabled: boolean): Promise<unknown> =>
+    session.transact({
+      localSeq: localSeq++,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: POLICY_ID,
+        value: { value: { version: 1, serverPrimaryExecution: enabled } },
+      }],
+    });
+  try {
+    await session.setExecutionDemand("", ["piece:clean-computation"]);
+    await pool.idle();
+    assertEquals(factory.starts.length, 1);
+    assertEquals(factory.starts[0]?.lease.leaseGeneration, 1);
+
+    enable = writePolicy(true).finally(() => {
+      enableSettled = true;
+    });
+    const boundary = await Promise.race([
+      server.transitionDrainStarted.promise.then(() => "drain"),
+      enable.then(() => "response"),
+    ]);
+    assertEquals(boundary, "drain");
+    assertEquals(enableSettled, false);
+    assertEquals(factory.starts.length, 1);
+
+    server.releaseTransitionDrain.resolve();
+    await factory.replacementStarted.promise;
+    assertEquals(enableSettled, false);
+    assertEquals(factory.executors[0]?.stopped, 1);
+
+    factory.releaseReplacement.resolve();
+    await enable;
+    await pool.idle();
+    assertEquals(factory.starts.length, 2);
+    assertEquals(factory.starts[1]?.lease.leaseGeneration, 2);
+
+    const drainsAfterEnable = server.drainCalls.length;
+    await writePolicy(true);
+    await pool.idle();
+    assertEquals(server.drainCalls.length, drainsAfterEnable);
+    assertEquals(factory.starts.length, 2);
+
+    await writePolicy(false);
+    await pool.idle();
+    assertEquals(factory.starts.length, 3);
+    assertEquals(factory.starts[2]?.lease.leaseGeneration, 3);
+
+    const drainsAfterDisable = server.drainCalls.length;
+    await writePolicy(false);
+    await pool.idle();
+    assertEquals(server.drainCalls.length, drainsAfterDisable);
+    assertEquals(factory.starts.length, 3);
+  } finally {
+    server.releaseTransitionDrain.resolve();
+    factory.releaseReplacement.resolve();
+    await enable?.catch(() => undefined);
+    await pool.close();
+    await client.close();
+    await server.close();
+  }
+});
 
 Deno.test("accepted commit cold-starts parked demand on behalf of its origin", async () => {
   const control = new FakeExecutionControl();
