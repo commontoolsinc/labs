@@ -3,6 +3,7 @@ import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
 import {
   createFactoryShell,
   factoryStateOf,
+  registerFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
 import { FsTree } from "./tree.ts";
 import {
@@ -676,6 +677,22 @@ Deno.test("safeStringify projects factories through the tagged Fabric codec", ()
   assertEquals(parsed.search.startsWith("fvj1:"), true);
   assertEquals(parsed.search.includes("Factory@1"), true);
   assertEquals(parsed.search.includes("function"), false);
+});
+
+Deno.test("safeStringify projects live factories before their legacy toJSON", () => {
+  const liveFactory = registerFabricFactory(
+    Object.assign(() => undefined, {
+      toJSON: () => ({ legacyGraph: true }),
+    }),
+    "pattern",
+    factoryStateOf(patternFactory),
+  );
+
+  const parsed = JSON.parse(safeStringify({ search: liveFactory }));
+  assertEquals(typeof parsed.search, "string");
+  assertEquals(parsed.search.startsWith("fvj1:"), true);
+  assertEquals(parsed.search.includes("Factory@1"), true);
+  assertEquals(parsed.search.includes("legacyGraph"), false);
 });
 
 Deno.test("decodeFactoryProjection returns an inert callable shell", () => {
