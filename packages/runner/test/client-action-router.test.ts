@@ -116,6 +116,30 @@ Deno.test("client action router keeps an exact claimed computation local", () =>
   );
 });
 
+Deno.test("two actions in one piece route independently by exact claim key", () => {
+  const claimed = commit();
+  const unclaimed = commit();
+  const unclaimedObservation = unclaimed.schedulerObservation as ReturnType<
+    typeof observation
+  >;
+  Object.assign(unclaimedObservation, { actionId: "action:other" });
+
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: claimed, sourceAction },
+      { claims: [claim()], builtinPassivity: false },
+    ).disposition,
+    "local",
+  );
+  assertEquals(
+    routeClientActionTransaction(
+      { space: SPACE, commit: unclaimed, sourceAction: {} },
+      { claims: [claim()], builtinPassivity: false },
+    ),
+    { disposition: "upstream" },
+  );
+});
+
 Deno.test("client action router fails open when the full claim key mismatches", () => {
   for (
     const mismatch of [
