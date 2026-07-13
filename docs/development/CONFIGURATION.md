@@ -283,7 +283,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 
 | Var | Default | Notes |
 |---|---|---|
-| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for `piece`, `acl`, `exec` against a remote toolshed. |
+| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for `piece`, `acl`, `exec`, and `execution` against a remote toolshed. |
 | `CF_API_URL` | _(none)_ | Toolshed URL. Required for the same commands as above. |
 | `CF_LOG_LEVEL` | `error` | `debug` \| `info` \| `warn` \| `error` \| `silent`. Also settable per-invocation with `--log-level`. |
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
@@ -299,7 +299,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 
 ### Per-command args
 
-`piece`, `acl`, `exec`, and `fuse` accept their own subcommand options
+`piece`, `acl`, `exec`, `execution`, and `fuse` accept their own subcommand options
 (`-i,--identity`, `-a,--api-url`, `-s,--space`, etc.). Use `cf <command> --help`
 for the authoritative list — it's not duplicated here.
 

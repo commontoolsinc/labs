@@ -73,8 +73,10 @@ Verify:
 ## Operational signals
 
 `GET /api/health/stats` exposes the bounded-cardinality host snapshots as
-`serverExecutionPool` and `serverExecutionControl`. A null value means the
-provider is not installed in that process, not that the counters are zero.
+`serverExecutionPool` and `serverExecutionControl`. A null pool value means no
+pool is available or started in that process (including when the runtime flag
+is off); a null control value means its provider is not installed. Neither
+means the counters are zero.
 
 Keep space, branch, action, and DID values in structured logs/traces rather than
 metric labels. The current bounded-cardinality sources are:
@@ -163,12 +165,12 @@ deno task integration patterns server-primary-rollout-profile
 
 The initial A/B/B/A sampling snapshot and its limitations are retained in the
 [historical Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-12.md),
-but it is not current CPU acceptance evidence. The parked-worker claim-
+but it is superseded as CPU acceptance evidence. The parked-worker claim-
 readiness failure it exposed is fixed and covered by exact cold-wake,
-sponsor-preference, settle-watermark, and replacement tests. Fresh acceptance
-still requires the counterbalanced eight-phase renderer-process gate above,
-with exact per-action routing and settlement diagnostics; no newer historical
-acceptance report is recorded yet. Phase 2 removes duplicate wire writes and
-external effects while deliberately leaving speculative browser compute in
-place. Complete-closure client-compute suppression remains the separately
-gated Phase 3 optimization.
+sponsor-preference, settle-watermark, and replacement tests. The fresh
+counterbalanced eight-phase renderer-process gate above passed with exact
+per-action routing and settlement diagnostics; see the
+[accepted Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-13.md).
+Phase 2 removes duplicate wire writes and external effects while deliberately
+leaving speculative browser compute in place. Complete-closure client-compute
+suppression remains the separately gated Phase 3 optimization.

@@ -170,9 +170,11 @@ propagate](#how-flags-propagate).
   permanent-builtin failure, failure drills, bounded pool/control health
   signals, and the local Phase 2 product-derived/literal rollout gates are also
   implemented. The parked-worker claim-readiness failure is fixed with
-  deterministic cold-wake and replacement coverage; fresh counterbalanced
-  browser/CPU acceptance and the deployed-staging drill remain pending. Off
-  remains client-primary behavior. The narrower
+  deterministic cold-wake and replacement coverage. The 500-event
+  counterbalanced browser/CPU acceptance gate passes; see the
+  [accepted Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-13.md).
+  Only the deployed-staging enable/disable drill remains pending. Off remains
+  client-primary behavior. The narrower
   `serverPrimaryExecutionClaimRoutingV1` and
   `serverPrimaryExecutionBuiltinPassivityV1` capabilities now advertise with
   the main flag. Policy-enabled spaces reject peers missing either graduated
