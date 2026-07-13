@@ -260,6 +260,88 @@ describe("cold bound PatternFactory list readiness", () => {
     expect(executions).toEqual(["A:3", "A:4"]);
   });
 
+  it("retries transient cold loads without requiring a selector change", async () => {
+    const baseA = makeBase("A", REFS.a);
+    const selector = await seedSelector(shell(baseA, 10));
+    const retryGates = [
+      {
+        entered: Promise.withResolvers<void>(),
+        release: Promise.withResolvers<void>(),
+      },
+      {
+        entered: Promise.withResolvers<void>(),
+        release: Promise.withResolvers<void>(),
+      },
+    ];
+    let loadAttempts = 0;
+    runtime.patternManager.loadArtifactByIdentity = (
+      identity,
+      symbol,
+      artifactSpace,
+    ) => {
+      const attempt = loadAttempts++;
+      expect({ identity, symbol, artifactSpace }).toEqual({
+        ...REFS.a,
+        artifactSpace: sourceSpace,
+      });
+      if (attempt < retryGates.length) {
+        return Promise.reject(Object.assign(
+          new Error(`transient list factory load ${attempt + 1}`),
+          {
+            readyToRetry: () => {
+              retryGates[attempt]!.entered.resolve();
+              return retryGates[attempt]!.release.promise;
+            },
+          },
+        ));
+      }
+      warmArtifacts.set(`${identity}#${symbol}`, baseA);
+      return Promise.resolve(baseA);
+    };
+
+    const outer = outerPattern();
+    const resultCell = runtime.getCell<Record<string, unknown>>(
+      parentSpace,
+      "transient cold canonical list",
+      outer.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outer,
+      { values: [2], selector },
+      resultCell,
+    );
+    const recovered = Promise.withResolvers<number[]>();
+    const cancelObservation = result.key("mapped").sink((current) => {
+      if (Array.isArray(current)) recovered.resolve(current as number[]);
+    });
+    await commitAndRenew();
+    try {
+      await within(
+        retryGates[0]!.entered.promise,
+        "first transient list retry gate",
+        500,
+      );
+      expect(executions).toEqual([]);
+      retryGates[0]!.release.resolve();
+      await within(
+        retryGates[1]!.entered.promise,
+        "second transient list retry gate",
+        500,
+      );
+      expect(executions).toEqual([]);
+      retryGates[1]!.release.resolve();
+
+      expect(await within(recovered.promise, "transient list recovery"))
+        .toEqual([20]);
+      expect(loadAttempts).toBe(3);
+      expect(executions).toEqual(["A:2"]);
+    } finally {
+      cancelObservation();
+    }
+  });
+
   it("drops a cold selection when the op changes before readiness", async () => {
     const baseA = makeBase("A", REFS.a);
     const baseB = makeBase("B", REFS.b);
