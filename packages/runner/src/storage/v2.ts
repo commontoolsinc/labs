@@ -4211,6 +4211,46 @@ class SpaceReplica implements ISpaceReplica {
     record.lastSettlement = cloneActionSettlement(settlement);
   }
 
+  private mergeSuccessfulExecutionSettlements(
+    current: ActionSettlement,
+    next: ActionSettlement,
+  ): ActionSettlement {
+    const inputBasisSeq = current.inputBasisSeq > next.inputBasisSeq
+      ? current.inputBasisSeq
+      : next.inputBasisSeq;
+    const currentAcceptedCommitSeq = current.outcome === "committed"
+      ? current.acceptedCommitSeq
+      : undefined;
+    const nextAcceptedCommitSeq = next.outcome === "committed"
+      ? next.acceptedCommitSeq
+      : undefined;
+    const requiredAcceptedCommitSeq = currentAcceptedCommitSeq === undefined
+      ? nextAcceptedCommitSeq
+      : nextAcceptedCommitSeq === undefined ||
+          currentAcceptedCommitSeq > nextAcceptedCommitSeq
+      ? currentAcceptedCommitSeq
+      : nextAcceptedCommitSeq;
+    return cloneActionSettlement(
+      requiredAcceptedCommitSeq === undefined
+        ? {
+          branch: next.branch,
+          claim: next.claim,
+          inputBasisSeq,
+          outcome: "no-op",
+          ...(next.diagnosticCode === undefined
+            ? {}
+            : { diagnosticCode: next.diagnosticCode }),
+        }
+        : {
+          branch: next.branch,
+          claim: next.claim,
+          inputBasisSeq,
+          outcome: "committed",
+          acceptedCommitSeq: requiredAcceptedCommitSeq,
+        },
+    );
+  }
+
   private retainEarlyExecutionSettlement(
     settlement: ActionSettlement,
   ): void {
@@ -4232,43 +4272,29 @@ class SpaceReplica implements ISpaceReplica {
     // This cache is a successful-settlement frontier, not merely the latest
     // event. A newer no-op may advance the covered input basis, but it cannot
     // erase an accepted-data barrier contributed by an earlier commit.
-    const inputBasisSeq = current.inputBasisSeq > settlement.inputBasisSeq
-      ? current.inputBasisSeq
-      : settlement.inputBasisSeq;
-    const currentAcceptedCommitSeq = current.outcome === "committed"
-      ? current.acceptedCommitSeq
-      : undefined;
-    const nextAcceptedCommitSeq = settlement.outcome === "committed"
-      ? settlement.acceptedCommitSeq
-      : undefined;
-    const requiredAcceptedCommitSeq = currentAcceptedCommitSeq === undefined
-      ? nextAcceptedCommitSeq
-      : nextAcceptedCommitSeq === undefined ||
-          currentAcceptedCommitSeq > nextAcceptedCommitSeq
-      ? currentAcceptedCommitSeq
-      : nextAcceptedCommitSeq;
     this.#earlyExecutionSettlements.set(
       incarnation,
-      cloneActionSettlement(
-        requiredAcceptedCommitSeq === undefined
-          ? {
-            branch: settlement.branch,
-            claim: settlement.claim,
-            inputBasisSeq,
-            outcome: "no-op",
-            ...(settlement.diagnosticCode === undefined
-              ? {}
-              : { diagnosticCode: settlement.diagnosticCode }),
-          }
-          : {
-            branch: settlement.branch,
-            claim: settlement.claim,
-            inputBasisSeq,
-            outcome: "committed",
-            acceptedCommitSeq: requiredAcceptedCommitSeq,
-          },
-      ),
+      this.mergeSuccessfulExecutionSettlements(current, settlement),
     );
+  }
+
+  private coalescePendingSuccessfulExecutionSettlement(
+    settlement: ActionSettlement,
+  ): ActionSettlement {
+    const incarnation = executionClaimIncarnationKey(settlement.claim);
+    let frontier = settlement;
+    this.#pendingExecutionSettlements = this.#pendingExecutionSettlements
+      .filter((current) => {
+        if (
+          executionClaimIncarnationKey(current.claim) !== incarnation ||
+          (current.outcome !== "committed" && current.outcome !== "no-op")
+        ) {
+          return true;
+        }
+        frontier = this.mergeSuccessfulExecutionSettlements(current, frontier);
+        return false;
+      });
+    return frontier;
   }
 
   private reconcileEarlyExecutionSettlement(claim: ExecutionClaim): void {
@@ -4276,11 +4302,14 @@ class SpaceReplica implements ISpaceReplica {
     const settlement = this.#earlyExecutionSettlements.get(incarnation);
     if (settlement === undefined) return;
     this.#earlyExecutionSettlements.delete(incarnation);
+    const frontier = this.coalescePendingSuccessfulExecutionSettlement(
+      settlement,
+    );
     if (
-      this.settlementMatchesLiveClaim(settlement) &&
-      this.reconcileExecutionSettlement(settlement)
+      this.settlementMatchesLiveClaim(frontier) &&
+      this.reconcileExecutionSettlement(frontier)
     ) {
-      this.#pendingExecutionSettlements.push(settlement);
+      this.#pendingExecutionSettlements.push(frontier);
     }
   }
 
@@ -4546,8 +4575,12 @@ class SpaceReplica implements ISpaceReplica {
         this.retainEarlyExecutionSettlement(event.settlement);
         return;
       }
-      if (this.reconcileExecutionSettlement(event.settlement)) {
-        this.#pendingExecutionSettlements.push(event.settlement);
+      const settlement = event.settlement.outcome === "committed" ||
+          event.settlement.outcome === "no-op"
+        ? this.coalescePendingSuccessfulExecutionSettlement(event.settlement)
+        : event.settlement;
+      if (this.reconcileExecutionSettlement(settlement)) {
+        this.#pendingExecutionSettlements.push(settlement);
       }
     }
   }
@@ -4625,10 +4658,21 @@ class SpaceReplica implements ISpaceReplica {
     const pending = this.#pendingExecutionSettlements;
     this.#pendingExecutionSettlements = [];
     for (const settlement of pending) {
+      if (!this.settlementMatchesLiveClaim(settlement)) continue;
+      const incarnation = executionClaimIncarnationKey(settlement.claim);
+      const hasOverlay = [...this.#claimedOverlays.values()].some((overlay) =>
+        executionClaimIncarnationKey(overlay.claim) === incarnation
+      );
       if (
-        this.settlementMatchesLiveClaim(settlement) &&
-        this.reconcileExecutionSettlement(settlement)
+        !hasOverlay &&
+        (settlement.outcome === "committed" || settlement.outcome === "no-op")
       ) {
+        // The prior overlay may disappear for a non-authoritative reason (for
+        // example, a pending source commit was rejected). Preserve the server's
+        // successful frontier so a later speculative run cannot bypass its
+        // accepted-data barrier.
+        this.retainEarlyExecutionSettlement(settlement);
+      } else if (this.reconcileExecutionSettlement(settlement)) {
         this.#pendingExecutionSettlements.push(settlement);
       }
     }

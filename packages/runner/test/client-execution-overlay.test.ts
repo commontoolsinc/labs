@@ -936,6 +936,96 @@ Deno.test("rejected source basis discards its dependent overlay", async () => {
   }
 });
 
+Deno.test("early no-op preserves a pending committed barrier after overlay loss", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const sourceApplied = Promise.withResolvers<AppliedCommit>();
+  factory.onTransact = () => sourceApplied.promise;
+  const storage = OverlayStorageManager.connect(factory);
+  const query = {
+    space: SPACE,
+    branch: "",
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    const sourceCommit = beginSourceInputWrite(storage, "doomed-source");
+    await waitFor(() => factory.commits.length === 1);
+    await writeClaimedOutput(storage, "first-overlay", true);
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "committed",
+            acceptedCommitSeq: 7 as AcceptedCommitSeq,
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
+    );
+
+    sourceApplied.reject(Object.assign(new Error("source rejected"), {
+      name: "TransactionError",
+    }));
+    await sourceCommit;
+    await waitFor(() => visibleOutput(storage) === undefined);
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(1),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 3
+    );
+
+    await writeClaimedOutput(storage, "second-overlay");
+    assertEquals(visibleOutput(storage), "second-overlay");
+    const held = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(held.actions[0]?.pendingOverlayCount, 1);
+    assertEquals(held.actions[0]?.pendingSettlementCount, 1);
+
+    factory.view.push(emptySync({
+      toSeq: 7,
+      upserts: [{
+        branch: "",
+        id: OUTPUT,
+        seq: 7,
+        doc: { value: "authoritative-after-recovery" },
+      }],
+    }));
+    await waitFor(() =>
+      visibleOutput(storage) === "authoritative-after-recovery"
+    );
+    const settled = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(settled.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(settled.actions[0]?.pendingSettlementCount, 0);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
 Deno.test("committed settlement waits for the accepted data to be replica-applied", async () => {
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();
@@ -981,6 +1071,84 @@ Deno.test("committed settlement waits for the accepted data to be replica-applie
       ]?.debug ?? 0,
       divergenceBaseline + 1,
     );
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("a later live no-op retains an earlier committed data barrier", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const query = {
+    space: SPACE,
+    branch: "",
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "speculative");
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "committed",
+            acceptedCommitSeq: 7 as AcceptedCommitSeq,
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
+    );
+    assertEquals(visibleOutput(storage), "speculative");
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(1),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 3
+    );
+
+    assertEquals(visibleOutput(storage), "speculative");
+    const held = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(held.actions[0]?.pendingOverlayCount, 1);
+    assertEquals(held.actions[0]?.pendingSettlementCount, 1);
+
+    factory.view.push(emptySync({
+      toSeq: 7,
+      upserts: [{
+        branch: "",
+        id: OUTPUT,
+        seq: 7,
+        doc: { value: "authoritative" },
+      }],
+    }));
+    await waitFor(() => visibleOutput(storage) === "authoritative");
+    const settled = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(settled.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(settled.actions[0]?.pendingSettlementCount, 0);
+    assertEquals(settled.actions[0]?.basisCoveredOverlayDrops, 1);
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
