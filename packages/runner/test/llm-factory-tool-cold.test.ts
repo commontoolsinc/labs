@@ -53,7 +53,7 @@ Deno.test("a cold direct PatternFactory tool parks catalog construction until it
     runtime.patternManager.isArtifactAvailableInSpace = (
       identity,
       artifactSpace,
-    ) => warm && identity === ref.identity && artifactSpace === sourceSpace;
+    ) => identity === ref.identity && artifactSpace === sourceSpace;
     runtime.patternManager.artifactFromIdentitySync = (identity, symbol) =>
       warm && identity === ref.identity && symbol === ref.symbol
         ? factory

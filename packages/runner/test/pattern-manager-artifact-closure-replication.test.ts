@@ -111,7 +111,15 @@ describe("PatternManager artifact-closure replication", () => {
       `is not available in space ${destinationSpace}`,
     );
 
-    const sourceDocument = runtime.getImmutableCell(sourceSpace, importer);
+    const sourceTx = runtime.edit();
+    const sourceDocument = runtime.getCell(
+      sourceSpace,
+      "linked factory source",
+      undefined,
+      sourceTx,
+    );
+    sourceDocument.set(importer);
+    expect((await sourceTx.commit()).error).toBeUndefined();
     const tx = runtime.edit();
     const destinationHolder = runtime.getCell(
       destinationSpace,

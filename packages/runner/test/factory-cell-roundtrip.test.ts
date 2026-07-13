@@ -23,6 +23,9 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("factory cell roundtrip test");
 const space = signer.did();
+const destinationSpace = (await Identity.fromPassphrase(
+  "factory cell roundtrip destination",
+)).did();
 
 const VALUE_SCHEMA = {
   type: "object",
@@ -314,4 +317,34 @@ describe("typed Factory@1 Cell round trips", () => {
       }
     });
   }
+
+  it("rejects a Cell write when its factory artifact is unavailable in the destination space", () => {
+    const tx = runtime.edit();
+    const destination = runtime.getCell<{ nested: { factory: FabricValue } }>(
+      destinationSpace,
+      "cross-space-factory-write",
+      undefined,
+      tx,
+    );
+
+    expect(() =>
+      destination.set({
+        nested: { factory: fixtures.pattern.shell },
+      })
+    ).toThrow(
+      `Factory artifact ${REFS.pattern.identity} is not available in space ${destinationSpace}`,
+    );
+  });
+
+  it("rejects a stream event when its factory artifact is unavailable in the destination space", () => {
+    const stream = runtime.getCell<LiveFactory>(
+      destinationSpace,
+      "cross-space-factory-event",
+      { asCell: ["stream"] },
+    );
+
+    expect(() => stream.send(fixtures.pattern.shell as LiveFactory)).toThrow(
+      `Factory artifact ${REFS.pattern.identity} is not available in space ${destinationSpace}`,
+    );
+  });
 });

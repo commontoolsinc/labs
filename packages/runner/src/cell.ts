@@ -1314,6 +1314,11 @@ export class CellImpl<T extends FabricValue>
 
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
+      assertFactoryArtifactsAvailableForWrite(
+        this.runtime,
+        event,
+        resolvedToValueLink.space,
+      );
 
       // Trigger on fully resolved link
       this.runtime.scheduler.queueEvent(
@@ -1345,6 +1350,17 @@ export class CellImpl<T extends FabricValue>
 
       // Looks for arrays and makes sure each object gets its own doc.
       const transformedValue = recursivelyAddIDIfNeeded(newValue, this._frame);
+      const writeLink = resolveLink(
+        this.runtime,
+        this.tx,
+        this.link,
+        "writeRedirect",
+      );
+      assertFactoryArtifactsAvailableForWrite(
+        this.runtime,
+        transformedValue,
+        writeLink.space,
+      );
       recordRelevantSchemaWritePolicyInput(
         this.tx,
         resolvedToValueLink,
@@ -1355,7 +1371,7 @@ export class CellImpl<T extends FabricValue>
       diffAndUpdate(
         this.runtime,
         this.tx,
-        resolveLink(this.runtime, this.tx, this.link, "writeRedirect"),
+        writeLink,
         transformedValue,
         this._frame?.cause,
       );
@@ -2196,6 +2212,11 @@ export class CellImpl<T extends FabricValue>
     if (!this.synced) this.sync();
 
     const inlined = findAndInlineDataUriLinks(value);
+    assertFactoryArtifactsAvailableForWrite(
+      this.runtime,
+      inlined,
+      this.link.space,
+    );
 
     // When asked to write only on change, read the current raw value and bail
     // out if it already equals what we'd write. `readValueOrThrow` mirrors the
@@ -3394,6 +3415,83 @@ export function prepareFactoryStatesForWrite(
     return value;
   }
   return result;
+}
+
+/**
+ * Fail closed before a by-value Factory@1 write can outlive the artifact
+ * closure needed to execute it from the containing space.
+ *
+ * Links retain their own source-space provenance and are intentionally atomic
+ * here. Callable factory values, including factories nested in factory state,
+ * must already have a complete verified closure in the exact destination
+ * space because Cell and stream writes are synchronous and cannot replicate it
+ * before enqueueing or committing.
+ */
+function assertFactoryArtifactsAvailableForWrite(
+  runtime: Runtime,
+  value: unknown,
+  destinationSpace: MemorySpace,
+  seen: Set<object> = new Set(),
+): void {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "object" && typeof value !== "function") return;
+
+  const object = value as object;
+  if (seen.has(object)) return;
+  seen.add(object);
+
+  if (isAdmittedFabricFactory(value)) {
+    const state = factoryStateOf(value);
+    if (state.ref === undefined) {
+      throw new Error(
+        `Factory has no durable artifact ref for space ${destinationSpace}`,
+      );
+    }
+    runtime.patternManager.assertArtifactAvailableInSpace(
+      state.ref.identity,
+      destinationSpace,
+    );
+    mapFactoryStateValues(state, (nested) => {
+      assertFactoryArtifactsAvailableForWrite(
+        runtime,
+        nested,
+        destinationSpace,
+        seen,
+      );
+      return nested;
+    });
+    return;
+  }
+
+  if (
+    value instanceof FabricSpecialObject || isCell(value) ||
+    isCellResultForDereferencing(value) || isCellLink(value)
+  ) {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const nested of value) {
+      assertFactoryArtifactsAvailableForWrite(
+        runtime,
+        nested,
+        destinationSpace,
+        seen,
+      );
+    }
+    return;
+  }
+
+  if (isRecord(value)) {
+    for (const nested of Object.values(value)) {
+      assertFactoryArtifactsAvailableForWrite(
+        runtime,
+        nested,
+        destinationSpace,
+        seen,
+      );
+    }
+  }
 }
 
 /**

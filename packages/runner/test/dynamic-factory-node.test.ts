@@ -132,9 +132,7 @@ describe("dynamic Factory@1 node", () => {
     runtime.patternManager.artifactFromIdentitySync = (identity, symbol) =>
       warmArtifacts.get(refKey(identity, symbol));
     runtime.patternManager.isArtifactAvailableInSpace = (identity) =>
-      [...warmArtifacts.keys()].some((candidate) =>
-        candidate.startsWith(`${identity}#`)
-      );
+      Object.values(REFS).some((ref) => ref.identity === identity);
   });
 
   async function commitAndRenew(): Promise<void> {

@@ -146,9 +146,7 @@ describe("dynamic Factory@1 framework authority", () => {
       artifactSpace,
     ) =>
       artifactSpace === space &&
-      [...warmArtifacts.keys()].some((candidate) =>
-        candidate.startsWith(`${identity}#`)
-      );
+      Object.values(REFS).some((ref) => ref.identity === identity);
   });
 
   afterEach(async () => {
