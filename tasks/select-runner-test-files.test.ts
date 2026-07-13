@@ -1,11 +1,33 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertMatch, assertStringIncludes } from "@std/assert";
 import {
   listRunnerTests,
   selectRunnerTestFiles,
 } from "./select-runner-test-files.ts";
 import { parseShard } from "./shard-utils.ts";
 
-const TOTAL_SHARDS = 5;
+const TOTAL_SHARDS = 6;
+
+Deno.test("runner shard count stays aligned with CI coverage artifacts", async () => {
+  const workflow = await Deno.readTextFile(
+    new URL("../.github/workflows/deno.yml", import.meta.url),
+  );
+  const runnerJob = workflow.match(
+    /\n[ ]{2}runner-test:\n([\s\S]*?)\n[ ]{2}build-binaries:/,
+  )?.[1];
+  assertStringIncludes(
+    runnerJob ?? "",
+    "shard: [1, 2, 3, 4, 5, 6]",
+  );
+  assertStringIncludes(runnerJob ?? "", "total: [6]");
+
+  const perfCheck = await Deno.readTextFile(
+    new URL("./perf-check.ts", import.meta.url),
+  );
+  assertMatch(
+    perfCheck,
+    /\.\.\.\[1, 2, 3, 4, 5, 6\]\.map\(\(shard\) =>\s*`coverage-profile-runner-\$\{shard\}`\s*\)/,
+  );
+});
 
 Deno.test("parseShard parses shard notation", () => {
   assertEquals(parseShard("2/5"), { index: 2, total: 5 });
