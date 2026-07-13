@@ -750,12 +750,14 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       assertEquals(collector.getOps().length, 0);
       assertEquals(errors, []);
 
-      rootCell.set({
-        type: "vnode",
-        name: "div",
-        props: { id: "ready" },
-        children: ["Ready"],
-      } satisfies WorkerVNode);
+      rootCell.set(
+        {
+          type: "vnode",
+          name: "div",
+          props: { id: "ready" },
+          children: ["Ready"],
+        } satisfies WorkerVNode,
+      );
       await new Promise((resolve) => setTimeout(resolve, 10));
       assertEquals(
         collector.getOpsOfType("create-element").some((op) =>
@@ -770,12 +772,14 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       assertEquals(collector.getOps().length, 0);
       assertEquals(errors, []);
 
-      rootCell.set({
-        type: "vnode",
-        name: "div",
-        props: { id: "updated" },
-        children: ["Updated"],
-      } satisfies WorkerVNode);
+      rootCell.set(
+        {
+          type: "vnode",
+          name: "div",
+          props: { id: "updated" },
+          children: ["Updated"],
+        } satisfies WorkerVNode,
+      );
       await new Promise((resolve) => setTimeout(resolve, 10));
       assertEquals(
         collector.getOpsOfType("set-prop").some((op) =>
@@ -792,12 +796,14 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     async () => {
       const collector = createOpsCollector();
       const childCell = new MockCell(DataUnavailable.pending());
-      const rootCell = new MockCell({
-        type: "vnode",
-        name: "div",
-        props: {},
-        children: [childCell as unknown as WorkerRenderNode],
-      } satisfies WorkerVNode);
+      const rootCell = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: [childCell as unknown as WorkerRenderNode],
+        } satisfies WorkerVNode,
+      );
       const reconciler = new WorkerReconciler({ onOps: collector.onOps });
 
       reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
