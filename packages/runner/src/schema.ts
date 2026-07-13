@@ -1078,9 +1078,11 @@ export function validateAndTransform(
       options?.traverseCells ?? false,
       undefined,
       undefined,
-      // Absent cross-space link targets get an async load kicked; the
+      // Absent link targets get an async load kicked (cross-space always;
+      // same-space only when the replica has never seen the doc); the
       // tracked read re-runs the reader on arrival.
-      (missing) => runtime.ensureLinkedDocLoaded(missing),
+      (missing, sourceSpace) =>
+        runtime.ensureLinkedDocLoaded(missing, sourceSpace),
     ),
     objectCreator,
   );

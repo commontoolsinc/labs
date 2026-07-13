@@ -718,6 +718,13 @@ export class StorageManager implements IStorageManager {
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+  // Docs already offered a link-target pull via shouldPullDoc. One entry per
+  // (space, scope, id) for the manager's lifetime: the first pull registers a
+  // server-side watch that keeps the doc flowing afterwards, so a second kick
+  // is never needed — and never re-kicking is what keeps reads of genuinely
+  // absent targets (dangling links, deleted docs) from churning the
+  // cross-space convergence loop on every read.
+  #docPullKicks = new Set<string>();
   // In-flight commits, registered synchronously by the transaction layer at
   // commit() entry (see IStorageManager.trackPendingCommit). This is the
   // write-durability barrier: distinct from #crossSpacePromises, which also
@@ -1019,6 +1026,30 @@ export class StorageManager implements IStorageManager {
         console.error("pending-commits subscriber threw:", error);
       }
     }
+  }
+
+  shouldPullDoc(space: MemorySpace, id: URI, scope?: CellScope): boolean {
+    if (id.startsWith("data:")) {
+      return false;
+    }
+    const key = `${space}\0${docKey(id, scope)}`;
+    if (this.#docPullKicks.has(key)) {
+      return false;
+    }
+    this.#docPullKicks.add(key);
+    // State the local replica can already serve needs no pull. getState is
+    // undefined both for never-pulled docs and for docs known to hold no
+    // value (deleted / genuinely absent) — the second kind gets one harmless
+    // kick and is then held off by the kick set above.
+    return this.open(space).replica.get({
+      id,
+      type: DOCUMENT_MIME as MIME,
+      scope,
+    }) === undefined;
+  }
+
+  retractDocPullKick(space: MemorySpace, id: URI, scope?: CellScope): void {
+    this.#docPullKicks.delete(`${space}\0${docKey(id, scope)}`);
   }
 
   addCrossSpacePromise(promise: Promise<void>): void {
