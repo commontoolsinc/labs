@@ -3,6 +3,7 @@ import {
   type ClientCommit,
   encodeMemoryBoundary,
   type EntitySnapshot,
+  type ExecutionControlEvent,
   type GraphQuery,
   type GraphQueryResult,
   type HelloOkMessage,
@@ -73,6 +74,9 @@ interface UnleasedHostProviderChannelOptions {
   /** Host-owned grant creation. This callback and its credentials never cross
    *  the MessagePort into the Worker. */
   authorizeSessionOpen: MemoryClient.SessionOpenAuthFactory;
+  /** Explicit browser/test-realm mode. Executor channels leave this false so
+   *  only real client connections can originate connection-owned demand. */
+  allowExecutionDemand?: boolean;
   executionLease?: never;
 }
 
@@ -81,6 +85,7 @@ interface LeasedHostProviderChannelOptions {
    * remains in this realm and is never encoded onto the MessagePort. */
   executionLease: ExecutionLeaseHandle;
   authorizeSessionOpen?: never;
+  allowExecutionDemand?: never;
 }
 
 export type HostProviderChannelOptions =
@@ -271,7 +276,10 @@ export function createHostProviderChannel(
       });
       return;
     }
-    if (parsed.type === "session.execution.demand.set") {
+    if (
+      parsed.type === "session.execution.demand.set" &&
+      options.allowExecutionDemand !== true
+    ) {
       sendError(parsed.requestId, {
         name: "AuthorizationError",
         message: "executor providers cannot originate client execution demand",
@@ -578,19 +586,34 @@ class HostReplicaSession implements ReplicaSession {
   #appliedSeq: number;
   #acceptedOrder = 0;
   #schedulerDeliverySeq: number;
+  #executionReceivedSeq: number;
+  #pendingExecutionBatches: {
+    fromFeedSeq: number;
+    toFeedSeq: number;
+    event: ExecutionControlEvent;
+  }[] = [];
+  #unsubscribeExecutionControl = () => {};
   #seenObservationVersions = new Map<number, string>();
   #closed = false;
+  readonly setExecutionDemand?: NonNullable<
+    ReplicaSession["setExecutionDemand"]
+  >;
+  readonly subscribeExecutionControl?: NonNullable<
+    ReplicaSession["subscribeExecutionControl"]
+  >;
 
   constructor(
     private readonly session: MemoryClient.SpaceSession,
     private readonly transport: MessagePortTransport,
     private readonly branch: BranchName,
+    private readonly supportsExecutionDemand: boolean,
     private readonly onAcceptedCommitIntegrated?: (
       notice: AcceptedCommitNotice,
     ) => void,
   ) {
     this.#appliedSeq = session.serverSeq;
     this.#schedulerDeliverySeq = session.serverSeq;
+    this.#executionReceivedSeq = session.executionFeedSeq;
     transport.setAcceptedCommitReceiver((notice) => {
       const refresh = this.#mutation.then(
         () => this.refreshAndNotifyAcceptedCommit(notice),
@@ -608,6 +631,32 @@ class HostReplicaSession implements ReplicaSession {
         }
       });
     });
+    if (supportsExecutionDemand) {
+      this.setExecutionDemand = (branch, pieces) =>
+        this.session.setExecutionDemand?.(branch, pieces) ??
+          Promise.resolve(false);
+      this.subscribeExecutionControl = (listener) =>
+        this.session.subscribeExecutionControl(listener);
+      this.#unsubscribeExecutionControl = this.session
+        .subscribeExecutionControl((event) => {
+          const fromFeedSeq = this.#executionReceivedSeq;
+          const toFeedSeq = Math.max(
+            fromFeedSeq + 1,
+            this.session.executionFeedSeq,
+          );
+          this.#executionReceivedSeq = toFeedSeq;
+          const batch = { fromFeedSeq, toFeedSeq, event };
+          const delivery = this.#mutation.then(
+            () => this.deliverExecutionBatches([batch]),
+            () => this.deliverExecutionBatches([batch]),
+          );
+          this.#mutation = delivery.catch((error) => {
+            if (!this.#closed) {
+              console.warn("client execution-control delivery failed", error);
+            }
+          });
+        });
+    }
   }
 
   /** Wait until every accepted-commit notice already delivered by the host has
@@ -641,6 +690,18 @@ class HostReplicaSession implements ReplicaSession {
 
   get serverSeq(): number {
     return this.session.serverSeq;
+  }
+
+  get executionClaims() {
+    return this.supportsExecutionDemand
+      ? this.session.executionClaims
+      : undefined;
+  }
+
+  get executionFeedSeq() {
+    return this.supportsExecutionDemand
+      ? this.session.executionFeedSeq
+      : undefined;
   }
 
   async transact(commit: ClientCommit) {
@@ -741,6 +802,10 @@ class HostReplicaSession implements ReplicaSession {
         this.#view.applySync(sync, false);
       }
       result = { view: this.#view, sync };
+      if (this.#pendingExecutionBatches.length > 0) {
+        const pending = this.#pendingExecutionBatches.splice(0);
+        await this.deliverExecutionBatches(pending);
+      }
     });
     return this.#mutation.then(() => result);
   }
@@ -837,6 +902,46 @@ class HostReplicaSession implements ReplicaSession {
     return true;
   }
 
+  /** HostReplicaSession owns a synthetic WatchView, so the underlying memory
+   * client's execution-control stream must be copied into that view as an
+   * ordered control-only sync. SpaceReplica intentionally consumes claims from
+   * WatchView syncs, not the optional session callback surface. */
+  private async deliverExecutionBatches(
+    batches: readonly Readonly<{
+      fromFeedSeq: number;
+      toFeedSeq: number;
+      event: ExecutionControlEvent;
+    }>[],
+  ): Promise<void> {
+    if (this.#closed || batches.length === 0) return;
+    if (this.#view === null) {
+      this.#pendingExecutionBatches.push(...batches);
+      return;
+    }
+    for (const batch of batches) {
+      this.#view.applySync({
+        type: "sync",
+        fromSeq: this.#appliedSeq,
+        toSeq: this.#appliedSeq,
+        upserts: [],
+        removes: [],
+        execution: {
+          fromFeedSeq: batch.fromFeedSeq,
+          toFeedSeq: batch.toFeedSeq,
+          events: [batch.event],
+        },
+      }, true);
+      await Promise.resolve();
+    }
+  }
+
+  closeExecutionControl(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#unsubscribeExecutionControl();
+    this.#pendingExecutionBatches.length = 0;
+  }
+
   private async adoptionObservations(
     throughSeq: number,
     allowedObservationIds: ReadonlySet<number>,
@@ -926,16 +1031,20 @@ class HostReplicaSession implements ReplicaSession {
 
 class HostSessionFactory implements SessionFactory {
   #session: HostReplicaSession | null = null;
+  readonly supportsExecutionDemand: boolean;
 
   constructor(
     private readonly port: MessagePort,
     private readonly space: MemorySpace,
     private readonly branch: BranchName,
     private readonly protocolFlags?: Partial<WireMemoryProtocolFlags>,
+    supportsExecutionDemand = false,
     private readonly onAcceptedCommitIntegrated?: (
       notice: AcceptedCommitNotice,
     ) => void,
-  ) {}
+  ) {
+    this.supportsExecutionDemand = supportsExecutionDemand;
+  }
 
   acceptedCommitsSettled(): Promise<number> {
     return this.#session?.acceptedCommitsSettled() ?? Promise.resolve(0);
@@ -954,11 +1063,13 @@ class HostSessionFactory implements SessionFactory {
       transport,
       ...(this.protocolFlags ? { protocolFlags: this.protocolFlags } : {}),
     });
+    const lifecycle: { replica?: HostReplicaSession } = {};
     // This transferred channel is a lease-bound one-shot transport, not a
     // reconnectable network endpoint. A host close is terminal: close the
     // client so pending requests reject without starting the generic memory
     // client's reconnect loop against an already-disposed MessagePort.
     transport.setCloseReceiver(() => {
+      lifecycle.replica?.closeExecutionControl();
       void client.close().catch(() => undefined);
     });
     const session = await client.mount(space, mountOptions);
@@ -966,8 +1077,10 @@ class HostSessionFactory implements SessionFactory {
       session,
       transport,
       this.branch,
+      this.supportsExecutionDemand,
       this.onAcceptedCommitIntegrated,
     );
+    lifecycle.replica = replica;
     this.#session = replica;
     return {
       client,
@@ -998,6 +1111,9 @@ export interface HostStorageManagerOptions {
   id?: string;
   settings?: Options["settings"];
   protocolFlags?: Partial<WireMemoryProtocolFlags>;
+  /** Client-realm host channels may publish connection-owned execution
+   *  demand. Executor Workers leave this false. */
+  supportsExecutionDemand?: boolean;
   /** Keep executor-derived writes inside the Worker replica for shadow graph
    * discovery. No transaction or scheduler operation reaches the host. */
   shadowWrites?: boolean;
@@ -1025,6 +1141,7 @@ export class HostStorageManager extends StorageManager {
       options.space,
       options.branch ?? "",
       options.protocolFlags,
+      options.supportsExecutionDemand === true,
       options.onAcceptedCommitIntegrated,
     );
     return new HostStorageManager(
