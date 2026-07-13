@@ -52,6 +52,20 @@ const PROGRAM: RuntimeProgram = {
   }],
 };
 
+const NESTED_OUTPUT_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "/// <cts-enable />",
+      "import { pattern, computed } from 'commonfabric';",
+      "export default pattern<{ value: number }>(({ value }) => ({",
+      "  doubled: computed(() => (value as any) * 2),",
+      "}));",
+    ].join("\n"),
+  }],
+};
+
 const BUILTIN_FLAGS = {
   ...FLAGS,
 } as const satisfies Partial<MemoryProtocolFlags>;
@@ -209,7 +223,11 @@ class RejectNextClaimedCommitServer extends Server {
 }
 
 async function exercisePoolAuthorityTransition(
-  options: { replaceShadowWorker?: boolean } = {},
+  options: {
+    nestedRoot?: boolean;
+    replaceShadowWorker?: boolean;
+    sameWindowRemoteObservation?: boolean;
+  } = {},
 ): Promise<void> {
   const principal = await Identity.fromPassphrase(
     `executor pool transition ${crypto.randomUUID()}`,
@@ -271,7 +289,10 @@ async function exercisePoolAuthorityTransition(
   const acceptedEvents: string[] = [];
 
   try {
-    const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
+    const program = options.nestedRoot === true
+      ? NESTED_OUTPUT_PROGRAM
+      : PROGRAM;
+    const compiled = await seedRuntime.patternManager.compilePattern(program, {
       space,
     });
     const seedTx = seedRuntime.edit();
@@ -299,7 +320,10 @@ async function exercisePoolAuthorityTransition(
       result,
     );
     assertEquals((await seedTx.commit()).error, undefined);
-    assertEquals(await seedHandle.pull(), 10);
+    const seedVisibleResult = options.nestedRoot === true
+      ? seedHandle.key("doubled")
+      : seedHandle;
+    assertEquals(await seedVisibleResult.pull() as unknown, 10);
     await seedRuntime.settled();
     await seedRuntime.storageManager.synced();
     const seedPieceDocument = await server.readDocument(
@@ -308,7 +332,15 @@ async function exercisePoolAuthorityTransition(
     ) as
       & Record<string, unknown>
       & { value: { "/": { "link@1": { id: string } } } };
-    const stableOutputId = seedPieceDocument.value["/"]["link@1"].id;
+    const stableOutputId = options.nestedRoot === true
+      ? seedHandle.key("doubled").resolveAsCell().getAsNormalizedFullLink().id
+      : seedPieceDocument.value["/"]["link@1"].id;
+    if (options.nestedRoot === true) {
+      assertEquals(
+        containsStoredValue(seedPieceDocument, stableOutputId),
+        true,
+      );
+    }
     assertEquals(
       (await server.readDocument(space, stableOutputId) as { value?: unknown })
         ?.value,
@@ -403,8 +435,11 @@ async function exercisePoolAuthorityTransition(
     // server shadow pool started; the final phase still proves a cold resume.
     clientStorage = seedStorage;
     clientRuntime = seedRuntime;
-    const visibleResult = seedRuntime.getCellFromLink(stableResultLink);
-    assertEquals(visibleResult.sourceURI, stableResultId);
+    const visibleRoot = seedRuntime.getCellFromLink(stableResultLink);
+    assertEquals(visibleRoot.sourceURI, stableResultId);
+    const visibleResult = options.nestedRoot === true
+      ? visibleRoot.key("doubled")
+      : visibleRoot;
     cancelWarmSink = visibleResult.sink(() => {});
     await seedRuntime.settled();
     clientCommits.length = 0;
@@ -418,7 +453,11 @@ async function exercisePoolAuthorityTransition(
       const pieceDocument = await server.readDocument(space, stableResultId) as
         & Record<string, unknown>
         & { value: { "/": { "link@1": { id: string } } } };
-      assertEquals(pieceDocument.value["/"]["link@1"].id, stableOutputId);
+      if (options.nestedRoot === true) {
+        assertEquals(containsStoredValue(pieceDocument, stableOutputId), true);
+      } else {
+        assertEquals(pieceDocument.value["/"]["link@1"].id, stableOutputId);
+      }
     };
     const writePolicy = async (enabled: boolean): Promise<void> => {
       await observer.transact({
@@ -478,7 +517,7 @@ async function exercisePoolAuthorityTransition(
         unsubscribeAccepted();
       }
       await clientStorage!.synced();
-      assertEquals(await visibleResult.pull(), value * 2);
+      assertEquals(await visibleResult.pull() as unknown, value * 2);
       await clientRuntime!.settled();
       assertEquals(
         (await server.readDocument(space, stableOutputId) as {
@@ -498,6 +537,77 @@ async function exercisePoolAuthorityTransition(
         observation?.actionKind === "computation" &&
         commit.operations.length > 0;
     };
+    const runRemoteObservedSource = async (
+      value: number,
+      template: ClientCommit,
+    ): Promise<number> => {
+      assertExists(template.schedulerObservation);
+      const outputAccepted = Promise.withResolvers<void>();
+      const unsubscribeAccepted = server.subscribeAcceptedCommits(
+        space,
+        (event) => {
+          acceptedEvents.push(
+            `accepted-remote:${
+              event.revisions.map((revision) => revision.id).join(",")
+            }`,
+          );
+          if (
+            event.revisions.some((revision) => revision.id === stableOutputId)
+          ) {
+            outputAccepted.resolve();
+          }
+        },
+      );
+      try {
+        const source = await observer.transact({
+          localSeq: ++observerLocalSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: stableInputId,
+            value: { value },
+          }, {
+            op: "set",
+            id: stableOutputId,
+            value: { value: value * 2 },
+          }],
+          schedulerObservation: structuredClone(
+            template.schedulerObservation,
+          ),
+        });
+        assertEquals(
+          source.schedulerObservationResults?.some((result) =>
+            result.status === "kept"
+          ),
+          true,
+        );
+        assertEquals(
+          source.schedulerDirtiedReaders?.some((reader) =>
+            reader.actionId === candidateActionId
+          ),
+          true,
+        );
+        await awaitBarrier(
+          outputAccepted.promise,
+          `pool transition remote-observed output ${value}`,
+          acceptedEvents,
+        );
+        await clientStorage!.synced();
+        await visibleResult.pull();
+        await clientRuntime!.settled();
+        assertEquals(await visibleResult.pull() as unknown, value * 2);
+        assertEquals(
+          (await server.readDocument(space, stableOutputId) as {
+            value?: unknown;
+          })?.value,
+          value * 2,
+        );
+        await assertStableIdentity();
+        return source.seq;
+      } finally {
+        unsubscribeAccepted();
+      }
+    };
     const loggerCount = (key: string): number => {
       const value = getLoggerCountsBreakdown()["storage.v2"]?.[key];
       if (typeof value === "number") return value;
@@ -516,6 +626,12 @@ async function exercisePoolAuthorityTransition(
     assertExists(candidateActionId);
     assertEquals(server.listExecutionClaims(space), []);
     assertEquals(clientCommits.some(isDerivedWireCommit), true);
+    const remoteObservationTemplate = options.sameWindowRemoteObservation
+      ? clientCommits.find(isDerivedWireCommit)
+      : undefined;
+    if (options.sameWindowRemoteObservation) {
+      assertExists(remoteObservationTemplate);
+    }
 
     if (options.replaceShadowWorker === true) {
       // Model the browser rollout failure deterministically: generation 1 has
@@ -646,8 +762,14 @@ async function exercisePoolAuthorityTransition(
     assertEquals(overlaysDropped >= overlaysCreated, true);
     const overlayCountAfterDisable = loggerCount("execution-overlay-created");
     clientCommits.length = 0;
-    await runSource(9);
-    assertEquals(clientCommits.some(isDerivedWireCommit), true);
+    // Keep the replacement clean in the observation-adoption regression. A
+    // disabled-policy run here would queue another candidate behind claim
+    // control; re-enable could accept it before the remote observation arrives
+    // and turn the race into a false green.
+    if (remoteObservationTemplate === undefined) {
+      await runSource(9);
+      assertEquals(clientCommits.some(isDerivedWireCommit), true);
+    }
     assertEquals(
       loggerCount("execution-overlay-created"),
       overlayCountAfterDisable,
@@ -660,7 +782,9 @@ async function exercisePoolAuthorityTransition(
     // returned to the server without crashing on the drained lease.
     await writePolicy(true);
     clientCommits.length = 0;
-    const reclaimSeq = await runSource(10);
+    const reclaimSeq = remoteObservationTemplate === undefined
+      ? await runSource(10)
+      : await runRemoteObservedSource(10, remoteObservationTemplate);
     const reclaimEvent = await waitForControl(
       (event): event is Extract<
         ExecutionControlEvent,
@@ -720,12 +844,15 @@ async function exercisePoolAuthorityTransition(
         serverPrimaryExecution: true,
       },
     });
-    await coldRuntime.patternManager.compilePattern(PROGRAM, { space });
-    const coldResult = coldRuntime.getCellFromLink(stableResultLink);
-    await coldResult.sync();
-    assertEquals(coldResult.sourceURI, stableResultId);
-    assertEquals(await coldRuntime.start(coldResult), true);
-    assertEquals(await coldResult.pull(), 22);
+    await coldRuntime.patternManager.compilePattern(program, { space });
+    const coldRoot = coldRuntime.getCellFromLink(stableResultLink);
+    await coldRoot.sync();
+    assertEquals(coldRoot.sourceURI, stableResultId);
+    assertEquals(await coldRuntime.start(coldRoot), true);
+    const coldResult = options.nestedRoot === true
+      ? coldRoot.key("doubled")
+      : coldRoot;
+    assertEquals(await coldResult.pull() as unknown, 22);
     await coldRuntime.settled();
     await coldStorage.synced();
     await assertStableIdentity();
@@ -1498,6 +1625,14 @@ Deno.test("shared execution pool transitions shadow to claimed and back without 
 
 Deno.test("replacement executor resumes shadow discovery before claim promotion", async () => {
   await exercisePoolAuthorityTransition({ replaceShadowWorker: true });
+});
+
+Deno.test("replacement executor reruns before adopting a same-window client observation", async () => {
+  await exercisePoolAuthorityTransition({
+    nestedRoot: true,
+    replaceShadowWorker: true,
+    sameWindowRemoteObservation: true,
+  });
 });
 
 Deno.test("real Worker settles permanent builtin failures unserved but retains transient claims", async (t) => {

@@ -651,9 +651,10 @@ export class Scheduler {
     this.actionCommitRejectionHandler = handler;
   }
 
-  /** Host-only handoff guard. While an executor has installed an exact claim,
-   * a pre-claim client observation must not adopt that action clean and erase
-   * an authoritative conflict retry. */
+  /** Host-only execution guard. A server shadow must independently rerun
+   * remote invalidations to assess current servability and candidate
+   * authority; incremental adoption must not erase that dirt. Initial durable
+   * snapshot rehydration uses a separate registration path. */
   setActionObservationAdoptionGuard(
     guard: ((action: Action) => boolean) | undefined,
   ): void {
