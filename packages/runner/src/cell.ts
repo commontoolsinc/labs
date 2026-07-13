@@ -1550,6 +1550,11 @@ export class CellImpl<T extends FabricValue>
     for (let i = 0; i < value.length; i++) {
       combined[array.length + i] = value[i];
     }
+    assertFactoryArtifactsAvailableForWrite(
+      this.runtime,
+      value,
+      resolvedLink.space,
+    );
     diffAndUpdate(
       this.runtime,
       this.tx,
@@ -1637,6 +1642,11 @@ export class CellImpl<T extends FabricValue>
     if (toAdd.length === 0) {
       return;
     }
+    assertFactoryArtifactsAvailableForWrite(
+      this.runtime,
+      toAdd,
+      resolvedLink.space,
+    );
     diffAndUpdate(
       this.runtime,
       this.tx,

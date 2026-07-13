@@ -336,6 +336,26 @@ describe("typed Factory@1 Cell round trips", () => {
     );
   });
 
+  for (const method of ["push", "addUnique"] as const) {
+    it(`rejects Cell.${method} when its factory artifact is unavailable in the destination space`, () => {
+      const tx = runtime.edit();
+      const destination = runtime.getCell<LiveFactory[]>(
+        destinationSpace,
+        `cross-space-factory-${method}`,
+        {
+          type: "array",
+          items: { asFactory: CONTRACTS.pattern },
+        },
+        tx,
+      );
+
+      expect(() => destination[method](fixtures.pattern.shell as LiveFactory))
+        .toThrow(
+          `Factory artifact ${REFS.pattern.identity} is not available in space ${destinationSpace}`,
+        );
+    });
+  }
+
   it("rejects a stream event when its factory artifact is unavailable in the destination space", () => {
     const stream = runtime.getCell<LiveFactory>(
       destinationSpace,
