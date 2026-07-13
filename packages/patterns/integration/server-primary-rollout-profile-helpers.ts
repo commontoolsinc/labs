@@ -285,12 +285,23 @@ export function exactRoutingPhaseIssues(
       action.claimedOverlayRoutes,
       events,
     );
-    addMismatch(
-      issues,
-      "settlements.committed + settlements.noOp",
-      action.settlements.committed + action.settlements.noOp,
-      events,
-    );
+    const successfulSettlements = action.settlements.committed +
+      action.settlements.noOp;
+    // Accepted source commits can arrive before the worker's next pull. One
+    // scheduler run may therefore settle every overlay whose basis it covers.
+    if (events === 0) {
+      addMismatch(
+        issues,
+        "settlements.committed + settlements.noOp",
+        successfulSettlements,
+        0,
+      );
+    } else if (successfulSettlements < 1 || successfulSettlements > events) {
+      issues.push(
+        "settlements.committed + settlements.noOp was " +
+          `${successfulSettlements}, expected between 1 and ${events}`,
+      );
+    }
     addMismatch(
       issues,
       "basisCoveredOverlayDrops",

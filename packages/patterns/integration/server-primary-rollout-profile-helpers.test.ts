@@ -246,6 +246,59 @@ Deno.test("enabled routing phase requires exact settled claimed-overlay counts",
   );
 });
 
+Deno.test("enabled routing phase accepts one coalesced settlement covering all overlays", () => {
+  assertExactRoutingPhase(
+    diagnostics({
+      actions: [action({
+        settlements: { committed: 1, noOp: 0, failed: 0, unserved: 0 },
+      })],
+    }),
+    {
+      key,
+      policyEnabled: true,
+      events: 4,
+    },
+  );
+
+  for (const committed of [0, 5]) {
+    assertThrows(
+      () =>
+        assertExactRoutingPhase(
+          diagnostics({
+            actions: [action({
+              settlements: { committed, noOp: 0, failed: 0, unserved: 0 },
+            })],
+          }),
+          {
+            key,
+            policyEnabled: true,
+            events: 4,
+          },
+        ),
+      Error,
+      "expected between 1 and 4",
+    );
+  }
+});
+
+Deno.test("enabled routing counter reset accepts zero events and settlements", () => {
+  assertExactRoutingPhase(
+    diagnostics({
+      actions: [action({
+        claimedOverlayRoutes: 0,
+        settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+        basisCoveredOverlayDrops: 0,
+        lastSettlement: undefined,
+      })],
+    }),
+    {
+      key,
+      policyEnabled: true,
+      events: 0,
+    },
+  );
+});
+
 Deno.test("disabled routing phase requires exact upstream-only counts", () => {
   const disabled = diagnostics({
     claims: [],

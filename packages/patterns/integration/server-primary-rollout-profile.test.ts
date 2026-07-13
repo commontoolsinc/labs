@@ -387,13 +387,19 @@ async function waitForExactRoutingPhase(
             action.lastSettlement.acceptedCommitSeq
         ) return false;
         if (enabled) {
+          const successfulSettlements = action.settlements.committed +
+            action.settlements.noOp;
+          // The worker may coalesce several accepted source commits into one
+          // run; exact overlay drops prove that settlement covered the batch.
           return diagnostics.claims.length === 1 &&
             diagnostics.claims.some(sameKey) &&
             action.liveClaim !== undefined &&
             sameKey(action.liveClaim) && action.upstreamRoutes === 0 &&
             action.claimedOverlayRoutes === expectedEvents &&
-            action.settlements.committed + action.settlements.noOp ===
-              expectedEvents &&
+            (expectedEvents === 0
+              ? successfulSettlements === 0
+              : successfulSettlements >= 1 &&
+                successfulSettlements <= expectedEvents) &&
             action.basisCoveredOverlayDrops === expectedEvents;
         }
         return diagnostics.claims.length === 0 &&
