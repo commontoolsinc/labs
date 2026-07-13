@@ -214,7 +214,12 @@ export class Client {
     message: Record<string, unknown>,
   ): Promise<Result | undefined> {
     await this.ensureConnected();
-    if (this.#serverFlags?.[capability] !== true) return undefined;
+    if (
+      this.#advertisedFlags?.[capability] !== true ||
+      this.#serverFlags?.[capability] !== true
+    ) {
+      return undefined;
+    }
     return await this.requestConnected(message);
   }
 
@@ -775,7 +780,6 @@ export class SpaceSession {
     pieces: readonly string[],
   ): Promise<boolean> {
     this.#assertOpen();
-    if (!this.client.serverPrimaryExecutionV1) return false;
     const result = await this.client
       .requestIfServerSupports<ExecutionDemandSetResult>(
         "serverPrimaryExecutionV1",
@@ -802,7 +806,6 @@ export class SpaceSession {
     branch: string,
   ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
     this.#assertOpen();
-    if (!this.client.serverPrimaryExecutionV1) return undefined;
     const result = await this.client.requestIfServerSupports<
       LegacyBackgroundExclusionStatusResult
     >("serverPrimaryExecutionV1", {
@@ -822,7 +825,6 @@ export class SpaceSession {
     exclusionGeneration: number,
   ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
     this.#assertOpen();
-    if (!this.client.serverPrimaryExecutionV1) return undefined;
     const result = await this.client.requestIfServerSupports<
       LegacyBackgroundExclusionStatusResult
     >("serverPrimaryExecutionV1", {
@@ -843,7 +845,6 @@ export class SpaceSession {
     exclusionGeneration: number,
   ): Promise<LegacyBackgroundExclusion | null | undefined> {
     this.#assertOpen();
-    if (!this.client.serverPrimaryExecutionV1) return undefined;
     const result = await this.client.requestIfServerSupports<
       LegacyBackgroundExclusionReleaseResult
     >("serverPrimaryExecutionV1", {
