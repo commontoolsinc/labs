@@ -51,6 +51,8 @@ type WorkerRequest = {
   experimental?: ExperimentalOptions;
   protocolFlags?: Partial<WireMemoryProtocolFlags>;
   claim?: ExecutionClaim;
+  demandGeneration?: number;
+  resetClaims?: boolean;
 };
 
 const worker = globalThis as unknown as DedicatedWorkerGlobalScope;
@@ -61,7 +63,8 @@ let space: MemorySpace | null = null;
 let branch: BranchName = "";
 const demanded = new Map<string, Cell<unknown>>();
 const candidateActions = new Map<string, Action>();
-const claimsByAction = new WeakMap<object, ExecutionClaim>();
+let claimsByAction = new WeakMap<object, ExecutionClaim>();
+let demandGeneration = 0;
 let selectiveWake: SelectiveDemandWakeQueue | null = null;
 let work = Promise.resolve();
 let stopped = false;
@@ -113,12 +116,21 @@ const pullDemand = async (
   }
 };
 
-const replaceDemand = async (pieces: readonly string[]): Promise<void> => {
+const replaceDemand = async (
+  pieces: readonly string[],
+  resetClaims = false,
+): Promise<void> => {
   if (runtime === null || space === null) {
     throw new Error("executor Worker is not initialized");
   }
   const next = [...new Set(pieces)].sort();
   const nextSet = new Set(next);
+  if (resetClaims) {
+    for (const cell of demanded.values()) runtime.runner.stop(cell);
+    demanded.clear();
+    candidateActions.clear();
+    claimsByAction = new WeakMap<object, ExecutionClaim>();
+  }
   for (const [pieceId, cell] of demanded) {
     if (nextSet.has(pieceId)) continue;
     runtime.runner.stop(cell);
@@ -173,7 +185,13 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
         claimKey(candidate.claimKey),
         sourceAction as Action,
       );
-      worker.postMessage({ type: "candidate-claim", candidate });
+      worker.postMessage({
+        type: "candidate-claim",
+        candidate: {
+          ...candidate,
+          ...(demandGeneration > 0 ? { demandGeneration } : {}),
+        },
+      });
     },
     onDiagnostic: (diagnostic) => {
       worker.postMessage({ type: "candidate-diagnostic", diagnostic });
@@ -321,7 +339,14 @@ const handle = async (request: WorkerRequest): Promise<void> => {
       if (!Array.isArray(request.pieces)) {
         throw new Error("executor demand is malformed");
       }
-      await enqueue(() => replaceDemand(request.pieces!));
+      if (
+        !Number.isSafeInteger(request.demandGeneration) ||
+        Number(request.demandGeneration) < demandGeneration
+      ) {
+        throw new Error("executor demand generation is malformed");
+      }
+      demandGeneration = Number(request.demandGeneration);
+      await enqueue(() => replaceDemand(request.pieces!, request.resetClaims));
       break;
     case "wake":
       await enqueue(pullDemand);

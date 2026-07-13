@@ -89,12 +89,15 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
     );
   }
 
-  candidate(claimKey: ActionClaimKey): void {
+  candidate(claimKey: ActionClaimKey, demandGeneration?: number): void {
     this.dispatchEvent(
       new MessageEvent("message", {
         data: {
           type: "candidate-claim",
-          candidate: { claimKey },
+          candidate: {
+            claimKey,
+            ...(demandGeneration !== undefined ? { demandGeneration } : {}),
+          },
         },
       }),
     );
@@ -299,6 +302,28 @@ Deno.test("canonical unserved attempts revoke the exact test-only claim", async 
       diagnosticCode: "dynamic-non-space-read-scope",
     }]);
     assertEquals(server.revoked, [CLAIM]);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("demand shrink revokes stale claims so re-added roots can reclaim", async () => {
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+  });
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+    assertEquals(server.claimRequests.length, 1);
+
+    await executor.setDemand(["space:of:other-piece"]);
+    assertEquals(server.revoked, [CLAIM]);
+
+    await executor.setDemand([CLAIM_KEY.pieceId, "space:of:other-piece"]);
+    worker.candidate(CLAIM_KEY, 1);
+    await flushClaimControl();
+    assertEquals(server.claimRequests.length, 2);
+    assertEquals(crashes, []);
   } finally {
     await executor.stop();
   }

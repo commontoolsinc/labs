@@ -66,6 +66,9 @@ export interface DenoSpaceExecutorFactoryOptions {
 export interface CandidateClaim {
   readonly claimKey: ActionClaimKey;
   readonly builtinId?: ServerExecutableBuiltinId;
+  /** Worker-side demand epoch; stale closure candidates are ignored after a
+   * demanded-root shrink rebuilds the runtime graph. */
+  readonly demandGeneration?: number;
 }
 
 export interface CandidateClaimDiagnostic {
@@ -166,10 +169,21 @@ const isCandidateClaimDiagnostic = (
 
 const isCandidateClaim = (value: unknown): value is CandidateClaim => {
   if (typeof value !== "object" || value === null) return false;
-  const candidate = value as { claimKey?: unknown; builtinId?: unknown };
+  const candidate = value as {
+    claimKey?: unknown;
+    builtinId?: unknown;
+    demandGeneration?: unknown;
+  };
   if (
     candidate.builtinId !== undefined &&
     !isServerExecutableBuiltinId(candidate.builtinId)
+  ) {
+    return false;
+  }
+  if (
+    candidate.demandGeneration !== undefined &&
+    (!Number.isSafeInteger(candidate.demandGeneration) ||
+      Number(candidate.demandGeneration) < 0)
   ) {
     return false;
   }
@@ -219,6 +233,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
   ) => void;
   readonly #onWriterDiscovery?: (discovery: ExecutorWriterDiscovery) => void;
   readonly #claims = new Map<string, ExecutionClaim>();
+  readonly #demandedPieces: Set<string>;
   readonly #pending = new Map<
     number,
     PromiseWithResolvers<WorkerResponse>
@@ -226,6 +241,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
   readonly #booted = Promise.withResolvers<void>();
   #claimControl = Promise.resolve();
   #requestId = 0;
+  #demandGeneration = 0;
   #stopped = false;
   #failed = false;
 
@@ -252,6 +268,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
     this.#worker = worker;
     this.#provider = provider;
     this.#startOptions = startOptions;
+    this.#demandedPieces = new Set(startOptions.pieces);
     this.#server = control.server;
     this.#protocolFlags = control.protocolFlags ?? {};
     this.#onCandidateClaim = control.onCandidateClaim;
@@ -303,7 +320,20 @@ class DenoSpaceExecutor implements SpaceExecutor {
   }
 
   async setDemand(pieces: readonly string[]): Promise<void> {
-    await this.#request("set-demand", { pieces: [...pieces] });
+    const next = new Set(pieces);
+    const shrunk = [...this.#demandedPieces].some((piece) => !next.has(piece));
+    if (shrunk) {
+      this.#demandGeneration++;
+      await this.#claimControl;
+      this.#revokeClaims();
+    }
+    await this.#request("set-demand", {
+      pieces: [...next],
+      demandGeneration: this.#demandGeneration,
+      resetClaims: shrunk,
+    });
+    this.#demandedPieces.clear();
+    for (const piece of next) this.#demandedPieces.add(piece);
   }
 
   async wake(): Promise<void> {
@@ -414,6 +444,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
 
   async #handleCandidate(candidate: CandidateClaim): Promise<void> {
     this.#onCandidateClaim?.(candidate);
+    if ((candidate.demandGeneration ?? 0) !== this.#demandGeneration) return;
     const key = candidate.claimKey;
     if (
       key.space !== this.#startOptions.space ||
