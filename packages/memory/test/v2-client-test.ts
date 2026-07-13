@@ -3192,6 +3192,129 @@ Deno.test("memory v2 writer lookup rechecks capability after reconnect", async (
   }
 });
 
+Deno.test("memory v2 execution RPCs recheck capability after reconnect", async () => {
+  const capableFlags = {
+    ...getMemoryProtocolFlags(),
+    serverPrimaryExecutionV1: true,
+    serverPrimaryExecutionClaimRoutingV1: true,
+    serverPrimaryExecutionBuiltinPassivityV1: true,
+  };
+  const legacyFlags = { ...capableFlags } as Record<string, boolean>;
+  delete legacyFlags.serverPrimaryExecutionV1;
+  delete legacyFlags.serverPrimaryExecutionClaimRoutingV1;
+  delete legacyFlags.serverPrimaryExecutionBuiltinPassivityV1;
+  const secondHelloSent = defer<void>();
+  const releaseLegacyHello = defer<void>();
+  let helloCount = 0;
+  let receiver = (_payload: string) => {};
+  let closeReceiver = (_error?: Error) => {};
+  const executionRequests: string[] = [];
+  const respond = (message: FabricValue) =>
+    receiver(encodeMemoryBoundary(message));
+  const transport: Transport & { disconnect(): void } = {
+    send(payload): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        requestId?: string;
+      };
+      switch (message.type) {
+        case "hello": {
+          helloCount++;
+          if (helloCount === 1) {
+            respond({ ...HELLO_OK, flags: capableFlags });
+          } else {
+            secondHelloSent.resolve();
+            void releaseLegacyHello.promise.then(() =>
+              respond({ ...HELLO_OK, flags: legacyFlags })
+            );
+          }
+          return Promise.resolve();
+        }
+        case "session.open":
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: {
+              sessionId: "session:execution-reconnect-capability",
+              sessionToken: "token:execution-reconnect-capability",
+              serverSeq: helloCount === 1 ? 17 : 23,
+              resumed: helloCount > 1,
+              sessionOpen: sessionOpenFor(message.requestId!),
+            },
+          });
+          return Promise.resolve();
+        case "session.execution.demand.set":
+          executionRequests.push(message.type);
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: { serverSeq: 23, references: 1 },
+          });
+          return Promise.resolve();
+        case "session.execution.legacy-background.acquire":
+        case "session.execution.legacy-background.renew":
+          executionRequests.push(message.type);
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: { serverSeq: 23, status: null },
+          });
+          return Promise.resolve();
+        case "session.execution.legacy-background.release":
+          executionRequests.push(message.type);
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: { serverSeq: 23, released: null },
+          });
+          return Promise.resolve();
+        default:
+          throw new Error(`unexpected memory request: ${message.type}`);
+      }
+    },
+    async close() {},
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
+    disconnect() {
+      closeReceiver(new Error("switch to legacy execution server"));
+    },
+  };
+
+  const client = await connect({
+    transport,
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+    },
+  });
+  try {
+    const session = await client.mount(
+      "did:key:z6Mk-execution-reconnect-capability-space",
+    );
+    transport.disconnect();
+    await secondHelloSent.promise;
+    const results = Promise.all([
+      session.setExecutionDemand("", ["piece:one"]),
+      session.acquireLegacyBackgroundExclusion(""),
+      session.renewLegacyBackgroundExclusion("", 1),
+      session.releaseLegacyBackgroundExclusion("", 1),
+    ]);
+    releaseLegacyHello.resolve();
+
+    assertEquals(await results, [false, undefined, undefined, undefined]);
+    assertEquals(executionRequests, []);
+    assertEquals(client.serverPrimaryExecutionV1, false);
+  } finally {
+    releaseLegacyHello.resolve();
+    await client.close();
+  }
+});
+
 Deno.test("memory v2 client wraps close errors with connection error names", async () => {
   const client = await connect({
     transport: new CloseOnSessionOpenTransport(),

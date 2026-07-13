@@ -1,5 +1,4 @@
 import {
-  type ActionClaimKey,
   actionClaimMapKey,
   type ActionSettlement,
   type ClientCommit,
@@ -777,14 +776,19 @@ export class SpaceSession {
   ): Promise<boolean> {
     this.#assertOpen();
     if (!this.client.serverPrimaryExecutionV1) return false;
-    const result = await this.client.request<ExecutionDemandSetResult>({
-      type: "session.execution.demand.set",
-      requestId: crypto.randomUUID(),
-      space: this.space,
-      sessionId: this.#sessionId,
-      branch,
-      pieces: [...pieces],
-    });
+    const result = await this.client
+      .requestIfServerSupports<ExecutionDemandSetResult>(
+        "serverPrimaryExecutionV1",
+        {
+          type: "session.execution.demand.set",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          branch,
+          pieces: [...pieces],
+        },
+      );
+    if (result === undefined) return false;
     this.noteResult(result.serverSeq);
     if (pieces.length === 0) {
       this.#executionDemands.delete(branch);
@@ -799,15 +803,16 @@ export class SpaceSession {
   ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
     this.#assertOpen();
     if (!this.client.serverPrimaryExecutionV1) return undefined;
-    const result = await this.client.request<
+    const result = await this.client.requestIfServerSupports<
       LegacyBackgroundExclusionStatusResult
-    >({
+    >("serverPrimaryExecutionV1", {
       type: "session.execution.legacy-background.acquire",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
       branch,
     });
+    if (result === undefined) return undefined;
     this.noteResult(result.serverSeq);
     return result.status;
   }
@@ -818,9 +823,9 @@ export class SpaceSession {
   ): Promise<LegacyBackgroundExclusionStatus | null | undefined> {
     this.#assertOpen();
     if (!this.client.serverPrimaryExecutionV1) return undefined;
-    const result = await this.client.request<
+    const result = await this.client.requestIfServerSupports<
       LegacyBackgroundExclusionStatusResult
-    >({
+    >("serverPrimaryExecutionV1", {
       type: "session.execution.legacy-background.renew",
       requestId: crypto.randomUUID(),
       space: this.space,
@@ -828,6 +833,7 @@ export class SpaceSession {
       branch,
       exclusionGeneration,
     });
+    if (result === undefined) return undefined;
     this.noteResult(result.serverSeq);
     return result.status;
   }
@@ -838,9 +844,9 @@ export class SpaceSession {
   ): Promise<LegacyBackgroundExclusion | null | undefined> {
     this.#assertOpen();
     if (!this.client.serverPrimaryExecutionV1) return undefined;
-    const result = await this.client.request<
+    const result = await this.client.requestIfServerSupports<
       LegacyBackgroundExclusionReleaseResult
-    >({
+    >("serverPrimaryExecutionV1", {
       type: "session.execution.legacy-background.release",
       requestId: crypto.randomUUID(),
       space: this.space,
@@ -848,6 +854,7 @@ export class SpaceSession {
       branch,
       exclusionGeneration,
     });
+    if (result === undefined) return undefined;
     this.noteResult(result.serverSeq);
     return result.released;
   }
