@@ -161,6 +161,30 @@ export const snippet = (text: string, max: number): string => {
 export const isSafeLinkUrl = (url: string): boolean =>
   /^https?:\/\//i.test((url ?? "").trim());
 
+/** Every fid payload referenced anywhere in `text`, in match order,
+ * duplicates included (callers dedupe as needed).
+ *
+ * Matches a fid in every shape people paste: bare `fid1:X`, storage-form
+ * `of:fid1:X`, page URLs `https://host/space/fid1:X`, and share links where
+ * the colon is percent-encoded (`fid1%3AX`). The base64url payload alone is
+ * the identity — hosts and prefixes around it vary, and base64url survives
+ * percent-encoding untouched. The length floor keeps prose that merely
+ * mentions "fid1" from matching (real payloads are 43 chars of hash). The
+ * regex lives inside the function: a module-scope `/g` RegExp is stateful
+ * and the closure verifier rejects it as captured data. */
+export const extractFidPayloads = (text: string): string[] => {
+  const fidInText = /fid1(?::|%3a)([A-Za-z0-9_-]{20,})/gi;
+  const out: string[] = [];
+  for (const m of (text ?? "").matchAll(fidInText)) out.push(m[1]);
+  return out;
+};
+
+/** The payload of a `fid1:…` tagged hash string; "" for anything else. */
+export const fidPayload = (fid: string): string => {
+  const m = /^fid1:([A-Za-z0-9_-]{20,})$/.exec((fid ?? "").trim());
+  return m ? m[1] : "";
+};
+
 const LINK_KIND_ITEMS = [
   { label: "Web", value: "web" },
   { label: "PR", value: "pr" },

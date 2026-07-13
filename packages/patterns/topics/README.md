@@ -6,6 +6,12 @@ up into the body; the thread holds the deliberation), a flat chronological
 comment thread, and typed links out to other core objects (PRs, agent sessions,
 other topics — URLs in v0).
 
+The board also surfaces the corpus's **prose reference graph**: any topic fid
+pasted in a body, comment, or link URL (bare, `of:`-prefixed, page URL, or
+percent-encoded share link) becomes a navigable "references →" / "← referenced
+by" chip on the topic's card, and the graph is exported as the `crossrefs`
+output for headless consumers.
+
 Deliberately absent until reached for: statuses (not even open/closed), labels,
 assignees, attachments, nesting. What a topic grows next is part of the
 experiment.
@@ -27,6 +33,12 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   Edit→Save toggle rather than a live-bound textarea.
 - **`myName` is `PerUser` on the shared piece** — one tracker, one name per
   authenticated identity, shared with every topic the tracker creates.
+- **Cross-references are derived at read time, never persisted.** The board
+  rescans the whole corpus per render (trivial at board scale) instead of
+  materializing backlinks into topics: an index pattern that writes derived
+  edges back can destroy real data when run from a partial-view replica, and a
+  retracted mention should simply stop being an edge. Any future persisted index
+  needs single-writer + full-view preconditions first.
 - Verified by `multi-user.test.tsx` (two isolated runtimes, one shared board).
 
 ## Headless / agent use
@@ -38,5 +50,9 @@ cf piece call --piece <board> setMyName '{"name":"Fable"}'
 cf piece call --piece <board> addTopic '{"title":"..."}'
 cf piece get  --piece <board> topics --input      # then address a topic piece
 cf piece call --piece <topic> addComment '{"body":"..."}'
-cf piece step --piece <...>                       # after mutations
 ```
+
+Do **not** run `cf piece step` from a fresh CLI replica: a replica with a
+partial view persists deriveds computed from that partial view. Writes commit
+fine on their own; renderers derive for themselves. Verify writes via a renderer
+or post-materialization fid reads.
