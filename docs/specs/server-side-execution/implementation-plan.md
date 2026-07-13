@@ -714,7 +714,13 @@ and signing authority are separate.
    renew responses carry the server clock sampled with the authority
    transaction. Convert the remaining duration to a request-start-anchored
    monotonic deadline in the background manager; missing timing data from an
-   older host fails closed.
+   older host fails closed. When the memory host owns the conflicting client
+   lease, it immediately revokes that lease's claims and broker authority,
+   synchronously waits for the shared pool's abrupt Worker stop and lease
+   release, and only then reports the background exclusion ready. A lease owned
+   by another host retains its originally advertised expiry: background stays
+   blocked through that deadline because shortening it in durable storage
+   cannot notify or fence the remote holder safely.
 
 **Success criteria:**
 
@@ -731,7 +737,11 @@ and signing authority are separate.
 - [x] Every ordinary shadow pull produces zero server data operations and zero
       external builtin calls while still collecting local graph observations.
 - [x] Concurrent active legacy background execution plus client demand starts
-      no second server Worker and publishes no server-primary claim.
+      no second server Worker and publishes no server-primary claim. The
+      false→true handoff regression additionally holds the first Worker stop
+      open and proves background readiness remains pending, claims and broker
+      egress are already fenced, and demand resumes only after exclusion
+      release (`executor-legacy-background-transition.test.ts`).
 
 ---
 

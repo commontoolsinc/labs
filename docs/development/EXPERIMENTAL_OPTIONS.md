@@ -163,7 +163,8 @@ propagate](#how-flags-propagate).
 - **Status on 2026-07-12.** Runtime, environment, browser-worker, background-
   worker, memory handshake, connection-owned client root demand, one shared
   fenced shadow Worker per active branch/space, durable legacy-background
-  exclusion, strict owner policy, and the ordered reconnectable
+  exclusion with a synchronously fenced host-local handoff, strict owner
+  policy, and the ordered reconnectable
   claim/settlement feed are implemented. Exact claim routing, causal client
   overlays, claimed-builtin passivity, failure drills, and the local Phase 2
   product/browser rollout gates are also implemented; off remains
