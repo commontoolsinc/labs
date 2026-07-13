@@ -9,8 +9,9 @@ import { createNativeErrorBrandCheck } from "./native-error-brand.ts";
 // SES lockdown replaces/tames selected intrinsics, including removing newer
 // Error statics. Capture the host-realm brand check while the module graph is
 // initialized so async builtin error writebacks can still recognize errors
-// after a Runtime installs SES. Browsers without Error.isError use the
-// cross-realm Object.prototype brand for Error and DOMException values.
+// after a Runtime installs SES. Browsers without Error.isError retain the
+// intrinsic DOMException check and otherwise fail closed for cross-realm
+// ordinary Errors.
 const isNativeError = createNativeErrorBrandCheck(
   typeof Error.isError === "function" ? Error.isError.bind(Error) : undefined,
 );
@@ -152,6 +153,11 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   if (typeof ctor === "function") {
     tag = tagFromNativeClass(ctor);
   }
+
+  // A value-controlled `constructor` property is not proof of an Error brand.
+  // Require the captured intrinsic even when constructor dispatch matched a
+  // standard Error class; this also rejects Proxies around real Errors.
+  if (tag === NATIVE_TAGS.Error && !isNativeError(value)) tag = null;
 
   // `tagFromNativeClass()` handles dedicated types (`Error`, `Date`, `Map`, etc.) and
   // returns `HasToJSON` for classes whose prototype has `toJSON()`. For those,

@@ -1,11 +1,8 @@
 export type NativeErrorBrandCheck = (value: unknown) => boolean;
 
-// Bind the intrinsic before SES can tame Function/Object prototypes. The
-// resulting object brand remains useful across realms in browsers that do not
-// implement Error.isError.
-const nativeObjectTag = Function.prototype.call.bind(
-  Object.prototype.toString,
-) as (value: unknown) => string;
+// Capture the DOMException intrinsic before SES can tame prototypes. Unlike
+// Object.prototype.toString, this getter performs an internal-slot brand check
+// that a Proxy cannot forge.
 const domExceptionNameGetter = typeof DOMException === "undefined"
   ? undefined
   : Object.getOwnPropertyDescriptor(DOMException.prototype, "name")?.get;
@@ -30,11 +27,9 @@ export function createNativeErrorBrandCheck(
         // Not a DOMException; fall through to the Error object brand.
       }
     }
-    try {
-      return nativeObjectTag(value) === "[object Error]" &&
-        !(Symbol.toStringTag in value);
-    } catch {
-      return false;
-    }
+    // Without Error.isError there is no unspoofable, cross-realm ordinary
+    // Error brand check. Object.prototype.toString, instanceof, and prototype
+    // inspection are all forgeable by a Proxy, so fail closed.
+    return false;
   };
 }

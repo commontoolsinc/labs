@@ -60,7 +60,7 @@ describe("native-type-tags", () => {
 
     it("falls back when Error.isError is absent during initialization", () => {
       const fallback = createNativeErrorBrandCheck(undefined);
-      expect(fallback(new Error("browser"))).toBe(true);
+      expect(fallback(new Error("browser"))).toBe(false);
       expect(fallback(new DOMException("browser"))).toBe(true);
       expect(fallback({ message: "not branded" })).toBe(false);
     });
@@ -82,6 +82,33 @@ describe("native-type-tags", () => {
       expect(fallback(new DOMExceptionSpoof())).toBe(false);
       expect(tagFromNativeValue(new ErrorSpoof())).toBe(null);
       expect(tagFromNativeValue(new DOMExceptionSpoof())).toBe(null);
+    });
+
+    it("does not mistake a hostile Proxy for a native Error", () => {
+      const proxy = new Proxy(Object.create(null), {
+        get(_target, key) {
+          if (key === Symbol.toStringTag) return "Error";
+          return undefined;
+        },
+        has(_target, key) {
+          if (key === Symbol.toStringTag) return false;
+          return false;
+        },
+      });
+      const fallback = createNativeErrorBrandCheck(undefined);
+      const native = createNativeErrorBrandCheck(Error.isError.bind(Error));
+
+      expect(fallback(proxy)).toBe(false);
+      expect(tagFromNativeValue(proxy)).not.toBe(NATIVE_TAGS.Error);
+      expect(native(new Error("native"))).toBe(true);
+      expect(native(proxy)).toBe(false);
+      expect(native(new Proxy(new Error("wrapped"), {}))).toBe(false);
+      expect(tagFromNativeValue({ constructor: Error })).not.toBe(
+        NATIVE_TAGS.Error,
+      );
+      expect(tagFromNativeValue(new Proxy(new Error("wrapped"), {}))).not.toBe(
+        NATIVE_TAGS.Error,
+      );
     });
 
     it("returns `Map` tag for `Map` instances", () => {
