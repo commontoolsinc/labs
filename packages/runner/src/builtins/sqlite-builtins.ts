@@ -41,6 +41,7 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { stripEntityUriScheme } from "@commonfabric/data-model/fabric-primitives";
 import { columnDeclaresIfc } from "@commonfabric/memory/v2";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -528,14 +529,12 @@ export function sqliteDatabase(
         | undefined;
       // `handle` is a builtin RESULT cell (makeResultCell), and result cells
       // are always `of:`-schemed — the computed kind applies only to derived
-      // internal cells — so stripping `of:` here is safe and keeps the
-      // historical key form. Deriving from the scheme-preserving sourceURI
-      // (rather than the scheme-erasing entityId) makes that assumption
-      // explicit: if a computed: handle ever appeared, its scheme would stay
-      // in the key instead of silently merging its labels into the of:
-      // sibling's entry — matching the scheme-preserving getAsLink() fallback.
+      // internal cells — so stripping the entity scheme yields the handle's
+      // stable, historical key form. Deriving from the scheme-preserving
+      // sourceURI through the canonical helper keeps that assumption
+      // explicit and in one place.
       const id = (typeof handle.sourceURI === "string"
-        ? handle.sourceURI.replace(/^of:/, "")
+        ? stripEntityUriScheme(handle.sourceURI)
         : undefined) ?? JSON.stringify(handle.getAsLink());
       // Grow-only merge the per-column `ifc` against any prior committed handle
       // value at this (causally-stable) id: the store's effective label is

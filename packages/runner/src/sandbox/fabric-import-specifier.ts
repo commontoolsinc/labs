@@ -1,4 +1,8 @@
 import { validateSlug } from "../slugs.ts";
+import {
+  ENTITY_URI_SCHEMES,
+  type EntityUriScheme,
+} from "@commonfabric/data-model/fabric-primitives";
 
 export const HASH_RE = /^[A-Za-z0-9_-]{43}$/;
 
@@ -12,7 +16,7 @@ export interface FabricRef {
   space?: string;
   ref:
     | { kind: "slug"; slug: string }
-    | { kind: "uri"; scheme: "of" | "pattern" | "computed"; hash: string };
+    | { kind: "uri"; scheme: EntityUriScheme | "pattern"; hash: string };
   /** Path inside the target program. */
   subpath?: string;
   /** Trailing @<hash> pin. */
@@ -183,12 +187,12 @@ function parseRefToken(
     }
     if (
       parts.length === 3 &&
-      (parts[0] === "of" || parts[0] === "computed") &&
+      (ENTITY_URI_SCHEMES as readonly string[]).includes(parts[0]) &&
       parts[1] === "fid1"
     ) {
       return {
         kind: "uri",
-        scheme: parts[0],
+        scheme: parts[0] as EntityUriScheme,
         hash: parseHash(parts[2], specifier),
       };
     }

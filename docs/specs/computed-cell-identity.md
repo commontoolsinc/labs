@@ -216,6 +216,18 @@ only by the URI codecs (`uri-utils.ts`, `fabric-import-specifier.ts`,
 `fabric-ref-resolution.ts`) and read by the engine's drop policy via
 `entityKindOfIdString`.
 
+Terminology: the entity KIND is the semantic property (re-derivability,
+conflict policy); the URI SCHEME is its representation in the id string —
+a "kinded scheme" encodes a kind, `of:` is the unkinded default. Two other
+uses of "kind" in the runtime are related concepts under a shared word,
+not entity kinds: stream cells' `$kind: "stream"` is the same
+flavor-distinction implemented by the older, preimage-mixed mechanism
+(invisible in the id string; a future migration to a visible `stream:`
+scheme is left open but excluded by the Non-goals above), and `asCell`
+kinds (`"cell"`, `"stream"`, `"opaque"`, …) are handle CAPABILITY kinds —
+properties of a binding, unrelated to identity. The full delineation lives
+at the definition site, `entity-kind.ts`.
+
 ### Builder-side classification
 
 The classifier (`assignComputedCellKinds`,

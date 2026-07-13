@@ -14,6 +14,27 @@
  * string IS the identity — never rebuild a computed cell's URI from its
  * bare hash.
  *
+ * ## Terminology: "kind" vs "scheme" (and the other two "kind"s)
+ *
+ * - **Entity kind** (this module) is the SEMANTIC property: how an entity's
+ *   contents relate to derivation, and what conflict policy the server may
+ *   apply. **Entity URI scheme** is that kind's REPRESENTATION in the id
+ *   string: `uriSchemeForEntityKind` maps kind → scheme,
+ *   `entityKindOfIdString` parses scheme → kind. A "kinded scheme" is a
+ *   scheme that encodes a kind; `of:` is the unkinded default.
+ * - **Stream `$kind`** (`$kind: "stream"` in stream cells' cause PREIMAGES,
+ *   builder/pattern.ts) is the same concept — distinguishing a cell flavor
+ *   at identity-minting time — via the older mechanism: mixed into the hash
+ *   preimage, invisible in the id string. Streams may eventually migrate to
+ *   a visible `stream:` scheme, but deliberately have not: a visible marker
+ *   would re-identify every existing stream cell (see the spec's
+ *   Non-goals). Until then, "stream" is NOT an `EntityKind` and has no
+ *   entry in `ENTITY_URI_SCHEMES`.
+ * - **`asCell` kinds** (`asCell: ["cell" | "stream" | "opaque" | ...]` in
+ *   schemas) are HANDLE CAPABILITY kinds: what a granted reference may do —
+ *   a property of the binding, not of the entity, and unrelated to
+ *   identity despite sharing the word (and the value `"stream"`).
+ *
  * See `docs/specs/computed-cell-identity.md`.
  */
 export type EntityKind = "computed";
