@@ -276,10 +276,14 @@ Merkle-verified closure with `loadPatternByIdentity` +
 
 Creation provenance is not producer identity. A computation may redirect its
 output into a pre-existing cell whose creator is unrelated to the action that
-currently recomputes it. Existing `source` metadata may remain useful as a
-local or historical diagnostic, but this plan neither adds universal source
+currently recomputes it. Existing `result` metadata (the meta link from a
+builtin-allocated cell back to its piece's result root — the field that
+replaced the earlier `source` metadata; see
+`packages/runner/src/result-utils.ts`) may remain useful as a local or
+historical diagnostic, but this plan neither adds universal provenance
 stamping nor promises a per-document causal-audit mechanism. A future audit
-lineage design is separate; creation source must not select an executor action.
+lineage design is separate; creation provenance must not select an executor
+action.
 
 The authoritative producer projection is `scheduler_write_index`, joined to
 `scheduler_action_state` and the durable action snapshot. Lookup is by

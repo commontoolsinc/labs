@@ -45,9 +45,10 @@ const runtime = new Runtime({
 
 // Access services through the runtime
 const cell = runtime.getCell("my-space", "my-cause", schema);
-const doc = runtime.documentMap.getDoc(value, cause, space);
 await cell.sync();
-const pattern = await runtime.patternManager.loadPattern(patternId);
+const pattern = await runtime.patternManager.compilePattern(program, {
+  space: "my-space",
+});
 
 // Wait for all operations to complete
 await runtime.idle();
@@ -67,33 +68,39 @@ purposes:
 - `src/index.ts`: The main entry point that exports the public API
 - `src/runtime.ts`: Central orchestrator that creates and manages all services
 - `src/cell.ts`: Defines the `Cell` abstraction and its implementation
-- `src/doc.ts`: Implements `DocImpl` which represents stored documents in
-  storage
-- `src/runner.ts`: Provides the runtime for executing patterns
-- `src/scheduler.ts`: Manages execution order and batching of reactive updates
-- `src/storage.ts`: Manages persistence and synchronization
-- `src/doc-map.ts`: Manages the mapping between entities and documents
+- `src/runner.ts`: Instantiates patterns and manages their lifecycle
+- `src/scheduler.ts` / `src/scheduler/`: Execution order, batching, and event
+  dispatch for reactive updates
+- `src/storage/`: The storage stack — transactions, the v2 memory-protocol
+  client, and the local replica/cache layers
+- `src/builder/`: The pattern/handler/lift builder surface (migrated from the
+  former `@commonfabric/builder` package; see `createBuilder`)
+- `src/builtins/`: Built-in modules (`map`, `ifElse`, `fetchJson`, `llm`,
+  `sqliteDatabase`, ...)
 - `src/pattern-manager.ts`: Handles pattern loading, compilation, and caching
 - `src/module.ts`: Manages module registration and retrieval
+- `src/cfc/`: Contextual flow control (information-flow labels and policy)
+- `src/sandbox/`: SES sandboxing and verified pattern evaluation
 
 ## Core Concepts
 
-### Document vs Cell Abstractions
+### Documents vs Cell Abstractions
 
 One of the most important concepts to understand in the Runner is the
-relationship between documents and cells:
+relationship between stored documents and cells:
 
-- **DocImpl**: Represents raw documents stored in storage. These are the actual
-  persistence units that get saved and synchronized.
+- **Documents** are the persistence units: entity-id-addressed values that live
+  in a space and are read and written through storage transactions
+  (`src/storage/`). They are what the memory server versions and synchronizes.
 
 - **Cell**: The user-facing abstraction that provides a reactive view over one
   or more documents. Cells are defined by schemas and can traverse document
   relationships through sigil-based links.
 
-While DocImpl handles the low-level storage concerns, Cells provide the
-higher-level programming model with schema validation, reactivity, and
-relationship traversal. When you're working with data in the Runner, you'll
-almost always interact with Cells rather than directly with DocImpl instances.
+Storage transactions handle the low-level persistence concerns, while Cells
+provide the higher-level programming model with schema validation, reactivity,
+and relationship traversal. When you're working with data in the Runner, you'll
+almost always interact with Cells rather than with raw storage reads and writes.
 
 ### Schema and Validation
 
@@ -120,7 +127,9 @@ This approach replaces the previous distinction between CellLinks and Aliases.
 
 Patterns define computational graphs that process data:
 
-- Created using the Builder package (`@commonfabric/builder`)
+- Created with the builder surface (`createBuilder` from this package — trusted
+  host-side construction) or authored as `.tsx` patterns compiled by the CTS
+  transformer
 - Define inputs, outputs, and transformation logic
 - Can be composed into larger patterns
 - Executed by the Runner with automatic dependency tracking
@@ -129,12 +138,14 @@ Patterns define computational graphs that process data:
 
 The storage system handles persistence and synchronization:
 
-- Multiple storage implementations (memory, remote)
-- Document-based persistence model
+- Multiple storage implementations (emulated in-process, remote memory-v2
+  server)
+- Document-based persistence model with transactional commits
 - Identity-based access control
 - Synchronization through a publish/subscribe mechanism
-- Primitives for conflict resolution strategies, although right now only
-  compare-and-swap is implemented and failed transactions just reset the data
+- Conflict detection by read watermark: a commit whose reads went stale is
+  rejected, and the scheduler re-runs the affected computation against the newer
+  inputs and commits again
 
 ### Reactivity System
 
@@ -180,9 +191,11 @@ const runtime = new Runtime({
 ```
 
 ```typescript
+const space = signer.did();
+
 // Create a cell with schema and default values
 const settingsCell = runtime.getCell(
-  "my-space", // The space this cell belongs to
+  space, // The space this cell belongs to
   "settings", // Causal ID - a string identifier
   { // JSON Schema with default values
     type: "object",
@@ -197,7 +210,7 @@ const settingsCell = runtime.getCell(
 // Create a related cell using an object with references as causal ID
 // This establishes a semantic relationship between cells
 const profileCell = runtime.getCell(
-  "my-space", // The space this cell belongs to
+  space, // The space this cell belongs to
   { parent: settingsCell, id: "profile" }, // Causal ID with reference to parent
   { // JSON Schema with default values
     type: "object",
@@ -212,13 +225,18 @@ const profileCell = runtime.getCell(
 // Two cells with the same causal ID will be synced automatically
 // when using storage, even across different instances
 
-// Get and set values
+// Get values
 const settings = settingsCell.get();
-settingsCell.set({ theme: "light", fontSize: 16 });
+
+// Mutations require a transaction (outside handlers, open one explicitly
+// with runtime.edit(); inside handlers the runtime provides it)
+const tx = runtime.edit();
+settingsCell.withTx(tx).set({ theme: "light", fontSize: 16 });
 
 // Work with nested properties
 const themeProperty = settingsCell.key("theme");
-themeProperty.set("system");
+themeProperty.withTx(tx).set("system");
+await tx.commit();
 
 // Subscribe to changes
 // sink() will immediately call the callback with the current value,
@@ -247,7 +265,7 @@ Builder package provides TypeScript type inference.
 ```typescript
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { JSONSchema } from "@commonfabric/builder";
+import type { JSONSchema } from "@commonfabric/runner";
 import { Identity } from "@commonfabric/identity";
 
 // Set up storage manager
@@ -294,10 +312,22 @@ const userSchema = {
 
 // Create a cell with schema validation
 const userCell = runtime.getCell(
-  "my-space",
+  signer.did(),
   "user-123", // Causal ID - identifies this particular user
   userSchema, // Schema for validation, typing, and default values
 );
+
+// Schema defaults are readable immediately — but they are VIRTUAL (backed
+// by a read-only data: document), so seed the cell with a real write
+// before mutating through nested cells.
+const seed = runtime.edit();
+userCell.withTx(seed).set({
+  id: 123,
+  name: "Alice",
+  tags: [],
+  settings: { theme: "light", notifications: true },
+});
+await seed.commit();
 
 // Access the typed data
 const user = userCell.get();
@@ -308,8 +338,15 @@ const settingsCell = user.settings; // This is a cell
 const settings = settingsCell.get();
 console.log(settings.theme); // "light"
 
-// Update nested cells
-settingsCell.set({ theme: "dark", notifications: false });
+// Update nested cells (mutations require a transaction)
+const tx = runtime.edit();
+settingsCell.withTx(tx).set({ theme: "dark", notifications: false });
+await tx.commit();
+
+// Re-read through the parent for the updated view — a nested-cell handle
+// obtained from an earlier get() keeps observing its earlier snapshot
+console.log(userCell.get().settings.get());
+// { theme: "dark", notifications: false }
 
 // Key navigation preserves schema
 const nameCell = userCell.key("name");
@@ -319,13 +356,12 @@ console.log(nameCell.get()); // "Alice"
 ### Running Patterns
 
 Patterns define computational graphs that process data. Patterns are created
-using the Builder package and executed by the Runner, which manages dependencies
-and updates results automatically.
+through the builder surface and executed by the Runner, which manages
+dependencies and updates results automatically.
 
 ```typescript
-import { Runtime } from "@commonfabric/runner";
+import { createBuilder, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { derive, pattern } from "@commonfabric/builder";
 import { Identity } from "@commonfabric/identity";
 
 // Set up storage manager
@@ -340,54 +376,57 @@ const runtime = new Runtime({
 ```
 
 ```typescript
-// Define a pattern with input and output schemas
-const doubleNumberPattern = pattern(
-  // Input schema
-  {
-    type: "object",
-    properties: {
-      value: { type: "number" },
-    },
-    default: { value: 0 },
-  },
-  // Output schema
-  {
-    type: "object",
-    properties: {
-      result: { type: "number" },
-    },
-    required: ["result"],
-  },
-  // Implementation function
-  (input) => {
-    return { result: derive(input.value, (value) => value * 2) };
-  },
-);
+// Obtain the trusted builder surface for host-side pattern construction.
+// (.tsx pattern sources instead go through the CTS transformer, which also
+// generates their schemas.)
+const { commonfabric } = createBuilder({
+  unsafeHostTrust: runtime.createUnsafeHostTrust({
+    reason: "embedder example",
+  }),
+});
+const { pattern, lift } = commonfabric;
 
-// Create a cell to store results
-const resultCell = runtime.documentMap.getDoc(
-  undefined,
+// Define a pattern: the implementation function comes first; explicit
+// argument/result schemas are optional trailing parameters.
+const double = lift((x: number) => x * 2);
+const doubleNumberPattern = pattern<{ value: number }>(({ value }) => ({
+  result: double(value),
+}));
+
+// Allocate the input and result cells inside a transaction.
+const space = signer.did();
+const tx = runtime.edit();
+const input = runtime.getCell<number>(space, "double-input", undefined, tx);
+input.withTx(tx).set(5);
+const resultCell = runtime.getCell<{ result?: number }>(
+  space,
   "calculation-result",
-  "my-space",
+  undefined,
+  tx,
 );
 
-// Run the pattern
-const result = runtime.runner.run(
+// Run the pattern. Passing the input CELL (not a literal) keeps the
+// argument reactive: later writes to it re-derive the result.
+const result = runtime.run(
+  tx,
   doubleNumberPattern,
-  { value: 5 },
+  { value: input },
   resultCell,
 );
+runtime.prepareTxForCommit(tx);
+await tx.commit();
 
-// Await the computation graph to settle
+// Await the computation graph to settle, then pull the result cell's view
 await runtime.idle();
-
-// Access results (which update automatically)
+await result.pull();
 console.log(result.get()); // { result: 10 }
 
-// Update input and watch result change automatically
-const sourceCell = result.sourceCell;
-sourceCell.key("argument").key("value").set(10);
+// Update the input and watch the result change automatically
+const update = runtime.edit();
+input.withTx(update).set(10);
+await update.commit();
 await runtime.idle();
+await result.pull();
 console.log(result.get()); // { result: 20 }
 
 // Stop pattern execution when no longer needed
@@ -447,7 +486,7 @@ You can map and transform data using cells with schemas:
 ```typescript
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { JSONSchema } from "@commonfabric/builder";
+import type { JSONSchema } from "@commonfabric/runner";
 import { Identity } from "@commonfabric/identity";
 
 // Set up storage manager
@@ -462,9 +501,12 @@ const runtime = new Runtime({
 ```
 
 ```typescript
-// Original data source cell
+const space = signer.did();
+
+// Original data source cell. Note: schema defaults are VIRTUAL — links
+// resolve against stored values, so seed the source with a real write.
 const sourceCell = runtime.getCell(
-  "my-space",
+  space,
   "source-data",
   {
     type: "object",
@@ -482,20 +524,20 @@ const sourceCell = runtime.getCell(
         items: { type: "string" },
       },
     },
-    default: {
-      id: 1,
-      metadata: {
-        createdAt: "2023-01-01",
-        type: "user",
-      },
-      tags: ["tag1", "tag2"],
-    },
   },
 );
+const seed = runtime.edit();
+sourceCell.withTx(seed).set({
+  id: 1,
+  metadata: { createdAt: "2023-01-01", type: "user" },
+  tags: ["tag1", "tag2"],
+});
+await seed.commit();
 
-// Create a mapping cell that reorganizes the data
+// Create a mapping cell that reorganizes the data by writing sigil LINKS
+// into it (setRaw writes the links themselves rather than link targets).
 const mappingCell = runtime.getCell(
-  "my-space",
+  space,
   "data-mapping",
   {
     type: "object",
@@ -508,22 +550,25 @@ const mappingCell = runtime.getCell(
       kind: { type: "string" },
       firstTag: { type: "string" },
     },
-    default: {
-      // References to source cell values using sigil links
-      id: sourceCell.key("id").getAsLink(),
-      // Turn single value to array
-      changes: [sourceCell.key("metadata").key("createdAt").getAsLink()],
-      // Rename field and uplift from nested element
-      kind: sourceCell.key("metadata").key("type").getAsLink(),
-      // Reference to first array element
-      firstTag: sourceCell.key("tags").key(0).getAsLink(),
-    },
   },
 );
+const tx = runtime.edit();
+mappingCell.withTx(tx).setRaw({
+  // References to source cell values using sigil links
+  id: sourceCell.key("id").getAsLink(),
+  // Turn single value to array
+  changes: [sourceCell.key("metadata").key("createdAt").getAsLink()],
+  // Rename field and uplift from nested element
+  kind: sourceCell.key("metadata").key("type").getAsLink(),
+  // Reference to first array element
+  firstTag: sourceCell.key("tags").key(0).getAsLink(),
+});
+await tx.commit();
+await runtime.idle();
 
-// The schema is already applied - just get the result
-const result = mappingCell.get();
-console.log(result);
+// Reads resolve through the links to the source values
+await mappingCell.pull();
+console.log(mappingCell.get());
 // {
 //   id: 1,
 //   changes: ["2023-01-01"],
@@ -553,8 +598,9 @@ const runtime = new Runtime({
 ```
 
 ```typescript
+const space = signer.did();
 const rootCell = runtime.getCell(
-  "my-space",
+  space,
   "nested-example",
   {
     type: "object",
@@ -569,14 +615,17 @@ const rootCell = runtime.getCell(
         asCell: ["cell"],
       },
     },
-    default: {
-      value: "root",
-      current: {
-        label: "nested",
-      },
-    },
   },
 );
+
+// Seed the cell with a real write (schema defaults are virtual and do not
+// materialize nested cells on their own)
+const seed = runtime.edit();
+rootCell.withTx(seed).set({
+  value: "root",
+  current: { label: "nested" },
+});
+await seed.commit();
 
 // Subscribe to changes in the whole cell
 // This callback is called immediately with the current value,
@@ -604,12 +653,16 @@ rootCell.key("current").key("label").sink((value) => {
   console.log("Label value:", value); // Called immediately with "nested"
 });
 
-// Changing values will trigger the callbacks
-rootCell.key("current").key("label").set("updated");
-// This will log:
-// "Label value: updated"
+// Changing values requires a transaction and triggers the callbacks
+const tx = runtime.edit();
+rootCell.key("current").key("label").withTx(tx).set("updated");
+await tx.commit();
+// This will log (after the commit propagates):
 // "Nested value: { label: 'updated' }"
-// "Root changed: { value: 'root', current: { label: 'updated' } }"
+// "Label value: updated"
+// The ROOT callback does NOT re-fire: `asCell` gives `current` its own
+// document, so the root's stored value (a link to it) is unchanged —
+// exactly the isolation that makes nested cells independently observable.
 ```
 
 ## Migration from Singleton Pattern
@@ -645,15 +698,17 @@ await runtime.idle();
 
 - `getCell()` → `runtime.getCell()`
 - `getCellFromLink()` → `runtime.getCellFromLink()`
-- `getDocByEntityId()` → `runtime.documentMap.getDocByEntityId()`
-- `storage.*` → `runtime.storage.*`
+- `getDocByEntityId()` → `runtime.getCellFromEntityId()`
+- `storage.*` → `runtime.storageManager` / storage transactions
 - `idle()` → `runtime.idle()`
-- `run()` → `runtime.runner.run()`
+- `run()` → `runtime.run(tx, ...)`
 - Storage configuration now happens in Runtime constructor
 
 ### Runtime Configuration
 
-The Runtime constructor accepts a configuration object:
+The Runtime constructor accepts a configuration object (excerpt — see
+`RuntimeOptions` in `src/runtime.ts` for the full surface, and
+`runtime-presets.ts` for the first-party preset assembly):
 
 ```typescript
 interface RuntimeOptions {
@@ -681,7 +736,7 @@ The storage manager opens storage providers for different memory spaces. The
 StorageManager provides convenient factory methods:
 
 ```ts
-import { StorageManager } from "@commonfabric/runner/storage/cache ";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("my-passphrase");
@@ -696,12 +751,12 @@ const storageManager = StorageManager.open({
 });
 ```
 
-The `@commonfabric/storage/cache` provides a default implementation of the
-`IStorageManager` interface.
+`@commonfabric/runner/storage/cache` (and its `.deno` variant) provides the
+default implementation of the `IStorageManager` interface:
 
-- `"volatile://"` - In-memory storage (for testing)
-- `"https://example.com/storage"` - Remote storage with schema queries
-- Custom providers can be configured through options
+- `StorageManager.emulate({ as })` — in-process memory-v2 server (tests, local
+  tooling)
+- `StorageManager.open({ address, as })` — remote memory-v2 server
 
 ## TypeScript Support
 
@@ -732,7 +787,6 @@ The Runtime coordinates several core services:
 - **Scheduler**: Manages execution order and batching of reactive updates
 - **Storage**: Handles persistence and synchronization with configurable
   backends
-- **DocumentMap**: Maps entity IDs to document instances and manages creation
 - **PatternManager**: Loads, compiles, and caches pattern definitions
 - **ModuleRegistry**: Manages module registration and retrieval for patterns
 - **Runner**: Executes patterns and manages their lifecycle
