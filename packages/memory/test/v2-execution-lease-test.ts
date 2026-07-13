@@ -757,7 +757,7 @@ Deno.test("sponsor WRITE loss fences commits before replacement", async () => {
   }
 });
 
-Deno.test("lease-bound execution projects the sponsor PerSession scope", async () => {
+Deno.test("lease-bound execution reads and mirrors sponsor PerSession scope", async () => {
   const directory = await Deno.makeTempDir();
   const server = createLeaseServer(
     toFileUrl(`${directory}/`),
@@ -963,24 +963,29 @@ Deno.test("lease-bound execution projects the sponsor PerSession scope", async (
       [{ body: "sponsor-row" }],
     );
 
-    await executor.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: "of:sponsor-session-output",
-        scope: "session",
-        value: { value: { lane: "executor" } },
-      }, {
-        op: "sqlite",
-        db: sessionDb,
-        sql: "INSERT INTO notes (body) VALUES (?)",
-        params: ["executor-row"],
-      }],
-    });
+    await assertRejects(
+      () =>
+        executor.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:sponsor-session-output",
+            scope: "session",
+            value: { value: { lane: "executor" } },
+          }, {
+            op: "sqlite",
+            db: sessionDb,
+            sql: "INSERT INTO notes (body) VALUES (?)",
+            params: ["executor-row"],
+          }],
+        }),
+      Error,
+      "exact execution claim incarnation",
+    );
     assertEquals(
       await sessionValue(sponsor, "of:sponsor-session-output"),
-      { lane: "executor" },
+      undefined,
     );
     assertEquals(
       await sessionValue(sibling, "of:sponsor-session-output"),
@@ -991,7 +996,7 @@ Deno.test("lease-bound execution projects the sponsor PerSession scope", async (
         sessionDb,
         "SELECT body FROM notes ORDER BY rowid",
       )).rows,
-      [{ body: "sponsor-row" }, { body: "executor-row" }],
+      [{ body: "sponsor-row" }],
     );
     assertEquals(
       (await sibling.sqliteQuery(
@@ -1134,15 +1139,10 @@ Deno.test("scheduler mirrors retain sponsor scope across executor disconnect", a
     const inFlight = executor.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: secondSessionWrite.id,
-        scope: secondSessionWrite.scope,
-        value: { value: { updated: true } },
-      }],
+      operations: [],
       schedulerObservation: {
         ...schedulerObservation,
-        actualChangedWrites: [secondSessionWrite],
+        actualChangedWrites: [],
         currentKnownWrites: [sessionWrite, secondSessionWrite],
         completeActionScopeSummary: {
           ...schedulerObservation.completeActionScopeSummary,

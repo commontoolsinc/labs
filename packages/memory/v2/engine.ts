@@ -3611,11 +3611,6 @@ const assertExecutionLeaseFenceTransaction = (
       "execution lease does not match the commit lane and principal",
     );
   }
-  if (options.requireExactClaim === true && options.claims.length !== 1) {
-    throw new ExecutionLeaseFenceError(
-      "bound executor semantic transaction requires one exact execution claim incarnation",
-    );
-  }
   if (fence.authorize?.(engine) !== true) {
     throw new ExecutionLeaseFenceError(
       "execution sponsor lacks current WRITE authority or execution policy",
@@ -3633,6 +3628,11 @@ const assertExecutionLeaseFenceTransaction = (
   ) {
     throw new ExecutionLeaseFenceError(
       "execution lease is stale, expired, or revoked",
+    );
+  }
+  if (options.requireExactClaim === true && options.claims.length !== 1) {
+    throw new ExecutionLeaseFenceError(
+      "bound executor semantic transaction requires one exact execution claim incarnation",
     );
   }
   for (const claim of options.claims) {

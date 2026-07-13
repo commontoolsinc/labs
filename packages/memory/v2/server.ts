@@ -3107,8 +3107,8 @@ export class Server {
     observations: readonly CommitSchedulerObservation[],
   ): ReadonlyMap<number, ExecutionClaim> | undefined {
     if (binding === undefined) return undefined;
-    this.expireExecutionClaims();
     const claims = new Map<number, ExecutionClaim>();
+    let claimsExpired = false;
     for (const { localSeq, observation } of observations) {
       if (
         observation.actionKind === "event-handler" ||
@@ -3126,6 +3126,10 @@ export class Server {
         throw new Engine.ProtocolError(
           "bound executor action is missing an execution claim incarnation",
         );
+      }
+      if (!claimsExpired) {
+        this.expireExecutionClaims();
+        claimsExpired = true;
       }
       const key: ActionClaimKey = {
         branch,
