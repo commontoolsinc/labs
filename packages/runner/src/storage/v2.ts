@@ -1779,6 +1779,7 @@ type ClaimedOverlayGeneration = {
   readonly localSeq: number;
   readonly claim: ExecutionClaim;
   readonly sourceAction: object;
+  readonly createdAt: number;
   basisSeq: number;
   readonly unresolvedBasisLocalSeqs: Set<number>;
   readonly touched: readonly { id: URI; scope?: CellScope }[];
@@ -3879,6 +3880,7 @@ class SpaceReplica implements ISpaceReplica {
       localSeq,
       claim,
       sourceAction,
+      createdAt: Date.now(),
       basisSeq,
       unresolvedBasisLocalSeqs,
       touched: [...new Map(touched.map((entry) => [
@@ -3886,6 +3888,14 @@ class SpaceReplica implements ISpaceReplica {
         entry,
       ])).values()],
     });
+    logger.debug("execution-client-derived-suppressed", () => [
+      "Claimed client action retained as a local overlay",
+      { actionId: claim.actionId, localSeq, basisSeq },
+    ]);
+    logger.debug("execution-overlay-created", () => [
+      "Claimed overlay created",
+      { actionId: claim.actionId, localSeq, basisSeq },
+    ]);
   }
 
   private noteSourceCommitConfirmed(localSeq: number, seq: number): void {
@@ -4044,11 +4054,30 @@ class SpaceReplica implements ISpaceReplica {
       overlay.unresolvedBasisLocalSeqs.size === 0 &&
       overlay.basisSeq <= settlement.inputBasisSeq
     );
-    if (covered.length === 0) return unresolved;
+    if (covered.length === 0) {
+      logger.debug("execution-overlay-retained", () => [
+        unresolved
+          ? "Settlement awaits pending-source basis translation"
+          : "Settlement input basis does not cover the overlay",
+        {
+          actionId: settlement.claim.actionId,
+          reason: unresolved ? "pending-source-basis" : "older-basis",
+        },
+      ]);
+      return unresolved;
+    }
     if (
       settlement.outcome === "committed" &&
       this.#executionAppliedSeq < settlement.acceptedCommitSeq
     ) {
+      logger.debug("execution-overlay-retained", () => [
+        "Settlement awaits accepted data application",
+        {
+          actionId: settlement.claim.actionId,
+          appliedSeq: this.#executionAppliedSeq,
+          acceptedCommitSeq: settlement.acceptedCommitSeq,
+        },
+      ]);
       return true;
     }
     const coveredSeqs = new Set(covered.map((overlay) => overlay.localSeq));
@@ -4113,6 +4142,17 @@ class SpaceReplica implements ISpaceReplica {
     for (const overlay of dropped) {
       this.#claimedOverlays.delete(overlay.localSeq);
     }
+    const now = Date.now();
+    logger.debug("execution-overlay-dropped", () => [
+      "Claimed overlay dropped",
+      {
+        overlays: dropped.length,
+        reason: options.diagnosticCode,
+        maxAgeMs: Math.max(
+          ...dropped.map((overlay) => Math.max(0, now - overlay.createdAt)),
+        ),
+      },
+    ]);
     if (before !== undefined) {
       const changes = before.compare(this);
       const changed = [...changes].length > 0;

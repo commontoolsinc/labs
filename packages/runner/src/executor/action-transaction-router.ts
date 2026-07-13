@@ -32,6 +32,12 @@ import {
   type ServerBuiltinActionDescriptor,
   serverBuiltinImplementationHash,
 } from "../builtins/server-execution.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+
+const logger = getLogger("execution.executor", {
+  enabled: true,
+  level: "error",
+});
 
 export interface ExecutorCandidateDiagnostic {
   readonly diagnosticCode: string;
@@ -215,6 +221,12 @@ export function createExecutorActionTransactionRouter(
       return local;
     }
     if (liveClaim === undefined) {
+      if (routedObservation.transactionKind === "action-run") {
+        logger.debug("execution-server-shadow-action-run", () => [
+          "Server shadow action run completed",
+          { actionId: claimKey.actionId, actionKind: claimKey.actionKind },
+        ]);
+      }
       const encoded = JSON.stringify(claimKey);
       if (reported.get(sourceAction) !== encoded) {
         reported.set(sourceAction, encoded);
@@ -227,6 +239,12 @@ export function createExecutorActionTransactionRouter(
     }
 
     attachClaimAssertion(input.commit, routedObservation, liveClaim);
+    if (routedObservation.transactionKind === "action-run") {
+      logger.debug("execution-server-authoritative-action-run", () => [
+        "Server authoritative action run completed",
+        { actionId: liveClaim.actionId, actionKind: liveClaim.actionKind },
+      ]);
+    }
     return {
       disposition: "upstream",
       ...(options.onUnserved

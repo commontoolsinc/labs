@@ -114,6 +114,7 @@ import { ExtendedStorageTransaction } from "./storage/extended-storage-transacti
 import { isCellScope, normalizeCellScope } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
 import { isDeno } from "@commonfabric/utils/env";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   type AsyncLocalStore,
   FallbackAsyncLocalStore,
@@ -135,6 +136,11 @@ import {
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
+
+const executionLogger = getLogger("runtime.execution", {
+  enabled: true,
+  level: "error",
+});
 
 const isFullNormalizedLinkShape = (
   value: unknown,
@@ -1061,6 +1067,11 @@ export class Runtime {
       ? getTransactionSourceAction()
       : undefined;
     if (sourceAction !== undefined) {
+      const role = this.hasServerBuiltinFetch() ? "server" : "client";
+      executionLogger.debug(`execution-${role}-async-request`, () => [
+        "Async builtin work started",
+        { role },
+      ]);
       this.storageManager.beginClientExecutionEffect?.(sourceAction);
     }
     const tracked = promise.then(() => {}, () => {});

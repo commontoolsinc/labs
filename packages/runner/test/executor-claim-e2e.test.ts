@@ -798,7 +798,10 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
     const clientFallback = Promise.withResolvers<void>();
     const clientFallbackKinds = new Set<"fetch" | "generate">();
     enableMockMode();
-    for (let attempt = 0; attempt < clientRuntimes.length; attempt++) {
+    // Current client-primary mutex behavior may retry across runtimes before
+    // one writeback wins. Supply a bounded fixture pool so those established
+    // retries remain mocked without warning after authority returns.
+    for (let attempt = 0; attempt < clientRuntimes.length * 4; attempt++) {
       addMockResponse(
         () => {
           clientFallbackKinds.add("generate");

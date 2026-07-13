@@ -22,7 +22,7 @@ export interface SpaceConfig {
 }
 
 // Create an identity and session from configuration.
-async function loadSession(config: SpaceConfig): Promise<Session> {
+export async function loadSession(config: SpaceConfig): Promise<Session> {
   const identity = await loadIdentity(config.identityPath);
   return isDID(config.space)
     ? createSession({

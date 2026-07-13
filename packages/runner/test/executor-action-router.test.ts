@@ -1,4 +1,5 @@
 import { assertEquals, assertStrictEquals } from "@std/assert";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import type {
   ActionClaimKey,
   ClientCommit,
@@ -98,6 +99,11 @@ const key: ActionClaimKey = {
 };
 
 Deno.test("executor action router reports a pure candidate then routes its exact claim upstream", async () => {
+  const counts = getLoggerCountsBreakdown()["execution.executor"] ?? {};
+  const shadowBaseline = counts["execution-server-shadow-action-run"]?.debug ??
+    0;
+  const authoritativeBaseline =
+    counts["execution-server-authoritative-action-run"]?.debug ?? 0;
   const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
   const claims = new WeakMap<object, ExecutionClaim>();
@@ -121,6 +127,12 @@ Deno.test("executor action router reports a pure candidate then routes its exact
   );
   assertEquals(candidates, [{ claimKey: key, sourceAction: action }]);
   assertEquals(diagnostics, []);
+  assertEquals(
+    getLoggerCountsBreakdown()["execution.executor"]?.[
+      "execution-server-shadow-action-run"
+    ]?.debug ?? 0,
+    shadowBaseline + 1,
+  );
 
   const claim: ExecutionClaim = {
     ...key,
@@ -146,6 +158,12 @@ Deno.test("executor action router reports a pure candidate then routes its exact
       leaseGeneration: 5,
       claimGeneration: 7,
     },
+  );
+  assertEquals(
+    getLoggerCountsBreakdown()["execution.executor"]?.[
+      "execution-server-authoritative-action-run"
+    ]?.debug ?? 0,
+    authoritativeBaseline + 1,
   );
 });
 

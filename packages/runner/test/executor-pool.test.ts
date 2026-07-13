@@ -194,6 +194,27 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       pieces: ["piece:shared"],
       leaseGeneration: 1,
     });
+    assertEquals(pool.metrics(), {
+      activeLanes: 1,
+      activeWorkers: 1,
+      activeDemands: 10,
+      states: {
+        waiting: 0,
+        excluded: 0,
+        starting: 0,
+        live: 1,
+        draining: 0,
+        backoff: 0,
+      },
+      demandSnapshots: 1,
+      workersStarted: 1,
+      workersStopped: 0,
+      abruptStops: 0,
+      leaseLosses: 0,
+      leaseReplacements: 0,
+      sponsorRotations: 0,
+      crashes: 0,
+    });
 
     await control.emit(2, demands.slice(1));
     await pool.idle();
@@ -205,6 +226,27 @@ Deno.test("shared execution pool unions ten client references into one worker", 
     assertEquals(factory.executors[0]?.stopped, 1);
     assertEquals(control.finished, 1);
     assertEquals(pool.snapshot(SPACE, BRANCH), undefined);
+    assertEquals(pool.metrics(), {
+      activeLanes: 0,
+      activeWorkers: 0,
+      activeDemands: 0,
+      states: {
+        waiting: 0,
+        excluded: 0,
+        starting: 0,
+        live: 0,
+        draining: 0,
+        backoff: 0,
+      },
+      demandSnapshots: 3,
+      workersStarted: 1,
+      workersStopped: 1,
+      abruptStops: 0,
+      leaseLosses: 0,
+      leaseReplacements: 0,
+      sponsorRotations: 0,
+      crashes: 0,
+    });
   } finally {
     await pool.close();
   }
@@ -255,6 +297,10 @@ Deno.test("shared execution pool renews authority before reusing a live worker",
     assertEquals(factory.executors[0]?.stopped, 1);
     assertEquals(factory.starts.length, 2);
     assertEquals(factory.starts[1]?.lease.leaseGeneration, 2);
+    assertEquals(pool.metrics().leaseLosses, 1);
+    assertEquals(pool.metrics().leaseReplacements, 1);
+    assertEquals(pool.metrics().workersStarted, 2);
+    assertEquals(pool.metrics().abruptStops, 1);
   } finally {
     await pool.close();
   }
@@ -637,6 +683,8 @@ Deno.test("shared execution pool fences a crashed worker before replacement", as
     await pool.idle();
     assertEquals(factory.starts.length, 2);
     assertEquals(factory.starts[1]?.lease.leaseGeneration, 2);
+    assertEquals(pool.metrics().crashes, 1);
+    assertEquals(pool.metrics().leaseReplacements, 1);
   } finally {
     await pool.close();
   }

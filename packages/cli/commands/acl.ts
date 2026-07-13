@@ -99,7 +99,7 @@ export const acl = new Command()
 /**
  * Parse space-related options from command arguments
  */
-function parseSpaceOptions(
+export function parseSpaceOptions(
   options: Record<string, string | undefined>,
 ): SpaceConfig {
   const apiUrl = options.apiUrl || Deno.env.get("CF_API_URL");

@@ -4,6 +4,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { ExecutionClaim } from "@commonfabric/memory/v2";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
 Deno.test("executor shadow runtime records but never releases external sink effects", async () => {
   const signer = await Identity.fromPassphrase(
@@ -108,6 +109,9 @@ Deno.test("post-commit builtin continuations inherit their source action", async
     storageManager: storage,
   });
   const sourceAction = {};
+  const asyncBaseline = getLoggerCountsBreakdown()["runtime.execution"]?.[
+    "execution-client-async-request"
+  ]?.debug ?? 0;
 
   try {
     let continuationSource: object | undefined;
@@ -120,6 +124,7 @@ Deno.test("post-commit builtin continuations inherit their source action", async
       { url: "/continuation" },
       "fetchText-start",
       async () => {
+        runtime.trackAsyncWork(Promise.resolve(), { externalEffect: true });
         await Promise.resolve();
         const continuation = runtime.edit();
         continuationSource = continuation.tx.sourceAction;
@@ -128,6 +133,13 @@ Deno.test("post-commit builtin continuations inherit their source action", async
     );
     assertEquals((await tx.commit()).error, undefined);
     assertEquals(continuationSource, sourceAction);
+    await runtime.settled();
+    assertEquals(
+      getLoggerCountsBreakdown()["runtime.execution"]?.[
+        "execution-client-async-request"
+      ]?.debug ?? 0,
+      asyncBaseline + 1,
+    );
   } finally {
     await runtime.dispose();
     await storage.close();

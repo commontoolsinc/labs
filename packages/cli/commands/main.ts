@@ -4,6 +4,7 @@ import { acl } from "./acl.ts";
 import { check, dev } from "./dev.ts";
 import { deps } from "./deps.ts";
 import { exec } from "./exec.ts";
+import { execution } from "./execution.ts";
 import { fuse } from "./fuse.ts";
 import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
@@ -80,6 +81,8 @@ export const main = new Command()
   .command("inspect", inspect)
   .command("view", view)
   .command("exec", exec)
+  // @ts-ignore for the same nested-command overload issue as acl/piece.
+  .command("execution", execution)
   // @ts-ignore for the above type issue
   .command("fuse", fuse)
   .command(

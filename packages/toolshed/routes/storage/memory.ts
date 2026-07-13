@@ -5,7 +5,10 @@ import env from "@/env.ts";
 import { memoryEngineStoreUrl } from "./memory-store-url.ts";
 import { identity } from "@/lib/identity.ts";
 import type { Runtime } from "@commonfabric/runner";
-import { SharedExecutionPool } from "@commonfabric/runner/executor";
+import {
+  type ExecutionPoolMetricsSnapshot,
+  SharedExecutionPool,
+} from "@commonfabric/runner/executor";
 import { DenoSpaceExecutorFactory } from "@commonfabric/runner/executor/deno";
 
 const memoryAudience = identity.did();
@@ -44,6 +47,12 @@ export const memoryServer = new MemoryServer.Server({
   },
 });
 let executionPool: SharedExecutionPool | null = null;
+
+export function serverExecutionPoolMetrics():
+  | ExecutionPoolMetricsSnapshot
+  | null {
+  return executionPool?.metrics() ?? null;
+}
 
 /** Start client-demand execution after runtime flags are installed, but before
  * the HTTP server accepts connections. */

@@ -78,6 +78,21 @@ export interface SpaceExecutionSnapshot {
   readonly leaseGeneration?: number;
 }
 
+export interface ExecutionPoolMetricsSnapshot {
+  readonly activeLanes: number;
+  readonly activeWorkers: number;
+  readonly activeDemands: number;
+  readonly states: Readonly<Record<SpaceExecutionSnapshot["state"], number>>;
+  readonly demandSnapshots: number;
+  readonly workersStarted: number;
+  readonly workersStopped: number;
+  readonly abruptStops: number;
+  readonly leaseLosses: number;
+  readonly leaseReplacements: number;
+  readonly sponsorRotations: number;
+  readonly crashes: number;
+}
+
 type Slot = {
   readonly key: string;
   readonly space: string;
@@ -93,6 +108,8 @@ type Slot = {
   renewTimer: number | null;
   backoffTimer: number | null;
   crashAttempts: number;
+  lastLeaseGeneration?: number;
+  lastSponsor?: string;
   tail: Promise<void>;
 };
 
@@ -129,6 +146,16 @@ export class SharedExecutionPool {
   readonly #settleTimeoutMs: number;
   readonly #slots = new Map<string, Slot>();
   readonly #tasks = new Set<Promise<void>>();
+  readonly #metrics = {
+    demandSnapshots: 0,
+    workersStarted: 0,
+    workersStopped: 0,
+    abruptStops: 0,
+    leaseLosses: 0,
+    leaseReplacements: 0,
+    sponsorRotations: 0,
+    crashes: 0,
+  };
   #unsubscribe: (() => void) | null = null;
   #closed = false;
 
@@ -171,6 +198,31 @@ export class SharedExecutionPool {
         ? { leaseGeneration: slot.lease.leaseGeneration }
         : {}),
     };
+  }
+
+  metrics(): ExecutionPoolMetricsSnapshot {
+    const states: Record<SpaceExecutionSnapshot["state"], number> = {
+      waiting: 0,
+      excluded: 0,
+      starting: 0,
+      live: 0,
+      draining: 0,
+      backoff: 0,
+    };
+    let activeWorkers = 0;
+    let activeDemands = 0;
+    for (const slot of this.#slots.values()) {
+      states[slot.state]++;
+      activeDemands += slot.demands.length;
+      if (slot.executor !== null) activeWorkers++;
+    }
+    return Object.freeze({
+      activeLanes: this.#slots.size,
+      activeWorkers,
+      activeDemands,
+      states: Object.freeze(states),
+      ...this.#metrics,
+    });
   }
 
   async idle(): Promise<void> {
@@ -218,6 +270,7 @@ export class SharedExecutionPool {
       this.#slots.set(key, slot);
     }
     if (snapshot.order <= slot.order) return slot.tail;
+    this.#metrics.demandSnapshots++;
     slot.order = snapshot.order;
     slot.demands = snapshot.demands;
     return this.#enqueue(slot, () => this.#reconcile(slot!));
@@ -285,6 +338,7 @@ export class SharedExecutionPool {
       }
       const renewed = await this.#control.renewExecutionLease(slot.lease);
       if (renewed === null) {
+        this.#metrics.leaseLosses++;
         await this.#shutdown(slot, true);
       } else {
         slot.lease = renewed;
@@ -303,6 +357,20 @@ export class SharedExecutionPool {
       slot.branch,
     );
     if (acquired === null) return;
+    if (
+      slot.lastLeaseGeneration !== undefined &&
+      slot.lastLeaseGeneration !== acquired.leaseGeneration
+    ) {
+      this.#metrics.leaseReplacements++;
+    }
+    if (
+      slot.lastSponsor !== undefined &&
+      slot.lastSponsor !== acquired.onBehalfOf
+    ) {
+      this.#metrics.sponsorRotations++;
+    }
+    slot.lastLeaseGeneration = acquired.leaseGeneration;
+    slot.lastSponsor = acquired.onBehalfOf;
     slot.lease = acquired;
     slot.state = "starting";
     const token = {};
@@ -315,7 +383,10 @@ export class SharedExecutionPool {
         lease: acquired,
         pieces: nextPieces,
         onCrash: (error) => {
-          if (slot.generationToken !== token) return;
+          if (
+            slot.generationToken !== token || slot.crashToken === token
+          ) return;
+          this.#metrics.crashes++;
           slot.crashToken = token;
           console.warn(
             `executor Worker crashed for ${slot.space}/${slot.branch}`,
@@ -324,6 +395,7 @@ export class SharedExecutionPool {
           void this.#enqueue(slot, () => this.#reconcile(slot));
         },
       });
+      this.#metrics.workersStarted++;
       if (slot.generationToken !== token || this.#closed) {
         await executor.stop();
         return;
@@ -358,6 +430,7 @@ export class SharedExecutionPool {
         if (slot.lease === null || slot.generationToken !== token) return;
         const renewed = await this.#control.renewExecutionLease(slot.lease);
         if (renewed === null) {
+          this.#metrics.leaseLosses++;
           await this.#shutdown(slot, true);
           await this.#reconcile(slot);
           return;
@@ -423,6 +496,7 @@ export class SharedExecutionPool {
     const failRenewal = (error?: unknown): void => {
       if (renewalFailed) return;
       renewalFailed = true;
+      this.#metrics.leaseLosses++;
       if (error !== undefined) {
         console.warn("execution lease renewal failed during settle", error);
       }
@@ -507,7 +581,9 @@ export class SharedExecutionPool {
       abrupt = !settled.graceful;
     }
     if (lease !== null && lease.state === "active") {
-      lease = await this.#control.beginExecutionLeaseDrain(lease) ?? lease;
+      const draining = await this.#control.beginExecutionLeaseDrain(lease);
+      if (draining === null) this.#metrics.leaseLosses++;
+      lease = draining ?? lease;
       if (slot.lease?.leaseGeneration === lease.leaseGeneration) {
         slot.lease = lease;
       }
@@ -518,6 +594,8 @@ export class SharedExecutionPool {
       } catch (error) {
         console.warn("executor Worker teardown failed", error);
       }
+      this.#metrics.workersStopped++;
+      if (abrupt) this.#metrics.abruptStops++;
     }
     if (lease !== null) {
       await this.#control.finishExecutionLeaseDrain(lease);

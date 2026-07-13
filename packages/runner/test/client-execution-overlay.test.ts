@@ -288,11 +288,24 @@ Deno.test("claimed client computation stays visible locally with zero wire commi
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();
   const storage = OverlayStorageManager.connect(factory);
+  const counts = getLoggerCountsBreakdown()["storage.v2"] ?? {};
+  const suppressedBaseline = counts["execution-client-derived-suppressed"]
+    ?.debug ?? 0;
+  const createdBaseline = counts["execution-overlay-created"]?.debug ?? 0;
   try {
     await storage.open(SPACE).sync(INPUT);
     await writeClaimedOutput(storage, "local-overlay");
     assertEquals(visibleOutput(storage), "local-overlay");
     assertEquals(factory.commits, []);
+    const updated = getLoggerCountsBreakdown()["storage.v2"] ?? {};
+    assertEquals(
+      updated["execution-client-derived-suppressed"]?.debug ?? 0,
+      suppressedBaseline + 1,
+    );
+    assertEquals(
+      updated["execution-overlay-created"]?.debug ?? 0,
+      createdBaseline + 1,
+    );
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
@@ -371,6 +384,9 @@ Deno.test("matching no-op settlement clears a claimed overlay", async () => {
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();
   const storage = OverlayStorageManager.connect(factory);
+  const droppedBaseline = getLoggerCountsBreakdown()["storage.v2"]?.[
+    "execution-overlay-dropped"
+  ]?.debug ?? 0;
   try {
     await storage.open(SPACE).sync(INPUT);
     await writeClaimedOutput(storage, "local-overlay");
@@ -392,6 +408,12 @@ Deno.test("matching no-op settlement clears a claimed overlay", async () => {
     }));
     await waitFor(() => visibleOutput(storage) === undefined);
     assertEquals(visibleOutput(storage), undefined);
+    assertEquals(
+      getLoggerCountsBreakdown()["storage.v2"]?.[
+        "execution-overlay-dropped"
+      ]?.debug ?? 0,
+      droppedBaseline + 1,
+    );
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
@@ -402,6 +424,9 @@ Deno.test("settlement basis older than a direct confirmed read retains the overl
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();
   const storage = OverlayStorageManager.connect(factory);
+  const retainedBaseline = getLoggerCountsBreakdown()["storage.v2"]?.[
+    "execution-overlay-retained"
+  ]?.debug ?? 0;
   try {
     await storage.open(SPACE).sync(INPUT);
     factory.view.push(emptySync({
@@ -440,6 +465,12 @@ Deno.test("settlement basis older than a direct confirmed read retains the overl
     }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(visibleOutput(storage), "basis-five");
+    assertEquals(
+      getLoggerCountsBreakdown()["storage.v2"]?.[
+        "execution-overlay-retained"
+      ]?.debug ?? 0,
+      retainedBaseline + 1,
+    );
 
     factory.view.push(emptySync({
       fromSeq: 5,
