@@ -185,6 +185,13 @@ export class SpaceManager {
     if (this.isRunning) {
       return;
     }
+    if (this.isStopping) {
+      const stopping = this.stopPromise;
+      if (stopping !== null) {
+        void stopping.then(() => this.start(), () => {});
+      }
+      return;
+    }
     this.isRunning = true;
     this.isStopping = false;
     this.stopPromise = null;

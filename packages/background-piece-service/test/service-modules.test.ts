@@ -764,6 +764,91 @@ describe("SpaceManager", () => {
     assertEquals(releases, 2);
   });
 
+  it("defers a restart until an overlapping stop lifecycle finishes", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const firstShutdown = Promise.withResolvers<void>();
+    let generation = 0;
+    let workers = 0;
+    const releases: number[] = [];
+    const status = (): LegacyBackgroundExclusionStatus => ({
+      exclusion: {
+        version: 1,
+        space: TEST_DID,
+        branch: "",
+        exclusionGeneration: generation,
+        holderId: "background:overlapping-restart",
+        servicePrincipal: identity.did(),
+        expiresAt: 1_000,
+      },
+      ready: true,
+      serverTime: 0,
+    });
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      deactivationTimeoutMs: 100,
+      now: () => 0,
+      setTimer: () => 1,
+      clearTimer: () => {},
+      backgroundExclusion: {
+        acquire: () => {
+          generation++;
+          return Promise.resolve(status());
+        },
+        renew: () => Promise.resolve(status()),
+        release: (_branch, exclusionGeneration) => {
+          releases.push(exclusionGeneration);
+          return Promise.resolve(status().exclusion);
+        },
+      },
+      createWorkerController: () => {
+        const worker = ++workers;
+        return {
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () =>
+            worker === 1 ? firstShutdown.promise : Promise.resolve(),
+          terminateNow: () => {},
+        } as never;
+      },
+    });
+
+    manager.start();
+    await manager.idle();
+    (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
+      new FakeEntryCell(pieceEntry());
+
+    const stopping = manager.stop();
+    manager.start();
+    await manager.idle();
+
+    (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
+      null;
+    firstShutdown.resolve();
+    await stopping;
+    await manager.idle();
+
+    assertEquals(
+      (manager as never as { isRunning: boolean }).isRunning,
+      true,
+    );
+    assertEquals(workers, 2);
+    assertEquals(releases, [1]);
+    assertEquals(
+      (manager as never as {
+        backgroundExclusion: LegacyBackgroundExclusion | null;
+      }).backgroundExclusion?.exclusionGeneration,
+      2,
+    );
+
+    await manager.stop();
+  });
+
   it("waits for client drain and hard-fences renewal loss", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     let now = 100;
