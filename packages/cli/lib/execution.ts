@@ -1,5 +1,9 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import { executionPolicyId } from "@commonfabric/memory/v2";
+import {
+  type EntityDocument,
+  executionPolicyId,
+  parseExecutionPolicy,
+} from "@commonfabric/memory/v2";
 import type { Runtime } from "@commonfabric/runner";
 import { createRuntime, loadSession, type SpaceConfig } from "./acl.ts";
 
@@ -48,15 +52,12 @@ export async function readExecutionPolicy(
   );
   await cell.sync();
   const value = cell.get();
-  if (
-    value === null || typeof value !== "object" ||
-    !("version" in value) || value.version !== 1 ||
-    !("serverPrimaryExecution" in value) ||
-    typeof value.serverPrimaryExecution !== "boolean"
-  ) {
-    return "absent";
-  }
-  return value.serverPrimaryExecution ? "enabled" : "disabled";
+  const policy = parseExecutionPolicy({ value } as EntityDocument);
+  return policy === null
+    ? "absent"
+    : policy.serverPrimaryExecution
+    ? "enabled"
+    : "disabled";
 }
 
 export async function setSpaceExecutionPolicy(

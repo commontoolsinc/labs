@@ -99,6 +99,25 @@ describe("cli execution policy", () => {
     ).toBe("absent");
   });
 
+  it("treats a policy with extra fields as absent", async () => {
+    const runtime = {
+      getCellFromEntityId: () => ({
+        sync: () => Promise.resolve(),
+        get: () => ({
+          version: 1,
+          serverPrimaryExecution: true,
+          ignoredByServer: true,
+        }),
+      }),
+    } as unknown as Runtime;
+    expect(
+      await readExecutionPolicy(
+        runtime,
+        "did:key:z6Mk-cli-extra-field-execution-policy",
+      ),
+    ).toBe("absent");
+  });
+
   it("uses the derived named-space identity for policy authority in ACL-off mode", async () => {
     const user = await Identity.fromPassphrase(
       "cli named-space execution policy user",
