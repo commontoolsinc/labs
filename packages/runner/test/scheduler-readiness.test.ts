@@ -144,6 +144,66 @@ describe("scheduler RetryWhenReady", () => {
     cancel();
   });
 
+  it("can coalesce dependency changes until readiness rereads current state", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "coalesced-readiness-action-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "coalesced-readiness-action-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const readiness = Promise.withResolvers<void>();
+    const parked = Promise.withResolvers<void>();
+    let ready = false;
+    let runs = 0;
+    const action: Action = (actionTx) => {
+      const value = source.withTx(actionTx).get();
+      runs++;
+      if (!ready) {
+        parked.resolve();
+        throw new RetryWhenReady(
+          readiness.promise,
+          "coalesce until durable state is ready",
+          { keepDependenciesWhileWaiting: false },
+        );
+      }
+      output.withTx(actionTx).send(value);
+    };
+    const cancel = runtime.scheduler.subscribe(action, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
+    }, { isEffect: true });
+
+    await parked.promise;
+    await runtime.idle();
+    for (const value of [2, 3, 4]) {
+      source.withTx(tx).send(value);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+    }
+    expect(runs).toBe(1);
+
+    ready = true;
+    readiness.resolve();
+    await Promise.resolve();
+    await runtime.idle();
+    expect(runs).toBe(2);
+    expect(output.get()).toBe(4);
+    cancel();
+  });
+
   it("fences a reactive readiness continuation after cancellation", async () => {
     const readiness = Promise.withResolvers<void>();
     const parked = Promise.withResolvers<void>();

@@ -283,10 +283,49 @@ describe("bound PatternFactory list operation cold resume", () => {
 
       const resumedRoot = runtime.getCellFromLink(rootLink);
       await resumedRoot.sync();
+      const rowReadiness = Promise.withResolvers<void>();
+      const syncRow = runtime.runner.syncCellsForPatternResume.bind(
+        runtime.runner,
+      );
+      runtime.runner.syncCellsForPatternResume = async (...args) => {
+        const synced = await syncRow(...args);
+        await rowReadiness.promise;
+        return synced;
+      };
       resetAllLoggerCounts();
       resetAllTimingStats();
       expect(await within(runtime.start(resumedRoot), "cold resume start"))
         .toBe(true);
+      const resumedMapped = resumedRoot.key("mapped").pull();
+      const mapRuns = () =>
+        runtime!.scheduler.getGraphSnapshot().nodes.find((node) =>
+          node.id.startsWith("raw:map:")
+        )?.stats?.runCount ?? 0;
+      await within(
+        (async () => {
+          while (mapRuns() === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+        })(),
+        "parked row readiness",
+      );
+      const parkedRuns = mapRuns();
+      const argument = runtime.getCellFromLink(
+        getMetaLink(resumedRoot, "argument")!,
+      );
+      for (const values of [[2], [2, 4, 6], [2, 4]]) {
+        expect(
+          (await runtime.editWithRetry((updateTx) => {
+            argument.withTx(updateTx).key("values").set(values);
+          })).error,
+        ).toBeUndefined();
+        await runtime.idle();
+      }
+      expect(mapRuns()).toBeLessThanOrEqual(parkedRuns + 1);
+      resetAllLoggerCounts();
+      resetAllTimingStats();
+      rowReadiness.resolve();
+      await within(resumedMapped, "resumed map after row readiness");
       await expectMapped(runtime, resumedRoot, [22, 43], "resumed bound map");
       expect(
         getLoggerCountsBreakdown()["storage.v2"]?.["commit-conflict"]

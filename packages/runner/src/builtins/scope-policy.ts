@@ -11,6 +11,7 @@ import type { CellScope, Pattern } from "../builder/types.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { resolveLink } from "../link-resolution.ts";
 import {
+  ignoreReadForScheduling,
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
@@ -173,7 +174,7 @@ export function exposedResultCell<T>(
   // on plumbing containers (template-population §6). The value COPY below
   // stays unmarked — the exposed cell genuinely depends on it.
   const target = tx.runWithAmbientReadMeta(
-    machineryRead,
+    { ...ignoreReadForScheduling, ...machineryRead },
     () =>
       resolveLink(
         runtime,
@@ -191,7 +192,11 @@ export function exposedResultCell<T>(
   // coordinator rebuilding its output array re-consumes every reused
   // element result's label and smears it across fresh elements).
   const raw = tx.runWithAmbientReadMeta(
-    { ...linkResolutionProbe, ...machineryRead },
+    {
+      ...ignoreReadForScheduling,
+      ...linkResolutionProbe,
+      ...machineryRead,
+    },
     () => initialCell.getRaw({ lastNode: "writeRedirect" }),
   );
   // If the last writeRedirect target is a link, use that, but otherwise use

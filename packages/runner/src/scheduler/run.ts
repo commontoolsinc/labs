@@ -327,6 +327,7 @@ export interface SchedulerActionRunState {
   readonly handleError: (error: Error, action: Action) => void;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
   readonly markInvalid: (action: Action) => void;
+  readonly clearDirty: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly setExecutingAction: (action: Action, actionId: string) => void;
   readonly clearExecutingAction: () => void;
@@ -508,6 +509,11 @@ function rescheduleActionWhenReady(
 ): void {
   const log = txToReactivityLog(args.tx);
   if (args.tx.status().status === "ready") args.tx.abort(args.error);
+  // A parked action is clean until either a retained dependency changes or
+  // readiness explicitly schedules the continuation. Leaving its direct/stale
+  // bit set makes pull demand invoke the same not-ready action every settle
+  // pass even when no new input arrived.
+  state.clearDirty(args.action);
 
   if (
     state.isActionReadinessAttemptCurrent(
@@ -519,7 +525,12 @@ function rescheduleActionWhenReady(
     // The transaction is aborted, but its reads are still the authoritative
     // dependency selection for this invocation. Keeping them armed lets an
     // input change supersede this parked attempt before code loading finishes.
-    state.resubscribe(args.action, log);
+    state.resubscribe(
+      args.action,
+      args.error.keepDependenciesWhileWaiting
+        ? log
+        : { reads: [], shallowReads: [], writes: [] },
+    );
   }
 
   args.error.readiness.then(
@@ -533,7 +544,10 @@ function rescheduleActionWhenReady(
       ) {
         return;
       }
-      if (args.invalidCauses !== undefined && args.invalidCauses.length > 0) {
+      if (
+        args.error.keepDependenciesWhileWaiting &&
+        args.invalidCauses !== undefined && args.invalidCauses.length > 0
+      ) {
         const record = state.nodes.get(args.action);
         if (record) {
           restoreInvalidCauses(

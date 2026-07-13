@@ -161,7 +161,7 @@ describe("bound PatternFactory list operations", () => {
     artifacts = new Map();
   });
 
-  function boundMapOp() {
+  function boundMapOp(factor: unknown = 10) {
     const calculate = commonfabric.lift(
       (
         { element, index, array, factor }: {
@@ -187,7 +187,7 @@ describe("bound PatternFactory list operations", () => {
       NUMBER_RESULT_SCHEMA,
     );
     installArtifact(base, REFS.map);
-    return curry(base, { factor: 10 });
+    return curry(base, { factor });
   }
 
   function boundFilterOp() {
@@ -306,5 +306,87 @@ describe("bound PatternFactory list operations", () => {
       result.key("mapped").key(0).resolveAsCell()
         .getAsNormalizedFullLink(),
     ).toMatchObject(rowIdentity);
+  });
+
+  it("does not rerun the list coordinator when captured values update", async () => {
+    const factor = runtime.getCell<number>(
+      space,
+      "bound list coordinator capture",
+      { type: "number" },
+      tx,
+    );
+    factor.set(10);
+    const element = runtime.getCell<number>(
+      space,
+      "bound list coordinator element",
+      { type: "number" },
+      tx,
+    );
+    element.set(1);
+    const mapNode = createNodeFactory({ type: "ref", implementation: "map" });
+    const outer = commonfabric.pattern(
+      (({ values, factor }: any) => ({
+        mapped: mapNode({ list: values, op: boundMapOp(factor) }),
+      })) as any,
+      {
+        type: "object",
+        properties: {
+          values: { type: "array", items: { type: "number" } },
+          factor: { type: "number" },
+        },
+        required: ["values", "factor"],
+        additionalProperties: false,
+      },
+    );
+    const resultCell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "bound list coordinator dependencies",
+      outer.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outer,
+      { values: [element], factor },
+      resultCell,
+    );
+    await commitAndRenew();
+
+    expect(await within(result.key("mapped").pull(), "captured value map"))
+      .toEqual([11]);
+    await runtime.idle();
+
+    const coordinator = runtime.scheduler.getGraphSnapshot().nodes.find((
+      node,
+    ) => node.id.startsWith("raw:map:"));
+    expect(coordinator).toBeDefined();
+    const rowId = result.key("mapped").key(0).resolveAsCell()
+      .getAsNormalizedFullLink().id.toString();
+    expect(coordinator?.reads?.some((read) => read.includes(rowId)))
+      .toBe(false);
+    const elementId = element.getAsNormalizedFullLink().id.toString();
+    expect(coordinator?.reads?.some((read) => read.includes(elementId)))
+      .toBe(false);
+
+    const coordinatorRuns = coordinator?.stats?.runCount;
+    factor.withTx(tx).set(20);
+    await commitAndRenew();
+    expect(await within(result.key("mapped").pull(), "updated captured value"))
+      .toEqual([21]);
+    await runtime.idle();
+    const afterCaptureUpdate = runtime.scheduler.getGraphSnapshot().nodes.find(
+      (node) => node.id === coordinator?.id,
+    );
+    expect(afterCaptureUpdate?.stats?.runCount).toBe(coordinatorRuns);
+
+    element.withTx(tx).set(2);
+    await commitAndRenew();
+    expect(await within(result.key("mapped").pull(), "updated list element"))
+      .toEqual([41]);
+    await runtime.idle();
+    const afterElementUpdate = runtime.scheduler.getGraphSnapshot().nodes.find(
+      (node) => node.id === coordinator?.id,
+    );
+    expect(afterElementUpdate?.stats?.runCount).toBe(coordinatorRuns);
   });
 });

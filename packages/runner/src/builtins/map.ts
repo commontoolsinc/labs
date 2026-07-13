@@ -41,6 +41,7 @@ import {
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
 import {
+  ignoreReadForScheduling,
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
@@ -111,7 +112,7 @@ export function map(
   // each child rehydrate its own persisted state at registration. Elements
   // added by later (post-resume) reconciles are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
-  let resumeRowsReady = !awaitSync;
+  let resumeRowsReadyKey: string | undefined;
   let resumeRowsReadiness: Promise<void> | undefined;
 
   // Hold the durable container while the input list itself confirms. On a resume
@@ -155,6 +156,18 @@ export function map(
   };
 
   const reconcile: Action = (tx: IExtendedStorageTransaction) => {
+    if (resumeRowsReadiness !== undefined) {
+      // A dependency notification may supersede the invocation that began the
+      // row pre-sync. Park that newer invocation without collecting another
+      // copy of the coordinator's broad setup read set. Readiness always
+      // schedules a fresh invocation, which then rereads the current list and
+      // factory and starts another pre-sync if their key changed meanwhile.
+      throw new RetryWhenReady(
+        resumeRowsReadiness,
+        "map: resumed row patterns are waiting for durable state",
+        { keepDependenciesWhileWaiting: false },
+      );
+    }
     // Captured before the loop consumes it: this reconcile's element runs use
     // the current value; the flag is cleared only once a non-empty resume batch
     // has been processed (below), so a transient empty first reconcile doesn't
@@ -192,7 +205,14 @@ export function map(
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
         const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
-        const resolved = resolveLink(runtime, tx, slotLink, "value");
+        const resolved = tx.runWithAmbientReadMeta(
+          {
+            ...ignoreReadForScheduling,
+            ...linkResolutionProbe,
+            ...machineryRead,
+          },
+          () => resolveLink(runtime, tx, slotLink, "value"),
+        );
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
     const selection = factorySupervisor.materialize(
@@ -274,7 +294,11 @@ export function map(
       elementAwaitSync &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
-      const pending = result.sync();
+      // Capture this container: a later row-readiness attempt deliberately
+      // clears `result` so its aborted binding is rebuilt, while this async
+      // seed still has to finish against the container it originally probed.
+      const pendingResult = result;
+      const pending = pendingResult.sync();
       // The container's durable value is still streaming in; its arrival
       // re-triggers this reconcile (the probe read above is journaled). If the
       // container was never persisted — so nothing will ever stream in to
@@ -282,7 +306,7 @@ export function map(
       // left wedged waiting for a value that will never arrive.
       const seedIfStillAbsent = () =>
         runtime.editWithRetry((seedTx) => {
-          const container = result!.withTx(seedTx);
+          const container = pendingResult.withTx(seedTx);
           if (container.getRaw() === undefined) container.set([]);
         }).then(({ error }) => {
           if (error) {
@@ -351,37 +375,42 @@ export function map(
     // this, setup observes missing params metadata in the cold cache and
     // re-publishes it; several concurrently resumed pieces then conflict on
     // the space sequence even though every durable value is unchanged.
-    if (elementAwaitSync && !resumeRowsReady) {
-      if (resumeRowsReadiness === undefined) {
-        const keyCounts = new Map<string, number>();
-        const rowCells: Cell<unknown>[] = [];
-        for (let i = 0; i < list.length; i++) {
-          if (!(i in list)) continue;
-          const { dedupKey, linkKey } = cellIdentityKey(list[i]);
-          const occurrence = keyCounts.get(dedupKey) ?? 0;
-          keyCounts.set(dedupKey, occurrence + 1);
-          const elementKey = JSON.stringify([...linkKey, occurrence]);
-          rowCells.push(runtime.getCell(
-            parentCell.space,
-            { map: result, elementKey },
-          ));
-        }
+    if (elementAwaitSync) {
+      const keyCounts = new Map<string, number>();
+      const rowCells: Cell<unknown>[] = [];
+      const rowKeys: string[] = [];
+      for (let i = 0; i < list.length; i++) {
+        if (!(i in list)) continue;
+        const { dedupKey, linkKey } = cellIdentityKey(list[i]);
+        const occurrence = keyCounts.get(dedupKey) ?? 0;
+        keyCounts.set(dedupKey, occurrence + 1);
+        const elementKey = JSON.stringify([...linkKey, occurrence]);
+        rowKeys.push(elementKey);
+        rowCells.push(runtime.getCell(
+          parentCell.space,
+          { map: result, elementKey },
+        ));
+      }
+      const readyKey = JSON.stringify([factoryGeneration, rowKeys]);
+      if (resumeRowsReadyKey !== readyKey) {
         resumeRowsReadiness = Promise.all(
           rowCells.map((rowCell) =>
             runtime.runner.syncCellsForPatternResume(rowCell, opPattern)
           ),
         ).then(() => {
-          resumeRowsReady = true;
+          resumeRowsReadyKey = readyKey;
+          resumeRowsReadiness = undefined;
         });
+        // The result binding was established in this transaction. It will be
+        // aborted with RetryWhenReady, so force the retry to establish it again
+        // against the same deterministic container identity.
+        result = undefined;
+        throw new RetryWhenReady(
+          resumeRowsReadiness,
+          "map: resumed row patterns are waiting for durable state",
+          { keepDependenciesWhileWaiting: false },
+        );
       }
-      // The result binding was established in this transaction. It will be
-      // aborted with RetryWhenReady, so force the retry to establish it again
-      // against the same deterministic container identity.
-      result = undefined;
-      throw new RetryWhenReady(
-        resumeRowsReadiness,
-        "map: resumed row patterns are waiting for durable state",
-      );
     }
 
     // The resume batch has now been observed; later reconciles are post-resume.

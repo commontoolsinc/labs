@@ -2599,6 +2599,7 @@ export class Scheduler {
       handleError: (error, target) => this.handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
       markInvalid: (target) => this.markActionInvalid(target),
+      clearDirty: (target) => this.clearInvalidAction(target),
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
         this.executingAction = target;
