@@ -109,7 +109,7 @@ describe("home rehydration churn (persistent scheduler state)", () => {
     identity = await Identity.generate({ implementation: "noble" });
   });
 
-  it("reloading a populated home commits no conflicts at all", async () => {
+  it("reloading a populated home stays within one known conflict", async () => {
     const page = shell.page();
 
     await gotoHome(shell, identity);

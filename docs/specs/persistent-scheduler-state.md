@@ -9,11 +9,14 @@ a separate decision.
 The landed implementation includes internal memory-v2 scheduler observation
 tables, no-op observation commits, same-space durable dirty marking,
 cross-space read-index mirrors, live observation adoption, and snapshot query
-APIs. A resumed boot awaits space sync once, loads one cursor-paginated,
-space-wide snapshot epoch, buckets it by piece document, and applies matching
-observations synchronously as actions register. Missing, invalid,
-fingerprint-mismatched, or stale-at-apply observations fall back to synced fresh
-registration.
+APIs. Cross-space fan-out is serialized in owner-commit order and mirror
+upserts reject an owner sequence older than the persisted row. Exact-session
+contexts are bounded per principal/action so abandoned sessions cannot grow
+dirty lookup fanout indefinitely. A resumed boot awaits space sync once, loads
+one cursor-paginated, space-wide snapshot epoch, buckets it by piece document,
+and applies matching observations synchronously as actions register. Missing,
+invalid, fingerprint-mismatched, or stale-at-apply observations fall back to
+synced fresh registration.
 
 Active scheduler ownership is qualified by a server-derived execution context:
 `space`, `user:<principal>`, or
@@ -715,6 +718,13 @@ uses the originating authenticated principal/session context when resolving
 those keys; a mirror never reclassifies the action independently in its target
 database.
 
+Post-commit scheduler side effects are serialized per owner space in the order
+their owner commits were applied. Each mirror snapshot also retains the owner
+commit's `observed_at_seq`; an upsert older than the persisted value for that
+execution context is ignored. The persisted fence keeps a delayed repair or
+future asynchronous fan-out path from rolling a mirror backward even outside
+the normal in-process queue.
+
 The owner space remains the source of truth for rehydration state. A write in a
 read space can use mirrored rows to discover inactive readers, but it must push
 the resulting direct-dirty marker back to each reader's owner space. The owner
@@ -725,13 +735,13 @@ driven only by actual committed writes; possible writes from dirty/stale actions
 wait until those actions run and commit real changed writes.
 
 Version 1 accepts that owner-space commits and cross-space mirror writes are not
-atomic across SQLite databases. If the owner commit succeeds and a later mirror
-write fails, semantic data remains committed and the transaction may report a
-failure after the fact. The known consequence is temporarily degraded
-cross-space dirty propagation for inactive readers until a future run rewrites
-or repairs the mirror rows. A later production hardening pass should add
-explicit repair or `unknown` marking for mirror failures, but this spec does not
-require distributed atomicity.
+atomic across SQLite databases. Ordering and the persisted owner-sequence fence
+prevent successful writes from regressing a mirror, but if the owner commit
+succeeds and a later mirror write fails, semantic data remains committed. The
+known consequence is temporarily degraded cross-space dirty propagation for
+inactive readers until a future run rewrites or repairs the mirror rows. A later
+production hardening pass should add explicit repair or `unknown` marking for
+mirror failures, but this spec does not require distributed atomicity.
 
 In-memory read-trigger indexes must also be cleaned up when actions unsubscribe
 or a scheduler instance is disposed. Mirror rows are durable, but the runner's
@@ -997,7 +1007,8 @@ Server-side dirty propagation for materializers follows the same split:
 - Observation persistence must be atomic with the memory commit whose writes it
   describes.
 - Cross-space read-index mirrors are version-1 best-effort rows written after
-  the owner-space commit; they are not distributed-transaction participants.
+  the owner-space commit; they are ordered per owner and fenced by the persisted
+  owner sequence, but are not distributed-transaction participants.
 - No-op observations must record the branch head sequence and read watermarks
   they observed.
 - Every committed actual write must be reflected into the durable scheduler
@@ -1104,13 +1115,13 @@ Current branch status:
 | Observation construction and no-op persistence | Implemented, including batched no-op observation commits. |
 | Memory scheduler tables and same-space dirty marking | Implemented. |
 | Context-qualified ownership and migration | Implemented with authenticated space/user/session filtering, monotonic floors, effective target keys, and conservative migration of only provably shared legacy rows. |
-| Cross-space read-index mirrors | Implemented with accepted non-atomic mirror writes. |
+| Cross-space read-index mirrors | Implemented with per-owner ordering, a persisted owner-sequence fence, and accepted non-atomic failure behavior. |
 | Snapshot query surface | Implemented. |
 | Runner rehydration primitive and boot-time space listing | Implemented. |
 | Synchronous registration-time clean startup skip | Implemented for recreated actions with valid, locally current snapshots. |
 | Durable process graph generations | Future work; version 1 uses result cell identity plus graph generation `0`. |
 | Demand-targeted dirty recovery beyond subscription startup | Future work. |
-| Replication, retention, and mirror repair | Future work. |
+| Replication, retention, and mirror repair | Exact-session contexts are bounded per principal/action; generation/branch GC and failed-mirror repair remain future work. |
 
 The version 1 implementation is gated by the project's common
 experimental-option plumbing. With
@@ -1185,6 +1196,9 @@ are accepted and served.
 
 - Decide whether scheduler observations replicate across devices or remain
   local cache state.
+- Implemented: retain at most 32 exact-session contexts per principal/action.
+  Eviction is conservative because a missing session snapshot runs fresh;
+  space/user contexts are unaffected.
 - Add garbage collection keyed by piece generation, branch lifecycle, and
   superseded action snapshots.
 - Add metrics for cold start skipped actions, unknown-action fallback, and
@@ -1257,8 +1271,8 @@ latency, cross-space mirror repair, or full pattern startup.
   are clean, or should restored subscriptions be considered enough?
 - How should observation tables be encrypted or filtered, given that persisted
   read paths may reveal structure even when values are protected by CFC labels?
-- What is the retention policy for observations from old process generations
-  and inactive branches?
+- Beyond the bounded exact-session cache, what is the retention policy for
+  observations from old process generations and inactive branches?
 - Can the process graph snapshot and scheduler observation be committed in a
   single setup transaction, or do they need independent lifecycles?
 - How should pending optimistic commits be represented if a process restarts

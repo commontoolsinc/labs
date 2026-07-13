@@ -18,6 +18,7 @@ import {
   resolveCommitSessionKey,
   type SchedulerActionObservation,
   serverSeq,
+  upsertMirroredSchedulerObservation,
   upsertSchedulerObservation as upsertSchedulerObservationEngine,
   type UpsertSchedulerObservationOptions,
 } from "../v2/engine.ts";
@@ -1241,6 +1242,164 @@ Deno.test("memory v2 identical observation-only coalesce keeps the row in the ad
         "session:writer-a:sess-a",
         DIRECT_TEST_SCOPE_CONTEXT.principal,
       ),
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 redelivers an identical observation after a semantic commit", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    const first = applyCommit(engine, {
+      sessionId: "session:stable-shape-writer",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:stable-shape-doc",
+          value: { value: { n: 1 } },
+        }],
+        schedulerObservation: observation,
+      },
+    });
+    const second = applyCommit(engine, {
+      sessionId: "session:stable-shape-writer",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:stable-shape-doc",
+          value: { value: { n: 2 } },
+        }],
+        schedulerObservation: { ...observation, observedAtLocalSeq: 2 },
+      },
+    });
+
+    assertEquals(second.seq, first.seq + 1);
+    const currentWindow = listSchedulerActionSnapshots(engine, {
+      sinceCommitSeq: first.seq,
+      throughCommitSeq: second.seq,
+    }).snapshots;
+    assertEquals(currentWindow.length, 1);
+    assertEquals(currentWindow[0]?.commitSeq, second.seq);
+    assertEquals(currentWindow[0]?.observedAtSeq, second.seq);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 rejects stale cross-space scheduler mirrors", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:mirror-fence-owner";
+  const actionId = "pattern.tsx:computed:mirror-fence";
+  const executionContextKey = `user:${
+    encodeURIComponent(DIRECT_TEST_SCOPE_CONTEXT.principal)
+  }` as const;
+  const newerRead = {
+    ...sourceRead,
+    path: ["value", "newer"],
+  };
+  const olderRead = {
+    ...sourceRead,
+    path: ["value", "older"],
+  };
+  const newerObservation = observationForAction(actionId, {
+    ownerSpace,
+    reads: [newerRead],
+  });
+  const olderObservation = observationForAction(actionId, {
+    ownerSpace,
+    reads: [olderRead],
+  });
+
+  try {
+    upsertMirroredSchedulerObservation(engine, {
+      ownerSpace,
+      observedAtSeq: 2,
+      scopeContext: DIRECT_TEST_SCOPE_CONTEXT,
+      originExecutionContextKey: executionContextKey,
+      observation: newerObservation,
+    });
+    upsertMirroredSchedulerObservation(engine, {
+      ownerSpace,
+      observedAtSeq: 1,
+      scopeContext: DIRECT_TEST_SCOPE_CONTEXT,
+      originExecutionContextKey: executionContextKey,
+      observation: olderObservation,
+    });
+
+    const snapshot = getLatestSchedulerActionSnapshot(engine, {
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId,
+      executionContextKey,
+    });
+    assertEquals(snapshot?.observedAtSeq, 2);
+    assertEquals(snapshot?.observation.reads, [newerRead]);
+    assertEquals(
+      findSchedulerReadersForWrite(engine, { write: olderRead }),
+      [],
+    );
+    assertEquals(
+      findSchedulerReadersForWrite(engine, { write: newerRead }).map((reader) =>
+        reader.actionId
+      ),
+      [actionId],
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 bounds retained exact-session scheduler contexts", async () => {
+  const { engine, path } = await createEngine();
+  const principal = "did:key:session-retention-principal";
+  const ownerSpace = "did:key:session-retention-owner";
+  const actionId = "pattern.tsx:computed:session-retention";
+  const retainedLimit = 32;
+
+  try {
+    for (let index = 0; index < retainedLimit + 3; index += 1) {
+      upsertSchedulerObservation(engine, {
+        ownerSpace,
+        observedAtSeq: index + 1,
+        scopeContext: {
+          principal,
+          sessionId: `session-retention-${index}`,
+        },
+        observation: observationForAction(actionId, { ownerSpace }),
+      });
+    }
+
+    const snapshots = listSchedulerActionSnapshots(engine, {
+      ownerSpace,
+      actionId,
+      limit: 100,
+    }).snapshots;
+    assertEquals(snapshots.length, retainedLimit);
+    assertEquals(
+      findSchedulerReadersForWrite(engine, { write: sourceRead }).length,
+      retainedLimit,
+    );
+    assertEquals(
+      snapshots.some((snapshot) =>
+        snapshot.executionContextKey.endsWith("session-retention-0")
+      ),
+      false,
+    );
+    assertEquals(
+      snapshots.some((snapshot) =>
+        snapshot.executionContextKey.endsWith("session-retention-34")
+      ),
+      true,
     );
   } finally {
     close(engine);
@@ -2749,6 +2908,94 @@ Deno.test("memory v2 server contains incomplete scheduler replay metadata", asyn
   } finally {
     console.warn = originalWarn;
     await server.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 server serializes scheduler side effects per owner space", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const server = new Server({
+    store: new URL("memory://scheduler-side-effect-order"),
+    authorizeSessionOpen: () => "did:key:scheduler-side-effect-principal",
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const internals = server as unknown as {
+    runPostCommitSchedulerSideEffects: (
+      ownerSpace: string,
+      commit: AppliedCommit,
+      observations: readonly {
+        localSeq: number;
+        observation: SchedulerActionObservation;
+      }[],
+      previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
+      session: { id: string; principal: string },
+    ) => Promise<void>;
+    mirrorSchedulerObservation: (
+      ownerSpace: string,
+      observation: SchedulerActionObservation,
+      executionContextKey: string,
+      commit: AppliedCommit,
+    ) => Promise<void>;
+  };
+  const firstStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  const mirroredSequences: number[] = [];
+  internals.mirrorSchedulerObservation = async (
+    _ownerSpace,
+    _observation,
+    _executionContextKey,
+    commit,
+  ) => {
+    mirroredSequences.push(commit.seq);
+    if (commit.seq === 1) {
+      firstStarted.resolve();
+      await releaseFirst.promise;
+    }
+  };
+  const ownerSpace = "did:key:scheduler-side-effect-owner";
+  const session = {
+    id: "scheduler-side-effect-session",
+    principal: "did:key:scheduler-side-effect-principal",
+  };
+  const observations = [{ localSeq: 1, observation }];
+  const commit = (seq: number) =>
+    ({
+      seq,
+      branch: "",
+      revisions: [],
+      schedulerObservationResults: [{
+        localSeq: 1,
+        status: "kept",
+        schedulerObservationId: seq,
+        executionContextKey: "space",
+      }],
+    }) as unknown as AppliedCommit;
+
+  try {
+    const first = internals.runPostCommitSchedulerSideEffects(
+      ownerSpace,
+      commit(1),
+      observations,
+      new Map(),
+      session,
+    );
+    await firstStarted.promise;
+    const second = internals.runPostCommitSchedulerSideEffects(
+      ownerSpace,
+      commit(2),
+      observations,
+      new Map(),
+      session,
+    );
+    await Promise.resolve();
+    assertEquals(mirroredSequences, [1]);
+
+    releaseFirst.resolve();
+    await Promise.all([first, second]);
+    assertEquals(mirroredSequences, [1, 2]);
+  } finally {
+    releaseFirst.resolve();
+    await server.close().catch(() => {});
     resetPersistentSchedulerStateConfig();
   }
 });

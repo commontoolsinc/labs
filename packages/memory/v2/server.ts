@@ -837,6 +837,10 @@ export class Server {
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
+  // The owner commit is synchronous, but cross-space scheduler fan-out awaits
+  // other engines. Preserve owner apply order across concurrent connections so
+  // an older mirror cannot land after a newer one.
+  #schedulerSideEffectsByOwnerSpace = new Map<string, Promise<void>>();
   #lastRefreshDurationMs = 0;
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
@@ -3241,7 +3245,33 @@ export class Server {
     }
   }
 
-  private async runPostCommitSchedulerSideEffects(
+  private runPostCommitSchedulerSideEffects(
+    ownerSpace: string,
+    commit: Engine.AppliedCommit,
+    observations: readonly CommitSchedulerObservation[],
+    previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
+    session: SessionState | undefined,
+  ): Promise<void> {
+    const run = () =>
+      this.applyPostCommitSchedulerSideEffects(
+        ownerSpace,
+        commit,
+        observations,
+        previousReadSpaces,
+        session,
+      );
+    const previous = this.#schedulerSideEffectsByOwnerSpace.get(ownerSpace);
+    const queued = previous?.then(run, run) ?? run();
+    const tracked = queued.finally(() => {
+      if (this.#schedulerSideEffectsByOwnerSpace.get(ownerSpace) === tracked) {
+        this.#schedulerSideEffectsByOwnerSpace.delete(ownerSpace);
+      }
+    });
+    this.#schedulerSideEffectsByOwnerSpace.set(ownerSpace, tracked);
+    return tracked;
+  }
+
+  private async applyPostCommitSchedulerSideEffects(
     ownerSpace: string,
     commit: Engine.AppliedCommit,
     observations: readonly CommitSchedulerObservation[],

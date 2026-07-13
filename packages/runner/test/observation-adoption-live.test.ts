@@ -199,6 +199,28 @@ describe("incremental observation adoption (live)", () => {
       expect(opRuns(liveTrace)).toEqual([]);
       expect(adoptOkCount()).toBeGreaterThan(adoptedBefore);
 
+      // Repeat with the same dependency shape. The later observation must ride
+      // the later semantic commit's sync window rather than retaining the first
+      // run's already-consumed delivery slot.
+      const beforeRepeated = rt2.scheduler.getActionRunTrace().length;
+      const adoptedBeforeRepeated = adoptOkCount();
+      const txRepeated = rt1.edit();
+      valueCell1.withTx(txRepeated).set(11);
+      expect((await txRepeated.commit()).error).toBeUndefined();
+      await rt1.idle();
+      await rt1.storageManager.synced();
+      await waitForLocalValue(
+        rt2,
+        () => resultCell2.key("doubled").getAsQueryResult(),
+        22,
+      );
+      expect(
+        opRuns(
+          rt2.scheduler.getActionRunTrace().slice(beforeRepeated),
+        ),
+      ).toEqual([]);
+      expect(adoptOkCount()).toBeGreaterThan(adoptedBeforeRepeated);
+
       // LOCAL REACTIVITY PRESERVED: a B-local write runs B's own lift
       // (adoption must not deaden the receiving scheduler). A still converges;
       // its push window may run or adopt depending on observation ordering.

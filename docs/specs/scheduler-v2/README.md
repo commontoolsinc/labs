@@ -159,8 +159,11 @@ eligibility. Policies adjust gate inputs; they do not own timers or queues.
 **P9 — Persistence-first lifecycle.** Node registration takes an explicit
 start mode (`fresh` vs `resume`). Resume restores the observation (read set,
 gate config, clean/invalid) and *does not run*; fresh starts invalid and runs
-when demanded. Waiting for storage sync is a piece-level precondition of
-`resume`, not a per-node racing timeout.
+when demanded. Snapshot discovery and synchronization are one piece-level
+precondition of persisted `resume`, never per-node asynchronous lookups. A
+node that falls back to fresh registration may still use a bounded per-action
+sync hold; that hold is a best-effort anti-churn optimization, not a correctness
+gate or snapshot-loading path.
 
 **P10 — Diagnostics observe, never participate.** Stats, traces, snapshots,
 idempotency checking and non-settling detection read scheduler state through a
@@ -959,10 +962,12 @@ the fingerprint string is versioned so v1 observations are simply misses.
   the observation; on fingerprint match, install `reads` (+ gate config)
   directly into the indexes, set `status = clean`, or `invalid` if durable
   dirty markers say so; on miss/mismatch, degrade that node to `fresh`
-  behind a synced-hold (it runs after the space syncs instead of racing the
-  data). Child-starting coordinators (map/filter/flatMap reconciles) never
-  rehydrate clean — they run on resume to re-attach their children, which
-  then rehydrate individually.
+  behind a bounded synced-hold. The successful listing path has already synced,
+  so that hold releases immediately; after a flag-off or failed-listing fallback
+  it waits briefly for sync and then releases on timeout. It is an anti-churn
+  optimization, not a correctness precondition. Child-starting coordinators
+  (map/filter/flatMap reconciles) never rehydrate clean — they run on resume to
+  re-attach their children, which then rehydrate individually.
 
 Rehydrated-clean nodes cost index inserts only. The v1 race-guard apparatus
 (per-action rehydration tokens, superseded checks, per-action timeout sharing)
@@ -1150,7 +1155,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | `SchedulerWriteIndex` current-known/historical/backfill/ancestor-pruning | Static write surface (outputs + envelopes) | P4: the builder already guarantees one primary redirect; static side-write targets and envelopes are fixed at registration (confirmed 2026-06-11). |
 | Cycle breaker + cycle-aware debounce + effect pre-clear cycle detection | Budgets + escalating backoff gate (§7.7, §8) | Bounded-rate convergence preserves liveness without bespoke surgery. |
 | 3 timer systems (debounce timers, computation trailing flush, event wake) | One gate + one wake timer (§8) | All were expressions of `eligibleAt`. |
-| Per-action rehydration tokens/timeouts/awaitSync race guards | Piece-level resume phase (§9.2) | Sync-before-register makes per-node racing impossible by construction. |
+| Per-action snapshot lookups/rehydration tokens/shared lookup deadlines | Piece-level resume phase (§9.2) | One sync + snapshot listing occurs before registration. The remaining bounded per-action sync hold applies only to conservative fresh fallback and loads no snapshot. |
 
 ---
 

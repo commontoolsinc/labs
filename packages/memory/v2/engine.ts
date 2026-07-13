@@ -34,6 +34,10 @@ const DEFAULT_SCOPE: CellScope = "space";
 const DEFAULT_SCOPE_KEY = "space" as const;
 const DEFAULT_SCHEDULER_SNAPSHOT_LIST_LIMIT = 500;
 const MAX_SCHEDULER_SNAPSHOT_LIST_LIMIT = 1_000;
+// Exact-session observations are conservative caches: dropping one only makes
+// that session run fresh. Bound them per principal/action so abandoned restart
+// sessions cannot grow the cross-space read-index fanout without limit.
+const MAX_RETAINED_SCHEDULER_SESSION_CONTEXTS_PER_ACTION = 32;
 
 export interface SchedulerScopeContext {
   principal: string;
@@ -2438,6 +2442,34 @@ const upsertSchedulerObservationTransaction = (
     options.ownerSpace,
   );
   const payload = encodeSchedulerDependencySnapshot(observation);
+  if (options.originExecutionContextKey !== undefined) {
+    // Validate the trusted origin key before consulting it. `observedAtSeq` is
+    // the authoritative owner-space sequence for mirrors, so it doubles as a
+    // persisted last-writer fence against delayed asynchronous fan-out.
+    schedulerContextScopeForCanonicalKey(
+      options.originExecutionContextKey,
+      options.scopeContext,
+    );
+    const mirroredLatest = selectSchedulerSnapshotRow(engine, {
+      branch,
+      ownerSpace: observation.ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: observation.actionId,
+      executionContextKey: options.originExecutionContextKey,
+    });
+    if (
+      mirroredLatest &&
+      mirroredLatest.observed_at_seq > options.observedAtSeq
+    ) {
+      return {
+        observationId: mirroredLatest.observation_id,
+        commitSeq: mirroredLatest.commit_seq,
+        executionContextKey: options.originExecutionContextKey,
+        invalidatedExecutionContextKeys: [],
+      };
+    }
+  }
   const { executionContextKey, invalidatedExecutionContextKeys } =
     options.originExecutionContextKey === undefined
       ? resolveSchedulerExecutionContext(engine, {
@@ -2525,12 +2557,13 @@ const upsertSchedulerObservationTransaction = (
   upsertSchedulerSnapshot(engine, {
     branch,
     observationId,
-    // An identical metadata-only refresh does not need a new delivery slot;
-    // preserve the existing semantic/future slot. First-ever and
-    // payload-changing rows use the caller's next-sync reservation.
-    commitSeq: !payloadChanged && latest?.commit_seq != null
-      ? latest.commit_seq
-      : options.deliveryCommitSeq ?? options.commitSeq ?? null,
+    // Every semantic commit needs its own live-adoption delivery slot, even
+    // when the dependency shape is unchanged. Only a metadata-only identical
+    // refresh can safely preserve the existing semantic/future slot.
+    commitSeq: options.commitSeq ??
+      (!payloadChanged && latest?.commit_seq != null
+        ? latest.commit_seq
+        : options.deliveryCommitSeq ?? null),
     observedAtSeq: options.observedAtSeq,
     payload,
     observation,
@@ -2541,6 +2574,14 @@ const upsertSchedulerObservationTransaction = (
     observation,
     executionContextKey,
     latestObservationId: observationId,
+  });
+  pruneSchedulerSessionExecutionContexts(engine, {
+    branch,
+    ownerSpace: observation.ownerSpace,
+    pieceId: observation.pieceId,
+    processGeneration: observation.processGeneration,
+    actionId: observation.actionId,
+    principal: options.scopeContext.principal,
   });
   if (options.writerSessionId !== undefined && options.localSeq !== undefined) {
     recordSchedulerObservationReplay(engine, {
@@ -3900,6 +3941,50 @@ function selectSchedulerSnapshotRow(
     action_id: key.actionId,
     execution_context_key: key.executionContextKey,
   }) as SchedulerSnapshotRow | undefined;
+}
+
+function pruneSchedulerSessionExecutionContexts(
+  engine: Engine,
+  key: {
+    branch: BranchName;
+    ownerSpace?: string;
+    pieceId: string;
+    processGeneration: number;
+    actionId: string;
+    principal: string;
+  },
+): void {
+  const sessionPrefix = `session:${encodeScopeKeyPart(key.principal)}:`;
+  const expired = engine.database.prepare(`
+    SELECT execution_context_key
+    FROM scheduler_action_snapshot
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND substr(execution_context_key, 1, length(:session_prefix)) =
+        :session_prefix
+    ORDER BY observed_at_seq DESC, observation_id DESC
+    LIMIT -1 OFFSET :retained_limit
+  `).all({
+    branch: key.branch,
+    owner_space: normalizeSchedulerOwnerSpace(key.ownerSpace),
+    piece_id: key.pieceId,
+    process_generation: key.processGeneration,
+    action_id: key.actionId,
+    session_prefix: sessionPrefix,
+    retained_limit: MAX_RETAINED_SCHEDULER_SESSION_CONTEXTS_PER_ACTION,
+  }) as { execution_context_key: SchedulerExecutionContextKey }[];
+  if (expired.length === 0) return;
+  invalidateSchedulerExecutionContexts(engine, {
+    branch: key.branch,
+    ownerSpace: key.ownerSpace,
+    pieceId: key.pieceId,
+    processGeneration: key.processGeneration,
+    actionId: key.actionId,
+    executionContextKeys: expired.map((row) => row.execution_context_key),
+  });
 }
 
 class SchedulerObservationPersistenceError extends Error {
