@@ -165,13 +165,15 @@ propagate](#how-flags-propagate).
   fenced shadow Worker per active branch/space, durable legacy-background
   exclusion, strict owner policy, and the ordered reconnectable
   claim/settlement feed are implemented. Exact claim routing, causal client
-  overlays, and claimed-builtin passivity are also implemented; off remains
+  overlays, claimed-builtin passivity, failure drills, and the local Phase 2
+  product/browser rollout gates are also implemented; off remains
   client-primary behavior. The narrower
   `serverPrimaryExecutionClaimRoutingV1` and
   `serverPrimaryExecutionBuiltinPassivityV1` capabilities now advertise with
   the main flag. Policy-enabled spaces reject peers missing either graduated
-  promise. Rollout measurement remains pending; use the
-  [server-primary execution runbook](./server-primary-execution.md).
+  promise. Use the
+  [server-primary execution runbook](./server-primary-execution.md) for
+  opt-in, rollback, metrics, and reproducible measurement commands.
 - **Path to removal.** Complete the shadow, positive-claim, reconciliation,
   and builtin-passivity rollout; confirm every supported deployment and client
   speaks the protocol; make it unconditional; then delete the runtime flag,

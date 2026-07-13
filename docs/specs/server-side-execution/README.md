@@ -1,13 +1,15 @@
 # Server-Primary Execution
 
-Status: Phases 0–2 are implemented behind the default-off flag. W2.4 rollout
-measurement and drills remain pending; Phases 3+ remain design. Author: design session
+Status: Phases 0–2, including the W2.4 local staging-equivalent rollout
+gates, are implemented behind the default-off flag; Phases 3+ remain design.
+Author: design session
 2026-07-06; revised 2026-07-07 (doc-centric demand, SQLite-primary state,
 transient executor passes, reactive interpreter de-scoped); revised
 2026-07-11 after implementation review (scheduler-v2 as the base, user-
 sponsored shared workers, positive per-action authority, writer-index
 producer lookup, scope-safe fallback, causal settlement acknowledgements,
-and server egress parity); revised 2026-07-12 as implementation began.
+and server egress parity); revised 2026-07-12 after Phase 2 implementation and
+local rollout validation.
 Completed work-order status is
 recorded inline; unimplemented phases remain design requirements rather than
 descriptions of current behavior. Operator procedure lives in the
@@ -1261,12 +1263,15 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   transfer plus indexed parked-reader wake (G0/G2/G3/G4). Background-registry
   consolidation is deferred, but legacy-owned spaces are excluded immediately
   so a second server Worker cannot start.
-- **Phase 2 — positive B claims (implemented, default-off).** Add client overlay routing, ephemeral
+- **Phase 2 — positive B claims (implemented and locally validated,
+  default-off).** Add client overlay routing, ephemeral
   `ExecutionClaim`, `ActionSettlement.inputBasisSeq`, whole-action scope
   firewall, passive claimed builtins, and egress parity (G5/G10/G11). Measure
   conflict rate, multi-client action volume, divergence, revocations, and
-  fallback latency. Fallback is claim removal. Initial counters and the
-  operator runbook are present; named W2.4 product measurements/drills remain.
+  fallback latency. Fallback is claim removal. The operator runbook, product-
+  shaped multi-client fixtures, enable/disable and failure drills, and local
+  browser CPU measurement are complete. The measurement is recorded in the
+  [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md).
 - **Phase 3 — background demand + narrower feeds.** Fold existing background
   registrations into the same lower-priority pool and retire graph-query
   subscriptions only after the doc-set feed has parity. Separately gate

@@ -3,10 +3,9 @@
 Companion to [README.md](./README.md). Read the design first; this plan turns
 it into reviewable, red-green work orders.
 
-Status: Phases 0–2 are implemented through W2.3 behind the default-off flag.
-W2.4 has an operator command, initial metrics, and a runbook; named rollout
-measurements and drills remain pending. Later background, feed, scoped, and
-handler work is outlined only.
+Status: Phases 0–2, including W2.4's local staging-equivalent rollout gates,
+are implemented behind the default-off flag. Later background, feed, scoped,
+and handler work is outlined only.
 
 Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
 its facade, commit-gated starts, cancellation semantics, bounded settle,
@@ -811,8 +810,9 @@ async ledger, rigorous idempotency, and delegated execution keys are later
 hardening. This WO must not make network reach or duplicate behavior worse than
 the client runtime.
 
-**Status:** implemented for the v1 brokered egress boundary. Deployed-host,
-cross-user handoff, and crash drill evidence remains part of W2.4 rollout.
+**Status:** implemented for the v1 brokered egress boundary. Cross-user
+handoff and crash behavior are covered by the W2.4 deterministic failure
+drills.
 
 **Steps:**
 
@@ -1053,9 +1053,11 @@ per-action sink authority decision and pre-claim in-flight handoff.
 
 **Depends on:** W1.5, W2.2, W2.3.
 
-**Status:** the owner CLI, runbook, pool lifecycle snapshot, and initial
-role/overlay counters are implemented. Product perf fixtures, CPU measurements,
-and staging/failover drill records remain pending and therefore unchecked.
+**Status:** implemented and locally validated. The owner CLI, runbook,
+bounded-cardinality health/latency signals, product-shaped multi-client
+fixtures, deterministic authority/failure drills, and browser CPU measurement
+are present. This is staging-equivalent local evidence; it does not claim that
+the implementation PR mutated a deployed staging space.
 
 **Deliverable:** perf fixtures, operational metrics, and an enable/disable
 runbook using serverPrimaryExecution plus optional executionPolicy.
@@ -1072,14 +1074,23 @@ runbook using serverPrimaryExecution plus optional executionPolicy.
 
 **Success criteria:**
 
-- [ ] Multi-client lunch-poll/group-chat fixtures approach one server action run
-      per invalidation and zero client derived wire writes for claimed actions.
-- [ ] Unclaimed/scoped/cross-space actions remain behaviorally identical.
-- [ ] Enabling then disabling a staging space converges without data migration.
-- [ ] Kill/restart/sponsor-loss drills demonstrate fail-open authority and no
-      duplicate worker commits.
-- [ ] Browser compute and lazy-client CPU are measured; first rollout is at
-      least no worse, with later suppression optimization tracked explicitly.
+- [x] Multi-client lunch-poll/group-chat product-shaped fixtures approach one
+      server action run per invalidation and zero client derived wire writes
+      for claimed actions (`server-execution-rollout-products.test.ts`). The
+      literal transformed product patterns' static claim surfaces are also
+      certified by `server-execution-product-fixtures.test.ts`.
+- [x] Unclaimed/scoped/cross-space actions remain behaviorally identical under
+      flag-off/flag-on parity (`server-execution-rollout-products.test.ts`).
+- [x] Enabling then disabling a staging-equivalent space converges without
+      data migration (`executor-claim-e2e.test.ts`, "shared execution pool
+      transitions shadow to claimed and back without migration").
+- [x] Kill/restart/sponsor-loss drills demonstrate fail-open authority and no
+      duplicate worker commits (`executor-drain-barrier.test.ts`).
+- [x] Browser compute and lazy-client CPU are measured; the first local
+      A/B/B/A rollout is no worse, and later complete-closure suppression is
+      tracked explicitly in Phase 3. See the
+      [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md)
+      and `server-primary-rollout-profile.test.ts`.
 
 ---
 

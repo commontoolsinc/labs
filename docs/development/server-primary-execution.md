@@ -15,8 +15,12 @@ runs; client-compute suppression is a later, separately gated phase.
   `serverPrimaryExecutionV1`, claim routing, and builtin passivity together.
 - Start with one staging space whose active computations are same-space and
   space-scoped. Spaces owned by the legacy background service remain excluded.
-- Use an OWNER identity for policy changes. Policy-enabled spaces reject stale
-  clients instead of silently mixing authority rules.
+- For a named space, `cf execution enable|disable` automatically uses the
+  derived space identity that created it. For a raw DID while ACL mode is
+  `off` or `observe`, the supplied identity must be the space key or a
+  configured service DID; an ACL-granted OWNER is sufficient in `enforce`
+  mode. `status` only needs normal read access. Policy-enabled spaces reject
+  stale clients instead of silently mixing authority rules.
 
 ## Shadow observation
 
@@ -55,15 +59,21 @@ Verify:
 
 ## Operational signals
 
+`GET /api/health/stats` exposes the bounded-cardinality host snapshots as
+`serverExecutionPool` and `serverExecutionControl`. A null value means the
+provider is not installed in that process, not that the counters are zero.
+
 Keep space, branch, action, and DID values in structured logs/traces rather than
 metric labels. The current bounded-cardinality sources are:
 
 | Source | Signals |
 | --- | --- |
-| `SharedExecutionPool.metrics()` | active lanes/workers/demands; demand snapshots; Worker starts/stops; abrupt stops; lease losses/replacements; sponsor rotations; crashes |
+| `/api/health/stats.serverExecutionPool` | active lanes/workers/demands and state counts; demand snapshots; Worker starts/stops; abrupt stops; lease losses/replacements; sponsor rotations; crashes |
+| `/api/health/stats.serverExecutionControl` | inactive-policy attempts; claims issued/revoked; accepted action attempts; committed/no-op/failed/unserved settlements; lease-fence and action-firewall rejects |
+| `/api/health/stats.timingStats["execution.pool"]` | Worker start, demand update, and settle latency |
 | Memory host APIs | `listExecutionDemands`, `currentExecutionLease`, and `listExecutionClaims` for point-in-time lane authority |
 | `execution.executor` logger | `execution-server-shadow-action-run`, `execution-server-authoritative-action-run` |
-| `storage.v2` logger | `execution-client-derived-suppressed`, overlay created/retained/dropped, and `execution-overlay-divergence` |
+| `storage.v2` logger | client-derived suppressed/upstream commits; overlay created/retained/dropped/divergence; `execution-overlay-held` timing |
 | `runtime.execution` logger | client/server async builtin starts by role |
 | Toolshed executor callbacks | claim candidates, unserved diagnostics, and writer discovery |
 
@@ -107,8 +117,25 @@ EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true deno task integration
 ```
 
 The three-client executor fixtures cover claimed pure actions and supported
-builtins. Before broad rollout, still record the named lunch-poll/group-chat
-measurements, browser/lazy-client CPU, a real staging enable/disable drill, and
-an integrated kill/restart/sponsor-loss drill. Phase 2 is expected to remove
-duplicate wire writes and external effects while leaving speculative browser
-compute approximately unchanged.
+builtins. The product, authority-transition, failure, and browser gates can be
+run directly when diagnosing rollout behavior:
+
+```sh
+deno test -A packages/runner/test/server-execution-rollout-products.test.ts
+deno test -A packages/runner/test/executor-claim-e2e.test.ts
+deno test -A packages/runner/test/executor-drain-barrier.test.ts
+
+EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true \
+EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
+CF_SERVER_EXECUTION_CPU_BENCH=1 \
+CF_SERVER_EXECUTION_CPU_EVENTS=20 \
+CF_CPUPROFILE_DIR=/tmp/server-execution-profiles \
+HEADLESS=1 \
+deno task integration patterns server-primary-rollout-profile
+```
+
+The local A/B/B/A browser measurement and its limitations are recorded in the
+[Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-12.md).
+Phase 2 removes duplicate wire writes and external effects while deliberately
+leaving speculative browser compute in place. Complete-closure client-compute
+suppression remains the separately gated Phase 3 optimization.
