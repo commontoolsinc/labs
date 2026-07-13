@@ -1,5 +1,10 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
+import {
+  addMockResponse,
+  enableMockMode,
+  resetMockMode,
+} from "@commonfabric/llm/client";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import type {
   ActionSettlement,
@@ -518,7 +523,6 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
   const clientStorages: LoopbackStorageManager[] = [];
   const events: string[] = [];
   const brokerRequests: ServerBuiltinFetchRequest[] = [];
-  const originalGlobalFetch = globalThis.fetch;
   try {
     const compiled = await seedRuntime.patternManager.compilePattern(
       ASYNC_BUILTIN_PROGRAM,
@@ -700,10 +704,6 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
           : new Response("client fetch response"),
       );
     };
-    // The established browser generateText transport is process-global. Keep
-    // this test faithful to that path while restoring the worker-global seam
-    // in finally so the fallback assertion covers both supported builtins.
-    globalThis.fetch = clientFetch;
     const clientWireCommits: ClientCommit[] = [];
     for (let index = 0; index < 3; index++) {
       const storage = LoopbackStorageManager.connectTo(
@@ -797,6 +797,21 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
     clientNetworkRequests.length = 0;
     const clientFallback = Promise.withResolvers<void>();
     const clientFallbackKinds = new Set<"fetch" | "generate">();
+    enableMockMode();
+    for (let attempt = 0; attempt < clientRuntimes.length; attempt++) {
+      addMockResponse(
+        () => {
+          clientFallbackKinds.add("generate");
+          if (clientFallbackKinds.size === 2) clientFallback.resolve();
+          return true;
+        },
+        {
+          role: "assistant",
+          content: "client generated response",
+          id: `client-generate-e2e-${attempt}`,
+        },
+      );
+    }
     const resolvingClientFetch = async (input: string | URL | Request) => {
       const response = await clientFetch(input);
       const url = typeof input === "string"
@@ -810,7 +825,6 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
       if (clientFallbackKinds.size === 2) clientFallback.resolve();
       return response;
     };
-    globalThis.fetch = resolvingClientFetch;
     for (const runtime of clientRuntimes) {
       Object.defineProperty(runtime, "fetch", {
         configurable: true,
@@ -835,7 +849,7 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
     await new Promise((resolve) => setTimeout(resolve, 20));
     assertEquals(clientFallbackKinds, new Set(["fetch", "generate"]));
   } finally {
-    globalThis.fetch = originalGlobalFetch;
+    resetMockMode();
     unsubscribeAccepted();
     for (const runtime of clientRuntimes) await runtime.dispose();
     for (const storage of clientStorages) await storage.close();
