@@ -1517,6 +1517,41 @@ Deno.test("Schema Shrink Validation", async (t) => {
   );
 
   await t.step(
+    "lift preserves caller reads from same-file helper results",
+    async () => {
+      const source = [
+        "/// <cts-enable />",
+        'import { lift } from "commonfabric";',
+        "type Tile = { char: string; id: string; unused: string };",
+        "const findTile = (tiles: readonly Tile[], char: string) =>",
+        "  tiles.find((tile) => tile.char === char)!;",
+        "const liftTileId = lift((input: { tiles: readonly Tile[] }) => {",
+        '  const tile = findTile(input.tiles, "A");',
+        "  return tile.id;",
+        "});",
+      ].join("\n");
+
+      const result = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(result.diagnostics);
+
+      assertEquals(
+        errors.length,
+        0,
+        `expected no validation errors but got: ${
+          errors.map((e) => `${e.type}: ${e.message}`).join("; ")
+        }`,
+      );
+      const names = schemaPropertyNames(schemasOf(result.output)[0]);
+      assert(names.has("tiles"));
+      assert(names.has("char"));
+      assert(names.has("id"));
+      assert(!names.has("unused"));
+    },
+  );
+
+  await t.step(
     "lift preserves direct properties read from find() results",
     async () => {
       const source = [

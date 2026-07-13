@@ -267,6 +267,114 @@ function isInterproceduralSummaryTarget(
     declaration.getSourceFile() === sourceFile;
 }
 
+interface InterproceduralReturnProjection {
+  readonly parameterIndex: number;
+  readonly path: readonly string[];
+  readonly dynamic: boolean;
+  readonly arrayElement?: boolean;
+  readonly elementResult?: boolean;
+}
+
+function returnedExpression(
+  fn: CapabilityAnalyzableFunction,
+): ts.Expression | undefined {
+  if (!fn.body) return undefined;
+  if (!ts.isBlock(fn.body)) return fn.body;
+
+  const returns: ts.Expression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (node !== fn && isCapabilityAnalyzableFunction(node)) return;
+    if (ts.isReturnStatement(node)) {
+      if (node.expression) returns.push(node.expression);
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(fn.body);
+  return returns.length === 1 ? returns[0] : undefined;
+}
+
+/**
+ * Describe a helper result that preserves identity from one of its arguments.
+ * Interprocedural capability propagation accounts for what the helper itself
+ * reads, but callers may continue reading a returned object. Keeping that
+ * alias lets those caller-side reads extend the same source path instead of
+ * disappearing from the generated schema.
+ */
+function interproceduralReturnProjection(
+  fn: CapabilityAnalyzableFunction,
+  checker: ts.TypeChecker,
+): InterproceduralReturnProjection | undefined {
+  const project = (
+    expression: ts.Expression,
+  ): InterproceduralReturnProjection | undefined => {
+    const current = unwrapExpression(expression);
+    const access = extractAccessPath(current, checker);
+    if (access) {
+      const parameterIndex = fn.parameters.findIndex((parameter) =>
+        ts.isIdentifier(parameter.name) && parameter.name.text === access.root
+      );
+      return parameterIndex < 0 ? undefined : {
+        parameterIndex,
+        path: access.path,
+        dynamic: access.dynamic,
+      };
+    }
+
+    if (
+      ts.isCallExpression(current) &&
+      (ts.isPropertyAccessExpression(current.expression) ||
+        ts.isElementAccessExpression(current.expression))
+    ) {
+      const receiver = project(current.expression.expression);
+      if (!receiver) return undefined;
+      const methodName = ts.isPropertyAccessExpression(current.expression)
+        ? current.expression.name.text
+        : current.expression.argumentExpression &&
+            isLiteralElement(current.expression.argumentExpression)
+        ? getLiteralElementText(current.expression.argumentExpression)
+        : undefined;
+      if (
+        methodName === "find" || methodName === "findLast" ||
+        methodName === "at"
+      ) {
+        return {
+          ...receiver,
+          arrayElement: true,
+          elementResult: true,
+        };
+      }
+      if (
+        methodName === "filter" || methodName === "sort" ||
+        methodName === "toSorted" || methodName === "get"
+      ) {
+        return receiver;
+      }
+    }
+
+    if (ts.isConditionalExpression(current)) {
+      const whenTrue = project(current.whenTrue);
+      const whenFalse = project(current.whenFalse);
+      return whenTrue && whenFalse &&
+          whenTrue.parameterIndex === whenFalse.parameterIndex &&
+          whenTrue.dynamic === whenFalse.dynamic &&
+          !!whenTrue.arrayElement === !!whenFalse.arrayElement &&
+          !!whenTrue.elementResult === !!whenFalse.elementResult &&
+          whenTrue.path.length === whenFalse.path.length &&
+          whenTrue.path.every((segment, index) =>
+            segment === whenFalse.path[index]
+          )
+        ? whenTrue
+        : undefined;
+    }
+
+    return undefined;
+  };
+
+  const expression = returnedExpression(fn);
+  return expression ? project(expression) : undefined;
+}
+
 // Body analysis cannot see writes performed inside a callee whose body lives in
 // another file. The callee's declared parameter type is the only available
 // description of what it does with the cell, so it is treated as a contract for
@@ -1914,6 +2022,36 @@ export function analyzeFunctionCapabilities(
       }
 
       const current = unwrapExpression(expression);
+      if (interprocedural && checker && ts.isCallExpression(current)) {
+        const signature = checker.getResolvedSignature(current);
+        const declaration = signature?.declaration;
+        if (
+          isInterproceduralSummaryTarget(declaration, summarySourceFile)
+        ) {
+          const projection = interproceduralReturnProjection(
+            declaration,
+            checker,
+          );
+          const hasEarlierSpread = projection && current.arguments
+            .slice(0, projection.parameterIndex + 1)
+            .some(ts.isSpreadElement);
+          const argument = projection && !hasEarlierSpread &&
+            current.arguments[projection.parameterIndex];
+          const argumentBinding = argument && resolveBinding(argument);
+          if (
+            projection && argumentBinding &&
+            isSourceRefBinding(argumentBinding)
+          ) {
+            return {
+              root: argumentBinding.root,
+              path: [...argumentBinding.path, ...projection.path],
+              dynamic: argumentBinding.dynamic || projection.dynamic,
+              arrayElement: projection.arrayElement,
+              elementResult: projection.elementResult,
+            };
+          }
+        }
+      }
       if (
         ts.isCallExpression(current) &&
         (
