@@ -3,7 +3,9 @@
 Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
 and deterministic failure gates are locally validated, including the accepted
 500-event counterbalanced browser/CPU gate. The deployed-staging enable/disable
-drill remains pending. Phases 3+ remain design.
+drill remains pending. Phases 3+ remain design. Terminal crash quarantine and
+hard pool resource caps are later operational hardening tracked as G18, not
+part of the Phase 0–2 acceptance contract.
 Author: design session
 2026-07-06; revised 2026-07-07 (doc-centric demand, SQLite-primary state,
 transient executor passes, reactive interpreter de-scoped); revised
@@ -1123,25 +1125,32 @@ below are that policy's defaults, not requirements.
   last-settled seq and respawns immediately if any landed during the
   drain. A parked space holds zero memory; its whole scheduler state is
   the observation rows.
-- **Crash and quarantine:** worker error → restart with exponential
-  backoff; after N consecutive failures the space is quarantined (not
-  served) with an operator alert. Revoke its lease and claims first, so
-  clients immediately resume normal commits. Un-quarantine is manual.
+- **Crash handling (implemented):** worker error → revoke its lease and claims
+  first, so clients immediately resume normal commits, then retry with capped
+  exponential backoff. Terminal quarantine, operator alerting, and manual
+  un-quarantine remain later operational hardening (G18); Phase 0–2 does not
+  claim those controls.
 
 ### 6.6 Isolation and resources
+
+This section describes both the implemented isolation boundary and the target
+resource-control envelope. Phase 0–2 implements SES/broker isolation, bounded
+settle passes and control-feed retention, builtin timeouts, and fenced failure
+cleanup. Hard per-Worker memory limits and bounded-LRU pool admission/eviction
+remain later operational hardening (G18).
 
 - Pattern leaf code still runs in SES inside the worker. Pattern network and
   generation operations are exposed only through `fetch*` / `generate*`
   builtins. Prefer a host broker and no broad Worker network permission;
   direct builtin execution is acceptable only with the exact §5.B.5 policy.
-- Budgets per worker: memory cap, settle-pass budget (scheduler-v2), event
-  lane depth, async concurrency (`runtime.getOrCreateQueue`). A space that
-  exhausts budgets degrades to catch-up-on-demand rather than starving the
-  pool.
-- Pool sizing: workers ≈ active spaces, bounded LRU; hibernation makes the
-  bound soft. Multi-machine sharding (space → executor affinity) is a later
-  concern; single-writer-per-space makes it embarrassingly shardable by
-  space DID (G14 notes the coordination primitive).
+- **Target state — per-Worker budgets:** hard memory cap, settle-pass budget
+  (scheduler-v2), event lane depth, and async concurrency
+  (`runtime.getOrCreateQueue`). A space that exhausts budgets degrades to
+  catch-up-on-demand rather than starving the pool.
+- **Target state — pool sizing:** workers ≈ active spaces, bounded LRU;
+  hibernation makes the bound soft. Multi-machine sharding (space → executor
+  affinity) is a later concern; single-writer-per-space makes it embarrassingly
+  shardable by space DID (G14 notes the coordination primitive).
 
 ### 6.7 State residency: SQLite is primary, memory is a cache
 
@@ -1352,6 +1361,7 @@ means a design doc/decision is required before implementation.
 | G15 | Client pending-commit durability (true offline) | orthogonal | out of scope here; noted |
 | G16 | Principal-aware scoped runtime lanes and delegated user keys | scoped execution | later; context-key prerequisite is G1 |
 | G17 | Complete-closure client-compute suppression with cold remote-owned actions | remove N× local compute | later; Phase 2 only suppresses writes/effects |
+| G18 | Terminal crash quarantine/manual un-quarantine, operator alerting, hard per-Worker memory limits, and bounded-LRU pool admission/eviction | production resource hardening | later; Phase 0–2 fences and revokes failed generations, retries with capped exponential backoff, bounds settle/control-feed work, and preserves correctness through hibernation/wake |
 
 Cross-engine idempotency (the intent/attempt-cell ledger from
 `cfc-runner-future-work.md` Tier 2) is deliberately *not* listed as a B

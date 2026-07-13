@@ -7,7 +7,9 @@ Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
 and deterministic failure gates are locally validated, including the accepted
 500-event counterbalanced browser/CPU gate. The deployed-staging enable/disable
 drill remains pending. Later background, feed, scoped, and handler work is
-outlined only.
+outlined only. The design's terminal crash quarantine and hard pool resource
+caps are later operational hardening (G18), not additional Phase 0–2 work
+orders.
 
 Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
 its facade, commit-gated starts, cancellation semantics, bounded settle,
@@ -685,7 +687,10 @@ generation. Background-only work gets its service identity later.
 
 **Depends on:** W0.6, W1.1, W0.1.
 **Unblocks:** W1.3.
-**Status:** implemented.
+**Status:** implemented. V1 fences and revokes failed generations, then retries
+with capped exponential backoff. Terminal quarantine/manual un-quarantine and
+hard pool-wide resource caps are later operational hardening (G18), not W1.2
+success criteria.
 
 **Decision:** never start one runtime per client. Worker cardinality, demand,
 and signing authority are separate.
