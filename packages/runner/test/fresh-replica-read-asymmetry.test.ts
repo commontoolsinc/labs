@@ -5,6 +5,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
+import type { MemorySpace } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import { resolveCellPath } from "../src/piece-helpers.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -482,6 +483,48 @@ describe("fresh-replica read asymmetry", () => {
       );
       await (storage.crossSpaceSettled?.() ?? Promise.resolve());
       expect(containerSyncs.length).toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it("a failed cross-space kick does not clear another read's reservation", async () => {
+    // Retract-only-if-owned: a cross-space kick never takes the
+    // shouldPullDoc reservation, so its failure must not hand back a
+    // reservation a concurrent same-space read holds for the same target —
+    // that would permit duplicate syncs while the first is still pending.
+    const { rt, close } = freshReader();
+    try {
+      const storage = rt.storageManager;
+      const provider = storage.open(space);
+      const origSync = provider.sync.bind(provider);
+      const ghostId = writerRt.getCell(space, "xspace-ghost", entrySchema)
+        .getAsNormalizedFullLink().id;
+      provider.sync = ((uri, selector, scope) => {
+        if (uri === ghostId) {
+          return Promise.reject(new Error("injected failure"));
+        }
+        return origSync(uri, selector, scope);
+      }) as typeof provider.sync;
+
+      // A same-space read holds the reservation (as if its kick is in
+      // flight).
+      expect(storage.shouldPullDoc?.(space, ghostId)).toBe(true);
+
+      // A cross-space-sourced report for the same target fails its kick.
+      const otherSource = "did:key:zOtherSourceSpace" as MemorySpace;
+      rt.ensureLinkedDocLoaded(
+        {
+          space,
+          id: ghostId,
+          path: [] as readonly string[],
+        } as Parameters<typeof rt.ensureLinkedDocLoaded>[0],
+        otherSource,
+      );
+      await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+
+      // The same-space reservation survives: no duplicate kick permitted.
+      expect(storage.shouldPullDoc?.(space, ghostId)).toBe(false);
     } finally {
       await close();
     }

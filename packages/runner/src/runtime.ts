@@ -1274,15 +1274,18 @@ export class Runtime {
     // without lazy replication) needs no fetch.
     const sameSpace = sourceSpace === space;
     const mgr = this.storageManager;
-    if (sameSpace && mgr.shouldPullDoc?.(space, id, scope) !== true) return;
+    const reserved = sameSpace &&
+      mgr.shouldPullDoc?.(space, id, scope) === true;
+    if (sameSpace && !reserved) return;
     this.missingDocLoadKicks.add(key);
     mgr.trackUntilSettled(
       this.getCellFromLink(link).sync().catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect) — in this
-        // dedup set and in the storage manager's kick set, which was marked
-        // when shouldPullDoc approved the same-space fetch above.
+        // Allow a retry on failure (e.g. transient disconnect): clear this
+        // dedup set, and hand back the storage manager's reservation when
+        // THIS kick took it — a cross-space kick never reserved, and must
+        // not clear a reservation a concurrent same-space read holds.
         this.missingDocLoadKicks.delete(key);
-        mgr.retractDocPullKick?.(space, id, scope);
+        if (reserved) mgr.retractDocPullKick?.(space, id, scope);
       }),
     );
   }

@@ -328,15 +328,19 @@ export function resolveLink(
       // `Cell.pull()`'s convergence loop awaits the tracked sync and re-reads.
       const mgr = runtime.storageManager;
       const { space, id, scope } = link;
-      if (crossSpace || mgr.shouldPullDoc?.(space, id, scope) === true) {
+      const reserved = !crossSpace &&
+        mgr.shouldPullDoc?.(space, id, scope) === true;
+      if (crossSpace || reserved) {
         // Swallow sync failures: this kick is best-effort (the read still
         // resolves from the local replica) and an unhandled rejection here
-        // would otherwise escape the resolution path. Retract the
-        // shouldPullDoc reservation on failure so a later read may retry
-        // (no-op for the cross-space arm, which never reserved).
+        // would otherwise escape the resolution path. On failure, retract
+        // the shouldPullDoc reservation so a later read may retry — but only
+        // when THIS kick took it: a failed cross-space kick never reserved,
+        // and must not clear a reservation a concurrent same-space read
+        // holds for the same target (that would permit duplicate syncs).
         mgr.trackUntilSettled(
           runtime.getCellFromLink(link).sync().catch(() => {
-            mgr.retractDocPullKick?.(space, id, scope);
+            if (reserved) mgr.retractDocPullKick?.(space, id, scope);
           }),
         );
       }
