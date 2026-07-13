@@ -324,6 +324,11 @@ type PlainSchemaPlan =
     properties: ReadonlyMap<string, PlainSchemaPlan>;
   };
 
+type PlainSchemaReads = {
+  address: Omit<IMemorySpaceValueAddress, "path">;
+  paths: (readonly string[])[];
+};
+
 const _plainSchemaPlanCache = new WeakMap<
   JSONSchemaObj,
   PlainSchemaPlan | false
@@ -1195,6 +1200,17 @@ export interface IObjectCreator<T> {
   // In the validateAndTransform system, we may add the toCell and toReactive
   // functions or actualy create the cell.
   createObject(
+    link: NormalizedFullLink,
+    value: (T | undefined)[] | Record<string, (T | undefined)> | T | undefined,
+  ): T;
+
+  /**
+   * Creates a value whose schema has already been proven to contain only exact
+   * `type`, `properties`, and `items` keywords. Implementations may skip the
+   * generic asCell/default/schema-shape checks; the result must otherwise have
+   * the same observable wrapping and annotation as `createObject()`.
+   */
+  createPlainSchemaObject?(
     link: NormalizedFullLink,
     value: (T | undefined)[] | Record<string, (T | undefined)> | T | undefined,
   ): T;
@@ -3532,6 +3548,50 @@ export class SchemaObjectTraverser<V extends FabricValue>
     plan: PlainSchemaPlan,
     link?: NormalizedFullLink,
   ): TraverseResult<Immutable<FabricValue>> | undefined {
+    const { path: _path, ...address } = doc.address;
+    const reads: PlainSchemaReads = { address, paths: [] };
+    const result = this.traversePlainSchemaWithReads(doc, plan, link, reads);
+    this.trackPlainSchemaReads(reads);
+    return result;
+  }
+
+  private trackPlainSchemaReads(
+    reads: PlainSchemaReads,
+  ): void {
+    if (reads.paths.length === 0) return;
+    if (this.tx.trackReadPaths) {
+      this.tx.trackReadPaths(reads.address, reads.paths, {
+        nonRecursive: true,
+      });
+    } else {
+      for (const path of reads.paths) {
+        this.tx.read(
+          { ...reads.address, path },
+          READ_NON_RECURSIVE_FOR_SCHEDULING,
+        );
+      }
+    }
+    reads.paths.length = 0;
+  }
+
+  private createPlainSchemaObject(
+    link: NormalizedFullLink,
+    value:
+      | (FabricValue | undefined)[]
+      | Record<string, FabricValue | undefined>
+      | FabricValue
+      | undefined,
+  ): Immutable<FabricValue> {
+    return this.objectCreator.createPlainSchemaObject?.(link, value) ??
+      this.objectCreator.createObject(link, value);
+  }
+
+  private traversePlainSchemaWithReads(
+    doc: IMemorySpaceValueAttestation,
+    plan: PlainSchemaPlan,
+    link: NormalizedFullLink | undefined,
+    reads: PlainSchemaReads,
+  ): TraverseResult<Immutable<FabricValue>> | undefined {
     if (isSigilLink(doc.value)) return undefined;
 
     if (plan.kind === "primitive") {
@@ -3552,13 +3612,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const newValue = new Array<Immutable<FabricValue>>(doc.value.length);
       const newLink = link ?? getNormalizedLink(doc.address, plan.schema);
       // Match traverseArrayWithSchema's structural and per-index reads.
-      this.tx.read(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+      reads.paths.push(doc.address.path);
       const valid = doc.value.every((item, index) => {
-        const itemAddress = {
-          ...doc.address,
-          path: appendToPath(doc.address.path, index.toString()),
-        };
-        this.tx.read(itemAddress, READ_NON_RECURSIVE_FOR_SCHEDULING);
+        reads.paths.push(appendToPath(doc.address.path, index.toString()));
         if (getJsonType(item) === itemPlan.type) {
           newValue[index] = item;
           return true;
@@ -3574,7 +3630,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         return false;
       });
       return valid
-        ? { ok: this.objectCreator.createObject(newLink, newValue) }
+        ? { ok: this.createPlainSchemaObject(newLink, newValue) }
         : fail(TRAVERSE_FAILURES.invalidArray);
     }
 
@@ -3583,27 +3639,42 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
     const newValue: Record<string, Immutable<FabricValue>> = {};
     const newLink = link ?? getNormalizedLink(doc.address, plan.schema);
-    for (const [propKey, propValue] of Object.entries(doc.value)) {
+    for (const propKey of Object.keys(doc.value)) {
+      const propValue = doc.value[propKey];
       const childPlan = plan.properties.get(propKey);
       if (childPlan === undefined) {
         this.objectCreator.addOptionalProperty(newValue, propKey, propValue);
         continue;
       }
-      const propDoc = {
-        address: {
-          ...doc.address,
-          path: appendToPath(doc.address.path, propKey),
-        },
-        value: propValue,
-      };
-      this.tx.read(propDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
-      const result = this.traversePlainSchema(propDoc, childPlan) ??
-        this.traverseWithSchema(propDoc, childPlan.schema);
-      if (result.error === undefined) newValue[propKey] = result.ok;
+      const propPath = appendToPath(doc.address.path, propKey);
+      reads.paths.push(propPath);
+      if (childPlan.kind === "primitive" && !isSigilLink(propValue)) {
+        if (getJsonType(propValue) === childPlan.type) {
+          newValue[propKey] = propValue;
+        }
+      } else {
+        const propDoc = {
+          address: { ...doc.address, path: propPath },
+          value: propValue,
+        };
+        let result = this.traversePlainSchemaWithReads(
+          propDoc,
+          childPlan,
+          undefined,
+          reads,
+        );
+        if (result === undefined) {
+          // Preserve activity ordering when a child needs the general
+          // traversal, which may register its own reads before returning.
+          this.trackPlainSchemaReads(reads);
+          result = this.traverseWithSchema(propDoc, childPlan.schema);
+        }
+        if (result.error === undefined) newValue[propKey] = result.ok;
+      }
     }
 
     return {
-      ok: this.objectCreator.createObject(
+      ok: this.createPlainSchemaObject(
         newLink,
         newValue as FabricValue,
       ),

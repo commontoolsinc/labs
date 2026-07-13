@@ -15,6 +15,13 @@ import {
 const deepFrozenCache = new WeakSet<object>();
 
 /**
+ * Objects already proven to be both deeply frozen and valid Fabric values.
+ * A successful proof is stable forever because every reachable container is
+ * frozen, so repeated storage-boundary checks can answer by identity.
+ */
+const deepFrozenFabricValueCache = new WeakSet<object>();
+
+/**
  * Adds a value which has been determined to be deep-frozen to the cache.
  */
 function addToDeepFrozenCache(obj: object) {
@@ -250,7 +257,7 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
     }
 
     case "object": {
-      if (value === null) {
+      if (value === null || deepFrozenFabricValueCache.has(value)) {
         return true;
       } else if (!isDeepFrozen(value)) {
         return false;
@@ -312,5 +319,7 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
     }
   };
 
-  return checkValue(value);
+  const result = checkValue(value);
+  if (result) deepFrozenFabricValueCache.add(value);
+  return result;
 }

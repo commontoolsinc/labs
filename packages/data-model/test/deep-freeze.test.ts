@@ -375,6 +375,26 @@ describe("deep-freeze", () => {
     });
   });
 
+  describe("`isDeepFrozenFabricValue()` identity cache", () => {
+    it("does not revalidate an already-proven frozen Fabric value", () => {
+      let childReads = 0;
+      const child = Object.freeze({ value: 1 });
+      const value = Object.freeze({
+        get child() {
+          childReads++;
+          return child;
+        },
+      });
+
+      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      const readsAfterProof = childReads;
+      expect(readsAfterProof).toBeGreaterThan(0);
+
+      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      expect(childReads).toBe(readsAfterProof);
+    });
+  });
+
   // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
   // 4-arm dispatch) and the analogous arms of `checkValue` inside
   // `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and

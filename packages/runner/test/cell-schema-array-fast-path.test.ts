@@ -12,6 +12,7 @@ import { toCell } from "../src/back-to-cell.ts";
 import type { Cell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
+import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("schema array fast path test");
@@ -209,6 +210,50 @@ describe("plain-schema array traversal", () => {
       tx,
     );
     expect(cell.get()).toEqual([["linked"]]);
+  });
+
+  it("falls back for a linked primitive array nested in a plain object", async () => {
+    await seed("linked-alias", "linked");
+    const linkedAlias = runtime.getCell<string>(
+      space,
+      "linked-alias",
+      undefined,
+      tx,
+    );
+    await seedRaw("nested-linked-aliases", [{
+      data: { id: "one", label: "First" },
+      label: "First",
+      aliases: [linkedAlias.getAsLink()],
+    }]);
+
+    const cell = runtime.getCell<Row[]>(
+      space,
+      "nested-linked-aliases",
+      ROWS_SCHEMA,
+      tx,
+    );
+    expect(cell.get()).toEqual([{
+      data: { id: "one", label: "First" },
+      label: "First",
+      aliases: ["linked"],
+    }]);
+  });
+
+  it("preserves individual-read fallback transactions", async () => {
+    await seed("wrapped-plain-schema-rows", [{
+      data: { id: "one", label: "First" },
+      label: "First",
+      aliases: ["one"],
+    }]);
+
+    const wrapper = new TransactionWrapper(tx, { nonReactive: true });
+    const directFallback = runtime.getCell<Row[]>(
+      space,
+      "wrapped-plain-schema-rows",
+      ROWS_SCHEMA,
+      wrapper,
+    );
+    expect(directFallback.get()[0].label).toBe("First");
   });
 
   it("falls back when a linked item has no stored target", async () => {
