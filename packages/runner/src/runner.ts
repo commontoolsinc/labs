@@ -650,6 +650,17 @@ function dedupeNormalizedLinks(
   return deduped;
 }
 
+/** A requested piece root is not present in the current storage snapshot yet. */
+export class CellDataUnavailableError extends Error {
+  override name = "CellDataUnavailableError";
+
+  constructor() {
+    // Preserve the established diagnostic while giving retrying callers a
+    // stable type instead of asking them to match an error string.
+    super("No data at cell");
+  }
+}
+
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
@@ -1561,7 +1572,7 @@ export class Runner {
         if (!this.isStartAttemptCurrent(attempt)) return false;
         logger.time(rootSyncStart, "start", "rootCellSync");
         if (rootCell.getRaw() === undefined) {
-          return Promise.reject(new Error("No data at cell"));
+          return Promise.reject(new CellDataUnavailableError());
         } else {
           return this.doStart(rootCell, seenCells, attempt);
         }

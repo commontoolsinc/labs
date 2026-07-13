@@ -12,6 +12,7 @@ import {
 import {
   type Action,
   type Cell,
+  CellDataUnavailableError,
   entityIdFrom,
   type ExperimentalOptions,
   Runtime,
@@ -63,12 +64,14 @@ let builtinBroker: ServerBuiltinBrokerClient | null = null;
 let space: MemorySpace | null = null;
 let branch: BranchName = "";
 const demanded = new Map<string, Cell<unknown>>();
+const instantiatedDemand = new Set<string>();
 const candidateActions = new Map<string, Action>();
 let claimsByAction = new WeakMap<object, ExecutionClaim>();
 let demandGeneration = 0;
 let selectiveWake: SelectiveDemandWakeQueue | null = null;
 let work = Promise.resolve();
 let stopped = false;
+let pendingDemandRetry: number | null = null;
 
 const denyExternalBuiltinFetch: typeof globalThis.fetch = () =>
   Promise.reject(
@@ -86,11 +89,57 @@ const normalizePieceId = (pieceId: string): string =>
 
 const claimKey = (claim: ActionClaimKey): string => actionClaimMapKey(claim);
 
+const postFatal = (error: unknown): void => {
+  worker.postMessage({
+    type: "fatal",
+    message: error instanceof Error ? error.message : String(error),
+  });
+};
+
 const invalidatesExecutorClaim = (error: unknown): boolean => {
   const named = error as { name?: string } | undefined | null;
   return named?.name === "StorageTransactionAborted" ||
     named?.name === "AuthorizationError" ||
     isPermanentRejection(named) || isTerminalRejection(named);
+};
+
+const activateDemand = async (
+  pieceId: string,
+  cell: Cell<unknown>,
+): Promise<boolean> => {
+  if (runtime === null) throw new Error("executor Worker is not initialized");
+  if (instantiatedDemand.has(pieceId)) return true;
+  await cell.sync();
+  if (cell.getRaw() === undefined) return false;
+  try {
+    const discovery = await prepareExecutorDemandPiece({
+      runtime,
+      branch,
+      pieceId,
+      target: cell,
+      instantiate: () => runtime!.start(cell),
+    });
+    instantiatedDemand.add(pieceId);
+    worker.postMessage({ type: "writer-discovery", discovery });
+    return true;
+  } catch (error) {
+    // A demand may beat the commit that creates its piece, or a link in its
+    // startup chain. Keep the lane live and retry that root when data arrives.
+    if (error instanceof CellDataUnavailableError) return false;
+    throw error;
+  }
+};
+
+const schedulePendingDemandRetry = (): void => {
+  if (
+    stopped || pendingDemandRetry !== null ||
+    instantiatedDemand.size === demanded.size
+  ) return;
+  pendingDemandRetry = setTimeout(() => {
+    pendingDemandRetry = null;
+    if (stopped) return;
+    void enqueue(pullDemand).catch(postFatal);
+  }, 100) as unknown as number;
 };
 
 const pullDemand = async (
@@ -103,8 +152,10 @@ const pullDemand = async (
     ) {
       continue;
     }
+    if (!(await activateDemand(pieceId, cell))) continue;
     await cell.pull();
   }
+  schedulePendingDemandRetry();
 };
 
 const replaceDemand = async (
@@ -119,6 +170,7 @@ const replaceDemand = async (
   if (resetClaims) {
     for (const cell of demanded.values()) runtime.runner.stop(cell);
     demanded.clear();
+    instantiatedDemand.clear();
     candidateActions.clear();
     claimsByAction = new WeakMap<object, ExecutionClaim>();
   }
@@ -126,6 +178,7 @@ const replaceDemand = async (
     if (nextSet.has(pieceId)) continue;
     runtime.runner.stop(cell);
     demanded.delete(pieceId);
+    instantiatedDemand.delete(pieceId);
   }
   for (const pieceId of next) {
     if (demanded.has(pieceId)) continue;
@@ -133,16 +186,8 @@ const replaceDemand = async (
       space,
       entityIdFrom(normalizePieceId(pieceId)),
     );
-    await cell.sync();
-    const discovery = await prepareExecutorDemandPiece({
-      runtime,
-      branch,
-      pieceId,
-      target: cell,
-      instantiate: () => runtime!.start(cell),
-    });
     demanded.set(pieceId, cell);
-    worker.postMessage({ type: "writer-discovery", discovery });
+    await activateDemand(pieceId, cell);
   }
   await pullDemand();
 };
@@ -212,6 +257,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       selectiveWake?.push(
         notice.staleDemandedReaders.map((reader) => reader.pieceId),
       );
+      if (instantiatedDemand.size !== demanded.size) {
+        void enqueue(pullDemand).catch(postFatal);
+      }
     },
   });
   builtinBroker = createServerBuiltinBrokerClient({
@@ -306,7 +354,10 @@ const stop = async (): Promise<void> => {
   space = null;
   branch = "";
   selectiveWake = null;
+  if (pendingDemandRetry !== null) clearTimeout(pendingDemandRetry);
+  pendingDemandRetry = null;
   demanded.clear();
+  instantiatedDemand.clear();
   candidateActions.clear();
 };
 

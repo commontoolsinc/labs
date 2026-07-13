@@ -109,6 +109,7 @@ export {
 export * from "./pattern-manager.ts";
 export {
   asPatternIdentityRef,
+  CellDataUnavailableError,
   getPatternIdentityRef,
   getPatternSource,
   patternIdentityKey,
