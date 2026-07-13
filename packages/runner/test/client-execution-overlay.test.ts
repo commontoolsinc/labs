@@ -583,6 +583,146 @@ Deno.test("matching no-op settlement clears a claimed overlay", async () => {
   }
 });
 
+Deno.test("a no-op settlement arriving before speculation clears the later overlay", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics({
+        space: SPACE,
+        branch: "",
+        pieceId: claim.pieceId,
+        actionId: claim.actionId,
+      }).executionFeedSeq === 2
+    );
+
+    await writeClaimedOutput(storage, "late-local-overlay");
+
+    assertEquals(visibleOutput(storage), undefined);
+    const diagnostics = storage.getExecutionRoutingDiagnostics({
+      space: SPACE,
+      branch: "",
+      pieceId: claim.pieceId,
+      actionId: claim.actionId,
+    });
+    assertEquals(diagnostics.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(diagnostics.actions[0]?.basisCoveredOverlayDrops, 1);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("a committed settlement arriving before speculation retains its data barrier", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "committed",
+            acceptedCommitSeq: 5 as AcceptedCommitSeq,
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics({
+        space: SPACE,
+        branch: "",
+        pieceId: claim.pieceId,
+        actionId: claim.actionId,
+      }).executionFeedSeq === 2
+    );
+
+    await writeClaimedOutput(storage, "late-local-overlay");
+    assertEquals(visibleOutput(storage), "late-local-overlay");
+
+    factory.view.push(emptySync({
+      toSeq: 5,
+      upserts: [{
+        branch: "",
+        id: OUTPUT,
+        seq: 5,
+        doc: { value: "server-output" },
+      }],
+    }));
+    await waitFor(() => visibleOutput(storage) === "server-output");
+    const diagnostics = storage.getExecutionRoutingDiagnostics({
+      space: SPACE,
+      branch: "",
+      pieceId: claim.pieceId,
+      actionId: claim.actionId,
+    });
+    assertEquals(diagnostics.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(diagnostics.actions[0]?.basisCoveredOverlayDrops, 1);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("live computation claims are exposed without broadening builtin capture", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const computationAction = {};
+  storage.registerExecutionAction(
+    computationAction,
+    canonicalActionClaimKey(claim),
+  );
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    assertEquals(
+      storage.hasLiveExecutionClaimForAction(computationAction),
+      true,
+    );
+    assertEquals(storage.captureExecutionClaim(computationAction), undefined);
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        snapshot: { claims: [] },
+        events: [],
+      },
+    }));
+    await waitFor(() =>
+      storage.hasLiveExecutionClaimForAction(computationAction) === false
+    );
+  } finally {
+    storage.unregisterExecutionAction(computationAction);
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
 Deno.test("settlement basis older than a direct confirmed read retains the overlay", async () => {
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();

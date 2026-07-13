@@ -998,6 +998,19 @@ export class StorageManager implements IStorageManager {
     this.#clientExecutionEffects.delete(action);
   }
 
+  hasLiveExecutionClaimForAction(action: object): boolean {
+    if (
+      !getServerPrimaryExecutionConfig() || this.#shadowWrites ||
+      this.#actionTransactionRouter !== undefined
+    ) {
+      return false;
+    }
+    const key = this.#executionActionKeys.get(action);
+    if (key === undefined || key.actionKind !== "computation") return false;
+    return this.#providers.get(key.space as MemorySpace)?.replica
+      .executionClaimForActionKey(key) !== undefined;
+  }
+
   captureExecutionClaim(
     action: object | undefined,
   ): ExecutionClaim | undefined {
@@ -1884,6 +1897,10 @@ class SpaceReplica implements ISpaceReplica {
   readonly #shadowLocalSeqsByAction = new WeakMap<object, Set<number>>();
   readonly #executionClaims = new Map<string, ExecutionClaim>();
   readonly #claimedOverlays = new Map<number, ClaimedOverlayGeneration>();
+  // A fast server settlement can beat the client's bounded speculative run.
+  // Retain one latest settlement per live claim incarnation so a later local
+  // overlay still observes the same basis/data barriers and cannot get stuck.
+  readonly #earlyExecutionSettlements = new Map<string, ActionSettlement>();
   readonly #executionRoutingDiagnostics = new Map<
     string,
     ExecutionRoutingDiagnosticRecord
@@ -3063,6 +3080,7 @@ class SpaceReplica implements ISpaceReplica {
           );
         } else {
           this.compactDominatedClaimedPendingVersions(overlay);
+          this.reconcileEarlyExecutionSettlement(route.claim);
         }
       }
       if (
@@ -4127,6 +4145,7 @@ class SpaceReplica implements ISpaceReplica {
         true;
     this.#executionFeedSeq = handle.session.executionFeedSeq ?? 0;
     this.#executionClaims.clear();
+    this.#earlyExecutionSettlements.clear();
     for (const claim of handle.session.executionClaims ?? []) {
       this.#executionClaims.set(actionClaimMapKey(claim), claim);
     }
@@ -4173,6 +4192,46 @@ class SpaceReplica implements ISpaceReplica {
       record.settlements[settlement.outcome]++;
     }
     record.lastSettlement = structuredClone(settlement);
+  }
+
+  private retainEarlyExecutionSettlement(
+    settlement: ActionSettlement,
+  ): void {
+    if (
+      settlement.outcome !== "committed" && settlement.outcome !== "no-op"
+    ) {
+      return;
+    }
+    const incarnation = executionClaimIncarnationKey(settlement.claim);
+    const current = this.#earlyExecutionSettlements.get(incarnation);
+    if (
+      current === undefined ||
+      current.inputBasisSeq <= settlement.inputBasisSeq
+    ) {
+      this.#earlyExecutionSettlements.set(
+        incarnation,
+        structuredClone(settlement),
+      );
+    }
+  }
+
+  private reconcileEarlyExecutionSettlement(claim: ExecutionClaim): void {
+    const incarnation = executionClaimIncarnationKey(claim);
+    const settlement = this.#earlyExecutionSettlements.get(incarnation);
+    if (settlement === undefined) return;
+    this.#earlyExecutionSettlements.delete(incarnation);
+    if (
+      this.settlementMatchesLiveClaim(settlement) &&
+      this.reconcileExecutionSettlement(settlement)
+    ) {
+      this.#pendingExecutionSettlements.push(settlement);
+    }
+  }
+
+  private clearEarlyExecutionSettlement(claim: ExecutionClaim): void {
+    this.#earlyExecutionSettlements.delete(
+      executionClaimIncarnationKey(claim),
+    );
   }
 
   private recordClaimedOverlay(
@@ -4344,6 +4403,7 @@ class SpaceReplica implements ISpaceReplica {
         executionClaimIncarnationKey(replacement) !==
           executionClaimIncarnationKey(previous)
       ) {
+        this.clearEarlyExecutionSettlement(previous);
         this.dropClaimedOverlays(
           (overlay) =>
             executionClaimIncarnationKey(overlay.claim) ===
@@ -4376,6 +4436,7 @@ class SpaceReplica implements ISpaceReplica {
               executionClaimIncarnationKey(current),
           { dirtyProducer: true, diagnosticCode: "claim-generation-replaced" },
         );
+        this.clearEarlyExecutionSettlement(current);
       }
       this.#executionClaims.set(key, event.claim);
       return;
@@ -4392,6 +4453,7 @@ class SpaceReplica implements ISpaceReplica {
         return;
       }
       this.#executionClaims.delete(key);
+      this.clearEarlyExecutionSettlement(current);
       this.dropClaimedOverlays(
         (overlay) =>
           executionClaimIncarnationKey(overlay.claim) ===
@@ -4403,6 +4465,14 @@ class SpaceReplica implements ISpaceReplica {
 
     if (this.settlementMatchesLiveClaim(event.settlement)) {
       this.noteExecutionSettlement(event.settlement);
+      const incarnation = executionClaimIncarnationKey(event.settlement.claim);
+      const hasOverlay = [...this.#claimedOverlays.values()].some((overlay) =>
+        executionClaimIncarnationKey(overlay.claim) === incarnation
+      );
+      if (!hasOverlay) {
+        this.retainEarlyExecutionSettlement(event.settlement);
+        return;
+      }
       if (this.reconcileExecutionSettlement(event.settlement)) {
         this.#pendingExecutionSettlements.push(event.settlement);
       }

@@ -10,6 +10,9 @@ export interface SchedulerGateState {
   throttleMs?: number;
   debounceReadyAt?: number;
   throttleReadyAt?: number;
+  /** Leading-edge grace for a remote invalidation of an exactly claimed
+   * computation. Local invalidations release it immediately. */
+  claimedRemoteSpeculationReadyAt?: number;
   backoffUntil?: number;
   backoffStreak: number;
   /** Backoff passes charged to the current idle-wait episode. */

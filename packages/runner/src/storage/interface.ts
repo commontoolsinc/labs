@@ -226,6 +226,10 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * external request. */
   registerExecutionAction?(action: object, key: ActionClaimKey): void;
   unregisterExecutionAction?(action: object): void;
+  /** Whether this client currently observes an exact live computation claim
+   * for `action`. This is a scheduling hint only: transaction routing still
+   * re-checks the captured claim incarnation at commit time. */
+  hasLiveExecutionClaimForAction?(action: object): boolean;
   captureExecutionClaim?(
     action: object | undefined,
   ): ExecutionClaim | undefined;

@@ -36,6 +36,13 @@ export const AUTO_DEBOUNCE_THRESHOLD_MS = 50;
 export const AUTO_DEBOUNCE_MIN_RUNS = 3;
 export const AUTO_DEBOUNCE_DELAY_MS = 100;
 
+// Remote source changes can be followed immediately by the authoritative
+// server action observation that resolves them. Give an exactly claimed
+// computation one short leading-edge window to adopt that observation before
+// falling open to its ordinary local speculative run. This never applies to a
+// local optimistic commit and never slides under a hot remote feed.
+export const CLAIMED_REMOTE_SPECULATION_GRACE_MS = 50;
+
 // How long a resumed action's initial run may be held while waiting for its
 // space to finish syncing (see runner.ts awaitSyncBeforeInitialRun). This hold
 // covers the flag-off path and the flag-on fallback for a missing, stale, or
