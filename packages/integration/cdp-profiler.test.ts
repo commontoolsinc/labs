@@ -221,6 +221,12 @@ Deno.test("deltaRendererProcessCpu matches renderer ids and sums CPU deltas", ()
   assertEquals(delta.renderers.map(({ id }) => id), [42, 43]);
   assertAlmostEquals(delta.renderers[0]!.cpuTimeUs, 125_000);
   assertAlmostEquals(delta.renderers[1]!.cpuTimeUs, 50_000);
+  assertEquals(
+    delta.renderers.map(({ startedDuringMeasurement }) =>
+      startedDuringMeasurement
+    ),
+    [false, false],
+  );
 });
 
 Deno.test("deltaRendererProcessCpu rejects renderer churn and reset counters", () => {
@@ -250,20 +256,24 @@ Deno.test("deltaRendererProcessCpu rejects renderer churn and reset counters", (
     Error,
     "renderer process 1 disappeared",
   );
-  assertThrows(
-    () =>
-      deltaRendererProcessCpu(
-        {
-          processes: [{ type: "renderer", id: 1, cpuTimeSeconds: 2 }],
-        },
-        {
-          processes: [
-            { type: "renderer", id: 1, cpuTimeSeconds: 3 },
-            { type: "renderer", id: 2, cpuTimeSeconds: 0.5 },
-          ],
-        },
-      ),
-    Error,
-    "new renderer process 2 appeared",
+});
+
+Deno.test("deltaRendererProcessCpu conservatively includes newly started renderers", () => {
+  const delta = deltaRendererProcessCpu(
+    {
+      processes: [{ type: "renderer", id: 1, cpuTimeSeconds: 2 }],
+    },
+    {
+      processes: [
+        { type: "renderer", id: 1, cpuTimeSeconds: 3 },
+        { type: "renderer", id: 2, cpuTimeSeconds: 0.5 },
+      ],
+    },
   );
+
+  assertAlmostEquals(delta.totalCpuTimeUs, 1_500_000);
+  assertEquals(delta.renderers, [
+    { id: 1, cpuTimeUs: 1_000_000, startedDuringMeasurement: false },
+    { id: 2, cpuTimeUs: 500_000, startedDuringMeasurement: true },
+  ]);
 });

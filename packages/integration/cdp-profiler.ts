@@ -65,7 +65,11 @@ export interface BrowserProcessMetrics {
 /** Renderer CPU consumed between two process snapshots. */
 export interface RendererProcessCpuDelta {
   totalCpuTimeUs: number;
-  renderers: Array<{ id: number; cpuTimeUs: number }>;
+  renderers: Array<{
+    id: number;
+    cpuTimeUs: number;
+    startedDuringMeasurement: boolean;
+  }>;
 }
 
 /**
@@ -136,8 +140,10 @@ export function parseBrowserProcessMetrics(
 }
 
 /**
- * Match renderer counters by process id and return their CPU delta. Renderer
- * churn fails closed so process replacement cannot masquerade as lower CPU.
+ * Match renderer counters by process id and return their CPU delta. A renderer
+ * absent from the baseline necessarily started during the interval, so its
+ * entire cumulative CPU counter is conservatively included. A renderer that
+ * disappears still fails closed because its final counter is unknowable.
  */
 export function deltaRendererProcessCpu(
   before: BrowserProcessMetrics,
@@ -173,7 +179,7 @@ export function deltaRendererProcessCpu(
 
   const beforeRenderers = rendererMap(before, "before");
   const afterRenderers = rendererMap(after, "after");
-  const renderers: Array<{ id: number; cpuTimeUs: number }> = [];
+  const renderers: RendererProcessCpuDelta["renderers"] = [];
   for (const [id, beforeSeconds] of beforeRenderers) {
     const afterSeconds = afterRenderers.get(id);
     if (afterSeconds === undefined) {
@@ -187,11 +193,16 @@ export function deltaRendererProcessCpu(
     renderers.push({
       id,
       cpuTimeUs: (afterSeconds - beforeSeconds) * 1_000_000,
+      startedDuringMeasurement: false,
     });
   }
-  for (const id of afterRenderers.keys()) {
+  for (const [id, afterSeconds] of afterRenderers) {
     if (!beforeRenderers.has(id)) {
-      throw new Error(`new renderer process ${id} appeared during measurement`);
+      renderers.push({
+        id,
+        cpuTimeUs: afterSeconds * 1_000_000,
+        startedDuringMeasurement: true,
+      });
     }
   }
   renderers.sort((left, right) => left.id - right.id);

@@ -371,13 +371,42 @@ const p95 = (values: readonly number[]): number => {
           if (!processCpuBefore) {
             throw new Error("Browser process CPU baseline was not captured");
           }
+          let rendererDelta: RendererProcessCpuDelta;
+          try {
+            rendererDelta = deltaRendererProcessCpu(
+              processCpuBefore,
+              processCpuAfter,
+            );
+          } catch (cause) {
+            if (PROFILE_DIR) {
+              await Deno.mkdir(PROFILE_DIR, { recursive: true });
+              await Deno.writeTextFile(
+                join(PROFILE_DIR, "server-primary-rollout-cpu-error.json"),
+                JSON.stringify(
+                  {
+                    capturedAt: new Date().toISOString(),
+                    label,
+                    before: processCpuBefore,
+                    after: processCpuAfter,
+                    error: cause instanceof Error
+                      ? {
+                        name: cause.name,
+                        message: cause.message,
+                        stack: cause.stack,
+                      }
+                      : String(cause),
+                  },
+                  null,
+                  2,
+                ),
+              );
+            }
+            throw cause;
+          }
           browserProcessCpu = {
             before: processCpuBefore,
             after: processCpuAfter,
-            rendererDelta: deltaRendererProcessCpu(
-              processCpuBefore,
-              processCpuAfter,
-            ),
+            rendererDelta,
           };
         }
         // Query the profiled lazy Worker only after sampling stops. Per-event
