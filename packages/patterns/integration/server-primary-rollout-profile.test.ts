@@ -22,6 +22,7 @@ import type {
   ExecutionRoutingDiagnostics,
   ExecutionRoutingDiagnosticsQuery,
 } from "@commonfabric/runner/shared";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
@@ -43,9 +44,8 @@ import {
 } from "./server-primary-rollout-profile-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
-const SERVER_EXECUTION_ENABLED =
-  Deno.env.get("EXPERIMENTAL_SERVER_PRIMARY_EXECUTION") === "true" ||
-  Deno.env.get("EXPERIMENTAL_SERVER_PRIMARY_EXECUTION") === "1";
+const SERVER_EXECUTION_ENABLED = experimentalOptionsFromEnv(Deno.env.get)
+  .serverPrimaryExecution === true;
 const CPU_BENCH = Deno.env.get("CF_SERVER_EXECUTION_CPU_BENCH") === "1";
 // The expensive CPU gate is intentionally opt-in. Its workload parser rejects
 // partial, padded, fractional, and out-of-range values instead of silently
