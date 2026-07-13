@@ -510,10 +510,17 @@ class DenoSpaceExecutor implements SpaceExecutor {
     const mapKey = candidateKey(candidate);
     if (!routingEnabled || this.#claims.has(mapKey) || this.#stopped) return;
 
-    const claim = await this.#server.setExecutionClaim(
+    const claim = await this.#server.trySetExecutionClaim(
       this.#startOptions.lease,
       key,
     );
+    if (claim === null) {
+      this.#onCandidateDiagnostic?.({
+        claimKey: key,
+        diagnosticCode: "execution-policy-disabled",
+      });
+      return;
+    }
     if (this.#stopped || this.#failed) {
       this.#revokeClaim(claim);
       return;

@@ -738,6 +738,13 @@ Deno.test("positive claims require enabled policy and disabling it revokes autho
   });
   try {
     const lease = await demandAndAcquireLease(server, session);
+    assertEquals(
+      await server.trySetExecutionClaim(
+        lease,
+        claimKey(POLICY_SPACE, ""),
+      ),
+      null,
+    );
     await assertRejects(
       () =>
         server.setExecutionClaim(

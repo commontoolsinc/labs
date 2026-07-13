@@ -178,12 +178,24 @@ class ClaimRecordingServer {
   }[] = [];
   readonly revoked: ExecutionClaim[] = [];
   readonly renewRequests: ExecutionClaim[] = [];
+  claimAvailable = true;
+
+  trySetExecutionClaim(
+    lease: ExecutionLeaseHandle,
+    claimKey: ActionClaimKey,
+  ): Promise<ExecutionClaim | null> {
+    this.claimRequests.push({ lease, claimKey });
+    return Promise.resolve(this.claimAvailable ? CLAIM : null);
+  }
 
   setExecutionClaim(
     lease: ExecutionLeaseHandle,
     claimKey: ActionClaimKey,
   ): Promise<ExecutionClaim> {
     this.claimRequests.push({ lease, claimKey });
+    if (!this.claimAvailable) {
+      return Promise.reject(new Error("execution policy is not enabled"));
+    }
     return Promise.resolve(CLAIM);
   }
 
@@ -266,6 +278,37 @@ Deno.test("shadow executors report CandidateClaim diagnostics without publishing
 
     assertEquals(candidates, [{ claimKey: CLAIM_KEY }]);
     assertEquals(server.claimRequests, []);
+    assertEquals(
+      worker.messages.some((message) =>
+        (message as { type?: string }).type === "run-claimed-action"
+      ),
+      false,
+    );
+    assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("policy-inactive candidates remain shadow without crashing", async () => {
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  server.claimAvailable = false;
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+
+    assertEquals(server.claimRequests, [{
+      lease: LEASE,
+      claimKey: CLAIM_KEY,
+    }]);
+    assertEquals(diagnostics, [{
+      claimKey: CLAIM_KEY,
+      diagnosticCode: "execution-policy-disabled",
+    }]);
     assertEquals(
       worker.messages.some((message) =>
         (message as { type?: string }).type === "run-claimed-action"

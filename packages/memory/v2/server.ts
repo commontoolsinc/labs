@@ -3132,6 +3132,30 @@ export class Server {
     lease: ExecutionLeaseHandle,
     claimInput: ExecutionClaimInput,
   ): Promise<ExecutionClaim> {
+    const claim = await this.#trySetExecutionClaim(lease, claimInput);
+    if (claim === null) {
+      throw new Error(
+        `server-primary execution policy is not enabled for ${claimInput.space}`,
+      );
+    }
+    return claim;
+  }
+
+  /** Attempt to publish claim authority while preserving an ordinary shadow
+   * run when the owner-managed policy is inactive. Invalid capabilities,
+   * inputs, and lease authority remain errors; only an inactive policy is a
+   * non-error absence of authority. */
+  trySetExecutionClaim(
+    lease: ExecutionLeaseHandle,
+    claimInput: ExecutionClaimInput,
+  ): Promise<ExecutionClaim | null> {
+    return this.#trySetExecutionClaim(lease, claimInput);
+  }
+
+  async #trySetExecutionClaim(
+    lease: ExecutionLeaseHandle,
+    claimInput: ExecutionClaimInput,
+  ): Promise<ExecutionClaim | null> {
     const flags = this.memoryProtocolFlags();
     if (!flags.serverPrimaryExecutionV1) {
       throw new Error("server-primary-execution-v1 is disabled");
@@ -3164,9 +3188,7 @@ export class Server {
     const now = this.#executionNowMs();
     const engine = await this.openEngine(claimInput.space);
     if (!this.#reconcileExecutionPolicy(engine, claimInput.space)) {
-      throw new Error(
-        `server-primary execution policy is not enabled for ${claimInput.space}`,
-      );
+      return null;
     }
     const current = Engine.currentExecutionLease(engine, {
       space: claimInput.space,
