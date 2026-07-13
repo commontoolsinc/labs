@@ -326,19 +326,18 @@ export function resolveLink(
       // reads mask as `undefined`, indistinguishable from absence. The kick
       // is async; one-shot reads still return the masked value, but
       // `Cell.pull()`'s convergence loop awaits the tracked sync and re-reads.
-      if (
-        crossSpace ||
-        runtime.storageManager.shouldPullDoc?.(
-            link.space,
-            link.id,
-            link.scope,
-          ) === true
-      ) {
+      const mgr = runtime.storageManager;
+      const { space, id, scope } = link;
+      if (crossSpace || mgr.shouldPullDoc?.(space, id, scope) === true) {
         // Swallow sync failures: this kick is best-effort (the read still
         // resolves from the local replica) and an unhandled rejection here
-        // would otherwise escape the resolution path.
-        runtime.storageManager.trackUntilSettled(
-          runtime.getCellFromLink(link).sync().catch(() => {}),
+        // would otherwise escape the resolution path. Retract the
+        // shouldPullDoc reservation on failure so a later read may retry
+        // (no-op for the cross-space arm, which never reserved).
+        mgr.trackUntilSettled(
+          runtime.getCellFromLink(link).sync().catch(() => {
+            mgr.retractDocPullKick?.(space, id, scope);
+          }),
         );
       }
     } else {

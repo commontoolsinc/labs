@@ -339,6 +339,203 @@ describe("fresh-replica read asymmetry", () => {
     }
   });
 
+  it("shouldPullDoc reserves once per doc+scope; retractDocPullKick re-enables", async () => {
+    // Reservation lifecycle (cubic P2): the kick set is taken before the
+    // async pull settles, so a failed pull must be able to hand the
+    // reservation back — otherwise one transient failure masks the doc for
+    // the manager's lifetime. Scope is part of the key: scoped instances
+    // are distinct docs.
+    const storage = SharedServerStorageManager.connectTo(server, {
+      as: signer,
+    });
+    try {
+      const id = writerRt.getCell(space, "reserve-probe", entrySchema)
+        .getAsNormalizedFullLink().id;
+      expect(storage.shouldPullDoc(space, id)).toBe(true);
+      expect(storage.shouldPullDoc(space, id)).toBe(false);
+      storage.retractDocPullKick(space, id);
+      expect(storage.shouldPullDoc(space, id)).toBe(true);
+      // A different scope is an independent reservation.
+      expect(storage.shouldPullDoc(space, id, "user")).toBe(true);
+      // data: URIs are always locally materializable — never pulled.
+      expect(storage.shouldPullDoc(space, "data:application/json,{}")).toBe(
+        false,
+      );
+    } finally {
+      await storage.close();
+    }
+  });
+
+  it("a transiently failed kick is retried instead of masking forever", async () => {
+    // Integration of the retract-on-failure semantics: the first kick for
+    // one entry doc fails (injected). The failure hands back the
+    // shouldPullDoc reservation, so a later resolution pass re-kicks — in
+    // practice within the SAME pull when sibling arrivals re-run the read
+    // effect, and at latest on the next read. Without the retract, the
+    // entry would be masked for the replica's lifetime.
+    const { rt, close } = freshReader();
+    try {
+      const entry1Id = writerRt.getCell(space, "entry-1", entrySchema)
+        .getAsNormalizedFullLink().id;
+      const storage = rt.storageManager;
+      const provider = storage.open(space);
+      const origSync = provider.sync.bind(provider);
+      let injections = 0;
+      provider.sync = ((uri, selector, scope) => {
+        if (uri === entry1Id && injections === 0) {
+          injections++;
+          return Promise.reject(new Error("injected transient failure"));
+        }
+        return origSync(uri, selector, scope);
+      }) as typeof provider.sync;
+
+      const container = rt.getCell<Record<string, unknown>>(
+        space,
+        CONTAINER_CAUSE,
+        undefined,
+      );
+      const first = (await container.pull()) as {
+        topics?: ({ title?: string } | null | undefined)[];
+      };
+      // Unpoisoned entries always converge on the first pull.
+      expect(first?.topics?.[0]?.title).toBe("T0");
+      expect(first?.topics?.[2]?.title).toBe("T2");
+
+      // The poisoned entry heals by the second pull at the latest.
+      const second = (await container.pull()) as {
+        topics?: ({ title?: string } | null | undefined)[];
+      };
+      expect(second?.topics?.[1]?.title).toBe("T1");
+      // Exactly one injected failure, exactly one successful retry: the
+      // reservation really was taken, failed, and handed back.
+      expect(injections).toBe(1);
+    } finally {
+      await close();
+    }
+  });
+
+  it("ensureLinkedDocLoaded hands back both reservations on a failed kick", async () => {
+    // The traverse-side kick path: a failed sync must clear the runtime's
+    // dedup set AND retract the storage manager's shouldPullDoc reservation,
+    // so the next report retries; after a successful kick the dedup holds.
+    const { rt, close } = freshReader();
+    try {
+      const storage = rt.storageManager;
+      const provider = storage.open(space);
+      const origSync = provider.sync.bind(provider);
+      const ghostId = writerRt.getCell(space, "eldl-ghost", entrySchema)
+        .getAsNormalizedFullLink().id;
+      let calls = 0;
+      let failures = 0;
+      provider.sync = ((uri, selector, scope) => {
+        if (uri !== ghostId) return origSync(uri, selector, scope);
+        calls++;
+        if (failures === 0) {
+          failures++;
+          return Promise.reject(new Error("injected transient failure"));
+        }
+        return origSync(uri, selector, scope);
+      }) as typeof provider.sync;
+
+      const link = {
+        space,
+        id: ghostId,
+        path: [] as readonly string[],
+      } as Parameters<typeof rt.ensureLinkedDocLoaded>[0];
+
+      rt.ensureLinkedDocLoaded(link, space);
+      await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+      expect(failures).toBe(1);
+
+      // The failure handed back both reservations: a second report re-kicks.
+      rt.ensureLinkedDocLoaded(link, space);
+      await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+      expect(calls).toBe(2);
+
+      // After the successful kick the dedup holds: a third report is a no-op.
+      rt.ensureLinkedDocLoaded(link, space);
+      await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+      expect(calls).toBe(2);
+
+      // A same-space doc the replica already holds takes the early return:
+      // reported missing (e.g. a stale traversal), but never re-kicked.
+      const container = rt.getCell<Record<string, unknown>>(
+        space,
+        CONTAINER_CAUSE,
+        undefined,
+      );
+      await container.sync();
+      const containerLink = container.getAsNormalizedFullLink();
+      const containerSyncs: number[] = [];
+      const counting = provider.sync;
+      provider.sync = ((uri, selector, scope) => {
+        if (uri === containerLink.id) containerSyncs.push(1);
+        return counting(uri, selector, scope);
+      }) as typeof provider.sync;
+      rt.ensureLinkedDocLoaded(
+        {
+          space,
+          id: containerLink.id,
+          path: [] as readonly string[],
+        } as Parameters<typeof rt.ensureLinkedDocLoaded>[0],
+        space,
+      );
+      await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+      expect(containerSyncs.length).toBe(0);
+    } finally {
+      await close();
+    }
+  });
+
+  it("missing-target kicks are scope-keyed: one scope does not suppress another", async () => {
+    // Cubic P1: Runtime.ensureLinkedDocLoaded dedupes kicks; scoped
+    // instances (user/session) are distinct docs, so a kick for one scope
+    // must not swallow a later kick for another.
+    const { rt, close } = freshReader();
+    try {
+      const storage = rt.storageManager;
+      const provider = storage.open(space);
+      const origSync = provider.sync.bind(provider);
+      const synced: string[] = [];
+      provider.sync = ((uri, selector, scope) => {
+        synced.push(`${scope ?? "space"}\0${uri}`);
+        return origSync(uri, selector, scope);
+      }) as typeof provider.sync;
+
+      const ghostId = writerRt.getCell(space, "p1-scoped-ghost", entrySchema)
+        .getAsNormalizedFullLink().id;
+      const baseLink = {
+        space,
+        id: ghostId,
+        path: [] as readonly string[],
+      };
+      rt.ensureLinkedDocLoaded(
+        baseLink as Parameters<typeof rt.ensureLinkedDocLoaded>[0],
+        space,
+      );
+      rt.ensureLinkedDocLoaded(
+        { ...baseLink, scope: "user" } as Parameters<
+          typeof rt.ensureLinkedDocLoaded
+        >[0],
+        space,
+      );
+      await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+      const forGhost = synced.filter((entry) => entry.endsWith(`\0${ghostId}`));
+      expect(forGhost.some((entry) => entry.startsWith("space\0"))).toBe(true);
+      expect(forGhost.some((entry) => entry.startsWith("user\0"))).toBe(true);
+      // And the dedup still holds within a scope: repeat is a no-op.
+      const before = synced.length;
+      rt.ensureLinkedDocLoaded(
+        baseLink as Parameters<typeof rt.ensureLinkedDocLoaded>[0],
+        space,
+      );
+      await (storage.crossSpaceSettled?.() ?? Promise.resolve());
+      expect(synced.length).toBe(before);
+    } finally {
+      await close();
+    }
+  });
+
   it("characterization: schema-less sync + one-shot get still shows root only", async () => {
     // get() is synchronous: the hop kick is async, so the FIRST get() after a
     // bare schema-less sync() still masks linked entries. pull() (above) is

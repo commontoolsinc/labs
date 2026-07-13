@@ -249,6 +249,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   shouldPullDoc?(space: MemorySpace, id: URI, scope?: CellScope): boolean;
 
   /**
+   * Undo a `shouldPullDoc` reservation after the kicked sync FAILED, so a
+   * later read may retry the pull. Without this, one transient sync failure
+   * would mask the doc for the manager's whole lifetime (the reservation is
+   * taken before the async pull settles). No-op when the doc was never
+   * reserved. Callers pair it with the failure path of the sync they kicked.
+   */
+  retractDocPullKick?(space: MemorySpace, id: URI, scope?: CellScope): void;
+
+  /**
    * Wait for the currently pending cross-space promises (and any they
    * transitively kick) to settle, WITHOUT waiting for full provider sync the
    * way `synced()` does. Used by `Cell.pull()`'s convergence loop so pulls

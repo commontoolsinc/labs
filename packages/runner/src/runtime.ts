@@ -1241,9 +1241,11 @@ export class Runtime {
     return wrapped;
   }
 
-  // (space, id) pairs for which a missing-link-target load has been kicked
-  // this session. The kicked sync establishes a live per-doc subscription, so
-  // a later creation of the doc still arrives — one kick per doc suffices.
+  // (space, scope, id) triples for which a missing-link-target load has been
+  // kicked this session. The kicked sync establishes a live per-doc
+  // subscription, so a later creation of the doc still arrives — one kick per
+  // doc suffices. Scope is part of the key: scoped instances (user/session)
+  // are distinct docs, and a kick for one scope must not suppress another's.
   private missingDocLoadKicks = new Set<string>();
 
   /**
@@ -1265,25 +1267,22 @@ export class Runtime {
     link: NormalizedFullLink,
     sourceSpace?: MemorySpace,
   ): void {
-    const key = `${link.space}\0${link.id}`;
+    const { space, id, scope } = link;
+    const key = `${space}\0${normalizeCellScope(scope)}\0${id}`;
     if (this.missingDocLoadKicks.has(key)) return;
-    if (
-      sourceSpace === link.space &&
-      this.storageManager.shouldPullDoc?.(
-          link.space,
-          link.id,
-          link.scope,
-        ) !== true
-    ) {
-      // Same-space target the replica already has state for (or a manager
-      // without lazy replication) — nothing to fetch.
-      return;
-    }
+    // A same-space target the replica already has state for (or a manager
+    // without lazy replication) needs no fetch.
+    const sameSpace = sourceSpace === space;
+    const mgr = this.storageManager;
+    if (sameSpace && mgr.shouldPullDoc?.(space, id, scope) !== true) return;
     this.missingDocLoadKicks.add(key);
-    this.storageManager.trackUntilSettled(
+    mgr.trackUntilSettled(
       this.getCellFromLink(link).sync().catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect).
+        // Allow a retry on failure (e.g. transient disconnect) — in this
+        // dedup set and in the storage manager's kick set, which was marked
+        // when shouldPullDoc approved the same-space fetch above.
         this.missingDocLoadKicks.delete(key);
+        mgr.retractDocPullKick?.(space, id, scope);
       }),
     );
   }

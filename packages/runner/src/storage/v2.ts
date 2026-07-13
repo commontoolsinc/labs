@@ -1048,6 +1048,10 @@ export class StorageManager implements IStorageManager {
     }) === undefined;
   }
 
+  retractDocPullKick(space: MemorySpace, id: URI, scope?: CellScope): void {
+    this.#docPullKicks.delete(`${space}\0${docKey(id, scope)}`);
+  }
+
   addCrossSpacePromise(promise: Promise<void>): void {
     this.#crossSpacePromises.add(promise);
   }
