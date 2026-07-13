@@ -127,6 +127,7 @@ import {
   parseExecutionPolicy,
 } from "./execution-policy.ts";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { getLogger } from "@commonfabric/utils/logger";
 
 export { SessionRegistry } from "./session-registry.ts";
 
@@ -135,6 +136,9 @@ export { SessionRegistry } from "./session-registry.ts";
 // OTLP SDK installed. Spans created here are purely additive observability and
 // do not affect write/fan-out behavior.
 const tracer = trace.getTracer("memory-server", "1.0.0");
+const executionControlLogger = getLogger("execution.control", {
+  enabled: false,
+});
 
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
@@ -142,6 +146,31 @@ const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
+const MAX_PENDING_EXECUTION_INVALIDATION_TIMINGS = 10_000;
+
+type ExecutionInvalidationActionKey = {
+  branch: BranchName;
+  space: string;
+  pieceId: string;
+  actionId: string;
+  contextKey: SchedulerExecutionContextKey;
+};
+
+const executionInvalidationActionKey = (
+  key: ExecutionInvalidationActionKey,
+): string =>
+  JSON.stringify([
+    key.branch,
+    key.space,
+    key.pieceId,
+    key.actionId,
+    key.contextKey,
+  ]);
+
+const executionInvalidationTimingKey = (
+  key: ExecutionInvalidationActionKey,
+  sourceSeq: number,
+): string => `${executionInvalidationActionKey(key)}\0${sourceSeq}`;
 
 // SQLite resource caps (mirror the `sqlite.query` wire-parse caps; also applied
 // to the folded-write path, which is parsed loosely as part of a `transact`).
@@ -1233,6 +1262,7 @@ export class Server {
   #executionClaimGeneration = new Map<string, number>();
   #boundExecutionSessions = new Map<string, BoundExecutionSession>();
   #ownedExecutionLeases = new Map<string, OwnedExecutionLease>();
+  #executionInvalidationStartedAt = new Map<string, number>();
   #executionLeaseAuthorities = new WeakMap<
     ExecutionLeaseHandle,
     OwnedExecutionLease
@@ -3556,6 +3586,68 @@ export class Server {
     return true;
   }
 
+  #recordExecutionInvalidations(
+    space: string,
+    readers: readonly Engine.SchedulerActionState[],
+    sourceSeq: number,
+    startedAt: number,
+  ): void {
+    for (const reader of readers) {
+      const key = executionInvalidationTimingKey({
+        branch: reader.branch,
+        space: reader.ownerSpace ?? space,
+        pieceId: reader.pieceId,
+        actionId: reader.actionId,
+        contextKey: reader.executionContextKey,
+      }, sourceSeq);
+      // Coalesced notifications for one durable source retain the earliest
+      // host timestamp. Later duplicate publication must not make the latency
+      // look shorter.
+      if (this.#executionInvalidationStartedAt.has(key)) continue;
+      this.#executionInvalidationStartedAt.set(key, startedAt);
+      while (
+        this.#executionInvalidationStartedAt.size >
+          MAX_PENDING_EXECUTION_INVALIDATION_TIMINGS
+      ) {
+        const oldest = this.#executionInvalidationStartedAt.keys().next().value;
+        if (oldest === undefined) break;
+        this.#executionInvalidationStartedAt.delete(oldest);
+      }
+    }
+  }
+
+  #recordExecutionInvalidationSettlement(
+    attempt: Engine.AppliedActionAttempt,
+  ): void {
+    let earliestStartedAt: number | undefined;
+    for (const sourceSeq of attempt.provenance.causedBy) {
+      const key = executionInvalidationTimingKey({
+        branch: attempt.claim.branch,
+        space: attempt.claim.space,
+        pieceId: attempt.claim.pieceId,
+        actionId: attempt.claim.actionId,
+        contextKey: attempt.claim.contextKey,
+      }, sourceSeq);
+      const startedAt = this.#executionInvalidationStartedAt.get(key);
+      this.#executionInvalidationStartedAt.delete(key);
+      if (
+        startedAt !== undefined &&
+        (earliestStartedAt === undefined || startedAt < earliestStartedAt)
+      ) {
+        earliestStartedAt = startedAt;
+      }
+    }
+    if (earliestStartedAt !== undefined) {
+      // One bounded-cardinality sample per published settlement. A coalesced
+      // attempt starts at its oldest exact durable cause; timing state is
+      // intentionally process-local, so a restart yields no fabricated value.
+      executionControlLogger.time(
+        earliestStartedAt,
+        "invalidation-settlement",
+      );
+    }
+  }
+
   listExecutionClaims(space: string): readonly ExecutionClaim[] {
     this.expireExecutionClaims();
     const engine = this.#openedEngines.get(space);
@@ -3609,6 +3701,7 @@ export class Server {
     this.#executionClaimGeneration.clear();
     this.#boundExecutionSessions.clear();
     this.#ownedExecutionLeases.clear();
+    this.#executionInvalidationStartedAt.clear();
     this.#readPool.close();
   }
 
@@ -3648,6 +3741,7 @@ export class Server {
       commit: Engine.AppliedCommit;
     },
   ): void {
+    const acceptedAt = performance.now();
     const order = (this.#acceptedCommitOrderBySpace.get(event.space) ?? 0) + 1;
     this.#acceptedCommitOrderBySpace.set(event.space, order);
     const revisions = Object.freeze(
@@ -3698,6 +3792,12 @@ export class Server {
           applicableExecutionContextKeys: ["space"],
           dirtySeq: event.commit.seq,
         }).map((reader) => Object.freeze({ ...reader })),
+    );
+    this.#recordExecutionInvalidations(
+      event.space,
+      staleDemandedReaders,
+      event.commit.seq,
+      acceptedAt,
     );
     const orderedEvent: AcceptedCommitEvent = Object.freeze({
       order,
@@ -6197,7 +6297,9 @@ export class Server {
       // The attempt was accepted synchronously under this exact live claim.
       // A false return now means expiry/revocation won during async post-commit
       // side effects; never resurrect that stale authority.
-      this.publishActionSettlement(settlement);
+      if (this.publishActionSettlement(settlement)) {
+        this.#recordExecutionInvalidationSettlement(attempt);
+      }
     }
   }
 

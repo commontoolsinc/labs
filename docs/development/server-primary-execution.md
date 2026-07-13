@@ -84,6 +84,7 @@ metric labels. The current bounded-cardinality sources are:
 | `/api/health/stats.serverExecutionPool` | active lanes/workers/demands and state counts; demand snapshots; Worker starts/stops; abrupt stops; lease losses/replacements; sponsor rotations; crashes; accepted-commit/index decisions; unrelated suppression; parked-wake attempts/starts; demand-empty hibernations |
 | `/api/health/stats.serverExecutionControl` | inactive-policy attempts; claims issued/reissued/revoked; accepted action attempts and exact claimed-action conflicts; committed/no-op/failed/unserved settlements; lease-fence and action-firewall rejects |
 | `/api/health/stats.timingStats["execution.pool"]` | Worker start, demand update, parked wake, hibernate, and settle latency |
+| `/api/health/stats.timingStats["execution.control"]` | `invalidation-settlement`: one host-local sample per published settlement, measured from the oldest exact durable source cause coalesced into that attempt |
 | Memory host APIs | `listExecutionDemands`, `currentExecutionLease`, and `listExecutionClaims` for point-in-time lane authority |
 | `execution.executor` logger | `execution-server-shadow-action-run`, `execution-server-authoritative-action-run` |
 | `storage.v2` logger | client-derived suppressed/upstream commits; overlay created/retained/dropped/divergence; `execution-overlay-held` timing |
@@ -97,9 +98,12 @@ mismatches, and any enabled phase whose exact action lacks one settlement per
 claimed overlay route. This is test diagnostics, not output from
 `cf execution status`.
 
-Feed latency has no server timestamp in v1. Measure invalidation-to-settlement
-at the host and settlement-held duration/retention on the client; do not call it
-wire latency without a shared trace or timestamp.
+Feed latency has no server timestamp in v1. The host's
+`execution.control/invalidation-settlement` sample joins process-local start
+times to durable `causedBy` sequences; a restart or bounded timing-state eviction
+therefore omits the sample instead of fabricating one. Measure settlement-held
+duration/retention on the client separately, and do not call either signal wire
+latency without a shared trace or timestamp.
 
 ## Per-space rollback
 

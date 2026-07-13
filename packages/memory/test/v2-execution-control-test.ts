@@ -23,6 +23,7 @@ import {
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,
 } from "./v2-auth-test-helpers.ts";
+import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 
 const POLICY_SPACE = "did:key:z6Mk-server-execution-policy-space";
 
@@ -1619,6 +1620,11 @@ Deno.test("claimed provenance retains every source commit after the read surface
       },
     });
 
+    const settlementTimingBefore =
+      getTimingStatsBreakdown()["execution.control"]?.[
+        "invalidation-settlement"
+      ]?.count ?? 0;
+
     const firstCause = await session.transact({
       localSeq: 4,
       reads: { confirmed: [], pending: [] },
@@ -1673,6 +1679,12 @@ Deno.test("claimed provenance retains every source commit after the read surface
       firstCause.seq,
       secondCause.seq,
     ]);
+    assertEquals(
+      getTimingStatsBreakdown()["execution.control"]?.[
+        "invalidation-settlement"
+      ]?.count,
+      settlementTimingBefore + 1,
+    );
 
     unbind();
     const laterCause = await session.transact({
@@ -1694,6 +1706,12 @@ Deno.test("claimed provenance retains every source commit after the read surface
     assertEquals(
       replay.schedulerObservationResults?.[0]?.executionProvenance?.causedBy,
       [firstCause.seq, secondCause.seq],
+    );
+    assertEquals(
+      getTimingStatsBreakdown()["execution.control"]?.[
+        "invalidation-settlement"
+      ]?.count,
+      settlementTimingBefore + 1,
     );
     await assertRejects(
       () =>
@@ -1727,6 +1745,12 @@ Deno.test("claimed provenance retains every source commit after the read surface
     assertEquals(afterRetry.actionAttempts?.[0]?.provenance.causedBy, [
       laterCause.seq,
     ]);
+    assertEquals(
+      getTimingStatsBreakdown()["execution.control"]?.[
+        "invalidation-settlement"
+      ]?.count,
+      settlementTimingBefore + 2,
+    );
 
     unbind();
     const futureSourceAddress = {

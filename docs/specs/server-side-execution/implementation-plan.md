@@ -924,7 +924,9 @@ the persisted dirty scheduler row is recovered by the replacement generation.
 6. Emit bounded counters for workers/demands, indexed decisions, wakes,
    suppressed unrelated commits, hibernation, claim churn/conflicts, action
    settlement, and fences, plus worker-start, demand-update, wake, hibernate,
-   and settle latency.
+   settle latency, and host-local invalidation-to-settlement latency joined by
+   the attempt's durable `causedBy` source sequences. Missing process-local
+   start state after restart or bounded eviction omits a sample honestly.
 
 **Success criteria:**
 
