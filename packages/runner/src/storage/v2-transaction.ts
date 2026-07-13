@@ -149,15 +149,6 @@ type DoneState = {
 
 type TxState = ReadyState | DoneState | PendingState;
 
-// A schema traversal can discover thousands of paths in one document. Keep
-// that batch compact internally and expand it only for inspection consumers.
-type BatchedReadActivity = Omit<IReadActivity, "path" | "journalIndex"> & {
-  paths: readonly (readonly string[])[];
-  journalIndex: number;
-};
-
-type RecordedReadActivity = IReadActivity | BatchedReadActivity;
-
 const logger = getLogger("storage.v2.transaction", {
   enabled: false,
   level: "error",
@@ -873,7 +864,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   #state: TxState = { status: "ready" };
   #branches = new Map<MemorySpace, SpaceBranch>();
-  #readActivities: RecordedReadActivity[] = [];
+  #readActivities: IReadActivity[] = [];
   // Per-transaction monotonic activity clock, shared between read activities
   // and write attempts so their relative order (the read|write interleaving)
   // is recoverable without a journal scan — V2 journals don't support
@@ -951,24 +942,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { status: "ready", journal: this.journal };
   }
 
-  *getReadActivities(): IterableIterator<IReadActivity> {
-    for (const read of this.#readActivities) {
-      if (!("paths" in read)) {
-        yield read;
-        continue;
-      }
-      for (let i = 0; i < read.paths.length; i++) {
-        yield {
-          space: read.space,
-          scope: read.scope,
-          id: read.id,
-          path: read.paths[i],
-          meta: read.meta,
-          ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
-          journalIndex: read.journalIndex + i,
-        };
-      }
-    }
+  getReadActivities(): readonly IReadActivity[] {
+    return this.#readActivities;
   }
 
   getWriteAttemptLog(): readonly IWriteAttempt[] {
@@ -1405,16 +1380,17 @@ export class V2StorageTransaction implements IStorageTransaction {
       ? { ...readMeta, ...ignoreReadForCommit }
       : readMeta;
     const scope = normalizeCellScope(address.scope);
-    this.#readActivities.push({
-      space: address.space,
-      scope,
-      id: address.id,
-      paths,
-      meta: activityMeta,
-      ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
-      journalIndex: this.#activityClock,
-    });
-    this.#activityClock += paths.length;
+    for (const path of paths) {
+      this.#readActivities.push({
+        space: address.space,
+        scope,
+        id: address.id,
+        path,
+        meta: activityMeta,
+        ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
+        journalIndex: this.#activityClock++,
+      });
+    }
     if (!skipCommitPrecondition) doc.validated = true;
     this.invalidateReactivityLog();
     return { ok: {} };
@@ -2143,20 +2119,17 @@ export class V2StorageTransaction implements IStorageTransaction {
     const shallowReads: IMemorySpaceAddress[] = [];
     let attemptedWrites: IMemorySpaceAddress[] | undefined;
 
-    const recordRead = (
-      read: Omit<IReadActivity, "path">,
-      path: readonly string[],
-    ) => {
+    for (const read of this.#readActivities) {
       const meta = read.meta ?? EMPTY_META;
       if (isReadIgnoredForScheduling(meta)) {
-        return;
+        continue;
       }
 
       const address = {
         space: read.space,
         scope: read.scope,
         id: read.id,
-        path,
+        path: read.path,
       };
 
       if (read.nonRecursive === true) {
@@ -2168,14 +2141,6 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (isReadMarkedAsAttemptedWrite(meta)) {
         attemptedWrites ??= [];
         attemptedWrites.push(address);
-      }
-    };
-
-    for (const read of this.#readActivities) {
-      if ("paths" in read) {
-        for (const path of read.paths) recordRead(read, path);
-      } else {
-        recordRead(read, read.path);
       }
     }
 

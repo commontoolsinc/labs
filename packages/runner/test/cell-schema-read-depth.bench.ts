@@ -17,8 +17,8 @@
  * not the committed setup transaction and does not fall back to the ambient
  * tx-less read path.
  *
- * A separate read-journal group uses the full item schema to measure the cost
- * shifted out of get() by lazy read-activity expansion:
+ * A separate read-journal group uses the full item schema to measure the
+ * end-to-end cost of consuming recorded reads and isolate the readout itself:
  *
  *   - get() alone
  *   - get() followed by fully materializing getReadActivities()
