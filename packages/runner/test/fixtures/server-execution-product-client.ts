@@ -25,7 +25,7 @@ type InitRequest = {
 };
 
 type CommandRequest = {
-  type: "reset" | "measure" | "dispose";
+  type: "reset" | "measure" | "reannounce-demand" | "dispose";
   requestId: number;
   actionId?: string;
   claim?: ExecutionClaim;
@@ -133,6 +133,18 @@ async function handleRequest(
     targetLink === undefined
   ) {
     throw new Error("product client is not initialized");
+  }
+  if (request.type === "reannounce-demand") {
+    const accepted = await storage.open(activeSpace).setExecutionDemand?.(
+      "",
+      [resultLink.id],
+    );
+    worker.postMessage({
+      type: "response",
+      requestId: request.requestId,
+      ok: { accepted: accepted === true },
+    });
+    return;
   }
   if (typeof request.actionId !== "string") {
     throw new Error("product client command is missing actionId");

@@ -510,6 +510,15 @@ class ProductClientWorker {
     return pending.promise;
   }
 
+  async reannounceDemand(): Promise<void> {
+    const requestId = ++this.#nextRequestId;
+    const pending = Promise.withResolvers<Record<string, unknown>>();
+    this.#pending.set(requestId, pending);
+    this.#worker.postMessage({ type: "reannounce-demand", requestId });
+    const result = await pending.promise;
+    assertEquals(result.accepted, true);
+  }
+
   waitForCommit(
     predicate: (commit: ClientCommit) => boolean,
   ): Promise<ClientCommit> {
@@ -697,7 +706,11 @@ for (const product of PRODUCT_CASES) {
         // client path independently of the lower-priority registry cleanup.
         legacyBackgroundActive: () => false,
       });
-      pool.start();
+      if (product.name !== "group-chat") {
+        // Lunch must let the executor adopt the seed's changed-output
+        // certificate before client no-op resumes refresh that snapshot.
+        pool.start();
+      }
 
       for (let index = 0; index < 3; index++) {
         clients.push(
@@ -712,6 +725,14 @@ for (const product of PRODUCT_CASES) {
             authorizeSessionOpen,
           }),
         );
+      }
+      if (product.name === "group-chat") {
+        // This second heavyweight product runs after lunch in the same Deno
+        // process. Compile its three clients first, then re-advertise one root
+        // after subscription; the host snapshot contains all three stable
+        // session demands without compiling four Workers concurrently.
+        pool.start();
+        await clients[0].reannounceDemand();
       }
       await pool.idle();
       assertEquals(pool.metrics().activeDemands, 3);
@@ -1012,9 +1033,12 @@ for (const product of PRODUCT_CASES) {
       }
     } finally {
       unsubscribeControl();
-      for (const client of clients) await client.dispose();
-      await pool?.idle().catch(() => undefined);
+      // Unsubscribe/drain while all client demands are still stable. Disposing
+      // clients first publishes a zero-demand snapshot while a replacement
+      // Worker may be starting, which creates teardown-only restart churn and
+      // can leak CPU into the next product case in this same Deno process.
       await pool?.close().catch(() => undefined);
+      for (const client of clients) await client.dispose();
       await observerClient?.close().catch(() => undefined);
       await server.close();
     }
