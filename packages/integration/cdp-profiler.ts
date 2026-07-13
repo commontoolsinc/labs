@@ -37,6 +37,13 @@ export interface CPUProfileSummary {
   sampledUs: number;
   /** Sample time attributed to V8's explicit `(idle)` node. */
   idleUs: number;
+  /** Sample time attributed to V8's ambiguous `(program)` node. This can
+   * include native event-loop work or otherwise unattributed time, so it is
+   * not sufficient evidence of JavaScript CPU on its own. */
+  programUs: number;
+  /** Sample time attributed to a concrete JavaScript function or V8 garbage
+   * collection. Excludes `(idle)`, `(program)`, and unknown sample ids. */
+  attributedWorkUs: number;
   /** Sampling-derived worker CPU occupancy: sampledUs minus idleUs. */
   busyUs: number;
   /** busyUs / sampledUs, or zero when the profile has no samples. */
@@ -49,7 +56,9 @@ export interface CPUProfileSummary {
  * attribute the sampling interval to nodes including an explicit `(idle)`
  * node. Only that node is excluded from busy time: garbage collection,
  * `(program)`, runtime overhead, and unknown node ids conservatively count as
- * worker activity.
+ * worker occupancy. `attributedWorkUs` is the narrower CPU signal: it counts
+ * only samples assigned to a concrete JavaScript function or V8 garbage
+ * collection, excluding ambiguous `(program)` and unknown samples.
  *
  * CDP emits microseconds for both the profile interval and sample deltas, so
  * the summary keeps those units and leaves per-invalidation normalization to
@@ -65,6 +74,8 @@ export function summarizeCPUProfile(
   );
   let sampledUs = 0;
   let idleUs = 0;
+  let programUs = 0;
+  let attributedWorkUs = 0;
 
   if (profile.samples !== undefined && profile.timeDeltas !== undefined) {
     for (let index = 0; index < profile.samples.length; index++) {
@@ -73,8 +84,13 @@ export function summarizeCPUProfile(
         continue;
       }
       sampledUs += delta;
-      if (functionByNodeId.get(profile.samples[index]!) === "(idle)") {
+      const functionName = functionByNodeId.get(profile.samples[index]!);
+      if (functionName === "(idle)") {
         idleUs += delta;
+      } else if (functionName === "(program)") {
+        programUs += delta;
+      } else if (functionName !== undefined) {
+        attributedWorkUs += delta;
       }
     }
   }
@@ -84,6 +100,8 @@ export function summarizeCPUProfile(
     wallUs,
     sampledUs,
     idleUs,
+    programUs,
+    attributedWorkUs,
     busyUs,
     busyFraction: sampledUs === 0 ? 0 : busyUs / sampledUs,
   };

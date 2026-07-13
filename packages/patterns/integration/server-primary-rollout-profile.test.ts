@@ -437,23 +437,27 @@ const p95 = (values: readonly number[]): number => {
               (phase.cpu?.busyUs ?? 0) > 0,
               `${phase.label} CPU profile contained no worker activity`,
             );
+            assert(
+              (phase.cpu?.attributedWorkUs ?? 0) > 0,
+              `${phase.label} CPU profile contained no attributed JavaScript/GC work`,
+            );
           }
-          const aggregateBusyPerEvent = (selected: PhaseResult[]): number =>
+          const aggregateWorkPerEvent = (selected: PhaseResult[]): number =>
             selected.reduce(
-              (total, phase) => total + (phase.cpu?.busyUs ?? 0),
+              (total, phase) => total + (phase.cpu?.attributedWorkUs ?? 0),
               0,
             ) / selected.reduce((total, phase) => total + phase.events, 0);
-          const baselineAggregate = aggregateBusyPerEvent([
+          const baselineAggregate = aggregateWorkPerEvent([
             baseline,
             baselineRepeat,
           ]);
-          const enabledAggregate = aggregateBusyPerEvent([
+          const enabledAggregate = aggregateWorkPerEvent([
             enabled,
             enabledRepeat,
           ]);
           assert(
             enabledAggregate <= baselineAggregate * 1.1,
-            `enabled sampled busy time/event ${enabledAggregate}us exceeded baseline ${baselineAggregate}us by more than 10%`,
+            `enabled attributed JavaScript/GC time/event ${enabledAggregate}us exceeded baseline ${baselineAggregate}us by more than 10%`,
           );
         }
 

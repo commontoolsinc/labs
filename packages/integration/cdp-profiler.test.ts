@@ -29,6 +29,14 @@ const profile = (
         lineNumber: 0,
       },
     },
+    {
+      id: 4,
+      callFrame: {
+        functionName: "(program)",
+        url: "",
+        lineNumber: 0,
+      },
+    },
   ],
   startTime: 1_000,
   endTime: 3_000,
@@ -37,16 +45,18 @@ const profile = (
 
 Deno.test("summarizeCPUProfile separates worker busy samples from V8 idle samples", () => {
   const summary = summarizeCPUProfile(profile({
-    samples: [1, 2, 3, 1, 999],
-    timeDeltas: [100, 200, 300, 400, 500],
+    samples: [1, 2, 3, 1, 4, 999],
+    timeDeltas: [100, 200, 300, 400, 250, 500],
   }));
 
   assertEquals(summary, {
     wallUs: 2_000,
-    sampledUs: 1_500,
+    sampledUs: 1_750,
     idleUs: 500,
-    busyUs: 1_000,
-    busyFraction: 2 / 3,
+    programUs: 250,
+    attributedWorkUs: 500,
+    busyUs: 1_250,
+    busyFraction: 5 / 7,
   });
 });
 
@@ -58,6 +68,8 @@ Deno.test("summarizeCPUProfile treats GC and unknown sample ids as busy", () => 
 
   assertEquals(summary.busyUs, 500);
   assertEquals(summary.idleUs, 0);
+  assertEquals(summary.programUs, 0);
+  assertEquals(summary.attributedWorkUs, 125);
   assertEquals(summary.busyFraction, 1);
 });
 
@@ -71,6 +83,8 @@ Deno.test("summarizeCPUProfile handles profiles without samples", () => {
     wallUs: 2_000,
     sampledUs: 0,
     idleUs: 0,
+    programUs: 0,
+    attributedWorkUs: 0,
     busyUs: 0,
     busyFraction: 0,
   });
@@ -86,6 +100,8 @@ Deno.test("summarizeCPUProfile ignores missing and invalid sample deltas", () =>
     wallUs: 2_000,
     sampledUs: 100,
     idleUs: 100,
+    programUs: 0,
+    attributedWorkUs: 0,
     busyUs: 0,
     busyFraction: 0,
   });
@@ -101,4 +117,17 @@ Deno.test("summarizeCPUProfile clamps an invalid wall interval", () => {
 
   assertEquals(summary.wallUs, 0);
   assertEquals(summary.busyUs, 250);
+  assertEquals(summary.attributedWorkUs, 250);
+});
+
+Deno.test("summarizeCPUProfile separates ambiguous program samples from attributed work", () => {
+  const summary = summarizeCPUProfile(profile({
+    samples: [4, 2, 3, 999],
+    timeDeltas: [600, 200, 100, 400],
+  }));
+
+  assertEquals(summary.programUs, 600);
+  // Unknown node ids are not evidence of attributed JavaScript/GC work.
+  assertEquals(summary.attributedWorkUs, 300);
+  assertEquals(summary.busyUs, 1_300);
 });
