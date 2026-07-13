@@ -653,7 +653,8 @@ describe("SpaceManager", () => {
           events.push(`acquire:${branch}`);
           return acquired.promise;
         },
-        renew: () => Promise.resolve({ exclusion, ready: true }),
+        renew: () =>
+          Promise.resolve({ exclusion, ready: true, serverTime: 100 }),
         release: (_branch, generation) => {
           events.push(`release:${generation}`);
           return Promise.resolve(exclusion);
@@ -682,7 +683,7 @@ describe("SpaceManager", () => {
     assertEquals(events, ["acquire:"]);
     assertEquals(events.includes("worker:create"), false);
 
-    acquired.resolve({ exclusion, ready: true });
+    acquired.resolve({ exclusion, ready: true, serverTime: 100 });
     await manager.idle();
     assertEquals(events, ["acquire:", "worker:create"]);
 
@@ -713,6 +714,7 @@ describe("SpaceManager", () => {
         expiresAt: 1_000,
       },
       ready: true,
+      serverTime: 0,
     });
     const manager = new SpaceManager({
       did: TEST_DID,
@@ -803,12 +805,17 @@ describe("SpaceManager", () => {
             exclusion: exclusion(1_100),
             ready: false,
             blockedUntil: 200,
+            serverTime: 100,
           }),
         renew: () => {
           renewals++;
           return Promise.resolve(
             renewals === 1
-              ? { exclusion: exclusion(1_200), ready: true }
+              ? {
+                exclusion: exclusion(1_200),
+                ready: true,
+                serverTime: 200,
+              }
               : null,
           );
         },
@@ -881,6 +888,7 @@ describe("SpaceManager", () => {
       identity,
       pollingIntervalMs: 1,
       now: () => now,
+      monotonicNow: () => now,
       setTimer: (callback, delayMs) => {
         const timer = ++nextTimer;
         timers.set(timer, { callback, delayMs, cleared: false });
@@ -891,7 +899,8 @@ describe("SpaceManager", () => {
         if (current) current.cleared = true;
       },
       backgroundExclusion: {
-        acquire: () => Promise.resolve({ exclusion, ready: true }),
+        acquire: () =>
+          Promise.resolve({ exclusion, ready: true, serverTime: 100 }),
         renew: () => new Promise(() => {}),
         release: () => Promise.resolve(exclusion),
       },
@@ -925,6 +934,117 @@ describe("SpaceManager", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(events, ["background exclusion expired locally"]);
     await manager.stop();
+  });
+
+  it("derives exclusion timers from server-relative duration despite wall-clock skew", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    let nextTimer = 0;
+    const timers = new Map<number, { delayMs: number; cleared: boolean }>();
+    const exclusion: LegacyBackgroundExclusion = {
+      version: 1,
+      space: TEST_DID,
+      branch: "",
+      exclusionGeneration: 1,
+      holderId: "background:skewed-clock",
+      servicePrincipal: identity.did(),
+      expiresAt: 200,
+    };
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      now: () => -10_000,
+      setTimer: (_callback, delayMs) => {
+        const timer = ++nextTimer;
+        timers.set(timer, { delayMs, cleared: false });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        const current = timers.get(timer);
+        if (current) current.cleared = true;
+      },
+      backgroundExclusion: {
+        acquire: () =>
+          Promise.resolve({
+            exclusion,
+            ready: true,
+            serverTime: 100,
+          }),
+        renew: () => new Promise(() => {}),
+        release: () => Promise.resolve(exclusion),
+      },
+      createWorkerController: () =>
+        ({
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => Promise.resolve(),
+          terminateNow: () => {},
+        }) as never,
+    });
+
+    try {
+      manager.start();
+      await manager.idle();
+      assertEquals(
+        [...timers.values()].filter((timer) => !timer.cleared)
+          .map((timer) => timer.delayMs).toSorted((a, b) => a - b),
+        [50, 100],
+      );
+    } finally {
+      await manager.stop();
+    }
+  });
+
+  it("fails closed when an old server omits relative exclusion time", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    let workers = 0;
+    const exclusion: LegacyBackgroundExclusion = {
+      version: 1,
+      space: TEST_DID,
+      branch: "",
+      exclusionGeneration: 1,
+      holderId: "background:old-server",
+      servicePrincipal: identity.did(),
+      expiresAt: 200,
+    };
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      now: () => 100,
+      setTimer: () => 1,
+      clearTimer: () => {},
+      backgroundExclusion: {
+        acquire: () => Promise.resolve({ exclusion, ready: true }),
+        renew: () => Promise.resolve({ exclusion, ready: true }),
+        release: () => Promise.resolve(exclusion),
+      },
+      createWorkerController: () => {
+        workers++;
+        return {
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => Promise.resolve(),
+          terminateNow: () => {},
+        } as never;
+      },
+    });
+
+    try {
+      manager.start();
+      await manager.idle();
+      assertEquals(workers, 0);
+    } finally {
+      await manager.stop();
+    }
   });
 
   it("schedules, runs, retries, disables, and removes pieces", async () => {

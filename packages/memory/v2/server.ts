@@ -2197,6 +2197,19 @@ export class Server {
     return owned.handle;
   }
 
+  /** Host-local interlock for the shared executor pool. */
+  async legacyBackgroundActive(
+    space: string,
+    branch: BranchName,
+  ): Promise<boolean> {
+    const engine = await this.openEngine(space);
+    return Engine.currentLegacyBackgroundExclusion(engine, {
+      space,
+      branch,
+      nowMs: () => this.#executionNowMs(),
+    }) !== null;
+  }
+
   #executionDrainTimeoutMs(): number {
     const timeoutMs = this.options.executionControl?.drainTimeoutMs ?? 5_000;
     if (!isPositiveSafeInteger(timeoutMs)) {

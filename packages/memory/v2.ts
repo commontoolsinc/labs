@@ -458,6 +458,8 @@ export interface LegacyBackgroundExclusion {
 
 export interface LegacyBackgroundExclusionStatus {
   exclusion: LegacyBackgroundExclusion;
+  /** Server wall clock sampled with the authority transaction. */
+  serverTime?: number;
   /** True only when no live client execution lease remains in the lane. */
   ready: boolean;
   /** Deadline of the draining client lease when `ready` is false. */

@@ -54,6 +54,7 @@ Deno.test("live background exclusion blocks client lease acquisition", async () 
   try {
     const acquired = acquireBackground(engine, 100);
     assertExists(acquired);
+    assertEquals(acquired.serverTime, 100);
     assertEquals(acquired.ready, true);
     assertEquals(acquired.blockedUntil, undefined);
     assertEquals(acquired.exclusion.exclusionGeneration, 1);
@@ -108,6 +109,7 @@ Deno.test("background acquisition atomically drains the client lease", async () 
       authorizeService: () => true,
     });
     assertExists(blocked);
+    assertEquals(blocked.serverTime, 250);
     assertEquals(blocked.ready, false);
     assertEquals(blocked.blockedUntil, 300);
 
@@ -119,6 +121,7 @@ Deno.test("background acquisition atomically drains the client lease", async () 
       authorizeService: () => true,
     });
     assertExists(ready);
+    assertEquals(ready.serverTime, 301);
     assertEquals(ready.ready, true);
     assertEquals(ready.blockedUntil, undefined);
   } finally {

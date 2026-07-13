@@ -3397,6 +3397,7 @@ const acquireLegacyBackgroundExclusionTransaction = (
   );
   return {
     exclusion,
+    serverTime: nowMs,
     ready: blockedUntil === undefined,
     ...(blockedUntil === undefined ? {} : { blockedUntil }),
   };
@@ -3474,6 +3475,7 @@ const renewLegacyBackgroundExclusionTransaction = (
   );
   return {
     exclusion,
+    serverTime: nowMs,
     ready: blockedUntil === undefined,
     ...(blockedUntil === undefined ? {} : { blockedUntil }),
   };

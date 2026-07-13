@@ -86,13 +86,16 @@ Deno.test("only a configured service session controls background exclusion", asy
 
     const acquired = await service.acquireLegacyBackgroundExclusion("");
     assertExists(acquired);
+    assertEquals(acquired.serverTime, 100);
     assertEquals(acquired.ready, true);
     assertEquals(acquired.exclusion.exclusionGeneration, 1);
     assertEquals(acquired.exclusion.servicePrincipal, SERVICE);
+    assertEquals(await server.legacyBackgroundActive(SPACE, ""), true);
 
     nowMs = 200;
     const renewed = await service.renewLegacyBackgroundExclusion("", 1);
     assertExists(renewed);
+    assertEquals(renewed.serverTime, 200);
     assertEquals(renewed.exclusion.expiresAt, 1_200);
     assertEquals(
       await service.releaseLegacyBackgroundExclusion("", 2),
@@ -101,6 +104,7 @@ Deno.test("only a configured service session controls background exclusion", asy
     const released = await service.releaseLegacyBackgroundExclusion("", 1);
     assertExists(released);
     assertEquals(released.expiresAt, 200);
+    assertEquals(await server.legacyBackgroundActive(SPACE, ""), false);
   } finally {
     await writerClient.close();
     await serviceClient.close();

@@ -33,6 +33,8 @@ export interface PieceSchedulerOptions extends WorkerOptions {
   backgroundExclusion?: LegacyBackgroundExclusionControl;
   createWorkerController?: (options: WorkerOptions) => WorkerController;
   now?: () => number;
+  /** Monotonic clock used only for locally enforcing server lease duration. */
+  monotonicNow?: () => number;
   setTimer?: (callback: () => void, delayMs: number) => number;
   clearTimer?: (timer: number) => void;
 }
@@ -66,6 +68,7 @@ export class SpaceManager {
     options: WorkerOptions,
   ) => WorkerController;
   private readonly now: () => number;
+  private readonly monotonicNow: () => number;
   private readonly setTimer: (
     callback: () => void,
     delayMs: number,
@@ -90,6 +93,9 @@ export class SpaceManager {
     this.createWorkerController = options.createWorkerController ??
       ((workerOptions) => new WorkerController(workerOptions));
     this.now = options.now ?? Date.now;
+    this.monotonicNow = options.monotonicNow ?? performance.now.bind(
+      performance,
+    );
     this.setTimer = options.setTimer ??
       ((callback, delayMs) =>
         setTimeout(callback, delayMs) as unknown as number);
@@ -382,8 +388,16 @@ export class SpaceManager {
     status: LegacyBackgroundExclusionStatus,
   ): Promise<void> {
     this.backgroundExclusion = status.exclusion;
+    if (!this.scheduleExclusionTimers(status)) {
+      console.error(
+        `${this.did} Background exclusion response lacks a safe server-relative deadline; failing closed`,
+      );
+      this.loseBackgroundAuthority(
+        "background exclusion deadline unavailable",
+      );
+      return;
+    }
     this.backgroundReady = status.ready;
-    this.scheduleExclusionTimers(status);
     if (status.ready && this.isRunning && this.workerController === null) {
       await this.setupWorkerController();
     }
@@ -391,13 +405,19 @@ export class SpaceManager {
 
   private scheduleExclusionTimers(
     status: LegacyBackgroundExclusionStatus,
-  ): void {
+  ): boolean {
     this.cancelExclusionTimers();
     const exclusion = status.exclusion;
-    const remaining = Math.max(1, exclusion.expiresAt - this.now());
+    const serverTime = status.serverTime;
+    if (
+      serverTime === undefined || !Number.isSafeInteger(serverTime) ||
+      !Number.isSafeInteger(exclusion.expiresAt) ||
+      exclusion.expiresAt <= serverTime
+    ) return false;
+    const remaining = exclusion.expiresAt - serverTime;
     const blockedDelay = status.blockedUntil === undefined
       ? remaining
-      : Math.max(1, status.blockedUntil - this.now());
+      : Math.max(1, status.blockedUntil - serverTime);
     const renewDelay = Math.max(
       1,
       Math.min(Math.floor(remaining / 2), blockedDelay),
@@ -406,17 +426,22 @@ export class SpaceManager {
       this.renewalTimer = null;
       this.beginRenewBackgroundExclusion(exclusion);
     }, renewDelay);
-    this.expiryTimer = this.setTimer(() => {
+    const localDeadline = this.monotonicNow() + remaining;
+    const expire = () => {
       this.expiryTimer = null;
+      const delay = Math.ceil(localDeadline - this.monotonicNow());
+      if (delay > 0) {
+        this.expiryTimer = this.setTimer(expire, delay);
+        return;
+      }
       void this.enqueueLifecycle(() => {
-        if (
-          this.backgroundExclusion === exclusion &&
-          this.now() >= exclusion.expiresAt
-        ) {
+        if (this.backgroundExclusion === exclusion) {
           this.loseBackgroundAuthority("background exclusion expired locally");
         }
       });
-    }, remaining);
+    };
+    this.expiryTimer = this.setTimer(expire, remaining);
+    return true;
   }
 
   private cancelExclusionTimers(): void {
