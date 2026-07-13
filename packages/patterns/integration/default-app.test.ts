@@ -3567,19 +3567,56 @@ async function findNoteInList(page: Page): Promise<boolean> {
   return (await collectNoteTitlesInList(page)).length > 0;
 }
 
-// Serialized into the page by waitForCondition: count the unique rendered
-// "📝 New Note #<hash>" titles across the document and every shadow root and
-// report whether more than `minCount` are present. Inlines the collection that
-// collectNoteTitlesInList performs so the wait resolves the instant the list
-// grows rather than on a polling tick.
+// Serialized into the page by waitForCondition: count only note chips rendered
+// in the active home pattern's "Pieces" table. The composed-tree walk crosses
+// cf-render's shadow root without letting stale note-view text elsewhere in the
+// shell satisfy the assertion.
 const noteTitlesExceed = (probe: ProbeApi, minCount: number): boolean => {
-  const titles = new Set<string>();
-  for (const element of probe.collect("*")) {
-    const text = element.textContent;
-    if (!text) continue;
-    for (const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)) {
-      titles.add(match[0]);
+  const composedParent = (element: Element): Element | null => {
+    if (element.parentElement) return element.parentElement;
+    const root = element.getRootNode();
+    return root instanceof ShadowRoot ? root.host : null;
+  };
+  const composedContains = (
+    ancestor: Element,
+    descendant: Element,
+  ): boolean => {
+    for (
+      let current: Element | null = descendant;
+      current;
+      current = composedParent(current)
+    ) {
+      if (current === ancestor) return true;
     }
+    return false;
+  };
+
+  const tables = probe.collect("cf-table");
+  let piecesTable: Element | undefined;
+  for (const heading of probe.collect("h3")) {
+    if (heading.textContent?.trim() !== "Pieces") continue;
+    for (
+      let container = composedParent(heading);
+      container;
+      container = composedParent(container)
+    ) {
+      piecesTable = tables.find((table) => composedContains(container, table));
+      if (piecesTable) break;
+    }
+    if (piecesTable) break;
+  }
+  if (!piecesTable) return false;
+
+  const titles = new Set<string>();
+  for (const chip of probe.collect("cf-chip")) {
+    if (!composedContains(piecesTable, chip)) continue;
+    const label = String(
+      (chip as Element & { label?: unknown }).label ||
+        chip.getAttribute("label") ||
+        probe.deepText(chip) ||
+        "",
+    ).trim();
+    if (/^📝 New Note #[A-Za-z0-9_-]+$/.test(label)) titles.add(label);
   }
   return titles.size > minCount;
 };
@@ -3587,25 +3624,67 @@ const noteTitlesExceed = (probe: ProbeApi, minCount: number): boolean => {
 async function collectNoteTitlesInList(page: Page): Promise<string[]> {
   try {
     return await page.evaluate(() => {
-      const titles = new Set<string>();
-
-      function search(root: Document | ShadowRoot): void {
-        const allElements = root.querySelectorAll("*");
-        for (const el of allElements) {
-          const text = el.textContent;
-          if (text) {
-            for (
-              const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)
-            ) {
-              titles.add(match[0]);
-            }
-          }
-          if (el.shadowRoot) {
-            search(el.shadowRoot);
-          }
+      const composedParent = (element: Element): Element | null => {
+        if (element.parentElement) return element.parentElement;
+        const root = element.getRootNode();
+        return root instanceof ShadowRoot ? root.host : null;
+      };
+      const composedContains = (
+        ancestor: Element,
+        descendant: Element,
+      ): boolean => {
+        for (
+          let current: Element | null = descendant;
+          current;
+          current = composedParent(current)
+        ) {
+          if (current === ancestor) return true;
         }
+        return false;
+      };
+      const collect = (selector: string): Element[] => {
+        const elements: Element[] = [];
+        const search = (root: Document | ShadowRoot): void => {
+          for (const element of root.querySelectorAll(selector)) {
+            elements.push(element);
+          }
+          for (const element of root.querySelectorAll("*")) {
+            if (element.shadowRoot) search(element.shadowRoot);
+          }
+        };
+        search(document);
+        return elements;
+      };
+
+      const tables = collect("cf-table");
+      let piecesTable: Element | undefined;
+      for (const heading of collect("h3")) {
+        if (heading.textContent?.trim() !== "Pieces") continue;
+        for (
+          let container = composedParent(heading);
+          container;
+          container = composedParent(container)
+        ) {
+          piecesTable = tables.find((table) =>
+            composedContains(container, table)
+          );
+          if (piecesTable) break;
+        }
+        if (piecesTable) break;
       }
-      search(document);
+      if (!piecesTable) return [];
+
+      const titles = new Set<string>();
+      for (const chip of collect("cf-chip")) {
+        if (!composedContains(piecesTable, chip)) continue;
+        const label = String(
+          (chip as Element & { label?: unknown }).label ||
+            chip.getAttribute("label") ||
+            chip.textContent ||
+            "",
+        ).trim();
+        if (/^📝 New Note #[A-Za-z0-9_-]+$/.test(label)) titles.add(label);
+      }
       return [...titles].sort();
     });
   } catch (_) {
