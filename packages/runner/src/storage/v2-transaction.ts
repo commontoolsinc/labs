@@ -102,7 +102,6 @@ const DOCUMENT_MIME = "application/json" as const;
 
 type ReadDocumentEntry = {
   initial: RootAttestation;
-  seq?: number;
   validated: boolean;
   current?: RootAttestation;
   frozenReads?: PathKeyMap<FabricValue | undefined>;
@@ -113,7 +112,6 @@ type ReadDocumentEntry = {
 type WritableDocumentEntry = {
   initial: RootAttestation;
   current: RootAttestation;
-  seq?: number;
   validated: boolean;
   frozenReads: PathKeyMap<FabricValue | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
@@ -2262,7 +2260,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   private document(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
-  ): { doc: DocumentEntry; meta: { seq?: number } } {
+  ): { doc: DocumentEntry } {
     const scope = normalizeCellScope(address.scope);
     if (
       this.#lastDocument?.branch === branch &&
@@ -2270,23 +2268,15 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.#lastDocument.type === (address.type ?? DOCUMENT_MIME) &&
       this.#lastDocument.scope === scope
     ) {
-      return {
-        doc: this.#lastDocument.doc,
-        meta: {
-          ...(typeof this.#lastDocument.doc.seq === "number"
-            ? { seq: this.#lastDocument.doc.seq }
-            : {}),
-        },
-      };
+      return { doc: this.#lastDocument.doc };
     }
 
     const key = this.docKey(address);
     let doc = branch.docs.get(key);
     if (!doc) {
-      const { root: loaded, seq } = this.loadRoot(branch, address);
+      const loaded = this.loadRoot(branch, address);
       doc = {
         initial: loaded,
-        seq,
         validated: false,
       };
       branch.docs.set(key, doc);
@@ -2298,23 +2288,20 @@ export class V2StorageTransaction implements IStorageTransaction {
       scope,
       doc,
     };
-    return {
-      doc,
-      meta: { ...(typeof doc.seq === "number" ? { seq: doc.seq } : {}) },
-    };
+    return { doc };
   }
 
   private loadRoot(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
-  ): { root: RootAttestation; seq?: number } {
+  ): RootAttestation {
     const type = address.type ?? DOCUMENT_MIME;
     if (address.id.startsWith("data:")) {
       const loaded = loadInline({ id: address.id, type });
       if (loaded.error) {
         throw loaded.error;
       }
-      return { root: loaded.ok as RootAttestation };
+      return loaded.ok as RootAttestation;
     }
 
     const value = toTransactionDocumentValue(
@@ -2322,15 +2309,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     );
 
     return {
-      root: {
-        address: {
-          id: address.id,
-          type,
-          path: [],
-          scope: normalizeCellScope(address.scope),
-        },
-        value,
+      address: {
+        id: address.id,
+        type,
+        path: [],
+        scope: normalizeCellScope(address.scope),
       },
+      value,
     };
   }
 
