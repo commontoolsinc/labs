@@ -36,6 +36,26 @@ Deno.test("executor worker OTel stays inert when the host is not exporting", asy
   assertEquals(preflight, []);
 });
 
+Deno.test("toolshed SDK OTel alone stays inert in the isolated worker", async () => {
+  const { runtime, preflight } = runtimeStub();
+  const warnings: unknown[][] = [];
+  let loads = 0;
+
+  const detach = await maybeAttachExecutorOtelBridge(runtime, {
+    envGet: (name: string) => name === "OTEL_ENABLED" ? "true" : undefined,
+    load: () => {
+      loads++;
+      return Promise.reject(new Error("main-isolate provider is unavailable"));
+    },
+    warn: (...args: unknown[]) => warnings.push(args),
+  });
+
+  assertEquals(detach, undefined);
+  assertEquals(loads, 0);
+  assertEquals(preflight, []);
+  assertEquals(warnings, []);
+});
+
 Deno.test("executor worker OTel bridges its isolated runtime and detaches", async () => {
   const { runtime, telemetry, preflight } = runtimeStub();
   const tracer = {} as OtelBridgeOptions["tracer"];
@@ -92,7 +112,7 @@ Deno.test("executor worker OTel fails open when bridge loading fails", async () 
   const warnings: unknown[][] = [];
 
   const detach = await maybeAttachExecutorOtelBridge(runtime, {
-    envGet: (name: string) => name === "OTEL_ENABLED" ? "true" : undefined,
+    envGet: (name: string) => name === "OTEL_DENO" ? "true" : undefined,
     load: () => Promise.reject(new Error("bridge unavailable")),
     warn: (...args: unknown[]) => warnings.push(args),
   });
@@ -100,4 +120,56 @@ Deno.test("executor worker OTel fails open when bridge loading fails", async () 
   assertEquals(detach, undefined);
   assertEquals(preflight, []);
   assertEquals(warnings.length, 1);
+});
+
+Deno.test("executor worker OTel contains and deduplicates detach failures", async () => {
+  const { runtime } = runtimeStub();
+  const warnings: unknown[][] = [];
+  let detaches = 0;
+
+  const detach = await maybeAttachExecutorOtelBridge(runtime, {
+    envGet: (name: string) => name === "OTEL_DENO" ? "true" : undefined,
+    load: () =>
+      Promise.resolve({
+        tracer: {} as OtelBridgeOptions["tracer"],
+        meter: {} as OtelBridgeOptions["meter"],
+        attach: () => () => {
+          detaches++;
+          throw new Error("bridge shutdown failed");
+        },
+      }),
+    warn: (...args: unknown[]) => warnings.push(args),
+  });
+
+  detach?.();
+  detach?.();
+  assertEquals(detaches, 1);
+  assertEquals(warnings.length, 1);
+});
+
+Deno.test("executor worker OTel contains cleanup failure after partial attach", async () => {
+  const { runtime } = runtimeStub();
+  const warnings: unknown[][] = [];
+  let detaches = 0;
+  runtime.scheduler.setEventPreflightTelemetryEnabled = () => {
+    throw new Error("preflight gate unavailable");
+  };
+
+  const detach = await maybeAttachExecutorOtelBridge(runtime, {
+    envGet: (name: string) => name === "OTEL_DENO" ? "true" : undefined,
+    load: () =>
+      Promise.resolve({
+        tracer: {} as OtelBridgeOptions["tracer"],
+        meter: {} as OtelBridgeOptions["meter"],
+        attach: () => () => {
+          detaches++;
+          throw new Error("partial bridge shutdown failed");
+        },
+      }),
+    warn: (...args: unknown[]) => warnings.push(args),
+  });
+
+  assertEquals(detach, undefined);
+  assertEquals(detaches, 1);
+  assertEquals(warnings.length, 2);
 });
