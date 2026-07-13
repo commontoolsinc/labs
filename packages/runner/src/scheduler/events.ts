@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { DataUnavailableReason } from "@commonfabric/data-model/fabric-instances";
 import { recordTrustedEventPolicyInputs } from "../cfc/ui-contract.ts";
 import type { Cancel } from "../cancel.ts";
 import { ensurePieceRunning } from "../ensure-piece-running.ts";
@@ -43,6 +44,7 @@ import type {
   Action,
   DirtyDependencyTraceContext,
   EventHandler,
+  HandlerInputReadiness,
   QueuedEvent,
   ReactivityLog,
 } from "./types.ts";
@@ -107,6 +109,7 @@ export function isHeadEventParked(
 export interface EventDependencyPreflightResult {
   shouldSkipEvent: boolean;
   shouldParkForInputs: boolean;
+  inputUnavailableReason?: DataUnavailableReason;
   deps: ReactivityLog;
   dirtyDeps: Set<Action>;
   hasDirtyDependencies: boolean;
@@ -371,7 +374,7 @@ export function preflightQueuedEventDependencies(state: {
   let collectMs = 0;
   let scheduleMs = 0;
   let shouldSkipEvent = false;
-  let inputsReady = true;
+  let inputReadiness: HandlerInputReadiness = { ready: true };
 
   // Get the handler's dependencies (read-only, just capturing what will be read)
   const depTx = state.runtime.edit();
@@ -385,7 +388,9 @@ export function preflightQueuedEventDependencies(state: {
   );
   try {
     handler.populateDependencies?.(depTx, eventValue);
-    inputsReady = handler.inputReadiness?.(depTx, eventValue) ?? true;
+    inputReadiness = handler.inputReadiness?.(depTx, eventValue) ?? {
+      ready: true,
+    };
   } catch (error) {
     state.eventQueue.shift();
     state.handleError(error as Error, handler);
@@ -512,9 +517,17 @@ export function preflightQueuedEventDependencies(state: {
     scheduleMs = performance.now() - stepStart;
   }
 
+  const inputUnavailableReason = inputReadiness.ready
+    ? undefined
+    : inputReadiness.reason;
   return {
     shouldSkipEvent,
-    shouldParkForInputs: !shouldSkipEvent && !inputsReady,
+    shouldParkForInputs: !shouldSkipEvent &&
+      (inputUnavailableReason === "pending" ||
+        inputUnavailableReason === "syncing"),
+    ...(inputUnavailableReason !== undefined && {
+      inputUnavailableReason,
+    }),
     deps,
     dirtyDeps,
     hasDirtyDependencies,

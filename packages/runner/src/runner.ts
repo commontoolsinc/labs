@@ -39,6 +39,7 @@ import {
 } from "./builder/pattern.ts";
 import { type Cell, createCell, getCellWithStatus, isCell } from "./cell.ts";
 import { type Action } from "./scheduler.ts";
+import type { HandlerInputReadiness } from "./scheduler/types.ts";
 import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
@@ -3922,21 +3923,25 @@ export class Runner {
     const inputReadiness = (
       readinessTx: IExtendedStorageTransaction,
       _event: any,
-    ): boolean => {
+    ): HandlerInputReadiness => {
       const inputsCell = this.runtime.getImmutableCell(
         processCell.space,
         capturedInputs,
         undefined,
         readinessTx,
       );
-      return this.readJavaScriptArgument(
+      const readiness = this.readJavaScriptArgument(
         capturedInputModule,
         inputsCell,
         readinessTx,
         {
           writableProxy: (module as { writableProxy?: boolean }).writableProxy,
         },
-      ).isValidArgument;
+      );
+      return readiness.isValidArgument ? { ready: true } : {
+        ready: false,
+        reason: readiness.unavailable?.reason ?? "schema-mismatch",
+      };
     };
 
     const wrappedHandler = Object.assign(handler, {

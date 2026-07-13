@@ -1095,11 +1095,11 @@ export class Scheduler {
         // A queued event is parked behind a throttled dependency. Wait for the
         // wake timer to re-schedule the queue and then re-check.
         this.idlePromises.push(park);
-      } else if (
-        this.hasPendingLineageHeadEvent() || this.hasInputParkedHeadEvent()
-      ) {
-        // These heads have no timer. Their origin commit or input dependency is
-        // the wake source, so idle must stay open until that callback runs.
+      } else if (this.hasPendingLineageHeadEvent()) {
+        // A pending origin commit has no timer and is itself scheduler work, so
+        // idle stays open until its callback runs. An input-parked handler is
+        // different: async producers commonly await idle before publishing the
+        // dependency write that wakes it, so it must be quiescent to idle().
         this.idlePromises.push(park);
       } else if (!this.scheduled) {
         if (this.hasRunnablePullWork()) {

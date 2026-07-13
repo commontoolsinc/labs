@@ -170,6 +170,10 @@ export async function processPullQueuedEventDuringExecute(
         dirtyDependencyCount: preflight.dirtyDeps.size,
         hasDirtyDependencies: preflight.hasDirtyDependencies,
         skipped: shouldSkipEvent || preflight.shouldParkForInputs,
+        ...(preflight.inputUnavailableReason !== undefined && {
+          inputUnavailableReason: preflight.inputUnavailableReason,
+        }),
+        queueDepth: state.eventQueue.length,
         populateMs: preflight.populateMs,
         txToLogMs: preflight.txToLogMs,
         depCommitMs: preflight.depCommitMs,

@@ -1439,9 +1439,24 @@ describe("JavaScript-node data unavailability", () => {
     expect(settledWhileSyncing).toBe(false);
     expect(calls).toBe(0);
 
-    const updateTx = runtime.edit();
-    result.getArgumentCell()!.withTx(updateTx).key("value").set(7);
-    await updateTx.commit();
+    // Async producers wait for scheduler quiescence before publishing. A
+    // parked handler must not hold idle() open, or the producer write which
+    // wakes this event can never happen.
+    const producerWrite = (async () => {
+      await runtime.idle();
+      const updateTx = runtime.edit();
+      result.getArgumentCell()!.withTx(updateTx).key("value").set(7);
+      await updateTx.commit();
+    })();
+    await Promise.race([
+      producerWrite,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("parked handler deadlocked its producer")),
+          1000,
+        )
+      ),
+    ]);
     const commitStatus = await Promise.race([
       eventCommitted.promise,
       new Promise<never>((_, reject) =>
@@ -1483,5 +1498,40 @@ describe("JavaScript-node data unavailability", () => {
     expect(queuedStatuses).toEqual(["done", "done"]);
     await runtime.idle();
     expect(calls).toBe(2);
+
+    for (
+      const terminal of [
+        DataUnavailable.error(new Error("terminal handler input")),
+        DataUnavailable.schemaMismatch(),
+      ]
+    ) {
+      const terminalTx = runtime.edit();
+      result.getArgumentCell()!.withTx(terminalTx).key("value").setRaw(
+        terminal,
+      );
+      await terminalTx.commit();
+
+      const terminalCommitted = Promise.withResolvers<string>();
+      result.key("trigger").send(
+        {},
+        (committedTx) => terminalCommitted.resolve(committedTx.status().status),
+      );
+      const status = await Promise.race([
+        terminalCommitted.promise,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `${terminal.reason} handler input blocked the event queue`,
+                ),
+              ),
+            1000,
+          )
+        ),
+      ]);
+      expect(status).toBe("done");
+      expect(calls).toBe(2);
+    }
   });
 });

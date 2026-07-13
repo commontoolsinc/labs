@@ -19,7 +19,7 @@ export function applyPullExecuteContinuation(
     !hasInputParkedHeadEvent;
   const hasParkedHeadEvent = state.eventQueue.length > 0 &&
     (isHeadEventParked(state.eventQueueWakeState) ||
-      hasPendingLineageHeadEvent || hasInputParkedHeadEvent);
+      hasPendingLineageHeadEvent);
   const shouldRerunAfterCurrentExecute = state
     .consumeRerunAfterCurrentExecute();
 
