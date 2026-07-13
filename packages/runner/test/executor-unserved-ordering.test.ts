@@ -5,6 +5,7 @@ import type { ClientCommit } from "@commonfabric/memory/v2";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type { ReplicaSessionHandle } from "../src/storage/v2-replica-session.ts";
 import { type SessionFactory, StorageManager } from "../src/storage/v2.ts";
+import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 
 const signer = await Identity.fromPassphrase(
   "executor unserved ordering principal",
@@ -82,9 +83,11 @@ Deno.test("canonical unserved settlement is accepted before claim release", asyn
     return Promise.resolve(applied(attempt));
   });
   let callbackCommitCount = 0;
+  const telemetry: RuntimeTelemetryMarker[] = [];
   const storage = ScriptedStorageManager.connectTo(factory, () => {
     callbackCommitCount = factory.commits.length;
   });
+  storage.setTelemetry({ submit: (marker) => telemetry.push(marker) });
   try {
     const result = await storage.open(SPACE).replica.commitNative!({
       operations: [{
@@ -112,6 +115,27 @@ Deno.test("canonical unserved settlement is accepted before claim release", asyn
       { diagnosticCode: "unobserved-read" },
     );
     assertEquals(callbackCommitCount, 2);
+    assertEquals(telemetry, [{
+      type: "storage.push.start",
+      id: `push:${SPACE}:1`,
+      operation: "transact",
+      localSeq: 1,
+      spaceDid: SPACE,
+    }, {
+      type: "storage.push.error",
+      id: `push:${SPACE}:1`,
+      error: "ExecutionActionFirewallError",
+    }, {
+      type: "storage.push.start",
+      id: `push:${SPACE}:2`,
+      operation: "transact",
+      localSeq: 2,
+      spaceDid: SPACE,
+    }, {
+      type: "storage.push.complete",
+      id: `push:${SPACE}:2`,
+      sessionId: "session:unserved-ordering",
+    }]);
   } finally {
     await storage.close();
   }
