@@ -87,6 +87,7 @@ export function createExecutorActionTransactionRouter(
       ? undefined
       : options.claimForAction(sourceAction);
     let observation = input.commit.schedulerObservation;
+    let synthesizedContinuation = false;
     if (
       !isSchedulerActionObservation(observation) &&
       sourceAction !== undefined && liveClaim !== undefined
@@ -100,6 +101,7 @@ export function createExecutorActionTransactionRouter(
       if (continuation !== undefined) {
         input.commit.schedulerObservation = continuation;
         observation = continuation;
+        synthesizedContinuation = true;
       }
     }
     if (!isSchedulerActionObservation(observation)) {
@@ -132,6 +134,7 @@ export function createExecutorActionTransactionRouter(
       sourceAction,
       builtinSummaries,
       builtinObservationTemplates,
+      !synthesizedContinuation,
     );
     const routedObservation = input.commit
       .schedulerObservation as SchedulerActionObservation;
@@ -248,6 +251,7 @@ function prepareSupportedBuiltinObservation(
   sourceAction: object,
   summaries: WeakMap<object, CompleteActionScopeSummary>,
   templates: WeakMap<object, SchedulerActionObservation>,
+  refreshFromActionRun: boolean,
 ):
   | import("../builtins/server-execution.ts").ServerExecutableBuiltinId
   | undefined {
@@ -285,7 +289,6 @@ function prepareSupportedBuiltinObservation(
         ...(observation.declaredWrites ?? []),
         ...observation.materializerWriteEnvelopes,
         ...(observation.ignoredSchedulingWrites ?? []),
-        ...commitWriteAddresses(input),
       ]),
       materializerWriteEnvelopes: dedupeAddresses(
         observation.materializerWriteEnvelopes,
@@ -295,8 +298,47 @@ function prepareSupportedBuiltinObservation(
       ),
     };
     summaries.set(sourceAction, summary);
-    templates.set(sourceAction, observation);
+  } else if (refreshFromActionRun) {
+    // Supported builtin actions retain one sourceAction across reruns. Their
+    // trusted runtimeWrites array can grow as lazy internal cells are minted,
+    // and a later input may exercise framework/CFC reads not present in the
+    // first run. Refresh the certificate with the same trusted descriptor and
+    // canonical commit surfaces used for the initial candidate; otherwise the
+    // second claimed request is rejected as an unobserved read and loops
+    // revoke/reclaim without ever reaching the broker.
+    summary = {
+      ...summary,
+      reads: dedupeAddresses([
+        ...summary.reads,
+        ...descriptor.reads.map(toMemorySpaceAddress),
+        ...descriptor.runtimeWrites.map(toMemorySpaceAddress),
+        ...descriptor.runtimeWrites.map((link) => ({
+          ...toMemorySpaceAddress(link),
+          path: [],
+        })),
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...commitReadAddresses(input),
+      ]),
+      writes: dedupeAddresses([
+        ...summary.writes,
+        ...descriptor.writes.map(toMemorySpaceAddress),
+        ...descriptor.runtimeWrites.map(toMemorySpaceAddress),
+        ...descriptor.runtimeWrites.map((link) => ({
+          ...toMemorySpaceAddress(link),
+          path: [],
+        })),
+        ...observation.actualChangedWrites,
+        ...observation.currentKnownWrites,
+        ...(observation.declaredWrites ?? []),
+        ...observation.materializerWriteEnvelopes,
+        ...(observation.ignoredSchedulingWrites ?? []),
+        ...commitWriteAddresses(input),
+      ]),
+    };
+    summaries.set(sourceAction, summary);
   }
+  if (refreshFromActionRun) templates.set(sourceAction, observation);
   input.commit.schedulerObservation = {
     ...observation,
     completeActionScopeSummary: summary,

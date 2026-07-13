@@ -38,6 +38,7 @@ import type {
 import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
 import type {
   CommitPrecondition,
+  ExecutionClaim,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
@@ -356,12 +357,26 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
     private readonly sinkDisposition: ExternalSinkDispositionPolicy = "allow",
+    private readonly captureExecutionClaim?: (
+      sourceAction: object | undefined,
+    ) => ExecutionClaim | undefined,
   ) {}
 
   externalSinkDisposition(): ExternalSinkDisposition {
-    return typeof this.sinkDisposition === "function"
+    const configured = typeof this.sinkDisposition === "function"
       ? this.sinkDisposition(this.tx.sourceAction)
       : this.sinkDisposition;
+    if (configured === "suppress") return configured;
+    if (this.tx.executionEffectAuthority === "server") return "suppress";
+    if (this.tx.executionEffectAuthority === "client") return "allow";
+    const claim = this.captureExecutionClaim?.(this.tx.sourceAction);
+    if (claim?.actionKind === "effect") {
+      this.tx.executionEffectAuthority = "server";
+      this.tx.executionClaim = claim;
+      return "suppress";
+    }
+    this.tx.executionEffectAuthority = "client";
+    return "allow";
   }
 
   noteCfcSinkReleaseReject(

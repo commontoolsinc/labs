@@ -3,6 +3,7 @@ import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import type {
   ActionSettlement,
+  ClientCommit,
   MemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
@@ -22,7 +23,7 @@ const FLAGS = {
   schedulerWriterLookup: true,
   serverPrimaryExecutionV1: true,
   serverPrimaryExecutionClaimRoutingV1: true,
-  serverPrimaryExecutionBuiltinPassivityV1: false,
+  serverPrimaryExecutionBuiltinPassivityV1: true,
 } as const satisfies Partial<MemoryProtocolFlags>;
 
 const PROGRAM: RuntimeProgram = {
@@ -40,7 +41,6 @@ const PROGRAM: RuntimeProgram = {
 
 const BUILTIN_FLAGS = {
   ...FLAGS,
-  serverPrimaryExecutionBuiltinPassivityV1: true,
 } as const satisfies Partial<MemoryProtocolFlags>;
 
 const ASYNC_BUILTIN_PROGRAM: RuntimeProgram = {
@@ -62,6 +62,7 @@ class LoopbackSessionFactory implements SessionFactory {
   constructor(
     private readonly server: Server,
     private readonly flags: Partial<MemoryProtocolFlags>,
+    private readonly onCommit?: (commit: ClientCommit) => void,
   ) {}
 
   async create(
@@ -84,6 +85,13 @@ class LoopbackSessionFactory implements SessionFactory {
         authorization: { principal: signer?.did() },
       }),
     );
+    if (this.onCommit !== undefined) {
+      const transact = session.transact.bind(session);
+      session.transact = (commit) => {
+        this.onCommit!(structuredClone(commit));
+        return transact(commit);
+      };
+    }
     return { client, session };
   }
 }
@@ -93,10 +101,11 @@ class LoopbackStorageManager extends StorageManager {
     server: Server,
     flags: Partial<MemoryProtocolFlags>,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,
+    onCommit?: (commit: ClientCommit) => void,
   ): LoopbackStorageManager {
     return new LoopbackStorageManager(
       { ...options, memoryHost: new URL("memory://executor-claim-e2e") },
-      new LoopbackSessionFactory(server, flags),
+      new LoopbackSessionFactory(server, flags, onCommit),
     );
   }
 }
@@ -173,6 +182,9 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
   let unsubscribeAccepted = () => {};
   let unsubscribeControl = () => {};
   let unsubscribeNoOp = () => {};
+  let unsubscribeClientSettlement = () => {};
+  const clientRuntimes: Runtime[] = [];
+  const clientStorages: LoopbackStorageManager[] = [];
   const events: string[] = [];
   try {
     const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
@@ -192,6 +204,7 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
       undefined,
       tx,
     );
+    const resultLink = result.getAsNormalizedFullLink();
     const handle = seedRuntime.run(tx, compiled, { value: input }, result);
     assertEquals((await tx.commit()).error, undefined);
     assertEquals(await handle.pull(), 10);
@@ -267,8 +280,8 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
 
     const factory = new DenoSpaceExecutorFactory({
       server,
-      apiUrl: new URL(import.meta.url),
-      patternApiUrl: new URL(import.meta.url),
+      apiUrl: new URL("https://toolshed.example/"),
+      patternApiUrl: new URL("https://toolshed.example/"),
       experimental: {
         persistentSchedulerState: true,
         serverPrimaryExecution: true,
@@ -365,10 +378,87 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
         ?.value,
       16,
     );
+
+    const clientDerivedCommits: ClientCommit[] = [];
+    for (let index = 0; index < 3; index++) {
+      const storage = LoopbackStorageManager.connectTo(
+        server,
+        FLAGS,
+        { as: principal },
+        (commit) => clientDerivedCommits.push(commit),
+      );
+      clientStorages.push(storage);
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+        experimental: {
+          persistentSchedulerState: true,
+          serverPrimaryExecution: true,
+        },
+      });
+      clientRuntimes.push(runtime);
+      await runtime.patternManager.compilePattern(PROGRAM, { space });
+      const resumed = runtime.getCellFromLink(resultLink);
+      await resumed.sync();
+      assertEquals(await runtime.start(resumed), true);
+      await resumed.pull();
+      await runtime.settled();
+    }
+    clientDerivedCommits.length = 0;
+
+    const clientSettled = Promise.withResolvers<ActionSettlement>();
+    let clientSourceSeq = Number.POSITIVE_INFINITY;
+    unsubscribeClientSettlement = observer.subscribeExecutionControl(
+      (event) => {
+        if (
+          event.type === "session.execution.settlement" &&
+          event.settlement.inputBasisSeq >= clientSourceSeq
+        ) {
+          clientSettled.resolve(event.settlement);
+        }
+      },
+    );
+    const clientSource = await observer.transact({
+      localSeq: 4,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 9 },
+      }],
+    });
+    clientSourceSeq = clientSource.seq;
+    const clientSettlement = await awaitBarrier(
+      clientSettled.promise,
+      "multi-client settlement",
+      events,
+    );
+    assertEquals(clientSettlement.outcome, "committed");
+    for (const runtime of clientRuntimes) await runtime.settled();
+    assertEquals(
+      clientDerivedCommits.filter((commit) => {
+        const observation = commit.schedulerObservation as {
+          actionId?: string;
+          actionKind?: string;
+        } | undefined;
+        return observation?.actionId === clientSettlement.claim.actionId &&
+          observation.actionKind === "computation" &&
+          commit.operations.length > 0;
+      }),
+      [],
+    );
+    assertEquals(
+      (await server.readDocument(space, outputId) as { value?: unknown })
+        ?.value,
+      18,
+    );
   } finally {
     unsubscribeAccepted();
     unsubscribeControl();
     unsubscribeNoOp();
+    unsubscribeClientSettlement();
+    for (const runtime of clientRuntimes) await runtime.dispose();
+    for (const storage of clientStorages) await storage.close();
     await executor?.stop();
     await seedRuntime.dispose();
     await seedStorage.close();
@@ -424,8 +514,11 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
     null;
   let observerClient: MemoryClient.Client | null = null;
   let unsubscribeAccepted = () => {};
+  const clientRuntimes: Runtime[] = [];
+  const clientStorages: LoopbackStorageManager[] = [];
   const events: string[] = [];
   const brokerRequests: ServerBuiltinFetchRequest[] = [];
+  const originalGlobalFetch = globalThis.fetch;
   try {
     const compiled = await seedRuntime.patternManager.compilePattern(
       ASYNC_BUILTIN_PROGRAM,
@@ -445,6 +538,7 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
       undefined,
       tx,
     );
+    const resultLink = result.getAsNormalizedFullLink();
     const handle = seedRuntime.run(tx, compiled, { url: input }, result);
     assertEquals((await tx.commit()).error, undefined);
     await handle.pull();
@@ -587,8 +681,164 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
       true,
     );
     assertEquals(events.some((event) => event.startsWith("crash:")), false);
+
+    const clientNetworkRequests: string[] = [];
+    const clientFetch = (input: string | URL | Request) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      clientNetworkRequests.push(url);
+      return Promise.resolve(
+        url.includes("/api/ai/llm")
+          ? Response.json({
+            role: "assistant",
+            content: "client generated response",
+            id: "client-generate-e2e",
+          })
+          : new Response("client fetch response"),
+      );
+    };
+    // The established browser generateText transport is process-global. Keep
+    // this test faithful to that path while restoring the worker-global seam
+    // in finally so the fallback assertion covers both supported builtins.
+    globalThis.fetch = clientFetch;
+    const clientWireCommits: ClientCommit[] = [];
+    for (let index = 0; index < 3; index++) {
+      const storage = LoopbackStorageManager.connectTo(
+        server,
+        BUILTIN_FLAGS,
+        { as: principal },
+        (commit) => clientWireCommits.push(commit),
+      );
+      clientStorages.push(storage);
+      const runtime = new Runtime({
+        apiUrl: servingOrigin,
+        patternEnvironment: { apiUrl: servingOrigin },
+        storageManager: storage,
+        fetch: clientFetch,
+        experimental: {
+          persistentSchedulerState: true,
+          serverPrimaryExecution: true,
+        },
+      });
+      clientRuntimes.push(runtime);
+      await runtime.patternManager.compilePattern(ASYNC_BUILTIN_PROGRAM, {
+        space,
+      });
+      const resumed = runtime.getCellFromLink(resultLink);
+      await resumed.sync();
+      assertEquals(await runtime.start(resumed), true);
+      await resumed.pull();
+      await runtime.settled();
+    }
+    clientNetworkRequests.length = 0;
+    clientWireCommits.length = 0;
+
+    const secondServerRound = Promise.withResolvers<void>();
+    const originalBrokerCount = brokerRequests.length;
+    const unsubscribeSecondRound = server.subscribeAcceptedCommits(
+      space,
+      () => {
+        if (brokerRequests.length >= originalBrokerCount + 2) {
+          secondServerRound.resolve();
+        }
+      },
+    );
+    try {
+      await observer.transact({
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: input.sourceURI,
+          value: { value: "/server-next" },
+        }],
+      });
+      await awaitBarrier(
+        secondServerRound.promise,
+        "passive builtin server round",
+        events,
+      );
+    } finally {
+      unsubscribeSecondRound();
+    }
+    for (const runtime of clientRuntimes) await runtime.settled();
+    assertEquals(clientNetworkRequests, []);
+    assertEquals(
+      clientWireCommits.filter((commit) => {
+        const observation = commit.schedulerObservation as {
+          actionKind?: string;
+        } | undefined;
+        return observation?.actionKind === "effect" &&
+          commit.operations.length > 0;
+      }),
+      [],
+    );
+
+    // Permanent authority removal releases the same three clients back to the
+    // existing durable mutex. Exactly one fetch and one generation may leave
+    // the browser cohort; no polling or heartbeat grants authority.
+    await observer.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${space}:execution-policy`,
+        value: { value: { version: 1, serverPrimaryExecution: false } },
+      }],
+    });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (observer.executionClaims.length === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    assertEquals(observer.executionClaims, []);
+    clientNetworkRequests.length = 0;
+    const clientFallback = Promise.withResolvers<void>();
+    const clientFallbackKinds = new Set<"fetch" | "generate">();
+    const resolvingClientFetch = async (input: string | URL | Request) => {
+      const response = await clientFetch(input);
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      clientFallbackKinds.add(
+        url.includes("/api/ai/llm") ? "generate" : "fetch",
+      );
+      if (clientFallbackKinds.size === 2) clientFallback.resolve();
+      return response;
+    };
+    globalThis.fetch = resolvingClientFetch;
+    for (const runtime of clientRuntimes) {
+      Object.defineProperty(runtime, "fetch", {
+        configurable: true,
+        value: resolvingClientFetch,
+      });
+    }
+    await observer.transact({
+      localSeq: 4,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: "/client-fallback" },
+      }],
+    });
+    await awaitBarrier(
+      clientFallback.promise,
+      "client builtin fallback",
+      events,
+    );
+    for (const runtime of clientRuntimes) await runtime.settled();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assertEquals(clientFallbackKinds, new Set(["fetch", "generate"]));
   } finally {
+    globalThis.fetch = originalGlobalFetch;
     unsubscribeAccepted();
+    for (const runtime of clientRuntimes) await runtime.dispose();
+    for (const storage of clientStorages) await storage.close();
     await executor?.stop();
     await seedRuntime.dispose();
     await seedStorage.close();

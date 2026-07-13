@@ -553,7 +553,7 @@ function fetchBuiltin(kind: FetchKind) {
                 );
               },
             );
-            runtime.trackAsyncWork(work);
+            runtime.trackAsyncWork(work, { externalEffect: true });
           },
         );
       }

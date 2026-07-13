@@ -163,6 +163,8 @@ class OverlaySessionFactory implements SessionFactory {
   ) => Promise<AppliedCommit>;
   #seq = 0;
 
+  constructor(private readonly builtinPassivity = false) {}
+
   create(
     _space: MemorySpace,
     _signer?: Signer,
@@ -203,7 +205,7 @@ class OverlaySessionFactory implements SessionFactory {
         serverFlags: {
           serverPrimaryExecutionV1: true,
           serverPrimaryExecutionClaimRoutingV1: true,
-          serverPrimaryExecutionBuiltinPassivityV1: false,
+          serverPrimaryExecutionBuiltinPassivityV1: this.builtinPassivity,
         },
         close: () => Promise.resolve(),
       } as ReplicaSessionHandle["client"],
@@ -754,6 +756,80 @@ Deno.test("execution feed gap freezes known authority until an authoritative sna
     await waitFor(() => visibleOutput(storage) === undefined);
     await writeClaimedOutput(storage, "resumed-upstream");
     assertEquals(factory.commits.length, 1);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("execution feed gap keeps an exact claimed builtin passive", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory(true);
+  const effectClaim = { ...claim, actionKind: "effect" as const };
+  factory.claims = [effectClaim];
+  const storage = OverlayStorageManager.connect(factory);
+  const effectAction = {};
+  storage.registerExecutionAction(effectAction, {
+    branch: effectClaim.branch,
+    space: effectClaim.space,
+    contextKey: effectClaim.contextKey,
+    pieceId: effectClaim.pieceId,
+    actionId: effectClaim.actionId,
+    actionKind: effectClaim.actionKind,
+    implementationFingerprint: effectClaim.implementationFingerprint,
+    runtimeFingerprint: effectClaim.runtimeFingerprint,
+  });
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    assertEquals(storage.captureExecutionClaim(effectAction), effectClaim);
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 99,
+        toFeedSeq: 100,
+        events: [{
+          type: "session.execution.claim.revoke",
+          branch: "",
+          claim: effectClaim,
+          leaseGeneration: effectClaim.leaseGeneration,
+          claimGeneration: effectClaim.claimGeneration,
+        }],
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(storage.captureExecutionClaim(effectAction), effectClaim);
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 0,
+        toFeedSeq: 1,
+        snapshot: { claims: [] },
+        events: [],
+      },
+    }));
+    await waitFor(() =>
+      storage.captureExecutionClaim(effectAction) === undefined
+    );
+  } finally {
+    storage.unregisterExecutionAction(effectAction);
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("a pre-claim client builtin attempt keeps all continuations upstream", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    storage.beginClientExecutionEffect(sourceAction);
+    await writeClaimedOutput(storage, "client-in-flight");
+    assertEquals(factory.commits.length, 1);
+    storage.endClientExecutionEffect(sourceAction);
+
+    await writeClaimedOutput(storage, "passive-after-handoff");
+    assertEquals(factory.commits.length, 1);
+    assertEquals(visibleOutput(storage), "passive-after-handoff");
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();

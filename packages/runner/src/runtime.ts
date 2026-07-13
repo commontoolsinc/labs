@@ -1053,10 +1053,24 @@ export class Runtime {
    * thrown) and auto-removed once it settles, so a rejecting promise is safe and
    * never leaks.
    */
-  trackAsyncWork(promise: Promise<unknown>): void {
+  trackAsyncWork(
+    promise: Promise<unknown>,
+    options: { externalEffect?: boolean } = {},
+  ): void {
+    const sourceAction = options.externalEffect === true
+      ? getTransactionSourceAction()
+      : undefined;
+    if (sourceAction !== undefined) {
+      this.storageManager.beginClientExecutionEffect?.(sourceAction);
+    }
     const tracked = promise.then(() => {}, () => {});
     this.#pendingAsyncWork.add(tracked);
-    tracked.finally(() => this.#pendingAsyncWork.delete(tracked));
+    tracked.finally(() => {
+      this.#pendingAsyncWork.delete(tracked);
+      if (sourceAction !== undefined) {
+        this.storageManager.endClientExecutionEffect?.(sourceAction);
+      }
+    });
   }
 
   /**
@@ -1214,65 +1228,73 @@ export class Runtime {
     if (debugActionId) {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
-    const wrapped = new ExtendedStorageTransaction(tx, {
-      resolvePolicyManifest: (
-        reference,
-        tx,
-        destinationSpace,
-        bindCommit,
-      ) =>
-        this.resolveCfcPolicyManifest(
+    const wrapped = new ExtendedStorageTransaction(
+      tx,
+      {
+        resolvePolicyManifest: (
           reference,
           tx,
           destinationSpace,
           bindCommit,
-        ),
-      hasPolicyManifest: (space, reference, tx) =>
-        this.hasCfcPolicyManifest(space, reference, tx),
-      installPolicyManifest: (space, reference, tx) =>
-        this.installCfcPolicyManifest(space, reference, tx),
-      onRelevantTx: () => {
-        this.cfcStats.cfcRelevantTx += 1;
+        ) =>
+          this.resolveCfcPolicyManifest(
+            reference,
+            tx,
+            destinationSpace,
+            bindCommit,
+          ),
+        hasPolicyManifest: (space, reference, tx) =>
+          this.hasCfcPolicyManifest(space, reference, tx),
+        installPolicyManifest: (space, reference, tx) =>
+          this.installCfcPolicyManifest(space, reference, tx),
+        onRelevantTx: () => {
+          this.cfcStats.cfcRelevantTx += 1;
+        },
+        onPreparedTx: () => {
+          this.cfcStats.cfcPreparedTx += 1;
+        },
+        onPrepareReject: () => {
+          this.cfcStats.cfcPrepareRejects += 1;
+        },
+        onDigestInvalidation: () => {
+          this.cfcStats.cfcDigestInvalidations += 1;
+        },
+        onOutboxFlush: () => {
+          this.cfcStats.cfcOutboxFlushes += 1;
+        },
+        onSinkDedupHit: () => {
+          this.cfcStats.sinkDedupHits += 1;
+        },
+        onSinkReleaseReject: () => {
+          this.cfcStats.sinkReleaseRejects += 1;
+        },
+        // Stage-0 D4 precision counters: installed only when the deployment
+        // opted in, so the default prepare path skips all measurement.
+        ...(this.cfcPrefixProvenanceStats
+          ? {
+            onPrefixProvenance: (summary: CfcPrefixProvenanceSummary) => {
+              this.cfcStats.prefixProvenanceSummaries += 1;
+              this.cfcStats.prefixProtectedWrites += summary.protectedWrites;
+              this.cfcStats.prefixGatedReads += summary.prefixGatedReads;
+              this.cfcStats.prefixTxGlobalGatedReads +=
+                summary.txGlobalGatedReads;
+              this.cfcStats.prefixBoundReal += summary.boundSources.real;
+              this.cfcStats.prefixBoundInfinityFallback +=
+                summary.boundSources.infinityFallback;
+              this.cfcStats.prefixBoundClockLess +=
+                summary.boundSources.clockLess;
+              this.cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
+              this.cfcStats.prefixClockLessReads += summary.clockLessReads;
+            },
+          }
+          : {}),
       },
-      onPreparedTx: () => {
-        this.cfcStats.cfcPreparedTx += 1;
-      },
-      onPrepareReject: () => {
-        this.cfcStats.cfcPrepareRejects += 1;
-      },
-      onDigestInvalidation: () => {
-        this.cfcStats.cfcDigestInvalidations += 1;
-      },
-      onOutboxFlush: () => {
-        this.cfcStats.cfcOutboxFlushes += 1;
-      },
-      onSinkDedupHit: () => {
-        this.cfcStats.sinkDedupHits += 1;
-      },
-      onSinkReleaseReject: () => {
-        this.cfcStats.sinkReleaseRejects += 1;
-      },
-      // Stage-0 D4 precision counters: installed only when the deployment
-      // opted in, so the default prepare path skips all measurement.
-      ...(this.cfcPrefixProvenanceStats
-        ? {
-          onPrefixProvenance: (summary: CfcPrefixProvenanceSummary) => {
-            this.cfcStats.prefixProvenanceSummaries += 1;
-            this.cfcStats.prefixProtectedWrites += summary.protectedWrites;
-            this.cfcStats.prefixGatedReads += summary.prefixGatedReads;
-            this.cfcStats.prefixTxGlobalGatedReads +=
-              summary.txGlobalGatedReads;
-            this.cfcStats.prefixBoundReal += summary.boundSources.real;
-            this.cfcStats.prefixBoundInfinityFallback +=
-              summary.boundSources.infinityFallback;
-            this.cfcStats.prefixBoundClockLess +=
-              summary.boundSources.clockLess;
-            this.cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
-            this.cfcStats.prefixClockLessReads += summary.clockLessReads;
-          },
-        }
-        : {}),
-    }, this.externalSinkDisposition);
+      this.externalSinkDisposition,
+      (sourceAction) =>
+        this.experimental.serverPrimaryExecution
+          ? this.storageManager.captureExecutionClaim?.(sourceAction)
+          : undefined,
+    );
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);

@@ -294,14 +294,17 @@ export function fetchProgram(
           // wait for the program resolve + writeback; `idle()` does not.
           myRequestId = requestId;
           abortController = new AbortController();
-          runtime.trackAsyncWork(startFetch(
-            runtime,
-            cache,
-            inputHash,
-            url,
-            requestId,
-            abortController.signal,
-          ));
+          runtime.trackAsyncWork(
+            startFetch(
+              runtime,
+              cache,
+              inputHash,
+              url,
+              requestId,
+              abortController.signal,
+            ),
+            { externalEffect: true },
+          );
         },
       );
     } else if (state.type === "fetching") {

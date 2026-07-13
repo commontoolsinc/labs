@@ -3,6 +3,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { ExecutionClaim } from "@commonfabric/memory/v2";
 
 Deno.test("executor shadow runtime records but never releases external sink effects", async () => {
   const signer = await Identity.fromPassphrase(
@@ -127,6 +128,59 @@ Deno.test("post-commit builtin continuations inherit their source action", async
     );
     assertEquals((await tx.commit()).error, undefined);
     assertEquals(continuationSource, sourceAction);
+  } finally {
+    await runtime.dispose();
+    await storage.close();
+  }
+});
+
+Deno.test("client builtin sink captures one exact claim and becomes passive", async () => {
+  const signer = await Identity.fromPassphrase(
+    "client exact claimed sink passivity",
+  );
+  const storage = StorageManager.emulate({ as: signer });
+  const sourceAction = {};
+  const claim: ExecutionClaim = {
+    branch: "",
+    space: signer.did(),
+    contextKey: "space",
+    pieceId: "space:of:claimed-sink-piece",
+    actionId: "action:claimed-sink",
+    actionKind: "effect",
+    implementationFingerprint: "impl:claimed-sink",
+    runtimeFingerprint: "runtime:claimed-sink",
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  storage.captureExecutionClaim = (action) =>
+    action === sourceAction ? claim : undefined;
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: storage,
+    experimental: { serverPrimaryExecution: true },
+  });
+
+  try {
+    let releases = 0;
+    const tx = runtime.edit();
+    tx.tx.sourceAction = sourceAction;
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "fetchText",
+      "fetchText:client-passive",
+      { url: "/claimed" },
+      "fetchText-start",
+      () => {
+        releases++;
+      },
+    );
+    assertEquals(tx.externalSinkDisposition(), "suppress");
+    assertEquals(tx.tx.executionEffectAuthority, "server");
+    assertEquals(tx.tx.executionClaim, claim);
+    assertEquals(tx.hasPendingPostCommitEffects(), false);
+    tx.abort();
+    assertEquals(releases, 0);
   } finally {
     await runtime.dispose();
     await storage.close();

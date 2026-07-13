@@ -898,6 +898,7 @@ export function llm(
               },
             )
           ),
+          { externalEffect: true },
         );
       },
     );
@@ -1245,6 +1246,7 @@ export function generateText(
               },
             )
           ),
+          { externalEffect: true },
         );
       },
     );

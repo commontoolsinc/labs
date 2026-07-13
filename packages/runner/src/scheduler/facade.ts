@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { ActionClaimKey } from "@commonfabric/memory/v2";
 import type { Cancel } from "../cancel.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import type {
@@ -739,6 +740,7 @@ export class Scheduler {
       dependencies,
       subscribeOptions,
     );
+    this.registerExecutionAction(action);
     // Rehydration and the synced-hold are independent: apply the snapshot when
     // one is preloaded for this action (unless the action declares it must
     // always run on resume), and hold the initial run of any action that did
@@ -1182,11 +1184,34 @@ export class Scheduler {
     });
   }
 
+  private registerExecutionAction(action: Action): void {
+    const identity = (action as Partial<TelemetryAnnotations>)
+      .schedulerObservationIdentity;
+    if (identity?.ownerSpace === undefined) return;
+    const actionId = this.getActionId(action);
+    const key: ActionClaimKey = {
+      branch: identity.branch ?? "",
+      space: identity.ownerSpace,
+      contextKey: "space",
+      pieceId: identity.pieceId,
+      actionId,
+      actionKind: this.nodes.isKnownEffect(action) ? "effect" : "computation",
+      implementationFingerprint: schedulerImplementationFingerprint(
+        action,
+        actionId,
+        getSchedulerActionTelemetryInfo(action),
+      ),
+      runtimeFingerprint: schedulerRuntimeFingerprint(),
+    };
+    this.runtime.storageManager.registerExecutionAction?.(action, key);
+  }
+
   unsubscribe(
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
+    this.runtime.storageManager.unregisterExecutionAction?.(action);
     this.materializers.clearAction(action);
     // Drop the adoption index entry only if it still points at this action
     // (a re-registration may have overwritten it). Cancel paths that bypass
@@ -2062,7 +2087,11 @@ export class Scheduler {
 
   private processStorageNotification(notification: StorageNotification): void {
     if (notification.type === "execution-claim-invalidation") {
-      this.markAndScheduleInvalidAction(notification.sourceAction as Action);
+      const action = notification.sourceAction as Action & {
+        prepareClaimedRerun?: () => void;
+      };
+      action.prepareClaimedRerun?.();
+      this.markAndScheduleInvalidAction(action);
       return;
     }
     if (notification.type === "scheduler-observations") {

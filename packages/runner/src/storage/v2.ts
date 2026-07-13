@@ -19,6 +19,7 @@ import {
 import { assert, unclaimed } from "@commonfabric/memory/fact";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import {
+  type ActionClaimKey,
   actionClaimMapKey,
   type ActionSettlement,
   type BranchName,
@@ -834,6 +835,8 @@ export class StorageManager implements IStorageManager {
   #sessionFactory: SessionFactory;
   readonly #shadowWrites: boolean;
   readonly #actionTransactionRouter?: ActionTransactionRouter;
+  readonly #executionActionKeys = new WeakMap<object, ActionClaimKey>();
+  readonly #clientExecutionEffects = new WeakMap<object, number>();
   #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -934,6 +937,44 @@ export class StorageManager implements IStorageManager {
     this.#spaceIdentities.set(identity.did() as MemorySpace, identity);
   }
 
+  registerExecutionAction(action: object, key: ActionClaimKey): void {
+    this.#executionActionKeys.set(action, key);
+  }
+
+  unregisterExecutionAction(action: object): void {
+    this.#executionActionKeys.delete(action);
+    this.#clientExecutionEffects.delete(action);
+  }
+
+  captureExecutionClaim(
+    action: object | undefined,
+  ): ExecutionClaim | undefined {
+    if (action === undefined || !getServerPrimaryExecutionConfig()) {
+      return undefined;
+    }
+    const key = this.#executionActionKeys.get(action);
+    if (key === undefined || key.actionKind !== "effect") return undefined;
+    return this.#providers.get(key.space as MemorySpace)?.replica
+      .executionClaimForActionKey(key, true);
+  }
+
+  beginClientExecutionEffect(action: object): void {
+    this.#clientExecutionEffects.set(
+      action,
+      (this.#clientExecutionEffects.get(action) ?? 0) + 1,
+    );
+  }
+
+  endClientExecutionEffect(action: object): void {
+    const current = this.#clientExecutionEffects.get(action) ?? 0;
+    if (current <= 1) this.#clientExecutionEffects.delete(action);
+    else this.#clientExecutionEffects.set(action, current - 1);
+  }
+
+  private clientExecutionEffectInFlight(action: object): boolean {
+    return (this.#clientExecutionEffects.get(action) ?? 0) > 0;
+  }
+
   open(space: MemorySpace): IStorageProviderWithReplica {
     let provider = this.#providers.get(space);
     if (!provider) {
@@ -948,6 +989,8 @@ export class StorageManager implements IStorageManager {
         subscription: this.#subscription,
         shadowWrites: this.#shadowWrites,
         actionTransactionRouter: this.#actionTransactionRouter,
+        clientExecutionEffectInFlight: (action) =>
+          this.clientExecutionEffectInFlight(action),
         supportsExecutionDemand:
           this.#sessionFactory.supportsExecutionDemand === true,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
@@ -1546,6 +1589,7 @@ type ProviderOptions = {
   subscription: IStorageSubscription;
   shadowWrites: boolean;
   actionTransactionRouter?: ActionTransactionRouter;
+  clientExecutionEffectInFlight: (action: object) => boolean;
   supportsExecutionDemand: boolean;
   createSession: () => Promise<ReplicaSessionHandle>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
@@ -1754,6 +1798,7 @@ class SpaceReplica implements ISpaceReplica {
   readonly #createSession: () => Promise<ReplicaSessionHandle>;
   readonly #shadowWrites: boolean;
   readonly #actionTransactionRouter?: ActionTransactionRouter;
+  readonly #clientExecutionEffectInFlight: (action: object) => boolean;
   readonly #shadowLocalSeqsByAction = new WeakMap<object, Set<number>>();
   readonly #executionClaims = new Map<string, ExecutionClaim>();
   readonly #claimedOverlays = new Map<number, ClaimedOverlayGeneration>();
@@ -1816,6 +1861,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
     this.#shadowWrites = options.shadowWrites;
     this.#actionTransactionRouter = options.actionTransactionRouter;
+    this.#clientExecutionEffectInFlight = options.clientExecutionEffectInFlight;
   }
 
   did(): MemorySpace {
@@ -2020,6 +2066,19 @@ class SpaceReplica implements ISpaceReplica {
 
   getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {
     return this.visibleDocument(uri, scope);
+  }
+
+  executionClaimForActionKey(
+    key: ActionClaimKey,
+    requireBuiltinPassivity = false,
+  ): ExecutionClaim | undefined {
+    if (
+      !this.#executionClaimRouting ||
+      (requireBuiltinPassivity && !this.#executionBuiltinPassivity)
+    ) {
+      return undefined;
+    }
+    return this.#executionClaims.get(actionClaimMapKey(key));
   }
 
   async close(): Promise<void> {
@@ -2779,6 +2838,20 @@ class SpaceReplica implements ISpaceReplica {
           commit,
           touched,
         );
+        const live = this.#executionClaims.get(actionClaimMapKey(route.claim));
+        if (
+          live === undefined ||
+          executionClaimIncarnationKey(live) !==
+            executionClaimIncarnationKey(route.claim)
+        ) {
+          this.dropClaimedOverlays(
+            (overlay) => overlay.localSeq === localSeq,
+            {
+              dirtyProducer: true,
+              diagnosticCode: "captured-claim-no-longer-live",
+            },
+          );
+        }
       }
       return { ok: {} };
     }
@@ -2843,12 +2916,23 @@ class SpaceReplica implements ISpaceReplica {
     commit: ClientCommit,
     source?: IStorageTransaction,
   ): ActionTransactionRoute {
+    const sourceAction = source?.sourceAction;
+    if (
+      source?.executionEffectAuthority === "client" ||
+      (sourceAction !== undefined &&
+        this.#clientExecutionEffectInFlight(sourceAction))
+    ) {
+      return { disposition: "upstream" };
+    }
     if (!this.#executionClaimRouting || this.#executionSnapshotRequired) {
       // During a reconnect/feed gap, existing claims remain authoritative. The
       // snapshot-required state freezes the last integrated view rather than
       // interpreting missing control data as authority return.
       if (!this.#executionClaimRouting) return { disposition: "upstream" };
     }
+    const capturedClaim = source?.executionEffectAuthority === "server"
+      ? source.executionClaim
+      : undefined;
     return routeClientActionTransaction({
       space: this.#space,
       commit,
@@ -2856,7 +2940,9 @@ class SpaceReplica implements ISpaceReplica {
         ? { sourceAction: source.sourceAction }
         : {}),
     }, {
-      claims: [...this.#executionClaims.values()],
+      claims: capturedClaim !== undefined
+        ? [capturedClaim]
+        : [...this.#executionClaims.values()],
       builtinPassivity: this.#executionBuiltinPassivity,
       onDiagnostic: ({ diagnosticCode, claim }) => {
         logger.warn("execution-client-route", () => [

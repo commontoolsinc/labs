@@ -5,9 +5,11 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import type {
+  ActionClaimKey,
   BranchName,
   CommitPrecondition,
   EntityDocument,
+  ExecutionClaim,
   LegacyBackgroundExclusion,
   LegacyBackgroundExclusionStatus,
   PatchOp,
@@ -164,6 +166,17 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * The identity is never used as the principal for ordinary storage work.
    */
   registerSpaceIdentity?(identity: Signer): void;
+
+  /** Register the exact durable action identity used by ephemeral execution
+   * claims. Scheduler registration calls this before an effect can release an
+   * external request. */
+  registerExecutionAction?(action: object, key: ActionClaimKey): void;
+  unregisterExecutionAction?(action: object): void;
+  captureExecutionClaim?(
+    action: object | undefined,
+  ): ExecutionClaim | undefined;
+  beginClientExecutionEffect?(action: object): void;
+  endClientExecutionEffect?(action: object): void;
 
   /**
    * Close all storage providers
@@ -765,6 +778,12 @@ export interface IStorageTransaction {
    * across instances.
    */
   sourceAction?: object;
+  /** Frozen authority decision for an external-effect attempt. A client-owned
+   * attempt and all of its async continuations remain upstream even if a claim
+   * arrives mid-flight; a server-owned attempt carries the exact claim that
+   * made its sink passive. */
+  executionEffectAuthority?: "client" | "server";
+  executionClaim?: ExecutionClaim;
   /**
    * Opt the transaction into writing to more than one memory space. By default
    * a transaction may write to a single space only. When enabled, commit()
