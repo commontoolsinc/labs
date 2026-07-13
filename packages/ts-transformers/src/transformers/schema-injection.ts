@@ -219,7 +219,7 @@ function getSymbolTypeAtSource(
 // callback AST and checker (it reads no cross-stage registries), and
 // transformed nodes have fresh identities, so entries can't go stale.
 interface CapabilitySummaryMemo {
-  /** `{ checker, includeNestedCallbacks: true }` analyses. */
+  /** `{ checker, interprocedural: true, includeNestedCallbacks: true }` analyses. */
   readonly nested: WeakMap<ts.Node, FunctionCapabilitySummary>;
   /** Non-nested analyses (fallback after a recorded-summary miss). */
   readonly fallback: WeakMap<ts.Node, FunctionCapabilitySummary>;
@@ -254,6 +254,7 @@ function findCapabilitySummaryForParameter(
     ? analyzeFunctionCapabilities(fn, {
       checker: options.checker,
       typeRegistry: context?.options.state?.typeRegistry,
+      interprocedural: true,
       includeNestedCallbacks: true,
       summaryCache: context
         ? capabilitySummaryMemoFor(context).nested

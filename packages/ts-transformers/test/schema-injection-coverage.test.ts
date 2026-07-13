@@ -185,6 +185,22 @@ Deno.test("handler<E, S> injects two schemas and marks a written Cell state fiel
   assertEquals((state.properties as Obj).total.asCell, ["writeonly"]);
 });
 
+Deno.test("handler state schema propagates Cell writes from same-file helpers", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { handler, Cell } from "commonfabric";',
+    "const writeTotal = (total: Cell<number>, value: number) => { total.set(value); };",
+    "export const h = handler<{ amount: number }, { total: Cell<number> }>(",
+    "  (event, ctx) => { writeTotal(ctx.total, event.amount); },",
+    ");",
+  ].join("\n");
+  const output = await t(source);
+  const [, state] = callSchemas(parseModule(output), "handler");
+  // Passing the Cell to the helper observes its identity while the helper
+  // writes it, so the least-authority contract must retain both capabilities.
+  assertEquals((state.properties as Obj).total.asCell, ["cell"]);
+});
+
 Deno.test("handler inline form injects the event schema from the annotated parameter", async () => {
   const source = [
     "/// <cts-enable />",
