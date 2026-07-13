@@ -314,26 +314,22 @@ Deno.test("memory v2 session registry bounds unacknowledged execution events", (
   const session = sessions.get(space, opened.sessionId);
   assertExists(session);
 
-  const append = (feedSeq: number) => {
-    session.executionFeedSeq = feedSeq;
-    session.executionEvents.push({
-      feedSeq,
-      event: {
-        type: "session.execution.claim.revoke",
+  const append = (claimGeneration: number) => {
+    sessions.appendExecutionEvent(session, {
+      type: "session.execution.claim.revoke",
+      branch: "",
+      claim: {
         branch: "",
-        claim: {
-          branch: "",
-          space,
-          contextKey: "space",
-          pieceId: "piece:bounded",
-          actionId: "action:bounded",
-          actionKind: "computation",
-          implementationFingerprint: "impl:bounded",
-          runtimeFingerprint: "runtime:bounded",
-        },
-        leaseGeneration: 1,
-        claimGeneration: feedSeq,
+        space,
+        contextKey: "space",
+        pieceId: "piece:bounded",
+        actionId: "action:bounded",
+        actionKind: "computation",
+        implementationFingerprint: "impl:bounded",
+        runtimeFingerprint: "runtime:bounded",
       },
+      leaseGeneration: 1,
+      claimGeneration,
     });
   };
 
@@ -345,13 +341,19 @@ Deno.test("memory v2 session registry bounds unacknowledged execution events", (
     [2, 3],
   );
 
-  // The server replaces this array when acknowledgements prune it. Retention
-  // must stay bounded after that assignment as well as after session resume.
-  session.executionEvents = session.executionEvents.filter(() => true);
-  append(4);
+  // Ack pruning replaces the plain array. Subsequent canonical appends must
+  // still enforce the registry's retention bound.
+  sessions.pruneExecutionEvents(session, 2);
   assertEquals(
     session.executionEvents.map((entry) => entry.feedSeq),
-    [3, 4],
+    [3],
+  );
+  append(4);
+  append(5);
+  append(6);
+  assertEquals(
+    session.executionEvents.map((entry) => entry.feedSeq),
+    [5, 6],
   );
 });
 

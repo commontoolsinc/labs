@@ -2999,10 +2999,10 @@ export class Server {
     session: SessionState,
     event: ExecutionControlEvent,
   ): SessionSync {
-    const fromFeedSeq = session.executionFeedSeq;
-    const toFeedSeq = fromFeedSeq + 1;
-    session.executionFeedSeq = toFeedSeq;
-    session.executionEvents.push({ feedSeq: toFeedSeq, event });
+    const { fromFeedSeq, toFeedSeq } = this.#sessions.appendExecutionEvent(
+      session,
+      event,
+    );
     return {
       type: "sync",
       fromSeq: session.lastSyncedSeq,
@@ -4347,12 +4347,9 @@ export class Server {
       );
     }
     if (message.executionFeedSeq !== undefined) {
-      session.executionFeedAckSeq = Math.max(
-        session.executionFeedAckSeq,
-        Math.min(message.executionFeedSeq, session.executionFeedSeq),
-      );
-      session.executionEvents = session.executionEvents.filter((entry) =>
-        entry.feedSeq > session.executionFeedAckSeq
+      this.#sessions.pruneExecutionEvents(
+        session,
+        message.executionFeedSeq,
       );
     }
     try {

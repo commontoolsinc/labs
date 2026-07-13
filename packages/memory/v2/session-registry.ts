@@ -39,24 +39,6 @@ type ExecutionEventEntry = SessionState["executionEvents"][number];
 
 const DEFAULT_MAX_EXECUTION_EVENTS = 1024;
 
-const boundedExecutionEvents = (
-  entries: readonly ExecutionEventEntry[],
-  limit: number,
-): ExecutionEventEntry[] => {
-  const queue = entries.slice(-limit);
-  Object.defineProperty(queue, "push", {
-    configurable: true,
-    writable: true,
-    value: (...next: ExecutionEventEntry[]): number => {
-      Array.prototype.push.apply(queue, next);
-      const excess = queue.length - limit;
-      if (excess > 0) queue.splice(0, excess);
-      return queue.length;
-    },
-  });
-  return queue;
-};
-
 type OpenSessionState = {
   sessionId: string;
   sessionToken: SessionToken;
@@ -155,13 +137,11 @@ export class SessionRegistry {
         session.executionFeedSeq ?? 0,
       ),
     );
-    let executionEvents = boundedExecutionEvents(
-      (existing?.executionEvents ?? []).filter((entry) =>
-        entry.feedSeq > executionFeedAckSeq
-      ),
-      this.#maxExecutionEvents,
-    );
-    const maxExecutionEvents = this.#maxExecutionEvents;
+    // Every reconnect carries a complete claim snapshot, so a client older
+    // than this retained suffix is safely restored through that snapshot.
+    const executionEvents = (existing?.executionEvents ?? []).filter((entry) =>
+      entry.feedSeq > executionFeedAckSeq
+    ).slice(-this.#maxExecutionEvents);
     const next: SessionState = {
       id: sessionId,
       space,
@@ -185,19 +165,7 @@ export class SessionRegistry {
         capabilities.serverPrimaryExecutionBuiltinPassivityV1 === true,
       executionFeedSeq,
       executionFeedAckSeq,
-      // Every reconnect carries a complete claim snapshot, so retaining the
-      // newest bounded suffix is sufficient for replay: a client older than
-      // the suffix is forced through that snapshot barrier. Keep the setter
-      // bounded because ack pruning replaces this array in server.ts.
-      get executionEvents() {
-        return executionEvents;
-      },
-      set executionEvents(entries) {
-        executionEvents = boundedExecutionEvents(
-          entries,
-          maxExecutionEvents,
-        );
-      },
+      executionEvents,
     };
     this.#sessions.set(key, next);
     return {
@@ -258,6 +226,32 @@ export class SessionRegistry {
     }
     session.seenSeq = Math.max(session.seenSeq, seenSeq);
     return session;
+  }
+
+  appendExecutionEvent(
+    session: SessionState,
+    event: ExecutionControlEvent,
+  ): { fromFeedSeq: number; toFeedSeq: number } {
+    const fromFeedSeq = session.executionFeedSeq;
+    const toFeedSeq = fromFeedSeq + 1;
+    session.executionFeedSeq = toFeedSeq;
+    session.executionEvents.push({ feedSeq: toFeedSeq, event });
+    const excess = session.executionEvents.length - this.#maxExecutionEvents;
+    if (excess > 0) session.executionEvents.splice(0, excess);
+    return { fromFeedSeq, toFeedSeq };
+  }
+
+  pruneExecutionEvents(
+    session: SessionState,
+    acknowledgedFeedSeq: number,
+  ): void {
+    session.executionFeedAckSeq = Math.max(
+      session.executionFeedAckSeq,
+      Math.min(acknowledgedFeedSeq, session.executionFeedSeq),
+    );
+    session.executionEvents = session.executionEvents.filter((entry) =>
+      entry.feedSeq > session.executionFeedAckSeq
+    ).slice(-this.#maxExecutionEvents);
   }
 
   detach(space: string, sessionId: string, ownerConnectionId: string): void {
