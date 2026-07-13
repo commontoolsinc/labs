@@ -800,7 +800,7 @@ function factoryFromPattern<T, R>(
         ) {
           throw new Error("Bound pattern params require callback binding");
         }
-        const outputs = reactive<R>();
+        const outputs = reactive<R>(undefined, resultSchema);
         const frame = getTopFrame();
         let nodeFactory: PatternFactory<T, R> = factory;
         if (spaceSelector !== undefined) {

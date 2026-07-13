@@ -340,6 +340,27 @@ function sourceSchemaContainsExpected(
   }
   if (isRecord(expected)) {
     if (!isRecord(source) || Array.isArray(source)) return false;
+    const expectedSchema = expected as JSONSchema;
+    const validationRoot = expectedRoot ?? expectedSchema;
+    if (
+      Object.hasOwn(source, "const") &&
+      validateAgainstSchema(
+          expectedSchema,
+          source.const,
+          validationRoot,
+        ) === undefined
+    ) {
+      return true;
+    }
+    if (
+      Array.isArray(source.enum) &&
+      source.enum.every((entry) =>
+        validateAgainstSchema(expectedSchema, entry, validationRoot) ===
+          undefined
+      )
+    ) {
+      return true;
+    }
     for (const [key, expectedValue] of Object.entries(expected)) {
       if (key === "$defs" || key === "definitions") continue;
       if (!Object.hasOwn(source, key)) return false;

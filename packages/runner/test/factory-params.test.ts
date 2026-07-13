@@ -409,6 +409,95 @@ Deno.test("pattern curry accepts sanitized nested cell metadata only from a real
   }
 });
 
+Deno.test("pattern curry retains a nested pattern result stream contract", async () => {
+  const signer = await Identity.fromPassphrase(
+    "factory-params-nested-pattern-stream-test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const eventSchema = {
+    type: "object",
+    properties: { value: { type: "string" } },
+    required: ["value"],
+  } as const satisfies JSONSchema;
+  const resultSchema = {
+    type: "object",
+    properties: {
+      removeLabels: { ...eventSchema, asCell: ["stream"] },
+    },
+    required: ["removeLabels"],
+  } as const satisfies JSONSchema;
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      extractor: resultSchema,
+    },
+    required: ["extractor"],
+  } as const satisfies JSONSchema;
+
+  try {
+    const { pattern, handler } = createTrustedBuilder(runtime).commonfabric;
+    const removeLabels = handler(
+      eventSchema,
+      true,
+      () => undefined,
+    );
+    const extractorPattern = pattern(
+      () => ({ removeLabels: removeLabels({}) }),
+      true,
+      resultSchema,
+    );
+    pattern(
+      () => {
+        const extractor = extractorPattern({});
+        assertEquals(
+          assertValidPatternParams(
+            {
+              extractor: {
+                removeLabels: (extractor as any).key("removeLabels"),
+              },
+            },
+            paramsSchema,
+          ),
+          undefined,
+        );
+        return {};
+      },
+      true,
+      true,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern curry accepts an enum-narrowed symbolic capture", () => {
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      identifierType: { type: "string" },
+    },
+    required: ["identifierType"],
+  } as const satisfies JSONSchema;
+
+  assertEquals(
+    assertValidPatternParams(
+      {
+        identifierType: symbolic({
+          enum: ["card", "account"],
+          asCell: ["cell"],
+        }),
+      },
+      paramsSchema,
+    ),
+    undefined,
+  );
+});
+
 Deno.test("pattern curry validates a symbolic Cell default when content schema is deferred", () => {
   const paramsSchema = {
     type: "object",
