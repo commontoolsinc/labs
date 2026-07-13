@@ -37,7 +37,7 @@ import {
   type SessionFactory,
   StorageManager,
 } from "./v2.ts";
-import type { ReplicaSession } from "./v2-replica-session.ts";
+import type { ReplicaClient, ReplicaSession } from "./v2-replica-session.ts";
 
 export interface AcceptedCommitNotice {
   space: string;
@@ -586,11 +586,13 @@ class HostReplicaSession implements ReplicaSession {
   #appliedSeq: number;
   #acceptedOrder = 0;
   #schedulerDeliverySeq: number;
-  #executionReceivedSeq: number;
+  #executionDeliverySeq: number;
+  #pendingExecutionEvents: ExecutionControlEvent[] = [];
+  #executionDeliveryScheduled = false;
   #pendingExecutionBatches: {
     fromFeedSeq: number;
     toFeedSeq: number;
-    event: ExecutionControlEvent;
+    events: ExecutionControlEvent[];
   }[] = [];
   #unsubscribeExecutionControl = () => {};
   #seenObservationVersions = new Map<number, string>();
@@ -613,7 +615,7 @@ class HostReplicaSession implements ReplicaSession {
   ) {
     this.#appliedSeq = session.serverSeq;
     this.#schedulerDeliverySeq = session.serverSeq;
-    this.#executionReceivedSeq = session.executionFeedSeq;
+    this.#executionDeliverySeq = session.executionFeedSeq;
     transport.setAcceptedCommitReceiver((notice) => {
       const refresh = this.#mutation.then(
         () => this.refreshAndNotifyAcceptedCommit(notice),
@@ -639,22 +641,7 @@ class HostReplicaSession implements ReplicaSession {
         this.session.subscribeExecutionControl(listener);
       this.#unsubscribeExecutionControl = this.session
         .subscribeExecutionControl((event) => {
-          const fromFeedSeq = this.#executionReceivedSeq;
-          const toFeedSeq = Math.max(
-            fromFeedSeq + 1,
-            this.session.executionFeedSeq,
-          );
-          this.#executionReceivedSeq = toFeedSeq;
-          const batch = { fromFeedSeq, toFeedSeq, event };
-          const delivery = this.#mutation.then(
-            () => this.deliverExecutionBatches([batch]),
-            () => this.deliverExecutionBatches([batch]),
-          );
-          this.#mutation = delivery.catch((error) => {
-            if (!this.#closed) {
-              console.warn("client execution-control delivery failed", error);
-            }
-          });
+          this.queueExecutionControl(event);
         });
     }
   }
@@ -906,11 +893,50 @@ class HostReplicaSession implements ReplicaSession {
    * client's execution-control stream must be copied into that view as an
    * ordered control-only sync. SpaceReplica intentionally consumes claims from
    * WatchView syncs, not the optional session callback surface. */
+  private queueExecutionControl(event: ExecutionControlEvent): void {
+    if (this.#closed) return;
+    this.#pendingExecutionEvents.push(event);
+    if (this.#executionDeliveryScheduled) return;
+    this.#executionDeliveryScheduled = true;
+    const delivery = this.#mutation.then(
+      () => this.flushExecutionControl(),
+      () => this.flushExecutionControl(),
+    );
+    this.#mutation = delivery.catch((error) => {
+      if (!this.#closed) {
+        console.warn("client execution-control delivery failed", error);
+      }
+    });
+  }
+
+  /** SpaceSession applies every event in one feed batch before advancing its
+   * cursor. Its callback therefore cannot assign a cursor to one event. Cross
+   * the callback stack, collect the whole burst, and advance this synthetic
+   * WatchView feed exactly once. A settlement released later by the accepted
+   * data barrier has no new upstream cursor, so it receives one synthetic
+   * advance of its own. */
+  private async flushExecutionControl(): Promise<void> {
+    this.#executionDeliveryScheduled = false;
+    if (this.#closed) {
+      this.#pendingExecutionEvents.length = 0;
+      return;
+    }
+    const events = this.#pendingExecutionEvents.splice(0);
+    if (events.length === 0) return;
+    const fromFeedSeq = this.#executionDeliverySeq;
+    const toFeedSeq = Math.max(
+      fromFeedSeq + 1,
+      this.session.executionFeedSeq,
+    );
+    this.#executionDeliverySeq = toFeedSeq;
+    await this.deliverExecutionBatches([{ fromFeedSeq, toFeedSeq, events }]);
+  }
+
   private async deliverExecutionBatches(
     batches: readonly Readonly<{
       fromFeedSeq: number;
       toFeedSeq: number;
-      event: ExecutionControlEvent;
+      events: ExecutionControlEvent[];
     }>[],
   ): Promise<void> {
     if (this.#closed || batches.length === 0) return;
@@ -928,7 +954,7 @@ class HostReplicaSession implements ReplicaSession {
         execution: {
           fromFeedSeq: batch.fromFeedSeq,
           toFeedSeq: batch.toFeedSeq,
-          events: [batch.event],
+          events: batch.events,
         },
       }, true);
       await Promise.resolve();
@@ -939,6 +965,7 @@ class HostReplicaSession implements ReplicaSession {
     if (this.#closed) return;
     this.#closed = true;
     this.#unsubscribeExecutionControl();
+    this.#pendingExecutionEvents.length = 0;
     this.#pendingExecutionBatches.length = 0;
   }
 
@@ -1082,8 +1109,17 @@ class HostSessionFactory implements SessionFactory {
     );
     lifecycle.replica = replica;
     this.#session = replica;
+    const replicaClient: ReplicaClient = {
+      get serverFlags() {
+        return client.serverFlags;
+      },
+      close: async () => {
+        replica.closeExecutionControl();
+        await client.close();
+      },
+    };
     return {
-      client,
+      client: replicaClient,
       session: replica,
     };
   }
