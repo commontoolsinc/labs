@@ -1562,6 +1562,410 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
   }
 });
 
+Deno.test("claimed provenance retains every source commit after the read surface exists", async () => {
+  const server = createControlServer("memory-v2-execution-caused-by");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:caused-by"),
+    );
+    const sourceAddress = {
+      space: POLICY_SPACE,
+      scope: "space" as const,
+      id: "of:caused-by-source",
+      path: ["value", "count"],
+    };
+    const initialSource = await session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sourceAddress.id,
+        value: { value: { count: 0 } },
+      }],
+    });
+    const claimedObservation = claimedSpaceObservation(
+      claim,
+      "of:caused-by-output",
+    );
+    const {
+      executionClaimAssertion: _executionClaimAssertion,
+      ...unclaimedObservation
+    } = claimedObservation;
+    await session.transact({
+      localSeq: 3,
+      reads: {
+        confirmed: [{
+          id: sourceAddress.id,
+          path: toDocumentPath(sourceAddress.path),
+          seq: initialSource.seq,
+        }],
+        pending: [],
+      },
+      operations: [],
+      schedulerObservation: {
+        ...unclaimedObservation,
+        completeActionScopeSummary: {
+          ...unclaimedObservation.completeActionScopeSummary,
+          reads: [sourceAddress],
+        },
+        reads: [sourceAddress],
+        actualChangedWrites: [],
+      },
+    });
+
+    const firstCause = await session.transact({
+      localSeq: 4,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sourceAddress.id,
+        value: { value: { count: 1 } },
+      }],
+    });
+    const secondCause = await session.transact({
+      localSeq: 5,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sourceAddress.id,
+        value: { value: { count: 2 } },
+      }],
+    });
+
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+    const acceptedCommit = {
+      localSeq: 6,
+      reads: {
+        confirmed: [{
+          id: sourceAddress.id,
+          path: toDocumentPath(sourceAddress.path),
+          seq: secondCause.seq,
+        }],
+        pending: [],
+      },
+      operations: [{
+        op: "set" as const,
+        id: "of:caused-by-output",
+        value: { value: { answer: 4 } },
+      }],
+      schedulerObservation: {
+        ...claimedObservation,
+        completeActionScopeSummary: {
+          ...claimedObservation.completeActionScopeSummary,
+          reads: [sourceAddress],
+        },
+        reads: [sourceAddress],
+      },
+    };
+    const accepted = await session.transact(acceptedCommit);
+
+    assertEquals(accepted.actionAttempts?.[0]?.provenance.causedBy, [
+      firstCause.seq,
+      secondCause.seq,
+    ]);
+
+    unbind();
+    const laterCause = await session.transact({
+      localSeq: 7,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sourceAddress.id,
+        value: { value: { count: 3 } },
+      }],
+    });
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+
+    const replay = await session.transact(acceptedCommit);
+    assertEquals(
+      replay.schedulerObservationResults?.[0]?.executionProvenance?.causedBy,
+      [firstCause.seq, secondCause.seq],
+    );
+    await assertRejects(
+      () =>
+        session.transact({
+          ...acceptedCommit,
+          localSeq: 8,
+          reads: {
+            confirmed: [{
+              id: sourceAddress.id,
+              path: toDocumentPath(sourceAddress.path),
+              seq: secondCause.seq,
+            }],
+            pending: [],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+    const afterRetry = await session.transact({
+      ...acceptedCommit,
+      localSeq: 9,
+      reads: {
+        confirmed: [{
+          id: sourceAddress.id,
+          path: toDocumentPath(sourceAddress.path),
+          seq: laterCause.seq,
+        }],
+        pending: [],
+      },
+    });
+    assertEquals(afterRetry.actionAttempts?.[0]?.provenance.causedBy, [
+      laterCause.seq,
+    ]);
+
+    unbind();
+    const futureSourceAddress = {
+      ...sourceAddress,
+      id: "of:caused-by-future-source",
+    };
+    const initialFutureSource = await session.transact({
+      localSeq: 10,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: futureSourceAddress.id,
+        value: { value: { count: 0 } },
+      }],
+    });
+    await session.transact({
+      localSeq: 11,
+      reads: {
+        confirmed: [
+          {
+            id: sourceAddress.id,
+            path: toDocumentPath(sourceAddress.path),
+            seq: laterCause.seq,
+          },
+          {
+            id: futureSourceAddress.id,
+            path: toDocumentPath(futureSourceAddress.path),
+            seq: initialFutureSource.seq,
+          },
+        ],
+        pending: [],
+      },
+      operations: [],
+      schedulerObservation: {
+        ...claimedObservation,
+        completeActionScopeSummary: {
+          ...claimedObservation.completeActionScopeSummary,
+          reads: [sourceAddress, futureSourceAddress],
+        },
+        reads: [sourceAddress, futureSourceAddress],
+        actualChangedWrites: [],
+      },
+    });
+    const coveredCause = await session.transact({
+      localSeq: 12,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sourceAddress.id,
+        value: { value: { count: 4 } },
+      }],
+    });
+    const futureCause = await session.transact({
+      localSeq: 13,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: futureSourceAddress.id,
+        value: { value: { count: 1 } },
+      }],
+    });
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+    const partial = await session.transact({
+      ...acceptedCommit,
+      localSeq: 14,
+      reads: {
+        confirmed: [{
+          id: sourceAddress.id,
+          path: toDocumentPath(sourceAddress.path),
+          seq: coveredCause.seq,
+        }],
+        pending: [],
+      },
+      schedulerObservation: {
+        ...claimedObservation,
+        completeActionScopeSummary: {
+          ...claimedObservation.completeActionScopeSummary,
+          reads: [sourceAddress],
+        },
+        reads: [sourceAddress],
+      },
+    });
+    assertEquals(partial.actionAttempts?.[0]?.provenance.causedBy, [
+      coveredCause.seq,
+    ]);
+    const preservedFuture = await session.transact({
+      ...acceptedCommit,
+      localSeq: 15,
+      reads: {
+        confirmed: [
+          {
+            id: sourceAddress.id,
+            path: toDocumentPath(sourceAddress.path),
+            seq: coveredCause.seq,
+          },
+          {
+            id: futureSourceAddress.id,
+            path: toDocumentPath(futureSourceAddress.path),
+            seq: futureCause.seq,
+          },
+        ],
+        pending: [],
+      },
+      schedulerObservation: {
+        ...claimedObservation,
+        completeActionScopeSummary: {
+          ...claimedObservation.completeActionScopeSummary,
+          reads: [sourceAddress, futureSourceAddress],
+        },
+        reads: [sourceAddress, futureSourceAddress],
+      },
+    });
+    assertEquals(
+      preservedFuture.actionAttempts?.[0]?.provenance.causedBy,
+      [futureCause.seq],
+    );
+
+    unbind();
+    let overflowFrontier = laterCause;
+    for (let index = 0; index < 65; index++) {
+      overflowFrontier = await session.transact({
+        localSeq: 16 + index,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: sourceAddress.id,
+          value: { value: { count: 100 + index } },
+        }],
+      });
+    }
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+    const overflowed = await session.transact({
+      ...acceptedCommit,
+      localSeq: 81,
+      reads: {
+        confirmed: [{
+          id: sourceAddress.id,
+          path: toDocumentPath(sourceAddress.path),
+          seq: overflowFrontier.seq,
+        }],
+        pending: [],
+      },
+    });
+    assertEquals(overflowed.actionAttempts?.[0]?.provenance.causedBy, []);
+
+    unbind();
+    const afterOverflow = await session.transact({
+      localSeq: 82,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sourceAddress.id,
+        value: { value: { count: 1_000 } },
+      }],
+    });
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+    const preciseAgain = await session.transact({
+      ...acceptedCommit,
+      localSeq: 83,
+      reads: {
+        confirmed: [{
+          id: sourceAddress.id,
+          path: toDocumentPath(sourceAddress.path),
+          seq: afterOverflow.seq,
+        }],
+        pending: [],
+      },
+    });
+    assertEquals(preciseAgain.actionAttempts?.[0]?.provenance.causedBy, [
+      afterOverflow.seq,
+    ]);
+
+    const selfWritingObservation = {
+      ...claimedObservation,
+      completeActionScopeSummary: {
+        ...claimedObservation.completeActionScopeSummary,
+        reads: [sourceAddress],
+        writes: [sourceAddress],
+        directOutputs: [sourceAddress],
+      },
+      reads: [sourceAddress],
+      actualChangedWrites: [sourceAddress],
+      currentKnownWrites: [sourceAddress],
+      declaredWrites: [sourceAddress],
+    };
+    const selfWrite = await session.transact({
+      localSeq: 84,
+      reads: {
+        confirmed: [{
+          id: sourceAddress.id,
+          path: toDocumentPath(sourceAddress.path),
+          seq: afterOverflow.seq,
+        }],
+        pending: [],
+      },
+      operations: [{
+        op: "set",
+        id: sourceAddress.id,
+        value: { value: { count: 2_000 } },
+      }],
+      schedulerObservation: selfWritingObservation,
+    });
+    assertEquals(selfWrite.actionAttempts?.[0]?.provenance.causedBy, []);
+    const afterSelfWrite = await session.transact({
+      localSeq: 85,
+      reads: {
+        confirmed: [{
+          id: sourceAddress.id,
+          path: toDocumentPath(sourceAddress.path),
+          seq: selfWrite.seq,
+        }],
+        pending: [],
+      },
+      operations: [],
+      schedulerObservation: {
+        ...selfWritingObservation,
+        actualChangedWrites: [],
+      },
+    });
+    assertEquals(afterSelfWrite.actionAttempts?.[0]?.provenance.causedBy, []);
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("claimed transactions reject non-space surfaces atomically", async () => {
   const server = createControlServer("memory-v2-execution-scope-firewall");
   const client = await connectControlClient(server);

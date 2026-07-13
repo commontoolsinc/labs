@@ -145,6 +145,43 @@ const NEW_DB_PRAGMAS = `
   PRAGMA page_size = 32768;
 `;
 
+const SCHEDULER_ACTION_CAUSE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS scheduler_action_cause (
+  branch                 TEXT    NOT NULL DEFAULT '',
+  owner_space            TEXT    NOT NULL DEFAULT '',
+  piece_id               TEXT    NOT NULL,
+  process_generation     INTEGER NOT NULL,
+  action_id              TEXT    NOT NULL,
+  execution_context_key  TEXT    NOT NULL,
+  source_seq             INTEGER NOT NULL,
+  PRIMARY KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key,
+    source_seq
+  ),
+  CHECK (source_seq >= 0 AND source_seq <= 9007199254740991),
+  FOREIGN KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key
+  ) REFERENCES scheduler_action_state (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key
+  ) ON DELETE CASCADE
+);
+`;
+
 const SCHEDULER_SCHEMA = `
 CREATE TABLE IF NOT EXISTS scheduler_observation (
   observation_id      INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -295,6 +332,8 @@ CREATE TABLE IF NOT EXISTS scheduler_action_state (
   FOREIGN KEY (latest_observation_id, execution_context_key)
     REFERENCES scheduler_observation(observation_id, execution_context_key)
 );
+
+${SCHEDULER_ACTION_CAUSE_SCHEMA}
 
 CREATE TABLE IF NOT EXISTS scheduler_context_floor (
   branch                     TEXT NOT NULL DEFAULT '',
@@ -2067,6 +2106,10 @@ ADD COLUMN accepted_payload JSON;
 `);
 };
 
+const migrateSchedulerActionCauseSchema = (database: Database): void => {
+  database.exec(SCHEDULER_ACTION_CAUSE_SCHEMA);
+};
+
 const SCHEDULER_ACTION_OWNERSHIP_COLUMNS = [
   "branch",
   "owner_space",
@@ -2508,6 +2551,7 @@ const migrateSchedulerExecutionContextSchema = (database: Database): void => {
   if (!CORE_SCHEDULER_TABLES.every((table) => hasTable(database, table))) {
     database.transaction(() => {
       database.exec(`
+        DROP TABLE IF EXISTS scheduler_action_cause;
         DROP TABLE IF EXISTS scheduler_observation_replay;
         DROP TABLE IF EXISTS scheduler_read_index;
         DROP TABLE IF EXISTS scheduler_write_index;
@@ -2535,6 +2579,7 @@ const migrateSchedulerExecutionContextSchema = (database: Database): void => {
       } => entry.observation !== undefined);
 
     database.exec(`
+      DROP TABLE IF EXISTS scheduler_action_cause;
       DROP INDEX IF EXISTS idx_scheduler_observation_action;
       DROP INDEX IF EXISTS idx_scheduler_observation_id_context;
       DROP INDEX IF EXISTS idx_scheduler_observation_session_local;
@@ -2610,6 +2655,7 @@ export const open = async (
     migrateSchedulerObservationReplayStatus(database);
   }
   migrateSchedulerExecutionContextSchema(database);
+  migrateSchedulerActionCauseSchema(database);
   migrateSchedulerObservationReplayAcceptedPayload(database);
   migrateSchedulerWriteLookupIndex(database);
   migrateSchedulerActionIndexes(database);
@@ -3624,6 +3670,12 @@ export interface UpsertSchedulerObservationOptions {
   observation: SchedulerActionObservation;
 }
 
+type HostSchedulerObservationOptions = UpsertSchedulerObservationOptions & {
+  /** Exact source frontier covered by a claimed attempt. This never crosses
+   * the protocol boundary; ordinary observations clear all pending causes. */
+  causeCoverageSeq?: number;
+};
+
 export interface UpsertSchedulerObservationResult {
   observationId: number;
   commitSeq: number | null;
@@ -3661,7 +3713,7 @@ export const upsertMirroredSchedulerObservation = (
 const upsertSchedulerObservationTransaction = (
   engine: Engine,
   options:
-    & UpsertSchedulerObservationOptions
+    & HostSchedulerObservationOptions
     & { originExecutionContextKey?: SchedulerExecutionContextKey },
 ): UpsertSchedulerObservationResult => {
   const branch = options.branch ?? options.observation.branch ?? DEFAULT_BRANCH;
@@ -3733,6 +3785,16 @@ const upsertSchedulerObservationTransaction = (
     actionId: observation.actionId,
     executionContextKey,
   };
+  const coveredThroughSeq = options.causeCoverageSeq ??
+    (observation.executionProvenance !== undefined
+      ? observation.inputBasisSeq
+      : undefined) ??
+    Number.MAX_SAFE_INTEGER;
+  consumeSchedulerActionCauses(
+    engine,
+    actionKey,
+    coveredThroughSeq,
+  );
   const latest = selectSchedulerSnapshotRow(engine, actionKey);
   const payloadChanged = latest?.payload !== payload;
   const observationId = latest?.observation_id ??
@@ -3806,6 +3868,7 @@ const upsertSchedulerObservationTransaction = (
     observation,
     executionContextKey,
     latestObservationId: observationId,
+    coveredThroughSeq,
   });
   pruneSchedulerSessionExecutionContexts(engine, {
     branch,
@@ -4540,6 +4603,9 @@ export const markSchedulerReadersDirtyForWrites = (
     ownerSpace?: string;
     dirtySeq: number;
     writes: readonly SchedulerWriteAddress[];
+    /** The accepted action producing these writes. Scheduler self-writes do
+     * not schedule another run or become causal source provenance. */
+    ignoredAction?: SchedulerActionCauseKey;
   },
 ): SchedulerReaderIndexEntry[] => {
   const branch = options.branch ?? DEFAULT_BRANCH;
@@ -4551,6 +4617,12 @@ export const markSchedulerReadersDirtyForWrites = (
         write,
       })
     ) {
+      if (
+        options.ignoredAction !== undefined &&
+        schedulerActionCauseKeyEquals(reader, options.ignoredAction)
+      ) {
+        continue;
+      }
       const key = schedulerActionKey(reader);
       if (!dirtied.has(key)) {
         dirtied.set(key, reader);
@@ -4578,6 +4650,7 @@ export const markSchedulerActionsDirectDirty = (
   },
 ): void => {
   const branch = options.branch ?? DEFAULT_BRANCH;
+  assertSchedulerActionCauseSeq(options.dirtySeq);
   const direct = dedupeSchedulerActions(options.actions, branch);
   for (const action of direct) {
     markSchedulerActionDirectDirty(engine, action, options.dirtySeq);
@@ -4589,6 +4662,234 @@ export const markSchedulerActionsDirectDirty = (
     actions: direct,
   });
 };
+
+const MAX_PENDING_SCHEDULER_ACTION_CAUSES = 64;
+
+type SchedulerActionCauseKey = {
+  branch: BranchName;
+  ownerSpace?: string | null;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  executionContextKey: SchedulerExecutionContextKey;
+};
+
+const schedulerActionCauseParams = (key: SchedulerActionCauseKey) => ({
+  branch: key.branch,
+  owner_space: normalizeSchedulerOwnerSpace(key.ownerSpace),
+  piece_id: key.pieceId,
+  process_generation: key.processGeneration,
+  action_id: key.actionId,
+  execution_context_key: key.executionContextKey,
+});
+
+const schedulerActionCauseKeyEquals = (
+  left: SchedulerActionCauseKey,
+  right: SchedulerActionCauseKey,
+): boolean =>
+  left.branch === right.branch &&
+  normalizeSchedulerOwnerSpace(left.ownerSpace) ===
+    normalizeSchedulerOwnerSpace(right.ownerSpace) &&
+  left.pieceId === right.pieceId &&
+  left.processGeneration === right.processGeneration &&
+  left.actionId === right.actionId &&
+  left.executionContextKey === right.executionContextKey;
+
+const assertSchedulerActionCauseSeq = (sourceSeq: number): void => {
+  if (!Number.isSafeInteger(sourceSeq) || sourceSeq <= 0) {
+    throw new TypeError(
+      "scheduler action cause sequence must be a positive safe integer",
+    );
+  }
+};
+
+/**
+ * Retain the newest exact causes while bounding durable state. A zero row is
+ * the honest overflow marker: once any exact cause has been folded into it,
+ * provenance stays unknown until one accepted run covers the entire pending
+ * dirty frontier.
+ */
+function recordSchedulerActionCause(
+  engine: Engine,
+  action: SchedulerActionCauseKey,
+  sourceSeq: number,
+): void {
+  const params = schedulerActionCauseParams(action);
+  engine.database.prepare(`
+    INSERT OR IGNORE INTO scheduler_action_cause (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key,
+      source_seq
+    ) VALUES (
+      :branch,
+      :owner_space,
+      :piece_id,
+      :process_generation,
+      :action_id,
+      :execution_context_key,
+      :source_seq
+    )
+  `).run({ ...params, source_seq: sourceSeq });
+
+  const rowCount = (engine.database.prepare(`
+    SELECT COUNT(*) AS count
+    FROM scheduler_action_cause
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+  `).get(params) as { count: number }).count;
+  if (rowCount <= MAX_PENDING_SCHEDULER_ACTION_CAUSES) return;
+
+  engine.database.prepare(`
+    INSERT OR IGNORE INTO scheduler_action_cause (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key,
+      source_seq
+    ) VALUES (
+      :branch,
+      :owner_space,
+      :piece_id,
+      :process_generation,
+      :action_id,
+      :execution_context_key,
+      0
+    )
+  `).run(params);
+  const boundedCount = (engine.database.prepare(`
+    SELECT COUNT(*) AS count
+    FROM scheduler_action_cause
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+  `).get(params) as { count: number }).count;
+  engine.database.prepare(`
+    DELETE FROM scheduler_action_cause
+    WHERE rowid IN (
+      SELECT rowid
+      FROM scheduler_action_cause
+      WHERE branch = :branch
+        AND owner_space = :owner_space
+        AND piece_id = :piece_id
+        AND process_generation = :process_generation
+        AND action_id = :action_id
+        AND execution_context_key = :execution_context_key
+        AND source_seq > 0
+      ORDER BY source_seq ASC
+      LIMIT :excess
+    )
+  `).run({
+    ...params,
+    excess: boundedCount - MAX_PENDING_SCHEDULER_ACTION_CAUSES,
+  });
+}
+
+type SchedulerActionCauseCoverage = {
+  causedBy: number[];
+  overflowed: boolean;
+  clearsOverflow: boolean;
+};
+
+function schedulerActionCauseCoverage(
+  engine: Engine,
+  key: SchedulerActionCauseKey,
+  throughSeq: number,
+): SchedulerActionCauseCoverage {
+  const params = schedulerActionCauseParams(key);
+  const rows = engine.database.prepare(`
+    SELECT source_seq
+    FROM scheduler_action_cause
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+    ORDER BY source_seq ASC
+  `).all(params) as Array<{ source_seq: number }>;
+  const overflowed = rows.some((row) => row.source_seq === 0);
+  const exact = [...new Set(rows.map((row) => row.source_seq))]
+    .filter((sourceSeq) =>
+      Number.isSafeInteger(sourceSeq) && sourceSeq > 0 &&
+      sourceSeq <= throughSeq
+    )
+    .sort((left, right) => left - right);
+  if (!overflowed) {
+    return { causedBy: exact, overflowed: false, clearsOverflow: false };
+  }
+
+  const state = engine.database.prepare(`
+    SELECT direct_dirty_seq, stale_seq
+    FROM scheduler_action_state
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+  `).get(params) as {
+    direct_dirty_seq: number | null;
+    stale_seq: number | null;
+  } | undefined;
+  const pendingFrontier = [state?.direct_dirty_seq, state?.stale_seq]
+    .filter((seq): seq is number => seq !== null && seq !== undefined)
+    .reduce<number | undefined>(
+      (maximum, seq) => maximum === undefined ? seq : Math.max(maximum, seq),
+      undefined,
+    );
+  return {
+    causedBy: [],
+    overflowed: true,
+    clearsOverflow: pendingFrontier !== undefined &&
+      Number.isSafeInteger(pendingFrontier) && pendingFrontier <= throughSeq,
+  };
+}
+
+function consumeSchedulerActionCauses(
+  engine: Engine,
+  key: SchedulerActionCauseKey,
+  throughSeq: number,
+): void {
+  const coverage = schedulerActionCauseCoverage(engine, key, throughSeq);
+  const params = schedulerActionCauseParams(key);
+  if (coverage.overflowed) {
+    if (!coverage.clearsOverflow) return;
+    engine.database.prepare(`
+      DELETE FROM scheduler_action_cause
+      WHERE branch = :branch
+        AND owner_space = :owner_space
+        AND piece_id = :piece_id
+        AND process_generation = :process_generation
+        AND action_id = :action_id
+        AND execution_context_key = :execution_context_key
+    `).run(params);
+    return;
+  }
+  engine.database.prepare(`
+    DELETE FROM scheduler_action_cause
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+      AND source_seq > 0
+      AND source_seq <= :through_seq
+  `).run({ ...params, through_seq: throughSeq });
+}
 
 export const getSchedulerActionState = (
   engine: Engine,
@@ -4716,6 +5017,7 @@ function markSchedulerActionDirectDirty(
     execution_context_key: action.executionContextKey,
     direct_dirty_seq: dirtySeq,
   });
+  recordSchedulerActionCause(engine, action, dirtySeq);
 }
 
 function markSchedulerActionStale(
@@ -4765,6 +5067,7 @@ function markSchedulerActionStale(
     execution_context_key: action.executionContextKey,
     stale_seq: staleSeq,
   });
+  recordSchedulerActionCause(engine, action, staleSeq);
 }
 
 function propagateSchedulerStaleFromActions(
@@ -6681,6 +6984,7 @@ function upsertSchedulerActionState(
     observation: SchedulerActionObservation;
     executionContextKey: SchedulerExecutionContextKey;
     latestObservationId: number;
+    coveredThroughSeq: number;
   },
 ): void {
   engine.database.prepare(`
@@ -6718,8 +7022,14 @@ function upsertSchedulerActionState(
     )
     DO UPDATE SET
       latest_observation_id = excluded.latest_observation_id,
-      direct_dirty_seq = NULL,
-      stale_seq = NULL,
+      direct_dirty_seq = CASE
+        WHEN direct_dirty_seq > :covered_through_seq THEN direct_dirty_seq
+        ELSE NULL
+      END,
+      stale_seq = CASE
+        WHEN stale_seq > :covered_through_seq THEN stale_seq
+        ELSE NULL
+      END,
       unknown_reason = NULL
   `).run({
     branch: options.branch,
@@ -6729,6 +7039,7 @@ function upsertSchedulerActionState(
     action_id: options.observation.actionId,
     execution_context_key: options.executionContextKey,
     latest_observation_id: options.latestObservationId,
+    covered_through_seq: options.coveredThroughSeq,
   });
 }
 
@@ -6953,13 +7264,26 @@ const applyCommitTransaction = (
     commit.reads.confirmed,
     resolvedPendingReads,
   );
+  const executionClaim = executionClaims?.get(commit.localSeq);
   const acceptedObservation = schedulerObservation
     ? acceptedSchedulerObservation(schedulerObservation, {
       branch,
       space,
       principal,
       inputBasisSeq,
-      executionClaim: executionClaims?.get(commit.localSeq),
+      executionClaim,
+      ...(executionClaim !== undefined
+        ? {
+          causedBy: schedulerActionCauseCoverage(engine, {
+            branch,
+            ownerSpace: space ?? schedulerObservation.ownerSpace,
+            pieceId: schedulerObservation.pieceId,
+            processGeneration: schedulerObservation.processGeneration,
+            actionId: schedulerObservation.actionId,
+            executionContextKey: executionClaim.contextKey,
+          }, inputBasisSeq).causedBy,
+        }
+        : {}),
     })
     : undefined;
   if (
@@ -7065,6 +7389,20 @@ const applyCommitTransaction = (
       ownerSpace: space,
       dirtySeq: seq,
       writes: changedSchedulerWrites,
+      ...(acceptedObservation?.provenance !== undefined
+        ? {
+          ignoredAction: {
+            branch,
+            ownerSpace: space ?? acceptedObservation.observation.ownerSpace,
+            pieceId: acceptedObservation.observation.pieceId,
+            processGeneration:
+              acceptedObservation.observation.processGeneration,
+            actionId: acceptedObservation.observation.actionId,
+            executionContextKey:
+              acceptedObservation.provenance.claim.contextKey,
+          },
+        }
+        : {}),
     });
   }
 
@@ -7077,6 +7415,15 @@ const applyCommitTransaction = (
       scopeContext: { principal: principal!, sessionId: scopeSessionId },
       writerSessionId: sessionKey,
       localSeq: commit.localSeq,
+      ...(acceptedObservation.provenance !== undefined
+        ? { causeCoverageSeq: inputBasisSeq }
+        : {}),
+      replayPayload: schedulerObservationReplayPayload({
+        branch,
+        observedAtSeq: seq,
+        ownerSpace: space ?? schedulerObservation!.ownerSpace,
+        observation: schedulerObservation!,
+      }),
       observation: acceptedObservation.observation,
     })
     : undefined;
@@ -7544,6 +7891,7 @@ const acceptedSchedulerObservation = (
     principal?: string;
     inputBasisSeq: InputBasisSeq;
     executionClaim?: ExecutionClaim;
+    causedBy?: readonly number[];
   },
 ): {
   observation: SchedulerActionObservation;
@@ -7602,9 +7950,9 @@ const acceptedSchedulerObservation = (
     onBehalfOf: options.principal,
     leaseGeneration: claim.leaseGeneration,
     claimGeneration: claim.claimGeneration,
-    // Invalidations currently retain addresses, not authoritative source
-    // sequences. Unknown is represented honestly as an empty sorted set.
-    causedBy: [],
+    causedBy: [...new Set(options.causedBy ?? [])]
+      .filter((sourceSeq) => Number.isSafeInteger(sourceSeq) && sourceSeq > 0)
+      .sort((left, right) => left - right),
     inputBasisSeq: options.inputBasisSeq,
   };
   return {
@@ -7917,6 +8265,18 @@ const applySchedulerObservationOnlyCommit = (
     principal,
     inputBasisSeq,
     executionClaim,
+    ...(executionClaim !== undefined
+      ? {
+        causedBy: schedulerActionCauseCoverage(engine, {
+          branch,
+          ownerSpace: space ?? schedulerObservation.ownerSpace,
+          pieceId: schedulerObservation.pieceId,
+          processGeneration: schedulerObservation.processGeneration,
+          actionId: schedulerObservation.actionId,
+          executionContextKey: executionClaim.contextKey,
+        }, inputBasisSeq).causedBy,
+      }
+      : {}),
   });
   if (accepted.provenance !== undefined) {
     if (accepted.unservedDiagnosticCode === undefined) {
@@ -7978,6 +8338,9 @@ const applySchedulerObservationOnlyCommit = (
     writerSessionId: sessionKey,
     localSeq,
     replayPayload,
+    ...(accepted.provenance !== undefined
+      ? { causeCoverageSeq: inputBasisSeq }
+      : {}),
     observation: accepted.observation,
   });
   if (

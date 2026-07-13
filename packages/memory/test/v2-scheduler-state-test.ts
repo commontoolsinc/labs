@@ -317,6 +317,83 @@ Deno.test("memory v2 migrates canonical replay payload without changing snapshot
   }
 });
 
+Deno.test("memory v2 adds the scheduler cause table without rebuilding state", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  let engine = await openEngine({ url: toFileUrl(path) });
+  const stored = upsertSchedulerObservation(engine, {
+    observedAtSeq: 0,
+    observation,
+  });
+  close(engine);
+
+  const legacyDb = new Database(path);
+  try {
+    legacyDb.exec(`DROP TABLE scheduler_action_cause;`);
+  } finally {
+    legacyDb.close();
+  }
+
+  engine = await openEngine({ url: toFileUrl(path) });
+  try {
+    assertEquals(
+      engine.database.prepare(`
+        SELECT name
+        FROM sqlite_schema
+        WHERE type = 'table' AND name = 'scheduler_action_cause'
+      `).get(),
+      { name: "scheduler_action_cause" },
+    );
+    assertEquals(
+      getLatestSchedulerActionSnapshot(engine, {
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+      })?.observationId,
+      stored.observationId,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 scheduler causes survive an engine reopen", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  let engine = await openEngine({ url: toFileUrl(path) });
+  upsertSchedulerObservation(engine, {
+    observedAtSeq: 0,
+    observation,
+  });
+  for (const dirtySeq of [7, 9]) {
+    markSchedulerReadersDirtyForWrites(engine, {
+      dirtySeq,
+      writes: [sourceRead],
+    });
+  }
+  close(engine);
+
+  engine = await openEngine({ url: toFileUrl(path) });
+  try {
+    assertEquals(
+      engine.database.prepare(`
+        SELECT source_seq
+        FROM scheduler_action_cause
+        WHERE action_id = :action_id
+        ORDER BY source_seq
+      `).all({ action_id: observation.actionId }),
+      [{ source_seq: 7 }, { source_seq: 9 }],
+    );
+    upsertSchedulerObservation(engine, {
+      observedAtSeq: 9,
+      observation,
+    });
+    assertEquals(countRows(engine, "scheduler_action_cause"), 0);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 migrates legacy scheduler write and snapshot metadata", async () => {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
   const legacyDb = new Database(path, { create: true });

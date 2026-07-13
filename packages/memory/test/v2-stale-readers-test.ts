@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import {
   close,
@@ -170,6 +170,17 @@ Deno.test("stale reader lookup returns distinct transitive demanded actions", as
       dirtySeq: 17,
       writes: [sourceLeaf],
     });
+    assertEquals(
+      engine.database.prepare(`
+        SELECT action_id, source_seq
+        FROM scheduler_action_cause
+        ORDER BY action_id, source_seq
+      `).all(),
+      [
+        { action_id: "bridge-action", source_seq: 17 },
+        { action_id: "demanded-action", source_seq: 17 },
+      ],
+    );
 
     assertEquals(
       staleReadersForTargets(engine, {
@@ -206,6 +217,97 @@ Deno.test("stale reader lookup returns distinct transitive demanded actions", as
         dirtySeq: 17,
       }),
       [],
+    );
+  });
+});
+
+Deno.test("scheduler action causes are bounded and context-qualified", async () => {
+  await withEngine((engine) => {
+    const source = address("of:cause-source", ["value"], "user");
+    const action = observation({
+      pieceId: "user:of:cause-piece",
+      actionId: "cause-action",
+      reads: [source],
+      writes: [address("of:cause-output", ["value"], "user")],
+    });
+    store(engine, action, ALICE);
+    store(engine, action, BOB);
+
+    assertThrows(
+      () =>
+        markSchedulerReadersDirtyForWrites(engine, {
+          ownerSpace: OWNER_SPACE,
+          dirtySeq: 0,
+          writes: [{ ...source, scopeKey: ALICE_USER_CONTEXT }],
+        }),
+      TypeError,
+      "positive safe integer",
+    );
+    for (let sourceSeq = 1; sourceSeq <= 65; sourceSeq++) {
+      markSchedulerReadersDirtyForWrites(engine, {
+        ownerSpace: OWNER_SPACE,
+        dirtySeq: sourceSeq,
+        writes: [{ ...source, scopeKey: ALICE_USER_CONTEXT }],
+      });
+    }
+    // Duplicate invalidation sequences remain canonical set members.
+    markSchedulerReadersDirtyForWrites(engine, {
+      ownerSpace: OWNER_SPACE,
+      dirtySeq: 65,
+      writes: [{ ...source, scopeKey: ALICE_USER_CONTEXT }],
+    });
+    markSchedulerReadersDirtyForWrites(engine, {
+      ownerSpace: OWNER_SPACE,
+      dirtySeq: 66,
+      writes: [{ ...source, scopeKey: BOB_USER_CONTEXT }],
+    });
+
+    const causes = engine.database.prepare(`
+      SELECT owner_space, piece_id, process_generation, action_id,
+             execution_context_key, source_seq
+      FROM scheduler_action_cause
+      ORDER BY execution_context_key, source_seq
+    `).all() as Array<{
+      owner_space: string;
+      piece_id: string;
+      process_generation: number;
+      action_id: string;
+      execution_context_key: string;
+      source_seq: number;
+    }>;
+    const aliceCauses = causes.filter((row) =>
+      row.execution_context_key === ALICE_USER_CONTEXT
+    );
+    assertEquals(aliceCauses.length, 64);
+    assertEquals(aliceCauses.map((row) => row.source_seq), [
+      0,
+      ...Array.from({ length: 63 }, (_, index) => index + 3),
+    ]);
+    assertEquals(
+      aliceCauses.every((row) =>
+        row.owner_space === OWNER_SPACE &&
+        row.piece_id === action.pieceId &&
+        row.process_generation === action.processGeneration &&
+        row.action_id === action.actionId
+      ),
+      true,
+    );
+    assertEquals(
+      causes.filter((row) => row.execution_context_key === BOB_USER_CONTEXT)
+        .map((row) => row.source_seq),
+      [66],
+    );
+
+    // An ordinary accepted re-observation consumes only Alice's qualified
+    // pending state; Bob's independent context remains attributable.
+    store(engine, action, ALICE);
+    assertEquals(
+      engine.database.prepare(`
+        SELECT execution_context_key, source_seq
+        FROM scheduler_action_cause
+        ORDER BY execution_context_key, source_seq
+      `).all(),
+      [{ execution_context_key: BOB_USER_CONTEXT, source_seq: 66 }],
     );
   });
 });

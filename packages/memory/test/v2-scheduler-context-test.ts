@@ -1363,6 +1363,10 @@ Deno.test("scheduler context rebuilds a partially converted ownership schema", a
       actionOwnershipKey,
     );
     assertEquals(primaryKey("scheduler_action_state"), actionOwnershipKey);
+    assertEquals(primaryKey("scheduler_action_cause"), [
+      ...actionOwnershipKey,
+      "source_seq",
+    ]);
     assertEquals(primaryKey("scheduler_context_floor"), [
       "branch",
       "owner_space",
@@ -1425,6 +1429,24 @@ Deno.test("scheduler context rebuilds a partially converted ownership schema", a
         },
       ]);
     }
+    assertEquals(
+      foreignKey("scheduler_action_cause"),
+      actionOwnershipKey.map((column) => ({
+        table: "scheduler_action_state",
+        from: column,
+        to: column,
+      })),
+    );
+    assertEquals(
+      [
+        ...new Set(
+          (engine!.database.prepare(
+            `PRAGMA foreign_key_list("scheduler_action_cause")`,
+          ).all() as Array<{ on_delete: string }>).map((row) => row.on_delete),
+        ),
+      ],
+      ["CASCADE"],
+    );
     assertEquals(
       engine!.database.prepare(`PRAGMA foreign_key_check`).all(),
       [],
