@@ -1655,7 +1655,9 @@ export class Server {
       this.memoryProtocolFlags().serverPrimaryExecutionV1 &&
       this.#sessions.sessionsForSpace(space).some((session) =>
         session.ownerConnectionId !== null &&
-        !session.serverPrimaryExecutionV1
+        (!session.serverPrimaryExecutionV1 ||
+          !session.serverPrimaryExecutionClaimRoutingV1 ||
+          !session.serverPrimaryExecutionBuiltinPassivityV1)
       )
     ) {
       return toError(
@@ -4044,13 +4046,15 @@ export class Server {
       if (
         this.memoryProtocolFlags().serverPrimaryExecutionV1 &&
         executionPolicyEnabled &&
-        !connection.serverPrimaryExecutionV1
+        (!connection.serverPrimaryExecutionV1 ||
+          !connection.serverPrimaryExecutionClaimRoutingV1 ||
+          !connection.serverPrimaryExecutionBuiltinPassivityV1)
       ) {
         return respondTypedError<SessionOpenResult>(
           message.requestId,
           toError(
             "ProtocolError",
-            `Space ${message.space} requires memory capability server-primary-execution-v1`,
+            `Space ${message.space} requires memory capabilities server-primary-execution-v1, claim-routing-v1, and builtin-passivity-v1`,
           ),
         );
       }

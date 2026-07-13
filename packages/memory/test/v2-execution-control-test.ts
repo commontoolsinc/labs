@@ -141,7 +141,11 @@ const createServer = (
     {
       ...testSessionOpenServerOptions,
       store: new URL(`memory://${name}`),
-      protocolFlags: { serverPrimaryExecutionV1 },
+      protocolFlags: {
+        serverPrimaryExecutionV1,
+        serverPrimaryExecutionClaimRoutingV1: serverPrimaryExecutionV1,
+        serverPrimaryExecutionBuiltinPassivityV1: serverPrimaryExecutionV1,
+      },
       acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
     } as ConstructorParameters<typeof Server>[0],
   ) as ExecutionServer;
@@ -152,7 +156,11 @@ const connectClient = async (
 ): Promise<MemoryClient.Client> =>
   await MemoryClient.connect({
     transport: MemoryClient.loopback(server),
-    protocolFlags: { serverPrimaryExecutionV1 },
+    protocolFlags: {
+      serverPrimaryExecutionV1,
+      serverPrimaryExecutionClaimRoutingV1: serverPrimaryExecutionV1,
+      serverPrimaryExecutionBuiltinPassivityV1: serverPrimaryExecutionV1,
+    },
     executionCapabilities: {
       routing: true,
       builtinPassivity: true,
@@ -387,7 +395,7 @@ Deno.test("enabled execution policy rejects a stale client but disabled policy d
       await assertRejects(
         () => mount(stale),
         Error,
-        "requires memory capability server-primary-execution-v1",
+        "requires memory capabilities server-primary-execution-v1",
       );
     } finally {
       await stale.close();
@@ -2150,8 +2158,11 @@ Deno.test("control-only claim frames advance one feed sequence without advancing
   }
 });
 
-Deno.test("server publishes only claim classes the client advertises", async () => {
+Deno.test("enabled policy rejects clients missing graduated execution subcapabilities", async () => {
   const server = createControlServer("memory-v2-execution-subcapabilities");
+  const ownerClient = await connectControlClient(server);
+  const owner = await mount(ownerClient);
+  await setPolicy(owner, true);
   const noRoutingClient = await MemoryClient.connect({
     transport: MemoryClient.loopback(server),
     protocolFlags: {
@@ -2168,27 +2179,19 @@ Deno.test("server publishes only claim classes the client advertises", async () 
       serverPrimaryExecutionBuiltinPassivityV1: false,
     },
   });
-  const noRouting = await mount(noRoutingClient) as ExecutionSession;
-  const computationOnly = await mount(
-    computationOnlyClient,
-  ) as ExecutionSession;
   try {
-    await setPolicy(computationOnly, true);
-    const lease = await demandAndAcquireLease(server, computationOnly);
-    await server.setExecutionClaim(
-      lease,
-      claimKey(POLICY_SPACE, "", "action:computation"),
+    await assertRejects(
+      () => mount(noRoutingClient),
+      Error,
+      "requires memory capabilities",
     );
-    await server.setExecutionClaim(lease, {
-      ...claimKey(POLICY_SPACE, "", "action:builtin"),
-      actionKind: "effect",
-    });
-    assertEquals(noRouting.executionClaims, []);
-    assertEquals(
-      computationOnly.executionClaims.map((claim) => claim.actionKind),
-      ["computation"],
+    await assertRejects(
+      () => mount(computationOnlyClient),
+      Error,
+      "requires memory capabilities",
     );
   } finally {
+    await ownerClient.close();
     await noRoutingClient.close();
     await computationOnlyClient.close();
     await server.close();

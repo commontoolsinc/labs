@@ -1099,10 +1099,8 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
   serverPrimaryExecutionV1: getServerPrimaryExecutionConfig(),
-  // Protocol shapes land before either client behavior. Test-only overrides
-  // exercise them in W0.6; production turns them on with W2.1/W2.3.
-  serverPrimaryExecutionClaimRoutingV1: false,
-  serverPrimaryExecutionBuiltinPassivityV1: false,
+  serverPrimaryExecutionClaimRoutingV1: getServerPrimaryExecutionConfig(),
+  serverPrimaryExecutionBuiltinPassivityV1: getServerPrimaryExecutionConfig(),
   // Build-inherent capability: older servers omit it and clients fail open to
   // piece-root discovery rather than sending an RPC the peer cannot parse.
   schedulerWriterLookup: true,

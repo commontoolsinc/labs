@@ -23,6 +23,14 @@ Deno.test("server-primary execution is an optional protocol capability that defa
       api.getMemoryProtocolFlags().serverPrimaryExecutionV1,
       true,
     );
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionClaimRoutingV1,
+      true,
+    );
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionBuiltinPassivityV1,
+      true,
+    );
 
     assertEquals(
       api.parseMemoryProtocolFlags({ serverPrimaryExecutionV1: true })

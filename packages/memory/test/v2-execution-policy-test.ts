@@ -32,7 +32,11 @@ const createServer = (
     },
     sessionOpenAuth: { audience: AUDIENCE },
     acl: { mode: aclMode, serviceDids: [OWNER] },
-    protocolFlags: { serverPrimaryExecutionV1: true },
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+    },
   });
 
 const connect = (
@@ -42,7 +46,11 @@ const connect = (
 ) =>
   MemoryClient.connect({
     transport: MemoryClient.loopback(server),
-    protocolFlags: { serverPrimaryExecutionV1: capable },
+    protocolFlags: {
+      serverPrimaryExecutionV1: capable,
+      serverPrimaryExecutionClaimRoutingV1: capable,
+      serverPrimaryExecutionBuiltinPassivityV1: capable,
+    },
   }).then((client) => ({ client, auth: authFactory(principal) }));
 
 Deno.test("execution policy is strict, owner-managed, and cannot be enabled around a stale session", async () => {
