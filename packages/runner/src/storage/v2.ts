@@ -4042,7 +4042,7 @@ class SpaceReplica implements ISpaceReplica {
       this.dropClaimedOverlays(
         (overlay) =>
           executionClaimIncarnationKey(overlay.claim) === incarnation,
-        { dirtyProducer: false, diagnosticCode: "claim-unserved" },
+        { dirtyProducer: true, diagnosticCode: "claim-unserved" },
       );
       return false;
     }

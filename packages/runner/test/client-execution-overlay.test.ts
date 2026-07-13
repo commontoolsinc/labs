@@ -365,6 +365,59 @@ Deno.test("ordered revoke drops the matching overlay and resumes upstream author
   }
 });
 
+Deno.test("unserved settlement dirties the claimed producer before exact revoke", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const notifications: StorageNotification[] = [];
+  storage.subscribe({
+    next(notification) {
+      notifications.push(notification);
+      return { done: false };
+    },
+  });
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "unserved-overlay");
+
+    factory.claims = [];
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "unserved",
+          },
+        }, {
+          type: "session.execution.claim.revoke",
+          branch: "",
+          claim,
+          leaseGeneration: claim.leaseGeneration,
+          claimGeneration: claim.claimGeneration,
+        }],
+      },
+    }));
+
+    await waitFor(() => visibleOutput(storage) === undefined);
+    assertEquals(
+      notifications.some((notification) =>
+        notification.type === "execution-claim-invalidation" &&
+        notification.sourceAction === sourceAction &&
+        notification.diagnosticCode === "claim-unserved"
+      ),
+      true,
+    );
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
 Deno.test("flag off keeps an otherwise matching claimed computation upstream", async () => {
   resetServerPrimaryExecutionConfig();
   const factory = new OverlaySessionFactory();
