@@ -635,7 +635,8 @@ only enumerable JavaScript properties. A factory nested in `UnknownValue`,
 `FabricError.cause` or extras, another codec-backed Fabric instance, an array,
 or an ordinary object therefore selects the canonical Fabric projection and
 round-trips the complete enclosing value. IPC preparation never flattens a
-codec-backed instance with `Object.entries()`.
+codec-backed instance with `Object.entries()` or strips its container before
+the codec owns the projection.
 
 The receiving side performs context-free decode, so every factory leaf is an
 inert callable shell. Worker IPC does not grant materialization or code-loading
@@ -1205,6 +1206,10 @@ stable identity is derived from the containing callable call-site Cell,
 including its path, not from the linked source/artifact Cell. Raw JSON may
 contain the same property names syntactically, but adapters overwrite marked
 paths; if the call-site identity cannot be derived, invocation fails closed.
+If execution temporarily reconstructs the tool through another Cell, that Cell
+is an implementation detail and does not replace the durable call-site
+identity. Removing a nested protected path also removes any now-system-only
+required ancestor from the authored help and flag schema.
 
 Authored code may neither supply a literal for such a field nor capture a
 chosen value and forward it. If a required system value or stable tool identity
@@ -1280,6 +1285,8 @@ Factory-function `toJSON()` compatibility remains until every Fabric boundary
 is proven to dispatch through registered codecs. It emits the full graph, never
 the retired `$patternRef` sentinel. This does not affect canonical Factory@1
 storage, hashing, memory, CLI, FUSE, or LLM boundaries.
+Canonical FUSE projection must inspect the original registered callable before
+JavaScript invokes a legacy `toJSON()` hook on it.
 
 ## Delivery Order
 

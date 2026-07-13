@@ -4,18 +4,30 @@ import {
   isAdmittedFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
 import {
+  entityRefToString,
+  isEntityRef,
+  linkRefFrom,
+} from "@commonfabric/data-model/cell-rep";
+import {
   type CallableKind,
   classifyCallableEntry,
   patternFactoryFromCallableEntry,
   patternFactorySchemas,
 } from "../../fuse/callables.ts";
 import { prepareFactory } from "../../runner/src/factory-materialization.ts";
+import { getFrameworkProvidedPaths } from "../../runner/src/builder/pattern-metadata.ts";
+import { getEntityId } from "../../runner/src/create-ref.ts";
+import {
+  applyFrameworkProvidedInputs,
+  stripFrameworkProvidedPaths,
+} from "../../runner/src/framework-provided-inputs.ts";
 import type { Runtime } from "../../runner/src/runtime.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
 const DEFAULT_TOOL_RESULT_TIMEOUT_MS = 15_000;
+const preparedCallableTools = new WeakSet<object>();
 
 export interface CliRuntimeErrorRecord {
   message: string;
@@ -46,6 +58,7 @@ export interface CallableCellLike {
   pull?: () => Promise<unknown>;
   getAsNormalizedFullLink?: () => {
     id?: string;
+    path?: readonly (string | number)[];
     space?: string;
     scope?: CellScope;
   };
@@ -95,12 +108,15 @@ export interface CallablePieceLike {
 
 export interface CallableResolution {
   callableCell: CallableCellLike;
+  /** Stable containing call-site identity when the executable value is read elsewhere. */
+  identityCell?: CallableCellLike;
   callableKind: CallableKind;
   cellKey: string;
   cellProp: "input" | "result";
   manager: CallableManagerLike;
   piece: CallablePieceLike;
   space: string;
+  preparedTool?: PreparedCallableTool;
 }
 
 export interface CallableExecutionDeps {
@@ -118,6 +134,13 @@ export interface CallableExecutionDeps {
 
 export interface ExecutedCallable {
   outputText?: string;
+}
+
+export interface PreparedCallableTool {
+  factory: unknown;
+  frameworkProvidedPaths: readonly (readonly string[])[];
+  commandSpec: ExecCommandSpec;
+  resultSchema: JSONSchema;
 }
 
 function canonicalFactorySelection(callableCell: CallableCellLike): {
@@ -256,6 +279,7 @@ export function detectCallableKind(
 export function callableCommandSpec(
   callableCell: CallableCellLike,
   callableKind: CallableKind,
+  preparedFactory?: unknown,
 ): ExecCommandSpec {
   if (callableKind === "handler") {
     return {
@@ -266,19 +290,97 @@ export function callableCommandSpec(
   }
 
   const canonical = canonicalFactorySelection(callableCell);
-  const canonicalSchemas = canonical === undefined
+  const schemaFactory = preparedFactory ?? canonical?.factory;
+  const canonicalSchemas = schemaFactory === undefined
     ? undefined
-    : patternFactorySchemas(canonical.factory);
+    : patternFactorySchemas(schemaFactory);
   if (canonicalSchemas) {
+    const frameworkProvidedPaths = getFrameworkProvidedPaths(schemaFactory);
     return {
       callableKind: "tool",
       defaultVerb: "run",
-      inputSchema: canonicalSchemas.argumentSchema,
+      inputSchema: stripFrameworkProvidedPaths(
+        canonicalSchemas.argumentSchema,
+        frameworkProvidedPaths,
+      ),
       outputSchemaSummary: canonicalSchemas.resultSchema,
     };
   }
 
   throw new TypeError("Mounted tool requires a PatternFactory");
+}
+
+export async function prepareResolvedCallableTool(
+  resolved: CallableResolution,
+  deps: CallableExecutionDeps = {},
+): Promise<PreparedCallableTool> {
+  if (resolved.preparedTool) {
+    if (!preparedCallableTools.has(resolved.preparedTool)) {
+      throw new TypeError("Mounted tool preparation is not runner-owned");
+    }
+    return resolved.preparedTool;
+  }
+  if (resolved.callableKind !== "tool") {
+    throw new TypeError("Only mounted tools have a factory to prepare");
+  }
+
+  const canonical = canonicalFactorySelection(resolved.callableCell);
+  if (!canonical) throw new TypeError("Mounted tool requires a PatternFactory");
+  if (!patternFactorySchemas(canonical.factory)) {
+    throw new TypeError("Mounted tool requires a PatternFactory");
+  }
+  const sourceCell = canonical.leafCell.resolveAsCell?.() ?? canonical.leafCell;
+  const artifactSpace = sourceCell.getAsNormalizedFullLink?.().space ??
+    resolved.space;
+  const factory = await (deps.prepareFactory ??
+    ((factory, context) =>
+      prepareFactory(factory, {
+        runtime: context.runtime as unknown as Runtime,
+        artifactSpace: context.artifactSpace as MemorySpace,
+      })))(canonical.factory, {
+      runtime: resolved.manager.runtime,
+      artifactSpace,
+    });
+  const frameworkProvidedPaths = getFrameworkProvidedPaths(factory);
+  const schemas = patternFactorySchemas(factory);
+  if (!schemas) {
+    throw new TypeError("Materialized tool is not a PatternFactory");
+  }
+  const prepared = {
+    factory,
+    frameworkProvidedPaths,
+    commandSpec: callableCommandSpec(
+      resolved.callableCell,
+      "tool",
+      factory,
+    ),
+    resultSchema: schemas.resultSchema,
+  };
+  preparedCallableTools.add(prepared);
+  return prepared;
+}
+
+function callableStableEntityId(
+  callableCell: CallableCellLike,
+): string | undefined {
+  let link;
+  try {
+    link = callableCell.getAsNormalizedFullLink?.();
+  } catch {
+    return undefined;
+  }
+  if (typeof link?.id !== "string" || link.id.length === 0) return undefined;
+  try {
+    const ref = getEntityId(linkRefFrom({
+      id: link.id,
+      ...(link.path && link.path.length > 0
+        ? { path: link.path.map(String) }
+        : {}),
+    }));
+    return ref && isEntityRef(ref) ? entityRefToString(ref) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function executeResolvedCallable(
@@ -324,36 +426,25 @@ export async function executeResolvedCallable(
     return {};
   }
 
-  const canonical = canonicalFactorySelection(resolved.callableCell);
-  if (!canonical) throw new TypeError("Mounted tool requires a PatternFactory");
-  const schemas = patternFactorySchemas(canonical.factory);
-  if (!schemas) throw new TypeError("Mounted tool requires a PatternFactory");
-  const resultSchema = schemas.resultSchema;
-  const sourceCell = canonical.leafCell.resolveAsCell?.() ?? canonical.leafCell;
-  const artifactSpace = sourceCell.getAsNormalizedFullLink?.().space ??
-    resolved.space;
-  const pattern = await (deps.prepareFactory ??
-    ((factory, context) =>
-      prepareFactory(factory, {
-        runtime: context.runtime as unknown as Runtime,
-        artifactSpace: context.artifactSpace as MemorySpace,
-      })))(canonical.factory, {
-      runtime: resolved.manager.runtime,
-      artifactSpace,
-    });
+  const prepared = await prepareResolvedCallableTool(resolved, deps);
+  const inputWithFrameworkValues = applyFrameworkProvidedInputs(
+    normalizeToolInput(input),
+    prepared.frameworkProvidedPaths,
+    callableStableEntityId(resolved.identityCell ?? resolved.callableCell),
+  );
   const tx = resolved.manager.runtime.edit();
   const resultScope = resolved.callableCell.getAsNormalizedFullLink?.().scope;
   const resultCell = resolved.manager.runtime.getCell(
     resolved.space,
     deps.uuid?.() ?? crypto.randomUUID(),
-    resultSchema,
+    prepared.resultSchema,
     tx,
     resultScope,
   );
   const running = resolved.manager.runtime.run(
     tx,
-    pattern,
-    normalizeToolInput(input),
+    prepared.factory,
+    inputWithFrameworkValues,
     resultCell,
   );
   let sinkValue: unknown;

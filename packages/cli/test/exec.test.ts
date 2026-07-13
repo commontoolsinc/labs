@@ -24,7 +24,10 @@ import {
 } from "../lib/exec.ts";
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
-import { brandTrustedBuilderArtifact } from "../../runner/src/builder/pattern-metadata.ts";
+import {
+  brandTrustedBuilderArtifact,
+  setFrameworkProvidedPaths,
+} from "../../runner/src/builder/pattern-metadata.ts";
 import { cf, isIgnorableDenoWarningLine } from "./utils.ts";
 
 const canonicalSearchFactory = createFactoryShell({
@@ -47,14 +50,17 @@ const canonicalSearchFactory = createFactoryShell({
 function livePatternFactory(
   argumentSchema: JSONSchema,
   resultSchema: JSONSchema,
+  frameworkProvidedPaths: readonly (readonly string[])[] = [],
 ): unknown {
   const factory = brandTrustedBuilderArtifact(() => undefined);
-  return registerFabricFactory(factory, "pattern", {
+  const registered = registerFabricFactory(factory, "pattern", {
     kind: "pattern",
     rootToken: {},
     argumentSchema,
     resultSchema,
   });
+  setFrameworkProvidedPaths(registered, frameworkProvidedPaths);
+  return registered;
 }
 
 function makeSpec(
@@ -1868,6 +1874,137 @@ describe("mounted callable resolution and execution", () => {
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
   });
 
+  it("injects FrameworkProvided inputs from the stable mounted callable identity", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const { harness, materializedFactory } = createFrameworkProvidedExecHarness(
+      {
+        stableIdentity: true,
+      },
+    );
+
+    await writeLiveMountState(stateDir, mountpoint);
+    const deps = {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+      prepareFactory: () => Promise.resolve(materializedFactory),
+    };
+
+    const help = await executeMountedCallableFile(
+      filePath,
+      ["--help", "--json"],
+      deps,
+    );
+    expect(JSON.parse(help.helpText!).inputSchema).toEqual({
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    });
+
+    await executeMountedCallableFile(filePath, ["--query", "tea"], deps);
+
+    expect(harness.tracker.toolRunInput).toMatchObject({ query: "tea" });
+    const sandboxId = (harness.tracker.toolRunInput as Record<string, unknown>)
+      .sandboxId;
+    expect(typeof sandboxId).toBe("string");
+    expect(sandboxId).not.toBe("");
+    expect(sandboxId).not.toBe("authored-sandbox");
+  });
+
+  it("overwrites authored FrameworkProvided JSON input", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const { harness, materializedFactory } = createFrameworkProvidedExecHarness(
+      {
+        stableIdentity: true,
+      },
+    );
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(filePath, ["--json"], {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+      prepareFactory: () => Promise.resolve(materializedFactory),
+      readJsonInput: () =>
+        Promise.resolve({
+          query: "tea",
+          sandboxId: "authored-sandbox",
+        }),
+      isStdinTerminal: () => false,
+    });
+
+    expect(harness.tracker.toolRunInput).toMatchObject({ query: "tea" });
+    expect(
+      (harness.tracker.toolRunInput as Record<string, unknown>).sandboxId,
+    ).not.toBe("authored-sandbox");
+  });
+
+  it("fails closed when a FrameworkProvided tool has no stable callable identity", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const { harness, materializedFactory } = createFrameworkProvidedExecHarness(
+      {
+        stableIdentity: false,
+      },
+    );
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await expect(
+      executeMountedCallableFile(filePath, ["--json"], {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        prepareFactory: () => Promise.resolve(materializedFactory),
+        readJsonInput: () =>
+          Promise.resolve({ query: "tea", sandboxId: "authored-sandbox" }),
+        isStdinTerminal: () => false,
+      }),
+    ).rejects.toThrow(/no stable entity id/i);
+  });
+
+  it("leaves an ordinary authored sandboxId unchanged", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const { harness, materializedFactory } = createFrameworkProvidedExecHarness(
+      {
+        stableIdentity: false,
+        frameworkProvided: false,
+      },
+    );
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await executeMountedCallableFile(filePath, ["--json"], {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+      prepareFactory: () => Promise.resolve(materializedFactory),
+      readJsonInput: () =>
+        Promise.resolve({ query: "tea", sandboxId: "authored-sandbox" }),
+      isStdinTerminal: () => false,
+    });
+
+    expect(harness.tracker.toolRunInput).toMatchObject({
+      query: "tea",
+      sandboxId: "authored-sandbox",
+    });
+  });
+
   it("resolves linked PatternFactory tools in their source space", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -2578,6 +2715,54 @@ async function createMountedFile(
   return absPath;
 }
 
+function createFrameworkProvidedExecHarness(options: {
+  stableIdentity: boolean;
+  frameworkProvided?: boolean;
+}) {
+  const argumentSchema: JSONSchema = {
+    type: "object",
+    properties: {
+      query: { type: "string" },
+      sandboxId: { type: "string" },
+    },
+    required: ["query", "sandboxId"],
+  };
+  const storedFactory = createFactoryShell({
+    kind: "pattern",
+    ref: {
+      identity: `${"E".repeat(42)}A`,
+      symbol: "search",
+    },
+    argumentSchema,
+    resultSchema: true,
+  });
+  const materializedFactory = livePatternFactory(
+    argumentSchema,
+    true,
+    options.frameworkProvided === false ? [] : [["sandboxId"]],
+  );
+  const harness = createExecHarness({
+    callableKind: "tool",
+    cellProp: "result",
+    cellKey: "search",
+    pieceId: "of:piece-123",
+    inputSchema: true,
+    canonicalFactory: storedFactory,
+    ...(options.stableIdentity
+      ? {
+        callableNormalizedLink: {
+          id: "of:NdU1e0QpFblGEAqU517Kq4iMKRcKwnVHyQI0tOPwmE4",
+          path: ["search"],
+          scope: "space" as const,
+          space: "home",
+        },
+      }
+      : {}),
+    toolResult: { echoed: "tea" },
+  });
+  return { harness, materializedFactory };
+}
+
 function createExecHarness(options: {
   callableKind: "handler" | "tool";
   cellProp: "input" | "result";
@@ -2592,6 +2777,12 @@ function createExecHarness(options: {
   canonicalFactory?: unknown;
   factorySourceSpace?: string;
   factoryLinkSourceSpace?: string;
+  callableNormalizedLink?: {
+    id: string;
+    path: string[];
+    scope: "space" | "user" | "session";
+    space: string;
+  };
   toolResult?: unknown;
   toolResultGetValue?: unknown;
   toolResultPullValue?: unknown;
@@ -2680,9 +2871,10 @@ function createExecHarness(options: {
         onSchemaFromLinks: () => {
           tracker.asSchemaFromLinksCalls++;
         },
-        normalizedLink: options.factorySourceSpace
-          ? { space: options.factorySourceSpace }
-          : undefined,
+        normalizedLink: options.callableNormalizedLink ??
+          (options.factorySourceSpace
+            ? { space: options.factorySourceSpace }
+            : undefined),
         resolvedValue: options.factoryLinkSourceSpace
           ? canonicalValue
           : undefined,
@@ -2809,9 +3001,19 @@ function createMockCell(
       ) => void,
     ) => void;
     isStream?: () => boolean;
-    normalizedLink?: { space?: string };
+    normalizedLink?: {
+      id?: string;
+      path?: string[];
+      scope?: "space" | "user" | "session";
+      space?: string;
+    };
     resolvedValue?: unknown;
-    resolvedNormalizedLink?: { space?: string };
+    resolvedNormalizedLink?: {
+      id?: string;
+      path?: string[];
+      scope?: "space" | "user" | "session";
+      space?: string;
+    };
   },
 ) {
   const cell = {

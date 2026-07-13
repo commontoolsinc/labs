@@ -60,6 +60,13 @@ produces an inert callable shell; only a runner may materialize it into
 executable code. A factory must have a durable compiler artifact ref before it
 can cross a durable boundary.
 
+When a factory is copied by value into another space, the runner publishes its
+verified content-addressed source closure with the containing write. Warm
+closures preserve synchronous speculative visibility; a cold closure delays
+only ordered server submission, not the authored setter or local commit.
+Cells and links remain opaque aliases rather than snapshots of their current
+factory value.
+
 ## Inline pattern closures
 
 An inline pattern may capture values from its surrounding pattern:
@@ -102,7 +109,10 @@ const tools = {
 ```
 
 Mounted tools appear as `*.tool`. FUSE JSON projections use the tagged Fabric
-codec, not function source or an implementation descriptor.
+codec, not function source, a legacy `toJSON()` graph, or an implementation
+descriptor. CLI/FUSE help and argument parsing first materialize trusted
+artifact metadata, omit `FrameworkProvided` paths, and inject those values from
+the stable containing tool Cell identity at invocation.
 
 ## Trust boundary
 
