@@ -129,7 +129,8 @@ propagate](#how-flags-propagate).
   whether scheduler rows are accepted on a connection.
 - **Status on 2026-07-11.** Implemented; the durable tables, the rehydration
   primitives, and the memory-protocol capability are wired. Default-on rollout
-  in progress. See
+  in progress. The pattern-reload CI job exercises both the default-on posture
+  and the explicit-false rollback path. See
   [`docs/specs/persistent-scheduler-state.md`](../specs/persistent-scheduler-state.md)
   and [`docs/specs/scheduler-v2/`](../specs/scheduler-v2/) for the tracked
   status.

@@ -689,13 +689,20 @@ jobs:
       # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
       # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
       # pattern-unit-test job. See docs/development/COVERAGE.md.
-      - name: 🧩 Run pattern reload integration tests
+      - name: 🧩 Run default-on pattern reload integration tests
         run: |
-          mkdir -p test-results
+          mkdir -p test-results/default
           HEADLESS=1 \
-          CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 \
           DENO_COVERAGE_DIR=coverage/raw/pattern-reload \
-          deno task integration --junit-dir=test-results patterns-reload
+          deno task integration --junit-dir=test-results/default patterns-reload
+
+      - name: ↩️ Run pattern reload integration tests with rollback override
+        run: |
+          mkdir -p test-results/rollback
+          HEADLESS=1 \
+          EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false \
+          DENO_COVERAGE_DIR=coverage/raw/pattern-reload \
+          deno task integration --junit-dir=test-results/rollback patterns-reload
 
       - name: 🧾 Write coverage report
         if: always()
