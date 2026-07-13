@@ -6,6 +6,12 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import {
+  getLoggerCountsBreakdown,
+  getTimingStatsBreakdown,
+  resetAllLoggerCounts,
+  resetAllTimingStats,
+} from "@commonfabric/utils/logger";
 
 import type { Cell, PatternFactory } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -277,9 +283,20 @@ describe("bound PatternFactory list operation cold resume", () => {
 
       const resumedRoot = runtime.getCellFromLink(rootLink);
       await resumedRoot.sync();
+      resetAllLoggerCounts();
+      resetAllTimingStats();
       expect(await within(runtime.start(resumedRoot), "cold resume start"))
         .toBe(true);
       await expectMapped(runtime, resumedRoot, [22, 43], "resumed bound map");
+      expect(
+        getLoggerCountsBreakdown()["storage.v2"]?.["commit-conflict"]
+          ?.total ?? 0,
+      ).toBe(0);
+      expect(
+        getTimingStatsBreakdown()["storage.v2"]?.[
+          "commitNative/commitOperations"
+        ]?.count ?? 0,
+      ).toBe(0);
       expect(
         runtime.patternManager.artifactFromIdentitySync(
           baseRef.identity,

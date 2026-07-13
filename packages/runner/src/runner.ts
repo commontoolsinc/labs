@@ -1013,13 +1013,16 @@ export class Runner {
       paramsSchema,
     );
     setResultCell(paramsCell, resultCell.asSchema(resultSchema));
-    resultCell.withTx(tx).setMetaRaw(
-      "params",
-      paramsCell.getAsWriteRedirectLink({
-        base: resultCell,
-        includeSchema: true,
-      }),
-    );
+    const paramsLink = paramsCell.getAsWriteRedirectLink({
+      base: resultCell,
+      includeSchema: true,
+    });
+    const currentParamsLink = resultCell.withTx(tx).getMetaRaw("params", {
+      meta: ignoreReadForScheduling,
+    });
+    if (!deepEqual(currentParamsLink, paramsLink)) {
+      resultCell.withTx(tx).setMetaRaw("params", paramsLink);
+    }
     this.updateRootCell(
       tx,
       paramsCell.getAsNormalizedFullLink(),
@@ -1565,6 +1568,14 @@ export class Runner {
       this.finishStartAttempt(attempt);
       return Promise.reject(error);
     }
+  }
+
+  /** @internal Pre-sync one deterministic sub-pattern subtree before resume. */
+  syncCellsForPatternResume(
+    resultCell: Cell<unknown>,
+    pattern: Pattern,
+  ): Promise<boolean> {
+    return this.syncCellsForRunningPattern(resultCell, pattern);
   }
 
   /** Convert a module to pattern format */

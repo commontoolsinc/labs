@@ -1,4 +1,6 @@
 import type { Cell } from "./cell.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
 
 /**
  * @param resultCell The cell whose meta pattern will be set
@@ -19,8 +21,9 @@ export function setPatternCell(
 }
 
 export function setResultCell(cell: Cell<unknown>, resultCell: Cell<unknown>) {
-  cell.setMetaRaw(
-    "result",
-    resultCell.getAsWriteRedirectLink({ includeSchema: true }),
-  );
+  const link = resultCell.getAsWriteRedirectLink({ includeSchema: true });
+  const current = cell.getMetaRaw("result", {
+    meta: ignoreReadForScheduling,
+  });
+  if (!deepEqual(current, link)) cell.setMetaRaw("result", link);
 }

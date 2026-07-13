@@ -24,7 +24,7 @@ const RESULT_PRESENCE_SCHEMA = internSchema({
 });
 
 import { type Cell } from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+import { type Action, RetryWhenReady } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
@@ -111,6 +111,8 @@ export function map(
   // each child rehydrate its own persisted state at registration. Elements
   // added by later (post-resume) reconciles are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
+  let resumeRowsReady = !awaitSync;
+  let resumeRowsReadiness: Promise<void> | undefined;
 
   // Hold the durable container while the input list itself confirms. On a resume
   // reconcile the input can be undefined or a transient empty default standing in
@@ -340,6 +342,46 @@ export function map(
 
     if (!Array.isArray(list)) {
       throw new Error("map currently only supports arrays");
+    }
+
+    // List-generated row patterns are not statically reachable from the
+    // containing pattern's resume graph, so the normal resume pre-sync cannot
+    // discover their deterministic result/params/internal cells. Park the
+    // first resumed reconcile until those row subtrees are confirmed. Without
+    // this, setup observes missing params metadata in the cold cache and
+    // re-publishes it; several concurrently resumed pieces then conflict on
+    // the space sequence even though every durable value is unchanged.
+    if (elementAwaitSync && !resumeRowsReady) {
+      if (resumeRowsReadiness === undefined) {
+        const keyCounts = new Map<string, number>();
+        const rowCells: Cell<unknown>[] = [];
+        for (let i = 0; i < list.length; i++) {
+          if (!(i in list)) continue;
+          const { dedupKey, linkKey } = cellIdentityKey(list[i]);
+          const occurrence = keyCounts.get(dedupKey) ?? 0;
+          keyCounts.set(dedupKey, occurrence + 1);
+          const elementKey = JSON.stringify([...linkKey, occurrence]);
+          rowCells.push(runtime.getCell(
+            parentCell.space,
+            { map: result, elementKey },
+          ));
+        }
+        resumeRowsReadiness = Promise.all(
+          rowCells.map((rowCell) =>
+            runtime.runner.syncCellsForPatternResume(rowCell, opPattern)
+          ),
+        ).then(() => {
+          resumeRowsReady = true;
+        });
+      }
+      // The result binding was established in this transaction. It will be
+      // aborted with RetryWhenReady, so force the retry to establish it again
+      // against the same deterministic container identity.
+      result = undefined;
+      throw new RetryWhenReady(
+        resumeRowsReadiness,
+        "map: resumed row patterns are waiting for durable state",
+      );
     }
 
     // The resume batch has now been observed; later reconciles are post-resume.
