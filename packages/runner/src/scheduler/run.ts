@@ -714,7 +714,23 @@ function attachSchedulerActionObservation(
           version: 1 as const,
           complete: true as const,
           piece: toMemorySpaceAddress(completeScopeSummary.piece),
-          reads: completeScopeSummary.reads.map(toMemorySpaceAddress),
+          // CFC preparation reads the raw document-level label envelope beside
+          // statically declared value inputs and outputs. Normalized cell links can
+          // only express paths below ["value"], so add these structurally
+          // fixed sibling reads after converting the complete transformer
+          // certificate to raw memory addresses.
+          reads: sortAndCompactPaths([
+            ...completeScopeSummary.reads.map(toMemorySpaceAddress),
+            ...[
+              ...completeScopeSummary.reads,
+              ...completeScopeSummary.writes,
+              ...completeScopeSummary.materializerWriteEnvelopes,
+              ...completeScopeSummary.directOutputs,
+            ].map(toMemorySpaceAddress).map((address) => ({
+              ...address,
+              path: ["cfc"],
+            })),
+          ]),
           writes: completeScopeSummary.writes.map(toMemorySpaceAddress),
           materializerWriteEnvelopes: completeScopeSummary
             .materializerWriteEnvelopes.map(

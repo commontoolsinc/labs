@@ -4221,8 +4221,12 @@ export class Runner {
 
     const action: Action & {
       ignoredSchedulingWrites?: NormalizedFullLink[];
+      refreshCompleteSchedulerScopeSummary?: (
+        tx: IExtendedStorageTransaction,
+      ) => void;
     } = (tx: IExtendedStorageTransaction) => {
       action.ignoredSchedulingWrites = [];
+      action.refreshCompleteSchedulerScopeSummary?.(tx);
       const resultFor = { inputs, outputs, fn: fnSource };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
@@ -4469,40 +4473,167 @@ export class Runner {
         getDerivedInternalCellLink(patternResultCell, descriptor)
       )
       : [];
+    const baseCompleteSchedulerScopeSummary =
+      module.completeSchedulerScopeSummary === true &&
+        redirectWriteTargets.complete && redirectReadTargets.complete
+        ? {
+          complete: true as const,
+          piece: patternResultCell.getAsNormalizedFullLink(),
+          // Link resolution probes the containing document while deciding
+          // whether a declared path is a redirect. Root envelopes for these
+          // statically named documents cover that deterministic plumbing,
+          // while the exact final targets continue to describe the authored
+          // value reads.
+          reads: dedupeNormalizedLinks([
+            ...reads,
+            ...reads.map((link) => ({ ...link, path: [] })),
+            ...redirectReadTargets.targets,
+            ...redirectReadTargets.targets.map((link) => ({
+              ...link,
+              path: [],
+            })),
+            inputsCell.getAsNormalizedFullLink(),
+            processCell.getAsNormalizedFullLink(),
+            ...structuralMetaLinks,
+            ...(internalMetaLink ? [internalMetaLink] : []),
+            ...derivedInternalLinks,
+            ...schedulingWrites,
+          ]),
+          writes: dedupeNormalizedLinks([
+            ...schedulingWrites,
+            ...redirectWriteTargets.targets,
+          ]),
+          materializerWriteEnvelopes,
+          directOutputs: writes,
+        }
+        : undefined;
+
+    const refreshCompleteSchedulerScopeSummary =
+      baseCompleteSchedulerScopeSummary === undefined
+        ? undefined
+        : (runTx: IExtendedStorageTransaction): void => {
+          const routingReads: NormalizedFullLink[] = [];
+          const resolvedReads: NormalizedFullLink[] = [];
+          const resolvedWrites: NormalizedFullLink[] = [];
+          const resolvedMaterializerWrites: NormalizedFullLink[] = [];
+          let complete = true;
+
+          const resolveStaticLink = (
+            link: NormalizedFullLink,
+            lastNode: "value" | "writeRedirect",
+          ): {
+            target?: NormalizedFullLink;
+            writeRedirectHops: number;
+          } => {
+            routingReads.push({ ...link, path: [] });
+            const state = runTx.getCfcState();
+            const traceStart = state.dereferenceTraces.length;
+            try {
+              const target = runTx.runWithAmbientReadMeta(
+                machineryRead,
+                () => resolveLink(this.runtime, runTx, link, lastNode),
+              );
+              const traces = runTx.getCfcState().dereferenceTraces.slice(
+                traceStart,
+              );
+              for (const trace of traces) {
+                routingReads.push(
+                  { ...trace.source, id: trace.source.id as URI, path: [] },
+                  { ...trace.target, id: trace.target.id as URI, path: [] },
+                );
+              }
+              routingReads.push({ ...target, path: [] });
+              return {
+                target,
+                writeRedirectHops:
+                  traces.filter((trace) => trace.kind === "write-redirect")
+                    .length,
+              };
+            } catch (error) {
+              complete = false;
+              logger.debug("complete-action-static-route", () => [
+                "Unable to resolve a complete action's static route",
+                { link, lastNode, error },
+              ]);
+              return { writeRedirectHops: 0 };
+            }
+          };
+
+          for (const read of reads) {
+            const { target } = resolveStaticLink(read, "value");
+            if (target) resolvedReads.push(target);
+          }
+          for (const write of writes) {
+            const { target, writeRedirectHops } = resolveStaticLink(
+              write,
+              "writeRedirect",
+            );
+            if (!target) continue;
+            // Product bindings are a single direct redirect into a root cell.
+            // Keep that invariant explicit: a redirect chain or sub-path
+            // target remains client-executed instead of receiving a complete
+            // server claim certificate.
+            if (
+              writeRedirectHops > 1 || target.path.length !== 0 ||
+              target.space !== write.space
+            ) {
+              complete = false;
+              continue;
+            }
+            resolvedWrites.push(target);
+          }
+          for (const envelope of materializerWriteEnvelopes) {
+            const { target } = resolveStaticLink(envelope, "writeRedirect");
+            if (!target) continue;
+            if (target.space !== envelope.space) {
+              complete = false;
+              continue;
+            }
+            resolvedMaterializerWrites.push(target);
+          }
+
+          if (!complete) {
+            delete (action as {
+              completeSchedulerScopeSummary?: unknown;
+            }).completeSchedulerScopeSummary;
+            return;
+          }
+          (action as {
+            completeSchedulerScopeSummary?:
+              typeof baseCompleteSchedulerScopeSummary;
+          }).completeSchedulerScopeSummary = {
+            ...baseCompleteSchedulerScopeSummary,
+            reads: dedupeNormalizedLinks([
+              ...baseCompleteSchedulerScopeSummary.reads,
+              ...routingReads,
+              ...resolvedReads,
+              ...resolvedWrites,
+              ...resolvedMaterializerWrites,
+            ]),
+            writes: dedupeNormalizedLinks([
+              ...baseCompleteSchedulerScopeSummary.writes,
+              ...resolvedWrites,
+            ]),
+            materializerWriteEnvelopes: dedupeNormalizedLinks([
+              ...baseCompleteSchedulerScopeSummary
+                .materializerWriteEnvelopes,
+              ...resolvedMaterializerWrites,
+            ]),
+            directOutputs: dedupeNormalizedLinks([
+              ...baseCompleteSchedulerScopeSummary.directOutputs,
+              ...resolvedWrites,
+            ]),
+          };
+        };
     const wrappedAction = Object.assign(action, {
       reads,
       writes: schedulingWrites,
       ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),
-      ...(module.completeSchedulerScopeSummary === true &&
-          redirectWriteTargets.complete && redirectReadTargets.complete
-        ? {
-          completeSchedulerScopeSummary: {
-            complete: true as const,
-            piece: patternResultCell.getAsNormalizedFullLink(),
-            // The callback's declared reads are only part of the action's
-            // structurally fixed read surface. Reads follow static redirects;
-            // the runner also materializes the immutable argument container
-            // and reads direct output cells while diffing/writing their values.
-            // Include those framework reads in the trusted certificate so a
-            // complete space-only lift is not mistaken for a contradiction.
-            reads: dedupeNormalizedLinks([
-              ...reads,
-              ...redirectReadTargets.targets,
-              inputsCell.getAsNormalizedFullLink(),
-              processCell.getAsNormalizedFullLink(),
-              ...structuralMetaLinks,
-              ...(internalMetaLink ? [internalMetaLink] : []),
-              ...derivedInternalLinks,
-              ...schedulingWrites,
-            ]),
-            writes: dedupeNormalizedLinks([
-              ...schedulingWrites,
-              ...redirectWriteTargets.targets,
-            ]),
-            materializerWriteEnvelopes,
-            directOutputs: writes,
-          },
-        }
+      ...(baseCompleteSchedulerScopeSummary
+        ? { completeSchedulerScopeSummary: baseCompleteSchedulerScopeSummary }
+        : {}),
+      ...(refreshCompleteSchedulerScopeSummary
+        ? { refreshCompleteSchedulerScopeSummary }
         : {}),
       module,
       pattern,
