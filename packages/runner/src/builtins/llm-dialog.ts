@@ -107,6 +107,10 @@ import type { RawBuiltinResult } from "../module.ts";
 import { scopedCell } from "./scope-policy.ts";
 import { getFrameworkProvidedPaths } from "../builder/pattern-metadata.ts";
 import {
+  applyFrameworkProvidedInputs,
+  stripFrameworkProvidedPaths,
+} from "../framework-provided-inputs.ts";
+import {
   FactoryArtifactUnavailableError,
   type MaterializedFactory,
   materializeFactory,
@@ -198,46 +202,6 @@ function stripFrameworkProvidedFields(schema: JSONSchema): JSONSchema {
     schema,
     FRAMEWORK_PROVIDED_TOOL_FIELDS.map((field) => [field]),
   );
-}
-
-function stripFrameworkProvidedPaths(
-  schema: JSONSchema,
-  paths: readonly (readonly string[])[],
-): JSONSchema {
-  let result = schema;
-  for (const path of paths) {
-    result = stripFrameworkProvidedPath(result, path);
-  }
-  return result;
-}
-
-function stripFrameworkProvidedPath(
-  schema: JSONSchema,
-  path: readonly string[],
-): JSONSchema {
-  if (!isRecord(schema) || path.length === 0) return schema;
-  const [head, ...tail] = path;
-  if (!head || !isRecord(schema.properties)) return schema;
-  const existing = schema.properties[head] as JSONSchema | undefined;
-  if (existing === undefined) return schema;
-
-  const properties = { ...schema.properties };
-  if (tail.length === 0) {
-    delete properties[head];
-  } else {
-    properties[head] = stripFrameworkProvidedPath(existing, tail);
-  }
-  return {
-    ...schema,
-    properties,
-    ...(Array.isArray(schema.required)
-      ? {
-        required: tail.length === 0
-          ? schema.required.filter((key) => key !== head)
-          : schema.required,
-      }
-      : {}),
-  };
 }
 
 /**
@@ -2806,33 +2770,7 @@ function applyFrameworkProvidedFactoryInputs(
   if (paths.length === 0) return args;
   const ref = identityCell ? getEntityId(identityCell) : undefined;
   const entityId = ref && isEntityRef(ref) ? entityRefToString(ref) : undefined;
-  if (typeof entityId !== "string" || entityId.length === 0) {
-    throw new Error(
-      "Cannot provide FrameworkProvided factory inputs: tool instance has no stable entity id",
-    );
-  }
-  const value = entityId.replace(/[^A-Za-z0-9_-]/g, "-");
-  let result = args;
-  for (const path of paths) {
-    result = setFrameworkProvidedPath(result, path, value);
-  }
-  return result;
-}
-
-function setFrameworkProvidedPath(
-  input: Record<string, unknown>,
-  path: readonly string[],
-  value: string,
-): Record<string, unknown> {
-  const [head, ...tail] = path;
-  if (!head) return input;
-  if (tail.length === 0) return { ...input, [head]: value };
-  const existing = input[head];
-  const child = isRecord(existing) && !Array.isArray(existing) ? existing : {};
-  return {
-    ...input,
-    [head]: setFrameworkProvidedPath(child, tail, value),
-  };
+  return applyFrameworkProvidedInputs(args, paths, entityId);
 }
 
 /**
