@@ -123,6 +123,7 @@ import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
   getArtifactEntryRef,
+  isTrustedBuilderArtifact,
   resolveOriginal,
 } from "./builder/pattern-metadata.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -866,9 +867,13 @@ export class Runner {
     options: SetupValidationOptions = {},
   ): Promise<Cell<R>> {
     if (providedTx) {
+      const prepared = this.materializeSetupFactorySync(
+        patternOrModule,
+        resultCell,
+      );
       this.setupInternal(
         providedTx,
-        patternOrModule,
+        prepared,
         argument,
         resultCell,
         options,
@@ -881,9 +886,14 @@ export class Runner {
       // to what would have happened if the write succeeded and was immediately
       // overwritten. Still surface real callback failures from setupInternal so
       // callers don't silently continue after a broken setup.
-      return this.runtime.editWithRetry((tx) => {
-        this.setupInternal(tx, patternOrModule, argument, resultCell, options);
-      }).then(({ error }) => {
+      const setup = (prepared: Pattern | Module | undefined) =>
+        this.runtime.editWithRetry((tx) => {
+          this.setupInternal(tx, prepared, argument, resultCell, options);
+        });
+      const pending = this.requiresSetupFactoryMaterialization(patternOrModule)
+        ? this.prepareSetupFactory(patternOrModule, resultCell).then(setup)
+        : setup(patternOrModule);
+      return pending.then(({ error }) => {
         if (error) {
           if (
             error.name === "StorageTransactionAborted" &&
@@ -904,6 +914,53 @@ export class Runner {
         return resultCell;
       });
     }
+  }
+
+  private assertSetupFactoryKind(
+    factory: MaterializedFactory,
+  ): Pattern | Module {
+    const kind = factoryStateOf(factory).kind;
+    if (kind === "handler") {
+      throw new TypeError(
+        "Root setup requires a pattern or module factory, got handler",
+      );
+    }
+    return factory as Pattern | Module;
+  }
+
+  private requiresSetupFactoryMaterialization(
+    patternOrModule: Pattern | Module | undefined,
+  ): boolean {
+    return isAdmittedFabricFactory(patternOrModule) &&
+      !isTrustedBuilderArtifact(patternOrModule);
+  }
+
+  private materializeSetupFactorySync<R>(
+    patternOrModule: Pattern | Module | undefined,
+    resultCell: Cell<R>,
+  ): Pattern | Module | undefined {
+    if (!this.requiresSetupFactoryMaterialization(patternOrModule)) {
+      return patternOrModule;
+    }
+    const factory = materializeFactory(patternOrModule, {
+      runtime: this.runtime,
+      artifactSpace: resultCell.getAsNormalizedFullLink().space,
+    });
+    return this.assertSetupFactoryKind(factory);
+  }
+
+  private async prepareSetupFactory<R>(
+    patternOrModule: Pattern | Module | undefined,
+    resultCell: Cell<R>,
+  ): Promise<Pattern | Module | undefined> {
+    if (!this.requiresSetupFactoryMaterialization(patternOrModule)) {
+      return patternOrModule;
+    }
+    const factory = await prepareFactory(patternOrModule, {
+      runtime: this.runtime,
+      artifactSpace: resultCell.getAsNormalizedFullLink().space,
+    });
+    return this.assertSetupFactoryKind(factory);
   }
 
   private resolveSetupPattern(
@@ -2348,18 +2405,22 @@ export class Runner {
     options: RunnerRunOptions = {},
   ): RunResult<R> {
     const tx = providedTx ?? this.runtime.edit();
+    const preparedPatternOrModule = this.materializeSetupFactorySync(
+      patternOrModule,
+      resultCell,
+    );
     const sourceKey = getTxDebugActionId(tx) ?? "none";
 
     triggerFlowLogger.debug(`runner-run/${sourceKey}`, () => [
       `[RUN] source=${sourceKey}`,
       `result=${resultCell.getAsNormalizedFullLink().id}`,
-      `pattern=${describePatternOrModule(patternOrModule)}`,
+      `pattern=${describePatternOrModule(preparedPatternOrModule)}`,
       `providedTx=${Boolean(providedTx)}`,
     ]);
 
     const { needsStart, pattern } = this.setupInternal(
       tx,
-      patternOrModule,
+      preparedPatternOrModule,
       argument,
       resultCell,
     );

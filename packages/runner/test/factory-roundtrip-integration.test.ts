@@ -268,6 +268,94 @@ describe("Factory@1 runner round trips", () => {
     );
   });
 
+  it("warm-materializes a decoded root PatternFactory before synchronous run", async () => {
+    const { identity } = await storeFactories();
+    const live = writer.patternManager.artifactFromIdentitySync(
+      identity,
+      "patternFactory",
+    ) as PatternFactory<unknown, unknown>;
+    const shell = valueFromJson(
+      jsonFromValue(live as unknown as FabricValue),
+    ) as PatternFactory<unknown, unknown>;
+    const tx = writer.edit();
+    const result = writer.getCell<{ result: number }>(
+      sourceSpace,
+      "warm-decoded-root-factory",
+      undefined,
+      tx,
+    );
+
+    writer.run(tx, shell as never, { value: 9 } as never, result);
+    writer.prepareTxForCommit(tx);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    expect(await result.pull()).toEqual({ result: 9 });
+    expect(result.getMetaRaw("patternIdentity")).toEqual({
+      identity,
+      symbol: "patternFactory",
+    });
+  });
+
+  it("cold-materializes a decoded root PatternFactory before non-transactional setup", async () => {
+    const { identity } = await storeFactories();
+    const live = writer.patternManager.artifactFromIdentitySync(
+      identity,
+      "patternFactory",
+    ) as PatternFactory<unknown, unknown>;
+    const shell = valueFromJson(
+      jsonFromValue(live as unknown as FabricValue),
+    ) as PatternFactory<unknown, unknown>;
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    extraRuntimes.push(runtime);
+    expect(
+      runtime.patternManager.artifactFromIdentitySync(
+        identity,
+        "patternFactory",
+      ),
+    ).toBeUndefined();
+    const result = runtime.getCell<{ result: number }>(
+      sourceSpace,
+      "cold-decoded-root-factory",
+    );
+
+    await runtime.setup(undefined, shell as never, { value: 11 }, result);
+
+    expect(
+      runtime.patternManager.artifactFromIdentitySync(
+        identity,
+        "patternFactory",
+      ),
+    ).toBeDefined();
+    expect(result.getMetaRaw("patternIdentity")).toEqual({
+      identity,
+      symbol: "patternFactory",
+    });
+  });
+
+  it("rejects a decoded HandlerFactory at root setup before writing piece state", async () => {
+    const { shells } = await storeFactories();
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    extraRuntimes.push(runtime);
+    const result = runtime.getCell(
+      sourceSpace,
+      "rejected-handler-root-factory",
+    );
+
+    await expect(
+      runtime.setup(undefined, shells[2] as never, {}, result),
+    ).rejects.toThrow(
+      "Root setup requires a pattern or module factory, got handler",
+    );
+
+    expect(result.getRaw()).toBeUndefined();
+  });
+
   it("preserves modifier state, including anonymous and link-mapped selectors", async () => {
     const { factories } = await storeFactories();
     const patternFactory = factories[0];
