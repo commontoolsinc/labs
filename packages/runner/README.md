@@ -262,6 +262,17 @@ Using cells with schemas is highly recommended as it provides type checking,
 validation, and automatic transformation of data. The `Schema<>` helper from the
 Builder package provides TypeScript type inference.
 
+> **Why these examples seed with a transaction.** This is untransformed embedder
+> code, so nothing here instantiates a piece: in transformer-compiled `.tsx`
+> patterns, declared defaults (`Default<>`) become schema defaults and the
+> initial state is written to storage when the piece is instantiated. Without
+> that instantiation write, a schema `default` stays **virtual** — readable, but
+> backed by a read-only `data:` document — so writing through a nested cell it
+> materialized throws `ReadOnlyAddressError`, links resolve against stored
+> values only, and nested-path subscriptions see `undefined`. The examples below
+> therefore seed initial state with an explicit `runtime.edit()` transaction
+> before mutating through nested cells or resolving links.
+
 ```typescript
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
