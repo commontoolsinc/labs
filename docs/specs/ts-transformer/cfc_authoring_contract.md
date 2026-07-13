@@ -1,6 +1,6 @@
 # CFC Authoring Contract
 
-**Status:** Draft contract
+**Status:** Implemented direct-authoring contract
 **Scope:** `packages/api`, `packages/ts-transformers`,
 `packages/schema-generator`
 
@@ -25,6 +25,8 @@ Related contracts:
   schemas, and explicit `pattern(..., outputSchema)` paths.
 - Preserve implementation identity where the schema must refer back to a local
   binding, especially for `WriteAuthorizedBy`.
+- Preserve the defining module identity and exact compiler-emitted manifest
+  digest for `PolicyOf<typeof rules>`.
 
 ## Non-Goals
 
@@ -73,24 +75,37 @@ public API, transformer diagnostics, and schema-generator formatter support.
 Canonical alias set:
 
 - `Cfc`
-- `Classified`
+- `Confidential`
 - `Integrity`
 - `AddIntegrity`
+- `RepresentsCurrentUser`
+- `AuthoredByCurrentUser`
 - `RequiresIntegrity`
 - `MaxConfidentiality`
-- `OpaqueInput`
+- `AnyOf`
+- `PolicyOf`
 - `WriteAuthorizedBy`
+- `TrustedActionWriteWithIntegrity`
+- `TrustedActionWrite`
+- `TrustedActionUiContract`
 - `ExactCopy`
 - `ProjectionPath`
 - `ProjectionOf`
 - `Projection`
-- `LengthPreservedFrom`
-- `FilteredFrom`
-- `SubsetOf`
-- `PermutationOf`
 
 Friendly aliases may expand to those forms, but the formatter contract is keyed
 to this canonical set.
+
+The former `OpaqueInput`, `LengthPreservedFrom`, `FilteredFrom`, `SubsetOf`,
+and `PermutationOf` aliases were removed: they lowered to `ifc.opaque` /
+`ifc.collection`, which the runner rejects fail-closed as unsupported
+trust-sensitive claims, so the authoring surface advertised capabilities that
+could only ever fail at commit. Reintroduce them together with the runner
+enforcement for the spec's §8.5 collection and §8.13 opaque-input transitions.
+A raw `Cfc<T, { opaque: ... }>` / `Cfc<T, { collection: ... }>` payload still
+lowers verbatim through the base-carrier rule below (and still fails closed at
+commit) — the carrier copies any payload; only the canonical promises are
+gone.
 
 ## Lowering Rules
 
@@ -112,41 +127,29 @@ These aliases lower to direct `ifc` keys:
 - `RequiresIntegrity<T, X>` -> `ifc.requiredIntegrity = X`
 - `MaxConfidentiality<T, X>` -> `ifc.maxConfidentiality = X`
 - `ExactCopy<T, P>` -> `ifc.exactCopyOf = P`
-- `LengthPreservedFrom<T, P>` -> `ifc.collection = { sourceCollection: P, lengthPreserved: true }`
-- `FilteredFrom<T, P>` -> `ifc.collection = { filteredFrom: P }`
-- `SubsetOf<T, P>` -> `ifc.collection = { subsetOf: P }`
-- `PermutationOf<T, P>` -> `ifc.collection = { permutationOf: P }`
 
-### Opaque Inputs
+### `AnyOf<X>`
 
-Opaque inputs are part of the CFC authoring surface even though they are not
-ordinary label-transition sugar.
+`AnyOf<readonly [A, B, ...]>` is valid only inside a confidentiality tuple and
+lowers to one `{ anyOf: [A, B, ...] }` clause. Without the wrapper,
+`Confidential<T, readonly [A, B]>` emits two conjunctive clauses. The wrapper is
+therefore an explicit weakening and should be used only when any one listed
+alternative is sufficient. Runtime authored-OR validation remains authoritative
+for forbidden alternative families.
 
-The canonical form is:
+### `PolicyOf<typeof rules>`
 
-```ts
-// Shown at module scope.
-type OpaqueInput<
-  T,
-  Spec extends true | {
-    schema?: unknown;
-    allowPassThrough?: boolean;
-  } = true,
-> = Cfc<Reactive<T>, { opaque: Spec }>;
-```
+`PolicyOf` is a compiler-bound reference to a static exported
+`exchangeRules([...])` declaration. The argument must be a direct `typeof`
+query. The CFC policy validation pass rejects plain objects, computed
+expressions, non-exported bindings, the wrong artifact kind, and unresolved
+imports.
 
-Normative behavior:
-
-- `Reactive<T>` supplies the handler-side reference/read restriction shape.
-- `Reactive<T>` by itself does not emit `ifc.opaque`.
-- `Cfc<Reactive<T>, { opaque: Spec }>` emits the base schema of `T` plus
-  `ifc.opaque = Spec`.
-- `Spec = true` means the field is opaque with default runtime handling.
-- `Spec = { schema, allowPassThrough? }` lowers that object verbatim into
-  `ifc.opaque`.
-- Because the emitted schema still describes `T`, opaque inputs remain
-  type-checkable for pass-through and schema validation, but they are not
-  authoring sugar for readable value access.
+Schema generation first emits an internal binding marker. The schema transformer
+then replaces it with an exact module-policy atom containing the defining
+module identity, defining export symbol, compiler-emitted policy digest, and
+`{ __ctOwningSpace: true }`. Imported and pinned `cf:` bindings retain the
+dependency's defining identity; they never acquire the importer's identity.
 
 ### Projection Helpers
 
@@ -195,21 +198,27 @@ equivalent cross-stage identity channel.
 
 ## Pipeline Contract
 
-The CFC authoring path is not owned by one transformer. The required stage
+The CFC authoring path is not owned by one transformer. The relevant stage
 ordering is:
 
-1. `CfcJsxTransformer`
-2. `SchemaInjectionTransformer`
-3. `SchemaGeneratorTransformer`
+1. `CfcPolicyAuthoringTransformer`
+2. `CfcPolicyOfValidationTransformer`
+3. `WriteAuthorizedByValidationTransformer`
+4. `SchemaInjectionTransformer`
+5. `SchemaGeneratorTransformer`
 
 More precisely:
 
-- `CfcJsxTransformer` rewrites recognized UI helpers and attaches node-local
-  schema hints.
+- `CfcPolicyAuthoringTransformer` validates static rule declarations, lowers
+  them to inert values, and emits per-source manifests through cross-stage
+  state rather than JavaScript exports.
+- `CfcPolicyOfValidationTransformer` validates the narrow direct-`typeof`
+  contract before schema generation.
 - `SchemaInjectionTransformer` seeds `[UI]` member schema hints and constructs
   `toSchema<...>()` calls that preserve type/identity information.
-- `SchemaGeneratorTransformer` validates `WriteAuthorizedBy` usage, evaluates
-  CFC type metadata, and emits the final schema AST.
+- `SchemaGeneratorTransformer` evaluates CFC type metadata, resolves
+  `PolicyOf` against the compiler manifest, rehydrates validated writer
+  identity markers, and emits the final schema AST.
 
 Reordering these stages changes behavior and is not allowed without updating
 this spec.
@@ -225,36 +234,45 @@ Required capabilities:
 - substitute type parameters through alias expansion
 - evaluate literal, tuple, array, and type-literal payloads
 - preserve the base type when stripping the `Cfc` carrier intersection
-- preserve wrapper erasure rules for `Reactive<T>` so `OpaqueInput<T, ...>`
-  lowers to the schema shape of `T` rather than inventing a separate opaque
+- preserve wrapper erasure rules for `Reactive<T>` so a `Cfc<Reactive<T>, ...>`
+  carrier lowers to the schema shape of `T` rather than inventing a separate
   runtime value shape
 
 If alias expansion cannot resolve back to a supported form, lowering must fall
 back to ordinary schema generation rather than inventing partial metadata.
+Non-canonical aliases resolve only through explicit type arguments — defaulted
+type parameters are not recovered outside the canonical set.
 
 ## Diagnostics
 
 Required diagnostic type:
 
 - `cfc-write-authorized-by`
+- `cfc-policy-authoring`
+- `cfc-policy-of`
 
 Required failure modes:
 
 - second type argument is not `typeof ...`
 - target is imported rather than local
 - target is not a supported handler/module-style binding
+- policy declarations contain dynamic content, unsupported fields, unbound
+  variables, missing guards, invalid exports, or rule reuse
+- `PolicyOf` does not directly query an exported `exchangeRules` binding
 
 ## Current Limits
 
 - `WriteAuthorizedBy` only supports in-scope local bindings.
+- Exchange-rule declarations use a closed static expression grammar and must be
+  module-level exports.
+- `PolicyOf` supports local, direct imported, and pinned `cf:` bindings; general
+  dynamic/re-export discovery is intentionally rejected.
+- `ConceptOf` and concept-default policy authoring are not implemented.
 - Projection paths must be statically known string tuples.
 - Metadata payload evaluation is limited to literal-like type syntax; arbitrary
   conditional or computed type programs are out of scope.
 - The supported alias set is closed by name. New sugar needs explicit formatter
   support.
-- `OpaqueInput<T, Spec>` only declares schema-level opacity. The compile-time
-  read restrictions on opaque values still come from the existing `Reactive`
-  type/runtime contract.
 
 ## Acceptance Coverage
 
@@ -262,5 +280,4 @@ The contract is not fully implemented until these tests pass or equivalent
 coverage exists:
 
 - `packages/ts-transformers/test/cfc-authoring.test.ts`
-- `packages/schema-generator/test/schema/cfc-type.test.ts`
-- equivalent coverage for `OpaqueInput<T, Spec>` lowering to `ifc.opaque`
+- `packages/schema-generator/test/schema/cfc-authoring.test.ts`

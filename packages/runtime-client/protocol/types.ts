@@ -52,6 +52,7 @@ export enum RequestType {
   EnsureHomePatternRunning = "runtime:ensureHomePatternRunning",
   Idle = "runtime:idle",
   RuntimeSynced = "runtime:synced",
+  ResolveSpaceName = "runtime:resolveSpaceName",
   RegisterSpaceHost = "runtime:registerSpaceHost",
   FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
@@ -116,12 +117,17 @@ export interface IPCClientMessage {
   data: IPCClientRequest;
 }
 
+export enum RuntimeErrorCode {
+  CompilerStackLoadFailed = "compiler-stack-load-failed",
+}
+
 export type IPCRemoteResponse = {
   msgId: MessageId;
   data?: RemoteResponse;
 } | {
   msgId: MessageId;
   error: string;
+  code?: RuntimeErrorCode;
 };
 
 export type IPCRemoteMessage = IPCRemoteNotification | IPCRemoteResponse;
@@ -172,7 +178,7 @@ export interface InitializationData {
     | "enforce-explicit"
     | "enforce-strict";
   // Flow-label propagation dial for the worker runtime (S16 default
-  // transition; docs/plans/cfc-future-work-implementation.md Epic H1):
+  // transition; docs/history/plans/cfc-future-work-implementation.md Epic H1):
   // "off" = no derivation; "observe" = compute the per-tx conservative
   // join and emit diagnostics, persist nothing; "persist" = write derived
   // label components. Propagation never rejects by itself. Absent =
@@ -299,6 +305,13 @@ export interface IdleRequest extends BaseRequest {
  */
 export interface RuntimeSyncedRequest extends BaseRequest {
   type: RequestType.RuntimeSynced;
+}
+
+/** Resolve a legacy named space inside the worker so its derived identity can
+ * be retained as fresh-space ACL bootstrap authority. */
+export interface ResolveSpaceNameRequest extends BaseRequest {
+  type: RequestType.ResolveSpaceName;
+  name: string;
 }
 
 /**
@@ -753,6 +766,7 @@ export type IPCClientRequest =
   | PageGetAllRequest
   | PageSyncedRequest
   | RuntimeSyncedRequest
+  | ResolveSpaceNameRequest
   | RegisterSpaceHostRequest
   | VDomMountRequest
   | VDomUnmountRequest
@@ -795,6 +809,10 @@ export interface SlugResponse {
   slug: string | undefined;
 }
 
+export interface SpaceResponse {
+  space: DID;
+}
+
 export interface GraphSnapshotResponse {
   snapshot: SchedulerGraphSnapshot;
 }
@@ -831,6 +849,7 @@ export interface NavigateRequestNotification {
 export interface ErrorNotification {
   type: NotificationType.ErrorReport;
   message: string;
+  code?: RuntimeErrorCode;
   pieceId?: string;
   space?: string;
   patternId?: string;
@@ -927,6 +946,7 @@ export type RemoteResponse =
   | WriteStackTraceResponse
   | PageResponse
   | SlugResponse
+  | SpaceResponse
   | VDomMountResponse
   | DetectNonIdempotentResponse
   | PatternSourcesResponse
@@ -1080,6 +1100,10 @@ export type Commands = {
   [RequestType.RuntimeSynced]: {
     request: RuntimeSyncedRequest;
     response: EmptyResponse;
+  };
+  [RequestType.ResolveSpaceName]: {
+    request: ResolveSpaceNameRequest;
+    response: SpaceResponse;
   };
   [RequestType.RegisterSpaceHost]: {
     request: RegisterSpaceHostRequest;

@@ -11,6 +11,7 @@ import {
   visitEachChildWithJsx,
 } from "../ast/mod.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
+import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
 
 export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
   transform(context: TransformationContext): ts.SourceFile {
@@ -129,6 +130,7 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
             writeAuthorizedByIdentity,
           );
         }
+        finalSchema = resolvePolicyOfMarkers(finalSchema, context, node);
         const emittedSchema = typeof finalSchema === "boolean"
           ? finalSchema
           : { ...(finalSchema as Record<string, unknown>), ...optionsObj };
@@ -161,6 +163,96 @@ export class SchemaGeneratorTransformer extends HelpersOnlyTransformer {
 
     return ts.visitNode(sourceFile, visit) as ts.SourceFile;
   }
+}
+
+function resolvePolicyOfMarkers(
+  value: unknown,
+  context: TransformationContext,
+  diagnosticNode: ts.Node,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) =>
+      resolvePolicyOfMarkers(entry, context, diagnosticNode)
+    );
+  }
+  if (value === null || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  const marker = record.__ctPolicyIdentityOf;
+  if (marker && typeof marker === "object" && !Array.isArray(marker)) {
+    const identity = marker as { file?: unknown; path?: unknown };
+    const file = typeof identity.file === "string" ? identity.file : undefined;
+    const symbol = Array.isArray(identity.path) &&
+        typeof identity.path[0] === "string"
+      ? identity.path[0]
+      : undefined;
+    const identityEntries = [
+      ...(context.options.moduleIdentities?.entries() ?? []),
+    ];
+    const exactSourceEntry = file === undefined
+      ? undefined
+      : identityEntries.find(([sourceName]) =>
+        sourceName.replace(/\\/g, "/") === file
+      );
+    const normalizedSourceEntries = file === undefined
+      ? []
+      : identityEntries.filter(([sourceName]) =>
+        normalizeSourceFilePath(sourceName) === file
+      );
+    const sourceEntry = exactSourceEntry ??
+      (normalizedSourceEntries.length === 1
+        ? normalizedSourceEntries[0]
+        : undefined);
+    let manifests = sourceEntry === undefined
+      ? undefined
+      : context.options.state?.getPolicyManifests().get(sourceEntry[0]);
+    if (sourceEntry !== undefined && manifests === undefined) {
+      const definingSource = context.program.getSourceFile(sourceEntry[0]);
+      if (definingSource !== undefined) {
+        try {
+          manifests = compileCfcPolicyManifestsForSource(
+            definingSource,
+            sourceEntry[1],
+          );
+          context.options.state?.recordPolicyManifests(
+            sourceEntry[0],
+            manifests,
+          );
+        } catch {
+          manifests = undefined;
+        }
+      }
+    }
+    const artifact = manifests?.find((candidate) =>
+      candidate.manifest.symbol === symbol
+    );
+    if (!sourceEntry || !symbol || !artifact) {
+      context.reportDiagnostic({
+        node: diagnosticNode,
+        type: "cfc-policy-of",
+        message:
+          "PolicyOf requires a direct typeof reference to a compiler-verified exported exchangeRules() binding.",
+      });
+      return value;
+    }
+    const { __ctPolicyIdentityOf: _, ...rest } = record;
+    return {
+      ...rest,
+      moduleIdentity: sourceEntry[1],
+      symbol,
+      policyDigest: artifact.policyDigest,
+    };
+  }
+  return Object.fromEntries(
+    Object.entries(record).map(([key, entry]) => [
+      key,
+      resolvePolicyOfMarkers(entry, context, diagnosticNode),
+    ]),
+  );
+}
+
+function normalizeSourceFilePath(fileName: string): string {
+  const normalized = fileName.replace(/\\/g, "/");
+  return normalized.match(/^\/[^/]+(\/.+)$/)?.[1] ?? normalized;
 }
 
 function createSchemaAst(
@@ -359,7 +451,7 @@ function extractWriteAuthorizedByIdentity(
     return undefined;
   }
   return {
-    file: normalizeWriterIdentityFile(sourceFileName),
+    file: normalizeSourceFilePath(sourceFileName),
     path: [bindingNode.exprName.text],
   };
 }
@@ -419,12 +511,6 @@ function createWriteAuthorizedByMarkerAst(
       ], true),
     ),
   ], true);
-}
-
-function normalizeWriterIdentityFile(fileName: string): string {
-  const normalized = fileName.replace(/\\/g, "/");
-  const strippedPrefixed = normalized.match(/^\/[^/]+(\/.+)$/)?.[1];
-  return strippedPrefixed ?? normalized;
 }
 
 function evaluateObjectLiteral(

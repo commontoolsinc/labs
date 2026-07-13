@@ -2,7 +2,7 @@
  * Worker-reconciler mount/remount benchmarks.
  *
  * CPU profiles of the default-app shell integration test
- * (docs/development/performance/default-app-note-create.md) show that the
+ * (docs/history/development/performance/default-app-note-create.md) show that the
  * single largest runtime-worker phase in a steady-state note-create cycle is
  * `handleVDomMount` → `WorkerReconciler.mount` → per-child cell subscription
  * and render: ~37% of busy worker CPU. Navigating back to the home view

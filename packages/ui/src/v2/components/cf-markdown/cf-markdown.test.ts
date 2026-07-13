@@ -62,6 +62,58 @@ describe("cf-markdown", () => {
     expect(rendered).toContain("cf-copy-button");
   });
 
+  it("should wrap tables in a horizontal scroll container", () => {
+    const el = new CFMarkdown();
+    const markdown = [
+      "| Airport | Flights | Notes |",
+      "| --- | --- | --- |",
+      "| Haneda | Terminal 1 North Wing | Arrive early |",
+    ].join("\n");
+
+    const rendered = (el as any)._renderMarkdown(markdown);
+
+    // The table is rendered...
+    expect(rendered).toContain("<table");
+    // ...and wrapped so it can scroll horizontally on narrow screens
+    // instead of cramming its columns.
+    expect(rendered).toContain('<div class="table-scroll">');
+    // The wrapper opens before the table and closes after it.
+    expect(rendered).toMatch(
+      /<div class="table-scroll"><table[\s\S]*?<\/table><\/div>/,
+    );
+  });
+
+  it("wraps multiple tables independently, not as one span", () => {
+    const el = new CFMarkdown();
+    // Two tables with prose between them. _wrapTablesForScroll uses a
+    // non-greedy match so each table gets its own .table-scroll; a greedy
+    // match would swallow the first table, the prose, AND the second table
+    // into a single wrapper.
+    const markdown = [
+      "| A | B |",
+      "| --- | --- |",
+      "| 1 | 2 |",
+      "",
+      "Prose between the tables.",
+      "",
+      "| C | D |",
+      "| --- | --- |",
+      "| 3 | 4 |",
+    ].join("\n");
+
+    const rendered = (el as any)._renderMarkdown(markdown);
+
+    // Exactly two independent wrappers, each closing right after its table.
+    // (A greedy match would produce a single wrapper and a single
+    // </table></div>.)
+    expect((rendered.match(/<div class="table-scroll">/g) ?? []).length).toBe(
+      2,
+    );
+    expect((rendered.match(/<\/table><\/div>/g) ?? []).length).toBe(2);
+    // The prose between the tables is not swallowed into a wrapper.
+    expect(rendered).toContain("Prose between the tables.");
+  });
+
   it("should get content value from string", () => {
     const el = new CFMarkdown();
     el.content = "test content";

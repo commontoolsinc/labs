@@ -13,7 +13,7 @@ import {
 
 const signer = await Identity.fromPassphrase("runner-cfc-trust");
 
-// Epic B3 (docs/plans/cfc-future-work-implementation.md §3): the user-scoped
+// Epic B3 (docs/history/plans/cfc-future-work-implementation.md §3): the user-scoped
 // trust closure (spec §4.8.9). Concept guards resolve from CONCRETE carried
 // integrity via the acting principal's delegations; concrete integrity stays
 // portable across users while concept satisfaction is acting-principal

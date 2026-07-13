@@ -4,8 +4,10 @@ import type {
   AttemptedWrite,
   CfcAddress,
   CfcDereferenceTrace,
+  CfcLabelMetadataObservation,
   CfcMetadata,
   ConsultedGrant,
+  ConsultedPolicyManifest,
   ConsumedRead,
   OrderedWriteAttempt,
   PreparedDigestInput,
@@ -79,6 +81,30 @@ const compareConsultedGrant = (
   if (left.space !== right.space) return left.space < right.space ? -1 : 1;
   if (left.id !== right.id) return left.id < right.id ? -1 : 1;
   return left.digest < right.digest ? -1 : left.digest > right.digest ? 1 : 0;
+};
+
+const compareConsultedPolicyManifest = (
+  left: ConsultedPolicyManifest,
+  right: ConsultedPolicyManifest,
+): number => {
+  const leftKey = hashStringOf(left.reference);
+  const rightKey = hashStringOf(right.reference);
+  if (leftKey !== rightKey) return leftKey < rightKey ? -1 : 1;
+  return left.state < right.state ? -1 : left.state > right.state ? 1 : 0;
+};
+
+const compareLabelMetadataObservation = (
+  left: CfcLabelMetadataObservation,
+  right: CfcLabelMetadataObservation,
+): number => {
+  const primary = compareAddress(left.target, right.target);
+  if (primary !== 0) return primary;
+  // Same metadata address: total-order distinct records by canonical hash
+  // (the compareWritePolicyInput tiebreaker idiom) so recording order cannot
+  // perturb the digest.
+  const leftHash = hashStringOf(left);
+  const rightHash = hashStringOf(right);
+  return leftHash < rightHash ? -1 : leftHash > rightHash ? 1 : 0;
 };
 
 const compareWritePolicyInput = (
@@ -314,6 +340,27 @@ export const canonicalizePreparedDigestInput = (
   ...(input.consultedGrants !== undefined && input.consultedGrants.length > 0
     ? {
       consultedGrants: [...input.consultedGrants].sort(compareConsultedGrant),
+    }
+    : {}),
+  ...(input.consultedPolicyManifests !== undefined &&
+      input.consultedPolicyManifests.length > 0
+    ? {
+      consultedPolicyManifests: [...input.consultedPolicyManifests].sort(
+        compareConsultedPolicyManifest,
+      ),
+    }
+    : {}),
+  // Label-metadata observations (inv-12 Stage 2): address-sorted with a
+  // canonical-hash tiebreak, so recording order is not decision content.
+  // Confidentiality arrays stay verbatim (they are population-rule joins,
+  // already deduped at construction); an empty set collapses to absent so
+  // pre-Stage-2 digests are unchanged.
+  ...(input.labelMetadataObservations !== undefined &&
+      input.labelMetadataObservations.length > 0
+    ? {
+      labelMetadataObservations: [...input.labelMetadataObservations].sort(
+        compareLabelMetadataObservation,
+      ),
     }
     : {}),
 });

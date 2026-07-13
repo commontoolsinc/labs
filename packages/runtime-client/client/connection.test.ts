@@ -7,7 +7,9 @@ import {
   type InitializationData,
   type IPCClientMessage,
   type IPCClientNotification,
+  NotificationType,
   RequestType,
+  RuntimeErrorCode,
 } from "../protocol/mod.ts";
 import type { RuntimeTransport, RuntimeTransportEvents } from "./transport.ts";
 
@@ -331,6 +333,36 @@ describe("RuntimeConnection request timeline", () => {
       .find((entry) => entry.type === RequestType.Idle);
     expect(doneEntry!.error).toBe(true);
     expect(typeof doneEntry!.doneAtMs).toBe("number");
+    await connection.dispose();
+  });
+
+  it("surfaces coded request failures as lifecycle error events", async () => {
+    const transport = new FakeTransport([RequestType.Idle]);
+    const connection = await initializedConnection(transport);
+    const errors: unknown[] = [];
+    connection.on("error", (error) => errors.push(error));
+
+    const request = connection.request<RequestType.Idle>({
+      type: RequestType.Idle,
+    });
+    const settled = request.then(() => undefined, (error) => error);
+    const sent = transport.sent.find(
+      (message): message is IPCClientMessage =>
+        "msgId" in message && message.data.type === RequestType.Idle,
+    );
+    transport.emit("message", {
+      msgId: sent!.msgId,
+      error: "Failed to load the compiler stack",
+      code: RuntimeErrorCode.CompilerStackLoadFailed,
+    });
+
+    const error = await settled as Error & { code?: RuntimeErrorCode };
+    expect(error.code).toBe(RuntimeErrorCode.CompilerStackLoadFailed);
+    expect(errors).toEqual([{
+      type: NotificationType.ErrorReport,
+      message: "Failed to load the compiler stack",
+      code: RuntimeErrorCode.CompilerStackLoadFailed,
+    }]);
     await connection.dispose();
   });
 

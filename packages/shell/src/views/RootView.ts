@@ -13,7 +13,11 @@ import { BaseView, createDefaultAppState, SHELL_COMMAND } from "./BaseView.ts";
 import { KeyStore } from "@commonfabric/identity";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
-import { type RuntimeClient } from "@commonfabric/runtime-client";
+import {
+  type ErrorNotification,
+  type RuntimeClient,
+  RuntimeErrorCode,
+} from "@commonfabric/runtime-client";
 import { type DID } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import { shouldRecreateRuntime } from "../lib/runtime-lifecycle.ts";
@@ -59,9 +63,13 @@ export class XRootView extends BaseView {
       width: 100%;
     }
 
+    /* Anchored to the BOTTOM edge: an overlay pinned to the top covers the
+      header breadcrumbs and steals their (hit-tested) clicks, breaking
+      space navigation until dismissed. Nothing interactive is shell-owned
+      at the bottom edge. */
     #version-skew-banner {
       position: fixed;
-      inset-block-start: 0;
+      inset-block-end: 0;
       inset-inline: 0;
       z-index: 2000;
       display: flex;
@@ -72,7 +80,7 @@ export class XRootView extends BaseView {
       font: 500 14px/1.4 system-ui, sans-serif;
       color: #1a1a1a;
       background: #ffe8a3;
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.2);
     }
 
     #version-skew-banner button {
@@ -96,6 +104,11 @@ export class XRootView extends BaseView {
   @state()
   private accessor _versionSkew = false;
 
+  // Invalidates callbacks from replaced workers. A coded compiler-load error
+  // can arrive through either a request reply or an asynchronous runtime error;
+  // only the currently-owned worker may trigger one replacement.
+  private _runtimeGeneration = 0;
+
   // Handler for the worker's versionSkew IPC — raises the banner.
   readonly _handleVersionSkew = (event: unknown): void => {
     console.warn(
@@ -103,6 +116,26 @@ export class XRootView extends BaseView {
       event,
     );
     this._versionSkew = true;
+  };
+
+  readonly _handleRuntimeError = (
+    event: ErrorNotification,
+    generation = this._runtimeGeneration,
+  ): void => {
+    console.error("[RuntimeClient Error]", event);
+    if (
+      event.code !== RuntimeErrorCode.CompilerStackLoadFailed ||
+      generation !== this._runtimeGeneration
+    ) {
+      return;
+    }
+
+    // A failed module URL is cached as failed in this worker's module map.
+    // RuntimeInternals.dispose() asks the worker to flush pending storage writes
+    // before terminating it; the replacement gets a fresh module map and can
+    // retry the compiler chunk when the user retries the operation.
+    this._runtimeGeneration++;
+    this._rt.run([this.app]);
   };
 
   @property()
@@ -131,6 +164,7 @@ export class XRootView extends BaseView {
       // whereas in a task we don't have access to necessary info
       // like previous app state.
       task: async ([app]: [AppState | undefined], { signal }) => {
+        const generation = ++this._runtimeGeneration;
         const previous = this._rt.value;
         if (previous) {
           previous.dispose().catch(console.error);
@@ -166,6 +200,7 @@ export class XRootView extends BaseView {
           // This client build's git sha, for the system-pattern auto-update
           // version-skew gate (compared to a space's toolshed /api/meta).
           clientVersion: COMMIT_SHA,
+          onError: (event) => this._handleRuntimeError(event, generation),
           onVersionSkew: this._handleVersionSkew,
           // Per-profile dogfood toggles: worker-console forwarding and the
           // Epic H3a render ceiling (see lib/host-toggles.ts).

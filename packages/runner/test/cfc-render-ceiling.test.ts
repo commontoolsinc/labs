@@ -8,7 +8,7 @@ import {
 import type { SpaceMembershipProvider } from "../src/cfc/space-membership.ts";
 import { atomsOutsideCeiling } from "../src/cfc/observation.ts";
 
-// Epic H3b (docs/plans/cfc-future-work-implementation.md §7): the display-sink
+// Epic H3b (docs/history/plans/cfc-future-work-implementation.md §7): the display-sink
 // render ceiling resolves §15.2 principal shapes via exchange rules
 // (spec §8.10.6 — "ordinary exchange-rule evaluation runs before the fit
 // check"; §4.3.3 SpaceReaderAccess; §4.9.3 HasRole membership facts). The

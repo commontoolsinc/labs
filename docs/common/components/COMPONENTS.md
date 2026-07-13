@@ -773,3 +773,97 @@ SVG charting components. Compose mark elements inside a `cf-chart` container.
 - **Data auto-detection:** Number arrays auto-index. String x-values use band scale. Date/ISO strings use time scale.
 - **Responsive width:** Chart fills its container width. Use CSS to control.
 - **Crosshair:** Enabled by default. Shows nearest data point on hover.
+
+---
+
+## Identity components
+
+**Render a person with the identity components — never a bare name string or a
+raw `<img>`.** A display name alone is forgeable, hard to recognize at a glance,
+and inaccessible. These components give consistent treatment, an accessible name,
+and (for the current viewer) a verified seal that user-space cannot forge.
+
+| You are showing… | Use | Why |
+| --- | --- | --- |
+| **any participant** whose live profile cell you hold — the viewer (via `wish`) or anyone who contributed their cell on join | `cf-profile-badge` bound to that cell | trusted; draws name + avatar + a DID-derived verified seal; cross-space reads resolve for every viewer (CT-1667/1687) |
+| a person you hold **only a snapshot** for — a self-contained piece, or an offline remote profile space | `cf-avatar` + their name | untrusted fallback, safe for any value; needs no profile cell |
+
+`cf-profile-badge` is the one preferred way to render an identity; `cf-avatar` is
+the explicit fallback for when no live profile cell is available. See
+[multi-user-patterns → Presenting Identity](../patterns/multi-user-patterns.md#presenting-identity)
+for the end-to-end flow (resolve the viewer, store each joiner's profile cell, mark "me").
+
+### cf-avatar
+
+Untrusted avatar primitive — safe for any code to render, for any person.
+
+```tsx
+// Shown for illustration only.
+<cf-avatar name="Ada Lovelace" src={person.avatar} size="sm" /> // data: URI image
+<cf-avatar name="Grace Hopper" src="🦊" />                       // emoji glyph
+<cf-avatar name="Alan Turing" />                                 // initials "AT"
+```
+
+- `src`: a `data:` URI image, an emoji/glyph, or `""`. **Only `data:` URIs render
+  as an image** — `http(s)`, `blob:`, and path URLs degrade to initials and are
+  never fetched (no tracking/exfil beacon).
+- `name`: drives the initials fallback and the accessible label — always set it.
+- `size`: `xs | sm | md | lg | xl`. `shape`: `circle | square`.
+
+Use `cf-avatar` as the **fallback** when you hold only a snapshot of a person — a
+self-contained piece, or a participant whose remote profile space is offline. When
+you have the live profile cell (which you do for every participant who joined by
+contributing it), prefer `cf-profile-badge`.
+
+### cf-profile-badge
+
+Trusted presentation of **a participant's profile** — the viewer's own, or anyone
+whose profile cell you stored on join. Bind a profile **cell** (not strings) via
+`$profile`; it renders name + avatar + a verified seal derived from the owner's
+identity that user-space cannot mint.
+
+```tsx
+// Shown for illustration only.
+const profileWish = wish({ query: "#profile" }); // resolves the viewer's profile cell
+...
+<cf-profile-badge $profile={profileWish.result} size="sm" />
+```
+
+- `$profile`: a profile **cell** — the viewer's own is
+  `wish({ query: "#profile" }).result` (the `.result`, not the wish object); for
+  other participants, bind the profile cell they contributed to the shared roster
+  on join.
+- `size`: `xs | sm | md | lg | xl`.
+- The verified seal only appears for a live, runtime-attested profile cell (it
+  will not show in stories or `--no-run` checks — that is expected, not a failure).
+- **Every participant** with a stored profile cell can be badged — not just the
+  viewer. Cross-space profile reads resolve for any authorized viewer (CT-1667/1687),
+  so store each person's `#profile` cell in the shared `PerSpace` roster on join and
+  bind `$profile={p.profile}`. See
+  [multi-user-patterns → Presenting Identity](../patterns/multi-user-patterns.md#presenting-identity)
+  and the live demo `packages/patterns/profile-roster-live-demo.tsx`. Only fall back
+  to `cf-avatar` when you deliberately hold just a snapshot.
+- ⚠️ **Bind it at a STATIC `[UI]` position.** Like every `$`-bidirectional binding
+  (`$value`, `$checked`, …), `$profile` must be bound where the JSX is constructed
+  once — **never inside a `{computed(() => …)}` subtree**. Inside a computed the
+  cell is auto-unwrapped to a plain value and the renderer throws *"Bidirectionally
+  bound property $profile is not reactive"*, blanking the whole pattern. Resolve
+  `wish({query:"#profile"})` once and place the badge in the static JSX; gate only
+  its *siblings* reactively, or use `ifElse(cond, staticA, staticB)` as a child of a
+  static wrapper. Repro: `packages/patterns/scope-bug-computed-vnode-blank/`.
+
+---
+
+## CFC Authorship
+
+`cf-cfc-authorship` can enforce text-integrity policy for its children when
+`verifyTextIntegrity` is set. If `requiredTextIntegrity` or `requiredIntegrity`
+is provided, the renderer uses that explicit atom list.
+
+When no explicit requirement is provided and `$author`/`author` is a cell whose
+root CFC label contains `represents-principal`, the renderer infers a required
+`{ kind: "authored-by", subject }` atom from that author cell. This means a
+cell-backed author can make previously display-only text require matching
+authorship integrity. Use an explicit `requiredTextIntegrity` when a component
+needs a different policy, and avoid cell-backed `$author` for purely decorative
+author names.

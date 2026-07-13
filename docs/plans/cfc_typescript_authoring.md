@@ -55,12 +55,21 @@ The implementation centers on a small canonical surface:
 - projection helpers: `ProjectionPath`, `ProjectionOf`, `Projection`
 - simple wrapper aliases:
   `Confidential`, `Integrity`, `AddIntegrity`, `RequiresIntegrity`,
-  `MaxConfidentiality`, `ExactCopy`, `LengthPreservedFrom`, `FilteredFrom`,
-  `SubsetOf`, `PermutationOf`
-- `OpaqueInput<T, Spec>` for schema-level opacity with `Reactive<T>` erasure
+  `MaxConfidentiality`, `ExactCopy`
 - `WriteAuthorizedBy<T, typeof binding>` for trust-sensitive write policy
 - closed JSX helper set:
   `UiAction`, `UiPromptSlot`, `UiDisclosure`
+
+> **2026-07-10 surface reduction:** the collection helpers
+> (`LengthPreservedFrom`, `FilteredFrom`, `SubsetOf`, `PermutationOf`) and
+> `OpaqueInput<T, Spec>` were removed from the canonical surface (and the
+> checked items below that built them were executed and later reverted): they
+> lowered to `ifc.collection` / `ifc.opaque`, which the runner rejects
+> fail-closed as unsupported trust-sensitive claims, so authors got code that
+> type-checked but could only ever fail at commit. Reintroduce the helpers
+> together with the runner enforcement for the spec's §8.5 / §8.13
+> transitions. `ifc.projection` is now runner-enforced (§8.3 verify + scoped
+> integrity carry), so the projection helpers stay.
 
 Friendly sugar may exist, but it must remain a thin layer over this canonical
 surface. There should not be a second CFC DSL with different lowering rules.
@@ -156,9 +165,11 @@ trusted-event and UI provenance path.
 
 ### `OpaqueInput` Boundary
 
-`OpaqueInput<T, Spec>` is part of the authoring surface, but it is not itself a
-commit-boundary enforcement rule in the runner plan. The implementation needs
-to keep that boundary clear:
+`OpaqueInput<T, Spec>` was removed from the authoring surface (see the
+2026-07-10 surface-reduction note above): the runner rejects `ifc.opaque`
+fail-closed, so the helper only produced commit failures. The boundary
+described here still applies if the helper is reintroduced with runner
+support:
 
 - authoring/schema generation owns `ifc.opaque` lowering
 - builder/runtime input handling owns opaque read restrictions

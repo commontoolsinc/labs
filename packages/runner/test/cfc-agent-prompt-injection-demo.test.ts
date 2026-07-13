@@ -23,7 +23,7 @@ const signer = await Identity.fromPassphrase(
 const space = signer.did();
 
 // End-to-end drive of the CFC agent prompt-injection demo's two agents (Epic
-// D2, docs/specs/cfc-trusted-agent-tool-integrity.md test plan). This mirrors
+// D2, docs/history/specs/cfc-trusted-agent-tool-integrity.md test plan). This mirrors
 // packages/patterns/cfc-agent-prompt-injection-demo/main.tsx — same atoms,
 // same sendMail floor (packages/patterns/cfc/prompt-injection/schemas.ts),
 // same logEmail / readRawBriefing handler shapes — driven through the REAL

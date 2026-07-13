@@ -16,6 +16,7 @@ import {
 } from "../../shared/mod.ts";
 import { KeyboardController } from "../lib/keyboard-router.ts";
 import { type Cancel, NAME, PageHandle } from "@commonfabric/runtime-client";
+import { prepareNamedSpace } from "../lib/named-space.ts";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -82,13 +83,14 @@ export class XAppView extends BaseView {
 
   _spaceRootPattern = new Task(this, {
     task: async (
-      [rt, space],
+      [app, rt, space],
     ): Promise<
       | PageHandle<NameSchema>
       | undefined
     > => {
       if (!rt || !space) return;
       try {
+        await prepareNamedSpace(app, rt, space);
         return await rt.getSpaceRootPattern(space);
       } catch (err) {
         if (!rt.signal.aborted) {
@@ -97,7 +99,7 @@ export class XAppView extends BaseView {
         throw err;
       }
     },
-    args: () => [this.rt, this.space],
+    args: () => [this.app, this.rt, this.space],
   });
 
   _selectedPattern = new Task(this, {
@@ -110,6 +112,7 @@ export class XAppView extends BaseView {
     > => {
       if (!rt || !space) return;
       this._patternError = undefined;
+      await prepareNamedSpace(app, rt, space);
       if ("pieceSlug" in app.view && app.view.pieceSlug) {
         try {
           const pieceId = slugIdForSpace(space, app.view.pieceSlug);

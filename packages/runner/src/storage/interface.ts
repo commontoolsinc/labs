@@ -41,15 +41,20 @@ import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import { Cell } from "../cell.ts";
 import type {
   CfcAddress,
+  CfcDeclaredMonotonicityMode,
+  CfcDeclaredWideningExemption,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
   CfcGrantWriteInput,
+  CfcLabelMetadataObservation,
+  CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
   ConsultedGrant,
+  ConsultedPolicyManifest,
   ImplementationIdentity,
   PostCommitSideEffect,
   TrustSnapshot,
@@ -143,6 +148,13 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * space's connection is already open to another host).
    */
   registerSpaceHost?(space: MemorySpace, host: string): boolean;
+
+  /**
+   * Register a derived space identity for fresh-space ACL genesis. Optional:
+   * storage managers without ACL bootstrap support may ignore this capability.
+   * The identity is never used as the principal for ordinary storage work.
+   */
+  registerSpaceIdentity?(identity: Signer): void;
 
   /**
    * Close all storage providers
@@ -914,6 +926,29 @@ export interface IExtendedStorageTransaction
    */
   setCfcPolicyEvaluationMode(mode: CfcPolicyEvaluationMode): void;
   /**
+   * Set the cross-space label-metadata representation dial (inv-12 Stage 1 /
+   * SC-25, spec §4.6.4.1). Anti-downgrade pinned: once `enforce`, weakening
+   * throws.
+   */
+  setCfcLabelMetadataProtectionMode(
+    mode: CfcLabelMetadataProtectionMode,
+  ): void;
+  /**
+   * Set the declared-component monotonicity gate dial (WP5, §8.12.1).
+   * Anti-downgrade pinned: once `enforce`, weakening throws.
+   */
+  setCfcDeclaredMonotonicityMode(mode: CfcDeclaredMonotonicityMode): void;
+  /**
+   * Exempt exactly one (doc, path, clauseDigest) triple from the
+   * declared-monotonicity gate for this transaction — the §8.12.7 route 2b
+   * declassification-event seam. Requires a trusted builtin implementation
+   * identity (the writeCfcGrant discipline); fails closed on malformed or
+   * over-broad markers; write-once per transaction.
+   */
+  setCfcDeclaredWideningExemption(
+    exemption: CfcDeclaredWideningExemption,
+  ): void;
+  /**
    * Record the addresses whose invalidating writes scheduled this run
    * (§8.9.2 trigger reads). Their labels join the flow-label derivation
    * even when the run never re-reads them.
@@ -1021,6 +1056,41 @@ export interface IExtendedStorageTransaction
    * decision, so exposure is harmless (like `noteCfcDiagnostic`).
    */
   recordCfcConsultedGrant(consulted: ConsultedGrant): void;
+
+  /** Records a present/absent exact module-policy manifest lookup. */
+  recordCfcConsultedPolicyManifest(
+    consulted: ConsultedPolicyManifest,
+  ): void;
+
+  /** Runtime-verified module policy manifest lookup (read-only). */
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    destinationSpace?: MemorySpace,
+    bindCommit?: boolean,
+  ): unknown;
+
+  /** Whether the exact manifest is installed for a destination space. */
+  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean;
+
+  /** Atomically stages a compiler-verified manifest for the destination. */
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean;
+
+  /**
+   * Records a label-METADATA observation (inv-12 Stage 2, spec §4.6.4.1-.2):
+   * the introspection surface observed first-layer label metadata, and the
+   * observation enters this transaction's consumed set with its §4.6.4.2
+   * population-rule label — the SC-6 revisit's application channel, beside
+   * the journal-classified payload observations. Folded into the flow
+   * derivation, the egress consumed set, the per-write input gate, and the
+   * prepared digest. Empty-label (public) observations are dropped — nothing
+   * to derive, gate, or bind. Labeled ones mark the transaction
+   * CFC-relevant. See ownership note above; the argument is `deepFreeze()`d
+   * on entry. Recording taints — it never grants — so exposure is fail-safe
+   * (like `addCfcTriggerReads`).
+   */
+  recordCfcLabelMetadataObservation(
+    observation: CfcLabelMetadataObservation,
+  ): void;
 
   /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route
@@ -1526,6 +1596,14 @@ export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
   value?: Immutable<FabricValue>;
   previousValue?: Immutable<FabricValue>;
+  /**
+   * Pre-transaction slot presence at `address.path` — distinguishes an
+   * absent slot from a present slot holding `undefined`, which
+   * `previousValue` alone cannot (the storage write path keeps presence
+   * distinct from value). Optional: transactions that cannot compute it
+   * omit it, and consumers fall back to `previousValue` definedness.
+   */
+  previousPresent?: boolean;
 }
 
 export interface TransactionReadDetail {

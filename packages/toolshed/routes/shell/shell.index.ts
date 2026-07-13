@@ -4,6 +4,7 @@ import * as path from "@std/path";
 import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";
 import env from "@/env.ts";
+import { buildInfo } from "@/lib/build-info.ts";
 import {
   createShellStaticRouter,
   StaticResponse,
@@ -62,7 +63,16 @@ const SHELL_URL = Deno.env.get("SHELL_URL");
 
 if (COMPILED) {
   // Production mode - serve static files
-  router.route("/", createShellStaticRouter(shellStaticRoot));
+  router.route(
+    "/",
+    createShellStaticRouter(shellStaticRoot, {
+      // build-binaries uses the mode name when no commit SHA was supplied;
+      // mirror that fallback so locally compiled binaries retain a working
+      // default worker URL too.
+      immutableBuildId: buildInfo.commitSha ??
+        (env.ENV === "production" ? "production" : "development"),
+    }),
+  );
 } else if (SHELL_URL) {
   // Development mode with proxy
 

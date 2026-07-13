@@ -66,7 +66,7 @@ const client = new LLMClient();
 /** Batch interval for partial streaming updates (~15fps). */
 const PARTIAL_BATCH_MS = 66;
 
-// Epic D1b (docs/plans/cfc-future-work-implementation.md): the llm builtins
+// Epic D1b (docs/history/plans/cfc-future-work-implementation.md): the llm builtins
 // stamp their model-output writebacks with an explicit `LlmDerived` provenance
 // atom — the same mark D1 attaches to dialog messages. `llm`/`generateText`
 // write `result`/`partial` through {@link LLM_DERIVED_RESULT_STAMP_SCHEMA};

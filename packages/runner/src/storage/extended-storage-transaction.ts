@@ -63,11 +63,15 @@ import {
   CFC_ENFORCING_STRICTNESS,
   CFC_GRANT_ID_PREFIX,
   type CfcAddress,
+  type CfcDeclaredMonotonicityMode,
+  type CfcDeclaredWideningExemption,
   type CfcDereferenceTrace,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
   type CfcGrantWriteInput,
+  type CfcLabelMetadataObservation,
+  type CfcLabelMetadataProtectionMode,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
   type CfcTriggerReadGating,
@@ -75,9 +79,12 @@ import {
   type CfcTxState,
   type CfcWriteFloorMode,
   type ConsultedGrant,
+  type ConsultedPolicyManifest,
   type ConsumedRead,
+  DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
   DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
@@ -96,6 +103,7 @@ import {
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
+import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -121,6 +129,22 @@ type CfcInstrumentationHooks = {
   // one summary per prepared transaction that measured a protected write.
   // When absent — the default — the prepare gate skips all measurement.
   onPrefixProvenance?(summary: CfcPrefixProvenanceSummary): void;
+  resolvePolicyManifest?(
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+    destinationSpace?: MemorySpace,
+    bindCommit?: boolean,
+  ): unknown;
+  hasPolicyManifest?(
+    space: MemorySpace,
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+  ): boolean;
+  installPolicyManifest?(
+    space: MemorySpace,
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+  ): boolean;
 };
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -259,6 +283,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     writeFloorMode: DEFAULT_CFC_WRITE_FLOOR_MODE,
     triggerReadGating: DEFAULT_CFC_TRIGGER_READ_GATING,
     policyEvaluationMode: DEFAULT_CFC_POLICY_EVALUATION_MODE,
+    labelMetadataProtectionMode: DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
+    declaredMonotonicityMode: DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
     prepare: { status: "unprepared" },
     dereferenceTraces: [],
     structureContainers: [],
@@ -270,6 +296,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     diagnostics: [],
     unprivilegedSystemWrites: [],
     consultedGrants: [],
+    consultedPolicyManifests: [],
+    labelMetadataObservations: [],
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
@@ -285,6 +313,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   #cfcWriteFloorPinned = false;
   #cfcTriggerReadGatingPinned = false;
   #cfcPolicyEvaluationPinned = false;
+  #cfcLabelMetadataProtectionPinned = false;
+  #cfcDeclaredMonotonicityPinned = false;
   // Write-once pin for the deployment policy snapshot. Distinct from the
   // slot's value being defined: the Runtime configures MANY tx with NO
   // policies (`undefined`), and that "no policies" state must be just as
@@ -345,6 +375,35 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // Read-only view, not the live object — see readOnlyCfcView. Internal
     // code mutates `this.#cfcState` directly and never goes through here.
     return readOnlyCfcView(this.#cfcState);
+  }
+
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    destinationSpace?: MemorySpace,
+    bindCommit?: boolean,
+  ): unknown {
+    return this.cfcInstrumentation.resolvePolicyManifest?.(
+      reference,
+      this,
+      destinationSpace,
+      bindCommit,
+    );
+  }
+
+  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.cfcInstrumentation.hasPolicyManifest?.(
+      space,
+      reference,
+      this,
+    ) ?? false;
+  }
+
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.cfcInstrumentation.installPolicyManifest?.(
+      space,
+      reference,
+      this,
+    ) ?? false;
   }
 
   setCfcEnforcementMode(mode: CfcEnforcementMode): void {
@@ -471,6 +530,66 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  setCfcLabelMetadataProtectionMode(
+    mode: CfcLabelMetadataProtectionMode,
+  ): void {
+    // Anti-downgrade pin (mirrors the write floor): once `enforce` is set —
+    // by the runtime at tx creation — pattern/handler code that reaches the
+    // tx cannot weaken it to `observe`/`off` so cross-space label metadata
+    // persists verbatim again (inv-12 Stage 1 / SC-25). Strengthening to
+    // `enforce` is always allowed.
+    if (this.#cfcLabelMetadataProtectionPinned && mode !== "enforce") {
+      throw new Error(
+        `CFC label-metadata protection mode cannot be weakened to "${mode}": ` +
+          `transaction is pinned at "enforce"`,
+      );
+    }
+    // The mode drives which representation prepareBoundaryCommit persists but
+    // is not part of PreparedDigestInput, so — like the flow-labels /
+    // write-floor / policy-evaluation setters — a real change after prepare
+    // must invalidate the prepared decision; the Runtime's idempotent set at
+    // tx creation (before prepare) does not.
+    if (
+      this.#cfcState.labelMetadataProtectionMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("label-metadata-protection-mode-changed");
+    }
+    this.#cfcState.labelMetadataProtectionMode = mode;
+    if (mode === "enforce") {
+      this.#cfcLabelMetadataProtectionPinned = true;
+    }
+  }
+
+  setCfcDeclaredMonotonicityMode(mode: CfcDeclaredMonotonicityMode): void {
+    // Anti-downgrade pin (mirrors the write floor): once `enforce` is set —
+    // by the runtime at tx creation — pattern/handler code that reaches the
+    // tx cannot weaken it to `observe`/`off` and slip a non-monotone
+    // declared re-mint through (WP5, §8.12.1). Strengthening to `enforce`
+    // is always allowed.
+    if (this.#cfcDeclaredMonotonicityPinned && mode !== "enforce") {
+      throw new Error(
+        `CFC declared-monotonicity mode cannot be weakened to "${mode}": ` +
+          `transaction is pinned at "enforce"`,
+      );
+    }
+    // The mode drives which prepare reasons/diagnostics the gate records but
+    // is not part of PreparedDigestInput, so — like the flow-labels /
+    // write-floor / policy-evaluation setters — a real change after prepare
+    // must invalidate the prepared decision; the Runtime's idempotent set at
+    // tx creation (before prepare) does not.
+    if (
+      this.#cfcState.declaredMonotonicityMode !== mode &&
+      this.#cfcState.prepare.status === "prepared"
+    ) {
+      this.invalidateCfc("declared-monotonicity-mode-changed");
+    }
+    this.#cfcState.declaredMonotonicityMode = mode;
+    if (mode === "enforce") {
+      this.#cfcDeclaredMonotonicityPinned = true;
+    }
+  }
+
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("trigger-reads-after-prepare");
@@ -576,6 +695,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // prepareBoundaryCommit, so the record stays inert there.
   private noteSystemWrite(address: IMemorySpaceAddress): void {
     if (this.#privilegedSystemWriteDepth > 0) return;
+    if (address.id.startsWith(CFC_POLICY_MANIFEST_ID_PREFIX)) {
+      throw new Error(
+        `cfcPolicyManifest: ${address.id} is immutable reserved policy state`,
+      );
+    }
     // Reserved grant documents (§8.12.7 route 2a, cfc/grants.ts): the WHOLE
     // document is policy state — a forged grant at the derived address would
     // spend another principal's release authority — so any unprivileged
@@ -825,6 +949,53 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  recordCfcConsultedPolicyManifest(
+    consulted: ConsultedPolicyManifest,
+  ): void {
+    const index = this.#cfcState.consultedPolicyManifests.findIndex(
+      (existing) => deepEqual(existing.reference, consulted.reference),
+    );
+    if (index !== -1) {
+      if (
+        this.#cfcState.consultedPolicyManifests[index].state === consulted.state
+      ) {
+        return;
+      }
+      this.#cfcState.consultedPolicyManifests[index] = deepFreeze(consulted);
+      if (this.#cfcState.prepare.status === "prepared") {
+        this.invalidateCfc("consulted-policy-manifest-changed");
+      }
+      return;
+    }
+    this.#cfcState.consultedPolicyManifests.push(deepFreeze(consulted));
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("consulted-policy-manifest-added");
+    }
+  }
+
+  recordCfcLabelMetadataObservation(
+    observation: CfcLabelMetadataObservation,
+  ): void {
+    // Public observations (empty population label) are dropped, not stored:
+    // an empty label adds nothing to the flow join, the consumed set, or any
+    // gate, and skipping them keeps "an observation was recorded" ⇔ "the tx
+    // consumed protected label metadata" — which is exactly the relevance
+    // condition below.
+    if (observation.confidentiality.length === 0) {
+      return;
+    }
+    this.#cfcState.labelMetadataObservations.push(deepFreeze(observation));
+    // A labeled metadata observation makes the transaction CFC-relevant
+    // directly (like noteSystemWrite): its taint must reach the flow
+    // derivation and the enforcement gates even when nothing else in the tx
+    // touches labeled data — the commit-time relevance probes only inspect
+    // journal reads and write targets, which this channel bypasses.
+    this.markCfcRelevant("label-metadata-observation");
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("label-metadata-observation-added");
+    }
+  }
+
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     this.assertWritable("writeCfcGrant()");
     // The trusted policy-writer path (§8.12.7 route 2a, design §2.3
@@ -874,6 +1045,65 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }, prepared.value as unknown as FabricValue);
     });
     return { space: prepared.space, id: prepared.id };
+  }
+
+  setCfcDeclaredWideningExemption(
+    exemption: CfcDeclaredWideningExemption,
+  ): void {
+    // The §8.12.7 route 2b seam (docs/specs/cfc-persisted-declassification.md
+    // §4): the future declassification-event writer exempts exactly ONE
+    // (doc, path, clauseDigest) triple from the declared-monotonicity gate
+    // for this transaction. Same privileged discipline as writeCfcGrant —
+    // an in-place widening of the declared component is durable release
+    // state, so authoring the exemption requires a trusted BUILTIN
+    // implementation identity; ordinary pattern/handler code runs under a
+    // `verified` (or no) identity and is refused.
+    const identity = this.#cfcState.implementationIdentity;
+    if (identity?.kind !== "builtin") {
+      throw new Error(
+        "cfc-declared-monotonicity: setCfcDeclaredWideningExemption requires " +
+          "a trusted builtin implementation identity (the §8.12.7 route 2b " +
+          "declassification-event discipline)",
+      );
+    }
+    // Fail closed on any malformed or over-broad marker: every field names
+    // one concrete thing — no wildcards, no empty identifiers, no non-string
+    // path segments. A rejected marker leaves the gate fully in force.
+    if (
+      !isRecord(exemption) ||
+      typeof exemption.space !== "string" || exemption.space.length === 0 ||
+      typeof exemption.id !== "string" || exemption.id.length === 0 ||
+      !Array.isArray(exemption.path) ||
+      !exemption.path.every((segment) => typeof segment === "string") ||
+      typeof exemption.clauseDigest !== "string" ||
+      exemption.clauseDigest.length === 0
+    ) {
+      throw new Error(
+        "cfc-declared-monotonicity: malformed widening exemption (space, id " +
+          "and clauseDigest must be non-empty strings; path must be a string " +
+          "array — no wildcard exemptions)",
+      );
+    }
+    // Write-once: ONE named triple per transaction. A second exemption is a
+    // second declassification event and belongs in its own transaction.
+    if (this.#cfcState.declaredWideningExemption !== undefined) {
+      throw new Error(
+        "cfc-declared-monotonicity: a widening exemption is already set for " +
+          "this transaction (one (doc, path, clauseDigest) triple per tx)",
+      );
+    }
+    this.#cfcState.declaredWideningExemption = deepFreeze({
+      space: exemption.space,
+      id: exemption.id,
+      path: canonicalizeLogicalPath(exemption.path),
+      clauseDigest: exemption.clauseDigest,
+    });
+    // The exemption changes the gate's prepare-time decision but is not part
+    // of PreparedDigestInput — invalidate a prepared decision like the mode
+    // setters above.
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("declared-widening-exemption-added");
+    }
   }
 
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {
@@ -1006,6 +1236,24 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // revocation then takes effect on the next evaluation (design §2.2).
       ...(this.#cfcState.consultedGrants.length > 0
         ? { consultedGrants: [...this.#cfcState.consultedGrants] }
+        : {}),
+      ...(this.#cfcState.consultedPolicyManifests.length > 0
+        ? {
+          consultedPolicyManifests: [
+            ...this.#cfcState.consultedPolicyManifests,
+          ],
+        }
+        : {}),
+      // Label-metadata observations (inv-12 Stage 2): boundary-decision
+      // inputs (they change the flow join and the consumed set), bound like
+      // writePolicyInputs. Absent-when-empty keeps pre-Stage-2 digests
+      // byte-identical.
+      ...(this.#cfcState.labelMetadataObservations.length > 0
+        ? {
+          labelMetadataObservations: [
+            ...this.#cfcState.labelMetadataObservations,
+          ],
+        }
         : {}),
     };
   }
@@ -1140,13 +1388,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     link: { space: MemorySpace; id: string; scope?: unknown },
   ): void {
     this.assertWritable("markCreateOnly");
+    // Fail closed, same posture as addCommitPrecondition above: a
+    // create-only mark is a commit gate — the exactly-once witness for
+    // event receipts and single-use grant consumption — so silently
+    // swallowing it over an inner transaction that cannot enforce it would
+    // let a duplicate commit through unguarded (cubic P1 on #4649). Every
+    // production transaction (v2) implements it; this arm exists for
+    // hand-built/legacy inner transactions.
+    if (!this.tx.markCreateOnly) {
+      throw new Error(
+        "storage transaction does not support markCreateOnly()",
+      );
+    }
     let marks = this.createOnlyMarks.get(link.space);
     if (!marks) {
       marks = new Set();
       this.createOnlyMarks.set(link.space, marks);
     }
     marks.add(createOnlyMarkKey(link));
-    this.tx.markCreateOnly?.(link);
+    this.tx.markCreateOnly(link);
   }
 
   recordMergeableOp(link: NormalizedFullLink, delta: MergeableOpDelta): void {
@@ -1660,6 +1920,22 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.setCfcPolicyEvaluationMode(mode);
   }
 
+  setCfcLabelMetadataProtectionMode(
+    mode: CfcLabelMetadataProtectionMode,
+  ): void {
+    this.wrapped.setCfcLabelMetadataProtectionMode(mode);
+  }
+
+  setCfcDeclaredMonotonicityMode(mode: CfcDeclaredMonotonicityMode): void {
+    this.wrapped.setCfcDeclaredMonotonicityMode(mode);
+  }
+
+  setCfcDeclaredWideningExemption(
+    exemption: CfcDeclaredWideningExemption,
+  ): void {
+    this.wrapped.setCfcDeclaredWideningExemption(exemption);
+  }
+
   addCfcTriggerReads(reads: readonly IMemorySpaceAddress[]): void {
     this.wrapped.addCfcTriggerReads(reads);
   }
@@ -1716,6 +1992,38 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
     this.wrapped.recordCfcConsultedGrant(consulted);
+  }
+
+  recordCfcConsultedPolicyManifest(
+    consulted: ConsultedPolicyManifest,
+  ): void {
+    this.wrapped.recordCfcConsultedPolicyManifest(consulted);
+  }
+
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    destinationSpace?: MemorySpace,
+    bindCommit?: boolean,
+  ): unknown {
+    return this.wrapped.resolveCfcPolicyManifest(
+      reference,
+      destinationSpace,
+      bindCommit,
+    );
+  }
+
+  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.wrapped.hasCfcPolicyManifest(space, reference);
+  }
+
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.wrapped.installCfcPolicyManifest(space, reference);
+  }
+
+  recordCfcLabelMetadataObservation(
+    observation: CfcLabelMetadataObservation,
+  ): void {
+    this.wrapped.recordCfcLabelMetadataObservation(observation);
   }
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {

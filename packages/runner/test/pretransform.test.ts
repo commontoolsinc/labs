@@ -54,6 +54,71 @@ Deno.test("transformInjectHelperModule transforms by default and respects cf-dis
   assertNotMatch(plain.contents, /cf-disable-transform/);
 });
 
+Deno.test("transformInjectHelperModule warns only on an indented (ignored) cf-disable-transform", () => {
+  const run = (name: string, contents: string) => {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+    try {
+      const out = transformInjectHelperModule({
+        main: name,
+        files: [{ name, contents }],
+      });
+      return { warnings, contents: out.files[0]!.contents };
+    } finally {
+      console.warn = originalWarn;
+    }
+  };
+
+  // Indented directive: not honored, so the file is transformed as usual —
+  // and the author is warned, by file name, that it was ignored.
+  const indented = run(
+    "/indented.tsx",
+    ["  /// <cf-disable-transform />", "export const value = 1;"].join("\n"),
+  );
+  assertMatch(
+    indented.contents,
+    /import \{ __cfHelpers \} from "commonfabric";/,
+  );
+  assertEquals(indented.warnings.length, 1);
+  assertMatch(indented.warnings[0]!, /\/indented\.tsx/);
+  assertMatch(indented.warnings[0]!, /column zero/);
+
+  // Column-zero directive: honored (transform disabled) and no warning.
+  const columnZero = run(
+    "/plain.tsx",
+    ["/// <cf-disable-transform />", "export const value = 1;"].join("\n"),
+  );
+  assertNotMatch(
+    columnZero.contents,
+    /import \{ __cfHelpers \} from "commonfabric";/,
+  );
+  assertEquals(columnZero.warnings.length, 0);
+});
+
+Deno.test("transformInjectHelperModule passes .d.ts files through untouched", () => {
+  const declarations = "export declare const value: number;\n";
+  const transformed = transformInjectHelperModule({
+    main: "/main.tsx",
+    files: [
+      { name: "/main.tsx", contents: "export default 1;" },
+      { name: "/types.d.ts", contents: declarations },
+    ],
+  });
+
+  const main = transformed.files.find((file) => file.name === "/main.tsx")!;
+  const types = transformed.files.find((file) => file.name === "/types.d.ts")!;
+
+  // A declaration file is types-only, so it bypasses the transform entirely:
+  // injecting the `__cfHelpers` value import would be invalid in a .d.ts. It is
+  // passed through byte-identical, while an ordinary source still gets helpers.
+  assertMatch(main.contents, /import \{ __cfHelpers \} from "commonfabric";/);
+  assertEquals(types.contents, declarations);
+  assertNotMatch(types.contents, /__cfHelpers/);
+});
+
 Deno.test("transformInjectHelperModule injects JS-syntax helpers into .js sources", () => {
   const program: RuntimeProgram = {
     main: "/main.tsx",

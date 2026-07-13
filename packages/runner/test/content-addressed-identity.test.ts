@@ -11,7 +11,7 @@ import { trustModule } from "./support/trusted-builder.ts";
 
 /**
  * PRs C and E1 of
- * docs/specs/content-addressed-action-identity-implementation-plan.md:
+ * docs/history/specs/content-addressed-action-identity-implementation-plan.md:
  * content-addressed `$implRef` + CFC provenance, and the writer flip.
  *
  * - Functions become "verified" by being registered through the trust-gated
@@ -348,7 +348,7 @@ export default pattern<{ value: number }>(({ value }) => ({
     // Serialize the compiled lift node's module the way a cell write would
     // (dual-write: $implRef alongside implementationRef), then strip the
     // legacy fields — the exact shape the planned flip produces (PR E of
-    // docs/specs/content-addressed-action-identity-implementation-plan.md:
+    // docs/history/specs/content-addressed-action-identity-implementation-plan.md:
     // writers stop emitting implementationRef and the stringified
     // implementation).
     const node = pattern.nodes.find((n) =>

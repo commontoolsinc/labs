@@ -14,9 +14,31 @@ export type CompilerStack = typeof CompilerStackModule;
 let loaded: CompilerStack | undefined;
 let loading: Promise<CompilerStack> | undefined;
 
+type CompilerStackLoader = () => Promise<CompilerStack>;
+const loadCompilerStack: CompilerStackLoader = () =>
+  import("./compiler-stack.ts");
+
+/** A worker-global module-fetch failure that requires a fresh module map. */
+export class CompilerStackLoadError extends Error {
+  override name = "CompilerStackLoadError";
+
+  constructor(cause: unknown) {
+    super("Failed to load the compiler stack", { cause });
+  }
+}
+
 /** Load (once) the compiler stack; idempotent and cheap when already loaded. */
-export function ensureCompilerStack(): Promise<CompilerStack> {
-  return loading ??= import("./compiler-stack.ts").then((m) => (loaded = m));
+export function ensureCompilerStack(
+  load: CompilerStackLoader = loadCompilerStack,
+): Promise<CompilerStack> {
+  return loading ??= load()
+    .then((module) => (loaded = module))
+    .catch((error) => {
+      // Browsers cache failed module URLs in the current worker's module map,
+      // so retrying this same import cannot recover. Preserve a distinct error
+      // identity for the host to replace the worker with a fresh module map.
+      throw new CompilerStackLoadError(error);
+    });
 }
 
 /**

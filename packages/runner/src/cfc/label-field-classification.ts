@@ -81,6 +81,24 @@ export const LABEL_FIELD_CLASSIFICATION:
     // `reference` when cross-space resolution ships." (The SC-25 recorded
     // initial-assignment exception.)
     entry({ type: CFC_ATOM_TYPE.Space }, ["id"], "public"),
+    // Policy/Context refs (B2b label-carried selection): `name`/`hash` →
+    // public — selection must DEREFERENCE them against the deployment
+    // snapshot at the destination (the Space.id argument); both identify a
+    // deployment policy profile, not a person, and `hash` is already a
+    // content digest. `subject` → commitment — a DID, equality-consumed at
+    // selection (same posture as User.subject); rules binding a variable
+    // FROM a commitment-form subject fail closed at the destination, which
+    // is the narrow direction.
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["name"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["hash"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["policyRefKind"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["moduleIdentity"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["symbol"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["policyDigest"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["subject"], "commitment"),
+    entry({ type: CFC_ATOM_TYPE.Context }, ["name"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Context }, ["hash"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Context }, ["subject"], "commitment"),
     // "LinkReference.source/target → commitment — display/provenance only;
     // nothing dereferences the persisted copy."
     entry({ type: CFC_ATOM_TYPE.LinkReference }, ["source"], "commitment"),
@@ -135,6 +153,24 @@ const CLASSIFICATION_BY_KEY: ReadonlyMap<
 > = new Map(
   LABEL_FIELD_CLASSIFICATION.map(
     (row) => [lookupKey(row.family, row.field)!, row.class],
+  ),
+);
+
+/**
+ * Kind-shaped families the table actually classifies. Used by the Stage 1
+ * transform's walk to decide whether a `kind`-bearing record (with no `type`)
+ * is a claim-family ATOM (resets the classification context) or an ordinary
+ * nested record that merely happens to carry a `kind` field — e.g. the
+ * `ImplementationIdentity` record inside `TransformedBy.identity`, whose
+ * `kind: "verified"` is a variant discriminator, not an atom family. Only a
+ * table-classified kind resets context; everything else extends the current
+ * atom's field path so multi-segment rows keep resolving.
+ */
+export const CLASSIFIED_KIND_FAMILIES: ReadonlySet<string> = new Set(
+  LABEL_FIELD_CLASSIFICATION.flatMap((row) =>
+    "kind" in row.family && typeof row.family.kind === "string"
+      ? [row.family.kind]
+      : []
   ),
 );
 

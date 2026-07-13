@@ -130,6 +130,8 @@ export interface TransformationOptions {
    */
   readonly diagnosticsCollector?: TransformationDiagnostic[];
   readonly patternCoverage?: PatternCoverageOptions;
+  /** Content identity assigned by the compiler for every authored source. */
+  readonly moduleIdentities?: ReadonlyMap<string, string>;
 }
 
 export type DiagnosticSeverity = "error" | "warning";

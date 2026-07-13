@@ -158,6 +158,42 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     }
   });
 
+  it("joins the authoritative covering label into carried sub-path entries (no shadow weakening)", async () => {
+    const { storageManager, runtime, sourceId } = await setup();
+    try {
+      // The shadow attack: the source's AUTHORITATIVE label state has only
+      // the root entry (confidentiality ["source-root"] — see setup) above
+      // the crafted path. A tampered carried view pushes a MORE SPECIFIC
+      // entry at a path the stored metadata does not cover, with weaker
+      // confidentiality. Under the per-component longest-prefix read
+      // resolution the specific entry REPLACES the root for reads at/below
+      // it, so without the authoritative join the crafted entry would
+      // weaken ["field","crafted"] reads from ["source-root"] to ["weak"].
+      const persistedId = await commitLinkWrite(runtime, sourceId, {
+        version: 1,
+        entries: [
+          { path: ["crafted"], label: { confidentiality: ["weak"] } },
+        ],
+      });
+
+      const entries = persistedEntriesFor(storageManager, persistedId);
+      const craftedEntry = entries.find((entry) =>
+        entry.path.join("/") === "field/crafted" && entry.origin === "link"
+      );
+      expect(craftedEntry).toBeDefined();
+      // The carried atom may ADD…
+      expect(craftedEntry!.label.confidentiality).toContainEqual("weak");
+      // …but the authoritative covering confidentiality rides along, so the
+      // more-specific entry is at least as restrictive as what it shadows.
+      expect(craftedEntry!.label.confidentiality).toContainEqual(
+        "source-root",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("persists the full caveat when the view carries a redacted copy", async () => {
     const { storageManager, runtime, sourceId, fullCaveat } = await setup();
     try {

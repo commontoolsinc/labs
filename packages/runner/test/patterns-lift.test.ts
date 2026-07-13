@@ -500,4 +500,85 @@ describe("Pattern Runner - Lift", () => {
     expect(lift1Runs).toBe(1);
     expect(lift2Runs).toBe(1);
   });
+  it("stores a lifted array-of-objects result inline as a single doc (no per-element entity docs)", async () => {
+    // Pin the write-path contract for DERIVED output: `Cell.set()` of an
+    // array of plain objects decomposes each element into its own entity
+    // doc (editable-array semantics, see cell.ts recursivelyAddIDIfNeeded),
+    // but a lift's RESULT is not editable and is written via the raw path
+    // (runner.ts setRawUntyped) — so an N-element derived list must land as
+    // ONE document with the elements stored INLINE, not as N element docs
+    // referenced by links. A regression here silently multiplies the doc
+    // count and sync cost of every derived list by its length.
+    const N = 50;
+    const makeIndex = lift(
+      ({ count }: { count: number }) =>
+        Array.from({ length: count }, (_, i) => ({
+          name: `entry-${i}`,
+          id: `FC:folder/${i}`,
+        })),
+      {
+        type: "object",
+        properties: { count: { type: "number" } },
+        required: ["count"],
+      } as const satisfies JSONSchema,
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            id: { type: "string" },
+          },
+        },
+      } as const satisfies JSONSchema,
+    );
+
+    const indexPattern = pattern<{ count: number }>((args) => {
+      return { index: makeIndex(args) };
+    });
+
+    const resultCell = runtime.getCell<{ index: unknown }>(
+      space,
+      "lift-array-output-single-doc",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, indexPattern, { count: N }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
+
+    const value = await result.pull() as { index: { name: string }[] };
+    expect(value.index.length).toBe(N);
+    expect(value.index[7]).toMatchObject({
+      name: "entry-7",
+      id: "FC:folder/7",
+    });
+
+    // Follow the result indirection to the doc that actually holds the
+    // array, then assert its RAW stored form: a plain inline array of
+    // records — not element links, and not element `[ID]` markers.
+    const indexCell = result.key("index");
+    const link = resolveLink(
+      runtime,
+      runtime.readTx(),
+      indexCell.getAsNormalizedFullLink(),
+    );
+    const raw = runtime.readTx().readValueOrThrow({
+      ...link,
+      path: link.path,
+    }) as unknown[];
+
+    expect(Array.isArray(raw)).toBe(true);
+    expect(raw.length).toBe(N);
+    for (const element of raw) {
+      // An entity-doc decomposition would store each element as a sigil
+      // link record ({"/": {"link@1": ...}}); inline storage keeps the
+      // record's own fields directly readable.
+      expect(isCell(element)).toBe(false);
+      const record = element as Record<string, unknown>;
+      expect(record["/"]).toBeUndefined();
+      expect(typeof record.name).toBe("string");
+      expect(typeof record.id).toBe("string");
+    }
+  });
 });

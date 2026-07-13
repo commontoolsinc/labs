@@ -4,7 +4,11 @@ MUST HAVE:
 REALLY SHOULD HAVE:
 - gh https://github.com/cli/cli
 - claude code
-  - `npm i -g @anthropic/claude-code`
-  - mcp
-    - `claude mcp add playwright npx '@playwright/mcp@latest'`
-      - enables browser-based pattern testing with `/pattern-deploy`
+  - `npm i -g @anthropic-ai/claude-code`
+- agent-browser CLI — enables browser-based pattern testing (see
+  `skills/agent-browser/SKILL.md` and `docs/common/ai/manual-testing-guide.md`)
+
+OPTIONAL:
+- Playwright MCP — fallback browser driver for `/tour` when agent-browser is
+  unavailable:
+  - `claude mcp add playwright npx '@playwright/mcp@latest'`

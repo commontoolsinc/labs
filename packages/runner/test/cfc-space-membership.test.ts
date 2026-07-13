@@ -9,9 +9,9 @@ import type { Cancel } from "../src/cancel.ts";
 import type { Runtime } from "../src/runtime.ts";
 
 // §4.9.3 render membership lookup — the client-side capability resolver
-// (design: docs/specs/cfc-render-membership-lookup.md §3.1). `spaceReaderRole`
-// mirrors the server's `#resolveCapability` (packages/memory/v2/server.ts) so
-// the render gate's authority decision cannot drift from the server's.
+// (design: docs/history/specs/cfc-render-membership-lookup.md §3.1). `spaceReaderRole`
+// shares valid-ACL capability resolution with the server while deliberately
+// treating absent/unsynced ACL state as no positive render-membership evidence.
 
 const ALICE = "did:key:alice";
 const MALLORY = "did:key:mallory";
@@ -32,12 +32,12 @@ describe("spaceReaderRole (§4.9.3 capability resolver)", () => {
   });
 
   it("maps a READ grant to the reader role", () => {
-    const acl: ACL = { [ALICE]: "READ" };
+    const acl: ACL = { [MALLORY]: "OWNER", [ALICE]: "READ" };
     expect(spaceReaderRole(acl, SPACE_TEAM, ALICE)).toBe("reader");
   });
 
   it("maps a WRITE grant to the writer role (WRITE implies READ)", () => {
-    const acl: ACL = { [ALICE]: "WRITE" };
+    const acl: ACL = { [MALLORY]: "OWNER", [ALICE]: "WRITE" };
     expect(spaceReaderRole(acl, SPACE_TEAM, ALICE)).toBe("writer");
   });
 
@@ -47,14 +47,18 @@ describe("spaceReaderRole (§4.9.3 capability resolver)", () => {
   });
 
   it("falls back to the ANYONE ('*') grant when the principal is unlisted", () => {
-    const acl: ACL = { "*": "READ" };
+    const acl: ACL = { [MALLORY]: "OWNER", "*": "READ" };
     expect(spaceReaderRole(acl, SPACE_TEAM, ALICE)).toBe("reader");
   });
 
   it("prefers an explicit principal entry over the ANYONE grant", () => {
     // `acl[principal] ?? acl["*"]` — the explicit entry wins even when it is
     // narrower than the public grant.
-    const acl: ACL = { [ALICE]: "READ", "*": "OWNER" };
+    const acl: ACL = {
+      [MALLORY]: "OWNER",
+      [ALICE]: "READ",
+      "*": "OWNER",
+    };
     expect(spaceReaderRole(acl, SPACE_TEAM, ALICE)).toBe("reader");
   });
 
@@ -75,6 +79,11 @@ describe("spaceReaderRole (§4.9.3 capability resolver)", () => {
     expect(
       spaceReaderRole({ [ALICE]: "SUDO" } as unknown as ACL, SPACE_TEAM, ALICE),
     ).toBeNull();
+  });
+
+  it("returns null for a syntactically valid but ownerless ACL", () => {
+    expect(spaceReaderRole({ [ALICE]: "READ" }, SPACE_TEAM, ALICE)).toBeNull();
+    expect(spaceReaderRole({ "*": "OWNER" }, SPACE_TEAM, ALICE)).toBeNull();
   });
 
   it("does not grant a service role to a non-service principal", () => {
@@ -109,7 +118,7 @@ const fakeRuntime = (aclBySpace: Record<string, unknown>) => {
     },
   } as unknown as Runtime;
   const fire = (space: string) => {
-    for (const cb of sinks.get(space) ?? []) cb();
+    for (const cb of sinks.get(`of:${space}`) ?? []) cb();
   };
   return { runtime, getCalls, fire, sinks };
 };
@@ -117,13 +126,13 @@ const fakeRuntime = (aclBySpace: Record<string, unknown>) => {
 describe("createRuntimeSpaceMembershipProvider (§4.9.3 provider)", () => {
   it("reads a granted ACL synchronously and returns the reader role", () => {
     const { runtime, getCalls } = fakeRuntime({
-      [SPACE_TEAM]: { [ALICE]: "READ" },
+      [`of:${SPACE_TEAM}`]: { [MALLORY]: "OWNER", [ALICE]: "READ" },
     });
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     expect(provider.readerRole(SPACE_TEAM)).toBe("reader");
     // The ACL doc for the queried space was read (a Cell.get() sync read that
     // also kicks a background sync when unsynced).
-    expect(getCalls).toContain(SPACE_TEAM);
+    expect(getCalls).toContain(`of:${SPACE_TEAM}`);
   });
 
   it("fails closed when the ACL doc is absent (residency is not authority)", () => {
@@ -139,28 +148,30 @@ describe("createRuntimeSpaceMembershipProvider (§4.9.3 provider)", () => {
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     expect(provider.readerRole(ALICE)).toBe("owner");
     // Own-space is implicit OWNER — no ACL doc read needed.
-    expect(getCalls).not.toContain(ALICE);
+    expect(getCalls).not.toContain(`of:${ALICE}`);
   });
 
   it("fails closed on a malformed ACL value", () => {
-    const { runtime } = fakeRuntime({ [SPACE_TEAM]: "not-an-acl" });
+    const { runtime } = fakeRuntime({ [`of:${SPACE_TEAM}`]: "not-an-acl" });
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     expect(provider.readerRole(SPACE_TEAM)).toBeNull();
   });
 
   it("reflects the latest replica across reads (no stale memo on revoke)", () => {
     // Soundness under revoke: a later read must see the ACL as it now stands.
-    const acl: Record<string, unknown> = { [SPACE_TEAM]: { [ALICE]: "READ" } };
+    const acl: Record<string, unknown> = {
+      [`of:${SPACE_TEAM}`]: { [MALLORY]: "OWNER", [ALICE]: "READ" },
+    };
     const { runtime } = fakeRuntime(acl);
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     expect(provider.readerRole(SPACE_TEAM)).toBe("reader");
-    delete acl[SPACE_TEAM]; // ACL revoked / doc dropped
+    delete acl[`of:${SPACE_TEAM}`]; // ACL revoked / doc dropped
     expect(provider.readerRole(SPACE_TEAM)).toBeNull();
   });
 
   it("subscribe fires onChange on CHANGE only (skips the at-subscribe fire), and cancels cleanly", () => {
     const { runtime, fire, sinks } = fakeRuntime({
-      [SPACE_TEAM]: { [ALICE]: "READ" },
+      [`of:${SPACE_TEAM}`]: { [MALLORY]: "OWNER", [ALICE]: "READ" },
     });
     const provider = createRuntimeSpaceMembershipProvider(runtime, ALICE);
     let changes = 0;
@@ -173,7 +184,7 @@ describe("createRuntimeSpaceMembershipProvider (§4.9.3 provider)", () => {
     cancel();
     fire(SPACE_TEAM);
     expect(changes).toBe(1); // no further callbacks after cancel
-    expect(sinks.get(SPACE_TEAM)?.size ?? 0).toBe(0);
+    expect(sinks.get(`of:${SPACE_TEAM}`)?.size ?? 0).toBe(0);
   });
 
   it("honors service DIDs for implicit OWNER", () => {

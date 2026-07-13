@@ -289,7 +289,12 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       const result = evaluateExchangeRules(
         { confidentiality: [userAlice] },
         {
-          records: [{ id: "handmade", digest: "d", rules: [rule] }],
+          records: [{
+            id: "handmade",
+            digest: "d",
+            rules: [rule],
+            selection: "ambient" as const,
+          }],
           digest: "d",
         },
         {
@@ -1242,7 +1247,12 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
 
   describe("evaluator fail-closed arms (hand-built snapshots)", () => {
     const handmade = (rule: ExchangeRule) => ({
-      records: [{ id: "handmade", digest: "d", rules: [rule] }],
+      records: [{
+        id: "handmade",
+        digest: "d",
+        rules: [rule],
+        selection: "ambient" as const,
+      }],
       digest: "d",
     });
 

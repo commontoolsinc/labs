@@ -6,7 +6,7 @@
 - AI-assisted specification
 
 ## Last Updated
-2026-03-26
+2026-07-10
 
 This document is the sole authoritative SES sandboxing specification for the
 current reimplementation effort. It supersedes prior divergence notes and
@@ -725,12 +725,24 @@ lockdown({
   stackFiltering: debug ? "verbose" : "concise",
   overrideTaming: "severe",
   consoleTaming: "unsafe",
+  localeTaming: "unsafe", // paired with the pre-lockdown locale sanitizer
 });
 ```
 
 Notes:
 
 - `overrideTaming: "severe"` remains the compatibility default.
+- `localeTaming: "unsafe"` is load-bearing only together with the pre-lockdown
+  vetted shim in `packages/runner/src/sandbox/locale-taming.ts`, which replaces
+  every method SES's `"safe"` mode would amputate with a pinned-default
+  wrapper: omitted locale → `"en-US"`, omitted Date `timeZone` → `"UTC"`, and
+  the ECMA-402 unsupported-tag locale fallback → `"en-US"` (appended to every
+  request so resolution can never reach the host default locale). Explicit
+  arguments pass through; invalid `timeZone` values throw per spec (ECMA-402
+  has no timezone fallback to the host zone). Do not change this option in
+  isolation: `"safe"` would clobber the sanitized methods with
+  argument-ignoring aliases, and bare `"unsafe"` without the shim reintroduces
+  ambient host-locale reads.
 - `mathTaming` and `dateTaming` should not be relied on as policy knobs in the
   reimplementation. In newer SES releases those options are gone; any future
   reintroduction of time/randomness helpers for authored code must be explicit
@@ -2379,6 +2391,24 @@ Potential escape routes and their status:
 | ambient web-fetch globals | Temporarily allowed | Compatibility shim in authored SES compartments; planned deprecation |
 | `globalThis` | Controlled | Custom minimal Compartment globals; runtime freezes the compartment global object after installing bindings and does not expose internal console-hook globals |
 
+### 11.5 Residual Observability and Fingerprinting Channels
+
+Distinct from escape routes: channels through which sandboxed code can learn
+about the host or the user without leaving the sandbox. Two classes:
+**user-level** (private information about the person — location, language) and
+**environment-level** (fingerprints the software build — engine, ICU/tzdata
+version — roughly user-agent-granularity information). New channels discovered
+in review or incident work should be added here with a class and a status.
+
+| Channel | Reveals | Class | Status |
+|---------|---------|-------|--------|
+| Untamed non-locale `Date` surface: `toString()`/`toTimeString()` (zone name in words), `getTimezoneOffset()`, local getters | Host timezone outright; the exact IANA zone via historical-offset probing (zones differ in DST history) → coarse user location | user-level | Accepted for now — patterns legitimately build local-day logic on the getters. Closure path: introduce viewer timezone as an explicit data input (CT-1881), then pin the ambient surface to UTC |
+| tzdata / ICU version probing: which zone names validate (newer-tzdata-only zones), formatting quirks (e.g. ICU 72's U+202F separators) | Engine / ICU / tzdata version | environment-level | Accepted; inherent to exposing real ICU formatting |
+| Supported-locale-set probing through the sanitized `toLocale*` methods | Full-ICU vs small-ICU build; available locale data | environment-level | Accepted |
+| Ambient web-fetch shim | User IP (→ geolocation, typically more precise than timezone) to any contacted server; general exfiltration and latency probing | user-level | Temporarily allowed; see 11.3 and the escape-hatch table; planned deprecation behind runtime-managed egress |
+| Host default locale via `toLocale*` defaults or the ECMA-402 unsupported-tag fallback | User language/region | user-level | **Closed** by `locale-taming.ts`: omitted locales and the resolution fallback both pin to `"en-US"` |
+| Host timezone via `toLocale*` `timeZone` defaults | User timezone | user-level | **Closed** by `locale-taming.ts`: omitted `timeZone` pins to `"UTC"`; invalid values throw (ECMA-402 has no fallback-to-host-zone path) |
+
 ---
 
 ## 12. Appendix
@@ -2416,6 +2446,6 @@ The existing AMD loader in `js-compiler` is compatible with SES Compartments. Th
 1. [SES (Secure ECMAScript)](https://github.com/endojs/endo/tree/master/packages/ses)
 2. [Hardened JavaScript](https://hardenedjs.org/)
 3. [Compartment API](https://github.com/tc39/proposal-compartments)
-4. [Common Fabric Pattern Documentation](../common/INTRODUCTION.md)
-5. [ts-transformers Package](../../packages/ts-transformers/)
-6. [js-compiler Package](../../packages/js-compiler/)
+4. [Common Fabric Pattern Documentation](../../common/README.md)
+5. [ts-transformers Package](../../../packages/ts-transformers/)
+6. [js-compiler Package](../../../packages/js-compiler/)

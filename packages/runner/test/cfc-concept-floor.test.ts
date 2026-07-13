@@ -26,7 +26,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 const signer = await Identity.fromPassphrase("runner-cfc-concept-floor");
 enableMockMode();
 
-// Epic D5 (docs/plans/cfc-future-work-implementation.md §5; spec §4.8.9 /
+// Epic D5 (docs/history/plans/cfc-future-work-implementation.md §5; spec §4.8.9 /
 // §8.10.3 / §8.12.4.1): integrity-floor membership matches a CONCEPT-valued
 // requirement against carried CONCRETE integrity through the acting
 // principal's trust closure. A floor like "minted by a valid GPS measurement"

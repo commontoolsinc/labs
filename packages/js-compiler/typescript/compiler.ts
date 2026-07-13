@@ -260,6 +260,13 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
 export interface TransformerPipelineResult {
   factories: ts.TransformerFactory<ts.SourceFile>[];
   getDiagnostics?: () => readonly TransformerDiagnosticInfo[];
+  getPolicyManifests?: () => ReadonlyMap<string, readonly unknown[]>;
+}
+
+export interface CompiledTypeScriptModule {
+  js: string;
+  sourceMap?: SourceMap;
+  policyManifests?: readonly unknown[];
 }
 
 /**
@@ -332,7 +339,7 @@ export class TypeScriptCompiler {
   compileToModules(
     program: Program,
     inputOptions: TypeScriptCompilerOptions = {},
-  ): Map<string, { js: string; sourceMap?: SourceMap }> {
+  ): Map<string, CompiledTypeScriptModule> {
     const steps = this.compileToModulesSteps(program, inputOptions);
     for (;;) {
       const next = steps.next();
@@ -355,7 +362,7 @@ export class TypeScriptCompiler {
   async compileToModulesInterleaved(
     program: Program,
     inputOptions: TypeScriptCompilerOptions = {},
-  ): Promise<Map<string, { js: string; sourceMap?: SourceMap }>> {
+  ): Promise<Map<string, CompiledTypeScriptModule>> {
     const steps = this.compileToModulesSteps(program, inputOptions);
     for (;;) {
       const next = steps.next();
@@ -381,7 +388,7 @@ export class TypeScriptCompiler {
   private *compileToModulesSteps(
     program: Program,
     inputOptions: TypeScriptCompilerOptions,
-  ): Generator<void, Map<string, { js: string; sourceMap?: SourceMap }>, void> {
+  ): Generator<void, Map<string, CompiledTypeScriptModule>, void> {
     const noCheck = inputOptions.noCheck ?? false;
     const runtimeModules = inputOptions.runtimeModules ?? [];
 
@@ -429,11 +436,15 @@ export class TypeScriptCompiler {
       checker.throwIfErrors(errors);
     }
 
-    const { beforeTransformers, sourceCollector, getDiagnostics } =
-      createTransformers(
-        tsProgram,
-        inputOptions,
-      );
+    const {
+      beforeTransformers,
+      sourceCollector,
+      getDiagnostics,
+      getPolicyManifests,
+    } = createTransformers(
+      tsProgram,
+      inputOptions,
+    );
 
     // Emit ALL source files (not just main), so every module gets a body —
     // one emit call per file (in program order) so the driver can interleave
@@ -497,7 +508,8 @@ export class TypeScriptCompiler {
       sourceByStem.set(stem, name);
     }
     const writes = host.getWrites();
-    const result = new Map<string, { js: string; sourceMap?: SourceMap }>();
+    const policyManifests = getPolicyManifests?.();
+    const result = new Map<string, CompiledTypeScriptModule>();
     for (const [outName, contents] of Object.entries(writes)) {
       if (!outName.endsWith(".js")) continue;
       const stem = outName.replace(/\.js$/, "");
@@ -506,6 +518,9 @@ export class TypeScriptCompiler {
       result.set(sourceName, {
         js: contents,
         sourceMap: parseSourceMap(writes[`${outName}.map`]),
+        ...(policyManifests?.get(sourceName)?.length
+          ? { policyManifests: policyManifests.get(sourceName) }
+          : {}),
       });
     }
     return result;
@@ -522,7 +537,7 @@ export class TypeScriptCompiler {
     program: Program,
     inputOptions: TypeScriptCompilerOptions = {},
   ): {
-    modules: Map<string, { js: string; sourceMap?: SourceMap }>;
+    modules: Map<string, CompiledTypeScriptModule>;
     diagnostics: { file: string; message: string }[];
   } {
     const runtimeModules = inputOptions.runtimeModules ?? [];
@@ -565,10 +580,11 @@ export class TypeScriptCompiler {
     }
 
     // Transform + emit, collecting (not throwing) transformer diagnostics.
-    const { beforeTransformers, getDiagnostics } = createTransformers(
-      tsProgram,
-      inputOptions,
-    );
+    const { beforeTransformers, getDiagnostics, getPolicyManifests } =
+      createTransformers(
+        tsProgram,
+        inputOptions,
+      );
     const { diagnostics: emitDiagnostics } = tsProgram.emit(
       undefined,
       undefined,
@@ -603,7 +619,8 @@ export class TypeScriptCompiler {
       sourceByStem.set(stem, name);
     }
     const writes = host.getWrites();
-    const modules = new Map<string, { js: string; sourceMap?: SourceMap }>();
+    const policyManifests = getPolicyManifests?.();
+    const modules = new Map<string, CompiledTypeScriptModule>();
     for (const [outName, contents] of Object.entries(writes)) {
       if (!outName.endsWith(".js")) continue;
       const sourceName = sourceByStem.get(outName.replace(/\.js$/, ""));
@@ -611,6 +628,9 @@ export class TypeScriptCompiler {
       modules.set(sourceName, {
         js: contents,
         sourceMap: parseSourceMap(writes[`${outName}.map`]),
+        ...(policyManifests?.get(sourceName)?.length
+          ? { policyManifests: policyManifests.get(sourceName) }
+          : {}),
       });
     }
     return { modules, diagnostics };
@@ -642,9 +662,13 @@ function createTransformers(
   beforeTransformers: ts.TransformerFactory<ts.SourceFile>[];
   sourceCollector?: SourceCollector;
   getDiagnostics?: () => readonly TransformerDiagnosticInfo[];
+  getPolicyManifests?: () => ReadonlyMap<string, readonly unknown[]>;
 } {
   let factories: ts.TransformerFactory<ts.SourceFile>[] = [];
   let getDiagnostics: (() => readonly TransformerDiagnosticInfo[]) | undefined;
+  let getPolicyManifests:
+    | (() => ReadonlyMap<string, readonly unknown[]>)
+    | undefined;
 
   if (options.beforeTransformers) {
     const result = options.beforeTransformers(program);
@@ -655,12 +679,14 @@ function createTransformers(
       // New: TransformerPipelineResult with factories and getDiagnostics
       factories = result.factories;
       getDiagnostics = result.getDiagnostics;
+      getPolicyManifests = result.getPolicyManifests;
     }
   }
 
   const out: ReturnType<typeof createTransformers> = {
     beforeTransformers: factories,
     getDiagnostics,
+    getPolicyManifests,
   };
 
   if (factories.length && options.getTransformedProgram) {

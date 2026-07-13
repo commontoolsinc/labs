@@ -96,7 +96,7 @@ describe("CFC runtime stats", () => {
         properties: {
           value: {
             type: "string",
-            ifc: { collection: ["unsupported"] },
+            ifc: { collection: ["unsupported"] } as any,
           },
         },
         required: ["value"],

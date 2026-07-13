@@ -15,7 +15,7 @@ import type { SpaceMembershipProvider } from "./space-membership.ts";
 
 /**
  * Display-sink render ceiling resolution (Epic H3b of
- * docs/plans/cfc-future-work-implementation.md §7; spec §8.10.6).
+ * docs/history/plans/cfc-future-work-implementation.md §7; spec §8.10.6).
  *
  * The render path is a display-sink egress boundary. Spec §8.10.6: "Ordinary
  * exchange-rule evaluation runs before the fit check, as at any boundary.
@@ -118,7 +118,7 @@ export type RenderConfidentialityResolverConfig = {
    *
    * The cross-space guarantee is exactly as strong as the deployment's
    * `MEMORY_ACL_MODE`: under `enforce` the ACL is authoritative; under
-   * `observe`/`off` the lookup reads the same declared (creator-seeded) record
+   * `observe`/`off` the lookup reads the same declared ACL record
    * — strictly better than residency, but only as strong as the posture. Fail
    * closed throughout: a `null` role (absent/unsynced/malformed ACL, or a
    * non-reader principal) mints nothing and the `Space(...)` clause stays

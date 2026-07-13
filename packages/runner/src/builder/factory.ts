@@ -38,6 +38,7 @@ import {
   generateObject,
   generateText,
   ifElse,
+  inspectConfLabel,
   llm,
   llmDialog,
   navigateTo,
@@ -211,6 +212,8 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
       constant: rowLabelConstant,
     },
     navigateTo,
+    // inv-12 Stage 2: bounded first-layer label introspection (§4.6.4.1).
+    inspectConfLabel,
     wish,
 
     // Multi-user test descriptor tag (see api MultiUserTestDescriptor):

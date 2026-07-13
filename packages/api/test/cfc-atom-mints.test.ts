@@ -30,6 +30,40 @@ Deno.test("cfcAtom mints confidentiality principals and Expires", () => {
   });
 });
 
+Deno.test("cfcAtom mints hash-bound policy references (spec §4.4.2)", () => {
+  assertEquals(cfcAtom.policyRef("share-flow", "did:key:alice", "h1"), {
+    type: CFC_ATOM_TYPE.Policy,
+    name: "share-flow",
+    subject: "did:key:alice",
+    hash: "h1",
+  });
+  assertEquals(cfcAtom.contextRef("primary", "did:key:alice", "h2"), {
+    type: CFC_ATOM_TYPE.Context,
+    name: "primary",
+    subject: "did:key:alice",
+    hash: "h2",
+  });
+});
+
+Deno.test("cfcAtom mints exact module-policy references (spec §4.4.2)", () => {
+  assertEquals(
+    cfcAtom.modulePolicyRef(
+      "sha256:module",
+      "releaseRules",
+      "sha256:manifest",
+      "did:key:alice",
+    ),
+    {
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity: "sha256:module",
+      symbol: "releaseRules",
+      policyDigest: "sha256:manifest",
+      subject: "did:key:alice",
+    },
+  );
+});
+
 Deno.test("cfcAtom mints HasRole facts", () => {
   assertEquals(cfcAtom.hasRole("did:key:alice", "space:x", "reader"), {
     type: CFC_ATOM_TYPE.HasRole,

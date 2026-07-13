@@ -184,6 +184,21 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
    - Track created cells and causes in context during execution
    - Wire lift/handler returns to auto-assign causes to returned cells
 
+### Independent Track: First-Class Factory Values (Proposed)
+
+This track depends on content-addressed builder-artifact identity, not on graph
+snapshots or the reactive-interpreter rollout. See
+[First-Class Serializable Factories](./node-factory-shipping.md) and its
+[implementation plan](../../plans/first-class-serializable-factories.md).
+
+1. Make pattern, module/lift, and handler factory functions directly branded
+   `Factory@1` Fabric values.
+2. Generalize ref binding, cold resolution, and symbolic invocation across
+   factory kinds.
+3. Closure-convert and hoist nested patterns, binding callback argument 1 with
+   one transformer-only `.curry(params)` operation.
+4. Replace `patternTool` with inline wrapper patterns.
+
 ### Phase 2: Graph Snapshot & Metadata (Deferred)
 
 1. **Graph snapshot generation**
@@ -191,10 +206,6 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
      cell metadata (implements the graph metadata described in the rollout plan)
    - Update rehydration/teardown logic to consume the snapshot
    - See `graph-snapshot.md` for schema details
-2. **Serializable node factories** (Deferred - see `node-factory-shipping.md`)
-   - Implement `nodeFactory@1` sigil format
-   - Add `.curry()` support for partial application
-   - Enable shipping factories across spaces
 
 ### Phase 3: Cleanup
 
@@ -203,7 +214,9 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
    - Remove `.setDefault`; rely on schema-level defaults
    - Deprecate JSON pattern representation in favor of graph snapshots
 2. **Testing & documentation**
-   - Integration test harness (see `pattern-integration-tests.md`) - **DONE**
+   - Integration test harness (see
+     `docs/history/specs/pattern-construction/pattern-integration-tests.md`) -
+     **DONE**
    - Update builder/runner tests for new helper behavior and metadata
    - Document unified cell types and `.for()` usage for pattern authors
 
@@ -235,7 +248,8 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
 ## Next Steps
 
 - Prototype capability wrappers and convert a sample pattern to validate
-  ergonomics (see `capability-wrappers.md`).
+  ergonomics (see the superseded exploration in
+  `docs/history/specs/pattern-construction/capability-wrappers.md`).
 - Draft and iterate on the graph snapshot schema, then review with
   runtime/storage stakeholders (`graph-snapshot.md`).
 - Implement rehydration against the stored graph snapshot and exercise it with

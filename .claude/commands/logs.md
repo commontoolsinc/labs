@@ -2,9 +2,10 @@ the logs of past sessions in this repository are stored in `~/.claude/projects/`
 
 ## Log Analysis Strategy
 
-1. **Use ripgrep (rg) for fast searching** across all log files:
+1. **Use ripgrep (rg) for fast searching** across all log files. The folder
+   name is the project's absolute path with `/` and `.` each replaced by `-`:
    ```bash
-   rg "pattern" ~/.claude/projects/-Users-ben-code-labs/*.jsonl
+   rg "pattern" ~/.claude/projects/$(pwd | tr '/.' '--')/*.jsonl
    ```
 
 2. **Log file structure**: Each line is a JSON object with:

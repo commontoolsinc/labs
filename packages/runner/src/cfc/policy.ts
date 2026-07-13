@@ -1,18 +1,30 @@
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isRecord } from "@commonfabric/utils/types";
-import type { AtomPattern } from "./atom-pattern.ts";
+import { type AtomPattern, isAtomVarPlaceholder } from "./atom-pattern.ts";
+
+export const CFC_POLICY_MANIFEST_ID_PREFIX = "of:cfc-policy-manifest:";
+
+export const cfcPolicyManifestDocId = (
+  policyDigest: string,
+): `of:${string}` => `${CFC_POLICY_MANIFEST_ID_PREFIX}${policyDigest}`;
 
 /**
  * Policy records + exchange rules (spec §4.3/§4.4, Epic B2 of
- * docs/plans/cfc-future-work-implementation.md §3).
+ * docs/history/plans/cfc-future-work-implementation.md §3).
  *
- * This is stage B2a: a deployment-configured, frozen policy set supplied via
- * `RuntimeOptions.cfcPolicyRecords` — the degenerate single-policy-root case
- * of spec §4.4.1's content-addressed policy storage. Rule scoping happens
- * through each rule's explicit `appliesTo` pattern rather than through
- * label-carried `Policy(...)` principals; space-hosted, hash-bound policy
- * docs (B2b) arrive later and reuse these record shapes verbatim.
+ * A deployment-configured, frozen policy set supplied via
+ * `RuntimeOptions.cfcPolicyRecords` — and, per the revised B2b decision,
+ * the ENDURING record store: remote attestation covers deployment config
+ * for security-sensitive inputs like this one, so attested federated peers
+ * provably evaluate the same record set and the originally planned
+ * space-hosted policy documents are not needed for federation soundness
+ * (owner decision 2026-07-10; docs/specs/cfc-spec-changes.md SC-28). Rule
+ * scoping is per record: `ambient` records apply through their rules'
+ * `appliesTo` patterns to every label (spec §4.4.1's deployment/system
+ * policy root as a discovery source); `referenced` records are selected by
+ * label-carried, hash-bound `Policy(...)`/`Context(...)` principals and
+ * rewrite only their home clauses (CT-1874; `exchange-eval.ts`).
  */
 
 /**
@@ -72,15 +84,31 @@ export type ExchangeRule = {
 };
 
 /**
+ * How a record enters evaluation scope (B2b label-carried selection):
+ *
+ * - `ambient` (default, the B2a posture): in scope for every evaluated label
+ *   — the operator-vetted standard profiles (B6 sanitizer, display), spec
+ *   §4.4.1's deployment/system policy root as a discovery source.
+ * - `referenced`: in scope ONLY where a label clause carries a policy-ref
+ *   atom (`Policy(...)`/`Context(...)`, spec §4.4.2) whose `name` matches the
+ *   record id AND whose `hash` matches the record digest — and its rules may
+ *   rewrite only that atom's home clause(s) (CT-1874 / invariant 11: a policy
+ *   admitted as one clause's alternative must not widen sibling clauses).
+ */
+export type CfcPolicySelection = "ambient" | "referenced";
+
+/**
  * A named, digest-bound set of exchange rules (spec §4.3.1, reduced to the
- * B2a surface: `id` + `rules`). `digest` is COMPUTED content-addressing over
- * the canonical record content — never trusted from input (a supplied digest
- * is verified and mismatch fails closed, §4.4.3 discipline).
+ * B2a surface: `id` + `rules` + `selection`). `digest` is COMPUTED
+ * content-addressing over the canonical record content — never trusted from
+ * input (a supplied digest is verified and mismatch fails closed, §4.4.3
+ * discipline).
  */
 export type PolicyRecord = {
   readonly id: string;
   readonly digest: string;
   readonly rules: readonly ExchangeRule[];
+  readonly selection: CfcPolicySelection;
 };
 
 /**
@@ -102,9 +130,53 @@ export type CfcPolicyRecordInput = {
   readonly id: string;
   readonly rules: readonly ExchangeRule[];
   readonly digest?: string;
+  /** Scope mode (see {@link CfcPolicySelection}); defaults to `ambient`. */
+  readonly selection?: CfcPolicySelection;
 };
 
-const RECORD_INPUT_KEYS = new Set(["id", "rules", "digest"]);
+export type PolicyTemplateExchangeRuleV1 = {
+  readonly name: string;
+  readonly preCondition: {
+    readonly confidentiality: readonly AtomPattern[];
+    readonly integrity: readonly AtomPattern[];
+  };
+  readonly preConfScope?: "targetClause" | "anywhere";
+  readonly postCondition: {
+    readonly confidentiality: readonly AtomPattern[];
+    readonly integrity: readonly AtomPattern[];
+  };
+  readonly guard?: {
+    readonly policyState: readonly AtomPattern[];
+  };
+};
+
+export type PolicyTemplateV1 = {
+  readonly templateVersion: 1;
+  readonly exchangeRules: readonly PolicyTemplateExchangeRuleV1[];
+  readonly dependencies: {
+    readonly authorityOnly: readonly string[];
+    readonly dataBearing: readonly string[];
+  };
+  readonly integrityRequirements: {
+    readonly read?: readonly AtomPattern[];
+    readonly write?: readonly AtomPattern[];
+    readonly share?: readonly AtomPattern[];
+  };
+};
+
+export type PolicyArtifactManifestBodyV1 = {
+  readonly formatVersion: 1;
+  readonly moduleIdentity: string;
+  readonly symbol: string;
+  readonly template: PolicyTemplateV1;
+};
+
+export type PolicyArtifactManifestV1 = {
+  readonly policyDigest: string;
+  readonly manifest: PolicyArtifactManifestBodyV1;
+};
+
+const RECORD_INPUT_KEYS = new Set(["id", "rules", "digest", "selection"]);
 const RULE_KEYS = new Set([
   "id",
   "appliesTo",
@@ -119,6 +191,37 @@ const PRE_CONDITION_KEYS = new Set([
   "policyState",
 ]);
 const POST_KEYS = new Set(["addAlternatives", "dropClause"]);
+const MANIFEST_BODY_KEYS = new Set([
+  "formatVersion",
+  "moduleIdentity",
+  "symbol",
+  "template",
+]);
+const MANIFEST_ENVELOPE_KEYS = new Set(["policyDigest", "manifest"]);
+const TEMPLATE_KEYS = new Set([
+  "templateVersion",
+  "exchangeRules",
+  "dependencies",
+  "integrityRequirements",
+]);
+const TEMPLATE_RULE_KEYS = new Set([
+  "name",
+  "preCondition",
+  "preConfScope",
+  "postCondition",
+  "guard",
+]);
+const TEMPLATE_PRE_CONDITION_KEYS = new Set([
+  "confidentiality",
+  "integrity",
+]);
+const TEMPLATE_POST_CONDITION_KEYS = new Set([
+  "confidentiality",
+  "integrity",
+]);
+const TEMPLATE_GUARD_KEYS = new Set(["policyState"]);
+const DEPENDENCY_KEYS = new Set(["authorityOnly", "dataBearing"]);
+const INTEGRITY_REQUIREMENT_KEYS = new Set(["read", "write", "share"]);
 
 /**
  * Deployment policy records are trusted enforcement config, so malformation
@@ -170,6 +273,73 @@ const validatePatternArray = (
   return value as readonly AtomPattern[];
 };
 
+const isThisPolicyPattern = (value: unknown): boolean =>
+  isPlainRecord(value) && Object.keys(value).length === 1 &&
+  value.thisPolicy === true;
+
+const isThisPolicyFieldPattern = (value: unknown): boolean =>
+  isPlainRecord(value) && Object.keys(value).length === 1 &&
+  value.thisPolicyField === "subject";
+
+const validateTemplatePattern = (
+  value: unknown,
+  where: string,
+  allowThisPolicy = false,
+): void => {
+  if (value === undefined) {
+    throw new Error(`cfcPolicyManifest: ${where} contains undefined`);
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) =>
+      validateTemplatePattern(entry, `${where}[${index}]`)
+    );
+    return;
+  }
+  if (!isRecord(value)) return;
+  if (Object.hasOwn(value, "var")) {
+    if (!isAtomVarPlaceholder(value)) {
+      throw new Error(`cfcPolicyManifest: malformed variable in ${where}`);
+    }
+    return;
+  }
+  if (Object.hasOwn(value, "thisPolicy")) {
+    if (!allowThisPolicy || !isThisPolicyPattern(value)) {
+      throw new Error(`cfcPolicyManifest: invalid THIS_POLICY in ${where}`);
+    }
+    return;
+  }
+  if (Object.hasOwn(value, "thisPolicyField")) {
+    if (!isThisPolicyFieldPattern(value)) {
+      throw new Error(
+        `cfcPolicyManifest: invalid THIS_POLICY field in ${where}`,
+      );
+    }
+    return;
+  }
+  for (const [key, field] of Object.entries(value)) {
+    validateTemplatePattern(field, `${where}.${key}`);
+  }
+};
+
+const collectPatternVariables = (
+  value: unknown,
+  variables: Set<string>,
+): void => {
+  if (isAtomVarPlaceholder(value)) {
+    variables.add(value.var);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectPatternVariables(entry, variables));
+    return;
+  }
+  if (isRecord(value)) {
+    Object.values(value).forEach((field) =>
+      collectPatternVariables(field, variables)
+    );
+  }
+};
+
 /**
  * `policyState` guard validation (§8.12.7 route 2a): each entry is a grant
  * pattern — a PLAIN record whose `kind` field is a CONCRETE non-empty string
@@ -210,7 +380,10 @@ const validatePolicyStateGuards = (value: unknown, where: string): void => {
   }
 };
 
-const validateExchangeRule = (rule: unknown, where: string): ExchangeRule => {
+const validateExchangeRule = (
+  rule: unknown,
+  where: string,
+): ExchangeRule => {
   if (!isPlainRecord(rule)) {
     throw new Error(`cfcPolicyRecords: ${where} must be a rule object`);
   }
@@ -309,16 +482,22 @@ const validateExchangeRule = (rule: unknown, where: string): ExchangeRule => {
 const policyRecordDigest = (
   id: string,
   rules: readonly ExchangeRule[],
+  selection: CfcPolicySelection,
 ): string =>
   hashStringOf({
-    // Version 2: the digestible projection gained `policyState` (§8.12.7
-    // route 2a guards). The bump changes every record digest — safe today
-    // because policy digests never persist beyond one process (they are
-    // computed at boot and folded into in-memory prepared digests), and it
-    // keeps the projection canonical: absent == [] by construction, with no
-    // conditional key inclusion.
-    version: 2,
+    // Version 3: the digestible projection gained `selection` (B2b
+    // label-carried scope; absent == "ambient" by construction, no
+    // conditional key inclusion). Version 2 added `policyState` (§8.12.7
+    // route 2a guards). Each bump changes every record digest — safe while
+    // digests only feed in-memory prepared digests, and REQUIRED here: a
+    // selection flip re-scopes every rule, so it must invalidate. NOTE:
+    // from B2b on, label-carried policy-ref atoms persist record digests as
+    // their `hash` binding — a future projection change strands those refs
+    // (they stop matching and fail CLOSED, the §4.4.3/§4.4.4 version-
+    // mismatch posture) until labels re-mint against the new digests.
+    version: 3,
     id,
+    selection,
     rules: rules.map((rule) => ({
       id: rule.id,
       appliesTo: rule.appliesTo,
@@ -335,6 +514,297 @@ const policyRecordDigest = (
       },
     })),
   });
+
+const validateStringArray = (value: unknown, where: string): void => {
+  if (
+    !Array.isArray(value) || value.some((entry) => typeof entry !== "string")
+  ) {
+    throw new Error(`cfcPolicyManifest: ${where} must be a string array`);
+  }
+};
+
+const validatePolicyTemplateRule = (
+  input: unknown,
+): PolicyTemplateExchangeRuleV1 => {
+  if (!isPlainRecord(input)) {
+    throw new Error("cfcPolicyManifest: module policy rule must be an object");
+  }
+  rejectUnknownKeys(input, TEMPLATE_RULE_KEYS, "module policy rule");
+  if (typeof input.name !== "string" || input.name.length === 0) {
+    throw new Error("cfcPolicyManifest: module policy rule needs a name");
+  }
+  const where = `module policy rule "${input.name}"`;
+  if (!isPlainRecord(input.preCondition)) {
+    throw new Error(`cfcPolicyManifest: ${where} needs a preCondition`);
+  }
+  rejectUnknownKeys(
+    input.preCondition,
+    TEMPLATE_PRE_CONDITION_KEYS,
+    `${where} preCondition`,
+  );
+  const confidentiality = validatePatternArray(
+    input.preCondition.confidentiality,
+    `${where} preCondition.confidentiality`,
+  );
+  const integrity = validatePatternArray(
+    input.preCondition.integrity,
+    `${where} preCondition.integrity`,
+  );
+  if (
+    confidentiality.length === 0 || !isThisPolicyPattern(confidentiality[0])
+  ) {
+    throw new Error(
+      `cfcPolicyManifest: ${where} must target THIS_POLICY as its first confidentiality pattern`,
+    );
+  }
+  confidentiality.forEach((pattern, index) =>
+    validateTemplatePattern(
+      pattern,
+      `${where} preCondition.confidentiality[${index}]`,
+      index === 0,
+    )
+  );
+  integrity.forEach((pattern, index) =>
+    validateTemplatePattern(
+      pattern,
+      `${where} preCondition.integrity[${index}]`,
+    )
+  );
+  if (
+    input.preConfScope !== undefined &&
+    input.preConfScope !== "targetClause" &&
+    input.preConfScope !== "anywhere"
+  ) {
+    throw new Error(
+      `cfcPolicyManifest: ${where} preConfScope must be "targetClause" or "anywhere"`,
+    );
+  }
+  if (!isPlainRecord(input.postCondition)) {
+    throw new Error(`cfcPolicyManifest: ${where} needs a postCondition`);
+  }
+  rejectUnknownKeys(
+    input.postCondition,
+    TEMPLATE_POST_CONDITION_KEYS,
+    `${where} postCondition`,
+  );
+  const postConfidentiality = validatePatternArray(
+    input.postCondition.confidentiality,
+    `${where} postCondition.confidentiality`,
+  );
+  const postIntegrity = validatePatternArray(
+    input.postCondition.integrity,
+    `${where} postCondition.integrity`,
+  );
+  if (postIntegrity.length > 0) {
+    throw new Error(
+      `cfcPolicyManifest: ${where} cannot mint integrity in authoring v1`,
+    );
+  }
+  postConfidentiality.forEach((pattern, index) =>
+    validateTemplatePattern(
+      pattern,
+      `${where} postCondition.confidentiality[${index}]`,
+    )
+  );
+
+  let policyState: readonly AtomPattern[] = [];
+  if (input.guard !== undefined) {
+    if (!isPlainRecord(input.guard)) {
+      throw new Error(`cfcPolicyManifest: ${where} guard must be an object`);
+    }
+    rejectUnknownKeys(input.guard, TEMPLATE_GUARD_KEYS, `${where} guard`);
+    policyState = validatePatternArray(
+      input.guard.policyState,
+      `${where} guard.policyState`,
+    );
+    validatePolicyStateGuards(policyState, `${where} guard.policyState`);
+    policyState.forEach((pattern, index) =>
+      validateTemplatePattern(
+        pattern,
+        `${where} guard.policyState[${index}]`,
+      )
+    );
+  }
+  if (integrity.length === 0 && policyState.length === 0) {
+    throw new Error(
+      `cfcPolicyManifest: ${where} needs an integrity or policyState guard`,
+    );
+  }
+
+  const bound = new Set<string>();
+  collectPatternVariables(confidentiality, bound);
+  collectPatternVariables(integrity, bound);
+  collectPatternVariables(policyState, bound);
+  const postVariables = new Set<string>();
+  collectPatternVariables(postConfidentiality, postVariables);
+  for (const variable of postVariables) {
+    if (!bound.has(variable)) {
+      throw new Error(
+        `cfcPolicyManifest: ${where} has unbound postcondition variable "${variable}"`,
+      );
+    }
+  }
+  return input as PolicyTemplateExchangeRuleV1;
+};
+
+const validatePolicyTemplate = (input: unknown): PolicyTemplateV1 => {
+  if (!isPlainRecord(input)) {
+    throw new Error("cfcPolicyManifest: template must be an object");
+  }
+  rejectUnknownKeys(input, TEMPLATE_KEYS, "policy template");
+  if (input.templateVersion !== 1) {
+    throw new Error("cfcPolicyManifest: templateVersion must be 1");
+  }
+  if (!Array.isArray(input.exchangeRules)) {
+    throw new Error("cfcPolicyManifest: exchangeRules must be an array");
+  }
+  const ruleNames = new Set<string>();
+  for (const rule of input.exchangeRules) {
+    const validated = validatePolicyTemplateRule(rule);
+    if (ruleNames.has(validated.name)) {
+      throw new Error(
+        `cfcPolicyManifest: duplicate rule name "${validated.name}"`,
+      );
+    }
+    ruleNames.add(validated.name);
+  }
+  if (!isPlainRecord(input.dependencies)) {
+    throw new Error("cfcPolicyManifest: dependencies must be an object");
+  }
+  rejectUnknownKeys(
+    input.dependencies,
+    DEPENDENCY_KEYS,
+    "template dependencies",
+  );
+  validateStringArray(
+    input.dependencies.authorityOnly,
+    "dependencies.authorityOnly",
+  );
+  validateStringArray(
+    input.dependencies.dataBearing,
+    "dependencies.dataBearing",
+  );
+  if (!isPlainRecord(input.integrityRequirements)) {
+    throw new Error(
+      "cfcPolicyManifest: integrityRequirements must be an object",
+    );
+  }
+  rejectUnknownKeys(
+    input.integrityRequirements,
+    INTEGRITY_REQUIREMENT_KEYS,
+    "template integrityRequirements",
+  );
+  for (const operation of INTEGRITY_REQUIREMENT_KEYS) {
+    const patterns = input.integrityRequirements[operation];
+    if (patterns === undefined) continue;
+    const validated = validatePatternArray(
+      patterns,
+      `integrityRequirements.${operation}`,
+    );
+    validated.forEach((pattern, index) =>
+      validateTemplatePattern(
+        pattern,
+        `integrityRequirements.${operation}[${index}]`,
+      )
+    );
+  }
+  return input as PolicyTemplateV1;
+};
+
+/** Adapts the normative portable template into the runner's clause-local form. */
+export const lowerCfcPolicyTemplateRules = (
+  template: PolicyTemplateV1,
+): readonly ExchangeRule[] =>
+  template.exchangeRules.map((rule) => {
+    const [appliesTo, ...confidentiality] = rule.preCondition.confidentiality;
+    return {
+      id: rule.name,
+      appliesTo: appliesTo!,
+      preCondition: {
+        confidentiality,
+        integrity: rule.preCondition.integrity,
+        ...(rule.guard === undefined
+          ? {}
+          : { policyState: rule.guard.policyState }),
+      },
+      ...(rule.preConfScope === undefined
+        ? {}
+        : { preConfScope: rule.preConfScope }),
+      post: rule.postCondition.confidentiality.length === 0
+        ? { dropClause: true }
+        : { addAlternatives: rule.postCondition.confidentiality },
+    };
+  });
+
+const validatePolicyManifestBody = (
+  input: unknown,
+): PolicyArtifactManifestBodyV1 => {
+  if (!isPlainRecord(input)) {
+    throw new Error("cfcPolicyManifest: manifest body must be an object");
+  }
+  rejectUnknownKeys(input, MANIFEST_BODY_KEYS, "policy manifest body");
+  if (input.formatVersion !== 1) {
+    throw new Error("cfcPolicyManifest: formatVersion must be 1");
+  }
+  if (
+    typeof input.moduleIdentity !== "string" ||
+    input.moduleIdentity.length === 0
+  ) {
+    throw new Error(
+      "cfcPolicyManifest: moduleIdentity must be a non-empty string",
+    );
+  }
+  if (typeof input.symbol !== "string" || input.symbol.length === 0) {
+    throw new Error("cfcPolicyManifest: symbol must be a non-empty string");
+  }
+  validatePolicyTemplate(input.template);
+  return input as PolicyArtifactManifestBodyV1;
+};
+
+const policyManifestDigest = (
+  manifest: PolicyArtifactManifestBodyV1,
+): string =>
+  hashStringOf({
+    domain: "cfc/policy-manifest/v1",
+    manifest,
+  });
+
+/** Validates, canonical-digests, and freezes one compiler-produced manifest. */
+export const buildCfcPolicyArtifactManifest = (
+  input: PolicyArtifactManifestBodyV1,
+): PolicyArtifactManifestV1 => {
+  const manifest = validatePolicyManifestBody(input);
+  return deepFreeze({
+    policyDigest: policyManifestDigest(manifest),
+    manifest,
+  });
+};
+
+/** Trusted-ingestion validation for a transported manifest envelope. */
+export const validateCfcPolicyArtifactManifest = (
+  input: unknown,
+): PolicyArtifactManifestV1 => {
+  if (!isPlainRecord(input)) {
+    throw new Error("cfcPolicyManifest: envelope must be an object");
+  }
+  rejectUnknownKeys(input, MANIFEST_ENVELOPE_KEYS, "policy manifest envelope");
+  if (
+    typeof input.policyDigest !== "string" || input.policyDigest.length === 0
+  ) {
+    throw new Error(
+      "cfcPolicyManifest: policyDigest must be a non-empty string",
+    );
+  }
+  const built = buildCfcPolicyArtifactManifest(
+    input.manifest as PolicyArtifactManifestBodyV1,
+  );
+  if (built.policyDigest !== input.policyDigest) {
+    throw new Error(
+      `cfcPolicyManifest: policyDigest mismatch (expected ${built.policyDigest})`,
+    );
+  }
+  return built;
+};
 
 /**
  * Validates, digests, and deep-freezes a deployment policy-record set into
@@ -360,10 +830,11 @@ export const buildCfcPolicySnapshot = (
       throw new Error("cfcPolicyRecords: each record must be an object");
     }
     rejectUnknownKeys(input, RECORD_INPUT_KEYS, "policy record");
-    const { id, rules, digest } = input as {
+    const { id, rules, digest, selection } = input as {
       id?: unknown;
       rules?: unknown;
       digest?: unknown;
+      selection?: unknown;
     };
     if (typeof id !== "string" || id.length === 0) {
       throw new Error(
@@ -374,6 +845,14 @@ export const buildCfcPolicySnapshot = (
       throw new Error(`cfcPolicyRecords: duplicate record id "${id}"`);
     }
     recordIds.add(id);
+    if (
+      selection !== undefined && selection !== "ambient" &&
+      selection !== "referenced"
+    ) {
+      throw new Error(
+        `cfcPolicyRecords: record "${id}" selection must be "ambient" or "referenced"`,
+      );
+    }
     if (!Array.isArray(rules)) {
       throw new Error(`cfcPolicyRecords: record "${id}" needs a rules array`);
     }
@@ -388,13 +867,23 @@ export const buildCfcPolicySnapshot = (
       ruleIds.add(validated.id);
       return validated;
     });
-    const computedDigest = policyRecordDigest(id, validatedRules);
+    const recordSelection: CfcPolicySelection = selection ?? "ambient";
+    const computedDigest = policyRecordDigest(
+      id,
+      validatedRules,
+      recordSelection,
+    );
     if (digest !== undefined && digest !== computedDigest) {
       throw new Error(
         `cfcPolicyRecords: record "${id}" digest mismatch (expected ${computedDigest})`,
       );
     }
-    records.push({ id, digest: computedDigest, rules: validatedRules });
+    records.push({
+      id,
+      digest: computedDigest,
+      rules: validatedRules,
+      selection: recordSelection,
+    });
   }
   const snapshot: PolicySnapshot = {
     records,
