@@ -50,6 +50,112 @@ export interface CPUProfileSummary {
   busyFraction: number;
 }
 
+/** Cumulative CPU counters reported by CDP's Performance domain. */
+export interface WorkerPerformanceMetrics {
+  taskDurationSeconds: number;
+  scriptDurationSeconds: number;
+}
+
+/** CPU consumed between two worker Performance snapshots. */
+export interface WorkerPerformanceDelta {
+  taskDurationUs: number;
+  scriptDurationUs: number;
+}
+
+/**
+ * Parse the cumulative CPU counters needed by the rollout benchmark from a
+ * raw `Performance.getMetrics` response. Worker CPU profiles do not reliably
+ * emit `(idle)` samples, so these counters are the benchmark's authoritative
+ * CPU signal. Missing, duplicate, or invalid counters are an explicit error:
+ * a browser that cannot provide the metrics must not silently pass the gate.
+ */
+export function parseWorkerPerformanceMetrics(
+  result: unknown,
+): WorkerPerformanceMetrics {
+  if (
+    typeof result !== "object" || result === null ||
+    !("metrics" in result) || !Array.isArray(result.metrics)
+  ) {
+    throw new Error(
+      "CDP Performance.getMetrics did not return a metrics array",
+    );
+  }
+
+  const required = new Map<"TaskDuration" | "ScriptDuration", number>();
+  for (const metric of result.metrics) {
+    if (typeof metric !== "object" || metric === null || !("name" in metric)) {
+      continue;
+    }
+    const name = metric.name;
+    if (name !== "TaskDuration" && name !== "ScriptDuration") continue;
+    if (required.has(name)) {
+      throw new Error(
+        `CDP Performance.getMetrics returned duplicate ${name}`,
+      );
+    }
+    const value = "value" in metric ? metric.value : undefined;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error(
+        `CDP Performance.getMetrics returned invalid ${name}: ${value}`,
+      );
+    }
+    required.set(name, value);
+  }
+
+  for (const name of ["TaskDuration", "ScriptDuration"] as const) {
+    if (!required.has(name)) {
+      throw new Error(
+        `CDP Performance.getMetrics is missing required ${name}`,
+      );
+    }
+  }
+
+  return {
+    taskDurationSeconds: required.get("TaskDuration")!,
+    scriptDurationSeconds: required.get("ScriptDuration")!,
+  };
+}
+
+/** Convert two cumulative Performance snapshots into monotonic CPU deltas. */
+export function deltaWorkerPerformanceMetrics(
+  before: WorkerPerformanceMetrics,
+  after: WorkerPerformanceMetrics,
+): WorkerPerformanceDelta {
+  const delta = (
+    label: "TaskDuration" | "ScriptDuration",
+    beforeSeconds: number,
+    afterSeconds: number,
+  ): number => {
+    if (
+      !Number.isFinite(beforeSeconds) || beforeSeconds < 0 ||
+      !Number.isFinite(afterSeconds) || afterSeconds < 0
+    ) {
+      throw new Error(
+        `Worker Performance ${label} contains an invalid counter`,
+      );
+    }
+    if (afterSeconds < beforeSeconds) {
+      throw new Error(
+        `Worker Performance ${label} decreased from ${beforeSeconds}s to ${afterSeconds}s; the worker may have restarted`,
+      );
+    }
+    return (afterSeconds - beforeSeconds) * 1_000_000;
+  };
+
+  return {
+    taskDurationUs: delta(
+      "TaskDuration",
+      before.taskDurationSeconds,
+      after.taskDurationSeconds,
+    ),
+    scriptDurationUs: delta(
+      "ScriptDuration",
+      before.scriptDurationSeconds,
+      after.scriptDurationSeconds,
+    ),
+  };
+}
+
 /**
  * Distill a worker CPU profile without mistaking the profiling interval for
  * CPU time. Chrome's `endTime - startTime` is wall time, while `timeDeltas`
@@ -130,6 +236,7 @@ export class CdpWorkerProfiler {
   >();
   #workers = new Map<string, AttachedWorker>();
   #profilingSessionId: string | undefined;
+  #performanceEnabledSessions = new Set<string>();
 
   private constructor(ws: WebSocket) {
     this.#ws = ws;
@@ -206,6 +313,7 @@ export class CdpWorkerProfiler {
     } else if (msg.method === "Target.detachedFromTarget") {
       const params = msg.params as { sessionId: string };
       this.#workers.delete(params.sessionId);
+      this.#performanceEnabledSessions.delete(params.sessionId);
       // A command sent to a detached session never gets a response.
       this.#rejectAll("target detached", params.sessionId);
     } else if (msg.method === "Target.targetCreated") {
@@ -318,6 +426,36 @@ export class CdpWorkerProfiler {
       worker.sessionId,
     );
     await this.#send("Profiler.start", {}, worker.sessionId);
+  }
+
+  /**
+   * Snapshot cumulative TaskDuration and ScriptDuration counters on the worker
+   * currently selected by `start()`. Throws when Chrome does not expose the
+   * Performance domain or either required counter.
+   */
+  async readPerformanceMetrics(): Promise<WorkerPerformanceMetrics> {
+    const sessionId = this.#profilingSessionId;
+    if (!sessionId) {
+      throw new Error(
+        "Worker profiler was not started before reading Performance metrics.",
+      );
+    }
+    try {
+      if (!this.#performanceEnabledSessions.has(sessionId)) {
+        await this.#send("Performance.enable", {}, sessionId);
+        this.#performanceEnabledSessions.add(sessionId);
+      }
+      return parseWorkerPerformanceMetrics(
+        await this.#send("Performance.getMetrics", {}, sessionId),
+      );
+    } catch (cause) {
+      throw new Error(
+        `Worker Performance metrics are unavailable: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+        { cause },
+      );
+    }
   }
 
   /** Stop the profiler started by `start()` and return the profile. */

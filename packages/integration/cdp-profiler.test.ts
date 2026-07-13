@@ -1,5 +1,10 @@
-import { assertEquals } from "@std/assert";
-import { type CPUProfile, summarizeCPUProfile } from "./cdp-profiler.ts";
+import { assertAlmostEquals, assertEquals, assertThrows } from "@std/assert";
+import {
+  type CPUProfile,
+  deltaWorkerPerformanceMetrics,
+  parseWorkerPerformanceMetrics,
+  summarizeCPUProfile,
+} from "./cdp-profiler.ts";
 
 const profile = (
   overrides: Partial<CPUProfile> = {},
@@ -130,4 +135,82 @@ Deno.test("summarizeCPUProfile separates ambiguous program samples from attribut
   // Unknown node ids are not evidence of attributed JavaScript/GC work.
   assertEquals(summary.attributedWorkUs, 300);
   assertEquals(summary.busyUs, 1_300);
+});
+
+Deno.test("parseWorkerPerformanceMetrics extracts cumulative worker CPU counters", () => {
+  assertEquals(
+    parseWorkerPerformanceMetrics({
+      metrics: [
+        { name: "Timestamp", value: 123.5 },
+        { name: "ScriptDuration", value: 0.125 },
+        { name: "TaskDuration", value: 0.375 },
+        { name: "LayoutDuration", value: 99 },
+      ],
+    }),
+    {
+      taskDurationSeconds: 0.375,
+      scriptDurationSeconds: 0.125,
+    },
+  );
+});
+
+Deno.test("parseWorkerPerformanceMetrics rejects unavailable or invalid counters", () => {
+  assertThrows(
+    () => parseWorkerPerformanceMetrics({}),
+    Error,
+    "metrics array",
+  );
+  assertThrows(
+    () =>
+      parseWorkerPerformanceMetrics({
+        metrics: [{ name: "TaskDuration", value: 1 }],
+      }),
+    Error,
+    "missing required ScriptDuration",
+  );
+  assertThrows(
+    () =>
+      parseWorkerPerformanceMetrics({
+        metrics: [
+          { name: "TaskDuration", value: -1 },
+          { name: "ScriptDuration", value: 1 },
+        ],
+      }),
+    Error,
+    "invalid TaskDuration",
+  );
+  assertThrows(
+    () =>
+      parseWorkerPerformanceMetrics({
+        metrics: [
+          { name: "TaskDuration", value: 1 },
+          { name: "TaskDuration", value: 2 },
+          { name: "ScriptDuration", value: 1 },
+        ],
+      }),
+    Error,
+    "duplicate TaskDuration",
+  );
+});
+
+Deno.test("deltaWorkerPerformanceMetrics returns monotonic CPU deltas in microseconds", () => {
+  const delta = deltaWorkerPerformanceMetrics(
+    { taskDurationSeconds: 10.25, scriptDurationSeconds: 4.125 },
+    { taskDurationSeconds: 10.375, scriptDurationSeconds: 4.175 },
+  );
+
+  assertAlmostEquals(delta.taskDurationUs, 125_000);
+  assertAlmostEquals(delta.scriptDurationUs, 50_000);
+});
+
+Deno.test("deltaWorkerPerformanceMetrics rejects reset worker counters", () => {
+  assertThrows(
+    () =>
+      deltaWorkerPerformanceMetrics(
+        { taskDurationSeconds: 2, scriptDurationSeconds: 1 },
+        { taskDurationSeconds: 1, scriptDurationSeconds: 0.5 },
+      ),
+    Error,
+    "TaskDuration decreased",
+  );
 });
