@@ -959,6 +959,16 @@ export interface ChurnCounters {
   scheduleRunErrors: number;
   /** Event handlers that lost the receipt race permanently (`scheduler/event-lost-race`). */
   eventLostRaces: number;
+  /** Claimed computation/effect transactions retained as local overlays. */
+  clientDerivedSuppressed: number;
+  /** Unclaimed computation/effect transactions actually sent to the host. */
+  clientDerivedUpstreamCommits: number;
+  overlaysCreated: number;
+  overlaysRetained: number;
+  overlaysDropped: number;
+  overlayDivergences: number;
+  clientAsyncRequests: number;
+  serverAsyncRequests: number;
 }
 
 export interface BrowserLoadSummary {
@@ -1096,6 +1106,14 @@ export async function collectBrowserLoadSummary(
       commitRejected: 0,
       scheduleRunErrors: 0,
       eventLostRaces: 0,
+      clientDerivedSuppressed: 0,
+      clientDerivedUpstreamCommits: 0,
+      overlaysCreated: 0,
+      overlaysRetained: 0,
+      overlaysDropped: 0,
+      overlayDivergences: 0,
+      clientAsyncRequests: 0,
+      serverAsyncRequests: 0,
     };
     try {
       const workerCounts = await cf?.rt?.getLoggerCounts?.();
@@ -1148,6 +1166,38 @@ export async function collectBrowserLoadSummary(
       churn.commitRejected = countOf("storage.v2", "commit-rejected");
       churn.scheduleRunErrors = countOf("scheduler", "schedule-run-error");
       churn.eventLostRaces = countOf("scheduler", "event-lost-race");
+      churn.clientDerivedSuppressed = countOf(
+        "storage.v2",
+        "execution-client-derived-suppressed",
+      );
+      churn.clientDerivedUpstreamCommits = countOf(
+        "storage.v2",
+        "execution-client-derived-upstream-commit",
+      );
+      churn.overlaysCreated = countOf(
+        "storage.v2",
+        "execution-overlay-created",
+      );
+      churn.overlaysRetained = countOf(
+        "storage.v2",
+        "execution-overlay-retained",
+      );
+      churn.overlaysDropped = countOf(
+        "storage.v2",
+        "execution-overlay-dropped",
+      );
+      churn.overlayDivergences = countOf(
+        "storage.v2",
+        "execution-overlay-divergence",
+      );
+      churn.clientAsyncRequests = countOf(
+        "runtime.execution",
+        "execution-client-async-request",
+      );
+      churn.serverAsyncRequests = countOf(
+        "runtime.execution",
+        "execution-server-async-request",
+      );
     } catch {
       // Worker may be disposed during teardown — main-thread IPC still tells
       // the contention story.
@@ -1219,7 +1269,12 @@ export function logBrowserLoadSummary(summary: BrowserLoadSummary): void {
     ` commitConflicts=${c.commitConflicts} commitReverts=${c.commitReverts}` +
     ` commitRejected=${c.commitRejected}` +
     ` scheduleRunErrors=${c.scheduleRunErrors}` +
-    ` eventLostRaces=${c.eventLostRaces}`;
+    ` eventLostRaces=${c.eventLostRaces}` +
+    ` clientDerivedSuppressed=${c.clientDerivedSuppressed}` +
+    ` clientDerivedUpstream=${c.clientDerivedUpstreamCommits}` +
+    ` overlays=${c.overlaysCreated}/${c.overlaysRetained}/${c.overlaysDropped}` +
+    ` divergences=${c.overlayDivergences}` +
+    ` async=${c.clientAsyncRequests}/${c.serverAsyncRequests}`;
   const pendingLine = summary.pendingIpc.length === 0
     ? "    (none)"
     : summary.pendingIpc.map((row) =>
