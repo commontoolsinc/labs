@@ -1,17 +1,25 @@
 import { isDeno } from "@commonfabric/utils/env";
 import {
   type AsyncLocalStore,
-  FallbackAsyncLocalStore,
+  SynchronousContextStore,
 } from "@commonfabric/utils/async-local-store";
 
 const SourceActionStorage =
   (isDeno()
     ? (await import("node:async_hooks")).AsyncLocalStorage
-    : FallbackAsyncLocalStore) as new <T>() => AsyncLocalStore<T>;
+    // A browser has no native async-context primitive. The general fallback
+    // conservatively spans a returned promise, but overlapping promises can
+    // then observe each other's value. Source-action identity controls claim
+    // routing, so ambiguity must fail open as "no ambient action" instead of
+    // ever attributing one continuation to another action. Sink release and
+    // trackAsyncWork capture the action synchronously; client continuations
+    // remain on the ordinary upstream path.
+    : SynchronousContextStore) as new <T>() => AsyncLocalStore<T>;
 
 const sourceActionContext = new SourceActionStorage<object>();
 
-/** Bind async builtin continuations to the action that released their sink. */
+/** Bind sink release to its source action. Native server contexts also flow
+ * through async builtin continuations; browser continuations fail open. */
 export function runWithTransactionSourceAction<R>(
   sourceAction: object | undefined,
   fn: () => R,
@@ -21,7 +29,7 @@ export function runWithTransactionSourceAction<R>(
     : sourceActionContext.run(sourceAction, fn);
 }
 
-/** Current trusted action lineage, if this async chain came from an action. */
+/** Current unambiguous trusted action lineage, when the runtime can retain it. */
 export function getTransactionSourceAction(): object | undefined {
   return sourceActionContext.getStore();
 }
