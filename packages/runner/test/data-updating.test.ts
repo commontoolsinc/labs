@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID, ID_FIELD, JSONSchema } from "../src/builder/types.ts";
+import { type Cell, ID, ID_FIELD, JSONSchema } from "../src/builder/types.ts";
 import {
   addCommonIDfromObjectID,
   applyChangeSet,
@@ -9,6 +9,7 @@ import {
   diffAndUpdate,
   normalizeAndDiff,
 } from "../src/data-updating.ts";
+import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   areLinksSame,
@@ -46,6 +47,28 @@ describe("data-updating", () => {
     await runtime?.dispose();
     await storageManager?.close();
   });
+
+  const materializeCellArgument = (
+    source: Cell<any>,
+    schema: JSONSchema,
+    id: string,
+  ): Cell<any> => {
+    const argument = runtime.getCell<{ value: unknown }>(
+      space,
+      id,
+      undefined,
+      tx,
+    );
+    argument.setRaw({ value: source.getAsLink() });
+    const materialized = argument.asSchema({
+      type: "object",
+      properties: { value: schema },
+      required: ["value"],
+    }).get() as { value: unknown };
+
+    expect(isCell(materialized.value)).toBe(true);
+    return materialized.value as Cell<any>;
+  };
 
   describe("setNestedValue", () => {
     it("should set a value at a path", () => {
@@ -891,6 +914,117 @@ describe("data-updating", () => {
       const changes2 = normalizeAndDiff(runtime, tx, current, cellA);
 
       expect(changes2.length).toBe(0);
+    });
+
+    it("omits a capability-only unknown schema from a stored cell reference", () => {
+      const source = runtime.getCell<{ name: string }>(
+        space,
+        "normalizeAndDiff capability-only unknown source",
+        undefined,
+        tx,
+      );
+      source.set({ name: "Doc A" });
+      const comparableSource = materializeCellArgument(
+        source,
+        {
+          type: "unknown",
+          asCell: ["comparable"],
+        } as const satisfies JSONSchema,
+        "normalizeAndDiff capability-only unknown argument",
+      );
+      expect(comparableSource.schema).toEqual({ type: "unknown" });
+      const target = runtime.getCell<unknown>(
+        space,
+        "normalizeAndDiff capability-only unknown target",
+        undefined,
+        tx,
+      );
+
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        target.getAsNormalizedFullLink(),
+        comparableSource,
+      );
+
+      expect(changes).toHaveLength(1);
+      expect(parseLink(changes[0].value, target)!.schema).toBeUndefined();
+    });
+
+    it("preserves an explicitly authored bare unknown schema on a stored cell reference", () => {
+      const source = runtime.getCell<{ name: string }>(
+        space,
+        "normalizeAndDiff authored unknown source",
+        undefined,
+        tx,
+      );
+      source.set({ name: "Doc A" });
+      const unknownSource = source.asSchema(
+        {
+          type: "unknown",
+        } as const satisfies JSONSchema,
+      );
+      const target = runtime.getCell<unknown>(
+        space,
+        "normalizeAndDiff authored unknown target",
+        undefined,
+        tx,
+      );
+
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        target.getAsNormalizedFullLink(),
+        unknownSource,
+      );
+
+      expect(changes).toHaveLength(1);
+      expect(parseLink(changes[0].value, target)!.schema).toEqual({
+        type: "unknown",
+      });
+    });
+
+    it("preserves meaningful metadata on a capability-wrapped unknown cell reference", () => {
+      const schema = {
+        type: "unknown",
+        asCell: ["comparable"],
+        ifc: { confidentiality: ["secret"] },
+      } as const satisfies JSONSchema;
+      const source = runtime.getCell<{ name: string }>(
+        space,
+        "normalizeAndDiff capability unknown metadata source",
+        undefined,
+        tx,
+      );
+      source.set({ name: "Doc A" });
+      const comparableSource = materializeCellArgument(
+        source,
+        schema,
+        "normalizeAndDiff capability unknown metadata argument",
+      );
+      expect(comparableSource.schema).toEqual({
+        type: "unknown",
+        ifc: { confidentiality: ["secret"] },
+      });
+      const target = runtime.getCell<unknown>(
+        space,
+        "normalizeAndDiff capability unknown metadata target",
+        undefined,
+        tx,
+      );
+
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        target.getAsNormalizedFullLink(),
+        comparableSource,
+      );
+
+      expect(changes).toHaveLength(1);
+      expect(parseLink(changes[0].value, target)!.schema).toEqual({
+        type: "unknown",
+        ifc: { confidentiality: ["secret"] },
+      });
     });
 
     it("should handle data: URI links by writing their contents", () => {

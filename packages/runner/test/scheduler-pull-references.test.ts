@@ -14,10 +14,12 @@ import {
 } from "./scheduler-test-utils.ts";
 import type {
   Action,
+  Cell,
   IExtendedStorageTransaction,
   JSONSchema,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import { isCell } from "../src/cell.ts";
 
 describe("pull mode with references", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -214,6 +216,105 @@ describe("pull mode with references", () => {
 
     expect(seen).toEqual([undefined, "Ada"]);
     cancel();
+  });
+
+  it("should re-run when a linked field appears through a capability-only array item", async () => {
+    const allPieces = runtime.getCell<unknown[]>(
+      space,
+      "capability-only-array-items",
+      undefined,
+      tx,
+    );
+    const piece = runtime.getCell<Record<string, unknown>>(
+      space,
+      "capability-only-array-piece",
+      undefined,
+      tx,
+    );
+    const name = runtime.getCell<string>(
+      space,
+      "capability-only-array-piece-name",
+      undefined,
+      tx,
+    );
+    const visibleNames = runtime.getCell<string[]>(
+      space,
+      "capability-only-array-visible-names",
+      undefined,
+      tx,
+    );
+    const addPieceArgument = runtime.getCell<{ piece: unknown }>(
+      space,
+      "capability-only-array-add-piece-argument",
+      undefined,
+      tx,
+    );
+
+    allPieces.set([]);
+    piece.setRaw({ $NAME: name.getAsLink() });
+    addPieceArgument.setRaw({ piece: piece.getAsLink() });
+    const materializedArgument = addPieceArgument.asSchema(
+      {
+        type: "object",
+        properties: {
+          piece: {
+            type: "unknown",
+            asCell: ["comparable"],
+          },
+        },
+        required: ["piece"],
+      } as const satisfies JSONSchema,
+    ).get() as { piece: unknown };
+    expect(isCell(materializedArgument.piece)).toBe(true);
+    expect((materializedArgument.piece as Cell<unknown>).schema).toEqual({
+      type: "unknown",
+    });
+    allPieces.push(materializedArgument.piece as Cell<unknown>);
+    visibleNames.set([]);
+
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runs = 0;
+    const computeVisibleNames: Action = (actionTx) => {
+      runs++;
+      const pieces = allPieces.withTx(actionTx).asSchema({
+        type: "array",
+        items: true,
+      }).get() as Array<Record<string, unknown> | undefined>;
+      const names = pieces.flatMap((candidate) => {
+        if (!candidate) return [];
+        const candidateName = candidate.$NAME;
+        return typeof candidateName === "string" && candidateName.length > 0
+          ? [candidateName]
+          : [];
+      });
+      visibleNames.withTx(actionTx).send(names);
+    };
+
+    runtime.scheduler.subscribe(
+      computeVisibleNames,
+      {
+        reads: [toMemorySpaceAddress(allPieces.getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [toMemorySpaceAddress(visibleNames.getAsNormalizedFullLink())],
+      },
+      {},
+    );
+
+    await visibleNames.pull();
+    await runtime.idle();
+    expect(runs).toBe(1);
+    expect(visibleNames.get()).toEqual([]);
+
+    name.withTx(tx).send("New Note");
+    await tx.commit();
+    tx = runtime.edit();
+
+    await visibleNames.pull();
+    await runtime.idle();
+    expect(runs).toBe(2);
+    expect(visibleNames.get()).toEqual(["New Note"]);
   });
 
   it("should re-run a schema sink when a followed link target changes", async () => {
