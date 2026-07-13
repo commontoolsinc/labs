@@ -458,9 +458,8 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
         prompt: computed(() => {
           if (!shouldRunAnalysis) return undefined;
           if (!email.markdownContent) return undefined;
-          const template = extractionPromptTemplate || "";
-          if (!template) return undefined;
-          return interpolateTemplate(template, email);
+          if (!extractionPromptTemplate) return undefined;
+          return interpolateTemplate(extractionPromptTemplate, email);
         }) as any,
         schema: extractionSchema as JSONSchema,
         model: "anthropic:claude-sonnet-4-5",
