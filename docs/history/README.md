@@ -149,6 +149,8 @@ One line per archived document; each document's header carries the fuller
   — transformer design records.
 - [MIGRATION_SUMMARY.md](packages/ui/src/v2/MIGRATION_SUMMARY.md) — the ui v2
   migration.
+- [unified-storage-stack.md](future-tasks/unified-storage-stack.md) —
+  DocImpl-era storage-unification plan, superseded by the v2 stack.
 
 ### Investigations, journals, and working notes
 
