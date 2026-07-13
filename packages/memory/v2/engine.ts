@@ -8220,12 +8220,15 @@ const applySchedulerObservationOnlyCommit = (
 
   const unservedAttempt =
     schedulerObservation.executionUnservedAttempt !== undefined;
+  const strictReadValidation = unservedAttempt || executionClaim !== undefined;
   let dropReason: SchedulerObservationDropReason | undefined;
   let inputBasisSeq: InputBasisSeq;
-  if (unservedAttempt) {
-    // An unserved settlement is authoritative only after the same canonical
-    // conflict path has accepted every input revision. Never accept a
-    // Worker-supplied basis or merely sample the current head.
+  if (strictReadValidation) {
+    // Every claimed settlement is authoritative only after the same canonical
+    // conflict path has accepted every input revision. Never turn a stale
+    // claimed no-op into a successful dropped observation: reject it so the
+    // scheduler catches up and retries. Unserved attempts require the same
+    // strict basis even though they do not persist execution provenance.
     validateConfirmedReads(
       engine,
       branch,

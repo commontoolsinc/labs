@@ -1563,6 +1563,87 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
   }
 });
 
+Deno.test("stale claimed no-op is rejected instead of silently dropped", async () => {
+  const server = createControlServer("memory-v2-execution-stale-noop");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  let unbind = () => {};
+  try {
+    await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, "", "action:stale-noop"),
+    );
+    const sourceAddress = {
+      space: POLICY_SPACE,
+      scope: "space" as const,
+      id: "of:stale-noop-source",
+      path: ["value", "count"],
+    };
+    const initialSource = await session.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sourceAddress.id,
+        value: { value: { count: 0 } },
+      }],
+    });
+    await session.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: sourceAddress.id,
+        value: { value: { count: 1 } },
+      }],
+    });
+    unbind = server.bindExecutionSession(
+      POLICY_SPACE,
+      session.sessionId,
+      lease,
+    );
+    const observation = claimedSpaceObservation(
+      claim,
+      "of:stale-noop-output",
+    );
+
+    const error = await assertRejects(
+      () =>
+        session.transact({
+          localSeq: 4,
+          reads: {
+            confirmed: [{
+              id: sourceAddress.id,
+              path: toDocumentPath(sourceAddress.path),
+              seq: initialSource.seq,
+            }],
+            pending: [],
+          },
+          operations: [],
+          schedulerObservation: {
+            ...observation,
+            completeActionScopeSummary: {
+              ...observation.completeActionScopeSummary,
+              reads: [sourceAddress],
+            },
+            reads: [sourceAddress],
+            actualChangedWrites: [],
+          },
+        }),
+      Error,
+      "stale confirmed read",
+    );
+    assertEquals(error.name, "ConflictError");
+    assertEquals(server.executionStats.acceptedActionAttempts, 0);
+  } finally {
+    unbind();
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("claimed provenance retains every source commit after the read surface exists", async () => {
   const server = createControlServer("memory-v2-execution-caused-by");
   const client = await connectControlClient(server);
