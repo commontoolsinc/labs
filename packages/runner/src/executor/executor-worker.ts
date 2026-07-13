@@ -7,6 +7,7 @@ import {
   type BranchName,
   canonicalSchedulerPieceIdForDemandRoot,
   type ExecutionClaim,
+  executionClaimIncarnationKey,
   type WireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import {
@@ -72,6 +73,10 @@ const instantiatedDemand = new Set<string>();
 const pendingDemand = new Map<string, UnavailableCellAddress>();
 const demandSinks = new Map<string, Cancel>();
 const candidateActions = new Map<string, Action>();
+const claimedAttempts = new Map<
+  string,
+  { action: Action; settled: PromiseWithResolvers<void> }
+>();
 let claimsByAction = new WeakMap<object, ExecutionClaim>();
 let demandGeneration = 0;
 let selectiveWake: SelectiveDemandWakeQueue | null = null;
@@ -93,6 +98,17 @@ const normalizePieceId = (pieceId: string): string =>
   pieceId.startsWith("of:") ? pieceId.slice(3) : pieceId;
 
 const claimKey = (claim: ActionClaimKey): string => actionClaimMapKey(claim);
+
+const finishClaimedAttempt = (
+  claim: ExecutionClaim,
+  sourceAction: object,
+): void => {
+  const key = executionClaimIncarnationKey(claim);
+  const pending = claimedAttempts.get(key);
+  if (pending === undefined || pending.action !== sourceAction) return;
+  claimedAttempts.delete(key);
+  pending.settled.resolve();
+};
 
 const unavailableAddress = (cell: Cell<unknown>): UnavailableCellAddress => {
   const link = cell.getAsNormalizedFullLink();
@@ -262,16 +278,23 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       worker.postMessage({ type: "candidate-diagnostic", diagnostic });
     },
     onUnserved: (claim, sourceAction, diagnosticCode) => {
+      finishClaimedAttempt(claim, sourceAction);
       claimsByAction.delete(sourceAction);
       worker.postMessage({ type: "unserved-claim", claim, diagnosticCode });
     },
     onInvalidated: (claim, sourceAction, diagnosticCode) => {
+      finishClaimedAttempt(claim, sourceAction);
       claimsByAction.delete(sourceAction);
       worker.postMessage({
         type: "invalidated-claim",
         claim,
         diagnosticCode,
       });
+    },
+    onAttemptSettled: (claim, sourceAction, result) => {
+      if (result.error === undefined) {
+        finishClaimedAttempt(claim, sourceAction);
+      }
     },
   });
   storage = HostStorageManager.connect({
@@ -341,6 +364,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       }`,
     });
   });
+  runtime.scheduler.setActionObservationAdoptionGuard((action) =>
+    claimsByAction.has(action)
+  );
   selectiveWake = new SelectiveDemandWakeQueue((pieceIds) =>
     enqueue(() => pullDemand(new Set(pieceIds)))
   );
@@ -358,11 +384,23 @@ const runClaimedAction = async (claim: ExecutionClaim): Promise<void> => {
   if (action === undefined) {
     throw new Error("claimed executor action is no longer live");
   }
-  storage.discardShadowWritesForAction(space, action);
-  claimsByAction.set(action, claim);
-  (action as Action & { prepareClaimedRerun?: () => void })
-    .prepareClaimedRerun?.();
-  await runtime.scheduler.run(action);
+  const key = executionClaimIncarnationKey(claim);
+  if (claimedAttempts.has(key)) {
+    throw new Error("claimed executor action is already activating");
+  }
+  const settled = Promise.withResolvers<void>();
+  claimedAttempts.set(key, { action, settled });
+  try {
+    storage.discardShadowWritesForAction(space, action);
+    claimsByAction.set(action, claim);
+    (action as Action & { prepareClaimedRerun?: () => void })
+      .prepareClaimedRerun?.();
+    await runtime.scheduler.run(action);
+    await settled.promise;
+  } finally {
+    const current = claimedAttempts.get(key);
+    if (current?.settled === settled) claimedAttempts.delete(key);
+  }
 };
 
 const settle = async (): Promise<number> => {
@@ -399,6 +437,11 @@ const stop = async (): Promise<void> => {
   space = null;
   branch = "";
   selectiveWake = null;
+  const stoppedError = new Error("executor Worker stopped");
+  for (const attempt of claimedAttempts.values()) {
+    attempt.settled.reject(stoppedError);
+  }
+  claimedAttempts.clear();
   demanded.clear();
   instantiatedDemand.clear();
   pendingDemand.clear();
@@ -406,15 +449,16 @@ const stop = async (): Promise<void> => {
 };
 
 const handle = async (request: WorkerRequest): Promise<void> => {
+  if (!Number.isSafeInteger(request.requestId)) {
+    throw new Error("executor Worker request has no request id");
+  }
   if (request.type === "run-claimed-action") {
     if (request.claim === undefined) {
       throw new Error("claimed executor rerun has no claim");
     }
     await enqueue(() => runClaimedAction(request.claim!));
+    worker.postMessage({ type: "complete", requestId: request.requestId });
     return;
-  }
-  if (!Number.isSafeInteger(request.requestId)) {
-    throw new Error("executor Worker request has no request id");
   }
   switch (request.type) {
     case "initialize":

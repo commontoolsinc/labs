@@ -1,8 +1,4 @@
-import type {
-  ActionClaimKey,
-  CellScope,
-  ExecutionClaim,
-} from "@commonfabric/memory/v2";
+import type { ActionClaimKey, ExecutionClaim } from "@commonfabric/memory/v2";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { CandidateClaim } from "./deno-space-executor.ts";
 import {
@@ -16,6 +12,7 @@ import {
   executionClaimMatchesActionKey,
 } from "../scheduler/servability.ts";
 import type {
+  ActionTransactionCommitResult,
   ActionTransactionRoute,
   ActionTransactionRouteInput,
   ActionTransactionRouter,
@@ -64,6 +61,11 @@ export interface ExecutorActionTransactionRouterOptions {
     claim: ExecutionClaim,
     sourceAction: object,
     diagnosticCode: string,
+  ) => void;
+  readonly onAttemptSettled?: (
+    claim: ExecutionClaim,
+    sourceAction: object,
+    result: ActionTransactionCommitResult,
   ) => void;
 }
 
@@ -229,11 +231,14 @@ export function createExecutorActionTransactionRouter(
       }
       const encoded = JSON.stringify(claimKey);
       reported.set(sourceAction, encoded);
-      options.onCandidate({
-        claimKey,
-        ...(builtinId !== undefined ? { builtinId } : {}),
-      }, sourceAction);
-      return local;
+      return {
+        ...local,
+        afterLocalApply: () =>
+          options.onCandidate({
+            claimKey,
+            ...(builtinId !== undefined ? { builtinId } : {}),
+          }, sourceAction),
+      };
     }
 
     attachClaimAssertion(input.commit, routedObservation, liveClaim);
@@ -245,6 +250,12 @@ export function createExecutorActionTransactionRouter(
     }
     return {
       disposition: "upstream",
+      ...(options.onAttemptSettled
+        ? {
+          onCommitSettled: (result: ActionTransactionCommitResult) =>
+            options.onAttemptSettled!(liveClaim, sourceAction, result),
+        }
+        : {}),
       ...(options.onUnserved
         ? {
           onFirewallRejected: (diagnosticCode: string) => {

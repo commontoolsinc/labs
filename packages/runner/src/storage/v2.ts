@@ -580,14 +580,27 @@ export interface ActionTransactionRouteInput {
   readonly sourceAction?: object;
 }
 
+export type ActionTransactionCommitResult = Result<
+  Unit,
+  StorageTransactionRejected
+>;
+
 export type ActionTransactionRoute =
   | {
     readonly disposition: "upstream";
     readonly onFirewallRejected?: (diagnosticCode: string) => void;
+    /** Exact result of this routed attempt, after the provider has either
+     * accepted it upstream or completed its rejection path. */
+    readonly onCommitSettled?: (
+      result: ActionTransactionCommitResult,
+    ) => void;
   }
   | {
     readonly disposition: "local";
     readonly kind: "executor-shadow";
+    /** Publish host-visible readiness only after this optimistic transaction
+     * is applied and indexed for exact source-action discard. */
+    readonly afterLocalApply?: () => void;
   }
   | {
     readonly disposition: "local";
@@ -2873,6 +2886,19 @@ class SpaceReplica implements ISpaceReplica {
           );
         }
       }
+      if (
+        route.kind === "executor-shadow" &&
+        route.afterLocalApply !== undefined
+      ) {
+        try {
+          route.afterLocalApply();
+        } catch (error) {
+          logger.warn("execution-route", () => [
+            "Executor shadow post-apply callback failed",
+            error,
+          ]);
+        }
+      }
       return { ok: {} };
     }
 
@@ -3034,6 +3060,33 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private async pushCommit(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    commit: ClientCommit,
+    source?: IStorageTransaction,
+    route?: Extract<ActionTransactionRoute, { disposition: "upstream" }>,
+  ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const result = await this.pushCommitAttempt(
+      localSeq,
+      operations,
+      commit,
+      source,
+      route,
+    );
+    if (route?.onCommitSettled !== undefined) {
+      try {
+        route.onCommitSettled(result);
+      } catch (error) {
+        logger.warn("execution-route", () => [
+          "Executor upstream settlement callback failed",
+          error,
+        ]);
+      }
+    }
+    return result;
+  }
+
+  private async pushCommitAttempt(
     localSeq: number,
     operations: NativeCommitOperation[],
     commit: ClientCommit,

@@ -109,8 +109,12 @@ Deno.test("action transaction router keeps executor-shadow writes local", async 
 });
 
 Deno.test("action transaction router can send an exact action upstream", async () => {
+  const settled: unknown[] = [];
   await withServer(
-    () => ({ disposition: "upstream" }),
+    () => ({
+      disposition: "upstream",
+      onCommitSettled: (result) => settled.push(result),
+    }),
     async (server, storage) => {
       const result = await storage.open(SPACE).replica.commitNative!({
         operations: [{
@@ -125,6 +129,7 @@ Deno.test("action transaction router can send an exact action upstream", async (
       assertEquals(await server.readDocument(SPACE, OUTPUT), {
         value: { route: "upstream" },
       });
+      assertEquals(settled, [{ ok: {} }]);
     },
   );
 });
@@ -154,6 +159,48 @@ Deno.test("claimed rerun can discard only its earlier executor-shadow writes", a
       );
 
       storage.discardShadowWritesForAction(SPACE, sourceAction);
+      assertEquals(
+        storage.open(SPACE).replica.get({
+          id: OUTPUT,
+          type: "application/json",
+        })?.is,
+        undefined,
+      );
+    },
+  );
+});
+
+Deno.test("executor candidate handoff runs after its shadow write is discardable", async () => {
+  const sourceAction = {};
+  let storageRef: RoutedStorageManager | undefined;
+  let callbackSawShadow = false;
+  await withServer(
+    () => ({
+      disposition: "local",
+      kind: "executor-shadow",
+      afterLocalApply() {
+        callbackSawShadow = storageRef!.open(SPACE).replica.get({
+          id: OUTPUT,
+          type: "application/json",
+        })?.is !== undefined;
+        storageRef!.discardShadowWritesForAction(SPACE, sourceAction);
+      },
+    }),
+    async (_server, storage) => {
+      storageRef = storage;
+      const tx = storage.edit();
+      tx.sourceAction = sourceAction;
+      const writer = tx.writer(SPACE);
+      if (writer.error) throw writer.error;
+      const written = writer.ok.write({
+        id: OUTPUT,
+        type: "application/json",
+        path: ["value"],
+      }, { route: "shadow" });
+      if (written.error) throw written.error;
+
+      assertEquals(await tx.commit(), { ok: {} });
+      assertEquals(callbackSawShadow, true);
       assertEquals(
         storage.open(SPACE).replica.get({
           id: OUTPUT,

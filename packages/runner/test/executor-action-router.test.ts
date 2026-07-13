@@ -117,14 +117,16 @@ Deno.test("executor action router reoffers an unclaimed pure action then routes 
   });
 
   const first = commit();
-  assertEquals(
-    await router({
-      space: SPACE,
-      commit: first,
-      sourceAction: action,
-    }),
-    { disposition: "local", kind: "executor-shadow" },
-  );
+  const firstRoute = await router({
+    space: SPACE,
+    commit: first,
+    sourceAction: action,
+  });
+  assertEquals(firstRoute.disposition, "local");
+  if (firstRoute.disposition !== "local") throw new Error("expected local");
+  assertEquals(firstRoute.kind, "executor-shadow");
+  assertEquals(candidates, []);
+  if (firstRoute.kind === "executor-shadow") firstRoute.afterLocalApply?.();
   assertEquals(candidates, [{ claimKey: key, sourceAction: action }]);
   assertEquals(diagnostics, []);
   assertEquals(
@@ -135,14 +137,20 @@ Deno.test("executor action router reoffers an unclaimed pure action then routes 
   );
 
   const stillUnclaimed = commit();
-  assertEquals(
-    await router({
-      space: SPACE,
-      commit: stillUnclaimed,
-      sourceAction: action,
-    }),
-    { disposition: "local", kind: "executor-shadow" },
-  );
+  const stillUnclaimedRoute = await router({
+    space: SPACE,
+    commit: stillUnclaimed,
+    sourceAction: action,
+  });
+  assertEquals(stillUnclaimedRoute.disposition, "local");
+  if (stillUnclaimedRoute.disposition !== "local") {
+    throw new Error("expected local");
+  }
+  assertEquals(stillUnclaimedRoute.kind, "executor-shadow");
+  assertEquals(candidates.length, 1);
+  if (stillUnclaimedRoute.kind === "executor-shadow") {
+    stillUnclaimedRoute.afterLocalApply?.();
+  }
   assertEquals(candidates, [
     { claimKey: key, sourceAction: action },
     { claimKey: key, sourceAction: action },
@@ -359,14 +367,16 @@ Deno.test("executor action router candidates only a canonical supported builtin 
     onCandidate: (candidate) => candidates.push(candidate),
   });
 
-  assertEquals(
-    await router({
-      space: SPACE,
-      commit: effectCommit,
-      sourceAction: effectAction,
-    }),
-    { disposition: "local", kind: "executor-shadow" },
-  );
+  const route = await router({
+    space: SPACE,
+    commit: effectCommit,
+    sourceAction: effectAction,
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  assertEquals(route.kind, "executor-shadow");
+  assertEquals(candidates, []);
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
   assertEquals(candidates.length, 1);
   assertEquals(candidates[0]?.builtinId, "fetchText");
   assertEquals(candidates[0]?.claimKey.actionKind, "effect");
@@ -443,7 +453,17 @@ Deno.test("executor action router carries an accepted builtin claim across async
   initialObservation.implementationFingerprint =
     "impl:cf:builtin/fetchText:server-v1";
   delete initialObservation.completeActionScopeSummary;
-  await router({ space: SPACE, commit: initial, sourceAction: effectAction });
+  const initialRoute = await router({
+    space: SPACE,
+    commit: initial,
+    sourceAction: effectAction,
+  });
+  if (
+    initialRoute.disposition === "local" &&
+    initialRoute.kind === "executor-shadow"
+  ) {
+    initialRoute.afterLocalApply?.();
+  }
   const claim: ExecutionClaim = {
     ...candidateKey!,
     leaseGeneration: 3,

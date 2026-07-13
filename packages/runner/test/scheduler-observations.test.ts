@@ -1346,6 +1346,68 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("does not adopt an action clean during an executor authority handoff", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const scheduler = testRuntime.runtime.scheduler;
+      const action = Object.assign(function claimedHandoffAction() {}, {
+        writes: [writeLink],
+      });
+      scheduler.subscribe(action, {
+        reads: [],
+        shallowReads: [],
+        writes: [writeAddress],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:claimed-handoff-piece",
+          processGeneration: 0,
+        },
+      });
+      const snapshot: PersistedSchedulerObservationSnapshot = {
+        executionContextKey: "session:test:test",
+        observation: buildSchedulerActionObservation({
+          ownerSpace: space,
+          branch: "",
+          pieceId: "space:claimed-handoff-piece",
+          processGeneration: 0,
+          actionId: "claimedHandoffAction",
+          actionKind: "computation",
+          implementationFingerprint: schedulerImplementationFingerprint(
+            action,
+            "claimedHandoffAction",
+            undefined,
+          ),
+          runtimeFingerprint: schedulerRuntimeFingerprint(),
+          observedAtSeq: 5,
+          transactionKind: "action-run",
+          transactionLog: {
+            reads: [readAddress],
+            shallowReads: [],
+            writes: [writeAddress],
+          },
+          currentKnownWrites: [writeAddress],
+        }),
+      };
+      const oracle = {
+        readsCurrentAtSeq: () => true,
+        hasPendingLocalWriteOverlapping: () => false,
+      };
+
+      scheduler.setActionObservationAdoptionGuard((candidate) =>
+        candidate === action
+      );
+      expect(scheduler.adoptRemoteObservations([snapshot], oracle)).toBe(0);
+      expect(scheduler.isDirty(action)).toBe(true);
+
+      scheduler.setActionObservationAdoptionGuard(undefined);
+      expect(scheduler.adoptRemoteObservations([snapshot], oracle)).toBe(1);
+      expect(scheduler.isDirty(action)).toBe(false);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("does not adopt a clean broad row past a dirty session candidate", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {

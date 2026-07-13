@@ -417,7 +417,13 @@ class DenoSpaceExecutor implements SpaceExecutor {
   }
 
   #request(
-    type: "initialize" | "set-demand" | "wake" | "settle" | "stop",
+    type:
+      | "initialize"
+      | "set-demand"
+      | "wake"
+      | "settle"
+      | "stop"
+      | "run-claimed-action",
     fields: Record<string, unknown> = {},
     transfer: Transferable[] = [],
   ): Promise<WorkerResponse> {
@@ -527,8 +533,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
     }
     this.#claims.set(mapKey, claim);
     this.#scheduleClaimRenewal(claim);
-    this.#worker.postMessage({
-      type: "run-claimed-action",
+    const activated = this.#request("run-claimed-action", {
       claim,
       assertion: {
         contextKey: claim.contextKey,
@@ -536,6 +541,30 @@ class DenoSpaceExecutor implements SpaceExecutor {
         claimGeneration: claim.claimGeneration,
       },
     });
+    const response = await this.#awaitClaimActivation(activated, claim);
+    if (response.type !== "complete") {
+      throw new Error("executor Worker returned an invalid claim activation");
+    }
+  }
+
+  async #awaitClaimActivation(
+    activation: Promise<WorkerResponse>,
+    claim: ExecutionClaim,
+  ): Promise<WorkerResponse> {
+    const timeout = Promise.withResolvers<WorkerResponse>();
+    const remaining = Math.max(1, claim.expiresAt - this.#now());
+    const timer = this.#setTimer(
+      () =>
+        timeout.reject(
+          new Error("executor Worker did not activate its claim in time"),
+        ),
+      Math.min(this.#startupTimeoutMs, remaining),
+    );
+    try {
+      return await Promise.race([activation, timeout.promise]);
+    } finally {
+      this.#clearTimer(timer);
+    }
   }
 
   #handleClaimRelease(

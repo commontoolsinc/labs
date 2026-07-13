@@ -80,6 +80,7 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
   readonly messages: unknown[] = [];
   terminated = false;
   settledSeq = 41;
+  acknowledgeClaimedRuns = true;
 
   boot(): void {
     this.dispatchEvent(
@@ -156,7 +157,8 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
       );
     } else if (
       request.type === "set-demand" || request.type === "wake" ||
-      request.type === "stop"
+      request.type === "stop" ||
+      (request.type === "run-claimed-action" && this.acknowledgeClaimedRuns)
     ) {
       this.dispatchEvent(
         new MessageEvent("message", {
@@ -227,8 +229,11 @@ const startExecutor = async (options: {
     setTimer: (callback: () => void, delayMs: number) => number;
     clearTimer: (timer: number) => void;
   };
+  acknowledgeClaimedRuns?: boolean;
+  startupTimeoutMs?: number;
 }) => {
   const worker = new FakeWorker();
+  worker.acknowledgeClaimedRuns = options.acknowledgeClaimedRuns ?? true;
   const server = new ClaimRecordingServer();
   const channel = new MessageChannel();
   const crashes: unknown[] = [];
@@ -242,6 +247,8 @@ const startExecutor = async (options: {
     onCandidateClaim: options.onCandidateClaim,
     onCandidateDiagnostic: options.onCandidateDiagnostic,
     onWriterDiscovery: options.onWriterDiscovery,
+    now: options.claimTimers?.now ?? (() => 0),
+    startupTimeoutMs: options.startupTimeoutMs,
     ...options.claimTimers,
     createWorker: () => {
       queueMicrotask(() => worker.boot());
@@ -329,6 +336,7 @@ Deno.test("policy-inactive candidates remain shadow and later acquire authority"
     }]);
     assertEquals(worker.messages.at(-1), {
       type: "run-claimed-action",
+      requestId: 2,
       claim: CLAIM,
       assertion: {
         contextKey: "space",
@@ -447,6 +455,49 @@ Deno.test("live executor claims renew before their server-authored deadline", as
   }
 });
 
+Deno.test("unacknowledged claim activation is revoked and crashes the Worker", async () => {
+  let nextTimer = 0;
+  const timers = new Map<
+    number,
+    { callback: () => void; delayMs: number }
+  >();
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    acknowledgeClaimedRuns: false,
+    startupTimeoutMs: 100,
+    claimTimers: {
+      now: () => 0,
+      setTimer(callback, delayMs) {
+        const timer = ++nextTimer;
+        timers.set(timer, { callback, delayMs });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        timers.delete(timer);
+      },
+    },
+  });
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+
+    assertEquals(server.claimRequests.length, 1);
+    assertEquals(server.revoked, []);
+    const activation = [...timers.values()].find((timer) =>
+      timer.delayMs === 100
+    );
+    if (activation === undefined) throw new Error("activation timer missing");
+    activation.callback();
+    await flushClaimControl();
+
+    assertEquals(server.revoked, [CLAIM]);
+    assertEquals(crashes.length, 1);
+    assertEquals(worker.terminated, true);
+  } finally {
+    await executor.stop();
+  }
+});
+
 Deno.test("ordinary shadow rejection reports a host-local candidate diagnostic", async () => {
   const diagnostics: CandidateDiagnostic[] = [];
   const { worker, server, crashes, executor } = await startExecutor({
@@ -543,6 +594,7 @@ Deno.test("the explicit routing capability turns an exact CandidateClaim into an
     }]);
     assertEquals(worker.messages.at(-1), {
       type: "run-claimed-action",
+      requestId: 2,
       claim: CLAIM,
       assertion: {
         contextKey: "space",

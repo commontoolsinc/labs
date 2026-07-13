@@ -147,11 +147,15 @@ const containsStoredValue = (value: unknown, expected: string): boolean =>
     ? Object.values(value).some((entry) => containsStoredValue(entry, expected))
     : false);
 
-async function exercisePoolAuthorityTransition(): Promise<void> {
+async function exercisePoolAuthorityTransition(
+  options: { replaceShadowWorker?: boolean } = {},
+): Promise<void> {
   const principal = await Identity.fromPassphrase(
     `executor pool transition ${crypto.randomUUID()}`,
   );
   const space = principal.did();
+  let executionNow = Date.now();
+  const executionLeaseTtlMs = 30_000;
   const server = new Server({
     authorizeSessionOpen(message) {
       const value = (message.authorization as { principal?: unknown })
@@ -161,6 +165,11 @@ async function exercisePoolAuthorityTransition(): Promise<void> {
     sessionOpenAuth: { audience: "did:key:z6Mk-executor-pool-transition" },
     protocolFlags: FLAGS,
     acl: { mode: "off", serviceDids: [space] },
+    executionControl: {
+      leaseTtlMs: executionLeaseTtlMs,
+      claimTtlMs: executionLeaseTtlMs,
+      nowMs: () => executionNow,
+    },
   });
   const authorize: MemoryClient.SessionOpenAuthFactory = (
     _space,
@@ -309,11 +318,13 @@ async function exercisePoolAuthorityTransition(): Promise<void> {
           shadowRejected.resolve();
         }
       },
+      now: () => executionNow,
     });
     pool = new SharedExecutionPool({
       control: server,
       factory,
       settleTimeoutMs: 10_000,
+      now: () => executionNow,
     });
     pool.start();
     await observer.setExecutionDemand("", [stableResultId]);
@@ -369,6 +380,10 @@ async function exercisePoolAuthorityTransition(): Promise<void> {
           acceptedEvents.push(
             `accepted:${
               event.revisions.map((revision) => revision.id).join(",")
+            }:stale=${
+              event.staleDemandedReaders.map((reader) => reader.pieceId).join(
+                ",",
+              )
             }`,
           );
           if (
@@ -441,6 +456,27 @@ async function exercisePoolAuthorityTransition(): Promise<void> {
     assertEquals(server.listExecutionClaims(space), []);
     assertEquals(clientCommits.some(isDerivedWireCommit), true);
 
+    if (options.replaceShadowWorker === true) {
+      // Model the browser rollout failure deterministically: generation 1 has
+      // already discovered the writer in shadow mode, then loses its lease.
+      // Republishing the same demand makes the pool fence it and start a fresh
+      // realm from durable scheduler state before policy promotion.
+      executionNow += executionLeaseTtlMs + 1;
+      await observer.setExecutionDemand("", [stableResultId]);
+      await pool.idle();
+      assertEquals(pool.snapshot(space, ""), {
+        state: "live",
+        referenceCount: 1,
+        pieces: [stableResultId],
+        leaseGeneration: 2,
+      });
+      // The reconcile observes loss, then the stale handle also fails the
+      // best-effort drain fence.
+      assertEquals(pool.metrics().leaseLosses, 2);
+      assertEquals(pool.metrics().leaseReplacements, 1);
+      assertEquals(pool.metrics().workersStarted, 2);
+    }
+
     // Enable in place. The first invalidation promotes the already-running
     // shadow Worker; no piece or document is recreated.
     await writePolicy(true);
@@ -470,7 +506,10 @@ async function exercisePoolAuthorityTransition(): Promise<void> {
     await clientStorage.synced();
     await clientRuntime.settled();
     assertEquals(server.listExecutionClaims(space), [claim]);
-    assertEquals(pool.metrics().workersStarted, 1);
+    assertEquals(
+      pool.metrics().workersStarted,
+      options.replaceShadowWorker === true ? 2 : 1,
+    );
 
     // A subsequent invalidation measures the stable claimed posture: only the
     // server writes, any client speculation is local and settles away.
@@ -543,7 +582,10 @@ async function exercisePoolAuthorityTransition(): Promise<void> {
     );
     assertEquals(server.listExecutionClaims(space), []);
     assertEquals(pool.metrics().crashes, 0);
-    assertEquals(pool.metrics().workersStarted, 1);
+    assertEquals(
+      pool.metrics().workersStarted,
+      options.replaceShadowWorker === true ? 2 : 1,
+    );
 
     // Close every warm executor/runtime, then resume through a fresh client
     // realm. Durable state alone must name the same cells and converge.
@@ -1141,6 +1183,10 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
 
 Deno.test("shared execution pool transitions shadow to claimed and back without migration", async () => {
   await exercisePoolAuthorityTransition();
+});
+
+Deno.test("replacement executor resumes shadow discovery before claim promotion", async () => {
+  await exercisePoolAuthorityTransition({ replaceShadowWorker: true });
 });
 
 Deno.test("claimed builtins use host broker while client sinks observe pending and result", async () => {

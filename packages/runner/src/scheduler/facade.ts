@@ -570,6 +570,7 @@ export class Scheduler {
     action: Action,
     error: unknown,
   ) => void;
+  private actionObservationAdoptionGuard?: (action: Action) => boolean;
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
   private scheduled = false;
@@ -640,6 +641,15 @@ export class Scheduler {
     handler: ((action: Action, error: unknown) => void) | undefined,
   ): void {
     this.actionCommitRejectionHandler = handler;
+  }
+
+  /** Host-only handoff guard. While an executor has installed an exact claim,
+   * a pre-claim client observation must not adopt that action clean and erase
+   * an authoritative conflict retry. */
+  setActionObservationAdoptionGuard(
+    guard: ((action: Action) => boolean) | undefined,
+  ): void {
+    this.actionObservationAdoptionGuard = guard;
   }
 
   /**
@@ -1070,6 +1080,12 @@ export class Scheduler {
       // appended row unregistered — the reload path's always-run guard, live.
       if (this.alwaysRunActions.has(action)) {
         logger.debug("adopt/miss/always-run", () => [observation.actionId]);
+        continue;
+      }
+      if (this.actionObservationAdoptionGuard?.(action) === true) {
+        logger.debug("adopt/miss/authority-handoff", () => [
+          observation.actionId,
+        ]);
         continue;
       }
       let candidates = candidatesByAction.get(action);
