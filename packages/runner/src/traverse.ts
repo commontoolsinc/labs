@@ -909,13 +909,17 @@ export type TraversalContext = {
   metaDocsVisited: Set<string>;
   /**
    * Reports a followed link whose target document is absent from the local
-   * replica and lives in ANOTHER space. Per-space server queries cannot
-   * follow links across space boundaries, so such a target is never covered
-   * by the subscription that loaded the source doc — the client must fetch
-   * it itself (see `Runtime.ensureLinkedDocLoaded`). Optional: server-side
-   * schema traversals have no replica gap.
+   * replica. Cross-space targets (target space !== `sourceSpace`) can never
+   * be covered by the source doc's per-space subscription; same-space
+   * targets can still be absent when no selector ever walked them (the
+   * fresh-replica read asymmetry). The receiver decides whether to fetch —
+   * see `Runtime.ensureLinkedDocLoaded`. Optional: server-side schema
+   * traversals have no replica gap.
    */
-  onMissingLinkTarget?: (link: NormalizedFullLink) => void;
+  onMissingLinkTarget?: (
+    link: NormalizedFullLink,
+    sourceSpace: MemorySpace,
+  ) => void;
 };
 
 export function createTraversalContext(
@@ -924,7 +928,10 @@ export function createTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector>,
   includeMeta: boolean = false,
   metaDocsVisited: Set<string> = new Set<string>(),
-  onMissingLinkTarget?: (link: NormalizedFullLink) => void,
+  onMissingLinkTarget?: (
+    link: NormalizedFullLink,
+    sourceSpace: MemorySpace,
+  ) => void,
 ): TraversalContext {
   return {
     tracker,
@@ -941,7 +948,10 @@ export function createDefaultTraversalContext(
   schemaTracker: MapSet<string, SchemaPathSelector> =
     new MapSetStringToPathSelectors(true),
   metaDocsVisited: Set<string> = new Set<string>(),
-  onMissingLinkTarget?: (link: NormalizedFullLink) => void,
+  onMissingLinkTarget?: (
+    link: NormalizedFullLink,
+    sourceSpace: MemorySpace,
+  ) => void,
 ): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker<
@@ -1858,17 +1868,22 @@ function followPointer(
         "traverse",
         () => ["followPointer found missing/retracted fact", valueEntry],
       );
-      // A CROSS-SPACE target absent from the replica cannot have been
-      // covered by the source doc's per-space subscription — report it for
-      // an async load. This read still resolves notFound; the absent doc is
-      // a tracked read, so the reader re-runs when it arrives. Same-space
-      // absent targets are NOT reported: they are either covered by the
-      // originating query or genuinely absent, and kicking them turns every
-      // read of an optional value into a server query. The reported link
-      // carries the selector's target-rooted path (minus its "value"
-      // prefix) and schema so the fetch covers the shape this read needs.
-      if (link.space !== doc.address.space) {
-        context.onMissingLinkTarget?.({
+      // A target absent from the replica may simply never have been pulled —
+      // report it for an async load. This read still resolves notFound; the
+      // absent doc is a tracked read, so the reader re-runs when it arrives.
+      // Cross-space targets can never be covered by the source doc's
+      // per-space subscription. Same-space targets are reported too (the
+      // fresh-replica read asymmetry: a rejecting-selector sync delivers
+      // only the root doc, so a link can point at a doc no selector ever
+      // walked); the receiver decides whether a fetch is actually needed —
+      // Runtime.ensureLinkedDocLoaded kicks same-space targets only when
+      // the replica has never seen the doc, and at most once, so reads of
+      // genuinely absent optional values do not turn into repeated server
+      // queries. The reported link carries the selector's target-rooted
+      // path (minus its "value" prefix) and schema so the fetch covers the
+      // shape this read needs.
+      context.onMissingLinkTarget?.(
+        {
           space: link.space,
           id: link.id,
           path: selector !== undefined
@@ -1882,8 +1897,9 @@ function followPointer(
                 | undefined,
             }
             : {}),
-        } as NormalizedFullLink);
-      }
+        } as NormalizedFullLink,
+        doc.address.space,
+      );
       // We include the path in the address, so that information is available,
       return [notFound(target), selector];
     } else if (error.name !== "NotFoundError") {
@@ -3437,8 +3453,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // upstream computations in pull mode.
     this.tx.read(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
 
-    // We use `every` here so if our input is a sparse array, so is our output.
-    const valid = docArray.every((item, index) => {
+    // Evaluate EVERY element even after one fails: a failing element voids
+    // the whole array below, but each element's traversal is also what kicks
+    // async loads for absent link targets (fresh-replica read asymmetry).
+    // Short-circuiting at the first failure would serialize those kicks —
+    // one element per convergence round — and `Cell.pull()`'s round budget
+    // exhausts long before a many-element array converges. Walking the rest
+    // keeps convergence proportional to link DEPTH, and on the server side
+    // keeps the selector walk covering (and thus delivering + watching) the
+    // remaining element docs. `forEach` skips sparse holes like `every` did.
+    let valid = true;
+    docArray.forEach((item, index) => {
       const itemSchema = schemaAtPathCanonical(this.cfc, schema, [
         index.toString(),
       ]);
@@ -3488,7 +3513,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         ) {
           this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
           arrayObj[index] = null;
-          return true;
+          return;
         }
         this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const [redirDoc, selector] = this.getDocAtPath(
@@ -3603,13 +3628,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
               "traverse",
               () => ["Item doesn't match array schema", curDoc, curSelector],
             );
-            return undefined;
+            valid = false;
           }
         } else {
           arrayObj[index] = val;
         }
       }
-      return true;
     });
     return valid ? arrayObj : undefined;
   }

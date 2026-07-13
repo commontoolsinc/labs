@@ -317,9 +317,23 @@ export function resolveLink(
       } else {
         link = nextLink;
       }
-      // If we're crossing spaces, force fetching data from server, as the
-      // original server will not have pushed the data to the client yet.
-      if (crossSpace) {
+      // Force fetching data from the server when the local replica cannot
+      // serve the hop target: crossing spaces (the origin server never pushes
+      // other-space docs), or a same-space doc this replica has never pulled.
+      // The second arm is the fresh-replica read-asymmetry fix: selector
+      // driven syncs only deliver what a schema covered, so a link can point
+      // at a same-space doc no selector ever walked — without this kick such
+      // reads mask as `undefined`, indistinguishable from absence. The kick
+      // is async; one-shot reads still return the masked value, but
+      // `Cell.pull()`'s convergence loop awaits the tracked sync and re-reads.
+      if (
+        crossSpace ||
+        runtime.storageManager.shouldPullDoc?.(
+            link.space,
+            link.id,
+            link.scope,
+          ) === true
+      ) {
         // Swallow sync failures: this kick is best-effort (the read still
         // resolves from the local replica) and an unhandled rejection here
         // would otherwise escape the resolution path.

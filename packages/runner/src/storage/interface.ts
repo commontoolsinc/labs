@@ -236,6 +236,19 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   pendingCrossSpacePromiseCount?(): number;
 
   /**
+   * Whether a link target in `space` should be background-pulled because this
+   * replica has never seen the doc (fresh-replica read asymmetry): selector
+   * driven syncs only deliver what a schema covered, so a link can point at a
+   * same-space doc no selector ever walked — without a pull such reads mask
+   * as `undefined`, indistinguishable from absence. Returns true exactly once
+   * per (space, id, scope) per manager lifetime and only when the local
+   * replica holds no state for the doc; the caller kicks the actual sync (see
+   * the link-resolution hop loop). Optional: managers without lazy remote
+   * replication (e.g. test mocks) simply don't implement it.
+   */
+  shouldPullDoc?(space: MemorySpace, id: URI, scope?: CellScope): boolean;
+
+  /**
    * Wait for the currently pending cross-space promises (and any they
    * transitively kick) to settle, WITHOUT waiting for full provider sync the
    * way `synced()` does. Used by `Cell.pull()`'s convergence loop so pulls

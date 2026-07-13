@@ -1247,18 +1247,38 @@ export class Runtime {
   private missingDocLoadKicks = new Set<string>();
 
   /**
-   * Asynchronously load a cross-space link target that a read found absent
-   * from the local replica (CT-1667): per-space server queries cannot follow
-   * links across space boundaries, so the client must fetch such targets
-   * itself. Fire-and-forget, but registered as a cross-space promise so
+   * Asynchronously load a link target that a read found absent from the
+   * local replica. Cross-space targets (CT-1667): per-space server queries
+   * cannot follow links across space boundaries, so the client must fetch
+   * such targets itself. Same-space targets (fresh-replica read asymmetry):
+   * a rejecting-selector sync delivers only the root doc, so a link can
+   * point at a doc no selector ever walked — those are fetched only when
+   * the local replica has never seen the doc (`shouldPullDoc`), so reads of
+   * genuinely absent optional values do not become repeated server queries.
+   * Fire-and-forget, but registered as a cross-space promise so
    * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
    * it; the absent doc is a tracked read, so the reader re-runs on arrival.
    * Deduped per (space, id): the kicked sync leaves a live subscription
    * behind, so repeat kicks add nothing.
    */
-  ensureLinkedDocLoaded(link: NormalizedFullLink): void {
+  ensureLinkedDocLoaded(
+    link: NormalizedFullLink,
+    sourceSpace?: MemorySpace,
+  ): void {
     const key = `${link.space}\0${link.id}`;
     if (this.missingDocLoadKicks.has(key)) return;
+    if (
+      sourceSpace === link.space &&
+      this.storageManager.shouldPullDoc?.(
+          link.space,
+          link.id,
+          link.scope,
+        ) !== true
+    ) {
+      // Same-space target the replica already has state for (or a manager
+      // without lazy replication) — nothing to fetch.
+      return;
+    }
     this.missingDocLoadKicks.add(key);
     this.storageManager.trackUntilSettled(
       this.getCellFromLink(link).sync().catch(() => {
