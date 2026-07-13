@@ -39,4 +39,31 @@ describe("cli execution policy", () => {
       await storage.close();
     }
   });
+
+  it("treats a malformed null policy as absent", async () => {
+    const signer = await Identity.fromPassphrase(
+      "cli malformed execution policy test principal",
+    );
+    const storage = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+    });
+    try {
+      const tx = runtime.edit();
+      runtime.getCell<unknown>(
+        signer.did(),
+        `of:${signer.did()}:execution-policy`,
+        undefined,
+        tx,
+      ).set(null);
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+
+      expect(await readExecutionPolicy(runtime, signer.did())).toBe("absent");
+    } finally {
+      await runtime.dispose();
+      await storage.close();
+    }
+  });
 });

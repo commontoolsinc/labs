@@ -34,14 +34,16 @@ export async function readExecutionPolicy(
   runtime: Runtime,
   space: MemorySpace,
 ): Promise<ExecutionPolicyStatus> {
-  const cell = runtime.getCell<ExecutionPolicy | undefined>(
+  const cell = runtime.getCell<unknown>(
     space,
     policyId(space),
   );
   await cell.sync();
   const value = cell.get();
   if (
-    value === undefined || value.version !== 1 ||
+    value === null || typeof value !== "object" ||
+    !("version" in value) || value.version !== 1 ||
+    !("serverPrimaryExecution" in value) ||
     typeof value.serverPrimaryExecution !== "boolean"
   ) {
     return "absent";
