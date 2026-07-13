@@ -3218,6 +3218,83 @@ export class Server {
     return claim;
   }
 
+  /** Extend one exact live claim without minting a new authority incarnation.
+   * The executor still holds the same lease/claim generations, while the host
+   * revalidates the durable lease, sponsor, demand, policy, and WRITE authority
+   * before moving the server-authored deadline. */
+  async renewExecutionClaim(
+    lease: ExecutionLeaseHandle,
+    claim: ExecutionClaim,
+  ): Promise<ExecutionClaim | null> {
+    const now = this.#executionNowMs();
+    this.expireExecutionClaims(now);
+    const key = actionClaimMapKey(claim);
+    const live = this.#executionClaims.get(key);
+    if (
+      live === undefined ||
+      live.leaseGeneration !== claim.leaseGeneration ||
+      live.claimGeneration !== claim.claimGeneration
+    ) {
+      return null;
+    }
+    const authority = this.#executionLeaseAuthorities.get(lease);
+    const owned = this.#ownedExecutionLeases.get(
+      executionLeaseKey(claim.space, claim.branch),
+    );
+    if (
+      authority === undefined || authority !== owned ||
+      authority.drainRequested
+    ) {
+      this.revokeExecutionClaim(live);
+      return null;
+    }
+    const engine = await this.openEngine(claim.space);
+    if (!this.#reconcileExecutionPolicy(engine, claim.space)) {
+      this.revokeExecutionClaim(live);
+      return null;
+    }
+    const current = Engine.currentExecutionLease(engine, {
+      space: claim.space,
+      branch: claim.branch,
+      nowMs: now,
+    });
+    const sponsor = this.#sessions.get(
+      claim.space,
+      authority.sponsorSessionId,
+    );
+    const demand = this.#executionDemands.get(executionDemandKey(
+      authority.sponsorConnectionId,
+      claim.space,
+      authority.sponsorSessionId,
+      claim.branch,
+    ));
+    if (
+      current === null || current.state !== "active" ||
+      !this.#sameExecutionLease(current, lease) || sponsor === null ||
+      sponsor.sessionToken !== authority.sponsorSessionToken ||
+      demand === undefined || demand.principal !== current.onBehalfOf ||
+      !this.#executionSponsorCanWrite(engine, demand, sponsor)
+    ) {
+      this.revokeExecutionClaim(live);
+      return null;
+    }
+    const ttlMs = this.options.executionControl?.claimTtlMs ?? 30_000;
+    if (!isPositiveSafeInteger(ttlMs)) {
+      throw new TypeError("execution claim ttl must be a positive integer");
+    }
+    const renewed: ExecutionClaim = Object.freeze({
+      ...live,
+      expiresAt: Math.min(now + ttlMs, current.expiresAt),
+    });
+    if (renewed.expiresAt <= now) {
+      this.revokeExecutionClaim(live);
+      return null;
+    }
+    this.#executionClaims.set(key, renewed);
+    this.#scheduleExecutionClaimExpiry();
+    return renewed;
+  }
+
   revokeExecutionClaim(claim: ExecutionClaim): boolean {
     this.expireExecutionClaims();
     const key = actionClaimMapKey(claim);

@@ -1,5 +1,6 @@
 import {
   ActionClaimKey,
+  actionClaimMapKey,
   ExecutionClaim,
   type WireMemoryProtocolFlags,
   wireMemoryProtocolFlags,
@@ -61,6 +62,10 @@ export interface DenoSpaceExecutorFactoryOptions {
     request: AuthorizedServerBuiltinRequest,
     context: ServerBuiltinBrokerContext,
   ) => void | Promise<void>;
+  /** Claim-deadline seams keep renewal tests deterministic. */
+  now?: () => number;
+  setTimer?: (callback: () => void, delayMs: number) => number;
+  clearTimer?: (timer: number) => void;
 }
 
 export interface CandidateClaim {
@@ -208,16 +213,7 @@ const isExecutionClaim = (value: unknown): value is ExecutionClaim => {
 };
 
 const candidateKey = (candidate: CandidateClaim): string =>
-  JSON.stringify({
-    branch: candidate.claimKey.branch,
-    space: candidate.claimKey.space,
-    contextKey: candidate.claimKey.contextKey,
-    pieceId: candidate.claimKey.pieceId,
-    actionId: candidate.claimKey.actionId,
-    actionKind: candidate.claimKey.actionKind,
-    implementationFingerprint: candidate.claimKey.implementationFingerprint,
-    runtimeFingerprint: candidate.claimKey.runtimeFingerprint,
-  });
+  actionClaimMapKey(candidate.claimKey);
 
 class DenoSpaceExecutor implements SpaceExecutor {
   readonly #worker: ExecutorWorkerLike;
@@ -233,7 +229,11 @@ class DenoSpaceExecutor implements SpaceExecutor {
   ) => void;
   readonly #onWriterDiscovery?: (discovery: ExecutorWriterDiscovery) => void;
   readonly #claims = new Map<string, ExecutionClaim>();
+  readonly #claimRenewalTimers = new Map<string, number>();
   readonly #demandedPieces: Set<string>;
+  readonly #now: () => number;
+  readonly #setTimer: (callback: () => void, delayMs: number) => number;
+  readonly #clearTimer: (timer: number) => void;
   readonly #pending = new Map<
     number,
     PromiseWithResolvers<WorkerResponse>
@@ -263,12 +263,18 @@ class DenoSpaceExecutor implements SpaceExecutor {
         context: ServerBuiltinBrokerContext,
       ) => void | Promise<void>;
       servingOrigin: URL;
+      now: () => number;
+      setTimer: (callback: () => void, delayMs: number) => number;
+      clearTimer: (timer: number) => void;
     },
   ) {
     this.#worker = worker;
     this.#provider = provider;
     this.#startOptions = startOptions;
     this.#demandedPieces = new Set(startOptions.pieces);
+    this.#now = control.now;
+    this.#setTimer = control.setTimer;
+    this.#clearTimer = control.clearTimer;
     this.#server = control.server;
     this.#protocolFlags = control.protocolFlags ?? {};
     this.#onCandidateClaim = control.onCandidateClaim;
@@ -470,6 +476,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
       return;
     }
     this.#claims.set(mapKey, claim);
+    this.#scheduleClaimRenewal(claim);
     this.#worker.postMessage({
       type: "run-claimed-action",
       claim,
@@ -495,7 +502,53 @@ class DenoSpaceExecutor implements SpaceExecutor {
     }
     this.#revokeClaim(live);
     this.#claims.delete(mapKey);
+    this.#cancelClaimRenewal(mapKey);
     this.#onCandidateDiagnostic?.({ claim: live, diagnosticCode });
+  }
+
+  #scheduleClaimRenewal(claim: ExecutionClaim): void {
+    const key = candidateKey({ claimKey: claim });
+    this.#cancelClaimRenewal(key);
+    const remaining = Math.max(1, claim.expiresAt - this.#now());
+    const timer = this.#setTimer(() => {
+      this.#claimRenewalTimers.delete(key);
+      if (this.#stopped || this.#failed) return;
+      const renew = () => this.#renewClaim(claim);
+      this.#claimControl = this.#claimControl.then(renew, renew).catch((
+        error,
+      ) => this.#fail(error));
+    }, Math.max(1, Math.floor(remaining / 2)));
+    this.#claimRenewalTimers.set(key, timer);
+  }
+
+  async #renewClaim(expected: ExecutionClaim): Promise<void> {
+    const key = candidateKey({ claimKey: expected });
+    const live = this.#claims.get(key);
+    if (
+      live === undefined || live.leaseGeneration !== expected.leaseGeneration ||
+      live.claimGeneration !== expected.claimGeneration || this.#stopped ||
+      this.#failed
+    ) return;
+    const renewed = await this.#server.renewExecutionClaim(
+      this.#startOptions.lease,
+      live,
+    );
+    if (renewed === null) {
+      throw new Error("executor claim renewal lost authority");
+    }
+    if (this.#stopped || this.#failed) {
+      this.#revokeClaim(renewed);
+      return;
+    }
+    this.#claims.set(key, renewed);
+    this.#scheduleClaimRenewal(renewed);
+  }
+
+  #cancelClaimRenewal(key: string): void {
+    const timer = this.#claimRenewalTimers.get(key);
+    if (timer === undefined) return;
+    this.#clearTimer(timer);
+    this.#claimRenewalTimers.delete(key);
   }
 
   #isClaimLive(claim: ExecutionClaim): boolean {
@@ -540,6 +593,10 @@ class DenoSpaceExecutor implements SpaceExecutor {
   }
 
   #revokeClaims(): void {
+    for (const timer of this.#claimRenewalTimers.values()) {
+      this.#clearTimer(timer);
+    }
+    this.#claimRenewalTimers.clear();
     for (const claim of this.#claims.values()) {
       this.#revokeClaim(claim);
     }
@@ -628,6 +685,13 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
       authorizeBuiltinRequest: this.options.authorizeBuiltinRequest ??
         authorizeDefaultServerBuiltinRequest,
       servingOrigin: this.options.patternApiUrl ?? this.options.apiUrl,
+      now: this.options.now ?? Date.now,
+      setTimer: this.options.setTimer ??
+        ((callback, delayMs) =>
+          setTimeout(callback, delayMs) as unknown as number),
+      clearTimer: this.options.clearTimer ??
+        ((timer) =>
+          clearTimeout(timer as unknown as ReturnType<typeof setTimeout>)),
     });
     try {
       await executor.initialize({

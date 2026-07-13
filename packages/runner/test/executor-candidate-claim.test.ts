@@ -177,6 +177,7 @@ class ClaimRecordingServer {
     claimKey: ActionClaimKey;
   }[] = [];
   readonly revoked: ExecutionClaim[] = [];
+  readonly renewRequests: ExecutionClaim[] = [];
 
   setExecutionClaim(
     lease: ExecutionLeaseHandle,
@@ -190,6 +191,14 @@ class ClaimRecordingServer {
     this.revoked.push(claim);
     return true;
   }
+
+  renewExecutionClaim(
+    _lease: ExecutionLeaseHandle,
+    claim: ExecutionClaim,
+  ): Promise<ExecutionClaim> {
+    this.renewRequests.push(claim);
+    return Promise.resolve({ ...claim, expiresAt: claim.expiresAt + 80_000 });
+  }
 }
 
 const flushClaimControl = async (): Promise<void> => {
@@ -201,6 +210,11 @@ const startExecutor = async (options: {
   onCandidateClaim?: (candidate: CandidateClaim) => void;
   onCandidateDiagnostic?: (diagnostic: CandidateDiagnostic) => void;
   onWriterDiscovery?: (discovery: WriterDiscovery) => void;
+  claimTimers?: {
+    now: () => number;
+    setTimer: (callback: () => void, delayMs: number) => number;
+    clearTimer: (timer: number) => void;
+  };
 }) => {
   const worker = new FakeWorker();
   const server = new ClaimRecordingServer();
@@ -216,6 +230,7 @@ const startExecutor = async (options: {
     onCandidateClaim: options.onCandidateClaim,
     onCandidateDiagnostic: options.onCandidateDiagnostic,
     onWriterDiscovery: options.onWriterDiscovery,
+    ...options.claimTimers,
     createWorker: () => {
       queueMicrotask(() => worker.boot());
       return worker;
@@ -324,6 +339,45 @@ Deno.test("demand shrink revokes stale claims so re-added roots can reclaim", as
     await flushClaimControl();
     assertEquals(server.claimRequests.length, 2);
     assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("live executor claims renew before their server-authored deadline", async () => {
+  let nextTimer = 0;
+  const timers = new Map<
+    number,
+    { callback: () => void; delayMs: number }
+  >();
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    claimTimers: {
+      now: () => 0,
+      setTimer(callback, delayMs) {
+        const timer = ++nextTimer;
+        timers.set(timer, { callback, delayMs });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        timers.delete(timer);
+      },
+    },
+  });
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+    assertEquals([...timers.values()].map((timer) => timer.delayMs), [40_000]);
+
+    const renewal = [...timers.values()][0]!;
+    timers.clear();
+    renewal.callback();
+    await flushClaimControl();
+
+    assertEquals(server.renewRequests, [CLAIM]);
+    assertEquals(server.revoked, []);
+    assertEquals(crashes, []);
+    assertEquals(timers.size, 1);
   } finally {
     await executor.stop();
   }

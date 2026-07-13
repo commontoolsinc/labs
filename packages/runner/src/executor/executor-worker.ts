@@ -3,6 +3,7 @@
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
   type ActionClaimKey,
+  actionClaimMapKey,
   type BranchName,
   canonicalSchedulerPieceIdForDemandRoot,
   type ExecutionClaim,
@@ -83,17 +84,7 @@ const enqueue = (operation: () => Promise<void>): Promise<void> => {
 const normalizePieceId = (pieceId: string): string =>
   pieceId.startsWith("of:") ? pieceId.slice(3) : pieceId;
 
-const claimKey = (claim: ActionClaimKey): string =>
-  JSON.stringify({
-    branch: claim.branch,
-    space: claim.space,
-    contextKey: claim.contextKey,
-    pieceId: claim.pieceId,
-    actionId: claim.actionId,
-    actionKind: claim.actionKind,
-    implementationFingerprint: claim.implementationFingerprint,
-    runtimeFingerprint: claim.runtimeFingerprint,
-  });
+const claimKey = (claim: ActionClaimKey): string => actionClaimMapKey(claim);
 
 const invalidatesExecutorClaim = (error: unknown): boolean => {
   const named = error as { name?: string } | undefined | null;

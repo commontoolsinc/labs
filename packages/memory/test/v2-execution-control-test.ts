@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertRejects,
+  assertThrows,
+} from "@std/assert";
 import { toFileUrl } from "@std/path";
 import * as MemoryClient from "../v2/client.ts";
 import * as Engine from "../v2/engine.ts";
@@ -118,6 +123,10 @@ type ExecutionServer = Server & {
     lease: ExecutionLeaseHandle,
     claim: ActionClaimKey,
   ): Promise<ExecutionClaim>;
+  renewExecutionClaim(
+    lease: ExecutionLeaseHandle,
+    claim: ExecutionClaim,
+  ): Promise<ExecutionClaim | null>;
   revokeExecutionClaim(claim: ExecutionClaim): boolean;
   hasLiveExecutionClaim(claim: ExecutionClaim): boolean;
   publishActionSettlement(settlement: ActionSettlement): boolean;
@@ -929,6 +938,51 @@ Deno.test("claim expiry timer revokes clients and rejects stale settlement", asy
       events.filter((event) => event.type === "session.execution.claim.revoke")
         .length,
       1,
+    );
+  } finally {
+    unsubscribe();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("live executors renew an exact claim without changing its incarnation", async () => {
+  let nowMs = 1_000;
+  const server = createControlServer("memory-v2-execution-claim-renewal", {
+    executionControl: { claimTtlMs: 10, nowMs: () => nowMs },
+  });
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const events: ExecutionControlEvent[] = [];
+  const unsubscribe = session.subscribeExecutionControl((event) => {
+    events.push(event);
+  });
+  try {
+    await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, ""),
+    );
+    assertEquals(claim.expiresAt, 1_010);
+
+    nowMs = 1_005;
+    const renewed = await server.renewExecutionClaim(lease, claim);
+    assertExists(renewed);
+    assertEquals(renewed.claimGeneration, claim.claimGeneration);
+    assertEquals(renewed.leaseGeneration, claim.leaseGeneration);
+    assertEquals(renewed.expiresAt, 1_015);
+    assertEquals(server.listExecutionClaims(POLICY_SPACE), [renewed]);
+    assertEquals(server.expireExecutionClaims(1_010), 0);
+    assertEquals(
+      events.filter((event) => event.type === "session.execution.claim.set")
+        .length,
+      1,
+    );
+    assertEquals(
+      events.filter((event) => event.type === "session.execution.claim.revoke")
+        .length,
+      0,
     );
   } finally {
     unsubscribe();
