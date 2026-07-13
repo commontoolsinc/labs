@@ -344,10 +344,24 @@ function helperGuardEntryAtCallSite(
     );
     if (binding === undefined) continue;
 
+    const reportUnstableCallerPath = (): void => {
+      context.reportDiagnosticOnce({
+        type: "availability:unobserved-compute-guard",
+        message:
+          "An availability guard reached through a helper requires a stable caller capture path. Hoist dynamically selected values outside computed(), then pass the stable alias to the helper.",
+        node: call,
+      });
+    };
     const capture = parseAvailabilityCaptureExpression(argument);
-    if (!capture) return undefined;
+    if (!capture) {
+      reportUnstableCallerPath();
+      return undefined;
+    }
     const relativePath = applyBindingPath(binding, rest);
-    if (!relativePath) return undefined;
+    if (!relativePath) {
+      reportUnstableCallerPath();
+      return undefined;
+    }
     let relativeType = getTypeAtLocationWithFallback(
       argument,
       context.checker,

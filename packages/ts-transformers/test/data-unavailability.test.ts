@@ -108,6 +108,36 @@ Deno.test("a visible AsyncResult guard inside computed needs no observation cast
   assertEquals(output.includes("observeAvailability"), false);
 });
 
+Deno.test("reports a helper guard whose caller path cannot be represented", async () => {
+  const { diagnostics } = await validateSource(
+    `
+    import { AsyncResult, computed, hasError, pattern } from "commonfabric";
+
+    type Repo = { name: string };
+
+    function failed(request: AsyncResult<Repo>) {
+      return hasError(request);
+    }
+
+    export default pattern((input: {
+      requests: AsyncResult<Repo>[];
+      index: number;
+    }) => {
+      const result = computed(() => failed(input.requests[input.index]));
+      return { result };
+    });
+  `,
+    { types: { "commonfabric.d.ts": commonfabricTypes } },
+  );
+
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:unobserved-compute-guard",
+    ),
+    true,
+  );
+});
+
 Deno.test("a guard only accepts the availability variant it probes", async () => {
   const { diagnostics } = await validateSource(
     `
