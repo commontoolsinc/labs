@@ -13,7 +13,8 @@ import {
 } from "./support/trusted-builder.ts";
 import { type Cell, createCell } from "../src/cell.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
-import { type FactoryInput } from "../src/builder/types.ts";
+import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
+import { getCellOrThrow } from "../src/query-result-proxy.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -70,6 +71,39 @@ Deno.test("Cell.key keeps base scope; schema carries the scope", async () => {
       (cell.key("selectedRoom").getAsNormalizedFullLink().schema as any)?.scope,
       "session",
     );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern invocation makes unevaluated item schemas scope-silent", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+
+  try {
+    const { pattern } = createTrustedBuilder(runtime).commonfabric;
+    const resultSchema = {
+      type: "array",
+      unevaluatedItems: { type: "object", scope: "user" },
+    } as unknown as JSONSchema;
+    const Child = pattern(() => [], true, resultSchema);
+
+    pattern(() => {
+      const child = Child({});
+      const schema = getCellOrThrow(child).export().schema as Record<
+        string,
+        unknown
+      >;
+      assertEquals(
+        (schema.unevaluatedItems as Record<string, unknown>).scope,
+        undefined,
+      );
+      return {};
+    });
   } finally {
     await runtime.dispose();
     await storageManager.close();

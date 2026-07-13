@@ -140,6 +140,7 @@ function scopeSilentResultViewSchema(schema: JSONSchema): JSONSchema {
   const schemaValues = [
     "additionalProperties",
     "unevaluatedProperties",
+    "unevaluatedItems",
     "propertyNames",
     "items",
     "contains",
