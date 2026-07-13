@@ -544,10 +544,11 @@ function rescheduleActionWhenReady(
       ) {
         return;
       }
-      if (
-        args.error.keepDependenciesWhileWaiting &&
-        args.invalidCauses !== undefined && args.invalidCauses.length > 0
-      ) {
+      if (args.invalidCauses !== undefined && args.invalidCauses.length > 0) {
+        // Ordinary dependency retention controls whether input changes wake a
+        // parked action early. CFC invalidation provenance is independent:
+        // this retry still exists because those inputs scheduled the aborted
+        // run, so its eventual transaction must join their labels either way.
         const record = state.nodes.get(args.action);
         if (record) {
           restoreInvalidCauses(

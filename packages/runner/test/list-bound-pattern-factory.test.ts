@@ -308,6 +308,56 @@ describe("bound PatternFactory list operations", () => {
     ).toMatchObject(rowIdentity);
   });
 
+  it("rebinds a mapped element when an intermediate redirect retargets", async () => {
+    const first = runtime.getCell<number>(
+      space,
+      "bound list redirect first",
+      { type: "number" },
+      tx,
+    );
+    first.set(1);
+    const second = runtime.getCell<number>(
+      space,
+      "bound list redirect second",
+      { type: "number" },
+      tx,
+    );
+    second.set(5);
+    const redirect = runtime.getCell<unknown>(
+      space,
+      "bound list redirect",
+      { type: "number" },
+      tx,
+    );
+    redirect.setRaw(first.getAsWriteRedirectLink());
+
+    const mapNode = createNodeFactory({ type: "ref", implementation: "map" });
+    const outer = commonfabric.pattern(
+      (({ values }: any) => ({
+        mapped: mapNode({ list: values, op: boundMapOp() }),
+      })) as any,
+      OUTER_ARGUMENT_SCHEMA,
+    );
+    const resultCell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "bound list redirect result",
+      outer.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, outer, { values: [redirect] }, resultCell);
+    await commitAndRenew();
+
+    expect(await within(result.key("mapped").pull(), "initial redirect map"))
+      .toEqual([11]);
+
+    redirect.withTx(tx).setRaw(second.withTx(tx).getAsWriteRedirectLink());
+    await commitAndRenew();
+    await runtime.idle();
+
+    expect(await within(result.key("mapped").pull(), "retargeted redirect map"))
+      .toEqual([51]);
+  });
+
   it("does not rerun the list coordinator when captured values update", async () => {
     const factor = runtime.getCell<number>(
       space,

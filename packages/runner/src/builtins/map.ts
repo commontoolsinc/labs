@@ -132,7 +132,11 @@ export function map(
               .withTx(settleTx).getRaw();
             if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
               settleTx.runWithAmbientReadMeta(
-                { ...linkResolutionProbe, ...machineryRead },
+                {
+                  ...ignoreReadForScheduling,
+                  ...linkResolutionProbe,
+                  ...machineryRead,
+                },
                 () =>
                   result!.asSchema(RESULT_PRESENCE_SCHEMA).withTx(settleTx).set(
                     [],
@@ -205,14 +209,31 @@ export function map(
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
         const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
+        const dereferenceSources: NormalizedFullLink[] = [];
         const resolved = tx.runWithAmbientReadMeta(
           {
             ...ignoreReadForScheduling,
             ...linkResolutionProbe,
             ...machineryRead,
           },
-          () => resolveLink(runtime, tx, slotLink, "value"),
+          () =>
+            resolveLink(runtime, tx, slotLink, "value", {
+              onDereferenceSource: (source) => {
+                dereferenceSources.push(source);
+              },
+            }),
         );
+        // Resolution probes at the terminal element must not make the list
+        // coordinator depend on element content. Actual pointer hops are
+        // different: if an intermediate redirect retargets, this coordinator
+        // must rebind the row. Replay just those hop-source reads outside the
+        // non-scheduling resolver scope, retaining their followRef/CFC class.
+        for (const source of dereferenceSources) {
+          tx.runWithAmbientReadMeta(
+            { ...linkResolutionProbe, ...machineryRead },
+            () => tx.readValueOrThrow(source),
+          );
+        }
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
     const selection = factorySupervisor.materialize(
@@ -280,7 +301,11 @@ export function map(
     // plumbing containers now that the generic mint route is on (SC-8).
     const probeScoped = <T>(fn: () => T): T =>
       tx.runWithAmbientReadMeta(
-        { ...linkResolutionProbe, ...machineryRead },
+        {
+          ...ignoreReadForScheduling,
+          ...linkResolutionProbe,
+          ...machineryRead,
+        },
         fn,
       );
     // Resume against confirmed state, not the not-yet-loaded value: on the
@@ -432,18 +457,22 @@ export function map(
         const staleFactoryGeneration = factoryGeneration !== undefined &&
           existing.runGeneration !== factoryGeneration;
         if (staleFactoryGeneration || existing.lastIndex !== i) {
-          runtime.runner.run(
-            tx,
-            opPattern,
-            createRunInput(list[i], i),
-            existing.resultCell,
-            {
-              doNotUpdateOnPatternChange: true,
-              awaitSyncBeforeInitialRun: elementAwaitSync,
-              ...(factorySelectionLink === undefined
-                ? {}
-                : { factorySelectionLink }),
-            },
+          tx.runWithAmbientReadMeta(
+            { ...ignoreReadForScheduling, ...machineryRead },
+            () =>
+              runtime.runner.run(
+                tx,
+                opPattern,
+                createRunInput(list[i], i),
+                existing.resultCell,
+                {
+                  doNotUpdateOnPatternChange: true,
+                  awaitSyncBeforeInitialRun: elementAwaitSync,
+                  ...(factorySelectionLink === undefined
+                    ? {}
+                    : { factorySelectionLink }),
+                },
+              ),
           );
           existing.runGeneration = factoryGeneration;
         }
@@ -456,18 +485,22 @@ export function map(
           undefined,
           tx,
         );
-        runtime.runner.run(
-          tx,
-          opPattern,
-          createRunInput(list[i], i),
-          resultCell,
-          {
-            doNotUpdateOnPatternChange: true,
-            awaitSyncBeforeInitialRun: elementAwaitSync,
-            ...(factorySelectionLink === undefined
-              ? {}
-              : { factorySelectionLink }),
-          },
+        tx.runWithAmbientReadMeta(
+          { ...ignoreReadForScheduling, ...machineryRead },
+          () =>
+            runtime.runner.run(
+              tx,
+              opPattern,
+              createRunInput(list[i], i),
+              resultCell,
+              {
+                doNotUpdateOnPatternChange: true,
+                awaitSyncBeforeInitialRun: elementAwaitSync,
+                ...(factorySelectionLink === undefined
+                  ? {}
+                  : { factorySelectionLink }),
+              },
+            ),
         );
         // Link these individual cells to the top cell
         setResultCell(resultCell, parentCell);
