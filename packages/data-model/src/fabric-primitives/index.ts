@@ -11,9 +11,12 @@ export {
   type EntityKind,
   entityKindOfIdString,
   getComputedCellIdsConfig,
+  getComputedDropPolicyConfig,
   isEntityKind,
   resetComputedCellIdsConfig,
+  resetComputedDropPolicyConfig,
   setComputedCellIdsConfig,
+  setComputedDropPolicyConfig,
   uriSchemeForEntityKind,
 } from "./entity-kind.ts";
 export { FabricBytes } from "./FabricBytes.ts";

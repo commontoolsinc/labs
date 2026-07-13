@@ -21,8 +21,11 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import {
   getComputedCellIdsConfig,
+  getComputedDropPolicyConfig,
   resetComputedCellIdsConfig,
+  resetComputedDropPolicyConfig,
   setComputedCellIdsConfig,
+  setComputedDropPolicyConfig,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   getCommitPreconditionsConfig,
@@ -222,12 +225,23 @@ export interface ExperimentalOptions {
   /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
   commitPreconditions?: boolean | undefined;
   /**
-   * Mint kind-tagged entity ids (`fid2:computed:`) for internal cells the
-   * builder proves are written only by compute nodes. Gates minting only;
-   * readers accept both forms unconditionally. See
+   * Mint kind-schemed entity ids (`computed:fid1:<hash>`) for internal cells
+   * the builder proves are written only by replayable nodes. Gates minting
+   * only; readers accept both forms unconditionally, and conflict semantics
+   * are unchanged unless `computedDropPolicy` is ALSO on. See
    * `docs/specs/computed-cell-identity.md`.
    */
   computedCellIds?: boolean | undefined;
+  /**
+   * Enable the memory server's relaxed conflict policy for computed-kind
+   * entities: stale all-computed commits are acknowledged and dropped
+   * instead of rejected. Server-side dial — it only has effect in the
+   * process running the memory v2 engine (toolshed, or in-process
+   * emulate/loopback storage). Independent of `computedCellIds` so id
+   * tagging can be exercised with fully strict commit semantics. See
+   * `docs/specs/computed-cell-identity.md`.
+   */
+  computedDropPolicy?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
@@ -831,6 +845,7 @@ export class Runtime {
       persistentSchedulerState: undefined,
       commitPreconditions: undefined,
       computedCellIds: undefined,
+      computedDropPolicy: undefined,
       eagerSourceAnnotation: undefined,
       ...options.experimental,
     };
@@ -861,6 +876,8 @@ export class Runtime {
     this.experimental.commitPreconditions = getCommitPreconditionsConfig();
     setComputedCellIdsConfig(this.experimental.computedCellIds);
     this.experimental.computedCellIds = getComputedCellIdsConfig();
+    setComputedDropPolicyConfig(this.experimental.computedDropPolicy);
+    this.experimental.computedDropPolicy = getComputedDropPolicyConfig();
     // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
     // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
     // directly around runtime construction), and an unconditional
@@ -1152,6 +1169,7 @@ export class Runtime {
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetComputedCellIdsConfig();
+    resetComputedDropPolicyConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

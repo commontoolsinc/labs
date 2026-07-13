@@ -1,5 +1,9 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
+import {
+  entityKindOfIdString,
+  getComputedDropPolicyConfig,
+} from "@commonfabric/data-model/fabric-primitives";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatch,
@@ -775,6 +779,17 @@ export interface AppliedCommit {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
+  /**
+   * Set when the commit was acknowledged-as-committed but its operations were
+   * DROPPED under the computed-cell conflict policy: every semantic operation
+   * targeted a computed-kind entity (`computed:fid1:` id) and the commit's
+   * reads were stale, so reactivity guarantees the writer recomputes from the
+   * newer inputs — no rejection, no retry, no revisions. The commit still
+   * consumes its localSeq and satisfies dependent pending reads and
+   * origin-committed preconditions. See
+   * `docs/specs/computed-cell-identity.md`.
+   */
+  droppedComputed?: CommitReadDropReason;
   schedulerObservationId?: number;
   schedulerObservationResults?: AppliedSchedulerObservationResult[];
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
@@ -3159,10 +3174,15 @@ const applyCommitTransaction = (
         `commit replay mismatch for session ${sessionId} localSeq ${commit.localSeq}`,
       );
     }
+    const storedResolution = decodeMemoryBoundary(
+      existing.resolution,
+    ) as { droppedComputed?: CommitReadDropReason } | undefined;
     return {
       seq: existing.seq,
       branch: existing.branch,
       revisions: selectCommitRevisions(engine, existing.seq),
+      ...(storedResolution?.droppedComputed !== undefined &&
+        { droppedComputed: storedResolution.droppedComputed }),
     };
   }
 
@@ -3195,6 +3215,30 @@ const applyCommitTransaction = (
       localSeq: commit.localSeq,
       reads: commit.reads,
       schedulerObservation,
+    });
+  }
+
+  // Computed-cell conflict policy (docs/specs/computed-cell-identity.md): a
+  // commit whose semantic operations ALL target computed-kind entities is
+  // acknowledged-as-committed but DROPPED when its reads are stale, instead
+  // of rejected. The values are re-derivable — the writer's own scheduler
+  // recomputes from the newer inputs once they sync down — so rejection would
+  // only buy retry churn. The dropped commit still consumes its localSeq and
+  // (via its commit row) satisfies dependent pending reads and
+  // origin-committed preconditions, exactly like an applied commit.
+  const computedDropReason = commitComputedDropReason(engine, {
+    sessionKey,
+    sessionId,
+    principal,
+    branch,
+    commit,
+  });
+  if (computedDropReason !== undefined) {
+    return applyDroppedComputedCommit(engine, {
+      sessionKey,
+      branch,
+      commit,
+      reason: computedDropReason,
     });
   }
 
@@ -3786,6 +3830,118 @@ const schedulerObservationReadDropReason = (
   }
 
   return undefined;
+};
+
+/**
+ * The computed-cell drop policy's gate: returns a drop reason iff the
+ * `computedDropPolicy` flag is on, the commit carries at least one semantic
+ * operation, EVERY semantic operation targets a computed-kind entity
+ * (`computed:fid1:` id), and the commit's reads are stale. Any non-computed
+ * or sqlite operation disqualifies the whole commit — mixed commits keep
+ * strict all-or-nothing conflict semantics, preserving atomicity. Unknown
+ * URI schemes parse as no-kind and therefore stay strict.
+ *
+ * The flag check makes the drop policy independently gated from id MINTING
+ * (`computedCellIds`): with minting on and this flag off, `computed:` ids
+ * flow through the system but every commit keeps strict conflict semantics —
+ * classification and tagging can be exercised without relaxed commits.
+ *
+ * Cost note: an all-computed commit with current reads validates its reads
+ * here AND in the throwing validators afterwards. Correctness first; the two
+ * checks share `findConflictSeq`, so a divergence bug is not possible.
+ */
+const commitComputedDropReason = (
+  engine: Engine,
+  {
+    sessionKey,
+    sessionId,
+    principal,
+    branch,
+    commit,
+  }: {
+    sessionKey: string;
+    sessionId: SessionId;
+    principal: string | undefined;
+    branch: BranchName;
+    commit: ClientCommit;
+  },
+): CommitReadDropReason | undefined => {
+  if (!getComputedDropPolicyConfig()) return undefined;
+  const { operations } = commit;
+  if (operations.length === 0) return undefined;
+  const allComputed = operations.every((operation) =>
+    operation.op !== "sqlite" &&
+    entityKindOfIdString(operation.id) === "computed"
+  );
+  if (!allComputed) return undefined;
+  return schedulerObservationReadDropReason(engine, {
+    sessionKey,
+    sessionId,
+    principal,
+    branch,
+    reads: commit.reads,
+  });
+};
+
+/**
+ * Acknowledge-and-drop an all-computed stale commit. Inserts a real commit
+ * row with ZERO revisions: replay dedupe (`selectExistingCommit`), dependent
+ * pending reads, and origin-committed preconditions (`selectPendingResolution`)
+ * all key on `(session_id, local_seq)`, so the row makes a dropped commit
+ * indistinguishable from an applied one for every bookkeeping purpose — the
+ * spec's invariant. No revisions, no snapshot materialization, no scheduler
+ * dirty-marking: nothing changed. A `schedulerObservation` riding on the
+ * commit is deliberately NOT persisted — its reads are the same stale reads,
+ * and persistent-scheduler-state semantics drop stale observations, leaving
+ * the prior snapshot and dirty state untouched.
+ */
+const applyDroppedComputedCommit = (
+  engine: Engine,
+  {
+    sessionKey,
+    branch,
+    commit,
+    reason,
+  }: {
+    sessionKey: string;
+    branch: BranchName;
+    commit: ClientCommit;
+    reason: CommitReadDropReason;
+  },
+): AppliedCommit => {
+  const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
+  const invocationRef = engine.legacyCommitMetadataRefsRequired
+    ? LEGACY_EMPTY_INVOCATION_REF
+    : null;
+  const authorizationRef = engine.legacyCommitMetadataRefsRequired
+    ? LEGACY_EMPTY_AUTHORIZATION_REF
+    : null;
+  if (engine.legacyCommitMetadataRefsRequired) {
+    engine.statements.insertAuthorization.run({
+      ref: LEGACY_EMPTY_AUTHORIZATION_REF,
+      authorization: encodeMemoryBoundary(LEGACY_EMPTY_AUTHORIZATION),
+    });
+    engine.statements.insertInvocation.run({
+      ref: LEGACY_EMPTY_INVOCATION_REF,
+      iss: LEGACY_EMPTY_INVOCATION.iss,
+      aud: LEGACY_EMPTY_INVOCATION.aud ?? null,
+      cmd: LEGACY_EMPTY_INVOCATION.cmd,
+      sub: LEGACY_EMPTY_INVOCATION.sub,
+      invocation: encodeMemoryBoundary(LEGACY_EMPTY_INVOCATION),
+    });
+  }
+  engine.statements.insertCommit.run({
+    seq,
+    branch,
+    session_id: sessionKey,
+    local_seq: commit.localSeq,
+    invocation_ref: invocationRef,
+    authorization_ref: authorizationRef,
+    original: encodeMemoryBoundary(commit),
+    resolution: encodeMemoryBoundary({ seq, droppedComputed: reason }),
+  });
+  engine.statements.updateBranchHead.run({ branch, seq });
+  return { seq, branch, revisions: [], droppedComputed: reason };
 };
 
 const replayedSchedulerObservationResult = (

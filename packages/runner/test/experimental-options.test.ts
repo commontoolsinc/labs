@@ -9,7 +9,9 @@ import {
 } from "@commonfabric/data-model/cell-rep";
 import {
   getComputedCellIdsConfig,
+  getComputedDropPolicyConfig,
   resetComputedCellIdsConfig,
+  resetComputedDropPolicyConfig,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   getCommitPreconditionsConfig,
@@ -31,6 +33,7 @@ describe("ExperimentalOptions", () => {
     resetCommitPreconditionsConfig();
     resetPersistentSchedulerStateConfig();
     resetComputedCellIdsConfig();
+    resetComputedDropPolicyConfig();
   });
 
   describe("Runtime construction", () => {
@@ -48,6 +51,7 @@ describe("ExperimentalOptions", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         computedCellIds: false,
+        computedDropPolicy: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -70,6 +74,7 @@ describe("ExperimentalOptions", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         computedCellIds: false,
+        computedDropPolicy: false,
         eagerSourceAnnotation: false,
       });
       await runtime.dispose();
@@ -88,6 +93,7 @@ describe("ExperimentalOptions", () => {
         persistentSchedulerState: false,
         commitPreconditions: false,
         computedCellIds: false,
+        computedDropPolicy: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -160,6 +166,23 @@ describe("ExperimentalOptions", () => {
 
       await runtime.dispose();
       expect(getComputedCellIdsConfig()).toBe(false);
+      await sm.close();
+    });
+
+    it("constructing Runtime with computedDropPolicy sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          computedDropPolicy: true,
+        },
+      });
+
+      expect(getComputedDropPolicyConfig()).toBe(true);
+
+      await runtime.dispose();
+      expect(getComputedDropPolicyConfig()).toBe(false);
       await sm.close();
     });
 

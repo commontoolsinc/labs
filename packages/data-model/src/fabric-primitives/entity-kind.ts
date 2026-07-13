@@ -70,3 +70,26 @@ export function getComputedCellIdsConfig(): boolean {
 export function resetComputedCellIdsConfig(): void {
   computedCellIdsEnabled = false;
 }
+
+let computedDropPolicyEnabled = false;
+
+/**
+ * Ambient runtime flag gating the SERVER-SIDE conflict policy for
+ * computed-kind entities: ack-and-drop of stale all-computed commits
+ * (`commitComputedDropReason`, memory v2 engine). Deliberately separate from
+ * {@link setComputedCellIdsConfig}: minting kind-schemed ids is observable and
+ * reversible (readers accept both forms), while the drop policy changes commit
+ * semantics — so tagging can be exercised and censused with fully strict
+ * conflict handling until the policy is opted into on its own.
+ */
+export function setComputedDropPolicyConfig(enabled?: boolean): void {
+  computedDropPolicyEnabled = enabled ?? false;
+}
+
+export function getComputedDropPolicyConfig(): boolean {
+  return computedDropPolicyEnabled;
+}
+
+export function resetComputedDropPolicyConfig(): void {
+  computedDropPolicyEnabled = false;
+}

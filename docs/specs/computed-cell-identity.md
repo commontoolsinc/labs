@@ -3,22 +3,25 @@
 ## Status
 
 Phase 1 (minting) implemented behind `EXPERIMENTAL_COMPUTED_CELL_IDS`
-(default off) on this branch; redesigned in July 2026 — this document
-describes the redesigned form. Computed ids are now `computed:fid1:<hash>`:
-the kind rides the URI scheme, the `FabricHash` format tag stays `fid1`, and
-the earlier kind-in-hash-tag format is retired without back-compat readers
-(the flag never shipped, so no such ids exist). The classifier polarity
-flipped in the same redesign: internals with a writer are computed BY
-DEFAULT, with an exhaustive disqualifier list, instead of computed only
-under a narrow provable-pure rule. Phase 2 (server policy: the memory-v2
-engine acknowledges-and-drops stale all-computed commits, the storage client
+(default off); redesigned in July 2026 — this document describes the
+redesigned form. Computed ids are now `computed:fid1:<hash>`: the kind rides
+the URI scheme, the `FabricHash` format tag stays `fid1`, and the earlier
+kind-in-hash-tag format is retired without back-compat readers (the flag
+never shipped, so no such ids exist). The classifier polarity flipped in the
+same redesign: internals with a writer are computed BY DEFAULT, with an
+exhaustive disqualifier list, instead of computed only under a narrow
+provable-pure rule. Phase 2 (server policy) is implemented behind its own
+`EXPERIMENTAL_COMPUTED_DROP_POLICY` flag, in a separate PR stacked on
+minting: the memory-v2 engine acknowledges-and-drops stale all-computed
+commits — a zero-revision commit row keeps replay dedupe, dependent pending
+reads, and origin-committed preconditions working — and the storage client
 reverts the optimistic pending value on a `droppedComputed` ack instead of
-promoting it) and phase 3 (lineage verification) are SPLIT INTO THEIR OWN
-follow-up PR so minting can land and be exercised under fully strict
-conflict semantics first. Value-equality dedupe (phase 4) and the
-server-side action runner (phase 5) are not started. Derived from a design
-discussion on 2026-06-30/07-01 about avoiding needless commit conflicts when
-multiple clients recompute the same derived values; redesigned 2026-07.
+promoting it (promotion would shadow the authoritative value behind the
+monotonic seq guard). Phase 3 (lineage) is verified by engine tests in the
+same PR. Value-equality dedupe (phase 4) and the server-side action runner
+(phase 5) are not started. Derived from a design discussion on
+2026-06-30/07-01 about avoiding needless commit conflicts when multiple
+clients recompute the same derived values; redesigned 2026-07.
 
 ## Summary
 
@@ -333,9 +336,19 @@ output was never a supported contract.
 
 ### Server conflict policy
 
-At commit-apply time the engine classifies each semantic operation by
-parsing the kind from its entity id string (`entityKindOfIdString`; unknown
-schemes parse as no kind and stay strict). Policy:
+The policy is gated by its own flag, `computedDropPolicy`
+(`EXPERIMENTAL_COMPUTED_DROP_POLICY`), independent of the `computedCellIds`
+minting flag: minting is observable and reversible (readers accept both id
+forms), while this policy changes commit semantics. With minting on and the
+policy off, `computed:` ids flow through the system under fully strict
+conflict handling — classification and tagging can be exercised and
+censused before any write is ever dropped. The two flags graduate
+together.
+
+With the flag on, at commit-apply time the engine classifies each semantic
+operation by parsing the kind from its entity id string
+(`entityKindOfIdString`; unknown schemes parse as no kind and stay strict).
+Policy:
 
 - **All-computed commits** (every semantic operation targets a
   computed-kind entity):
@@ -479,13 +492,14 @@ this proposal onto persistent-scheduler-state:
    Gated behind `EXPERIMENTAL_COMPUTED_CELL_IDS`: the flag controls id
    creation only, and readers accept both forms unconditionally from the
    start.
-2. **Server policy, drop-on-stale** (split into its own follow-up PR).
-   Engine-side kind parse at commit-apply; ack-and-drop for all-computed
-   stale commits, with `droppedComputed` bookkeeping for inspectability,
-   reusing the persistent-scheduler-state keep/drop path. Backed out of
-   the minting branch so phase 1 can land and be exercised under fully
-   strict conflict semantics; ships gated behind its own flag.
-3. **Lineage integration** (with phase 2). `origin-committed` and
+2. **Server policy, drop-on-stale** (implemented). Engine-side kind parse
+   at commit-apply; ack-and-drop for all-computed stale commits, with
+   `droppedComputed` bookkeeping for inspectability, reusing the
+   persistent-scheduler-state keep/drop path. Gated behind its own
+   `EXPERIMENTAL_COMPUTED_DROP_POLICY` flag, split from minting so phase 1
+   can be exercised with strict conflict semantics (see Server conflict
+   policy).
+3. **Lineage integration** (verified). `origin-committed` and
    `PendingRead.localSeq` semantics against dropped commits under the
    speculation test suites.
 4. **Value-equality dedupe** for current-read computed commits, if the

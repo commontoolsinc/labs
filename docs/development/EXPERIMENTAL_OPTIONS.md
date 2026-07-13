@@ -34,6 +34,7 @@ was last checked against the code.
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
 | [`systemPatternAutoUpdateHome`](#systempatternautoupdatehome) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` env / shell build define, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#4611) | on after the home.tsx stable-addressing audit | implemented, off by default |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 (redesigned: `computed:` URI scheme) |
+| [`computedDropPolicy`](#computeddroppolicy) | `EXPERIMENTAL_COMPUTED_DROP_POLICY` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on together with `computedCellIds`, then delete both | in development on robin/feat-computed-cell-identity-p2 |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -305,7 +306,11 @@ the per-epic implementation notes).
   cells written by (or handed writable into) handlers, streams, and
   non-replayable builtins. Gates minting only; readers accept both id forms
   unconditionally, so the flag can flip either way without a migration —
-  but see the version-skew note below.
+  but see the version-skew note below. Conflict semantics are unchanged
+  unless [`computedDropPolicy`](#computeddroppolicy) is ALSO on: with just
+  this flag, tagged ids flow through the system under fully strict commit
+  handling, so classification and tagging can be exercised and censused on
+  their own.
 - **Current default and planned end state.** Off by default. Graduates to
   always-on together with the computed-cell write-conflict policy (ack-and-drop
   for stale all-computed commits), then the flag is deleted. The flag is the
@@ -313,12 +318,37 @@ the per-epic implementation notes).
   throw on such ids arriving via sync, so it must not graduate until every
   syncing client carries the readers (old servers are safe — an unknown
   scheme parses as no kind and stays strict).
+- **Status on 2026-07-12.** Phase 1 (kind-schemed minting, redesigned from
+  a retired kind-in-hash-tag format that never shipped) in development on
+  `robin/feat-computed-cell-identity-p2`. Phase 2 (ack-and-drop of stale
+  all-computed commits) lives in a separate PR behind
+  [`computedDropPolicy`](#computeddroppolicy).
+
+### `computedDropPolicy`
+
+- **Toggle via.** `EXPERIMENTAL_COMPUTED_DROP_POLICY` environment variable
+  (through the canonical env registry) or `RuntimeOptions.experimental`.
+- **Added by.** Robin McCollum, on the computed-cell-identity branch (spec:
+  `docs/specs/computed-cell-identity.md`).
+- **Purpose.** Enables the memory v2 server's relaxed conflict policy for
+  computed-kind entities: an all-computed commit with stale reads is
+  acknowledged and dropped (`commitComputedDropReason`, memory v2 engine)
+  instead of rejected. Server-side dial — it only has effect in the process
+  running the memory engine (toolshed, or in-process emulate/loopback
+  storage); a client-side setting changes nothing on a remote server.
+  Deliberately split from [`computedCellIds`](#computedcellids): minting is
+  observable and reversible, while this flag changes commit semantics, so id
+  tagging can roll out and be validated before any write is ever dropped.
+- **Current default and planned end state.** Off by default. Graduates to
+  always-on together with `computedCellIds` (the spec's phased plan), then
+  both flags are deleted. Must not graduate ahead of minting validation:
+  with the policy on, a misclassified state cell means silently dropped
+  user writes.
 - **Status on 2026-07-12.** In development on
-  `robin/feat-computed-cell-identity-p2`: phase 1 (kind-schemed minting,
-  redesigned from a retired kind-in-hash-tag format that never shipped)
-  implemented behind the flag. Phase 2 (ack-and-drop of stale all-computed
-  commits) is split into its own follow-up PR with its own flag, so this
-  branch changes no conflict semantics.
+  `robin/feat-computed-drop-policy` (stacked on the minting branch); the
+  engine path is fully implemented and tested behind the flag
+  (`packages/memory/test/v2-computed-drop-test.ts`,
+  `packages/runner/test/computed-drop-storage.test.ts`).
 
 ### `cfcEnforcementMode`
 

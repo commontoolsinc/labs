@@ -186,6 +186,7 @@ export const EXPERIMENTAL_ENV_VARS = {
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   systemPatternAutoUpdateHome: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
+  computedDropPolicy: "EXPERIMENTAL_COMPUTED_DROP_POLICY",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /**
