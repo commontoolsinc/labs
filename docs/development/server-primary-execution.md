@@ -93,18 +93,21 @@ metric labels. The current bounded-cardinality sources are:
 | `runtime.execution` logger | client/server async builtin starts by role |
 | Toolshed executor callbacks | claim candidates, unserved diagnostics, and writer discovery |
 
-When either `OTEL_DENO=true|1` or `OTEL_ENABLED=true|1` is present, every
-executor Worker bridges its isolated Runtime telemetry stream to the host OTel
-providers and enables scheduler preflight markers. Worker spans carry
+Under Deno native OTel (`OTEL_DENO=true|1` with `--unstable-otel`), every
+executor Worker bridges its isolated Runtime telemetry stream to that Worker's
+OTel providers and enables scheduler preflight markers. `OTEL_ENABLED` alone
+registers the toolshed SDK provider only in the main isolate and does not
+activate executor-Worker telemetry. Worker spans carry
 `ct.runtime=server-executor`, `space.did`, and the sponsoring `user.did`;
-metrics additionally carry the configured service and deployment environment.
-Bridge loading and attachment fail open and the bridge is detached after the
-Worker Runtime stops.
+metrics keep DIDs out and carry only the runtime plus configured service and
+deployment environment. Bridge loading, attachment, and teardown fail open,
+and the bridge is detached after the Worker Runtime stops.
 
-Each physical memory transaction has a distinct `storage.push` span joined by
-space and local sequence. An action-firewall rejection followed by a canonical
-unserved settlement therefore produces one rejected push span and one separate
-settlement push span; do not merge them when analyzing traces.
+Each normal replica commit transaction on the executor path has a distinct
+`storage.push` span joined by space and local sequence. An action-firewall
+rejection followed by a canonical unserved settlement therefore produces one
+rejected push span and one separate settlement push span; do not merge them
+when analyzing traces.
 
 The browser rollout fixture additionally consumes a bounded, piece-scoped
 routing snapshot from the runtime client. It rejects feed gaps, truncation,
