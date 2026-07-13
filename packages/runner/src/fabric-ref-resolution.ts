@@ -52,7 +52,7 @@ export async function resolveFabricRefToIdentity(
     // string as-is — stripping it to a bare hash would rename a computed ref
     // to its of: sibling.
     const patternId = `${ref.ref.scheme}:fid1:${ref.ref.hash}` as URI;
-    chain.push(`${ref.ref.scheme}:${patternId}`);
+    chain.push(`uri:${patternId}`);
     cell = runtime.getCellFromEntityId(refSpace, patternId);
     await cell.sync();
   }

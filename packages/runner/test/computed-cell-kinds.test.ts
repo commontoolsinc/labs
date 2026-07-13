@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type Frame } from "../src/builder/types.ts";
-import { byRef, handler, lift } from "../src/builder/module.ts";
+import { type Frame, type JSONSchema } from "../src/builder/types.ts";
+import {
+  byRef,
+  createNodeFactory,
+  handler,
+  lift,
+} from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { reactive } from "../src/builder/reactive.ts";
 import {
@@ -349,6 +354,253 @@ describe("computed cell kinds", () => {
       expect(testPattern.derivedInternalCells).toEqual([
         { partialCause: "doubled" },
       ]);
+    });
+  });
+
+  // Negative battery for the fail-closed fallbacks: every branch here exists
+  // because under-collection means silently dropped user writes, so each one
+  // must provably disqualify (or, for the read-only-kind check, provably
+  // spare) its roots. Hand-built modules via createNodeFactory reach the
+  // writer/input shapes the trusted builders never emit.
+  describe("fail-closed disqualifier battery", () => {
+    const mkModule = (spec: Record<string, unknown>) =>
+      createNodeFactory(spec as never);
+
+    it("raw modules disqualify as writers AND disqualify their input roots", () => {
+      const double = lift((x: number) => x * 2);
+      const rawNode = mkModule({ type: "raw", implementation: () => 0 });
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, out: rawNode({ v: doubled }) };
+      });
+      // Opaque module type: assume the worst on both sides.
+      expect(descriptorFor(testPattern, "out")?.kind).toBeUndefined();
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("effect modules disqualify as writers AND disqualify their input roots", () => {
+      const double = lift((x: number) => x * 2);
+      const effectNode = mkModule({
+        type: "javascript",
+        implementation: () => 0,
+        isEffect: true,
+      });
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, out: effectNode({ v: doubled }) };
+      });
+      expect(descriptorFor(testPattern, "out")?.kind).toBeUndefined();
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("writable-proxy modules disqualify as writers", () => {
+      const proxyNode = mkModule({
+        type: "javascript",
+        implementation: () => 0,
+        writableProxy: true,
+      });
+      const testPattern = pattern<{ x: number }>(({ x }) => ({
+        out: proxyNode({ v: x }),
+      }));
+      expect(descriptorFor(testPattern, "out")?.kind).toBeUndefined();
+    });
+
+    it("handler-wrapped modules disqualify as writers (hand-built shape)", () => {
+      // Real handlers never list outputs; the writer-side check stays for
+      // hand-built nodes exactly like this one.
+      const handlerish = mkModule({
+        type: "javascript",
+        implementation: () => 0,
+        wrapper: "handler",
+        argumentSchema: {
+          type: "object",
+          properties: { $event: true, $ctx: { type: "object" } },
+        },
+      });
+      const testPattern = pattern<{ x: number }>(({ x }) => ({
+        out: handlerish({ $ctx: { v: x } }),
+      }));
+      expect(descriptorFor(testPattern, "out")?.kind).toBeUndefined();
+    });
+
+    it("a handler argumentSchema without properties disqualifies every capture", () => {
+      const double = lift((x: number) => x * 2);
+      // Schema-carrying but shapeless: no properties map exists to prove any
+      // capture read-only, so the walk cannot run and everything bound
+      // disqualifies. Zero outputs keeps it off the writer path.
+      const shapeless = mkModule({
+        type: "javascript",
+        implementation: () => 0,
+        wrapper: "handler",
+        argumentSchema: { type: "object" },
+      });
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: shapeless({ $ctx: { t: doubled } }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("a $ref in the covering subschema fails closed", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: { target: { $ref: "#/$defs/grant" } },
+          $defs: { grant: { type: "number" } },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: doubled }) };
+      });
+      // The referenced schema is not inline — a writable grant could hide
+      // behind it, so the capture disqualifies even though this $defs target
+      // is harmless.
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("composition keywords (anyOf) in the covering subschema fail closed", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              anyOf: [{ type: "number" }, { type: "number", asCell: ["cell"] }],
+            },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: doubled }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("tuple-form items (schema arrays) fail closed", () => {
+      const toList = lift((x: number) => [x]);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: { items: [{ type: "number", asCell: ["cell"] }] },
+          },
+        } as unknown as JSONSchema,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const list = toList(x);
+        return { list, on: bump({ target: [list] }) };
+      });
+      // The walk models only single-schema items; a schema ARRAY is not a
+      // plain object and fails safe at the element step.
+      expect(descriptorFor(testPattern, "list")?.kind).toBeUndefined();
+    });
+
+    it("an array value under an object-shaped subschema fails closed", () => {
+      const toList = lift((x: number) => [x]);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "object",
+              properties: { deep: { type: "number", asCell: ["cell"] } },
+            },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const list = toList(x);
+        return { list, on: bump({ target: [list] }) };
+      });
+      // Value/schema shape mismatch (array where the schema says object, no
+      // items to align against) with a possible grant below: fail safe.
+      expect(descriptorFor(testPattern, "list")?.kind).toBeUndefined();
+    });
+
+    it("a cell bound where a DEEPER grant may exist disqualifies that root", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "object",
+              properties: { deep: { type: "number", asCell: ["cell"] } },
+            },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        // The cell itself sits at `target`; the grant is at `target.deep` —
+        // a handle obtained deeper writes INTO this root.
+        return { doubled, on: bump({ target: doubled }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("shared subtrees are walked once (seen guard) and still disqualify", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "object",
+              properties: {
+                a: {
+                  type: "object",
+                  properties: { v: { type: "number", asCell: ["cell"] } },
+                },
+                b: {
+                  type: "object",
+                  properties: { v: { type: "number", asCell: ["cell"] } },
+                },
+              },
+            },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        const shared = { v: doubled };
+        return { doubled, on: bump({ target: { a: shared, b: shared } }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("read-only asCell kinds (opaque) are provably handle-free — capture stays computed", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: { target: { type: "number", asCell: ["opaque"] } },
+        } as unknown as JSONSchema,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: doubled }) };
+      });
+      // Every asCell entry is a read-only kind: no write capability can flow
+      // through this capture, so the derivation stays computed.
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBe("computed");
     });
   });
 

@@ -186,7 +186,8 @@ function getDefaultDid(): string {
   return segments[2] ?? "";
 }
 
-function normalizeEntityId(
+/** Exported for tests; internal to the debug command surface. */
+export function normalizeEntityId(
   options?: Pick<DebugCellOptions, "did" | "id">,
 ): string {
   // Full schemed ids are canonical and pass through untouched — the scheme
