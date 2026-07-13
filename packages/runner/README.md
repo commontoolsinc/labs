@@ -36,7 +36,7 @@ const runtime = new Runtime({
   // The StorageManager constructor is protected — use the factory methods
   // (`open()` for a remote server, `emulate()` for in-process testing)
   storageManager: StorageManager.open({
-    address: new URL("https://example.com/storage"),
+    memoryHost: new URL("https://example.com/"),
     as: myIdentitySigner,
   }),
   consoleHandler: myConsoleHandler, // Optional
@@ -465,7 +465,7 @@ const signer = await Identity.fromPassphrase("my-passphrase");
 // Create storage manager (for production, use StorageManager.open() with remote storage)
 const storageManager = StorageManager.open({
   as: signer,
-  address: new URL("https://example.com/api"),
+  memoryHost: new URL("https://example.com/"),
 });
 
 // Create a runtime instance with configuration
@@ -756,17 +756,17 @@ The storage manager opens storage providers for different memory spaces. The
 StorageManager provides convenient factory methods:
 
 ```ts
-import { StorageManager } from "@commonfabric/runner/storage/cache";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("my-passphrase");
 
 // For development and testing - emulated storage
-const storageManager = StorageManager.emulate({ as: signer });
+const emulatedStorageManager = StorageManager.emulate({ as: signer });
 
 // For production - remote storage
-const storageManager = StorageManager.open({
-  address: "https://example.com/storage",
+const remoteStorageManager = StorageManager.open({
+  memoryHost: new URL("https://example.com/"),
   as: signer,
 });
 ```
@@ -776,7 +776,7 @@ default implementation of the `IStorageManager` interface:
 
 - `StorageManager.emulate({ as })` — in-process memory-v2 server (tests, local
   tooling)
-- `StorageManager.open({ address, as })` — remote memory-v2 server
+- `StorageManager.open({ memoryHost, as })` — remote memory-v2 server
 
 ## TypeScript Support
 
