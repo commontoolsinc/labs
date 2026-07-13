@@ -1,7 +1,8 @@
-import type {
+import {
   ActionClaimKey,
   ExecutionClaim,
-  WireMemoryProtocolFlags,
+  type WireMemoryProtocolFlags,
+  wireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Server } from "@commonfabric/memory/v2/server";
@@ -533,6 +534,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
 
 /** Creates the host provider before the realm so accepted commits buffer. */
 export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
+  readonly options: DenoSpaceExecutorFactoryOptions;
   readonly #createWorker: () => ExecutorWorkerLike;
   readonly #createProvider: (
     options: HostProviderChannelOptions,
@@ -541,17 +543,24 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
     context: ServerBuiltinBrokerContext,
   ) => ServerBuiltinFetchBroker;
 
-  constructor(readonly options: DenoSpaceExecutorFactoryOptions) {
-    this.#createWorker = options.createWorker ??
+  constructor(options: DenoSpaceExecutorFactoryOptions) {
+    this.options = {
+      ...options,
+      protocolFlags: options.protocolFlags ??
+        wireMemoryProtocolFlags(options.server.memoryProtocolFlags()),
+    };
+    this.#createWorker = this.options.createWorker ??
       (() =>
         new Worker(new URL("./executor-worker.ts", import.meta.url).href, {
           type: "module",
           name: "common-fabric-space-executor",
         }));
-    this.#createProvider = options.createProvider ?? createHostProviderChannel;
-    this.#createBuiltinBroker = options.createBuiltinBroker ??
+    this.#createProvider = this.options.createProvider ??
+      createHostProviderChannel;
+    this.#createBuiltinBroker = this.options.createBuiltinBroker ??
       ((context) =>
-        options.protocolFlags?.serverPrimaryExecutionBuiltinPassivityV1 === true
+        this.options.protocolFlags
+            ?.serverPrimaryExecutionBuiltinPassivityV1 === true
           ? createDefaultServerBuiltinBroker({
             servingOrigin: context.servingOrigin,
           })

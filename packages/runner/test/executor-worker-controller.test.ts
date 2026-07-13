@@ -64,6 +64,7 @@ Deno.test("Deno executor controller transfers only an opaque provider and sponso
   const factory = new DenoSpaceExecutorFactory({
     server: {} as Server,
     apiUrl: new URL("https://toolshed.example/"),
+    protocolFlags: {},
     createWorker: () => {
       queueMicrotask(() => worker.boot());
       return worker;

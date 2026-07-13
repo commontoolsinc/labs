@@ -291,7 +291,6 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
         persistentSchedulerState: true,
         serverPrimaryExecution: true,
       },
-      protocolFlags: FLAGS,
       onCandidateClaim: (candidate) =>
         events.push(`candidate:${candidate.claimKey.actionId}`),
       onCandidateDiagnostic: (diagnostic) =>
@@ -625,7 +624,6 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
         persistentSchedulerState: true,
         serverPrimaryExecution: true,
       },
-      protocolFlags: BUILTIN_FLAGS,
       createBuiltinBroker: () => ({
         fetch(request) {
           events.push(`broker:${request.url}`);
