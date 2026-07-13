@@ -21,6 +21,47 @@ export type EntityKind = "computed";
 /** The URI scheme of computed-kind entity ids (`computed:fid1:<hash>`). */
 export const COMPUTED_URI_SCHEME = "computed";
 
+/**
+ * Every entity URI scheme: `of` (the unkinded default) plus one scheme per
+ * entity kind. This is the SINGLE place the set is defined — the helpers
+ * below and scheme parsers across layers (routing, display, embeds) derive
+ * from it, so adding a kind cannot leave a stale `of|computed` alternation
+ * behind somewhere.
+ */
+export const ENTITY_URI_SCHEMES = ["of", COMPUTED_URI_SCHEME] as const;
+
+export type EntityUriScheme = (typeof ENTITY_URI_SCHEMES)[number];
+
+/**
+ * The `"<scheme>:"` prefix when `id` starts with an entity URI scheme,
+ * else `undefined`. Non-entity URIs (`data:`, `did:`, …) and bare tagged
+ * hashes (`fid1:<hash>`) return `undefined`.
+ */
+export function entityUriSchemePrefix(
+  id: string,
+): `${EntityUriScheme}:` | undefined {
+  for (const scheme of ENTITY_URI_SCHEMES) {
+    if (id.startsWith(`${scheme}:`)) return `${scheme}:`;
+  }
+  return undefined;
+}
+
+/** True iff `id` starts with an entity URI scheme (`of:`, `computed:`, …). */
+export function hasEntityUriScheme(id: string): boolean {
+  return entityUriSchemePrefix(id) !== undefined;
+}
+
+/**
+ * Strip the entity URI scheme, whichever it is. CAREFUL: for kinded schemes
+ * the scheme is part of the identity — a `computed:` id's bare hash names
+ * its `of:` sibling — so use this only where the scheme is carried
+ * alongside (see {@link entityUriSchemePrefix}) or provably `of:`.
+ */
+export function stripEntityUriScheme(id: string): string {
+  const prefix = entityUriSchemePrefix(id);
+  return prefix === undefined ? id : id.slice(prefix.length);
+}
+
 const KNOWN_ENTITY_KINDS: ReadonlySet<string> = new Set(["computed"]);
 
 export function isEntityKind(value: unknown): value is EntityKind {

@@ -1,5 +1,6 @@
 // Note: deno fmt can crash on deeply nested ternaries in html/svg templates - see renderBaselineStats
 import { css, html, LitElement, svg as svgTag, TemplateResult } from "lit";
+import { ENTITY_URI_SCHEMES } from "@commonfabric/data-model/fabric-primitives";
 import { property, query, state } from "lit/decorators.js";
 import dagre from "dagre";
 import type { DebuggerController } from "../lib/debugger-controller.ts";
@@ -49,6 +50,14 @@ const NODE_HEIGHT = 36;
  * Scheduler Graph visualization component.
  * Shows dependency graph with effects and computations.
  */
+// Entity-scheme parsers derived from the canonical scheme set, so a new
+// entity kind cannot leave a stale `of|computed` alternation here.
+const ENTITY_SCHEME_ALT = ENTITY_URI_SCHEMES.join("|");
+const ENTITY_SCHEME_PART_RE = new RegExp(`^(?:${ENTITY_SCHEME_ALT}):(.*)$`);
+const ENTITY_SCHEME_SEGMENT_RE = new RegExp(
+  `/(?:${ENTITY_SCHEME_ALT}):([^/]+)`,
+);
+
 export class XSchedulerGraph extends LitElement {
   static override styles = css`
     :host {
@@ -1374,7 +1383,7 @@ export class XSchedulerGraph extends LitElement {
       // Find entity ID - look for an entity URI scheme or use second part
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i];
-        const schemeMatch = part.match(/^(?:of|computed):(.*)$/);
+        const schemeMatch = part.match(ENTITY_SCHEME_PART_RE);
         if (schemeMatch) {
           entityPart = schemeMatch[1]; // Remove the URI scheme
           pathParts = parts.slice(i + 1).filter((p) => p.length > 0);
@@ -1424,7 +1433,7 @@ export class XSchedulerGraph extends LitElement {
    */
   private extractEntityId(actionId: string): string | undefined {
     // Look for an entity URI scheme which precedes the entity ID
-    const ofMatch = actionId.match(/\/(?:of|computed):([^\/]+)/);
+    const ofMatch = actionId.match(ENTITY_SCHEME_SEGMENT_RE);
     if (ofMatch) {
       return ofMatch[1];
     }

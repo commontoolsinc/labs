@@ -5,6 +5,7 @@
  * into concise summaries suitable for LLMs to help humans debug software behavior.
  */
 
+import { entityUriSchemePrefix } from "@commonfabric/data-model/fabric-primitives";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type {
   IExtendedStorageTransaction,
@@ -358,16 +359,16 @@ function formatValueForSummary(value: unknown): string {
  * Shorten an ID for display
  */
 function shortenId(id: string): string {
-  // Entity URI schemes: `of:` drops for brevity; `computed:` stays visible —
-  // the hash preimage is kind-free, so the scheme is the only difference
-  // from a state sibling of the same cause.
-  if (id.startsWith("computed:")) {
-    return "computed:" +
-      id.slice("computed:".length).substring(0, 12) + "...";
+  // Entity URI schemes: `of:` drops for brevity; kinded schemes stay
+  // visible — the hash preimage is kind-free, so the scheme is the only
+  // difference from a state sibling of the same cause.
+  const entityScheme = entityUriSchemePrefix(id);
+  if (entityScheme !== undefined && entityScheme !== "of:") {
+    return entityScheme + id.slice(entityScheme.length).substring(0, 12) +
+      "...";
   }
-  const body = id.replace(/^of:/, "");
-  if (body !== id) {
-    return body.substring(0, 12) + "...";
+  if (entityScheme === "of:") {
+    return id.slice(entityScheme.length).substring(0, 12) + "...";
   }
   if (id.length > 20) {
     return id.substring(0, 20) + "...";

@@ -8,12 +8,17 @@ import { FabricRegExp } from "./FabricRegExp.ts";
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 export {
   COMPUTED_URI_SCHEME,
+  ENTITY_URI_SCHEMES,
   type EntityKind,
   entityKindOfIdString,
+  type EntityUriScheme,
+  entityUriSchemePrefix,
   getComputedCellIdsConfig,
+  hasEntityUriScheme,
   isEntityKind,
   resetComputedCellIdsConfig,
   setComputedCellIdsConfig,
+  stripEntityUriScheme,
   uriSchemeForEntityKind,
 } from "./entity-kind.ts";
 export { FabricBytes } from "./FabricBytes.ts";

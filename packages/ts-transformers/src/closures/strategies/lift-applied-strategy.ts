@@ -157,9 +157,11 @@ function createDeriveSchedulerOptions(
   // writes through captures: analysis ran, no capture escaped tracking
   // (wildcard), no unrecognized method was called on a cell-like receiver
   // (hasUnverifiedCellUse — the writer-method list is closed but the Cell API
-  // is not), and analysis was not short-circuited (recursive). The
-  // computed-cell classifier keys its relaxation off this — an unverified
-  // callback stays under the conservative has-a-handle rule.
+  // is not), and analysis was not short-circuited (recursive). It is
+  // exhaustive-write PROVENANCE only: since the computed-by-default
+  // classifier redesign, nothing at runtime consumes it (replayable writers
+  // qualify regardless of capture writes). It is serialized through builder
+  // modules for future consumers — e.g. value-equality dedupe (spec phase 4).
   const captureWritesAnalyzed = inputParamSummary !== undefined &&
     inputParamSummary.wildcard !== true &&
     inputParamSummary.hasUnverifiedCellUse !== true &&

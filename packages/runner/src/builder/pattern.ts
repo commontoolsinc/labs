@@ -520,6 +520,15 @@ function factoryFromPattern<T, R>(
     true,
   )!;
 
+  // Deliberately AMBIENT (module-global, last Runtime constructor wins)
+  // rather than threaded through the building frame: the flag exists to
+  // switch a whole process over at once during rollout, and no supported
+  // topology runs two runtimes with opposite settings in one process — a
+  // mixed-flag process would mint different ids for the same causes and
+  // diverge on identity, so per-runtime scoping would legitimize a
+  // configuration that must not exist. (Tests that construct runtimes with
+  // different flags sequentially see last-constructed-wins; that is the
+  // accepted trade.)
   if (getComputedCellIdsConfig()) {
     assignComputedCellKinds(
       allNodes,

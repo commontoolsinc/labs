@@ -2,7 +2,6 @@ import {
   action,
   computed,
   type Default,
-  entityRefToString,
   equals,
   FS,
   type FsProjection,
@@ -296,8 +295,21 @@ const Note = pattern<NoteInput, NoteOutput>(
       ({ piece }: { piece: Writable<MentionablePiece> }) => {
         const name = piece.get()[NAME] ?? "";
         const resolved = (piece as any).resolveAsCell();
-        const ref = resolved?.entityId;
-        const entityId = ref ? entityRefToString(ref) : undefined;
+        // Wiki-link text persists the BARE id and the renderer re-adds
+        // `/of:` (see note-md.tsx), so derive it from the scheme-PRESERVING
+        // sourceURI: the bare entityId would silently alias a computed:
+        // cell to its of: sibling. Mentionables are pieces (always of:)
+        // today, so the computed: throw is a tripwire — if it ever fires,
+        // the embed format must learn to carry the scheme. Mirrors
+        // mentionIdFromCellId in packages/ui (not importable from a
+        // pattern).
+        const uri: string | undefined = resolved?.sourceURI;
+        if (uri?.startsWith("computed:")) {
+          throw new Error(
+            `cannot embed a computed: cell in a wiki-link: ${uri}`,
+          );
+        }
+        const entityId = uri?.replace(/^of:/, "");
         if (!name || !entityId) return;
 
         const link = `[[${name} (${entityId})]]`;

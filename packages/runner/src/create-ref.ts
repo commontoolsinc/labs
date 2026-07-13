@@ -2,6 +2,7 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   BaseFabricPrimitive,
   FabricHash,
+  hasEntityUriScheme,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,
@@ -153,8 +154,8 @@ export function createRef(
  */
 export function getEntityId(value: any): EntityRef | undefined {
   if (typeof value === "string") {
-    // Handle URI format with an entity scheme ("of:" or "computed:")
-    if (value.startsWith("of:") || value.startsWith("computed:")) {
+    // Handle URI format with an entity scheme ("of:", "computed:", ...)
+    if (hasEntityUriScheme(value)) {
       value = fromURI(value);
     }
     return entityRefFromString(value);

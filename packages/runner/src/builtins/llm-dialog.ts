@@ -51,6 +51,7 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
+import { entityUriSchemePrefix } from "@commonfabric/data-model/fabric-primitives";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
@@ -2598,17 +2599,27 @@ function applyAutoProvidedSandboxId(
         "remove it from patternTool's extraParams",
     );
   }
+  // getEntityId does the heavy lifting the key needs (content-hashing data:
+  // URIs, path-qualifying sub-cell identities so two tools in one document
+  // get distinct sandboxes) but it ERASES the URI scheme — and the scheme is
+  // part of the identity, so a computed: cell's bare hash would alias its
+  // of: sibling's sandbox. Re-apply the sourceURI's entity scheme (of: or
+  // computed:) as a prefix, so the key is the full schemed id. data:-derived
+  // identities have no entity scheme and stay as their bare content hash.
   const ref = identityCell ? getEntityId(identityCell) : undefined;
-  const entityId = ref && isEntityRef(ref) ? entityRefToString(ref) : undefined;
+  const bare = ref && isEntityRef(ref) ? entityRefToString(ref) : undefined;
+  const scheme = entityUriSchemePrefix(identityCell?.sourceURI ?? "") ?? "";
+  const entityId = bare ? scheme + bare : undefined;
   if (typeof entityId !== "string" || entityId.length === 0) {
     throw new Error(
       "Cannot auto-provide sandboxId: tool instance has no stable entity id",
     );
   }
-  // The entity id carries a URI scheme separator (e.g. "fid1:<hash>"). The id
-  // names a server-side resource at `/v1/sandboxes/<id>`, so map the only unsafe
-  // character (the scheme colon) to a hyphen. The hash body is base64url and is
-  // preserved exactly, so distinct entity ids stay distinct.
+  // The entity id carries URI scheme separators (e.g. "fid1:<hash>",
+  // "computed:fid1:<hash>"). The id names a server-side resource at
+  // `/v1/sandboxes/<id>`, so map the only unsafe character (the colon) to a
+  // hyphen. The hash body is base64url and is preserved exactly, so distinct
+  // entity ids stay distinct.
   args.sandboxId = entityId.replace(/[^A-Za-z0-9_-]/g, "-");
 }
 

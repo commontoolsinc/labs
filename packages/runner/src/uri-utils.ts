@@ -1,6 +1,8 @@
 import {
   type EntityKind,
+  entityUriSchemePrefix,
   FabricHash,
+  hasEntityUriScheme,
   uriSchemeForEntityKind,
 } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
@@ -42,10 +44,7 @@ export function toURI(value: unknown, kind?: EntityKind): URI {
       }
       // TODO(seefeld): Remove this once we want to support any URI, ideally
       // once there are no bare ids anymore
-      if (
-        !value.startsWith("of:") && !value.startsWith("data:") &&
-        !value.startsWith("computed:")
-      ) {
+      if (!hasEntityUriScheme(value) && !value.startsWith("data:")) {
         throw new Error(`Invalid URI: ${value}`);
       }
       return value as URI;
@@ -67,12 +66,11 @@ export function toURI(value: unknown, kind?: EntityKind): URI {
  * into `toURI` expecting the same entity.
  */
 export function fromURI(uri: URI | string): string {
+  const entityScheme = entityUriSchemePrefix(uri);
   if (!uri.includes(":")) {
     return uri;
-  } else if (uri.startsWith("of:")) {
-    return uri.slice("of:".length);
-  } else if (uri.startsWith("computed:")) {
-    return uri.slice("computed:".length);
+  } else if (entityScheme !== undefined) {
+    return uri.slice(entityScheme.length);
   } else if (uri.startsWith("data:")) {
     return hashOf(uri).toString();
   } else {

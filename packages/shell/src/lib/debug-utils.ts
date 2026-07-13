@@ -19,6 +19,7 @@ import type {
   WriteStackTraceMatcher,
 } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
+import { hasEntityUriScheme } from "@commonfabric/data-model/fabric-primitives";
 import { isRecord } from "@commonfabric/utils/types";
 import type { MetaField } from "@commonfabric/api";
 import { createVDomDebugHelpers, viewSettled } from "@commonfabric/html/debug";
@@ -196,7 +197,7 @@ export function normalizeEntityId(
   // a human-input convenience only (ids typed or copied from URL paths,
   // which are piece roots and therefore always of:).
   const withScheme = (value: string): string =>
-    /^(of|computed):/.test(value) ? value : `of:${value}`;
+    hasEntityUriScheme(value) ? value : `of:${value}`;
   const id = options?.id;
   if (id) {
     return withScheme(id);
