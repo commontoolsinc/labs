@@ -1209,6 +1209,7 @@ export async function dispatchQueuedEvent(state: {
           }
           if (!isQueuedEventRegistrationCurrent(queuedEvent)) {
             runFinalCommitCallback();
+            durableReadiness.resolve();
             return;
           }
           try {
