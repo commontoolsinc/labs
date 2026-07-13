@@ -1,18 +1,27 @@
 import {
+  assertCounterbalancedRendererCpu,
   type BrowserProcessMetrics,
   CdpWorkerProfiler,
-  type CPUProfile,
   deltaRendererProcessCpu,
   env,
   type Page,
+  parseCpuBenchmarkEventCount,
   type RendererProcessCpuDelta,
   summarizeCPUProfile,
   waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { Identity } from "@commonfabric/identity";
-import { executionPolicyId } from "@commonfabric/memory/v2";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import {
+  type ActionClaimKey,
+  executionPolicyId,
+} from "@commonfabric/memory/v2";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import type {
+  ExecutionRoutingDiagnostics,
+  ExecutionRoutingDiagnosticsQuery,
+} from "@commonfabric/runner/shared";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
@@ -26,48 +35,76 @@ import {
   waitForRuntimeIdle,
   waitForText,
 } from "./cfc-browser-helpers.ts";
+import {
+  assertEnabledPreflightSettlement,
+  assertExactRoutingPhase,
+  type DiscoveredRolloutAction,
+  discoverScopedWritingAction,
+} from "./server-primary-rollout-profile-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const SERVER_EXECUTION_ENABLED =
   Deno.env.get("EXPERIMENTAL_SERVER_PRIMARY_EXECUTION") === "true" ||
   Deno.env.get("EXPERIMENTAL_SERVER_PRIMARY_EXECUTION") === "1";
 const CPU_BENCH = Deno.env.get("CF_SERVER_EXECUTION_CPU_BENCH") === "1";
-const CPU_EVENTS = Math.max(
-  2,
-  Number(Deno.env.get("CF_SERVER_EXECUTION_CPU_EVENTS")) || 12,
-);
+// The expensive CPU gate is intentionally opt-in. Its workload parser rejects
+// partial, padded, fractional, and out-of-range values instead of silently
+// turning a mistyped benchmark into a short green run.
+const CPU_EVENTS = CPU_BENCH
+  ? parseCpuBenchmarkEventCount(
+    Deno.env.get("CF_SERVER_EXECUTION_CPU_EVENTS"),
+  )
+  : 4;
+const AUTHORITY_PREFLIGHT_EVENTS = 2;
+const WARMUP_EVENTS_PER_BLOCK = CPU_BENCH ? 25 : 1;
 const PROFILE_DIR = Deno.env.get("CF_CPUPROFILE_DIR");
 const TIMEOUT = 60_000;
+const MEASURED_OBSERVER_TIMEOUT = CPU_BENCH
+  ? Math.max(TIMEOUT, CPU_EVENTS * 500)
+  : TIMEOUT;
+const CPU_FLOOR_US = 100_000;
+
+const PHASES = [
+  { label: "abba-disabled-1", policyEnabled: false },
+  { label: "abba-enabled-1", policyEnabled: true },
+  { label: "abba-enabled-2", policyEnabled: true },
+  { label: "abba-disabled-2", policyEnabled: false },
+  { label: "baab-enabled-1", policyEnabled: true },
+  { label: "baab-disabled-1", policyEnabled: false },
+  { label: "baab-disabled-2", policyEnabled: false },
+  { label: "baab-enabled-2", policyEnabled: true },
+] as const;
 
 type ActionTraceEntry = {
   actionId: string;
   actualWrites: Array<{ entityId: string; path: string[] }>;
 };
 
-type ServerExecutionHealth = {
-  serverExecutionPool: {
-    activeWorkers: number;
-    activeDemands: number;
-  } | null;
-  serverExecutionControl: Record<string, number> | null;
-};
-
 type PhaseResult = {
   label: string;
   policyEnabled: boolean;
   events: number;
-  actionRuns: number[];
   lazyActionRuns: number;
   clientDerivedSuppressed: number;
   clientDerivedUpstreamCommits: number;
-  serverAcceptedActionAttempts: number;
-  observedActionWrites: string[];
-  cpu?: ReturnType<typeof summarizeCPUProfile>;
+  routing: ExecutionRoutingDiagnostics;
   browserProcessCpu?: {
     before: BrowserProcessMetrics;
     after: BrowserProcessMetrics;
     rendererDelta: RendererProcessCpuDelta;
   };
+};
+
+type BrowserRuntime = {
+  allSynced(): Promise<void>;
+  getActionRunTrace(): Promise<ActionTraceEntry[]>;
+  getExecutionRoutingDiagnostics(
+    query: ExecutionRoutingDiagnosticsQuery,
+  ): Promise<ExecutionRoutingDiagnostics>;
+  getGraphSnapshot(): Promise<{
+    nodes: Array<{ id: string; stats?: { runCount: number } }>;
+  }>;
+  setActionRunTraceEnabled(enabled: boolean): Promise<void>;
 };
 
 async function writePolicy(
@@ -91,50 +128,10 @@ async function writePolicy(
   await runtime.storageManager.synced();
 }
 
-async function executionHealth(): Promise<ServerExecutionHealth> {
-  const response = await fetch(new URL("/api/health/stats", API_URL));
-  if (!response.ok) {
-    throw new Error(`health stats failed with ${response.status}`);
-  }
-  return await response.json() as ServerExecutionHealth;
-}
-
-const controlCount = (
-  health: ServerExecutionHealth,
-  key: string,
-): number => health.serverExecutionControl?.[key] ?? 0;
-
-async function waitForControlAdvance(
-  page: Page,
-  counters: ReadonlyArray<readonly [key: string, before: number]>,
-  timeout = TIMEOUT,
-): Promise<void> {
-  await waitForCondition(
-    page,
-    async (_probe, apiUrl: string, thresholds: Array<[string, number]>) => {
-      const response = await fetch(new URL("/api/health/stats", apiUrl));
-      if (!response.ok) return false;
-      const health = await response.json() as ServerExecutionHealth;
-      return thresholds.some(([key, before]) =>
-        (health.serverExecutionControl?.[key] ?? 0) > before
-      );
-    },
-    {
-      timeout,
-      args: [
-        API_URL,
-        counters.map(([key, before]) => [key, before] as [string, number]),
-      ],
-    },
-  );
-}
-
 async function resetActionTrace(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const rt = (globalThis as typeof globalThis & {
-      commonfabric?: {
-        rt?: { setActionRunTraceEnabled(enabled: boolean): Promise<void> };
-      };
+      commonfabric?: { rt?: BrowserRuntime };
     }).commonfabric?.rt;
     if (!rt) throw new Error("runtime action trace is unavailable");
     await rt.setActionRunTraceEnabled(false);
@@ -142,12 +139,20 @@ async function resetActionTrace(page: Page): Promise<void> {
   });
 }
 
+async function disableActionTrace(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const rt = (globalThis as typeof globalThis & {
+      commonfabric?: { rt?: BrowserRuntime };
+    }).commonfabric?.rt;
+    if (!rt) throw new Error("runtime action trace is unavailable");
+    await rt.setActionRunTraceEnabled(false);
+  });
+}
+
 async function actionTrace(page: Page): Promise<ActionTraceEntry[]> {
   return await page.evaluate(async () => {
     const rt = (globalThis as typeof globalThis & {
-      commonfabric?: {
-        rt?: { getActionRunTrace(): Promise<ActionTraceEntry[]> };
-      };
+      commonfabric?: { rt?: BrowserRuntime };
     }).commonfabric?.rt;
     if (!rt) throw new Error("runtime action trace is unavailable");
     return await rt.getActionRunTrace();
@@ -157,16 +162,7 @@ async function actionTrace(page: Page): Promise<ActionTraceEntry[]> {
 async function actionRunCounts(page: Page): Promise<Record<string, number>> {
   return await page.evaluate(async () => {
     const rt = (globalThis as typeof globalThis & {
-      commonfabric?: {
-        rt?: {
-          getGraphSnapshot(): Promise<{
-            nodes: Array<{
-              id: string;
-              stats?: { runCount: number };
-            }>;
-          }>;
-        };
-      };
+      commonfabric?: { rt?: BrowserRuntime };
     }).commonfabric?.rt;
     if (!rt) throw new Error("runtime graph snapshot is unavailable");
     const { nodes } = await rt.getGraphSnapshot();
@@ -180,9 +176,374 @@ async function actionRunCounts(page: Page): Promise<Record<string, number>> {
   });
 }
 
-const p95 = (values: readonly number[]): number => {
-  const sorted = [...values].sort((left, right) => left - right);
-  return sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
+async function executionRoutingDiagnostics(
+  page: Page,
+  query: ExecutionRoutingDiagnosticsQuery,
+): Promise<ExecutionRoutingDiagnostics> {
+  return await page.evaluate(
+    async (request: ExecutionRoutingDiagnosticsQuery) => {
+      const rt = (globalThis as typeof globalThis & {
+        commonfabric?: { rt?: BrowserRuntime };
+      }).commonfabric?.rt;
+      if (!rt) throw new Error("execution routing diagnostics are unavailable");
+      return await rt.getExecutionRoutingDiagnostics(request);
+    },
+    { args: [query] },
+  );
+}
+
+async function runtimeAllSynced(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const rt = (globalThis as typeof globalThis & {
+      commonfabric?: { rt?: BrowserRuntime };
+    }).commonfabric?.rt;
+    if (!rt) throw new Error("runtime sync is unavailable");
+    await rt.allSynced();
+  });
+}
+
+const exactQuery = (key: ActionClaimKey): ExecutionRoutingDiagnosticsQuery => ({
+  space: key.space as MemorySpace,
+  branch: key.branch,
+  pieceId: key.pieceId,
+  actionId: key.actionId,
+});
+
+async function resetExactRoutingCounters(
+  page: Page,
+  key: ActionClaimKey,
+  policyEnabled: boolean,
+): Promise<ExecutionRoutingDiagnostics> {
+  const diagnostics = await rawResetExactRoutingCounters(page, key);
+  if (policyEnabled) {
+    assertExactRoutingPhase(diagnostics, {
+      key,
+      policyEnabled: true,
+      events: 0,
+    });
+  } else {
+    assertEquals(diagnostics.claims.length, 0);
+    assertEquals(diagnostics.actions.length, 0);
+  }
+  return diagnostics;
+}
+
+async function rawResetExactRoutingCounters(
+  page: Page,
+  key: ActionClaimKey,
+): Promise<ExecutionRoutingDiagnostics> {
+  const diagnostics = await executionRoutingDiagnostics(page, {
+    ...exactQuery(key),
+    resetCounters: true,
+  });
+  assertEquals(diagnostics.snapshotRequired, false);
+  assertEquals(diagnostics.truncatedActionRecords, 0);
+  return diagnostics;
+}
+
+async function waitForEnabledPreflightSettlement(
+  page: Page,
+  key: ActionClaimKey,
+  phase = "post-reset",
+): Promise<ExecutionRoutingDiagnostics> {
+  const query = exactQuery(key);
+  try {
+    await waitForCondition(
+      page,
+      async (
+        _probe,
+        request: ExecutionRoutingDiagnosticsQuery,
+        expectedKey: ActionClaimKey,
+      ) => {
+        const rt = (globalThis as typeof globalThis & {
+          commonfabric?: { rt?: BrowserRuntime };
+        }).commonfabric?.rt;
+        if (!rt) return false;
+        const diagnostics = await rt.getExecutionRoutingDiagnostics(request);
+        if (
+          diagnostics.snapshotRequired ||
+          diagnostics.truncatedActionRecords !== 0 ||
+          diagnostics.claims.length !== 1 ||
+          diagnostics.actions.length !== 1
+        ) return false;
+        const sameKey = (candidate: ActionClaimKey): boolean =>
+          candidate.branch === expectedKey.branch &&
+          candidate.space === expectedKey.space &&
+          candidate.contextKey === expectedKey.contextKey &&
+          candidate.pieceId === expectedKey.pieceId &&
+          candidate.actionId === expectedKey.actionId &&
+          candidate.actionKind === expectedKey.actionKind &&
+          candidate.implementationFingerprint ===
+            expectedKey.implementationFingerprint &&
+          candidate.runtimeFingerprint === expectedKey.runtimeFingerprint;
+        const action = diagnostics.actions[0];
+        const claim = diagnostics.claims[0];
+        const liveClaim = action.liveClaim;
+        const settlement = action.lastSettlement;
+        if (
+          !sameKey(action.key) || !sameKey(claim) || liveClaim === undefined ||
+          !sameKey(liveClaim) || settlement === undefined ||
+          !sameKey(settlement.claim)
+        ) return false;
+        const sameIncarnation = (
+          left: typeof claim,
+          right: typeof claim,
+        ): boolean =>
+          sameKey(left) && sameKey(right) &&
+          left.leaseGeneration === right.leaseGeneration &&
+          left.claimGeneration === right.claimGeneration;
+        if (
+          !sameIncarnation(liveClaim, claim) ||
+          !sameIncarnation(settlement.claim, liveClaim) ||
+          (settlement.outcome !== "committed" &&
+            settlement.outcome !== "no-op") ||
+          action.settlements.committed + action.settlements.noOp < 1 ||
+          action.settlements.failed !== 0 ||
+          action.settlements.unserved !== 0 ||
+          action.pendingOverlayCount !== 0 ||
+          action.unresolvedBasisOverlayCount !== 0 ||
+          action.pendingSettlementCount !== 0 ||
+          action.nonAuthoritativeOverlayDrops !== 0
+        ) return false;
+        return settlement.acceptedCommitSeq === undefined ||
+          diagnostics.executionAppliedSeq >= settlement.acceptedCommitSeq;
+      },
+      { timeout: TIMEOUT, args: [query, key] },
+    );
+  } catch (cause) {
+    const latest = await executionRoutingDiagnostics(page, query).catch(
+      (diagnosticCause) => ({
+        diagnosticReadError: diagnosticCause instanceof Error
+          ? diagnosticCause.message
+          : String(diagnosticCause),
+      }),
+    );
+    throw new Error(
+      `timed out waiting for a ${phase} settlement under the current claim incarnation. Snapshot: ${
+        JSON.stringify(latest)
+      }`,
+      { cause },
+    );
+  }
+  const diagnostics = await executionRoutingDiagnostics(page, query);
+  assertEnabledPreflightSettlement(diagnostics, key);
+  return diagnostics;
+}
+
+async function waitForExactRoutingPhase(
+  page: Page,
+  key: ActionClaimKey,
+  policyEnabled: boolean,
+  events: number,
+): Promise<ExecutionRoutingDiagnostics> {
+  const query = exactQuery(key);
+  try {
+    await waitForCondition(
+      page,
+      async (
+        _probe,
+        request: ExecutionRoutingDiagnosticsQuery,
+        expectedKey: ActionClaimKey,
+        enabled: boolean,
+        expectedEvents: number,
+      ) => {
+        const rt = (globalThis as typeof globalThis & {
+          commonfabric?: { rt?: BrowserRuntime };
+        }).commonfabric?.rt;
+        if (!rt) return false;
+        const diagnostics = await rt.getExecutionRoutingDiagnostics(request);
+        if (
+          diagnostics.snapshotRequired ||
+          diagnostics.truncatedActionRecords !== 0
+        ) return false;
+        const sameKey = (candidate: ActionClaimKey): boolean =>
+          candidate.branch === expectedKey.branch &&
+          candidate.space === expectedKey.space &&
+          candidate.contextKey === expectedKey.contextKey &&
+          candidate.pieceId === expectedKey.pieceId &&
+          candidate.actionId === expectedKey.actionId &&
+          candidate.actionKind === expectedKey.actionKind &&
+          candidate.implementationFingerprint ===
+            expectedKey.implementationFingerprint &&
+          candidate.runtimeFingerprint === expectedKey.runtimeFingerprint;
+        const actions = diagnostics.actions.filter((candidate) =>
+          sameKey(candidate.key)
+        );
+        if (actions.length !== 1 || diagnostics.actions.length !== 1) {
+          return false;
+        }
+        const action = actions[0];
+        if (
+          action.pendingOverlayCount !== 0 ||
+          action.unresolvedBasisOverlayCount !== 0 ||
+          action.pendingSettlementCount !== 0 ||
+          action.nonAuthoritativeOverlayDrops !== 0 ||
+          action.settlements.failed !== 0 ||
+          action.settlements.unserved !== 0
+        ) return false;
+        if (
+          action.lastSettlement?.acceptedCommitSeq !== undefined &&
+          diagnostics.executionAppliedSeq <
+            action.lastSettlement.acceptedCommitSeq
+        ) return false;
+        if (enabled) {
+          return diagnostics.claims.length === 1 &&
+            diagnostics.claims.some(sameKey) &&
+            action.liveClaim !== undefined &&
+            sameKey(action.liveClaim) && action.upstreamRoutes === 0 &&
+            action.claimedOverlayRoutes === expectedEvents &&
+            action.settlements.committed + action.settlements.noOp ===
+              expectedEvents &&
+            action.basisCoveredOverlayDrops === expectedEvents;
+        }
+        return diagnostics.claims.length === 0 &&
+          action.liveClaim === undefined &&
+          action.upstreamRoutes === expectedEvents &&
+          action.claimedOverlayRoutes === 0 &&
+          action.settlements.committed === 0 &&
+          action.settlements.noOp === 0 &&
+          action.basisCoveredOverlayDrops === 0;
+      },
+      { timeout: TIMEOUT, args: [query, key, policyEnabled, events] },
+    );
+  } catch (cause) {
+    const latest = await executionRoutingDiagnostics(page, query).catch(
+      (diagnosticCause) => ({
+        diagnosticReadError: diagnosticCause instanceof Error
+          ? diagnosticCause.message
+          : String(diagnosticCause),
+      }),
+    );
+    throw new Error(
+      `timed out waiting for exact ${
+        policyEnabled ? "enabled" : "disabled"
+      } routing phase with ${events} events. Snapshot: ${
+        JSON.stringify(latest)
+      }`,
+      { cause },
+    );
+  }
+  const diagnostics = await executionRoutingDiagnostics(page, query);
+  assertExactRoutingPhase(diagnostics, { key, policyEnabled, events });
+  return diagnostics;
+}
+
+type LazyObserverResult = { ok: true } | { ok: false; error: string };
+type LazyObserverState = {
+  promise: Promise<LazyObserverResult>;
+  cancel(): void;
+};
+
+async function armLazyFinalObserver(
+  page: Page,
+  expectedText: string,
+  timeout = TIMEOUT,
+): Promise<void> {
+  const target = await page.waitForSelector("#rollout-doubled", {
+    strategy: "pierce",
+    timeout,
+  });
+  await target.evaluate((element: Element, text: string, timeout: number) => {
+    const scope = globalThis as typeof globalThis & {
+      __serverPrimaryLazyObserver?: LazyObserverState;
+    };
+    scope.__serverPrimaryLazyObserver?.cancel();
+    let finish!: (result: LazyObserverResult) => void;
+    let finished = false;
+    const promise = new Promise<LazyObserverResult>((resolve) => {
+      finish = resolve;
+    });
+    const complete = (result: LazyObserverResult) => {
+      if (finished) return;
+      finished = true;
+      observer.disconnect();
+      clearTimeout(timer);
+      finish(result);
+    };
+    const check = () => {
+      const value = element.textContent;
+      if (value?.includes(text)) complete({ ok: true });
+    };
+    const observer = new MutationObserver(check);
+    observer.observe(element, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    const timer = setTimeout(
+      () =>
+        complete({
+          ok: false,
+          error: `lazy observer did not see ${
+            JSON.stringify(text)
+          } within ${timeout}ms`,
+        }),
+      timeout,
+    );
+    scope.__serverPrimaryLazyObserver = {
+      promise,
+      cancel: () => complete({ ok: false, error: "lazy observer cancelled" }),
+    };
+    check();
+  }, { args: [expectedText, timeout] });
+}
+
+async function awaitLazyFinalObserver(page: Page): Promise<void> {
+  const result = await page.evaluate(async () => {
+    const scope = globalThis as typeof globalThis & {
+      __serverPrimaryLazyObserver?: LazyObserverState;
+    };
+    const state = scope.__serverPrimaryLazyObserver;
+    if (!state) return { ok: false, error: "lazy observer was not armed" };
+    const result = await state.promise;
+    delete scope.__serverPrimaryLazyObserver;
+    return result;
+  });
+  if (!result.ok) throw new Error(result.error);
+}
+
+async function cancelLazyFinalObserver(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const scope = globalThis as typeof globalThis & {
+      __serverPrimaryLazyObserver?: LazyObserverState;
+    };
+    scope.__serverPrimaryLazyObserver?.cancel();
+    delete scope.__serverPrimaryLazyObserver;
+  }).catch(() => {});
+}
+
+async function lazySyncedIdleBarrier(page: Page): Promise<void> {
+  await runtimeAllSynced(page);
+  await waitForRuntimeIdle(page, { timeout: TIMEOUT });
+  await runtimeAllSynced(page);
+}
+
+const rendererIds = (metrics: BrowserProcessMetrics): number[] =>
+  metrics.processes.filter((process) => process.type === "renderer")
+    .map((process) => process.id).sort((left, right) => left - right);
+
+const assertRendererCountersContinue = (
+  previous: BrowserProcessMetrics,
+  current: BrowserProcessMetrics,
+): void => {
+  const previousRenderers = new Map(
+    previous.processes.filter((process) => process.type === "renderer").map(
+      (process) => [process.id, process.cpuTimeSeconds],
+    ),
+  );
+  assertEquals(rendererIds(current), rendererIds(previous));
+  for (
+    const process of current.processes.filter((entry) =>
+      entry.type === "renderer"
+    )
+  ) {
+    const previousCpu = previousRenderers.get(process.id);
+    assert(previousCpu !== undefined);
+    assert(
+      process.cpuTimeSeconds >= previousCpu,
+      `renderer ${process.id} CPU counter reset between phases`,
+    );
+  }
 };
 
 (SERVER_EXECUTION_ENABLED ? describe : describe.ignore)(
@@ -197,7 +558,9 @@ const p95 = (values: readonly number[]): number => {
     let lazyIdentity: Identity;
     let creator: PiecesController;
     let policyOwner: PiecesController;
+    let space: MemorySpace;
     let pieceId: string;
+    let executionPieceId: string;
     let doubledEntityId: string;
     let resultSinkCancel: (() => void) | undefined;
 
@@ -211,6 +574,7 @@ const p95 = (values: readonly number[]): number => {
         apiUrl: new URL(API_URL),
         identity: actorIdentity,
       });
+      space = creator.manager().getSpace();
       const spaceIdentity = await (await Identity.fromPassphrase("common user"))
         .derive(SPACE_NAME);
       policyOwner = await initializePiecesController({
@@ -232,8 +596,11 @@ const p95 = (values: readonly number[]): number => {
       );
       const piece = await creator.create(program, { start: true });
       pieceId = piece.id;
+      const rootLink = piece.getCell().getAsNormalizedFullLink();
+      executionPieceId = `${rootLink.scope}:${rootLink.id}`;
       const result = creator.manager().getResult(piece.getCell());
-      doubledEntityId = result.key("doubled").getAsNormalizedFullLink().id;
+      doubledEntityId = result.key("doubled").resolveAsCell()
+        .getAsNormalizedFullLink().id;
       resultSinkCancel = result.sink(() => {});
       await writePolicy(policyOwner, false);
     });
@@ -244,7 +611,7 @@ const p95 = (values: readonly number[]): number => {
       await Promise.all([creator?.dispose(), policyOwner?.dispose()]);
     });
 
-    it("keeps lazy-client compute no worse while claimed writes leave the browser wire", async () => {
+    it("keeps lazy-client compute no worse while exact claimed writes leave the browser wire", async () => {
       const actorPage = actorShell.page();
       const lazyPage = lazyShell.page();
       const view = { spaceName: SPACE_NAME, pieceId };
@@ -270,157 +637,308 @@ const p95 = (values: readonly number[]): number => {
       ]);
 
       let expectedCount = 0;
-      const clickAndSettle = async () => {
+      const clickActorAndWait = async (): Promise<void> => {
         expectedCount += 1;
         await clickCfButton(actorPage, "#rollout-increment");
-        await Promise.all([
-          waitForText(
-            actorPage,
-            "#rollout-doubled",
-            `doubled:${expectedCount * 2}`,
-            {
-              timeout: TIMEOUT,
-            },
-          ),
-          waitForText(
-            lazyPage,
-            "#rollout-doubled",
-            `doubled:${expectedCount * 2}`,
-            {
-              timeout: TIMEOUT,
-            },
-          ),
-        ]);
-        await Promise.all([
-          waitForRuntimeIdle(actorPage, { timeout: TIMEOUT }),
-          waitForRuntimeIdle(lazyPage, { timeout: TIMEOUT }),
-        ]);
+        await waitForText(
+          actorPage,
+          "#rollout-doubled",
+          `doubled:${expectedCount * 2}`,
+          { timeout: TIMEOUT },
+        );
+        await waitForRuntimeIdle(actorPage, { timeout: TIMEOUT });
+        await runtimeAllSynced(actorPage);
       };
 
-      let profiler: CdpWorkerProfiler | undefined;
-      if (CPU_BENCH) {
-        profiler = await CdpWorkerProfiler.connect(lazyShell.wsEndpoint());
-        await profiler.waitForWorker("worker-runtime");
+      const scopedQuery: ExecutionRoutingDiagnosticsQuery = {
+        space,
+        branch: "",
+        pieceId: executionPieceId,
+      };
+
+      const discoverExactAction = async (): Promise<{
+        discovered: DiscoveredRolloutAction;
+        trace: ActionTraceEntry[];
+      }> => {
+        await writePolicy(policyOwner, true);
+        await resetActionTrace(actorPage);
+        let lastEvidence: unknown;
+        for (let attempt = 0; attempt < 12; attempt++) {
+          await clickActorAndWait();
+          await waitForCondition(
+            actorPage,
+            async (
+              _probe,
+              request: ExecutionRoutingDiagnosticsQuery,
+              resultEntityId: string,
+            ) => {
+              const rt = (globalThis as typeof globalThis & {
+                commonfabric?: { rt?: BrowserRuntime };
+              }).commonfabric?.rt;
+              if (!rt) return false;
+              const [trace, diagnostics] = await Promise.all([
+                rt.getActionRunTrace(),
+                rt.getExecutionRoutingDiagnostics(request),
+              ]);
+              const writingIds = new Set(
+                trace.filter((entry) =>
+                  entry.actualWrites.some((write) =>
+                    write.entityId === resultEntityId
+                  )
+                ).map((entry) => entry.actionId),
+              );
+              const claims = diagnostics.claims.filter((claim) =>
+                writingIds.has(claim.actionId)
+              );
+              if (claims.length !== 1) return false;
+              const claim = claims[0];
+              const actions = diagnostics.actions.filter((action) => {
+                const candidate = action.key;
+                return candidate.branch === claim.branch &&
+                  candidate.space === claim.space &&
+                  candidate.contextKey === claim.contextKey &&
+                  candidate.pieceId === claim.pieceId &&
+                  candidate.actionId === claim.actionId &&
+                  candidate.actionKind === claim.actionKind &&
+                  candidate.implementationFingerprint ===
+                    claim.implementationFingerprint &&
+                  candidate.runtimeFingerprint === claim.runtimeFingerprint;
+              });
+              return !diagnostics.snapshotRequired && claims.length === 1 &&
+                actions.length === 1;
+            },
+            { timeout: 5_000, args: [scopedQuery, doubledEntityId] },
+          ).catch(() => {});
+          const [trace, diagnostics] = await Promise.all([
+            actionTrace(actorPage),
+            executionRoutingDiagnostics(actorPage, scopedQuery),
+          ]);
+          try {
+            const discovered = discoverScopedWritingAction(
+              trace,
+              diagnostics,
+              doubledEntityId,
+            );
+            // Claim publication is only route readiness. Do not immediately
+            // disable policy and replace the Worker until that exact claim
+            // incarnation has also settled successfully; otherwise discovery
+            // can race away the only live writer before its durable scheduler
+            // observation is available to the replacement generation.
+            await waitForEnabledPreflightSettlement(
+              actorPage,
+              discovered.key,
+              "initial discovery",
+            );
+            // A route-ready activation commonly settles no-op after the actor
+            // has already written the same result. Drive one changing event
+            // under the installed claim and require its accepted commit before
+            // any policy transition, so replacement discovery has a durable
+            // writer observation rather than only process-local evidence.
+            await rawResetExactRoutingCounters(actorPage, discovered.key);
+            await clickActorAndWait();
+            const durableReadiness = await waitForExactRoutingPhase(
+              actorPage,
+              discovered.key,
+              true,
+              1,
+            );
+            const durableSettlement = durableReadiness.actions[0]
+              ?.lastSettlement;
+            assert(durableSettlement !== undefined);
+            assertEquals(durableSettlement.outcome, "committed");
+            assertEquals(durableReadiness.actions[0].settlements.committed, 1);
+            assertEquals(durableReadiness.actions[0].settlements.noOp, 0);
+            assert(durableSettlement.acceptedCommitSeq !== undefined);
+            assert(
+              durableReadiness.executionAppliedSeq >=
+                durableSettlement.acceptedCommitSeq,
+            );
+            await waitForText(
+              lazyPage,
+              "#rollout-doubled",
+              `doubled:${expectedCount * 2}`,
+              { timeout: TIMEOUT },
+            );
+            await lazySyncedIdleBarrier(lazyPage);
+            return { discovered, trace };
+          } catch (cause) {
+            lastEvidence = {
+              attempt: attempt + 1,
+              trace,
+              diagnostics,
+              error: cause instanceof Error ? cause.message : String(cause),
+            };
+          }
+        }
+        throw new Error(
+          `could not discover exactly one claimed actor writer: ${
+            JSON.stringify(lastEvidence)
+          }`,
+        );
+      };
+
+      const { discovered, trace: discoveryTrace } = await discoverExactAction()
+        .finally(() => disableActionTrace(actorPage));
+      const actionKey = discovered.key;
+      assertEquals(actionKey.pieceId, executionPieceId);
+
+      const preflightPolicy = async (
+        policyEnabled: boolean,
+      ): Promise<void> => {
+        await writePolicy(policyOwner, policyEnabled);
+        // Event 1 must prove fresh authority, not reuse an activation
+        // settlement or route retained from the previous block.
+        await rawResetExactRoutingCounters(actorPage, actionKey);
+        const finalCount = expectedCount + AUTHORITY_PREFLIGHT_EVENTS;
+        await armLazyFinalObserver(
+          lazyPage,
+          `doubled:${finalCount * 2}`,
+        );
+        try {
+          // Event 1 invalidates the exact action. Enabled mode must then expose
+          // a successful post-reset settlement under the current live claim;
+          // disabled mode must route this exact event upstream. This setup
+          // traffic is deliberately discarded before event 2.
+          await clickActorAndWait();
+          if (policyEnabled) {
+            await waitForEnabledPreflightSettlement(actorPage, actionKey);
+          } else {
+            await waitForExactRoutingPhase(
+              actorPage,
+              actionKey,
+              false,
+              1,
+            );
+          }
+          await resetExactRoutingCounters(
+            actorPage,
+            actionKey,
+            policyEnabled,
+          );
+
+          // Event 2 must take exactly the route that the following block will
+          // measure. This is an authority preflight, never a warmup/CPU sample.
+          await clickActorAndWait();
+          await waitForExactRoutingPhase(
+            actorPage,
+            actionKey,
+            policyEnabled,
+            1,
+          );
+          await awaitLazyFinalObserver(lazyPage);
+          await lazySyncedIdleBarrier(lazyPage);
+          await resetExactRoutingCounters(
+            actorPage,
+            actionKey,
+            policyEnabled,
+          );
+        } catch (cause) {
+          await cancelLazyFinalObserver(lazyPage);
+          throw cause;
+        }
+      };
+
+      const runWarmupBlock = async (
+        policyEnabled: boolean,
+      ): Promise<void> => {
+        await preflightPolicy(policyEnabled);
+        const finalCount = expectedCount + WARMUP_EVENTS_PER_BLOCK;
+        await armLazyFinalObserver(
+          lazyPage,
+          `doubled:${finalCount * 2}`,
+        );
+        try {
+          for (let index = 0; index < WARMUP_EVENTS_PER_BLOCK; index++) {
+            await clickActorAndWait();
+          }
+          await waitForExactRoutingPhase(
+            actorPage,
+            actionKey,
+            policyEnabled,
+            WARMUP_EVENTS_PER_BLOCK,
+          );
+          await awaitLazyFinalObserver(lazyPage);
+          await lazySyncedIdleBarrier(lazyPage);
+        } catch (cause) {
+          await cancelLazyFinalObserver(lazyPage);
+          throw cause;
+        }
+      };
+
+      // Unmeasured ABBA warmup gives both policies the same event count and
+      // cold/warm positions before either CPU block starts (50 events per mode
+      // in CPU mode). Each block's two authority-preflight events remain
+      // separate.
+      for (const policyEnabled of [false, true, true, false]) {
+        await runWarmupBlock(policyEnabled);
       }
+
+      let processMonitor: CdpWorkerProfiler | undefined;
+      if (CPU_BENCH) {
+        // This connection never attaches to a worker. The authoritative gate
+        // uses only browser-level SystemInfo counters, never Profiler.start.
+        processMonitor = await CdpWorkerProfiler.connect(
+          lazyShell.wsEndpoint(),
+          { attachWorkers: false },
+        );
+      }
+      let rendererTopology: number[] | undefined;
+      let previousProcessAfter: BrowserProcessMetrics | undefined;
 
       const runPhase = async (
         label: string,
         policyEnabled: boolean,
       ): Promise<PhaseResult> => {
-        const beforePolicy = await executionHealth();
-        const claimsIssuedBefore = controlCount(beforePolicy, "claimsIssued");
-        const claimsRevokedBefore = controlCount(beforePolicy, "claimsRevoked");
-        const hadLiveClaims = claimsIssuedBefore > claimsRevokedBefore;
-        await writePolicy(policyOwner, policyEnabled);
-
-        if (policyEnabled) {
-          // Aggregate claim counters also include the shell's default pieces.
-          // Drive this exact transformed action until the actor proves it has
-          // integrated the claim by retaining a derived transaction locally.
-          // Every attempt here is excluded from the measured window.
-          const warmupBefore = await collectBrowserLoadSummary(
-            actorPage,
-            `${label}-warmup-before`,
-          );
-          let exactClaimObserved = false;
-          for (let attempt = 0; attempt < 12; attempt++) {
-            await clickAndSettle();
-            const warmupAfter = await collectBrowserLoadSummary(
-              actorPage,
-              `${label}-warmup-${attempt + 1}`,
-            );
-            if (
-              warmupAfter.churn.clientDerivedSuppressed >
-                warmupBefore.churn.clientDerivedSuppressed
-            ) {
-              exactClaimObserved = true;
-              break;
-            }
-
-            const progressBefore = await executionHealth();
-            const issuedBefore = controlCount(progressBefore, "claimsIssued");
-            const acceptedBefore = controlCount(
-              progressBefore,
-              "acceptedActionAttempts",
-            );
-            // Candidate discovery and claim-feed delivery are asynchronous to
-            // browser idle. Give the host a bounded chance to make progress,
-            // then invalidate again so a newly discovered candidate is
-            // reoffered even when unrelated claims are already live.
-            await waitForControlAdvance(actorPage, [
-              ["claimsIssued", issuedBefore],
-              ["acceptedActionAttempts", acceptedBefore],
-            ], 5_000).catch(() => {});
-          }
-          assert(
-            exactClaimObserved,
-            `host never claimed the exact browser action: ${
-              JSON.stringify({
-                claimsIssuedBefore,
-                claimsRevokedBefore,
-                health: await executionHealth(),
-              })
-            }`,
-          );
-        } else {
-          await clickAndSettle();
-        }
-
-        if (!policyEnabled && hadLiveClaims) {
-          await waitForControlAdvance(actorPage, [
-            ["claimsRevoked", claimsRevokedBefore],
-          ]);
-        }
-
-        await resetActionTrace(actorPage);
+        await preflightPolicy(policyEnabled);
+        const lazyActionRunsBefore = await actionRunCounts(lazyPage);
         const loadBefore = await collectBrowserLoadSummary(
           actorPage,
           `${label}-before`,
         );
-        const lazyActionRunsBefore = await actionRunCounts(lazyPage);
-        const healthBefore = await executionHealth();
-        let profile: CPUProfile | undefined;
-        let processCpuBefore: BrowserProcessMetrics | undefined;
-        if (profiler) {
-          await profiler.start("worker-runtime");
-          processCpuBefore = await profiler.readBrowserProcessMetrics();
-        }
-        const actionRuns: number[] = [];
-        const observedActionIds = new Set<string>();
-        const observedActionWrites = new Set<string>();
+        const finalCount = expectedCount + CPU_EVENTS;
+        await armLazyFinalObserver(
+          lazyPage,
+          `doubled:${finalCount * 2}`,
+          MEASURED_OBSERVER_TIMEOUT,
+        );
+
+        // Authoritative lazy-browser CPU bracket. The event batch never polls
+        // or settles the lazy client; one final observer and synced-idle-synced
+        // barrier below intentionally close all feed, overlay, and render work.
+        const processCpuBefore = processMonitor
+          ? await processMonitor.readBrowserProcessMetrics()
+          : undefined;
         for (let index = 0; index < CPU_EVENTS; index++) {
-          // The exact trace is a 2,000-entry diagnostic ring. Reset between
-          // batches so long benchmark phases cannot make a constant ring
-          // length look like a missed action.
-          if (index > 0 && index % 100 === 0) {
-            await resetActionTrace(actorPage);
-          }
-          const traceBefore = (await actionTrace(actorPage)).length;
-          await clickAndSettle();
-          const delta = (await actionTrace(actorPage)).slice(traceBefore);
-          const writingEntries = delta.filter((entry) =>
-            entry.actualWrites.length > 0
-          );
-          for (const entry of writingEntries) {
-            observedActionIds.add(entry.actionId);
-            for (const write of entry.actualWrites) {
-              observedActionWrites.add(
-                `${entry.actionId}:${write.entityId}:${write.path.join("/")}`,
-              );
-            }
-          }
-          actionRuns.push(writingEntries.length);
+          await clickActorAndWait();
         }
+        const routing = await waitForExactRoutingPhase(
+          actorPage,
+          actionKey,
+          policyEnabled,
+          CPU_EVENTS,
+        );
+
+        // Authority must settle before touching the lazy client. Then include
+        // its one final render observation and convergence barrier in the CPU
+        // bracket before reading process-after.
+        await awaitLazyFinalObserver(lazyPage);
+        await lazySyncedIdleBarrier(lazyPage);
+        const processCpuAfter = processMonitor
+          ? await processMonitor.readBrowserProcessMetrics()
+          : undefined;
+
         let browserProcessCpu: PhaseResult["browserProcessCpu"];
-        if (profiler) {
-          const processCpuAfter = await profiler.readBrowserProcessMetrics();
-          profile = await profiler.stop();
-          // `processCpuBefore` is always populated by the same profiler
-          // branch. Keep this explicit so a future refactor cannot silently
-          // omit the authoritative CPU signal while still writing a profile.
-          if (!processCpuBefore) {
-            throw new Error("Browser process CPU baseline was not captured");
+        if (processCpuBefore && processCpuAfter) {
+          if (previousProcessAfter) {
+            assertRendererCountersContinue(
+              previousProcessAfter,
+              processCpuBefore,
+            );
           }
+          const phaseTopology = rendererIds(processCpuBefore);
+          assert(phaseTopology.length > 0, "lazy browser exposed no renderers");
+          if (rendererTopology === undefined) rendererTopology = phaseTopology;
+          else assertEquals(phaseTopology, rendererTopology);
           let rendererDelta: RendererProcessCpuDelta;
           try {
             rendererDelta = deltaRendererProcessCpu(
@@ -438,6 +956,7 @@ const p95 = (values: readonly number[]): number => {
                     label,
                     before: processCpuBefore,
                     after: processCpuAfter,
+                    routing,
                     error: cause instanceof Error
                       ? {
                         name: cause.name,
@@ -453,242 +972,86 @@ const p95 = (values: readonly number[]): number => {
             }
             throw cause;
           }
+          assert(
+            rendererDelta.totalCpuTimeUs >= CPU_FLOOR_US,
+            `${label} renderer CPU ${rendererDelta.totalCpuTimeUs}us was below the ${CPU_FLOOR_US}us noise floor`,
+          );
           browserProcessCpu = {
             before: processCpuBefore,
             after: processCpuAfter,
             rendererDelta,
           };
+          previousProcessAfter = processCpuAfter;
         }
-        if (profile && PROFILE_DIR) {
-          await Deno.mkdir(PROFILE_DIR, { recursive: true });
-          await Deno.writeTextFile(
-            join(PROFILE_DIR, `${label}.cpuprofile`),
-            JSON.stringify(profile),
-          );
-        }
-        // Query cumulative graph counters only after sampling stops. This
-        // keeps lazy-worker RPC and trace instrumentation outside the CPU
-        // bracket while avoiding the finite action-trace ring entirely.
+
         const lazyActionRunsAfter = await actionRunCounts(lazyPage);
-        const lazyActionRuns = [...observedActionIds].reduce(
-          (total, actionId) => {
-            const before = lazyActionRunsBefore[actionId] ?? 0;
-            const after = lazyActionRunsAfter[actionId] ?? 0;
-            if (after < before) {
-              throw new Error(
-                `lazy action ${actionId} run count decreased from ${before} to ${after}`,
-              );
-            }
-            return total + after - before;
-          },
-          0,
+        const beforeRunCount = lazyActionRunsBefore[actionKey.actionId] ?? 0;
+        const afterRunCount = lazyActionRunsAfter[actionKey.actionId] ?? 0;
+        assert(
+          afterRunCount >= beforeRunCount,
+          `lazy action ${actionKey.actionId} run count decreased`,
         );
         const loadAfter = await collectBrowserLoadSummary(
           actorPage,
           `${label}-after`,
         );
-        const healthAfterBracket = await executionHealth();
-        const buildResult = (
-          healthAfter: ServerExecutionHealth,
-        ): PhaseResult => ({
+        return {
           label,
           policyEnabled,
           events: CPU_EVENTS,
-          actionRuns,
-          lazyActionRuns,
+          lazyActionRuns: afterRunCount - beforeRunCount,
           clientDerivedSuppressed: loadAfter.churn.clientDerivedSuppressed -
             loadBefore.churn.clientDerivedSuppressed,
           clientDerivedUpstreamCommits:
             loadAfter.churn.clientDerivedUpstreamCommits -
             loadBefore.churn.clientDerivedUpstreamCommits,
-          serverAcceptedActionAttempts:
-            controlCount(healthAfter, "acceptedActionAttempts") -
-            controlCount(healthBefore, "acceptedActionAttempts"),
-          observedActionWrites: [...observedActionWrites].sort(),
-          ...(profile ? { cpu: summarizeCPUProfile(profile) } : {}),
+          routing,
           ...(browserProcessCpu ? { browserProcessCpu } : {}),
-        });
-        if (policyEnabled) {
-          const acceptedBefore = controlCount(
-            healthBefore,
-            "acceptedActionAttempts",
-          );
-          try {
-            await waitForControlAdvance(actorPage, [
-              ["acceptedActionAttempts", acceptedBefore],
-            ]);
-          } catch (cause) {
-            const healthAfterTimeout = await executionHealth();
-            const evidence = {
-              capturedAt: new Date().toISOString(),
-              label,
-              phase: buildResult(healthAfterTimeout),
-              healthBefore,
-              healthAfterBracket,
-              healthAfterTimeout,
-              error: cause instanceof Error
-                ? {
-                  name: cause.name,
-                  message: cause.message,
-                  stack: cause.stack,
-                }
-                : String(cause),
-            };
-            console.error(
-              `server-primary phase failed after CPU bracket: ${
-                JSON.stringify(evidence)
-              }`,
-            );
-            if (PROFILE_DIR) {
-              await Deno.mkdir(PROFILE_DIR, { recursive: true });
-              await Deno.writeTextFile(
-                join(PROFILE_DIR, `${label}-failure.json`),
-                JSON.stringify(evidence, null, 2),
-              );
-            }
-            throw cause;
-          }
-        }
-        const healthAfter = await executionHealth();
-        const result = buildResult(healthAfter);
-        if (PROFILE_DIR) {
-          await Deno.mkdir(PROFILE_DIR, { recursive: true });
-          await Deno.writeTextFile(
-            join(PROFILE_DIR, `${label}-phase.json`),
-            JSON.stringify(
-              {
-                capturedAt: new Date().toISOString(),
-                phase: result,
-                healthBefore,
-                healthAfterBracket,
-                healthAfter,
-              },
-              null,
-              2,
-            ),
-          );
-        }
-        return result;
+        };
       };
 
+      const phases: PhaseResult[] = [];
       try {
-        const baseline = await runPhase("policy-disabled", false);
-        const enabled = await runPhase("policy-enabled", true);
+        for (const phase of PHASES) {
+          phases.push(await runPhase(phase.label, phase.policyEnabled));
+        }
 
-        assert(
-          baseline.actionRuns.every((runs) => runs > 0),
-          `baseline missed doubled action: ${
-            JSON.stringify({
-              doubledEntityId,
-              actionRuns: baseline.actionRuns,
-              observedActionWrites: baseline.observedActionWrites,
-            })
-          }`,
-        );
-        assert(
-          p95(enabled.actionRuns) <= p95(baseline.actionRuns),
-          `enabled actor-client p95 action runs ${
-            p95(enabled.actionRuns)
-          } exceeded baseline ${p95(baseline.actionRuns)}`,
-        );
-        // Phase 2 intentionally retains speculative browser action runs. Keep
-        // the lazy-client count in the report as a Phase 3 suppression
-        // diagnostic; renderer CPU is the no-regression gate for this phase.
-        assert(
-          enabled.clientDerivedSuppressed > 0,
-          `enabled phase did not suppress claimed browser writes: ${
-            JSON.stringify(enabled)
-          }`,
-        );
-        assertEquals(enabled.clientDerivedUpstreamCommits, 0);
-        assert(enabled.serverAcceptedActionAttempts > 0);
-
-        const phases = [baseline, enabled];
+        let cpuAnalysis:
+          | ReturnType<
+            typeof assertCounterbalancedRendererCpu
+          >
+          | undefined;
         if (CPU_BENCH) {
-          const enabledRepeat = await runPhase("policy-enabled-repeat", true);
-          const baselineRepeat = await runPhase(
-            "policy-disabled-repeat",
-            false,
-          );
-          phases.push(enabledRepeat, baselineRepeat);
-          const cpuDiagnostics = phases.map((phase) => ({
-            label: phase.label,
-            events: phase.events,
-            rendererCpuUs:
-              phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs ?? 0,
-            rendererCpuUsPerEvent:
-              (phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs ?? 0) /
-              phase.events,
-            rendererProcesses:
-              phase.browserProcessCpu?.rendererDelta.renderers ?? [],
-            sampledUs: phase.cpu?.sampledUs ?? 0,
-            attributedWorkUs: phase.cpu?.attributedWorkUs ?? 0,
-            lazyActionRuns: phase.lazyActionRuns,
-          }));
+          const cpuPerEvent = phases.map((phase) => {
+            const total = phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs;
+            assert(total !== undefined, `${phase.label} omitted renderer CPU`);
+            return total / phase.events;
+          });
+          cpuAnalysis = assertCounterbalancedRendererCpu(cpuPerEvent, {
+            maximumEnabledRatio: 1.1,
+            maximumReplicateSpread: 0.15,
+          });
           console.log(
-            `lazy-browser CPU phases: ${JSON.stringify(cpuDiagnostics)}`,
-          );
-          if (PROFILE_DIR) {
-            await Deno.mkdir(PROFILE_DIR, { recursive: true });
-            await Deno.writeTextFile(
-              join(PROFILE_DIR, "server-primary-rollout-cpu-summary.json"),
-              JSON.stringify(
-                {
-                  capturedAt: new Date().toISOString(),
-                  space: SPACE_NAME,
-                  doubledEntityId,
-                  phases,
-                  cpuDiagnostics,
-                },
-                null,
-                2,
-              ),
-            );
-          }
-          for (const phase of phases) {
-            assert(
-              (phase.cpu?.sampledUs ?? 0) > 0,
-              `${phase.label} CPU profile contained no valid samples`,
-            );
-            assert(
-              (phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs ?? 0) > 0,
-              `${phase.label} lazy-browser renderer CPU did not advance`,
-            );
-          }
-          const aggregateRendererCpuPerEvent = (
-            selected: PhaseResult[],
-          ): number =>
-            selected.reduce(
-              (total, phase) =>
-                total +
-                (phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs ?? 0),
-              0,
-            ) / selected.reduce((total, phase) => total + phase.events, 0);
-          const baselineAggregate = aggregateRendererCpuPerEvent([
-            baseline,
-            baselineRepeat,
-          ]);
-          const enabledAggregate = aggregateRendererCpuPerEvent([
-            enabled,
-            enabledRepeat,
-          ]);
-          assert(
-            enabledAggregate <= baselineAggregate * 1.1,
-            `enabled lazy-browser renderer CPU/event ${enabledAggregate}us exceeded baseline ${baselineAggregate}us by more than 10%: ${
-              JSON.stringify(cpuDiagnostics)
+            `authoritative lazy-browser CPU phases: ${
+              JSON.stringify({
+                cpuPerEvent,
+                analysis: cpuAnalysis,
+                phases: phases.map((phase) => ({
+                  label: phase.label,
+                  policyEnabled: phase.policyEnabled,
+                  rendererCpuUs: phase.browserProcessCpu?.rendererDelta
+                    .totalCpuTimeUs,
+                  renderers: phase.browserProcessCpu?.rendererDelta.renderers,
+                  lazyActionRuns: phase.lazyActionRuns,
+                  clientDerivedSuppressed: phase.clientDerivedSuppressed,
+                  clientDerivedUpstreamCommits:
+                    phase.clientDerivedUpstreamCommits,
+                })),
+              })
             }`,
           );
         }
 
-        const health = await executionHealth();
-        assert(
-          (health.serverExecutionPool?.activeWorkers ?? 0) >= 1,
-          `shared executor was not live: ${JSON.stringify(health)}`,
-        );
-        assert(
-          (health.serverExecutionPool?.activeDemands ?? 0) >= 2,
-          `browser demand was not retained: ${JSON.stringify(health)}`,
-        );
         if (PROFILE_DIR) {
           await Deno.mkdir(PROFILE_DIR, { recursive: true });
           await Deno.writeTextFile(
@@ -697,17 +1060,100 @@ const p95 = (values: readonly number[]): number => {
               {
                 capturedAt: new Date().toISOString(),
                 space: SPACE_NAME,
-                doubledEntityId,
+                actionKey,
+                discoveryClaim: discovered.claim,
+                discoveryWrites: discoveryTrace.filter((entry) =>
+                  entry.actionId === actionKey.actionId
+                ).flatMap((entry) => entry.actualWrites),
+                authorityPreflightEventsPerBlock: AUTHORITY_PREFLIGHT_EVENTS,
+                warmupEventsPerBlock: WARMUP_EVENTS_PER_BLOCK,
+                measuredEventsPerPhase: CPU_EVENTS,
                 phases,
-                health,
+                cpuAnalysis,
               },
               null,
               2,
             ),
           );
         }
+
+        // Optional sampling is deliberately after all eight authoritative
+        // SystemInfo phases and their gate. It is diagnostic only: attaching a
+        // worker profiler cannot influence any pass/fail CPU comparison above.
+        if (CPU_BENCH && PROFILE_DIR) {
+          const diagnosticEvents = Math.min(CPU_EVENTS, 100);
+          let sampler: CdpWorkerProfiler | undefined;
+          try {
+            await preflightPolicy(true);
+            const finalCount = expectedCount + diagnosticEvents;
+            await armLazyFinalObserver(
+              lazyPage,
+              `doubled:${finalCount * 2}`,
+            );
+            sampler = await CdpWorkerProfiler.connect(
+              lazyShell.wsEndpoint(),
+            );
+            await sampler.waitForWorker("worker-runtime");
+            await sampler.start("worker-runtime");
+            for (let index = 0; index < diagnosticEvents; index++) {
+              await clickActorAndWait();
+            }
+            const routing = await waitForExactRoutingPhase(
+              actorPage,
+              actionKey,
+              true,
+              diagnosticEvents,
+            );
+            const profile = await sampler.stop();
+            await awaitLazyFinalObserver(lazyPage);
+            await lazySyncedIdleBarrier(lazyPage);
+            await Deno.writeTextFile(
+              join(PROFILE_DIR, "diagnostic-enabled-non-gating.cpuprofile"),
+              JSON.stringify(profile),
+            );
+            await Deno.writeTextFile(
+              join(PROFILE_DIR, "diagnostic-enabled-non-gating.json"),
+              JSON.stringify(
+                {
+                  capturedAt: new Date().toISOString(),
+                  explicitlyNonGating: true,
+                  events: diagnosticEvents,
+                  routing,
+                  cpu: summarizeCPUProfile(profile),
+                },
+                null,
+                2,
+              ),
+            );
+          } catch (cause) {
+            const error = cause instanceof Error
+              ? { name: cause.name, message: cause.message, stack: cause.stack }
+              : { message: String(cause) };
+            console.warn(
+              `non-gating worker CPU diagnostic failed: ${
+                JSON.stringify(error)
+              }`,
+            );
+            await cancelLazyFinalObserver(lazyPage);
+            await Deno.writeTextFile(
+              join(PROFILE_DIR, "diagnostic-enabled-non-gating-failure.json"),
+              JSON.stringify(
+                {
+                  capturedAt: new Date().toISOString(),
+                  explicitlyNonGating: true,
+                  error,
+                },
+                null,
+                2,
+              ),
+            ).catch(() => {});
+          } finally {
+            sampler?.close();
+          }
+        }
       } finally {
-        profiler?.close();
+        processMonitor?.close();
+        await cancelLazyFinalObserver(lazyPage);
       }
     });
   },
