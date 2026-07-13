@@ -1,8 +1,9 @@
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import * as MemoryClient from "../v2/client.ts";
-import { Server } from "../v2/server.ts";
+import { type ExecutionDemandSnapshot, Server } from "../v2/server.ts";
 
 const SPACE = "did:key:z6Mk-execution-policy-acl-space";
+const OTHER_SPACE = "did:key:z6Mk-execution-policy-other-space";
 const OWNER = "did:key:z6Mk-execution-policy-owner";
 const WRITER = "did:key:z6Mk-execution-policy-writer";
 const READER = "did:key:z6Mk-execution-policy-reader";
@@ -120,6 +121,89 @@ Deno.test("policy disable waits for the old lease to enter draining before respo
   } finally {
     server.releaseDrain.resolve();
     await disable?.catch(() => undefined);
+    await ownerConnection.client.close();
+    await server.close();
+  }
+});
+
+Deno.test("policy enable awaits current demand for every branch in its space", async () => {
+  const server = createServer(
+    "memory-v2-execution-policy-enable-demand-reconcile",
+    "off",
+  );
+  const ownerConnection = await connect(server, OWNER, true);
+  const owner = await ownerConnection.client.mount(
+    SPACE,
+    {},
+    ownerConnection.auth,
+  );
+  const other = await ownerConnection.client.mount(
+    OTHER_SPACE,
+    {},
+    ownerConnection.auth,
+  );
+  const branches = ["", "feature", "preview"];
+  const listenerStarted = branches.map(() => Promise.withResolvers<void>());
+  const releaseListener = branches.map(() => Promise.withResolvers<void>());
+  const snapshots: ExecutionDemandSnapshot[] = [];
+  let enableSettled = false;
+  let enable: Promise<unknown> | undefined;
+  let unsubscribe = () => {};
+  try {
+    for (const branch of branches) {
+      await owner.setExecutionDemand(branch, [`piece:${branch || "default"}`]);
+    }
+    await other.setExecutionDemand("unrelated", ["piece:unrelated"]);
+
+    unsubscribe = server.subscribeExecutionDemands((snapshot) => {
+      snapshots.push(snapshot);
+      if (snapshot.space !== SPACE) return;
+      const index = branches.indexOf(snapshot.branch);
+      if (index === -1) return;
+      listenerStarted[index].resolve();
+      return releaseListener[index].promise;
+    });
+
+    enable = owner.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: POLICY_ID,
+        value: { value: { version: 1, serverPrimaryExecution: true } },
+      }],
+    }).finally(() => {
+      enableSettled = true;
+    });
+
+    const boundary = await Promise.race([
+      Promise.all(listenerStarted.map(({ promise }) => promise)).then(() =>
+        "listeners"
+      ),
+      enable.then(() => "response"),
+    ]);
+    assertEquals(boundary, "listeners");
+    assertEquals(enableSettled, false);
+    assertEquals(
+      snapshots.map((snapshot) => ({
+        space: snapshot.space,
+        branch: snapshot.branch,
+        pieces: snapshot.demands.map((demand) => demand.pieces),
+      })).sort((left, right) => left.branch.localeCompare(right.branch)),
+      branches.map((branch) => ({
+        space: SPACE,
+        branch,
+        pieces: [[`piece:${branch || "default"}`]],
+      })).sort((left, right) => left.branch.localeCompare(right.branch)),
+    );
+
+    for (const gate of releaseListener) gate.resolve();
+    await enable;
+    assertEquals(enableSettled, true);
+  } finally {
+    for (const gate of releaseListener) gate.resolve();
+    unsubscribe();
+    await enable?.catch(() => undefined);
     await ownerConnection.client.close();
     await server.close();
   }

@@ -4716,7 +4716,7 @@ export class Server {
               )
             ? Engine.serverSeq(engine) + 1
             : commit.seq;
-          const drainedExecutionBranches = new Set<BranchName>();
+          const reconciledExecutionBranches = new Set<BranchName>();
           if (aclTouched) {
             this.#invalidateAclCapabilities(message.space);
             // Pass the writing session so it isn't sent the terminal revocation
@@ -4734,7 +4734,7 @@ export class Server {
                 message.space,
               )
             ) {
-              drainedExecutionBranches.add(branch);
+              reconciledExecutionBranches.add(branch);
             }
           }
           if (executionPolicyTouched) {
@@ -4746,7 +4746,12 @@ export class Server {
                   { policyDisabled: true },
                 )
               ) {
-                drainedExecutionBranches.add(branch);
+                reconciledExecutionBranches.add(branch);
+              }
+            }
+            for (const demand of this.#executionDemands.values()) {
+              if (demand.space === message.space) {
+                reconciledExecutionBranches.add(demand.branch);
               }
             }
           }
@@ -4756,7 +4761,7 @@ export class Server {
           // observe renewal loss, stop that realm, and acquire a fresh shadow
           // generation for every affected lane.
           await Promise.all(
-            [...drainedExecutionBranches].map((branch) =>
+            [...reconciledExecutionBranches].map((branch) =>
               this.#publishExecutionDemandsAndWait(message.space, branch)
             ),
           );
