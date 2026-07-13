@@ -2228,6 +2228,8 @@ export class Scheduler {
       hasActiveDebounceTimer: (action) =>
         this.gates.hasActiveDebounceTimer(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
+      isClaimedRemoteSpeculationDeferred: (action) =>
+        this.gates.isClaimedRemoteSpeculationDeferred(action),
       // Engaged only while an initial rehydration is being applied (synchronous
       // post-phase-7). MUST NOT read backgroundTasks: its sole populator is now
       // the event-driven piece-start task (events.ts), so gating on it would

@@ -355,10 +355,16 @@ describe("scheduler v2 cutover fixtures", () => {
           .claimedRemoteSpeculationReadyAt,
       ).toBeGreaterThan(performance.now());
 
+      let idleResolved = false;
+      const idleAfterRemoteInvalidation = runtime.scheduler.idle().then(() => {
+        idleResolved = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(idleResolved).toBe(false);
       await new Promise((resolve) =>
         setTimeout(resolve, CLAIMED_REMOTE_SPECULATION_GRACE_MS + 25)
       );
-      await runtime.scheduler.idle();
+      await idleAfterRemoteInvalidation;
       expect(computationRuns).toBe(1);
 
       scheduler.markAndScheduleInvalidAction(computation, sourceAddress, {

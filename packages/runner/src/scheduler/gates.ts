@@ -181,6 +181,13 @@ export class SchedulerGates {
     this.recomputeWakeAfterClear();
   }
 
+  isClaimedRemoteSpeculationDeferred(
+    action: Action,
+    now = performance.now(),
+  ): boolean {
+    return (this.gate(action)?.claimedRemoteSpeculationReadyAt ?? 0) > now;
+  }
+
   onInvalidated(
     node: SchedulerNode,
     now = performance.now(),
