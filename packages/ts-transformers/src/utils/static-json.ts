@@ -181,6 +181,14 @@ export function evaluateStaticJson(
       }
       return { resolved: true, value: result };
     }
+    if (isTrustedSchemaIdentityCall(node, checker)) {
+      return evaluateStaticJson(
+        node.arguments[0]!,
+        checker,
+        seenNodes,
+        seenSymbols,
+      );
+    }
     if (ts.isIdentifier(node)) {
       let symbol = checker.getSymbolAtLocation(node);
       if (!symbol || seenSymbols.has(symbol)) return { resolved: false };
@@ -255,7 +263,8 @@ function isStableConstJsonBinding(
     !ts.isIdentifier(declaration.name) ||
     !ts.isVariableDeclarationList(declaration.parent) ||
     (declaration.parent.flags & ts.NodeFlags.Const) === 0 ||
-    isExportedVariable(declaration)
+    (isExportedVariable(declaration) &&
+      !isTrustedSchemaIdentityCall(declaration.initializer, checker))
   ) {
     return false;
   }
@@ -299,6 +308,39 @@ function isStableConstJsonBinding(
   } finally {
     visiting.delete(symbol);
   }
+}
+
+/**
+ * `schema(literal)` is the public frozen-data identity helper. Recognizing its
+ * syntax does not execute authored code; it exposes the literal argument to
+ * the same static JSON evaluator while allowing the frozen result to be
+ * exported safely.
+ */
+function isTrustedSchemaIdentityCall(
+  node: ts.Node | undefined,
+  checker: ts.TypeChecker,
+): node is ts.CallExpression {
+  if (!node || !ts.isCallExpression(node) || node.arguments.length !== 1) {
+    return false;
+  }
+  const callee = unwrap(node.expression);
+  if (
+    ts.isPropertyAccessExpression(callee) &&
+    ts.isIdentifier(callee.expression) &&
+    callee.expression.text === "__cfHelpers" && callee.name.text === "schema"
+  ) {
+    return true;
+  }
+  if (!ts.isIdentifier(callee)) return false;
+  const symbol = checker.getSymbolAtLocation(callee);
+  return symbol?.declarations?.some((candidate) => {
+    if (!ts.isImportSpecifier(candidate)) return false;
+    const importDeclaration = candidate.parent.parent.parent;
+    return ts.isImportDeclaration(importDeclaration) &&
+      ts.isStringLiteral(importDeclaration.moduleSpecifier) &&
+      importDeclaration.moduleSpecifier.text === "commonfabric" &&
+      (candidate.propertyName ?? candidate.name).text === "schema";
+  }) ?? false;
 }
 
 function isTypeOnlyReference(node: ts.Identifier): boolean {

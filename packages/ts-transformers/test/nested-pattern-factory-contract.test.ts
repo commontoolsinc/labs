@@ -951,6 +951,48 @@ export default pattern(() => ({ child: Existing }));
   });
 });
 
+Deno.test("factory contracts unwrap exported schema() literals", async () => {
+  const { output, diagnostics } = await validateSource(
+    `
+import { pattern, schema } from "commonfabric";
+
+export const model = schema({
+  type: "object",
+  properties: { value: { type: "number" } },
+  required: ["value"],
+});
+const Existing = pattern(({ value }) => ({ value }), model, model);
+export default pattern(() => ({ child: Existing }));
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+
+  assertEquals(
+    diagnostics.filter((diagnostic) =>
+      diagnostic.type === "pattern-factory:non-static-public-schema"
+    ).length,
+    0,
+  );
+  const root = parseModule(output);
+  const outer = patternCalls(root).filter((call) =>
+    ts.isIdentifier(call.expression) && call.expression.text === "pattern"
+  ).at(-1);
+  assert(outer, output);
+  assertEquals(propertyContract(resultProperties(outer).child), {
+    kind: "pattern",
+    argumentSchema: {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    },
+    resultSchema: {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    },
+  });
+});
+
 Deno.test("nested schema-bearing factories reject executable schema discovery", async () => {
   const { diagnostics } = await validateSource(
     `
