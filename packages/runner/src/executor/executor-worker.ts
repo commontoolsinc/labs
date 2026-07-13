@@ -45,6 +45,7 @@ import {
   schedulerIdentityKeyForAction,
   schedulerIdentityKeyForStaleReader,
 } from "./scheduler-wake-identity.ts";
+import { maybeAttachExecutorOtelBridge } from "./worker-otel.ts";
 
 type WorkerRequest = {
   type:
@@ -93,6 +94,7 @@ const claimedAttempts = new ClaimedAttemptLifecycle<Action>();
 let claimsByAction = new WeakMap<object, ExecutionClaim>();
 let demandGeneration = 0;
 let selectiveWake: SelectiveDemandWakeQueue | null = null;
+let detachOtelBridge: (() => void) | undefined;
 let work = Promise.resolve();
 let stopped = false;
 
@@ -496,6 +498,12 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
         ? "allow"
         : "suppress",
   }));
+  detachOtelBridge = await maybeAttachExecutorOtelBridge(runtime, {
+    attributes: {
+      "space.did": space,
+      "user.did": request.principal,
+    },
+  });
   runtime.installServerBuiltinFetch((builtinId, rawUrl, init) => {
     // Capture both object and exact claim before crossing an async broker
     // boundary. Broker IPC never receives a causal actor identity.
@@ -625,7 +633,12 @@ const stop = async (): Promise<void> => {
   for (const cancel of demandSinks.values()) cancel();
   demandSinks.clear();
   if (runtime !== null) {
-    await runtime.dispose();
+    try {
+      await runtime.dispose();
+    } finally {
+      detachOtelBridge?.();
+      detachOtelBridge = undefined;
+    }
   } else if (storage !== null) {
     await storage.close();
   }
