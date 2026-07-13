@@ -10,6 +10,11 @@ const logger = getLogger("execution.pool", { enabled: false });
 
 export interface ExecutionPoolControl {
   subscribeExecutionDemands(listener: ExecutionDemandListener): () => void;
+  /** Durable legacy owner query. Missing support must fail closed. */
+  legacyBackgroundActive?(
+    space: string,
+    branch: BranchName,
+  ): Promise<boolean> | boolean;
   acquireExecutionLease(
     space: string,
     branch: BranchName,
@@ -168,8 +173,9 @@ export class SharedExecutionPool {
   constructor(options: SharedExecutionPoolOptions) {
     this.#control = options.control;
     this.#factory = options.factory;
-    this.#legacyBackgroundActive = options.legacyBackgroundActive ??
-      (() => false);
+    const legacyBackgroundActive = options.legacyBackgroundActive ??
+      options.control.legacyBackgroundActive?.bind(options.control);
+    this.#legacyBackgroundActive = legacyBackgroundActive ?? (() => true);
     this.#now = options.now ?? Date.now;
     this.#setTimer = options.setTimer ??
       ((callback, delayMs) =>
@@ -349,7 +355,13 @@ export class SharedExecutionPool {
         this.#scheduleCrashRetry(slot);
         return;
       }
-      const renewed = await this.#control.renewExecutionLease(slot.lease);
+      let renewed: ExecutionLeaseHandle | null;
+      try {
+        renewed = await this.#control.renewExecutionLease(slot.lease);
+      } catch (error) {
+        console.warn("execution lease renewal failed", error);
+        renewed = null;
+      }
       if (renewed === null) {
         this.#metrics.leaseLosses++;
         await this.#shutdown(slot, true);
@@ -453,7 +465,13 @@ export class SharedExecutionPool {
       if (slot.generationToken !== token || this.#closed) return;
       void this.#enqueue(slot, async () => {
         if (slot.lease === null || slot.generationToken !== token) return;
-        const renewed = await this.#control.renewExecutionLease(slot.lease);
+        let renewed: ExecutionLeaseHandle | null;
+        try {
+          renewed = await this.#control.renewExecutionLease(slot.lease);
+        } catch (error) {
+          console.warn("execution lease renewal failed", error);
+          renewed = null;
+        }
         if (renewed === null) {
           this.#metrics.leaseLosses++;
           await this.#shutdown(slot, true);
@@ -603,6 +621,7 @@ export class SharedExecutionPool {
     this.#cancelBackoff(slot);
     const executor = slot.executor;
     let lease = slot.lease;
+    const leaseGeneration = lease?.leaseGeneration;
     if (executor === null && lease === null) return;
     slot.state = "draining";
 
@@ -612,11 +631,23 @@ export class SharedExecutionPool {
       abrupt = !settled.graceful;
     }
     if (lease !== null && lease.state === "active") {
-      const draining = await this.#control.beginExecutionLeaseDrain(lease);
-      if (draining === null) this.#metrics.leaseLosses++;
-      lease = draining ?? lease;
-      if (slot.lease?.leaseGeneration === lease.leaseGeneration) {
-        slot.lease = lease;
+      try {
+        const draining = await this.#control.beginExecutionLeaseDrain(lease);
+        if (draining === null) {
+          this.#metrics.leaseLosses++;
+          abrupt = true;
+          lease = null;
+        } else {
+          lease = draining;
+          if (slot.lease?.leaseGeneration === lease.leaseGeneration) {
+            slot.lease = lease;
+          }
+        }
+      } catch (error) {
+        console.warn("execution lease drain failed", error);
+        this.#metrics.leaseLosses++;
+        abrupt = true;
+        lease = null;
       }
     }
     if (executor !== null) {
@@ -629,10 +660,15 @@ export class SharedExecutionPool {
       if (abrupt) this.#metrics.abruptStops++;
     }
     if (lease !== null) {
-      await this.#control.finishExecutionLeaseDrain(lease);
+      try {
+        await this.#control.finishExecutionLeaseDrain(lease);
+      } catch (error) {
+        console.warn("execution lease drain completion failed", error);
+        this.#metrics.leaseLosses++;
+      }
     }
     if (slot.executor === executor) slot.executor = null;
-    if (slot.lease?.leaseGeneration === lease?.leaseGeneration) {
+    if (slot.lease?.leaseGeneration === leaseGeneration) {
       slot.lease = null;
     }
     slot.generationToken = null;

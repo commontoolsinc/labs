@@ -8,6 +8,7 @@ import type {
   ExecutionLeaseHandle,
 } from "@commonfabric/memory/v2/server";
 import {
+  type ExecutionPoolControl,
   SharedExecutionPool,
   type SpaceExecutor,
   type SpaceExecutorFactory,
@@ -47,6 +48,9 @@ class FakeExecutionControl {
   acquired = 0;
   renewals = 0;
   renewalSucceeds = true;
+  renewalError: unknown;
+  drainError: unknown;
+  legacyOwned = false;
   drains = 0;
   finished = 0;
 
@@ -75,6 +79,9 @@ class FakeExecutionControl {
     current: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null> {
     this.renewals++;
+    if (this.renewalError !== undefined) {
+      return Promise.reject(this.renewalError);
+    }
     return Promise.resolve(this.renewalSucceeds ? current : null);
   }
 
@@ -83,9 +90,16 @@ class FakeExecutionControl {
   ): Promise<ExecutionLeaseHandle | null> {
     this.events.push("begin-drain");
     this.drains++;
+    if (this.drainError !== undefined) {
+      return Promise.reject(this.drainError);
+    }
     const draining = { ...current, state: "draining" as const };
     this.current = draining as ExecutionLeaseHandle;
     return Promise.resolve(this.current);
+  }
+
+  legacyBackgroundActive(): Promise<boolean> {
+    return Promise.resolve(this.legacyOwned);
   }
 
   finishExecutionLeaseDrain(
@@ -108,6 +122,33 @@ class FakeExecutionControl {
     return this.listener?.(snapshot);
   }
 }
+
+Deno.test("shared execution pool fails closed without a legacy ownership interlock", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const controlWithoutInterlock: ExecutionPoolControl = {
+    subscribeExecutionDemands: control.subscribeExecutionDemands.bind(control),
+    acquireExecutionLease: control.acquireExecutionLease.bind(control),
+    renewExecutionLease: control.renewExecutionLease.bind(control),
+    beginExecutionLeaseDrain: control.beginExecutionLeaseDrain.bind(control),
+    finishExecutionLeaseDrain: control.finishExecutionLeaseDrain.bind(control),
+  };
+  const pool = new SharedExecutionPool({
+    control: controlWithoutInterlock,
+    factory,
+  });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    assertEquals(factory.starts.length, 0);
+    assertEquals(control.acquired, 0);
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "excluded");
+  } finally {
+    await pool.close();
+  }
+});
 
 class FakeExecutor implements SpaceExecutor {
   readonly events: string[];
@@ -357,6 +398,58 @@ Deno.test("shared execution pool renews authority before reusing a live worker",
   }
 });
 
+Deno.test("shared execution pool treats a rejected demand-time renewal as lease loss", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    const active = [demand(1, ["piece:a"])];
+    await control.emit(1, active);
+    await pool.idle();
+
+    control.renewalError = new Error("renew transport failed");
+    await control.emit(2, active);
+    await pool.idle();
+
+    assertEquals(factory.executors[0]?.stopOptions, [{ abrupt: true }]);
+    assertEquals(factory.starts.length, 2);
+    assertEquals(pool.metrics().leaseLosses, 1);
+    assertEquals(pool.metrics().activeWorkers, 1);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool treats a rejected scheduled renewal as lease loss", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const timers = new ManualTimers();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    control.renewalError = new Error("renew transport failed");
+    timers.fire((delayMs) => delayMs > 2_000);
+    await pool.idle();
+
+    assertEquals(factory.executors[0]?.stopOptions, [{ abrupt: true }]);
+    assertEquals(factory.starts.length, 2);
+    assertEquals(pool.metrics().leaseLosses, 1);
+    assertEquals(pool.metrics().activeWorkers, 1);
+  } finally {
+    await pool.close();
+  }
+});
+
 Deno.test("shared execution pool settles before fencing a graceful drain", async () => {
   const events: string[] = [];
   const control = new FakeExecutionControl(events);
@@ -521,6 +614,28 @@ Deno.test("shared execution pool fences and abruptly stops a worker that fails t
       "finish-drain",
     ]);
     assertEquals(factory.executors[0]?.stopOptions, [{ abrupt: true }]);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool abruptly stops and cleans up when drain control rejects", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    control.drainError = new Error("drain transport failed");
+
+    await control.emit(2, []);
+    await pool.idle();
+
+    assertEquals(factory.executors[0]?.stopOptions, [{ abrupt: true }]);
+    assertEquals(pool.metrics().leaseLosses, 1);
+    assertEquals(pool.snapshot(SPACE, BRANCH), undefined);
   } finally {
     await pool.close();
   }
