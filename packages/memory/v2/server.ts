@@ -2548,7 +2548,8 @@ export class Server {
     engine: Engine.Engine,
     space: string,
     options: { policyDisabled?: boolean } = {},
-  ): void {
+  ): ReadonlySet<BranchName> {
+    const affectedBranches = new Set<BranchName>();
     for (const authority of this.#ownedExecutionLeases.values()) {
       const lease = authority.handle;
       if (
@@ -2561,10 +2562,12 @@ export class Server {
         this.#executionLeaseSponsorCanWrite(engine, authority, sponsor)
       ) continue;
       authority.drainRequested = true;
+      affectedBranches.add(lease.branch);
       this.#trackExecutionLeaseTask(
         this.beginExecutionLeaseDrain(lease).then(() => undefined),
       );
     }
+    return affectedBranches;
   }
 
   #removeExecutionDemands(match: {
@@ -4708,6 +4711,7 @@ export class Server {
               )
             ? Engine.serverSeq(engine) + 1
             : commit.seq;
+          const drainedExecutionBranches = new Set<BranchName>();
           if (aclTouched) {
             this.#invalidateAclCapabilities(message.space);
             // Pass the writing session so it isn't sent the terminal revocation
@@ -4719,15 +4723,38 @@ export class Server {
               message.space,
               message.sessionId,
             );
-            this.#drainIneligibleExecutionLeases(engine, message.space);
+            for (
+              const branch of this.#drainIneligibleExecutionLeases(
+                engine,
+                message.space,
+              )
+            ) {
+              drainedExecutionBranches.add(branch);
+            }
           }
           if (executionPolicyTouched) {
             if (!this.#reconcileExecutionPolicy(engine, message.space)) {
-              this.#drainIneligibleExecutionLeases(engine, message.space, {
-                policyDisabled: true,
-              });
+              for (
+                const branch of this.#drainIneligibleExecutionLeases(
+                  engine,
+                  message.space,
+                  { policyDisabled: true },
+                )
+              ) {
+                drainedExecutionBranches.add(branch);
+              }
             }
           }
+          // A policy/ACL response is the client-visible transition boundary.
+          // Do not release it while a host-local pool can still retain the
+          // fenced lease and Worker: the awaited snapshot makes the pool
+          // observe renewal loss, stop that realm, and acquire a fresh shadow
+          // generation for every affected lane.
+          await Promise.all(
+            [...drainedExecutionBranches].map((branch) =>
+              this.#publishExecutionDemandsAndWait(message.space, branch)
+            ),
+          );
           const acceptedSchedulerObservations = this
             .#acceptedSchedulerObservations(
               schedulerObservations,

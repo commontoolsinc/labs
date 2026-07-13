@@ -612,9 +612,12 @@ async function exercisePoolAuthorityTransition(
     };
     assertEquals(acceptedObservation.executionProvenance?.onBehalfOf, space);
 
-    // Disable in place. Revocation clears claim authority before the next
-    // source write, so the same client action resumes wire ownership without
-    // creating another claimed overlay.
+    // Disable in place. Revocation clears claim authority and the policy
+    // commit does not return until the pool has fenced the old lease and
+    // replaced its Worker with a fresh shadow realm.
+    const workersBeforeDisable = pool.metrics().workersStarted;
+    const leaseGenerationBeforeDisable = pool.snapshot(space, "")
+      ?.leaseGeneration;
     await writePolicy(false);
     await waitForControl(
       (event): event is Extract<
@@ -630,6 +633,14 @@ async function exercisePoolAuthorityTransition(
     await clientStorage.synced();
     await clientRuntime.settled();
     assertEquals(server.listExecutionClaims(space), []);
+    assertEquals(pool.snapshot(space, ""), {
+      state: "live",
+      referenceCount: 1,
+      pieces: [stableResultId],
+      leaseGeneration: leaseGenerationBeforeDisable! + 1,
+    });
+    assertEquals(pool.metrics().workersStarted, workersBeforeDisable + 1);
+    assertEquals(pool.metrics().crashes, 0);
     const overlaysDropped = loggerCount("execution-overlay-dropped") -
       overlaysDroppedBefore;
     assertEquals(overlaysDropped >= overlaysCreated, true);
@@ -643,10 +654,41 @@ async function exercisePoolAuthorityTransition(
     );
     assertEquals(server.listExecutionClaims(space), []);
     assertEquals(pool.metrics().crashes, 0);
-    assertEquals(
-      pool.metrics().workersStarted,
-      options.replaceShadowWorker === true ? 2 : 1,
+
+    // Re-enable the already-live replacement realm. Its first invalidation
+    // installs a new claim incarnation; the next one proves stable ownership
+    // returned to the server without crashing on the drained lease.
+    await writePolicy(true);
+    clientCommits.length = 0;
+    const reclaimSeq = await runSource(10);
+    const reclaimEvent = await waitForControl(
+      (event): event is Extract<
+        ExecutionControlEvent,
+        { type: "session.execution.claim.set" }
+      > =>
+        event.type === "session.execution.claim.set" &&
+        event.claim.actionId === claim.actionId &&
+        event.claim.claimGeneration > claim.claimGeneration,
+      "pool transition replacement claim",
     );
+    const reclaimed = reclaimEvent.claim;
+    await waitForControl(
+      (event): event is Extract<
+        ExecutionControlEvent,
+        { type: "session.execution.settlement" }
+      > =>
+        event.type === "session.execution.settlement" &&
+        event.settlement.claim.claimGeneration ===
+          reclaimed.claimGeneration &&
+        event.settlement.inputBasisSeq >= reclaimSeq,
+      "pool transition replacement settlement",
+    );
+    assertEquals(reclaimed.leaseGeneration, leaseGenerationBeforeDisable! + 1);
+    assertEquals(server.listExecutionClaims(space), [reclaimed]);
+    clientCommits.length = 0;
+    await runSource(11);
+    assertEquals(clientCommits.some(isDerivedWireCommit), false);
+    assertEquals(pool.metrics().crashes, 0);
 
     // Close every warm executor/runtime, then resume through a fresh client
     // realm. Durable state alone must name the same cells and converge.
@@ -683,7 +725,7 @@ async function exercisePoolAuthorityTransition(
     await coldResult.sync();
     assertEquals(coldResult.sourceURI, stableResultId);
     assertEquals(await coldRuntime.start(coldResult), true);
-    assertEquals(await coldResult.pull(), 18);
+    assertEquals(await coldResult.pull(), 22);
     await coldRuntime.settled();
     await coldStorage.synced();
     await assertStableIdentity();
