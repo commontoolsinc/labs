@@ -5,6 +5,7 @@ import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
 import {
   type AcceptedCommitSeq,
   type ActionSettlement,
+  canonicalActionClaimKey,
   type ClientCommit,
   type ExecutionClaim,
   resetServerPrimaryExecutionConfig,
@@ -1233,6 +1234,276 @@ Deno.test("a pre-claim client builtin attempt keeps all continuations upstream",
     await writeClaimedOutput(storage, "passive-after-handoff");
     assertEquals(factory.commits.length, 1);
     assertEquals(visibleOutput(storage), "passive-after-handoff");
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("execution routing diagnostics expose exact settlement barriers and reset only history", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const query = {
+    space: SPACE,
+    branch: "",
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "speculative-diagnostic");
+
+    const routed = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(routed.space, SPACE);
+    assertEquals(routed.branch, "");
+    assertEquals(routed.executionFeedSeq, 1);
+    assertEquals(routed.executionAppliedSeq, 0);
+    assertEquals(routed.snapshotRequired, false);
+    assertEquals(routed.claims, [claim]);
+    assertEquals(routed.truncatedActionRecords, 0);
+    assertEquals(routed.actions.length, 1);
+    assertEquals(routed.actions[0]?.key, canonicalActionClaimKey(claim));
+    assertEquals(routed.actions[0]?.liveClaim, claim);
+    assertEquals(routed.actions[0]?.upstreamRoutes, 0);
+    assertEquals(routed.actions[0]?.claimedOverlayRoutes, 1);
+    assertEquals(routed.actions[0]?.pendingOverlayCount, 1);
+    assertEquals(routed.actions[0]?.unresolvedBasisOverlayCount, 0);
+    assertEquals(routed.actions[0]?.pendingSettlementCount, 0);
+
+    const settlement: ActionSettlement = {
+      branch: "",
+      claim,
+      inputBasisSeq: toInputBasisSeq(0),
+      outcome: "committed",
+      acceptedCommitSeq: 7 as AcceptedCommitSeq,
+    };
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement,
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
+    );
+
+    const awaitingData = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(awaitingData.actions[0]?.settlements, {
+      committed: 1,
+      noOp: 0,
+      failed: 0,
+      unserved: 0,
+    });
+    assertEquals(awaitingData.actions[0]?.lastSettlement, settlement);
+    assertEquals(awaitingData.actions[0]?.pendingOverlayCount, 1);
+    assertEquals(awaitingData.actions[0]?.pendingSettlementCount, 1);
+    assertEquals(awaitingData.actions[0]?.basisCoveredOverlayDrops, 0);
+
+    const reset = storage.getExecutionRoutingDiagnostics({
+      ...query,
+      resetCounters: true,
+    });
+    assertEquals(reset.claims, [claim]);
+    assertEquals(reset.actions[0]?.claimedOverlayRoutes, 0);
+    assertEquals(reset.actions[0]?.settlements, {
+      committed: 0,
+      noOp: 0,
+      failed: 0,
+      unserved: 0,
+    });
+    assertEquals(reset.actions[0]?.pendingOverlayCount, 1);
+    assertEquals(reset.actions[0]?.pendingSettlementCount, 1);
+
+    factory.view.push(emptySync({
+      toSeq: 7,
+      upserts: [{
+        branch: "",
+        id: OUTPUT,
+        seq: 7,
+        doc: { value: "authoritative-diagnostic" },
+      }],
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionAppliedSeq === 7
+    );
+    const applied = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(applied.actions[0]?.basisCoveredOverlayDrops, 1);
+    assertEquals(applied.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(applied.actions[0]?.pendingSettlementCount, 0);
+
+    factory.view.push(emptySync({
+      fromSeq: 7,
+      toSeq: 7,
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 5,
+        events: ["no-op", "failed", "unserved"].map((outcome) => ({
+          type: "session.execution.settlement" as const,
+          settlement: {
+            branch: "" as const,
+            claim,
+            inputBasisSeq: toInputBasisSeq(7),
+            outcome,
+          } as ActionSettlement,
+        })),
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 5
+    );
+    const outcomes = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(outcomes.actions[0]?.settlements, {
+      committed: 0,
+      noOp: 1,
+      failed: 1,
+      unserved: 1,
+    });
+    assertEquals(outcomes.actions[0]?.lastSettlement?.outcome, "unserved");
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("execution routing diagnostics scope authority and count non-authoritative drops", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const query = { space: SPACE, branch: "" };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "revoked-diagnostic");
+    factory.claims = [];
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.claim.revoke",
+          branch: "",
+          claim,
+          leaseGeneration: claim.leaseGeneration,
+          claimGeneration: claim.claimGeneration,
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
+    );
+    await writeClaimedOutput(storage, "upstream-diagnostic");
+
+    const diagnostics = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(diagnostics.claims, []);
+    assertEquals(diagnostics.actions.length, 1);
+    assertEquals(diagnostics.actions[0]?.claimedOverlayRoutes, 1);
+    assertEquals(diagnostics.actions[0]?.upstreamRoutes, 1);
+    assertEquals(diagnostics.actions[0]?.nonAuthoritativeOverlayDrops, 1);
+    assertEquals(diagnostics.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics({
+        ...query,
+        branch: "other",
+      }).actions,
+      [],
+    );
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics({
+        ...query,
+        pieceId: "space:of:other-piece",
+      }).actions,
+      [],
+    );
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics({
+        ...query,
+        actionId: "action:other",
+      }).actions,
+      [],
+    );
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 99,
+        toFeedSeq: 100,
+        events: [],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).snapshotRequired
+    );
+    const gap = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(gap.executionFeedSeq, 2);
+    assertEquals(gap.snapshotRequired, true);
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 0,
+        toFeedSeq: 1,
+        snapshot: { claims: [] },
+        events: [],
+      },
+    }));
+    await waitFor(() =>
+      !storage.getExecutionRoutingDiagnostics(query).snapshotRequired
+    );
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq,
+      1,
+    );
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("execution routing diagnostics bound historical action records", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  factory.claims = [];
+  const storage = OverlayStorageManager.connect(factory);
+  const query = { space: SPACE, branch: "", pieceId: claim.pieceId };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    for (let index = 0; index < 129; index++) {
+      await writeClaimedChainValue(
+        storage,
+        {},
+        { ...claim, actionId: `action:diagnostic-${index}` },
+        [],
+        OUTPUT,
+        index,
+      );
+    }
+
+    const diagnostics = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(diagnostics.actions.length, 128);
+    assertEquals(diagnostics.truncatedActionRecords, 1);
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics({
+        ...query,
+        actionId: "action:diagnostic-0",
+      }).actions,
+      [],
+    );
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics({
+        ...query,
+        actionId: "action:diagnostic-128",
+      }).actions[0]?.upstreamRoutes,
+      1,
+    );
+
+    const reset = storage.getExecutionRoutingDiagnostics({
+      ...query,
+      resetCounters: true,
+    });
+    assertEquals(reset.actions, []);
+    assertEquals(reset.truncatedActionRecords, 0);
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();

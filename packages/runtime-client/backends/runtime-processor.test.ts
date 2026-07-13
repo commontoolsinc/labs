@@ -37,6 +37,10 @@ import { Runtime } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
+import type {
+  ExecutionRoutingDiagnostics,
+  ExecutionRoutingDiagnosticsQuery,
+} from "@commonfabric/runner/shared";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
@@ -934,6 +938,49 @@ describe("RuntimeProcessor diagnosis helpers", () => {
       },
     );
     expect(writeTraceMatchers).toEqual([[]]);
+  });
+});
+
+describe("RuntimeProcessor execution routing diagnostics IPC", () => {
+  it("dispatches the scoped query to storage and returns its snapshot", async () => {
+    const query: ExecutionRoutingDiagnosticsQuery = {
+      space: "did:key:z6Mk-processor-routing-diagnostics",
+      branch: "",
+      pieceId: "space:of:processor-piece",
+      actionId: "action:processor",
+      resetCounters: true,
+    };
+    const diagnostics: ExecutionRoutingDiagnostics = {
+      space: query.space,
+      branch: query.branch,
+      executionFeedSeq: 13,
+      executionAppliedSeq: 17,
+      snapshotRequired: false,
+      claims: [],
+      actions: [],
+      truncatedActionRecords: 0,
+    };
+    const received: ExecutionRoutingDiagnosticsQuery[] = [];
+    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+      runtime: {
+        storageManager: {
+          getExecutionRoutingDiagnostics(
+            receivedQuery: ExecutionRoutingDiagnosticsQuery,
+          ) {
+            received.push(receivedQuery);
+            return diagnostics;
+          },
+        },
+      },
+    }) as RuntimeProcessor;
+
+    const response = await RuntimeProcessor.prototype.handleRequest.call(
+      processor,
+      { type: RequestType.GetExecutionRoutingDiagnostics, query },
+    );
+
+    expect(received).toEqual([query]);
+    expect(response).toEqual({ diagnostics });
   });
 });
 
