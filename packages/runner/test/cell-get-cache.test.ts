@@ -1,5 +1,6 @@
-// Memoization of Cell.get(): ready transactions cache until their next write;
-// ambient plain-data array reads cache until the next storage notification.
+// Per-transaction memoization of Cell.get(): within one ready transaction, a
+// repeated read with no intervening write reuses the prior result; any write
+// clears the cache so a stale value can never be served.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -26,12 +27,7 @@ const Y_ONLY_SCHEMA = {
   additionalProperties: false,
 } as const satisfies JSONSchema;
 
-const ARRAY_SCHEMA = {
-  type: "array",
-  items: OBJECT_SCHEMA,
-} as const satisfies JSONSchema;
-
-describe("Cell.get() read caches", () => {
+describe("Cell.get() per-transaction cache", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -313,77 +309,5 @@ describe("Cell.get() read caches", () => {
     // The real read path performed the read-after-prepare invalidation that a
     // cache hit would have skipped.
     expect(tx.getCfcState().prepare.status).toBe("invalidated");
-  });
-
-  it("serves repeated schema reads after the originating transaction commits", async () => {
-    const c = runtime.getCell(space, "ambient-cache-hit", ARRAY_SCHEMA, tx);
-    c.set([{ x: 1 }]);
-    await tx.commit();
-    tx = runtime.edit();
-
-    const first = c.get();
-    const second = c.get();
-
-    expect(second).toBe(first);
-    expect(second).toEqual([{ x: 1 }]);
-  });
-
-  it("shares ambient schema reads across equivalent wrappers", async () => {
-    const seed = runtime.getCell(
-      space,
-      "ambient-equivalent-wrapper",
-      ARRAY_SCHEMA,
-      tx,
-    );
-    seed.set([{ x: 1 }]);
-    await tx.commit();
-    tx = runtime.edit();
-
-    const first = runtime.getCell(
-      space,
-      "ambient-equivalent-wrapper",
-      ARRAY_SCHEMA,
-    ).get();
-    const second = runtime.getCell(
-      space,
-      "ambient-equivalent-wrapper",
-      ARRAY_SCHEMA,
-    ).get();
-
-    expect(second).toBe(first);
-    expect(second).toEqual([{ x: 1 }]);
-  });
-
-  it("invalidates ambient schema reads after a storage change", async () => {
-    const seed = runtime.getCell(
-      space,
-      "ambient-storage-change",
-      ARRAY_SCHEMA,
-      tx,
-    );
-    seed.set([{ x: 1 }]);
-    await tx.commit();
-    tx = runtime.edit();
-
-    const reader = runtime.getCell(
-      space,
-      "ambient-storage-change",
-      ARRAY_SCHEMA,
-    );
-    const first = reader.get();
-    expect(reader.get()).toBe(first);
-
-    const writeTx = runtime.edit();
-    runtime.getCell(
-      space,
-      "ambient-storage-change",
-      ARRAY_SCHEMA,
-      writeTx,
-    ).set([{ x: 2 }]);
-    await writeTx.commit();
-
-    const changed = reader.get();
-    expect(changed).not.toBe(first);
-    expect(changed).toEqual([{ x: 2 }]);
   });
 });

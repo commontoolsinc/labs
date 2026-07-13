@@ -1,37 +1,35 @@
 /**
- * Guards repeated schema-read cost across schema DEPTH on one unchanged doc.
+ * Compares whole-array materialization cost across schema DEPTH on one
+ * unchanged doc.
  *
- * Each iteration seeds one list and performs one warm get() outside the timed
- * window. Explicit plain-data array schemas should then reuse that immutable
- * materialization until storage reports a change; the timed loop measures the
- * cache-hit path through schemas of increasing depth:
+ * Each iteration seeds one list, creates one fresh transaction, binds the cell
+ * to it, and times one get() of the whole array through schemas of increasing
+ * depth:
  *
  *   - schemaless            → the baseline proxy path
  *   - items: true           → schema path entered, zero per-item validation
  *   - items: {type:object}  → permissive object schema (no properties)
  *   - full item schema      → every field declared
  *
- * The warm read still exercises the full validateAndTransform → traverse →
- * deep-freeze path during benchmark setup. If a schema variant falls out of
- * ambient-cache eligibility, its timed result immediately returns to scaling
- * with N and schema depth.
+ * The transaction is created outside the timed window: this benchmark isolates
+ * Cell.get() materialization rather than transaction construction. A single
+ * transaction spans the whole-array read, matching normal runtime use; it is
+ * not the committed setup transaction and does not fall back to the ambient
+ * tx-less read path.
  *
  * Environment controls:
  * - SCHEMA_READ_DEPTH_N: list size, default 1000
- * - SCHEMA_READ_DEPTH_READS: get() calls per bench iteration, default 100
  */
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("bench schema read depth");
 const space = signer.did();
 
 const N = Number(Deno.env.get("SCHEMA_READ_DEPTH_N") ?? "1000");
-const READS = Number(Deno.env.get("SCHEMA_READ_DEPTH_READS") ?? "100");
 
 const items = Array.from({ length: N }, (_, i) => ({
   data: {
@@ -90,33 +88,37 @@ function setup() {
 
 async function seed(
   runtime: Runtime,
-): Promise<IExtendedStorageTransaction> {
+): Promise<void> {
   const tx = runtime.edit();
   runtime.getCell<typeof items>(space, "schema-read-depth-doc", undefined, tx)
     .set(items);
   await tx.commit();
-  return tx;
 }
 
 for (const [label, schema] of VARIANTS) {
   Deno.bench({
-    name: `schema read depth - ${label} - get() x${READS} (${N} items)`,
+    name: `schema read depth - ${label} - fresh-tx get() (${N} items)`,
     group: "schema-read-depth",
     baseline: schema === undefined,
     async fn(b) {
       const { runtime, storageManager } = setup();
       await seed(runtime);
+      const tx = runtime.edit();
       const cell = runtime.getCell(
         space,
         "schema-read-depth-doc",
         schema as JSONSchema | undefined,
+        tx,
       );
-      cell.get(); // warm
-      b.start();
-      for (let i = 0; i < READS; i++) cell.get();
-      b.end();
-      await runtime.dispose();
-      await storageManager.close();
+      try {
+        b.start();
+        cell.get();
+        b.end();
+      } finally {
+        if (tx.status().status === "ready") tx.abort();
+        await runtime.dispose();
+        await storageManager.close();
+      }
     },
   });
 }

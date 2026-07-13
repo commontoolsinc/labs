@@ -92,7 +92,6 @@ import {
   type CellViewRef,
   processDefaultValue,
   resolveSchema,
-  schemaHasAsCell,
   schemaHasIfc,
   validateAndTransform,
 } from "./schema.ts";
@@ -943,9 +942,9 @@ export class CellImpl<T extends FabricValue>
     // wrappers in the same tx can share the cached traversal result. `variant`
     // separates reads that differ in options or synced state.
     const tx = this.tx;
-    const hasReadyTx = tx?.status().status === "ready";
-    const cacheable = tx !== undefined && hasReadyTx &&
+    const cacheable = tx !== undefined &&
       tx.getCachedReadResult !== undefined &&
+      tx.status().status === "ready" &&
       // Once CFC is prepared, the real read path's `read-after-prepare`
       // invalidation is load-bearing: bypass the cache so a post-prepare read
       // still goes through readOrThrow() and invalidates the prepared digest.
@@ -954,32 +953,6 @@ export class CellImpl<T extends FabricValue>
     const cacheKey = cacheable ? this.viewRefHash() : undefined;
     if (cacheable) {
       const cached = tx.getCachedReadResult!(cacheKey!, variant);
-      if (cached !== undefined) {
-        return cached.value as Readonly<StripDefaultBrand<T>>;
-      }
-    }
-
-    // A Cell with no ready bound transaction reads through a fresh ambient
-    // read transaction. That is necessary for each call to observe the latest
-    // replica, but it also means the transaction-local cache above is always
-    // cold. Cache only explicit, plain-data array schemas: these are the large
-    // immutable materializations for which schema traversal dominates. Reads
-    // that create Cells or explicitly traverse them remain transaction-local,
-    // because reusing those results would retain transaction-bound handles or
-    // skip dependency capture. The runtime clears this cache on every storage
-    // notification, before scheduler processing, so the next get() rebuilds
-    // from a fresh read transaction.
-    const ambientSchema = !hasReadyTx ? this._link.schema : undefined;
-    const ambientCacheable = isRecord(ambientSchema) &&
-      ambientSchema.type === "array" &&
-      options?.traverseCells !== true &&
-      !schemaHasAsCell(ambientSchema);
-    const ambientCacheKey = ambientCacheable ? this.viewRefHash() : undefined;
-    if (ambientCacheable) {
-      const cached = this.runtime.getCachedAmbientSchemaReadResult(
-        ambientCacheKey!,
-        variant,
-      );
       if (cached !== undefined) {
         return cached.value as Readonly<StripDefaultBrand<T>>;
       }
@@ -1006,13 +979,6 @@ export class CellImpl<T extends FabricValue>
       // run ensureLink() and replaced it with the completed link object, which
       // is the identity subsequent get()s will hash.
       tx.setCachedReadResult!(this.viewRefHash(), variant, value);
-    }
-    if (ambientCacheable) {
-      this.runtime.setCachedAmbientSchemaReadResult(
-        this.viewRefHash(),
-        variant,
-        value,
-      );
     }
     return value;
   }

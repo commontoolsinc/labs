@@ -12,8 +12,9 @@
  *
  *   1. write cost + stored bytes + docs created for one flat array in ONE
  *      doc vs one doc PER ITEM, as f(N)
- *   2. read cost: first get(), repeated schemaless get(), and repeated get()
- *      through a JSON schema after one warm materialization, as f(N)
+ *   2. read cost in fresh transaction-bound cells: first whole-array get(),
+ *      repeated schemaless get(), and repeated get() through a JSON schema,
+ *      as f(N)
  *   3. update cost: whole-array re-set with one item changed vs a targeted
  *      per-index write — bytes written per transaction (history growth)
  *
@@ -249,12 +250,12 @@ for (const N of SIZES) {
 }
 
 // =============================================================================
-// 3. READ: first get(), repeated get() x100, and cached schema get() x100
+// 3. READ: one whole-array get() in a fresh tx, then repeated reads in one tx
 // =============================================================================
 for (const N of SIZES) {
   Deno.bench({
-    name: `flat list read - FIRST get() after commit (${N} items)`,
-    group: `read-${N}`,
+    name: `flat list read - fresh-tx schemaless get() (${N} items)`,
+    group: `read-materialize-${N}`,
     baseline: true,
     async fn(b) {
       const { runtime, storageManager, tx } = setup();
@@ -266,16 +267,48 @@ for (const N of SIZES) {
       );
       cell.set(makeList(N));
       await tx.commit();
-      b.start();
-      cell.get();
-      b.end();
-      await cleanup(runtime, storageManager, tx);
+      const readTx = runtime.edit();
+      const reader = cell.withTx(readTx);
+      try {
+        b.start();
+        reader.get();
+        b.end();
+      } finally {
+        await cleanup(runtime, storageManager, readTx);
+      }
     },
   });
 
   Deno.bench({
-    name: `flat list read - repeated get() x100, unchanged doc (${N} items)`,
-    group: `read-${N}`,
+    name: `flat list read - fresh-tx schema get() (${N} items)`,
+    group: `read-materialize-${N}`,
+    async fn(b) {
+      const { runtime, storageManager, tx } = setup();
+      const cell = runtime.getCell(
+        space,
+        `bench-flat-index-read-first-schema-${N}`,
+        LIST_SCHEMA,
+        tx,
+      );
+      cell.set(makeList(N));
+      await tx.commit();
+      const readTx = runtime.edit();
+      const reader = cell.withTx(readTx);
+      try {
+        b.start();
+        reader.get();
+        b.end();
+      } finally {
+        await cleanup(runtime, storageManager, readTx);
+      }
+    },
+  });
+
+  Deno.bench({
+    name:
+      `flat list read - same-tx schemaless get() x100, unchanged (${N} items)`,
+    group: `read-cache-${N}`,
+    baseline: true,
     async fn(b) {
       const { runtime, storageManager, tx } = setup();
       const cell = runtime.getCell<IndexItem[]>(
@@ -286,17 +319,22 @@ for (const N of SIZES) {
       );
       cell.set(makeList(N));
       await tx.commit();
-      cell.get(); // warm
-      b.start();
-      for (let i = 0; i < 100; i++) cell.get();
-      b.end();
-      await cleanup(runtime, storageManager, tx);
+      const readTx = runtime.edit();
+      const reader = cell.withTx(readTx);
+      try {
+        reader.get(); // warm the per-transaction cache
+        b.start();
+        for (let i = 0; i < 100; i++) reader.get();
+        b.end();
+      } finally {
+        await cleanup(runtime, storageManager, readTx);
+      }
     },
   });
 
   Deno.bench({
-    name: `flat list read - schema get() x100, unchanged doc (${N} items)`,
-    group: `read-${N}`,
+    name: `flat list read - same-tx schema get() x100, unchanged (${N} items)`,
+    group: `read-cache-${N}`,
     async fn(b) {
       const { runtime, storageManager, tx } = setup();
       const cell = runtime.getCell(
@@ -307,11 +345,16 @@ for (const N of SIZES) {
       );
       cell.set(makeList(N));
       await tx.commit();
-      cell.get(); // warm
-      b.start();
-      for (let i = 0; i < 100; i++) cell.get();
-      b.end();
-      await cleanup(runtime, storageManager, tx);
+      const readTx = runtime.edit();
+      const reader = cell.withTx(readTx);
+      try {
+        reader.get(); // warm the per-transaction cache
+        b.start();
+        for (let i = 0; i < 100; i++) reader.get();
+        b.end();
+      } finally {
+        await cleanup(runtime, storageManager, readTx);
+      }
     },
   });
 }

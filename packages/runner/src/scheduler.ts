@@ -1901,7 +1901,6 @@ export class Scheduler {
   }
 
   private processStorageNotification(notification: StorageNotification): void {
-    this.runtime.invalidateAmbientSchemaReadCache();
     processPullStorageNotification(
       this.storageNotificationState,
       notification,
