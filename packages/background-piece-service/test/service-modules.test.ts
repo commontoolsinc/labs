@@ -936,8 +936,12 @@ describe("SpaceManager", () => {
     await manager.stop();
   });
 
-  it("derives exclusion timers from server-relative duration despite wall-clock skew", async () => {
+  it("anchors server-relative exclusion duration at request start despite clock skew", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
+    const acquired = Promise.withResolvers<
+      LegacyBackgroundExclusionStatus | null | undefined
+    >();
+    let monotonicNow = 0;
     let nextTimer = 0;
     const timers = new Map<number, { delayMs: number; cleared: boolean }>();
     const exclusion: LegacyBackgroundExclusion = {
@@ -955,6 +959,7 @@ describe("SpaceManager", () => {
       identity,
       pollingIntervalMs: 1,
       now: () => -10_000,
+      monotonicNow: () => monotonicNow,
       setTimer: (_callback, delayMs) => {
         const timer = ++nextTimer;
         timers.set(timer, { delayMs, cleared: false });
@@ -965,12 +970,7 @@ describe("SpaceManager", () => {
         if (current) current.cleared = true;
       },
       backgroundExclusion: {
-        acquire: () =>
-          Promise.resolve({
-            exclusion,
-            ready: true,
-            serverTime: 100,
-          }),
+        acquire: () => acquired.promise,
         renew: () => new Promise(() => {}),
         release: () => Promise.resolve(exclusion),
       },
@@ -988,11 +988,18 @@ describe("SpaceManager", () => {
 
     try {
       manager.start();
+      await Promise.resolve();
+      monotonicNow = 40;
+      acquired.resolve({
+        exclusion,
+        ready: true,
+        serverTime: 100,
+      });
       await manager.idle();
       assertEquals(
         [...timers.values()].filter((timer) => !timer.cleared)
           .map((timer) => timer.delayMs).toSorted((a, b) => a - b),
-        [50, 100],
+        [30, 60],
       );
     } finally {
       await manager.stop();
