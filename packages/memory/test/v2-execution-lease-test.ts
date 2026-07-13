@@ -25,6 +25,10 @@ const flags = {
 } as const;
 
 type LeaseServer = Server & {
+  executionOriginMatchesLeaseSponsor(
+    lease: ExecutionLeaseHandle,
+    originSessionId?: string,
+  ): boolean;
   acquireExecutionLease(
     space: string,
     branch: string,
@@ -297,6 +301,86 @@ Deno.test("preferred origin principal sponsors a sticky generation", async () =>
   } finally {
     await firstClient?.close();
     await secondClient?.close();
+    await ownerClient.close();
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("execution origins match the exact lease sponsor principal", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = createLeaseServer(
+    toFileUrl(`${directory}/`),
+    "host:origin-match",
+    { acl: "enforce" },
+  );
+  const ownerClient = await connect(server);
+  const owner = await mount(ownerClient, OWNER);
+  let sponsorClient: MemoryClient.Client | undefined;
+  let samePrincipalClient: MemoryClient.Client | undefined;
+  let otherPrincipalClient: MemoryClient.Client | undefined;
+  try {
+    await setAcl(owner, {
+      [OWNER]: "OWNER",
+      [WRITER_A]: "WRITE",
+      [WRITER_B]: "WRITE",
+    });
+    sponsorClient = await connect(server);
+    const sponsor = await mount(sponsorClient, WRITER_A);
+    await sponsor.setExecutionDemand("", ["space:first"]);
+    samePrincipalClient = await connect(server);
+    const samePrincipal = await mount(samePrincipalClient, WRITER_A);
+    otherPrincipalClient = await connect(server);
+    const otherPrincipal = await mount(otherPrincipalClient, WRITER_B);
+
+    const lease = await server.acquireExecutionLease(SPACE, "", {
+      preferredOriginSessionId: sponsor.sessionId,
+    });
+    assertExists(lease);
+    assertEquals(
+      server.executionOriginMatchesLeaseSponsor(lease, sponsor.sessionId),
+      true,
+    );
+    assertEquals(
+      server.executionOriginMatchesLeaseSponsor(
+        lease,
+        samePrincipal.sessionId,
+      ),
+      true,
+    );
+    assertEquals(
+      server.executionOriginMatchesLeaseSponsor(
+        lease,
+        otherPrincipal.sessionId,
+      ),
+      false,
+    );
+    assertEquals(
+      server.executionOriginMatchesLeaseSponsor(lease, undefined),
+      false,
+    );
+    assertEquals(
+      server.executionOriginMatchesLeaseSponsor(
+        { ...lease } as ExecutionLeaseHandle,
+        sponsor.sessionId,
+      ),
+      false,
+    );
+
+    const renewed = await server.renewExecutionLease(lease);
+    assertExists(renewed);
+    assertEquals(
+      server.executionOriginMatchesLeaseSponsor(lease, sponsor.sessionId),
+      false,
+    );
+    assertEquals(
+      server.executionOriginMatchesLeaseSponsor(renewed, sponsor.sessionId),
+      true,
+    );
+  } finally {
+    await sponsorClient?.close();
+    await samePrincipalClient?.close();
+    await otherPrincipalClient?.close();
     await ownerClient.close();
     await server.close();
     await Deno.remove(directory, { recursive: true });

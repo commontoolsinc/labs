@@ -1821,6 +1821,34 @@ export class Server {
   }
 
   /**
+   * Compare an accepted commit's authenticated origin with the principal this
+   * exact host-owned lease executes on behalf of. This deliberately returns a
+   * scalar answer: neither the origin principal nor sponsor identity crosses
+   * the executor MessagePort.
+   */
+  executionOriginMatchesLeaseSponsor(
+    lease: ExecutionLeaseHandle,
+    originSessionId?: string,
+  ): boolean {
+    if (originSessionId === undefined) return false;
+    const authority = this.#executionLeaseAuthorities.get(lease);
+    const owned = this.#ownedExecutionLeases.get(
+      executionLeaseKey(lease.space, lease.branch),
+    );
+    if (
+      authority === undefined || authority !== owned ||
+      authority.handle !== lease || lease.state === "revoked"
+    ) {
+      return false;
+    }
+    const origin = this.#sessions.get(lease.space, originSessionId);
+    return origin !== null && origin.principal !== undefined &&
+      origin.principal !== ANYONE_USER && origin.ownerConnectionId !== null &&
+      this.#connections.has(origin.ownerConnectionId) &&
+      origin.principal === lease.onBehalfOf;
+  }
+
+  /**
    * Bind one authenticated session to host-owned executor authority. This is a
    * process API, never a protocol message; the Worker receives no sponsor key
    * and cannot select `onBehalfOf`.

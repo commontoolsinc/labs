@@ -73,6 +73,9 @@ export interface DenoSpaceExecutorFactoryOptions {
 export interface CandidateClaim {
   readonly claimKey: ActionClaimKey;
   readonly builtinId?: ServerExecutableBuiltinId;
+  /** Worker-derived from a host-only accepted-commit boolean. No principal or
+   * actor identity crosses either executor IPC channel. */
+  readonly causalActorMatchesSponsor?: boolean;
   /** Worker-side demand epoch; stale closure candidates are ignored after a
    * demanded-root shrink rebuilds the runtime graph. */
   readonly demandGeneration?: number;
@@ -179,6 +182,7 @@ const isCandidateClaim = (value: unknown): value is CandidateClaim => {
   const candidate = value as {
     claimKey?: unknown;
     builtinId?: unknown;
+    causalActorMatchesSponsor?: unknown;
     demandGeneration?: unknown;
   };
   if (
@@ -191,6 +195,12 @@ const isCandidateClaim = (value: unknown): value is CandidateClaim => {
     candidate.demandGeneration !== undefined &&
     (!Number.isSafeInteger(candidate.demandGeneration) ||
       Number(candidate.demandGeneration) < 0)
+  ) {
+    return false;
+  }
+  if (
+    candidate.causalActorMatchesSponsor !== undefined &&
+    typeof candidate.causalActorMatchesSponsor !== "boolean"
   ) {
     return false;
   }
@@ -506,6 +516,16 @@ class DenoSpaceExecutor implements SpaceExecutor {
       key.branch !== this.#startOptions.branch
     ) {
       throw new Error("executor CandidateClaim escaped its bound lane");
+    }
+    if (
+      isServerExecutableBuiltinId(candidate.builtinId) &&
+      candidate.causalActorMatchesSponsor !== true
+    ) {
+      this.#onCandidateDiagnostic?.({
+        claimKey: key,
+        diagnosticCode: "builtin-causal-actor-mismatch",
+      });
+      return;
     }
     const routingEnabled =
       this.#protocolFlags.serverPrimaryExecutionV1 === true &&

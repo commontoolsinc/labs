@@ -42,9 +42,17 @@ const CLAIM: ExecutionClaim = {
   claimGeneration: 3,
   expiresAt: 80_000,
 };
+const BUILTIN_CLAIM_KEY: ActionClaimKey = {
+  ...CLAIM_KEY,
+  actionId: "cf:builtin/fetchText:instance-1",
+  actionKind: "effect",
+  implementationFingerprint: "impl:cf:builtin/fetchText:server-v1",
+};
 
 interface CandidateClaim {
   claimKey: ActionClaimKey;
+  builtinId?: string;
+  causalActorMatchesSponsor?: boolean;
 }
 
 interface CandidateDiagnostic {
@@ -91,14 +99,21 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
     );
   }
 
-  candidate(claimKey: ActionClaimKey, demandGeneration?: number): void {
+  candidate(
+    claimKey: ActionClaimKey,
+    options: {
+      demandGeneration?: number;
+      builtinId?: "fetchText";
+      causalActorMatchesSponsor?: boolean;
+    } = {},
+  ): void {
     this.dispatchEvent(
       new MessageEvent("message", {
         data: {
           type: "candidate-claim",
           candidate: {
             claimKey,
-            ...(demandGeneration !== undefined ? { demandGeneration } : {}),
+            ...options,
           },
         },
       }),
@@ -224,7 +239,16 @@ class ClaimRecordingServer {
     claimKey: ActionClaimKey,
   ): Promise<ExecutionClaim | null> {
     this.claimRequests.push({ lease, claimKey });
-    return Promise.resolve(this.claimAvailable ? CLAIM : null);
+    return Promise.resolve(
+      this.claimAvailable
+        ? {
+          ...claimKey,
+          leaseGeneration: LEASE.leaseGeneration,
+          claimGeneration: CLAIM.claimGeneration,
+          expiresAt: CLAIM.expiresAt,
+        }
+        : null,
+    );
   }
 
   setExecutionClaim(
@@ -280,6 +304,7 @@ const startExecutor = async (options: {
     protocolFlags: {
       serverPrimaryExecutionV1: true,
       serverPrimaryExecutionClaimRoutingV1: options.routing,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
     },
     onCandidateClaim: options.onCandidateClaim,
     onCandidateDiagnostic: options.onCandidateDiagnostic,
@@ -387,6 +412,44 @@ Deno.test("policy-inactive candidates remain shadow and later acquire authority"
   }
 });
 
+Deno.test("supported builtin candidates require a host-derived causal actor match", async () => {
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  try {
+    worker.candidate(BUILTIN_CLAIM_KEY, { builtinId: "fetchText" });
+    worker.candidate(BUILTIN_CLAIM_KEY, {
+      builtinId: "fetchText",
+      causalActorMatchesSponsor: false,
+    });
+    await flushClaimControl();
+
+    assertEquals(server.claimRequests, []);
+    assertEquals(diagnostics, [{
+      claimKey: BUILTIN_CLAIM_KEY,
+      diagnosticCode: "builtin-causal-actor-mismatch",
+    }, {
+      claimKey: BUILTIN_CLAIM_KEY,
+      diagnosticCode: "builtin-causal-actor-mismatch",
+    }]);
+
+    worker.candidate(BUILTIN_CLAIM_KEY, {
+      builtinId: "fetchText",
+      causalActorMatchesSponsor: true,
+    });
+    await flushClaimControl();
+    assertEquals(server.claimRequests, [{
+      lease: LEASE,
+      claimKey: BUILTIN_CLAIM_KEY,
+    }]);
+    assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
 Deno.test("executor settlement returns the Worker barrier and abrupt stop skips a second round trip", async () => {
   const { worker, executor } = await startExecutor({ routing: false });
 
@@ -444,7 +507,7 @@ Deno.test("demand shrink revokes stale claims so re-added roots can reclaim", as
     assertEquals(server.revoked, [CLAIM]);
 
     await executor.setDemand([CLAIM_KEY.pieceId, "space:of:other-piece"]);
-    worker.candidate(CLAIM_KEY, 1);
+    worker.candidate(CLAIM_KEY, { demandGeneration: 1 });
     await flushClaimControl();
     assertEquals(server.claimRequests.length, 2);
     assertEquals(crashes, []);

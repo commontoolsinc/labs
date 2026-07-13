@@ -30,6 +30,7 @@ import {
   StorageManager,
 } from "../src/storage/v2.ts";
 import {
+  type AcceptedCommitNotice,
   createHostProviderChannel,
   HostStorageManager,
 } from "../src/storage/v2-host-provider.ts";
@@ -1373,6 +1374,156 @@ Deno.test("executor host provider reports accepted commits only after replica in
     await storage.close();
     await channel.dispose();
     await writerClient.close();
+    await server.close();
+  }
+});
+
+Deno.test("lease-bound accepted commits expose only sponsor-match causality before integration", async () => {
+  const sponsorIdentity = await Identity.fromPassphrase(
+    `executor provider causal sponsor ${crypto.randomUUID()}`,
+  );
+  const otherIdentity = await Identity.fromPassphrase(
+    `executor provider causal other ${crypto.randomUUID()}`,
+  );
+  const space = sponsorIdentity.did();
+  const flags = {
+    serverPrimaryExecutionV1: true,
+    serverPrimaryExecutionClaimRoutingV1: true,
+    serverPrimaryExecutionBuiltinPassivityV1: true,
+  } as const;
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: {
+      audience: "did:key:z6Mk-executor-provider-causal-test",
+    },
+    protocolFlags: flags,
+    acl: { mode: "off", serviceDids: [sponsorIdentity.did()] },
+  });
+  const authorize = (
+    principal: string,
+  ): MemoryClient.SessionOpenAuthFactory =>
+  (_space, _session, context) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal },
+  });
+  const sponsorClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+    protocolFlags: flags,
+  });
+  const sponsor = await sponsorClient.mount(
+    space,
+    {},
+    authorize(sponsorIdentity.did()),
+  );
+  const otherClient = await MemoryClient.connect({
+    transport: MemoryClient.loopback(server),
+    protocolFlags: flags,
+  });
+  const other = await otherClient.mount(
+    space,
+    {},
+    authorize(otherIdentity.did()),
+  );
+  await sponsor.setExecutionDemand("", ["space:causal-provider"]);
+  const lease = await server.acquireExecutionLease(space, "", {
+    preferredOriginSessionId: sponsor.sessionId,
+  });
+  assertExists(lease);
+  const channel = createHostProviderChannel({
+    server,
+    space,
+    executionLease: lease,
+  });
+  const uri = "of:executor-provider:causal" as URI;
+  const address = {
+    id: uri,
+    type: "application/json" as MIME,
+    path: [],
+  };
+  const before: {
+    notice: AcceptedCommitNotice;
+    value: unknown;
+  }[] = [];
+  const after: {
+    notice: AcceptedCommitNotice;
+    value: unknown;
+  }[] = [];
+  let storage!: HostStorageManager;
+  storage = HostStorageManager.connect({
+    port: channel.port,
+    principal: sponsorIdentity.did(),
+    space,
+    protocolFlags: flags,
+    onAcceptedCommitWillIntegrate(notice) {
+      before.push({
+        notice,
+        value: storage.open(space).replica.get(address)?.is,
+      });
+    },
+    onAcceptedCommitIntegrated(notice) {
+      after.push({
+        notice,
+        value: storage.open(space).replica.get(address)?.is,
+      });
+    },
+  });
+
+  try {
+    const provider = storage.open(space);
+    assertEquals((await provider.sync(uri)).error, undefined);
+    await sponsor.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { revision: 1 } },
+      }],
+    });
+    await storage.acceptedCommitsSettled();
+    await other.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: uri,
+        value: { value: { revision: 2 } },
+      }],
+    });
+    await storage.acceptedCommitsSettled();
+
+    assertEquals(
+      before.map(({ notice, value }) => ({
+        match: notice.originMatchesExecutionSponsor,
+        value,
+      })),
+      [{ match: true, value: undefined }, {
+        match: false,
+        value: { value: { revision: 1 } },
+      }],
+    );
+    assertEquals(
+      after.map(({ notice, value }) => ({
+        match: notice.originMatchesExecutionSponsor,
+        value,
+      })),
+      [{ match: true, value: { value: { revision: 1 } } }, {
+        match: false,
+        value: { value: { revision: 2 } },
+      }],
+    );
+  } finally {
+    await storage.close();
+    await channel.dispose();
+    await otherClient.close();
+    await sponsorClient.close();
     await server.close();
   }
 });

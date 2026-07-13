@@ -46,6 +46,9 @@ export interface AcceptedCommitNotice {
   dataSeq: number;
   deliverySeq: number;
   originSessionId?: string;
+  /** Host-derived comparison only. Raw origin/sponsor principals never cross
+   * the executor channel. Present only on lease-bound channels. */
+  originMatchesExecutionSponsor?: boolean;
   revisions: {
     branch: BranchName;
     id: string;
@@ -128,6 +131,7 @@ const hasExecutionClaimAssertion = (commit: ClientCommit): boolean => {
 
 const toAcceptedCommitNotice = (
   event: AcceptedCommitEvent,
+  originMatchesExecutionSponsor?: boolean,
 ): AcceptedCommitNotice => ({
   space: event.space,
   branch: event.branch,
@@ -136,6 +140,9 @@ const toAcceptedCommitNotice = (
   deliverySeq: event.deliverySeq,
   ...(event.originSessionId !== undefined
     ? { originSessionId: event.originSessionId }
+    : {}),
+  ...(originMatchesExecutionSponsor !== undefined
+    ? { originMatchesExecutionSponsor }
     : {}),
   revisions: event.revisions.map((revision) => ({
     branch: revision.branch,
@@ -403,10 +410,20 @@ export function createHostProviderChannel(
     options.space,
     (event) => {
       if (disposed || event.branch !== branch) return;
+      const originMatchesExecutionSponsor = options.executionLease ===
+          undefined
+        ? undefined
+        : options.server.executionOriginMatchesLeaseSponsor(
+          options.executionLease,
+          event.originSessionId,
+        );
       hostPort.postMessage(
         {
           type: "accepted-commit",
-          notice: toAcceptedCommitNotice(event),
+          notice: toAcceptedCommitNotice(
+            event,
+            originMatchesExecutionSponsor,
+          ),
         } satisfies ProviderPortMessage,
       );
     },
@@ -609,6 +626,9 @@ class HostReplicaSession implements ReplicaSession {
     private readonly transport: MessagePortTransport,
     private readonly branch: BranchName,
     private readonly supportsExecutionDemand: boolean,
+    private readonly onAcceptedCommitWillIntegrate?: (
+      notice: AcceptedCommitNotice,
+    ) => void,
     private readonly onAcceptedCommitIntegrated?: (
       notice: AcceptedCommitNotice,
     ) => void,
@@ -805,6 +825,16 @@ class HostReplicaSession implements ReplicaSession {
       notice.branch !== this.branch || notice.order <= this.#acceptedOrder
     ) {
       return false;
+    }
+    try {
+      this.onAcceptedCommitWillIntegrate?.(notice);
+    } catch (error) {
+      // Causal attribution is control-plane state. A failing observer must not
+      // suppress integration of an already accepted durable commit.
+      console.warn(
+        "executor accepted-commit pre-integrate observer failed",
+        error,
+      );
     }
     const fromSeq = this.#appliedSeq;
     let observations: SchedulerActionSnapshotResult[] = [];
@@ -1066,6 +1096,9 @@ class HostSessionFactory implements SessionFactory {
     private readonly branch: BranchName,
     private readonly protocolFlags?: Partial<WireMemoryProtocolFlags>,
     supportsExecutionDemand = false,
+    private readonly onAcceptedCommitWillIntegrate?: (
+      notice: AcceptedCommitNotice,
+    ) => void,
     private readonly onAcceptedCommitIntegrated?: (
       notice: AcceptedCommitNotice,
     ) => void,
@@ -1105,6 +1138,7 @@ class HostSessionFactory implements SessionFactory {
       transport,
       this.branch,
       this.supportsExecutionDemand,
+      this.onAcceptedCommitWillIntegrate,
       this.onAcceptedCommitIntegrated,
     );
     lifecycle.replica = replica;
@@ -1156,6 +1190,9 @@ export interface HostStorageManagerOptions {
   /** Worker-local whole-action routing. The host still validates every
    * asserted upstream transaction against its live lease and claim. */
   actionTransactionRouter?: ActionTransactionRouter;
+  /** Runs synchronously after notice ordering checks but before scheduler or
+   * document integration, for causal attribution of the resulting rerun. */
+  onAcceptedCommitWillIntegrate?: (notice: AcceptedCommitNotice) => void;
   /** Runs synchronously after an accepted host commit has been point-refreshed
    * and applied to the Worker replica. */
   onAcceptedCommitIntegrated?: (notice: AcceptedCommitNotice) => void;
@@ -1178,6 +1215,7 @@ export class HostStorageManager extends StorageManager {
       options.branch ?? "",
       options.protocolFlags,
       options.supportsExecutionDemand === true,
+      options.onAcceptedCommitWillIntegrate,
       options.onAcceptedCommitIntegrated,
     );
     return new HostStorageManager(

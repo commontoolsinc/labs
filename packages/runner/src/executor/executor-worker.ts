@@ -18,12 +18,16 @@ import {
   Runtime,
   runtimePresets,
 } from "../index.ts";
+import type { TelemetryAnnotations } from "../scheduler/types.ts";
 import {
   CellDataUnavailableError,
   type UnavailableCellAddress,
 } from "../cell-data-unavailable-error.ts";
 import { createExecutorActionTransactionRouter } from "./action-transaction-router.ts";
-import { HostStorageManager } from "../storage/v2-host-provider.ts";
+import {
+  type AcceptedCommitNotice,
+  HostStorageManager,
+} from "../storage/v2-host-provider.ts";
 import {
   ClaimedAttemptLifecycle,
   claimedAttemptRejection,
@@ -73,6 +77,9 @@ const instantiatedDemand = new Set<string>();
 const pendingDemand = new Map<string, UnavailableCellAddress>();
 const demandSinks = new Map<string, Cancel>();
 const candidateActions = new Map<string, Action>();
+const actionsBySchedulerIdentity = new Map<string, Action>();
+const pendingCausalActorMatches = new Map<string, boolean>();
+let causalActorMatchesByAction = new WeakMap<object, boolean>();
 const claimedAttempts = new ClaimedAttemptLifecycle<Action>();
 let claimsByAction = new WeakMap<object, ExecutionClaim>();
 let demandGeneration = 0;
@@ -95,6 +102,86 @@ const normalizePieceId = (pieceId: string): string =>
   pieceId.startsWith("of:") ? pieceId.slice(3) : pieceId;
 
 const claimKey = (claim: ActionClaimKey): string => actionClaimMapKey(claim);
+
+const schedulerIdentityKey = (identity: {
+  branch: string;
+  ownerSpace: string;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  executionContextKey: string;
+}): string =>
+  JSON.stringify([
+    identity.branch,
+    identity.ownerSpace,
+    identity.pieceId,
+    identity.processGeneration,
+    identity.actionId,
+    identity.executionContextKey,
+  ]);
+
+const schedulerIdentityKeyForAction = (
+  action: object,
+  key: ActionClaimKey,
+): string | undefined => {
+  const identity = (action as Partial<TelemetryAnnotations>)
+    .schedulerObservationIdentity;
+  if (identity?.ownerSpace === undefined) return undefined;
+  return schedulerIdentityKey({
+    branch: identity.branch ?? "",
+    ownerSpace: identity.ownerSpace,
+    pieceId: identity.pieceId,
+    processGeneration: identity.processGeneration ?? 0,
+    actionId: key.actionId,
+    executionContextKey: key.contextKey,
+  });
+};
+
+const schedulerIdentityKeyForStaleReader = (
+  reader: AcceptedCommitNotice["staleDemandedReaders"][number],
+): string | undefined => {
+  if (reader.ownerSpace === undefined) return undefined;
+  return schedulerIdentityKey({
+    branch: reader.branch,
+    ownerSpace: reader.ownerSpace,
+    pieceId: reader.pieceId,
+    processGeneration: reader.processGeneration,
+    actionId: reader.actionId,
+    executionContextKey: reader.executionContextKey,
+  });
+};
+
+const noteAcceptedCommitCausalActors = (
+  notice: AcceptedCommitNotice,
+): void => {
+  const matchesSponsor = notice.originMatchesExecutionSponsor === true;
+  for (const reader of notice.staleDemandedReaders) {
+    const identity = schedulerIdentityKeyForStaleReader(reader);
+    if (identity === undefined) continue;
+    // Several accepted commits may coalesce before one rerun. Every causal
+    // origin must match the lease sponsor; a mismatch dominates that wave.
+    const combined = (pendingCausalActorMatches.get(identity) ?? true) &&
+      matchesSponsor;
+    pendingCausalActorMatches.set(identity, combined);
+    const action = actionsBySchedulerIdentity.get(identity);
+    if (action !== undefined) {
+      causalActorMatchesByAction.set(action, combined);
+    }
+  }
+};
+
+const registerCandidateCausalActor = (
+  candidate: { claimKey: ActionClaimKey; builtinId?: string },
+  action: Action,
+): boolean => {
+  const identity = schedulerIdentityKeyForAction(action, candidate.claimKey);
+  if (identity === undefined) return false;
+  actionsBySchedulerIdentity.set(identity, action);
+  const matchesSponsor = pendingCausalActorMatches.get(identity) ?? true;
+  pendingCausalActorMatches.delete(identity);
+  causalActorMatchesByAction.set(action, matchesSponsor);
+  return matchesSponsor;
+};
 
 const finishClaimedAttempt = (
   claim: ExecutionClaim,
@@ -220,6 +307,9 @@ const replaceDemand = async (
     pendingDemand.clear();
     demandSinks.clear();
     candidateActions.clear();
+    actionsBySchedulerIdentity.clear();
+    pendingCausalActorMatches.clear();
+    causalActorMatchesByAction = new WeakMap<object, boolean>();
     claimsByAction = new WeakMap<object, ExecutionClaim>();
   }
   for (const [pieceId, cell] of demanded) {
@@ -271,10 +361,19 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
         claimKey(candidate.claimKey),
         sourceAction as Action,
       );
+      const causalActorMatchesSponsor = candidate.builtinId === undefined
+        ? undefined
+        : registerCandidateCausalActor(
+          candidate,
+          sourceAction as Action,
+        );
       worker.postMessage({
         type: "candidate-claim",
         candidate: {
           ...candidate,
+          ...(causalActorMatchesSponsor !== undefined
+            ? { causalActorMatchesSponsor }
+            : {}),
           ...(demandGeneration > 0 ? { demandGeneration } : {}),
         },
       });
@@ -315,6 +414,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     protocolFlags: request.protocolFlags,
     shadowWrites: true,
     actionTransactionRouter,
+    onAcceptedCommitWillIntegrate(notice) {
+      noteAcceptedCommitCausalActors(notice);
+    },
     onAcceptedCommitIntegrated(notice) {
       selectiveWake?.push(
         notice.staleDemandedReaders.map((reader) => reader.pieceId),
@@ -406,6 +508,8 @@ const startClaimedAction = async (
   }
   const attempt = claimedAttempts.start(claim, action);
   try {
+    const identity = schedulerIdentityKeyForAction(action, claim);
+    if (identity !== undefined) pendingCausalActorMatches.delete(identity);
     storage.discardShadowWritesForAction(space, action);
     claimsByAction.set(action, claim);
     (action as Action & { prepareClaimedRerun?: () => void })
@@ -466,6 +570,9 @@ const stop = async (): Promise<void> => {
   instantiatedDemand.clear();
   pendingDemand.clear();
   candidateActions.clear();
+  actionsBySchedulerIdentity.clear();
+  pendingCausalActorMatches.clear();
+  causalActorMatchesByAction = new WeakMap<object, boolean>();
 };
 
 const handle = async (request: WorkerRequest): Promise<void> => {
