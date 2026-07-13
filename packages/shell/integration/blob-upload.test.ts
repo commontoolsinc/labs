@@ -24,6 +24,13 @@ describe("shell blob upload", () => {
           commonfabric?: { rt?: unknown };
         }).commonfabric?.rt,
       ));
+    await waitForCondition(shell.page(), () => {
+      const rootView = document.querySelector("x-root-view");
+      const appView = rootView?.shadowRoot?.querySelector("x-app-view") as
+        | { _patterns?: { value?: { spaceRootPattern?: unknown } } }
+        | null;
+      return Boolean(appView?._patterns?.value?.spaceRootPattern);
+    });
 
     const result = await shell.page().evaluate(async () => {
       const g = globalThis as unknown as {
@@ -37,18 +44,18 @@ describe("shell blob upload", () => {
             }): Promise<{ id: string; url: string }>;
           };
         };
-        app?: { state?: () => { identity?: { did?: () => string } } };
       };
       const rt = g.commonfabric?.rt;
       if (!rt) {
         throw new Error("Runtime client was not exposed");
       }
-      // Blob uploads name their space; the home space (= identity DID)
-      // is this test's target.
-      const space = g.app?.state?.()?.identity?.did?.();
-      if (!space) {
-        throw new Error("No identity available to derive the home space");
-      }
+      // Blob authorization is deferred, but direct writes under ACL
+      // enforcement still need an existing space. Await the normal named-space
+      // root bootstrap before exercising the upload compatibility path.
+      const space = (document.querySelector("x-root-view") as
+        | { space?: string }
+        | null)?.space;
+      if (!space) throw new Error("Named space did not resolve");
 
       const upload = await rt.uploadBlob({
         space,

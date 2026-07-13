@@ -168,7 +168,7 @@ The toolshed-embedded memory service has two modes:
 | `MEMORY_DIR` | `./cache/memory/` (as a `file://` URL) | **Directory mode** — one SQLite file per space. Default; backwards-compatible. |
 | `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database. Used for clusterduck clustering. Validated as an absolute path. |
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
-| `MEMORY_ACL_MODE` | `off` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
+| `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
 
 With ACL policy active, a fresh space is read-only until its space identity or a
