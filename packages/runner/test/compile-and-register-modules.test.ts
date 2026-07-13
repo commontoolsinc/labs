@@ -9,6 +9,7 @@ import {
 import type { RuntimeProgram } from "./engine-test-support.ts";
 import type { ModuleByteCache } from "../src/runtime.ts";
 import type { CompiledModuleArtifact } from "../src/harness/types.ts";
+import { factoryStateOf } from "@commonfabric/data-model/fabric-factory";
 
 /**
  * Conformance guard for CT-1811.
@@ -54,6 +55,17 @@ describe("PatternManager.compileAndRegisterModules", () => {
     );
     const entry = result.main!["default"] as object;
     expect(runtime.patternManager.getArtifactEntryRef(entry)).toBeDefined();
+  });
+
+  it("can persist the evaluated closure before granting durable factory refs", async () => {
+    const result = await runtime.patternManager.compileAndRegisterModules(
+      program,
+      undefined,
+      { space: signer.did() },
+    );
+    const entry = result.main!["default"] as object;
+
+    expect(factoryStateOf(entry).ref).toBeDefined();
   });
 
   it("the bare Engine.compileAndEvaluateModules does NOT index artifacts", async () => {

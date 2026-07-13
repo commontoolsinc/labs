@@ -886,6 +886,7 @@ export class PatternManager {
   async compileAndRegisterModules(
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
+    cacheCtx?: { space: MemorySpace },
   ): Promise<EvaluateResult> {
     const patternCoverage = this.patternCoverageFor(options);
     const effectiveOptions: TypeScriptHarnessProcessOptions = {
@@ -899,7 +900,10 @@ export class PatternManager {
         await getCompileCacheRuntimeVersion(),
         { patternCoverage: patternCoverage !== undefined },
       );
-    if (byteCache === undefined || runtimeVersion === undefined) {
+    if (
+      cacheCtx === undefined &&
+      (byteCache === undefined || runtimeVersion === undefined)
+    ) {
       const result = await this.runtime.harness.compileAndEvaluateModules(
         program,
         effectiveOptions,
@@ -908,13 +912,34 @@ export class PatternManager {
       return result;
     }
 
-    const { id, graph, mainSpecifier, modules } = await this.runtime.harness
+    const { id, graph, mainSpecifier, entryIdentity, modules } = await this
+      .runtime.harness
       .compileToRecordGraph(program, {
         ...effectiveOptions,
-        precompiledModulesFor: ({ identities }) =>
-          Promise.resolve(byteCache.getCompleteSet(runtimeVersion, identities)),
+        ...(cacheCtx === undefined
+          ? {}
+          : { fabricImports: { space: cacheCtx.space } }),
+        ...(byteCache === undefined || runtimeVersion === undefined ? {} : {
+          precompiledModulesFor: ({ identities }) =>
+            Promise.resolve(
+              byteCache.getCompleteSet(runtimeVersion, identities),
+            ),
+        }),
       });
-    byteCache.putAll(runtimeVersion, modules);
+    if (byteCache !== undefined && runtimeVersion !== undefined) {
+      byteCache.putAll(runtimeVersion, modules);
+    }
+    if (cacheCtx !== undefined) {
+      // This full-namespace seam is used by pattern-test harnesses that need
+      // named exports in addition to `main.default`. Persist the complete
+      // version-independent source closure before granting durable refs; a
+      // process byte-cache hit alone is only session authority.
+      await this.persistSourceCacheTracked(
+        cacheCtx.space,
+        modules,
+        entryIdentity,
+      );
+    }
     // Yield ahead of the synchronous SES evaluation (see compilePattern).
     await interleaveCompileYield();
     const result = this.runtime.harness.evaluateRecordGraph(
@@ -923,7 +948,11 @@ export class PatternManager {
       mainSpecifier,
       program.files,
     );
-    this.registerEvaluatedModules(result);
+    if (cacheCtx === undefined) {
+      this.registerEvaluatedModules(result);
+    } else {
+      this.registerDurableEvaluatedModules(result);
+    }
     return result;
   }
 
