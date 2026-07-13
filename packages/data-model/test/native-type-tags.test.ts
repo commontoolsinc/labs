@@ -65,6 +65,25 @@ describe("native-type-tags", () => {
       expect(fallback({ message: "not branded" })).toBe(false);
     });
 
+    it("does not mistake Symbol.toStringTag spoofs for native errors", () => {
+      class ErrorSpoof {
+        get [Symbol.toStringTag]() {
+          return "Error";
+        }
+      }
+      class DOMExceptionSpoof {
+        get [Symbol.toStringTag]() {
+          return "DOMException";
+        }
+      }
+      const fallback = createNativeErrorBrandCheck(undefined);
+
+      expect(fallback(new ErrorSpoof())).toBe(false);
+      expect(fallback(new DOMExceptionSpoof())).toBe(false);
+      expect(tagFromNativeValue(new ErrorSpoof())).toBe(null);
+      expect(tagFromNativeValue(new DOMExceptionSpoof())).toBe(null);
+    });
+
     it("returns `Map` tag for `Map` instances", () => {
       expect(tagFromNativeValue(new Map())).toBe(NATIVE_TAGS.Map);
     });
