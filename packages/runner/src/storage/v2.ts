@@ -381,6 +381,35 @@ const isPathPrefix = (
   prefix.length <= path.length &&
   prefix.every((segment, index) => segment === path[index]);
 
+/** Paths whose new value fully replaces every descendant. Structural and
+ * mergeable patch operations deliberately do not qualify. */
+const dominatingPendingPaths = (
+  pending: PendingVersion,
+): string[][] | undefined => {
+  if (pending.op === "set" || pending.op === "delete") return [[]];
+  if (
+    pending.patches.length === 0 ||
+    pending.patches.some((patch) => patch.op !== "replace")
+  ) return undefined;
+  return pending.patches.flatMap(touchedPointerPaths);
+};
+
+const pendingVersionDominatedBy = (
+  pending: PendingVersion,
+  dominatingPaths: readonly (readonly string[])[],
+): boolean => {
+  if (pending.op === "set" || pending.op === "delete") {
+    return dominatingPaths.some((path) => path.length === 0);
+  }
+  if (
+    pending.patches.length === 0 ||
+    pending.patches.some((patch) => patch.op !== "replace")
+  ) return false;
+  return pending.patches.flatMap(touchedPointerPaths).every((path) =>
+    dominatingPaths.some((prefix) => isPathPrefix(prefix, path))
+  );
+};
+
 const replayPathForPendingPatchTarget = (
   base: EntityDocument | undefined,
   pendingValue: EntityDocument,
@@ -3012,7 +3041,7 @@ class SpaceReplica implements ISpaceReplica {
       } else if (
         route.kind === "claimed-overlay" && source?.sourceAction !== undefined
       ) {
-        this.recordClaimedOverlay(
+        const overlay = this.recordClaimedOverlay(
           localSeq,
           route.claim,
           source.sourceAction,
@@ -3032,6 +3061,8 @@ class SpaceReplica implements ISpaceReplica {
               diagnosticCode: "captured-claim-no-longer-live",
             },
           );
+        } else {
+          this.compactDominatedClaimedPendingVersions(overlay);
         }
       }
       if (
@@ -4150,7 +4181,7 @@ class SpaceReplica implements ISpaceReplica {
     sourceAction: object,
     commit: ClientCommit,
     touched: readonly { id: URI; scope?: CellScope }[],
-  ): void {
+  ): ClaimedOverlayGeneration {
     let basisSeq = commit.reads.confirmed.reduce(
       (maximum, read) => Math.max(maximum, read.seq),
       0,
@@ -4178,7 +4209,7 @@ class SpaceReplica implements ISpaceReplica {
         basisSeq = Math.max(basisSeq, confirmed);
       }
     }
-    this.#claimedOverlays.set(localSeq, {
+    const overlay: ClaimedOverlayGeneration = {
       localSeq,
       claim,
       sourceAction,
@@ -4189,7 +4220,8 @@ class SpaceReplica implements ISpaceReplica {
         docKey(entry.id, entry.scope),
         entry,
       ])).values()],
-    });
+    };
+    this.#claimedOverlays.set(localSeq, overlay);
     logger.debug("execution-client-derived-suppressed", () => [
       "Claimed client action retained as a local overlay",
       { actionId: claim.actionId, localSeq, basisSeq },
@@ -4198,6 +4230,60 @@ class SpaceReplica implements ISpaceReplica {
       "Claimed overlay created",
       { actionId: claim.actionId, localSeq, basisSeq },
     ]);
+    return overlay;
+  }
+
+  /**
+   * Compact only physical pending versions that a newer resolved overlay
+   * completely overwrites. Logical overlay generations remain independent so
+   * settlement bases, rejection handling, held-time telemetry, and route/drop
+   * diagnostics retain their exact cardinality.
+   */
+  private compactDominatedClaimedPendingVersions(
+    next: ClaimedOverlayGeneration,
+  ): void {
+    if (next.unresolvedBasisLocalSeqs.size > 0) return;
+    const nextIncarnation = executionClaimIncarnationKey(next.claim);
+    let removed = 0;
+
+    for (const { id, scope } of next.touched) {
+      const record = this.#docs.get(docKey(id, scope));
+      if (record === undefined) continue;
+      const nextPending = record.pending.filter((entry) =>
+        entry.localSeq === next.localSeq
+      );
+      if (nextPending.length !== 1) continue;
+      const coverage = dominatingPendingPaths(nextPending[0]!);
+      if (coverage === undefined) continue;
+
+      const retained = record.pending.filter((entry) => {
+        if (entry.localSeq === next.localSeq) return true;
+        const previous = this.#claimedOverlays.get(entry.localSeq);
+        if (
+          previous === undefined ||
+          previous.sourceAction !== next.sourceAction ||
+          executionClaimIncarnationKey(previous.claim) !== nextIncarnation ||
+          previous.unresolvedBasisLocalSeqs.size > 0 ||
+          previous.basisSeq > next.basisSeq ||
+          !pendingVersionDominatedBy(entry, coverage)
+        ) {
+          return true;
+        }
+        removed++;
+        return false;
+      });
+      if (retained.length !== record.pending.length) {
+        record.pending = retained;
+        record.materialized = undefined;
+      }
+    }
+
+    if (removed > 0) {
+      logger.debug("execution-overlay-pending-versions-compacted", () => [
+        "Dominated claimed-overlay pending versions compacted",
+        { actionId: next.claim.actionId, versions: removed },
+      ]);
+    }
   }
 
   private noteSourceCommitConfirmed(localSeq: number, seq: number): void {

@@ -914,6 +914,102 @@ Deno.test("two rapid source bases require settlement through the later basis", a
   }
 });
 
+Deno.test("resolved replace overlays compact physical pending versions without losing basis accounting", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const compactedBaseline = getLoggerCountsBreakdown()["storage.v2"]?.[
+    "execution-overlay-pending-versions-compacted"
+  ]?.debug ?? 0;
+  const query = {
+    space: SPACE,
+    branch: "",
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    factory.view.push(emptySync({
+      toSeq: 5,
+      upserts: [{
+        branch: "",
+        id: INPUT,
+        seq: 5,
+        doc: { value: "resolved-source" },
+      }],
+    }));
+    await waitFor(() => visibleValue(storage, INPUT) === "resolved-source");
+
+    const overlayCount = 100;
+    for (let index = 1; index <= overlayCount; index++) {
+      await writeClaimedOutput(storage, `overlay-${index}`, true);
+    }
+    assertEquals(visibleOutput(storage), `overlay-${overlayCount}`);
+    assertEquals(factory.commits, []);
+    const routed = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(routed.actions[0]?.claimedOverlayRoutes, overlayCount);
+    assertEquals(routed.actions[0]?.pendingOverlayCount, overlayCount);
+    assertEquals(
+      getLoggerCountsBreakdown()["storage.v2"]?.[
+        "execution-overlay-pending-versions-compacted"
+      ]?.debug ?? 0,
+      compactedBaseline + overlayCount - 2,
+    );
+
+    factory.view.push(emptySync({
+      fromSeq: 5,
+      toSeq: 5,
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(4),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
+    );
+    assertEquals(visibleOutput(storage), `overlay-${overlayCount}`);
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics(query).actions[0]
+        ?.pendingOverlayCount,
+      overlayCount,
+    );
+
+    factory.view.push(emptySync({
+      fromSeq: 5,
+      toSeq: 5,
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(5),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() => visibleOutput(storage) === undefined);
+    const settled = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(settled.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(settled.actions[0]?.basisCoveredOverlayDrops, overlayCount);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
 Deno.test("chained claimed overlays expose the accepted non-transitive basis window and converge", async () => {
   setServerPrimaryExecutionConfig(true);
   const intermediateClaim: ExecutionClaim = {
