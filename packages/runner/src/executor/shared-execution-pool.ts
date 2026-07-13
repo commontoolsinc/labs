@@ -4,6 +4,9 @@ import type {
   ExecutionDemandSnapshot,
   ExecutionLeaseHandle,
 } from "@commonfabric/memory/v2/server";
+import { getLogger } from "@commonfabric/utils/logger";
+
+const logger = getLogger("execution.pool", { enabled: false });
 
 export interface ExecutionPoolControl {
   subscribeExecutionDemands(listener: ExecutionDemandListener): () => void;
@@ -353,7 +356,12 @@ export class SharedExecutionPool {
       } else {
         slot.lease = renewed;
         if (!sameStrings(slot.pieces, nextPieces)) {
-          await slot.executor.setDemand(nextPieces);
+          const demandStartedAt = performance.now();
+          try {
+            await slot.executor.setDemand(nextPieces);
+          } finally {
+            logger.time(demandStartedAt, "demand-update");
+          }
           slot.pieces = nextPieces;
         }
         slot.state = "live";
@@ -388,6 +396,7 @@ export class SharedExecutionPool {
     slot.crashToken = null;
     const startupAbort = new AbortController();
     slot.startupAbort = startupAbort;
+    const workerStartedAt = performance.now();
     try {
       const executor = await this.#factory.start({
         space: slot.space,
@@ -430,6 +439,8 @@ export class SharedExecutionPool {
         error,
       );
       this.#scheduleCrashRetry(slot);
+    } finally {
+      logger.time(workerStartedAt, "worker-start");
     }
   }
 
@@ -552,10 +563,11 @@ export class SharedExecutionPool {
     };
 
     scheduleRenewal();
+    const settleStartedAt = performance.now();
     const settle = executor.settle().then(
       (sequence): Outcome => ({ kind: "settled", sequence }),
       (error): Outcome => ({ kind: "settle-error", error }),
-    );
+    ).finally(() => logger.time(settleStartedAt, "worker-settle"));
     const timeout = new Promise<Outcome>((resolve) => {
       timeoutTimer = this.#setTimer(
         () => resolve({ kind: "timeout" }),

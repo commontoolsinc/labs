@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 import type { BranchName, ExecutionLease } from "@commonfabric/memory/v2";
 import type {
   AuthenticatedExecutionDemand,
@@ -297,6 +298,10 @@ Deno.test("shared execution pool updates disjoint roots without restarting", asy
   const factory = new FakeExecutorFactory();
   const pool = new SharedExecutionPool({ control, factory });
   pool.start();
+  const timingBefore = getTimingStatsBreakdown()["execution.pool"] ?? {};
+  const startBefore = timingBefore["worker-start"]?.count ?? 0;
+  const demandBefore = timingBefore["demand-update"]?.count ?? 0;
+  const settleBefore = timingBefore["worker-settle"]?.count ?? 0;
 
   try {
     await control.emit(1, [demand(1, ["piece:a"])]);
@@ -313,6 +318,12 @@ Deno.test("shared execution pool updates disjoint roots without restarting", asy
       "piece:b",
     ]]);
     assertEquals(pool.snapshot(SPACE, BRANCH)?.referenceCount, 2);
+    await control.emit(3, []);
+    await pool.idle();
+    const timingAfter = getTimingStatsBreakdown()["execution.pool"] ?? {};
+    assertEquals(timingAfter["worker-start"]?.count ?? 0, startBefore + 1);
+    assertEquals(timingAfter["demand-update"]?.count ?? 0, demandBefore + 1);
+    assertEquals(timingAfter["worker-settle"]?.count ?? 0, settleBefore + 1);
   } finally {
     await pool.close();
   }
