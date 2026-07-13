@@ -368,14 +368,23 @@ schemes parse as no kind and stay strict). Policy:
   common one.
 - **Non-computed commits**: unchanged.
 
-An acknowledged-and-dropped commit is indistinguishable from an accepted one
-for bookkeeping purposes: it consumes its `localSeq`, satisfies
-`origin-committed` preconditions that name it, and resolves
-`PendingRead.localSeq` references from later commits (the referenced read
-resolves against the value that actually won, which is the value the reader
-will observe after sync-down; if that read is thereby stale, the *reading*
-commit's own policy applies). This is the invariant that lets clients keep
-their existing commit pipeline untouched.
+An acknowledged-and-dropped commit consumes its `localSeq` — replay dedupe
+must keep working regardless of anything below. The REST of the dropped
+commit's lineage semantics are **PROVISIONAL**, not settled. Treating a
+dropped commit as accepted for `origin-committed` preconditions and
+`PendingRead.localSeq` resolution makes the *bookkeeping* consistent
+without making a descendant's *payload* consistent: a client can build
+commit B from commit A's optimistic value before A's ack arrives, so B's
+serialized operations already embed `g(X_v1)`; if A is dropped, resolving
+B's pending read against the winning `X_v2` does not recompute that
+payload — B would appear to read `X_v2` while writing `g(X_v1)`. For an
+all-computed B, recompute eventually paves over the phantom; for a B that
+writes authoritative state, the phantom persists. The follow-up
+implementation must therefore ensure a descendant derived from a dropped
+optimistic value is rejected, retried, recomputed, or proven independent
+of the dropped value (e.g. cascade-dropping computed-only lineage and
+strictly rejecting anything else) before these semantics can be considered
+final.
 
 ### Client behavior
 
@@ -471,9 +480,12 @@ this proposal onto persistent-scheduler-state:
   write and may be dropped.)
 - A commit is either applied whole or dropped whole; mixed commits are never
   partially applied.
-- An acknowledged-and-dropped commit satisfies every bookkeeping obligation
-  an accepted commit satisfies: `localSeq` consumption, `origin-committed`
-  preconditions, `PendingRead` resolution.
+- An acknowledged-and-dropped commit consumes its `localSeq` (replay
+  dedupe). PROVISIONAL — see Server conflict policy: whether it also
+  satisfies `origin-committed` preconditions and resolves `PendingRead`
+  references as if applied is NOT settled; the follow-up must first close
+  the phantom-descendant hazard (a dependent commit whose payload embeds
+  the dropped optimistic value must not apply unchanged).
 - For deterministic computations, all clients converge on identical values
   and identical entity ids without any client observing a conflict on a
   computed entity.
@@ -497,9 +509,12 @@ this proposal onto persistent-scheduler-state:
    reusing the persistent-scheduler-state keep/drop path. Backed out of
    the minting branch so phase 1 can land and be exercised under fully
    strict conflict semantics; ships gated behind its own flag.
-3. **Lineage integration** (with phase 2). `origin-committed` and
-   `PendingRead.localSeq` semantics against dropped commits under the
-   speculation test suites.
+3. **Lineage integration** (with phase 2; semantics provisional). Settle
+   the dropped-origin semantics for `origin-committed` and
+   `PendingRead.localSeq`: a descendant derived from a dropped optimistic
+   value must be rejected, retried, recomputed, or proven independent of
+   it — then validate lineage SAFETY (no phantom descendant payload
+   applies) under the speculation test suites.
 4. **Value-equality dedupe** for current-read computed commits, if the
    measured commit-log savings justify the comparison cost.
 5. **Later:** server-side action runner consumes the kinds (separate spec).
@@ -521,10 +536,15 @@ this proposal onto persistent-scheduler-state:
   cross-check that every registered builtin name is either replayable or on
   the documented non-replayable list; a pattern refactor that flips a
   cell's kind mints a new id and re-materializes via the manifest.
-- Engine: all-computed stale commit is acked, dropped, recorded, satisfies
-  a dependent `origin-committed` precondition, and resolves a later
-  commit's pending read; mixed commit keeps strict semantics; race of two
-  current computed commits is first-wins; unknown-scheme ids stay strict.
+- Engine: all-computed stale commit is acked, dropped, and recorded, and
+  replay stays idempotent; lineage SAFETY for dependents (per the
+  provisional semantics above): a descendant commit whose payload was
+  derived from the dropped optimistic value must not apply unchanged —
+  the tests validate whichever reject/retry/cascade resolution the
+  follow-up settles on, rather than prescribing that every dropped origin
+  satisfy downstream dependencies; mixed commit keeps strict semantics;
+  race of two current computed commits is first-wins; unknown-scheme ids
+  stay strict.
 - Integration: two-client scenario where both recompute the same node —
   assert convergence with zero conflict-driven action re-runs; flag-on
   instantiation syncs a manifest-linked `computed:fid1:` id through storage
