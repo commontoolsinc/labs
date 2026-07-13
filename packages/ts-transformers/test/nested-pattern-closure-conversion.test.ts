@@ -372,6 +372,41 @@ export default pattern<{
   );
 });
 
+Deno.test("a local nested factory called through a deeper capture stays symbolic", async () => {
+  const output = await transformSource(
+    `
+import { pattern } from "commonfabric";
+
+interface Input { value: number }
+interface Output { result: number }
+
+export default pattern<{ factor: number }>(({ factor }) => {
+  const local = pattern<Input, Output>(({ value }) => ({
+    result: value * factor,
+  }));
+  return {
+    child: pattern<Input, Output>((argument) => local(argument)),
+  };
+});
+`,
+    { ...options, typeCheck: true },
+  );
+  const root = parseModule(output);
+  const invocations = callsNamed(root, "invokeFactory");
+
+  assertEquals(invocations.length, 1, output);
+  const contract = literalToValue(invocations[0]!.arguments[2]!) as {
+    kind: string;
+    resultSchema: unknown;
+  };
+  assertEquals(contract.kind, "pattern");
+  assertEquals(contract.resultSchema, {
+    type: "object",
+    properties: { result: { type: "number" } },
+    required: ["result"],
+  });
+});
+
 Deno.test("nested patterns reject arbitrary local JavaScript function captures", async () => {
   const { diagnostics } = await validateSource(
     `

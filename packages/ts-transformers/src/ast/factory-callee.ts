@@ -194,6 +194,9 @@ function classifyFactoryValueOrigin(
 
   if (ts.isVariableDeclaration(declaration)) {
     if (isModuleScopedDeclaration(declaration)) return "live";
+    if (crossesSymbolicCallbackBoundary(target, declaration, checker)) {
+      return "symbolic";
+    }
     if (isConstVariableDeclaration(declaration) && declaration.initializer) {
       return classifyFactoryValueOrigin(
         declaration.initializer,
@@ -225,6 +228,44 @@ function classifyFactoryValueOrigin(
   }
 
   return "unknown";
+}
+
+/**
+ * Closure conversion moves a local binding captured by a deeper eager pattern
+ * callback into that callback's private argument-1 record. Even when the
+ * binding was initialized by a live builder call, its use inside the deeper
+ * callback is therefore a symbolic factory input until the runner
+ * materializes that pattern generation.
+ */
+function crossesSymbolicCallbackBoundary(
+  useSite: ts.Node,
+  declaration: ts.Declaration,
+  checker: ts.TypeChecker,
+): boolean {
+  let current: ts.Node | undefined = useSite.parent;
+  while (current) {
+    if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const semantics = getCallbackBoundarySemantics(current, checker);
+      if (
+        semantics.decision.kind === "supported" &&
+        (semantics.decision.boundaryKind === "pattern-builder" ||
+          semantics.decision.boundaryKind === "render-builder")
+      ) {
+        return !isDescendantOf(declaration, current);
+      }
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isDescendantOf(node: ts.Node, ancestor: ts.Node): boolean {
+  let current: ts.Node | undefined = node;
+  while (current) {
+    if (current === ancestor) return true;
+    current = current.parent;
+  }
+  return false;
 }
 
 function classifyParameterOrigin(
