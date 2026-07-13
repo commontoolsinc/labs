@@ -6189,6 +6189,7 @@ export class Server {
     observations: readonly CommitSchedulerObservation[],
     previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
     session: SessionState | undefined,
+    scopeContext: Engine.SchedulerScopeContext | undefined,
   ): Promise<void> {
     const run = () =>
       this.applyPostCommitSchedulerSideEffects(
@@ -6197,6 +6198,7 @@ export class Server {
         observations,
         previousReadSpaces,
         session,
+        scopeContext,
       );
     const previous = this.#schedulerSideEffectsByOwnerSpace.get(ownerSpace);
     const queued = previous?.then(run, run) ?? run();
