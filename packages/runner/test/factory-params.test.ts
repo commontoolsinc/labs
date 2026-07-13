@@ -120,6 +120,85 @@ Deno.test("pattern curry accepts a source schema that is stricter than capture m
   );
 });
 
+Deno.test("pattern curry realizes a serialized cell scope from its schema", () => {
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      selected: {
+        type: "string",
+        asCell: [{ kind: "cell", scope: "session" }],
+      },
+    },
+    required: ["selected"],
+  } as const satisfies JSONSchema;
+  const selected = {
+    "/": {
+      "link@1": {
+        id: "of:selected",
+        path: [],
+        scope: "space",
+        schema: { type: "string", scope: "session" },
+      },
+    },
+  };
+
+  assertEquals(
+    assertValidPatternParams({ selected }, paramsSchema),
+    undefined,
+  );
+});
+
+Deno.test("pattern curry accepts a capability-shrunk stream event schema", () => {
+  const expectedEvent = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      target: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          value: { type: "string" },
+        },
+      },
+    },
+  } as const satisfies JSONSchema;
+  const sourceEvent = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      target: {
+        type: "object",
+        properties: { name: { type: "string" } },
+      },
+    },
+  } as const satisfies JSONSchema;
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      onSelect: { $ref: "#/$defs/ExpectedEvent", asCell: ["stream"] },
+    },
+    required: ["onSelect"],
+    $defs: { ExpectedEvent: expectedEvent },
+  } as const satisfies JSONSchema;
+
+  assertEquals(
+    assertValidPatternParams(
+      { onSelect: symbolic({ ...sourceEvent, asCell: ["stream"] }) },
+      paramsSchema,
+    ),
+    undefined,
+  );
+  assertThrows(
+    () =>
+      assertValidPatternParams(
+        { onSelect: symbolic({ ...sourceEvent, asCell: ["cell"] }) },
+        paramsSchema,
+      ),
+    TypeError,
+    "cell kind mismatch",
+  );
+});
+
 Deno.test("pattern curry accepts the same rooted ref from a stricter source schema", () => {
   const item = {
     type: "object",

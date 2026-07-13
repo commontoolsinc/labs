@@ -141,6 +141,18 @@ describe("factory-aware graph and static walks", () => {
     expect(state.spaceSelector).toEqual(source.getAsLink());
   });
 
+  it("records scoped internal cells for durable factory capture binding", () => {
+    const { pattern, Writable } = createTrustedBuilder(runtime).commonfabric;
+    const containingPattern = pattern(() => {
+      const selected = Writable.perSession.of("");
+      return { selected };
+    });
+
+    expect(containingPattern.derivedInternalCells).toEqual([
+      expect.objectContaining({ scope: "session" }),
+    ]);
+  });
+
   it("keeps special values atomic in graph and serialization walks", () => {
     const bytes = new FabricBytes(new Uint8Array([10, 11, 12]));
     const factory = bindPattern({ bytes });

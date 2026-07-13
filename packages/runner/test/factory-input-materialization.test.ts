@@ -6,6 +6,7 @@ import {
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
 import { Identity } from "@commonfabric/identity";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
 import { setDurableArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 import type { FabricValue, JSONSchema } from "../src/builder/types.ts";
@@ -361,6 +362,45 @@ describe("scheduled Factory@1 input materialization", () => {
         }),
       ).toBe(ordinary);
       expect(getterReads).toBe(0);
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
+  it("quietly skips unrelated embedded schemas while scanning for factories", () => {
+    const ordinary = { manager: { fullUI: { type: "vnode" } } };
+    const schema = {
+      type: "object",
+      properties: {
+        manager: {
+          type: "object",
+          properties: {
+            fullUI: {
+              $ref: "https://commonfabric.org/schemas/vnode.json",
+            },
+          },
+        },
+      },
+    } as const satisfies JSONSchema;
+    const warningCount = () => getLoggerCountsBreakdown().cfc?.cfc?.warn ?? 0;
+    const before = warningCount();
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "unrelated-embedded-schema-input",
+        schema,
+        tx,
+      );
+
+      expect(
+        materializeScheduledFactoryInputs(ordinary, schema, {
+          runtime,
+          tx,
+          inputsCell,
+        }),
+      ).toBe(ordinary);
+      expect(warningCount()).toBe(before);
     } finally {
       tx.abort(new Error("test cleanup"));
     }

@@ -12,6 +12,7 @@ import {
 } from "../factory-contract.ts";
 import { isCell } from "../cell.ts";
 import { isCellLink, parseLink } from "../link-utils.ts";
+import { isCellScope } from "../scope.ts";
 import { isReactive, type JSONSchema } from "./types.ts";
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -35,9 +36,14 @@ function schemaAtRef(
     const key = encoded.replaceAll("~1", "/").replaceAll("~0", "~");
     current = current[key];
   }
-  return typeof current === "boolean" || isRecord(current)
-    ? current as JSONSchema
-    : undefined;
+  if (typeof current !== "boolean" && !isRecord(current)) return undefined;
+  const { $ref: _, ...siblings } = schema;
+  if (Object.keys(siblings).length === 0) return current as JSONSchema;
+  if (current === false) return false;
+  return schemaWithRootDefinitions(
+    current === true ? siblings : { ...current, ...siblings },
+    root,
+  );
 }
 
 function contractFromState(value: unknown): FactoryContract {
@@ -143,6 +149,31 @@ function asCellEntry(value: unknown):
   };
 }
 
+function symbolicCellEntries(
+  source: JSONSchema,
+  value: unknown,
+): { kind: string; scope?: string }[] {
+  const sourceEntries = source !== true && source !== false &&
+      Array.isArray(source.asCell)
+    ? source.asCell.map(asCellEntry).filter((entry) => entry !== undefined)
+    : [];
+  if (sourceEntries.length > 0) return sourceEntries;
+  const sourceScope = source !== true && source !== false &&
+      isCellScope(source.scope)
+    ? source.scope
+    : undefined;
+  const exportedCell = isCell(value) ? value.export() : undefined;
+  const isStreamCell = isRecord(exportedCell?.value) &&
+    exportedCell.value.$stream === true;
+  return isStreamCell
+    ? [{ kind: "stream", scope: sourceScope ?? exportedCell?.scope }]
+    : isCell(value)
+    ? [{ kind: "cell", scope: sourceScope ?? exportedCell?.scope }]
+    : isCellLink(value)
+    ? [{ kind: "cell", scope: sourceScope ?? parseLink(value)?.scope }]
+    : [];
+}
+
 function symbolicCellKindFailure(
   expected: JSONSchema,
   source: JSONSchema,
@@ -157,23 +188,7 @@ function symbolicCellKindFailure(
     entry !== undefined
   );
   if (expectedEntries.length === 0) return undefined;
-
-  const sourceEntries = source !== true && source !== false &&
-      Array.isArray(source.asCell)
-    ? source.asCell.map(asCellEntry).filter((entry) => entry !== undefined)
-    : [];
-  const exportedCell = isCell(value) ? value.export() : undefined;
-  const isStreamCell = isRecord(exportedCell?.value) &&
-    exportedCell.value.$stream === true;
-  const actualEntries = sourceEntries.length > 0
-    ? sourceEntries
-    : (isStreamCell
-      ? [{ kind: "stream", scope: exportedCell?.scope }]
-      : isCell(value)
-      ? [{ kind: "cell", scope: exportedCell?.scope }]
-      : isCellLink(value)
-      ? [{ kind: "cell", scope: parseLink(value)?.scope }]
-      : []);
+  const actualEntries = symbolicCellEntries(source, value);
   if (
     !expectedEntries.some((expectedEntry) =>
       actualEntries.some((actualEntry) =>
@@ -183,9 +198,11 @@ function symbolicCellKindFailure(
       )
     )
   ) {
+    const describe = (entry: { kind: string; scope?: string }) =>
+      `${entry.kind}@${entry.scope ?? "unspecified"}`;
     return `symbolic binding cell kind mismatch: expected ${
-      expectedEntries.map((entry) => entry.kind).join("|")
-    }, got ${actualEntries.map((entry) => entry.kind).join("|") || "none"}`;
+      expectedEntries.map(describe).join("|")
+    }, got ${actualEntries.map(describe).join("|") || "none"}`;
   }
   return undefined;
 }
@@ -285,7 +302,16 @@ function symbolicFailure(
     return undefined;
   }
   return factorySchemasEqual(expectedContent, sourceContent) ||
-      sourceSchemaContainsExpected(expectedContent, sourceContent)
+      sourceSchemaContainsExpected(expectedContent, sourceContent) ||
+      rootedSchema !== true && rootedSchema !== false &&
+        Array.isArray(rootedSchema.asCell) &&
+        rootedSchema.asCell.map(asCellEntry).some((entry) =>
+          entry?.kind === "stream"
+        ) &&
+        symbolicCellEntries(sourceSchema, value).some((entry) =>
+          entry.kind === "stream"
+        ) &&
+        sourceSchemaContainsExpected(sourceContent, expectedContent)
     ? undefined
     : `symbolic binding schema mismatch: expected ${
       JSON.stringify(expectedContent)

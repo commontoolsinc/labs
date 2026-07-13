@@ -199,6 +199,30 @@ describe("ContextualFlowControl.schemaAtPath", () => {
     ]);
   });
 
+  it("keeps factory-public refs rooted in their embedded schema", () => {
+    const factorySchema = {
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: {
+          $ref: "#/$defs/Input",
+          $defs: { Input: { type: "string" } },
+        },
+        resultSchema: { type: "number" },
+      },
+    } as const satisfies JSONSchema;
+    const fullSchema = {
+      $defs: { Factory: factorySchema },
+      $ref: "#/$defs/Factory",
+    } as const satisfies JSONSchema;
+
+    expect(
+      ContextualFlowControl.resolveSchemaRef(
+        fullSchema,
+        "#/$defs/Factory",
+      ),
+    ).toEqual(factorySchema);
+  });
+
   it("accepts schema-light module and handler factory contracts", () => {
     for (
       const asFactory of [

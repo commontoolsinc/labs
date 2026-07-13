@@ -199,6 +199,52 @@ describe("params pseudo-alias runtime seam", () => {
     expect(resolvedLink.path).toEqual(["capture"]);
     expect(resolvedLink.overwrite).toBe("redirect");
   });
+
+  it("preserves a params alias cell scope without the containing factory", () => {
+    const scopedSchema = {
+      type: "string",
+      asCell: [{ kind: "cell", scope: "session" }],
+    } as const;
+    const paramsSchema = {
+      type: "object",
+      properties: { capture: scopedSchema },
+      required: ["capture"],
+    } as const;
+    const resultCell = runtime.getCell(
+      space,
+      "scoped params pseudo-alias resolution result",
+      undefined,
+      tx,
+    );
+    const argumentCell = getMetaCell(resultCell, "argument", tx);
+    const paramsCell = getMetaCell(resultCell, "params", tx, paramsSchema);
+    paramsCell.set({ capture: "Ada" });
+    resultCell.setMetaRaw(
+      "params",
+      paramsCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+      }),
+    );
+
+    const resolved = unwrapOneLevelAndBindtoDoc(
+      runtime.cfc,
+      {
+        $alias: {
+          cell: "params",
+          path: ["capture"],
+          scope: "space",
+          schema: scopedSchema,
+        },
+      },
+      argumentCell.getAsNormalizedFullLink(),
+      resultCell,
+    );
+    const resolvedLink = parseLink(resolved, resultCell)!;
+
+    expect(resolvedLink.scope).toBe("space");
+    expect(resolvedLink.schema).toMatchObject({ scope: "session" });
+  });
 });
 
 describe("pattern-binding", () => {

@@ -628,7 +628,7 @@ function factoryFromPattern<T, R>(
   >();
   allCellsAndInternalRoots.forEach((cell) => {
     // Only process roots of extra cells:
-    const { cell: top, path, value, schema, external } = cell.export();
+    const { cell: top, path, value, schema, scope, external } = cell.export();
     if (top === inputRootCell || top === paramsRootCell) return;
     if (path.length > 0 || external) return;
 
@@ -644,6 +644,7 @@ function factoryFromPattern<T, R>(
       derivedInternalCells.push({
         partialCause,
         ...(descriptorSchema !== undefined && { schema: descriptorSchema }),
+        ...(scope !== undefined && { scope }),
       });
     }
   });

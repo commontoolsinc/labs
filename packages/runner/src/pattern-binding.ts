@@ -163,12 +163,15 @@ const foldDeclaredScopeIntoLinkSchema = (
   link: NormalizedFullLink,
   authoredRootSchema: JSONSchema | undefined,
   path: readonly string[],
+  authoredSlotFallback?: JSONSchema,
 ): NormalizedFullLink => {
-  if (authoredRootSchema === undefined || !isRecord(link.schema)) return link;
+  if (!isRecord(link.schema)) return link;
   if (ContextualFlowControl.getSchemaScopeCap(link.schema) !== undefined) {
     return link;
   }
-  const authoredSlotSchema = path.length > 0
+  const authoredSlotSchema = authoredRootSchema === undefined
+    ? authoredSlotFallback
+    : path.length > 0
     ? cfc.getSchemaAtPath(authoredRootSchema, [...path])
     : authoredRootSchema;
   const declaredCap = ContextualFlowControl.getSchemaScopeCap(
@@ -690,6 +693,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
             scopedLinkForPath(cfc, link, path, targetSchema ?? sourceSchema),
             authoredRootSchema,
             path,
+            alias.schema,
           ),
         );
       }

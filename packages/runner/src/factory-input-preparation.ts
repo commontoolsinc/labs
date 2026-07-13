@@ -15,7 +15,6 @@ import {
 import { resolveLink } from "./link-resolution.ts";
 import { isSigilLink } from "./link-utils.ts";
 import type { Runtime } from "./runtime.ts";
-import { resolveSchema } from "./schema.ts";
 import { RetryWhenReady } from "./scheduler/retry-when-ready.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { canBranchMatch } from "./traverse.ts";
@@ -125,6 +124,47 @@ function replaceChild(
 }
 
 /**
+ * Resolve only local refs that belong to the scheduled input's own schema.
+ * Factory discovery is auxiliary and must not ask the CFC resolver to interpret
+ * unrelated embedded schemas against the wrong outer `$defs` root.
+ */
+function resolveFactoryDiscoverySchema(
+  candidate: JSONSchema | undefined,
+  root: JSONSchema | undefined,
+): JSONSchema | undefined {
+  let current = candidate;
+  const seen = new Set<string>();
+  while (
+    isRecord(current) && typeof current.$ref === "string" &&
+    current.$ref.startsWith("#/") && isRecord(root)
+  ) {
+    if (seen.has(current.$ref)) return current;
+    seen.add(current.$ref);
+    let target: unknown = root;
+    for (const encoded of current.$ref.slice(2).split("/")) {
+      if (!isRecord(target)) return current;
+      const key = encoded.replaceAll("~1", "/").replaceAll("~0", "~");
+      target = target[key];
+    }
+    if (typeof target !== "boolean" && !isRecord(target)) return current;
+    const { $ref: _, ...siblings } = current;
+    if (target === false) return false;
+    if (target === true) {
+      current = Object.keys(siblings).length === 0 ? true : siblings;
+      continue;
+    }
+    current = {
+      ...target,
+      ...siblings,
+      ...(target.$defs === undefined && root.$defs !== undefined
+        ? { $defs: root.$defs }
+        : {}),
+    };
+  }
+  return current;
+}
+
+/**
  * Strengthen the shared conservative branch precheck only for discriminator
  * values that are already concrete. The general traverser deliberately ignores
  * const/enum because a link may resolve later; scheduled callback inputs have
@@ -182,18 +222,8 @@ export function materializeScheduledFactoryInputs(
   const fullSchema = schema;
   const resolvedSchemaFor = (
     candidate: JSONSchema | undefined,
-  ): JSONSchema | undefined => {
-    // Factory discovery is an auxiliary schema walk. Some existing schemas
-    // contain unresolved non-factory refs that ordinary CFC handling tolerates;
-    // do not turn those into action failures merely because a scheduled input
-    // might contain a factory elsewhere. Resolvable refs still expose a direct
-    // `asFactory` contract, while an unresolved ref remains opaque here.
-    const withRefs = isRecord(candidate) && typeof candidate.$ref === "string"
-      ? ContextualFlowControl.resolveSchemaRefs(candidate, fullSchema) ??
-        candidate
-      : candidate;
-    return resolveSchema(withRefs) ?? withRefs;
-  };
+  ): JSONSchema | undefined =>
+    resolveFactoryDiscoverySchema(candidate, fullSchema);
   const factorySchemaMemo = new WeakMap<object, boolean>();
   const schemaContainsFactory = (
     candidate: JSONSchema | undefined,
