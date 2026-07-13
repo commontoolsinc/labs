@@ -11,13 +11,17 @@ import {
 } from "@commonfabric/memory/v2";
 import {
   type Action,
+  type Cancel,
   type Cell,
-  CellDataUnavailableError,
   entityIdFrom,
   type ExperimentalOptions,
   Runtime,
   runtimePresets,
 } from "../index.ts";
+import {
+  CellDataUnavailableError,
+  type UnavailableCellAddress,
+} from "../cell-data-unavailable-error.ts";
 import { createExecutorActionTransactionRouter } from "./action-transaction-router.ts";
 import { HostStorageManager } from "../storage/v2-host-provider.ts";
 import {
@@ -65,6 +69,8 @@ let space: MemorySpace | null = null;
 let branch: BranchName = "";
 const demanded = new Map<string, Cell<unknown>>();
 const instantiatedDemand = new Set<string>();
+const pendingDemand = new Map<string, UnavailableCellAddress>();
+const demandSinks = new Map<string, Cancel>();
 const candidateActions = new Map<string, Action>();
 let claimsByAction = new WeakMap<object, ExecutionClaim>();
 let demandGeneration = 0;
@@ -88,6 +94,21 @@ const normalizePieceId = (pieceId: string): string =>
 
 const claimKey = (claim: ActionClaimKey): string => actionClaimMapKey(claim);
 
+const unavailableAddress = (cell: Cell<unknown>): UnavailableCellAddress => {
+  const link = cell.getAsNormalizedFullLink();
+  return {
+    space: link.space,
+    id: link.id,
+    scope: link.scope,
+    path: [...link.path],
+  };
+};
+
+const revisionKey = (address: {
+  id: string;
+  scope?: string;
+}): string => `${address.scope ?? "space"}\0${address.id}`;
+
 const postFatal = (error: unknown): void => {
   worker.postMessage({
     type: "fatal",
@@ -109,7 +130,10 @@ const activateDemand = async (
   if (runtime === null) throw new Error("executor Worker is not initialized");
   if (instantiatedDemand.has(pieceId)) return true;
   await cell.sync();
-  if (cell.getRaw() === undefined) return false;
+  if (cell.getRaw() === undefined) {
+    pendingDemand.set(pieceId, unavailableAddress(cell));
+    return false;
+  }
   try {
     const discovery = await prepareExecutorDemandPiece({
       runtime,
@@ -118,21 +142,33 @@ const activateDemand = async (
       target: cell,
       instantiate: () => runtime!.start(cell),
     });
+    // `pull()` below is a bounded settlement barrier, not durable demand. Keep
+    // one consumer live so an async host claim can rerun the same action after
+    // the initial pull's temporary consumer has been released.
+    demandSinks.set(pieceId, cell.sink(() => undefined));
     instantiatedDemand.add(pieceId);
+    pendingDemand.delete(pieceId);
     worker.postMessage({ type: "writer-discovery", discovery });
     return true;
   } catch (error) {
     // A demand may beat the commit that creates its piece, or a link in its
     // startup chain. Keep the lane live and retry that root when data arrives.
-    if (error instanceof CellDataUnavailableError) return false;
+    if (error instanceof CellDataUnavailableError) {
+      pendingDemand.set(pieceId, error.address);
+      return false;
+    }
     throw error;
   }
 };
 
 const pullDemand = async (
   schedulerPieceIds?: ReadonlySet<string>,
+  demandedPieceIds?: ReadonlySet<string>,
 ): Promise<void> => {
   for (const [pieceId, cell] of demanded) {
+    if (demandedPieceIds !== undefined && !demandedPieceIds.has(pieceId)) {
+      continue;
+    }
     if (
       schedulerPieceIds !== undefined &&
       !schedulerPieceIds.has(canonicalSchedulerPieceIdForDemandRoot(pieceId))
@@ -154,17 +190,25 @@ const replaceDemand = async (
   const next = [...new Set(pieces)].sort();
   const nextSet = new Set(next);
   if (resetClaims) {
-    for (const cell of demanded.values()) runtime.runner.stop(cell);
+    for (const [pieceId, cell] of demanded) {
+      demandSinks.get(pieceId)?.();
+      runtime.runner.stop(cell);
+    }
     demanded.clear();
     instantiatedDemand.clear();
+    pendingDemand.clear();
+    demandSinks.clear();
     candidateActions.clear();
     claimsByAction = new WeakMap<object, ExecutionClaim>();
   }
   for (const [pieceId, cell] of demanded) {
     if (nextSet.has(pieceId)) continue;
+    demandSinks.get(pieceId)?.();
+    demandSinks.delete(pieceId);
     runtime.runner.stop(cell);
     demanded.delete(pieceId);
     instantiatedDemand.delete(pieceId);
+    pendingDemand.delete(pieceId);
   }
   for (const pieceId of next) {
     if (demanded.has(pieceId)) continue;
@@ -173,7 +217,6 @@ const replaceDemand = async (
       entityIdFrom(normalizePieceId(pieceId)),
     );
     demanded.set(pieceId, cell);
-    await activateDemand(pieceId, cell);
   }
   await pullDemand();
 };
@@ -243,8 +286,19 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       selectiveWake?.push(
         notice.staleDemandedReaders.map((reader) => reader.pieceId),
       );
-      if (instantiatedDemand.size !== demanded.size) {
-        void enqueue(pullDemand).catch(postFatal);
+      if (pendingDemand.size > 0) {
+        const revised = new Set(notice.revisions.map(revisionKey));
+        const ready = new Set<string>();
+        for (const [pieceId, address] of pendingDemand) {
+          if (
+            address.space === notice.space && revised.has(revisionKey(address))
+          ) {
+            ready.add(pieceId);
+          }
+        }
+        if (ready.size > 0) {
+          void enqueue(() => pullDemand(undefined, ready)).catch(postFatal);
+        }
       }
     },
   });
@@ -331,6 +385,8 @@ const stop = async (): Promise<void> => {
   if (stopped) return;
   stopped = true;
   await settle();
+  for (const cancel of demandSinks.values()) cancel();
+  demandSinks.clear();
   if (runtime !== null) {
     await runtime.dispose();
   } else if (storage !== null) {
@@ -345,6 +401,7 @@ const stop = async (): Promise<void> => {
   selectiveWake = null;
   demanded.clear();
   instantiatedDemand.clear();
+  pendingDemand.clear();
   candidateActions.clear();
 };
 
