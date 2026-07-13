@@ -5,11 +5,14 @@ import {
   createFactoryShell,
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 
 import { setDurableArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
+import { withPatternParamsSchema } from "../src/builder/pattern.ts";
 import type {
   BuilderFunctionsAndConstants,
+  InternalPatternFactory,
   JSONSchema,
   Reactive,
 } from "../src/builder/types.ts";
@@ -247,6 +250,77 @@ describe("dynamic Factory@1 node", () => {
         result: testCase.result,
       });
     }
+  });
+
+  it("replaces a dynamic pattern when only bound FabricBytes params change", async () => {
+    const paramsSchema = {
+      type: "object",
+      properties: { bytes: true },
+      required: ["bytes"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+    const calculate = commonfabric.lift(({
+      value,
+      bytes,
+    }: {
+      value: number;
+      bytes: FabricBytes;
+    }) => ({ result: value + (bytes.slice()[0] ?? 0) }));
+    const base = commonfabric.pattern(
+      withPatternParamsSchema(
+        ((argument: any, params: { bytes: FabricBytes }) =>
+          calculate({ value: argument.value, bytes: params.bytes })) as any,
+        paramsSchema,
+      ) as any,
+      ARGUMENT_SCHEMA,
+      RESULT_SCHEMA,
+    );
+    setDurableArtifactEntryRef(base, REFS.pattern);
+    warmArtifacts.set(
+      refKey(REFS.pattern.identity, REFS.pattern.symbol),
+      base,
+    );
+    const bind = (byte: number) =>
+      (base as InternalPatternFactory<unknown, unknown>).curry({
+        bytes: new FabricBytes(new Uint8Array([byte])),
+      });
+    const selectedA = bind(1);
+    const selectedB = bind(9);
+    const selector = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-fabric-bytes-selector",
+      undefined,
+      tx,
+    );
+    selector.set(createFactoryShell(sealFactoryState(selectedA)));
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "dynamic-factory-fabric-bytes-result",
+      RESULT_SCHEMA,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outerPattern(PATTERN_CONTRACT),
+      { factory: selector, value: 1 },
+      resultCell,
+    );
+    await commitAndRenew();
+
+    expect(await within(result.pull(), "first FabricBytes selection"))
+      .toEqual({ result: 2 });
+    const outputIdentity = result.key("result").getAsNormalizedFullLink();
+
+    selector.withTx(tx).set(
+      createFactoryShell(sealFactoryState(selectedB)),
+    );
+    await commitAndRenew();
+
+    expect(await within(result.pull(), "replacement FabricBytes selection"))
+      .toEqual({ result: 10 });
+    expect(result.key("result").getAsNormalizedFullLink()).toEqual(
+      outputIdentity,
+    );
   });
 
   it("subscribes before the first selection so absence stays pending and later arrival instantiates", async () => {

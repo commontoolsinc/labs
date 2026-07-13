@@ -2,6 +2,10 @@ import {
   isAdmittedFabricFactory,
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import type { Cell } from "../cell.ts";
@@ -59,7 +63,10 @@ function sameSelection(
   left: CanonicalSelection,
   right: CanonicalSelection,
 ): boolean {
-  return deepEqual(left.canonical, right.canonical) &&
+  return valueEqual(
+    left.canonical as FabricValue,
+    right.canonical as FabricValue,
+  ) &&
     deepEqual(left.cfcLabel, right.cfcLabel);
 }
 

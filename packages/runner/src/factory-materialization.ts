@@ -8,6 +8,10 @@ import {
   tryFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
 import { factorySchemasEqual } from "@commonfabric/data-model/schema-utils";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 
@@ -350,7 +354,12 @@ function applyModifiers(
         throw new Error("Factory materialization resolved a non-pattern base");
       }
       if (Object.hasOwn(baseState, "params")) {
-        if (!deepEqual(baseState.params, state.params)) {
+        if (
+          !valueEqual(
+            baseState.params as FabricValue,
+            state.params as FabricValue,
+          )
+        ) {
           throw new Error(
             "Factory materialization resolved an already-bound base",
           );
@@ -397,7 +406,12 @@ function materializeResolved(
       }`,
     );
   }
-  if (!deepEqual(resultingState, carried)) {
+  if (
+    !valueEqual(
+      resultingState as unknown as FabricValue,
+      carried as unknown as FabricValue,
+    )
+  ) {
     throw new Error(
       `Factory materialization forged artifact metadata for ${
         refLabel(carried.ref)
@@ -419,7 +433,10 @@ function sameSelection(left: unknown, right: unknown): boolean {
     // Compare the sealed wire state. Live builder views also carry an opaque
     // root token, whose object identity is intentionally process-local and is
     // not part of a factory selection's canonical equality.
-    return deepEqual(sealFactoryState(left), sealFactoryState(right));
+    return valueEqual(
+      sealFactoryState(left) as unknown as FabricValue,
+      sealFactoryState(right) as unknown as FabricValue,
+    );
   } catch {
     return false;
   }

@@ -7,6 +7,7 @@ import {
   registerFabricFactory,
   sealFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import type {
   InternalPatternFactory,
@@ -56,6 +57,12 @@ const PARAMS_SCHEMA = {
   type: "object",
   properties: { offset: { type: "number" } },
   required: ["offset"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+const BYTES_PARAMS_SCHEMA = {
+  type: "object",
+  properties: { bytes: true },
+  required: ["bytes"],
   additionalProperties: false,
 } as const satisfies JSONSchema;
 
@@ -549,6 +556,49 @@ describe("runner-owned factory materialization", () => {
     });
     expect(() => materializeFactory(forged, { runtime, artifactSpace }))
       .toThrow("Factory materialization schema mismatch: pattern paramsSchema");
+  });
+
+  it("compares bound Fabric params by content during materialization and cold fencing", async () => {
+    const base = pattern(
+      withPatternParamsSchema(
+        ((argument: any, _params: any) => ({
+          result: argument.value,
+        })) as any,
+        BYTES_PARAMS_SCHEMA,
+      ) as any,
+      ARGUMENT_SCHEMA,
+      RESULT_SCHEMA,
+    );
+    setDurableArtifactEntryRef(base, REFS.pattern);
+    const selectedA = (base as InternalPatternFactory<unknown, unknown>).curry({
+      bytes: new FabricBytes(new Uint8Array([1])),
+    });
+    const selectedB = (base as InternalPatternFactory<unknown, unknown>).curry({
+      bytes: new FabricBytes(new Uint8Array([2])),
+    });
+    const shellA = createFactoryShell(sealFactoryState(selectedA));
+    const shellB = createFactoryShell(sealFactoryState(selectedB));
+
+    warm.set(key(REFS.pattern.identity, REFS.pattern.symbol), selectedB);
+    expect(() => materializeFactory(shellA, { runtime, artifactSpace }))
+      .toThrow("Factory materialization resolved an already-bound base");
+
+    warm.clear();
+    cold.set(key(REFS.pattern.identity, REFS.pattern.symbol), base);
+    const owner = {};
+    await expect(prepareFactory(shellA, {
+      runtime,
+      artifactSpace,
+      fence: {
+        owner,
+        generation: 1,
+        currentOwner: () => owner,
+        currentGeneration: () => 1,
+        currentSelection: () => shellB,
+      },
+    })).rejects.toThrow(
+      "Factory materialization was superseded while loading",
+    );
   });
 
   it("rejects malformed decoded params through the trusted curry validator", () => {

@@ -3,6 +3,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
   nativeFromFabricValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import {
   factoryStateOf,
@@ -3553,6 +3554,8 @@ export class Runner {
       if (!isAdmittedFabricFactory(selection)) return selection;
       return sealFactoryState(selection);
     };
+    const sameCanonicalSelection = (left: unknown, right: unknown): boolean =>
+      valueEqual(left as FabricValue, right as FabricValue);
 
     const readCurrent = (): {
       selection: unknown;
@@ -3679,7 +3682,10 @@ export class Runner {
         // and synchronously rematerialize that current value before execution.
         const current = readCurrent();
         if (
-          !deepEqual(canonicalSelection(current.selection), currentCanonical)
+          !sameCanonicalSelection(
+            canonicalSelection(current.selection),
+            currentCanonical,
+          )
         ) {
           return;
         }
@@ -3719,7 +3725,10 @@ export class Runner {
           resolvedExecutionSpaces.set(spaceName, resolvedSpace);
           const current = readCurrent();
           if (
-            !deepEqual(canonicalSelection(current.selection), currentCanonical)
+            !sameCanonicalSelection(
+              canonicalSelection(current.selection),
+              currentCanonical,
+            )
           ) {
             return;
           }
@@ -3780,7 +3789,7 @@ export class Runner {
       if (!active) return;
       const canonical = canonicalSelection(selection);
       if (
-        hasSelection && deepEqual(canonical, currentCanonical) &&
+        hasSelection && sameCanonicalSelection(canonical, currentCanonical) &&
         deepEqual(cfcLabel, currentSelectionLabel)
       ) {
         if (!fastPreemptedSelection) return;
@@ -3818,7 +3827,7 @@ export class Runner {
       if (!active || !selectionGenerationActive) return;
       const canonical = canonicalSelection(selection);
       if (
-        hasSelection && deepEqual(canonical, currentCanonical) &&
+        hasSelection && sameCanonicalSelection(canonical, currentCanonical) &&
         deepEqual(cfcLabel, currentSelectionLabel)
       ) {
         return;

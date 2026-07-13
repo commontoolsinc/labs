@@ -2,6 +2,11 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  createFactoryShell,
+  sealFactoryState,
+} from "@commonfabric/data-model/fabric-factory";
 
 import { createNodeFactory } from "../src/builder/module.ts";
 import { setDurableArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
@@ -47,6 +52,12 @@ const THRESHOLD_PARAMS_SCHEMA = {
   type: "object",
   properties: { threshold: { type: "number" } },
   required: ["threshold"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+const BYTES_PARAMS_SCHEMA = {
+  type: "object",
+  properties: { bytes: true },
+  required: ["bytes"],
   additionalProperties: false,
 } as const satisfies JSONSchema;
 const OUTER_ARGUMENT_SCHEMA = {
@@ -190,6 +201,33 @@ describe("bound PatternFactory list operations", () => {
     return curry(base, { factor });
   }
 
+  function byteBoundMapOps() {
+    const calculate = commonfabric.lift(({
+      element,
+      bytes,
+    }: {
+      element: number;
+      bytes: FabricBytes;
+    }) => element + (bytes.slice()[0] ?? 0));
+    const base = commonfabric.pattern(
+      withPatternParamsSchema(
+        ((argument: any, params: { bytes: FabricBytes }) =>
+          calculate({
+            element: argument.element,
+            bytes: params.bytes,
+          })) as any,
+        BYTES_PARAMS_SCHEMA,
+      ) as any,
+      LIST_ARGUMENT_SCHEMA,
+      NUMBER_RESULT_SCHEMA,
+    );
+    installArtifact(base, REFS.map);
+    return [
+      curry(base, { bytes: new FabricBytes(new Uint8Array([1])) }),
+      curry(base, { bytes: new FabricBytes(new Uint8Array([9])) }),
+    ] as const;
+  }
+
   function boundFilterOp() {
     const predicate = commonfabric.lift(
       (
@@ -306,6 +344,61 @@ describe("bound PatternFactory list operations", () => {
       result.key("mapped").key(0).resolveAsCell()
         .getAsNormalizedFullLink(),
     ).toMatchObject(rowIdentity);
+  });
+
+  it("replaces a bound list factory when only FabricBytes params change", async () => {
+    const [selectedA, selectedB] = byteBoundMapOps();
+    const selector = runtime.getCell<unknown>(
+      space,
+      "bound list FabricBytes selector",
+      undefined,
+      tx,
+    );
+    selector.set(createFactoryShell(sealFactoryState(selectedA)));
+    const mapNode = createNodeFactory({ type: "ref", implementation: "map" });
+    const outer = commonfabric.pattern(
+      (({ values, op }: any) => ({
+        mapped: mapNode({ list: values, op }),
+      })) as any,
+      {
+        type: "object",
+        properties: {
+          values: { type: "array", items: { type: "number" } },
+          op: {
+            asFactory: {
+              kind: "pattern",
+              argumentSchema: LIST_ARGUMENT_SCHEMA,
+              resultSchema: NUMBER_RESULT_SCHEMA,
+            },
+          },
+        },
+        required: ["values", "op"],
+        additionalProperties: false,
+      },
+    );
+    const resultCell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "bound list FabricBytes result",
+      outer.resultSchema,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outer,
+      { values: [1], op: selector },
+      resultCell,
+    );
+    await commitAndRenew();
+
+    expect(await within(result.key("mapped").pull(), "first bytes map"))
+      .toEqual([2]);
+    selector.withTx(tx).set(
+      createFactoryShell(sealFactoryState(selectedB)),
+    );
+    await commitAndRenew();
+
+    expect(await within(result.key("mapped").pull(), "replacement bytes map"))
+      .toEqual([10]);
   });
 
   it("rebinds a mapped element when an intermediate redirect retargets", async () => {
