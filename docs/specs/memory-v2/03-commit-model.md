@@ -17,6 +17,10 @@ operation targets an entity by `id`.
 
 ```typescript
 // Shown at module scope.
+type DocumentPath = readonly string[] & {
+  readonly __memoryV2DocumentPath: unique symbol;
+};
+
 interface SetOperation {
   op: "set";
   id: EntityId;
