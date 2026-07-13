@@ -160,16 +160,19 @@ propagate](#how-flags-propagate).
   connection. The planned end state is to graduate the protocol after the
   phased authority rollout, then remove the flag once every supported client
   obeys server-primary claims.
-- **Status on 2026-07-12.** Runtime, environment, browser-worker, background-
+- **Status on 2026-07-13.** Runtime, environment, browser-worker, background-
   worker, memory handshake, connection-owned client root demand, one shared
   fenced shadow Worker per active branch/space, durable legacy-background
   exclusion with a synchronously fenced host-local handoff, strict owner
   policy, and the ordered reconnectable
   claim/settlement feed are implemented. Exact claim routing, causal client
-  overlays, claimed-builtin passivity, failure drills, and the local Phase 2
-  product-derived/literal rollout gates are also implemented. The long-run
-  browser/CPU gate remains blocked on claim readiness; off remains
-  client-primary behavior. The narrower
+  overlays, claimed-builtin passivity, causal-actor gating, canonical
+  permanent-builtin failure, failure drills, bounded pool/control health
+  signals, and the local Phase 2 product-derived/literal rollout gates are also
+  implemented. The parked-worker claim-readiness failure is fixed with
+  deterministic cold-wake and replacement coverage; fresh counterbalanced
+  browser/CPU acceptance and the deployed-staging drill remain pending. Off
+  remains client-primary behavior. The narrower
   `serverPrimaryExecutionClaimRoutingV1` and
   `serverPrimaryExecutionBuiltinPassivityV1` capabilities now advertise with
   the main flag. Policy-enabled spaces reject peers missing either graduated

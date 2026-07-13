@@ -44,6 +44,10 @@ EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true \
 
 Expected status is `absent` or `disabled`.
 
+`cf execution status` reports only that policy value. Candidate-claim,
+unserved, and writer-discovery diagnostics remain host-local structured
+executor logs/callbacks; inspect those separately before opt-in.
+
 ## Enable one space
 
 ```sh
@@ -60,8 +64,9 @@ Verify:
 - one live pool lane and Worker serves all client demand references;
 - claims remain stable rather than repeatedly revoke/reclaim;
 - claimed pure actions produce zero client derived wire operations;
-- each claimed fetch/generate action produces one server broker request and no
-  client request;
+- each claimed fetch/generate action whose causal origin matches the sponsor
+  produces one server broker request and no client request; a mismatch produces
+  zero broker requests and one exact unserved settlement/revoke;
 - settlements clear or retain overlays at the documented basis/data barrier;
 - divergence and fenced/abrupt lifecycle counters do not grow continuously.
 
@@ -76,14 +81,21 @@ metric labels. The current bounded-cardinality sources are:
 
 | Source | Signals |
 | --- | --- |
-| `/api/health/stats.serverExecutionPool` | active lanes/workers/demands and state counts; demand snapshots; Worker starts/stops; abrupt stops; lease losses/replacements; sponsor rotations; crashes |
-| `/api/health/stats.serverExecutionControl` | inactive-policy attempts; claims issued/revoked; accepted action attempts; committed/no-op/failed/unserved settlements; lease-fence and action-firewall rejects |
-| `/api/health/stats.timingStats["execution.pool"]` | Worker start, demand update, and settle latency |
+| `/api/health/stats.serverExecutionPool` | active lanes/workers/demands and state counts; demand snapshots; Worker starts/stops; abrupt stops; lease losses/replacements; sponsor rotations; crashes; accepted-commit/index decisions; unrelated suppression; parked-wake attempts/starts; demand-empty hibernations |
+| `/api/health/stats.serverExecutionControl` | inactive-policy attempts; claims issued/reissued/revoked; accepted action attempts and exact claimed-action conflicts; committed/no-op/failed/unserved settlements; lease-fence and action-firewall rejects |
+| `/api/health/stats.timingStats["execution.pool"]` | Worker start, demand update, parked wake, hibernate, and settle latency |
 | Memory host APIs | `listExecutionDemands`, `currentExecutionLease`, and `listExecutionClaims` for point-in-time lane authority |
 | `execution.executor` logger | `execution-server-shadow-action-run`, `execution-server-authoritative-action-run` |
 | `storage.v2` logger | client-derived suppressed/upstream commits; overlay created/retained/dropped/divergence; `execution-overlay-held` timing |
 | `runtime.execution` logger | client/server async builtin starts by role |
 | Toolshed executor callbacks | claim candidates, unserved diagnostics, and writer discovery |
+
+The browser rollout fixture additionally consumes a bounded, piece-scoped
+routing snapshot from the runtime client. It rejects feed gaps, truncation,
+multiple action records, pending overlays/settlements, claim-incarnation
+mismatches, and any enabled phase whose exact action lacks one settlement per
+claimed overlay route. This is test diagnostics, not output from
+`cf execution status`.
 
 Feed latency has no server timestamp in v1. Measure invalidation-to-settlement
 at the host and settlement-held duration/retention on the client; do not call it
@@ -136,7 +148,7 @@ deno test -A packages/runner/test/executor-drain-barrier.test.ts
 EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true \
 EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
 CF_SERVER_EXECUTION_CPU_BENCH=1 \
-CF_SERVER_EXECUTION_CPU_EVENTS=20 \
+CF_SERVER_EXECUTION_CPU_EVENTS=500 \
 CF_CPUPROFILE_DIR=/tmp/server-execution-profiles \
 HEADLESS=1 \
 deno task integration patterns server-primary-rollout-profile
@@ -144,9 +156,12 @@ deno task integration patterns server-primary-rollout-profile
 
 The initial A/B/B/A sampling snapshot and its limitations are retained in the
 [historical Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-12.md),
-but it is not current CPU acceptance evidence. The reliable renderer-process
-gate remains blocked until a claimed long-run phase cannot suppress client
-writes without a corresponding server attempt and settlement. Phase 2 removes
-duplicate wire writes and external effects while deliberately leaving
-speculative browser compute in place. Complete-closure client-compute
-suppression remains the separately gated Phase 3 optimization.
+but it is not current CPU acceptance evidence. The parked-worker claim-
+readiness failure it exposed is fixed and covered by exact cold-wake,
+sponsor-preference, settle-watermark, and replacement tests. Fresh acceptance
+still requires the counterbalanced eight-phase renderer-process gate above,
+with exact per-action routing and settlement diagnostics; no newer historical
+acceptance report is recorded yet. Phase 2 removes duplicate wire writes and
+external effects while deliberately leaving speculative browser compute in
+place. Complete-closure client-compute suppression remains the separately
+gated Phase 3 optimization.

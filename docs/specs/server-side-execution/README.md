@@ -1,17 +1,19 @@
 # Server-Primary Execution
 
 Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
-and deterministic failure gates are locally validated, while its long-run
-browser/CPU gate is blocked on a claim-readiness failure and the deployed-
-staging enable/disable drill remains pending; Phases 3+ remain design. Author:
-design session
+and deterministic failure gates are locally validated. The previous parked-
+worker claim-readiness failure is fixed with deterministic cold-wake and
+replacement coverage; fresh counterbalanced browser/CPU acceptance and the
+deployed-staging enable/disable drill remain pending. Phases 3+ remain design.
+Author: design session
 2026-07-06; revised 2026-07-07 (doc-centric demand, SQLite-primary state,
 transient executor passes, reactive interpreter de-scoped); revised
 2026-07-11 after implementation review (scheduler-v2 as the base, user-
 sponsored shared workers, positive per-action authority, writer-index
 producer lookup, scope-safe fallback, causal settlement acknowledgements,
 and server egress parity); revised 2026-07-12 after Phase 2 implementation and
-local rollout validation.
+local rollout validation; revised 2026-07-13 after the parked-worker wake,
+causal-actor, permanent-builtin-failure, and bounded-observability follow-ups.
 Completed work-order status is
 recorded inline; unimplemented phases remain design requirements rather than
 descriptions of current behavior. Operator procedure lives in the
@@ -702,11 +704,15 @@ breakers follow after the move; v1 need only preserve current retry and
 deduplication behavior without making it worse.
 
 Identity-sensitive first-party calls must not silently use whichever sponsor
-currently owns the space. Their broker request carries the server-derived
-`onBehalfOf` from the authenticated request-producing commit. In v1 that actor
-must match the current lease sponsor; a mismatch or ambiguous origin makes the
-builtin unclaimable (or requires a fenced sponsor handoff). Per-action actor
-multiplexing waits for delegated execution contexts.
+currently owns the space. For every accepted source commit, the host compares
+its authenticated origin session with the exact current lease sponsor. Only
+the resulting match boolean enters Worker claim logic; the broker request
+carries the exact claim but no causal actor identity. A match permits execution
+under the lease sponsor. A mismatch or ambiguous origin reaches no broker
+egress and settles the exact claim canonically unserved with revoke. When a
+relevant commit wakes a parked lane, sponsor acquisition prefers that commit's
+origin session. Dynamic per-action actor multiplexing waits for delegated
+execution contexts.
 
 #### B.6 Scoped state: explicit first-phase boundary
 
@@ -1023,15 +1029,18 @@ user's ordinary session against the other space.
 
 ### 6.5 Lifecycle: spawn, catch-up, liveness, hibernate
 
-**Spawn triggers** — a space worker starts when any of:
+**Start and keep-live triggers:**
 
 1. **Demand:** a compatible authenticated client session publishes
-   `ExecutionDemand`, or an administrative warm-up supplies an eligible user
-   sponsor.
-2. **Wake-on-commit:** a commit lands whose written docs have stale
-   interested readers per the readers index (§3.2). This subsumes
-   webhook/ingest ingress — ingest is itself a commit.
-3. **Async continuation:** an existing claimed request remains in flight.
+   `ExecutionDemand`. The pool keeps one mapped lane while any reference
+   remains.
+2. **Indexed wake-on-commit:** while that mapped demand exists, an accepted
+   commit whose host-index result names stale demanded readers can retry a
+   parked or draining lane. A live Worker receives the same commit through its
+   provider instead of starting another generation. Unrelated, wrong-branch,
+   and already-settled commits do not wake the lane.
+3. **Async continuation:** existing claimed work keeps its current Worker from
+   completing a graceful drain; it is not a cold-start source.
 4. **Background-only demand (Phase 3):** lower-priority standing registration,
    using the background identity rather than a client sponsor. Until registry
    import, its controller acquires the durable exclusion before starting rather
@@ -1040,28 +1049,28 @@ user's ordinary session against the other space.
 
 **Spawn sequence** (ordered; the order is load-bearing):
 
-1. Pool capacity check; at cap, evict the idlest live worker (eviction =
-   ordinary hibernation, below).
-2. Choose a sponsor, acquire/fence the `ExecutionLease`, then create the
-   Worker with space DID, `onBehalfOf`, lease generation, provider
-   `MessageChannel`, and negotiated flags. No raw user key enters the Worker.
-3. The pool registers the engine's `onSpaceCommit(space)` callback and
-   starts BUFFERING batches for the worker BEFORE the worker settles
-   anything — no notification gap between the rehydration snapshot and
-   the live stream.
-4. The worker builds the runtime through the validated provider and rehydrates
+1. The first demand snapshot maps the branch/space lane and installs its
+   host-only accepted-commit subscription before lease acquisition.
+2. After the legacy-background exclusion check, acquire/fence the
+   `ExecutionLease`. A parked commit wake prefers that commit's authenticated
+   origin session; otherwise sponsor selection remains deterministic among
+   eligible demand sessions.
+3. Construct the host provider before the Worker realm. Its accepted-commit
+   subscription is registered before the Worker endpoint is transferred, so
+   `MessagePort` queues notices across initial point reads without a graph
+   watch or notification gap. No raw user key enters the Worker.
+4. The Worker builds the runtime through that validated provider and rehydrates
    context-qualified observations for the demanded piece set. Dirty state and
    confirmed input revisions determine the stale set; missing/invalid rows
    degrade to a full unclaimed pull (fail-open).
-5. The worker reports "live at seq S"; the pool releases buffered commits
-   from S. Eligible actions shadow-run before claims are published.
+5. A successful start makes the generation live. Graceful settle returns the
+   accepted sequence watermark used to ignore old wake notices; a later
+   indexed-relevant commit above that watermark can start one coalesced
+   replacement generation.
 
-Cold-start cost ≈ pattern load (compileCache by identity,
-single-flighted, plus a process-wide disk byte cache; pre-seed system
-patterns — the browser-wedge follow-up applies server-side directly) +
-observation rehydrate + the stale subset only. Parked→live is therefore
-far below a browser cold boot — which is what makes aggressive
-hibernation viable.
+Cold start consists of pattern load, context-qualified observation rehydrate,
+and the stale demanded subset. Parked-wake and hibernation latency are measured
+by the pool; no comparison with browser cold-boot latency is claimed yet.
 
 The limit case is the **transient executor pass**: because scheduler
 bookkeeping is SQLite-primary (§6.7), a worker need not outlive its work
@@ -1279,9 +1288,10 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   conflict rate, multi-client action volume, divergence, revocations, and
   fallback latency. Fallback is claim removal. The operator runbook,
   product-derived/literal multi-client fixtures, and deterministic local
-  enable/disable and failure drills are complete. The long-run browser gate
-  currently exposes a claim-readiness failure, so CPU acceptance and a
-  deployed-staging policy drill remain pending. The initial, superseded
+  enable/disable and failure drills are complete. The previous parked-worker
+  claim-readiness failure is fixed with deterministic cold-wake and replacement
+  coverage; fresh counterbalanced CPU acceptance and a deployed-staging policy
+  drill remain pending. The initial, superseded
   occupancy-proxy measurement is retained only as a historical snapshot in the
   [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md).
 - **Phase 3 — background demand + narrower feeds.** Fold existing background
@@ -1315,7 +1325,7 @@ means a design doc/decision is required before implementation.
 | G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | demand, reconnect snapshot, and ordered data/control barriers implemented; exact closure export remains later |
 | G8 | (retired — reactive interpreter de-scoped from this design, §3.4; its gates are tracked in its own specs) | — | retired |
 | G9 | Cross-space basis vectors, permissions, wake, and dual-space ownership | later expansion | explicitly client-authority in v1 |
-| G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | accepted-read basis, nominal sequence types, host-derived provenance, committed/no-op/failed run emission, and client data gate implemented; W1.3 emits unserved attempts |
+| G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | accepted-read basis, nominal sequence types, host-derived provenance, committed/no-op/failed run emission, and client data gate implemented; W1.3 and W1.4 emit canonical unserved attempts, including permanent builtin servability failures |
 | G11 | Server builtin egress parity, relative serving-origin resolution, redirect/DNS revalidation | claimed async | implemented for v1; durable quotas/ledger remain G12 |
 | G12 | Durable streaming, quotas, circuit breakers, and cross-engine effect ledger | async hardening/failover | later; v1 preserves current behavior |
 | G13 | Signed event envelope format (serialize trusted-event provenance; replay protection; verify path) — design now, build in Phase 5 | dual handler execution (C) | needs-spec; request-proof precedent exists |

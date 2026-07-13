@@ -4,10 +4,11 @@ Companion to [README.md](./README.md). Read the design first; this plan turns
 it into reviewable, red-green work orders.
 
 Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
-and deterministic failure gates are locally validated; its browser/CPU gate is
-blocked on a claim-readiness failure, and the deployed-staging enable/disable
-drill remains pending. Later background, feed, scoped, and handler work is
-outlined only.
+and deterministic failure gates are locally validated. The previous parked-
+worker claim-readiness failure is fixed with deterministic cold-wake and
+replacement coverage; fresh counterbalanced browser/CPU acceptance and the
+deployed-staging enable/disable drill remain pending. Later background, feed,
+scoped, and handler work is outlined only.
 
 Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
 its facade, commit-gated starts, cancellation semantics, bounded settle,
@@ -828,9 +829,11 @@ async ledger, rigorous idempotency, and delegated execution keys are later
 hardening. This WO must not make network reach or duplicate behavior worse than
 the client runtime.
 
-**Status:** implemented for the v1 brokered egress boundary. Cross-user
-handoff and crash behavior are covered by the W2.4 deterministic failure
-drills.
+**Status:** implemented for the v1 brokered egress boundary. The host derives
+causal sponsor matching without sending an actor identity through broker IPC;
+permanent actor/policy/servability failures settle the exact claim unserved
+with revoke, while transient failures retain it. Cross-user handoff and crash
+behavior are covered by deterministic Worker and W2.4 failure drills.
 
 **Steps:**
 
@@ -854,11 +857,13 @@ drills.
    and receives the full policy.
 6. Route generate-family calls through configured provider policy/credentials;
    never inherit arbitrary client secrets from the demand payload.
-7. For identity-sensitive first-party requests, derive the request actor from
-   the authenticated commit that produced the request and require it to match
-   the current lease sponsor. Never sign as an unrelated sticky sponsor. A
-   mismatch is unservable in v1 or triggers a fenced sponsor handoff; dynamic
-   per-action actors are later work.
+7. For identity-sensitive first-party requests, the host compares the
+   authenticated accepted-commit origin session with the exact current lease
+   sponsor. Only the resulting match boolean enters Worker claim logic; broker
+   IPC carries the exact claim but no causal actor identity. A parked wake
+   prefers the commit's origin session when acquiring its sponsor. A live
+   mismatch or ambiguous origin reaches no broker egress and settles the exact
+   claim unserved with revoke; dynamic per-action actors are later work.
 8. Claim a builtin before clients become passive. Transient failure remains a
    server-owned pending/retry according to existing builtin semantics;
    permanent policy/servability failure revokes and settles explicitly.
@@ -877,8 +882,9 @@ drills.
 - [x] Raw fetch remains unavailable in a pattern SES test.
 - [x] Supported fetch and generate actions execute once on the claimed server
       path in a multi-client fixture.
-- [x] A request produced by user B is never signed/executed as sticky sponsor A;
-      it stays unclaimed or performs a fenced handoff.
+- [x] A request caused by user B is never signed/executed as sticky sponsor A:
+      a parked wake prefers B as sponsor, while a live sponsor mismatch reaches
+      no broker egress and settles the exact claim unserved with revoke.
 - [x] Unsupported builtin/action stays client-primary without first causing an
       external request.
 - [x] Claim loss/crash behavior is no worse than today's client mutex tests.
@@ -890,11 +896,15 @@ drills.
 **Depends on:** W0.3, W1.3.
 **Unblocks:** efficient rollout.
 
-**Status:** implemented. Aggregate pool lifecycle metrics are exposed through
-`SharedExecutionPool.metrics()`. A real-Worker drain fixture accepts a source
-commit after the first settle, observes the old generation terminate before
-recomputing it, and proves the persisted dirty scheduler row is recovered by
-the replacement generation.
+**Status:** implemented. Each mapped demand lane observes the host accepted-
+commit index, coalesces relevant parked wakes above its settle watermark, and
+prefers the causal session for cold sponsor acquisition. Aggregate pool and
+control metrics are exposed through `SharedExecutionPool.metrics()` and
+`/api/health/stats`, with bounded counters for indexed decisions, unrelated
+suppression, parked wakes, hibernation, claims, conflicts, settlements, and
+fences. A real-Worker drain fixture accepts a source commit after the first
+settle, observes the old generation terminate before recomputing it, and proves
+the persisted dirty scheduler row is recovered by the replacement generation.
 
 **Steps:**
 
@@ -905,12 +915,16 @@ the replacement generation.
 3. When the last demand disappears and no async work remains, await
    runtime.settled(), record last-settled seq, release claims, release lease,
    close provider callbacks, and terminate.
-4. During drain, buffer commits. New demand or a relevant commit before final
-   release cancels drain or starts a later generation after fencing.
+4. Keep the mapped lane's accepted-commit subscription live during drain.
+   Coalesce indexed-relevant commits above its settle watermark; new demand or
+   a relevant commit before final release cancels drain or starts a later
+   generation after fencing.
 5. Demand itself wakes a cold space. A source commit wakes it only while a
    durable/active demand reference exists; background wake arrives in Phase 3.
-6. Emit counters for worker count, wakes, suppressed unrelated commits,
-   action runs, claim churn, and settle latency.
+6. Emit bounded counters for workers/demands, indexed decisions, wakes,
+   suppressed unrelated commits, hibernation, claim churn/conflicts, action
+   settlement, and fences, plus worker-start, demand-update, wake, hibernate,
+   and settle latency.
 
 **Success criteria:**
 
@@ -1071,12 +1085,14 @@ per-action sink authority decision and pre-claim in-flight handoff.
 
 **Depends on:** W1.5, W2.2, W2.3.
 
-**Status:** implementation and local validation are in progress. The owner CLI,
-runbook, bounded-cardinality health/latency signals, product-derived/literal
-multi-client fixtures, and deterministic authority/failure drills are present.
-The long-run browser gate currently exposes a claim-readiness failure (clients
-suppress while the live server lane produces no attempt or settlement), so CPU
-acceptance remains pending along with the deployed-staging enable/disable drill.
+**Status:** implementation is complete and local validation is in progress. The
+owner CLI, runbook, bounded-cardinality health/latency signals,
+product-derived/literal multi-client fixtures, and deterministic
+authority/failure drills are present. The previous parked-worker claim-
+readiness failure is fixed with exact cold-wake, sponsor-preference, settle-
+watermark, and replacement coverage. Fresh counterbalanced browser/CPU
+acceptance remains pending along with the deployed-staging enable/disable
+drill.
 
 **Deliverable:** perf fixtures, operational metrics, and an enable/disable
 runbook using serverPrimaryExecution plus optional executionPolicy.
