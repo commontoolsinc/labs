@@ -35,6 +35,28 @@ export type SessionState = {
   }>;
 };
 
+type ExecutionEventEntry = SessionState["executionEvents"][number];
+
+const DEFAULT_MAX_EXECUTION_EVENTS = 1024;
+
+const boundedExecutionEvents = (
+  entries: readonly ExecutionEventEntry[],
+  limit: number,
+): ExecutionEventEntry[] => {
+  const queue = entries.slice(-limit);
+  Object.defineProperty(queue, "push", {
+    configurable: true,
+    writable: true,
+    value: (...next: ExecutionEventEntry[]): number => {
+      Array.prototype.push.apply(queue, next);
+      const excess = queue.length - limit;
+      if (excess > 0) queue.splice(0, excess);
+      return queue.length;
+    },
+  });
+  return queue;
+};
+
 type OpenSessionState = {
   sessionId: string;
   sessionToken: SessionToken;
@@ -58,10 +80,21 @@ const nextSessionToken = (): SessionToken =>
 
 export class SessionRegistry {
   readonly #ttlMs: number;
+  readonly #maxExecutionEvents: number;
   #sessions = new Map<string, SessionState>();
 
-  constructor(options: { ttlMs?: number } = {}) {
+  constructor(
+    options: { ttlMs?: number; maxExecutionEvents?: number } = {},
+  ) {
     this.#ttlMs = options.ttlMs ?? 30_000;
+    this.#maxExecutionEvents = options.maxExecutionEvents ??
+      DEFAULT_MAX_EXECUTION_EVENTS;
+    if (
+      !Number.isSafeInteger(this.#maxExecutionEvents) ||
+      this.#maxExecutionEvents <= 0
+    ) {
+      throw new TypeError("maxExecutionEvents must be a positive integer");
+    }
   }
 
   #prune(now = Date.now()): void {
@@ -122,7 +155,14 @@ export class SessionRegistry {
         session.executionFeedSeq ?? 0,
       ),
     );
-    this.#sessions.set(key, {
+    let executionEvents = boundedExecutionEvents(
+      (existing?.executionEvents ?? []).filter((entry) =>
+        entry.feedSeq > executionFeedAckSeq
+      ),
+      this.#maxExecutionEvents,
+    );
+    const maxExecutionEvents = this.#maxExecutionEvents;
+    const next: SessionState = {
       id: sessionId,
       space,
       sessionToken,
@@ -145,10 +185,21 @@ export class SessionRegistry {
         capabilities.serverPrimaryExecutionBuiltinPassivityV1 === true,
       executionFeedSeq,
       executionFeedAckSeq,
-      executionEvents: (existing?.executionEvents ?? []).filter((entry) =>
-        entry.feedSeq > executionFeedAckSeq
-      ),
-    });
+      // Every reconnect carries a complete claim snapshot, so retaining the
+      // newest bounded suffix is sufficient for replay: a client older than
+      // the suffix is forced through that snapshot barrier. Keep the setter
+      // bounded because ack pruning replaces this array in server.ts.
+      get executionEvents() {
+        return executionEvents;
+      },
+      set executionEvents(entries) {
+        executionEvents = boundedExecutionEvents(
+          entries,
+          maxExecutionEvents,
+        );
+      },
+    };
+    this.#sessions.set(key, next);
     return {
       sessionId,
       sessionToken,

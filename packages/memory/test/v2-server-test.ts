@@ -301,6 +301,60 @@ Deno.test("memory v2 session registry scopes session ids by space", () => {
   assertExists(second.sessionToken);
 });
 
+Deno.test("memory v2 session registry bounds unacknowledged execution events", () => {
+  const space = "did:key:z6Mk-bounded-execution-events";
+  const sessions = new SessionRegistry({
+    maxExecutionEvents: 2,
+  });
+  const opened = sessions.open(
+    space,
+    { sessionId: "session:bounded-execution-events" },
+    0,
+  );
+  const session = sessions.get(space, opened.sessionId);
+  assertExists(session);
+
+  const append = (feedSeq: number) => {
+    session.executionFeedSeq = feedSeq;
+    session.executionEvents.push({
+      feedSeq,
+      event: {
+        type: "session.execution.claim.revoke",
+        branch: "",
+        claim: {
+          branch: "",
+          space,
+          contextKey: "space",
+          pieceId: "piece:bounded",
+          actionId: "action:bounded",
+          actionKind: "computation",
+          implementationFingerprint: "impl:bounded",
+          runtimeFingerprint: "runtime:bounded",
+        },
+        leaseGeneration: 1,
+        claimGeneration: feedSeq,
+      },
+    });
+  };
+
+  append(1);
+  append(2);
+  append(3);
+  assertEquals(
+    session.executionEvents.map((entry) => entry.feedSeq),
+    [2, 3],
+  );
+
+  // The server replaces this array when acknowledgements prune it. Retention
+  // must stay bounded after that assignment as well as after session resume.
+  session.executionEvents = session.executionEvents.filter(() => true);
+  append(4);
+  assertEquals(
+    session.executionEvents.map((entry) => entry.feedSeq),
+    [3, 4],
+  );
+});
+
 Deno.test("memory v2 server consumes a challenged session open", async () => {
   const audience = "did:key:z6Mk-memory-v2-server-audience";
   let now = 1_000_000;
