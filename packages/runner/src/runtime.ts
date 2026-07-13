@@ -50,6 +50,7 @@ import {
   type Cell,
   createCell,
   internCellLinkSchema,
+  isCell,
   schemaCellScope,
 } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
@@ -78,6 +79,7 @@ import {
 } from "@commonfabric/data-model/fabric-factory";
 import {
   FabricInstance,
+  FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import { codecOf } from "@commonfabric/data-model/codec-common";
@@ -113,7 +115,10 @@ import {
 } from "./cfc/policy.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
-import { snapshotQueryResult } from "./query-result-proxy.ts";
+import {
+  isCellResultForDereferencing,
+  snapshotQueryResult,
+} from "./query-result-proxy.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { PatternUpdater } from "./pattern-updater.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
@@ -194,6 +199,17 @@ const collectFactoryArtifactIdentities = (
     return;
   }
 
+  // Cells, query-result proxies, and link wrappers are symbolic aliases at a
+  // write boundary. Their implementation objects can retain the whole
+  // runtime graph, including unrelated keyless builder factories, but only
+  // the eventual link is stored. Do not mistake those internals for by-value
+  // factory payloads that need publication.
+  if (
+    isCell(value) || isCellResultForDereferencing(value) || isCellLink(value)
+  ) {
+    return;
+  }
+
   if (value instanceof FabricInstance) {
     collectFactoryArtifactIdentities(
       codecOf(value).encode(value as FabricValue),
@@ -202,6 +218,8 @@ const collectFactoryArtifactIdentities = (
     );
     return;
   }
+
+  if (value instanceof FabricSpecialObject) return;
 
   for (const nested of Object.values(value)) {
     collectFactoryArtifactIdentities(nested, identities, seen);
