@@ -855,7 +855,8 @@ export class RuntimeProcessor {
           path: [...link.path, ...request.cell.path],
         });
       } else {
-        // For meta cells that aren't link cells, return the raw data
+        // For meta cells that aren't link cells, encode the value through the
+        // factory-aware IPC codec so Factory@1 shells survive the worker hop.
         return encodeFactoryAwareIPCValue(
           rootCell.getMetaRaw(request.meta) as JSONValue | undefined,
         );
