@@ -164,12 +164,14 @@ propagate](#how-flags-propagate).
   worker, memory handshake, connection-owned client root demand, one shared
   fenced shadow Worker per active branch/space, durable legacy-background
   exclusion, strict owner policy, and the ordered reconnectable
-  claim/settlement feed are implemented; off remains client-primary behavior.
-  The narrower
+  claim/settlement feed are implemented. Exact claim routing, causal client
+  overlays, and claimed-builtin passivity are also implemented; off remains
+  client-primary behavior. The narrower
   `serverPrimaryExecutionClaimRoutingV1` and
-  `serverPrimaryExecutionBuiltinPassivityV1` capabilities are hardwired false
-  in ordinary builds until W2.1 and W2.3. Tests override them only to exercise
-  the otherwise-dark protocol.
+  `serverPrimaryExecutionBuiltinPassivityV1` capabilities now advertise with
+  the main flag. Policy-enabled spaces reject peers missing either graduated
+  promise. Rollout measurement remains pending; use the
+  [server-primary execution runbook](./server-primary-execution.md).
 - **Path to removal.** Complete the shadow, positive-claim, reconciliation,
   and builtin-passivity rollout; confirm every supported deployment and client
   speaks the protocol; make it unconditional; then delete the runtime flag,
@@ -583,11 +585,12 @@ the per-epic implementation notes).
 > experimental flags:
 >
 > - **`serverPrimaryExecutionClaimRoutingV1`** is an absent-false client promise
->   that computation claim routing is implemented. It stays false until W2.1;
->   the server publishes computation claims only to peers that advertise it.
+>   that computation claim routing is implemented. It advertises with
+>   `serverPrimaryExecution`; the server publishes computation claims only to
+>   peers that advertise it.
 > - **`serverPrimaryExecutionBuiltinPassivityV1`** is the corresponding
->   absent-false promise for claimed async builtins. It stays false until W2.3;
->   effect claims are not published to other peers.
+>   absent-false promise for claimed async builtins. It also advertises with
+>   the main flag; effect claims are not published to peers that omit it.
 > - **`syncSchemaTable`** is the older, index-keyed predecessor of
 >   `syncSchemaTableV2`. It is hardwired to `false` in `getMemoryProtocolFlags`
 >   and has no config function; it is effectively dead and can be deleted from

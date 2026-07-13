@@ -3,9 +3,10 @@
 Companion to [README.md](./README.md). Read the design first; this plan turns
 it into reviewable, red-green work orders.
 
-Status: executable plan for the scheduler prerequisite and client-driven
-server-primary execution. Later background, feed, scoped, and handler work is
-outlined only.
+Status: Phases 0–2 are implemented through W2.3 behind the default-off flag.
+W2.4 has an operator command, initial metrics, and a runbook; named rollout
+measurements and drills remain pending. Later background, feed, scoped, and
+handler work is outlined only.
 
 Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
 its facade, commit-gated starts, cancellation semantics, bounded settle,
@@ -30,7 +31,9 @@ where server and clients knowingly duplicate authoritative work.
 
 - **One work order (WO) = one PR.** W0.1 may instead be folded into #4288
   before it lands. Split any other WO only at the test boundaries below and
-  record the resulting dependency.
+  record the resulting dependency. The implementation branch intentionally
+  kept the WO/TDD boundaries as small commits in one stacked PR after the user
+  requested the complete authority split in one pass.
 - **Red-green is required.** Write the failing behavioral test first, confirm
   that it fails for the intended reason, then implement. The PR description
   includes the headline red and green commands/results.
@@ -506,9 +509,10 @@ provenance, hook, and notification path as a remote client.
 **Depends on:** #4288.
 **Unblocks:** client-driven pool and client authority split.
 
-**Status:** implemented. The base protocol and demand feed are production-dark
-behind `serverPrimaryExecution`; authoritative computation routing and builtin
-passivity remain independently absent-false until W2.1 and W2.3.
+**Status:** implemented. The base protocol, demand feed, authoritative
+computation routing, and builtin passivity are all gated together by
+`serverPrimaryExecution`; policy-enabled spaces reject peers missing either
+graduated sub-capability.
 
 **Read first:**
 
@@ -559,11 +563,12 @@ passivity remain independently absent-false until W2.1 and W2.3.
    ACL mutation is rollout-relaxed there, only implicit space/service owners
    qualify. Positive claims require the effective policy; disabling/deleting
    it revokes all live claims without suppressing shadow demand.
-8. Gate all messages behind serverPrimaryExecution, default off.
-   Negotiate absent-false `serverPrimaryExecutionClaimRoutingV1` and
-   `serverPrimaryExecutionBuiltinPassivityV1` sub-capabilities while the WOs
-   land; a server publishes only the claim classes the client says it can
-   honor. Ordinary builds keep them false until W2.1 and W2.3.
+8. Gate all messages behind serverPrimaryExecution, default off. Negotiate
+   absent-false `serverPrimaryExecutionClaimRoutingV1` and
+   `serverPrimaryExecutionBuiltinPassivityV1` sub-capabilities. Implemented
+   builds advertise both with the main flag; a server publishes only the claim
+   classes the client says it can honor and rejects a stale peer when policy
+   requires the graduated behavior.
 
 **Success criteria:**
 
@@ -805,6 +810,9 @@ async ledger, rigorous idempotency, and delegated execution keys are later
 hardening. This WO must not make network reach or duplicate behavior worse than
 the client runtime.
 
+**Status:** implemented for the v1 brokered egress boundary. Deployed-host,
+cross-user handoff, and crash drill evidence remains part of W2.4 rollout.
+
 **Steps:**
 
 1. Statically classify supported builtin actions and their known same-space
@@ -843,16 +851,16 @@ the client runtime.
 
 - [ ] Relative /api/... reaches the configured serving host in local and
       deployed fixtures.
-- [ ] A relative request may follow an absolute same-serving-origin redirect;
+- [x] A relative request may follow an absolute same-serving-origin redirect;
       an origin-changing redirect is reclassified and blocked when private.
-- [ ] Absolute localhost/private/metadata URLs are blocked, including DNS and
+- [x] Absolute localhost/private/metadata URLs are blocked, including DNS and
       redirect rebinding cases.
-- [ ] Raw fetch remains unavailable in a pattern SES test.
-- [ ] Supported fetch and generate actions execute once on the claimed server
+- [x] Raw fetch remains unavailable in a pattern SES test.
+- [x] Supported fetch and generate actions execute once on the claimed server
       path in a multi-client fixture.
 - [ ] A request produced by user B is never signed/executed as sticky sponsor A;
       it stays unclaimed or performs a fenced handoff.
-- [ ] Unsupported builtin/action stays client-primary without first causing an
+- [x] Unsupported builtin/action stays client-primary without first causing an
       external request.
 - [ ] Claim loss/crash behavior is no worse than today's client mutex tests.
 
@@ -862,6 +870,10 @@ the client runtime.
 
 **Depends on:** W0.3, W1.3.
 **Unblocks:** efficient rollout.
+
+**Status:** implemented. Aggregate pool lifecycle metrics are exposed through
+`SharedExecutionPool.metrics()`; the integrated settle/terminate drill remains
+rollout evidence.
 
 **Steps:**
 
@@ -881,11 +893,11 @@ the client runtime.
 
 **Success criteria:**
 
-- [ ] Relevant write wakes/re-runs only its demanded readers.
-- [ ] Unrelated write performs one indexed lookup and no Worker/action work.
+- [x] Relevant write wakes/re-runs only its demanded readers.
+- [x] Unrelated write performs one indexed lookup and no Worker/action work.
 - [ ] Commit in the settle→terminate window is not lost.
-- [ ] Rapid commits and demands coalesce without duplicate Worker generations.
-- [ ] Cold resume rehydrates only context-appropriate scheduler rows.
+- [x] Rapid commits and demands coalesce without duplicate Worker generations.
+- [x] Cold resume rehydrates only context-appropriate scheduler rows.
 
 ---
 
@@ -902,6 +914,9 @@ Phase exit:
 ### W2.1 — Claim-aware whole-action routing and speculative overlay
 
 **Depends on:** W0.6, W1.3.
+
+**Status:** implemented with exact synchronous client routing, replica-ordered
+claim snapshots, and local pending-layer overlays.
 
 **Steps:**
 
@@ -934,26 +949,29 @@ Phase exit:
 
 **Success criteria:**
 
-- [ ] Claimed pure action produces local UI output but zero derived client wire
+- [x] Claimed pure action produces local UI output but zero derived client wire
       operations.
-- [ ] Unclaimed action produces byte-identical commits to current behavior.
-- [ ] Mixed-scope claimed action commits whole from client; no partial
+- [x] Unclaimed action produces byte-identical commits to current behavior.
+- [x] Mixed-scope claimed action commits whole from client; no partial
       suppression.
 - [ ] Two actions in one piece can independently be server- and client-primary.
 - [ ] Identical action identities on two branches route independently; a claim,
       revoke, reconnect snapshot, or settlement on branch A never affects
       branch B.
-- [ ] Revocation/expiry causes deterministic dirty rerun and convergence.
+- [x] Revocation/expiry causes deterministic dirty rerun and convergence.
 - [ ] Disconnect while another client keeps the server claim live queues no
       derived wire commit; reconnect claim-snapshot barrier prevents a stale
       flush and then converges.
-- [ ] Flag off has byte-identical commit and control traffic.
+- [x] Flag off has byte-identical commit and control traffic.
 
 ---
 
 ### W2.2 — Settlement-driven overlay reconciliation
 
 **Depends on:** W0.4, W2.1.
+
+**Status:** implemented for the v1 direct-read scalar basis. The explicitly
+accepted non-transitive chained-action window still needs its named fixture.
 
 **Steps:**
 
@@ -984,26 +1002,29 @@ Phase exit:
 
 **Success criteria:**
 
-- [ ] Direct source read at S → local overlay → server settlement basis ≥ S →
+- [x] Direct source read at S → local overlay → server settlement basis ≥ S →
       overlay is physically removed only after acceptedCommitSeq is locally
       confirmed; the confirmed value remains.
-- [ ] Settlement basis < S retains overlay.
-- [ ] A no-op settlement clears the overlay.
-- [ ] Two rapid source commits require settlement through the later basis.
-- [ ] Old generation cannot clear new overlay.
-- [ ] Delayed/reordered commit data keeps the overlay until the matching data
+- [x] Settlement basis < S retains overlay.
+- [x] A no-op settlement clears the overlay.
+- [x] Two rapid source commits require settlement through the later basis.
+- [x] Old generation cannot clear new overlay.
+- [x] Delayed/reordered commit data keeps the overlay until the matching data
       frame is applied; settlement-first delivery cannot flash stale state.
 - [ ] A chained-action fixture demonstrates the accepted non-transitive basis
       window, records divergence, and deterministically converges after the
       intermediate and downstream actions re-settle.
-- [ ] Rigged divergence records one event and shows server value.
-- [ ] Rejected source basis discards and recomputes correctly.
+- [x] Rigged divergence records one event and shows server value.
+- [x] Rejected source basis discards and recomputes correctly.
 
 ---
 
 ### W2.3 — Client builtin passivity per claim
 
 **Depends on:** W1.4, W2.1, W2.2.
+
+**Status:** implemented for the supported fetch/generate builtins with a frozen
+per-action sink authority decision and pre-claim in-flight handoff.
 
 **Steps:**
 
@@ -1017,7 +1038,8 @@ Phase exit:
 
 **Success criteria:**
 
-- [ ] Three clients plus one server claim produce one external request.
+- [x] Three clients plus one server claim produce one external request per
+      supported builtin action.
 - [ ] Pending→result UI transition arrives through overlay/feed.
 - [ ] No claim behaves identically to current client builtin execution.
 - [ ] Permanent revoke releases client work without busy waiting.
@@ -1027,6 +1049,10 @@ Phase exit:
 ### W2.4 — Measurement and opt-in rollout
 
 **Depends on:** W1.5, W2.2, W2.3.
+
+**Status:** the owner CLI, runbook, pool lifecycle snapshot, and initial
+role/overlay counters are implemented. Product perf fixtures, CPU measurements,
+and staging/failover drill records remain pending and therefore unchecked.
 
 **Deliverable:** perf fixtures, operational metrics, and an enable/disable
 runbook using serverPrimaryExecution plus optional executionPolicy.
