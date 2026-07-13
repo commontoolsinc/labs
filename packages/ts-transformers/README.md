@@ -25,15 +25,16 @@ Example transformation (illustrative; trimmed for readability — use
 items.map((item) => item.price * discount);
 
 // Output: the reactive collection call becomes a hoisted, schema-annotated
-// mapWithPattern over a module-scope pattern, with closure captures threaded as
-// params and reactive reads lowered to `.key(...)`:
+// mapWithPattern over a module-scope pattern. Public list input stays callback
+// argument 0; the private closure environment is callback argument 1:
 const __cfPattern_1 = __cfHelpers.pattern(
-  (__cf_pattern_input) => {
+  __cfHelpers.withPatternParamsSchema((__cf_pattern_input, { discount }) => {
     const item = __cf_pattern_input.key("element");
-    const discount = __cf_pattern_input.key("params", "discount");
     return item.key("price") * discount;
-  },
-  /* element + params input schema */ {
+  }, /* private params schema */ {
+    /* discount */
+  }),
+  /* public element input schema */ {
     /* … */
   } as const satisfies __cfHelpers.JSONSchema,
   /* result schema */ {
@@ -41,10 +42,14 @@ const __cfPattern_1 = __cfHelpers.pattern(
   } as const satisfies __cfHelpers.JSONSchema,
 );
 // …used at the original site as:
-items.mapWithPattern(__cfPattern_1, { params: { discount } });
+items.mapWithPattern(__cfPattern_1.curry({ discount }));
 // …and registered for content-addressed identity at module end:
 __cfReg({ __cfPattern_1 });
 ```
+
+The one-argument `.curry(params)` call above is transformer-emitted and
+one-shot; it is not part of the public pattern API. `mapWithPattern` receives
+only the bound factory—there is no sibling params argument.
 
 Note the shape that current `main` actually emits: builder calls (`pattern` /
 `lift` / `handler`) are hoisted to module-scope consts and registered with a
@@ -149,14 +154,14 @@ onward), and pinned to the constant by `test/spec-sync.test.ts`.
 
 ### Representative Rewrites
 
-| Input Pattern         | Output                                    | Purpose                    |
-| --------------------- | ----------------------------------------- | -------------------------- |
-| `array.map(fn)`       | `array.mapWithPattern(pattern, captures)` | Explicit closure captures  |
-| `expr1 * expr2`       | `lift(schema, schema, fn)(inputs)`        | Data flow boundary         |
-| `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas  |
-| `assert(() => expr)`  | a `computed` whose body records operands  | Test assertion diagnostics |
-| `Cell<T>`             | `{ type: "...", asCell: ["cell"] }`       | Writable reactive ref      |
-| `Reactive<T>`         | structural schema without `asOpaque`      | Read-only reactive ref     |
+| Input Pattern         | Output                                   | Purpose                    |
+| --------------------- | ---------------------------------------- | -------------------------- |
+| `array.map(fn)`       | `array.mapWithPattern(boundFactory)`     | Explicit closure captures  |
+| `expr1 * expr2`       | `lift(schema, schema, fn)(inputs)`       | Data flow boundary         |
+| `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`  | Handler with dual schemas  |
+| `assert(() => expr)`  | a `computed` whose body records operands | Test assertion diagnostics |
+| `Cell<T>`             | `{ type: "...", asCell: ["cell"] }`      | Writable reactive ref      |
+| `Reactive<T>`         | structural schema without `asOpaque`     | Read-only reactive ref     |
 
 ### Assertion diagnostics
 

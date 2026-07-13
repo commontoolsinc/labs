@@ -121,7 +121,7 @@ pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
 
 The authoritative ordering lives in `CFC_TRANSFORMER_STAGE_SPECS` /
 `CFC_TRANSFORMER_STAGE_NAMES` in `src/cf-pipeline.ts`. Transformers always run
-in this order (23 stages):
+in this order (26 stages):
 
 1. `CastValidationTransformer`
 2. `EmptyArrayOfValidationTransformer`
@@ -132,36 +132,40 @@ in this order (23 stages):
 7. `CfcPolicyOfValidationTransformer`
 8. `JsxExpressionSiteRouterTransformer`
 9. `AssertDiagnosticsTransformer`
-10. `LiftLoweringTransformer`
-11. `ClosureTransformer`
-12. `PatternOwnedExpressionSiteLoweringTransformer`
-13. `HelperOwnedExpressionSiteLoweringTransformer`
-14. `WriteAuthorizedByValidationTransformer`
-15. `PatternCallbackLoweringTransformer`
-16. `SchemaInjectionTransformer`
-17. `BuilderCallHoistingTransformer`
-18. `SchemaGeneratorTransformer`
-19. `ReactiveVariableForTransformer`
-20. `ModuleScopeShadowingTransformer`
-21. `ModuleScopeCfDataTransformer`
-22. `PatternCoverageTransformer`
-23. `ModuleScopeFunctionHardeningTransformer`
+10. `FrameworkProvidedForwardingTransformer`
+11. `SymbolicFactoryCallTransformer`
+12. `LiftLoweringTransformer`
+13. `ClosureTransformer`
+14. `PatternOwnedExpressionSiteLoweringTransformer`
+15. `HelperOwnedExpressionSiteLoweringTransformer`
+16. `WriteAuthorizedByValidationTransformer`
+17. `PatternCallbackLoweringTransformer`
+18. `SchemaInjectionTransformer`
+19. `FrameworkProvidedTransformer`
+20. `BuilderCallHoistingTransformer`
+21. `SchemaGeneratorTransformer`
+22. `ReactiveVariableForTransformer`
+23. `ModuleScopeShadowingTransformer`
+24. `ModuleScopeCfDataTransformer`
+25. `PatternCoverageTransformer`
+26. `ModuleScopeFunctionHardeningTransformer`
+
 The order is behaviorally significant (invariant C-002). Two ordering facts
 worth calling out:
 
-- `BuilderCallHoistingTransformer` (stage 17) runs **after**
-  `SchemaInjectionTransformer` (stage 16) so each builder call it relocates to
+- `BuilderCallHoistingTransformer` (stage 20) runs **after**
+  `SchemaInjectionTransformer` (stage 18) so each builder call it relocates to
   module scope already carries its injected schemas — see CT-1644 and
   `packages/ts-transformers/docs/derive-to-lift-design.md`. This stage hoists
   `lift`, `handler`, and `pattern` builder calls. It absorbed and replaced the
   former separate `LiftHoistingTransformer` (which hoisted only `lift`); the
   even-older `BuilderCallbackHoistingTransformer` was deleted (#3864). Earlier
   spec revisions listing those two as distinct stages are obsolete.
-- The final five stages (18–22) run last so they operate on fully lowered and
-  schema-injected output; they are documented stage by stage in §13–§17.
 - `MergeablePushValidationTransformer` (stage 5; #4450/#4505) is
   validation-only and is documented with the other validators (§6.9).
-- `PatternCoverageTransformer` (stage 22) does no work unless pattern runtime
+- The final five stages (22–26) run last so they operate on fully lowered and
+  schema-injected output; they are documented stage by stage in §13–§17.
+- `PatternCoverageTransformer` (stage 25) does no work unless pattern runtime
   coverage is enabled. When enabled, it runs before
   `ModuleScopeFunctionHardeningTransformer` so coverage counters are added to
   authored bodies before hardening helpers are emitted (§16).
@@ -824,7 +828,7 @@ Transforms `action(...)` to handler factory invocation:
 ### 9.4 Array-method strategy
 
 Transforms eligible reactive collection operators to explicit `...WithPattern`
-forms with explicit capture params.
+forms with a first-class PatternFactory argument.
 
 Transform eligibility:
 
@@ -844,11 +848,17 @@ Transform eligibility:
 
 Result shape:
 
-- `receiver.<method>(fn[, thisArg])` ->
-  `receiver.<method>WithPattern(pattern(callbackSchema, resultSchema, newCallback), paramsObj[, thisArg])`
+- capture-free `receiver.<method>(fn)` ->
+  `receiver.<method>WithPattern(hoistedFactory)`
+- capturing `receiver.<method>(fn)` ->
+  `receiver.<method>WithPattern(hoistedFactory.curry(params))`
 - currently supported methods are `map`, `filter`, and `flatMap`
-- callback schema includes `{ element, index?, array? }` and adds `params` only
-  when captures exist
+- callback argument 0 and its public schema contain only
+  `{ element, index?, array? }`; captures are callback argument 1 and their
+  private schema is carried by `withPatternParamsSchema(callback, schema)`
+- `...WithPattern` receives exactly one argument. Captures never appear as a
+  sibling params object, and authored `thisArg` is rejected with
+  `array-method:this-arg-unsupported` instead of being forwarded
 - computed destructuring keys are stabilized with generated key constants and
   lift-applied wrappers where needed
 
@@ -1177,7 +1187,7 @@ Parameters Are a Capability Contract").
 
 ## 11. Builder Call Hoisting And `__cfReg` Registration
 
-`BuilderCallHoistingTransformer` (stage 17, **after** SchemaInjection) hoists
+`BuilderCallHoistingTransformer` (stage 20, **after** SchemaInjection) hoists
 every reactive *builder call* to module scope and emits a single trailing
 content-addressing registration. It is the sole module-scope hoisting phase; it
 absorbed the former `LiftHoistingTransformer` (lift-only) and replaced the
