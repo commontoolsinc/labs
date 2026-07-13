@@ -2086,8 +2086,13 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
-    await targetCell.pull();
-    return resolveCellPath(targetCell, path ?? []);
+    const targetPath = path ?? [];
+    let pullCell = targetCell;
+    for (const segment of targetPath) {
+      pullCell = pullCell.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    await pullCell.pull();
+    return resolveCellPath(targetCell, targetPath);
   }
 
   getCell(): Promise<Cell<unknown>> {

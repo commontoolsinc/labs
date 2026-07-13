@@ -1406,6 +1406,44 @@ describe("piece pull materialization", () => {
       .rejects.toThrow(`Unknown pattern: ${"Z".repeat(43)}#default`);
   });
 
+  it("pulls only the selected result path", async () => {
+    const piece = runtime.getCell(
+      manager.getSpace(),
+      "piece-controller-selected-result-path",
+    );
+    let rootPulls = 0;
+    let childPulls = 0;
+    const child = {
+      async pull() {
+        childPulls++;
+      },
+      get() {
+        return "selected";
+      },
+      key() {
+        return this;
+      },
+    };
+    const root = {
+      async pull() {
+        rootPulls++;
+      },
+      get() {
+        throw new Error("root contains a cold factory sibling");
+      },
+      key(segment: string | number) {
+        if (segment !== "lastMessage") throw new Error("unexpected path");
+        return child;
+      },
+    };
+    (manager as unknown as { getResult(): unknown }).getResult = () => root;
+    const controller = new PieceController(manager, piece);
+
+    expect(await controller.result.get(["lastMessage"])).toBe("selected");
+    expect(rootPulls).toBe(0);
+    expect(childPulls).toBe(1);
+  });
+
   it("pulls before reading result values", async () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),
