@@ -26,6 +26,34 @@ type ExecutorOtelOptions = {
 const enabled = (value: string | undefined): boolean =>
   value === "true" || value === "1";
 
+const report = (
+  warn: (...args: unknown[]) => void,
+  message: string,
+  error: unknown,
+): void => {
+  try {
+    warn(message, error);
+  } catch {
+    // Observability must never interrupt executor initialization or teardown.
+  }
+};
+
+const safeDetach = (
+  detach: () => void,
+  warn: (...args: unknown[]) => void,
+): (() => void) => {
+  let detached = false;
+  return () => {
+    if (detached) return;
+    detached = true;
+    try {
+      detach();
+    } catch (error) {
+      report(warn, "Executor runtime OTel bridge detach failed:", error);
+    }
+  };
+};
+
 const loadExecutorOtel = async (): Promise<ExecutorOtelDependencies> => {
   const [{ attachRuntimeTelemetryOtelBridge }, { metrics, trace }] =
     await Promise.all([
@@ -42,8 +70,9 @@ const loadExecutorOtel = async (): Promise<ExecutorOtelDependencies> => {
 /**
  * Attach the executor Worker's isolated Runtime to the host's OTel globals.
  * Deno Workers do not share the process-global Runtime telemetry bus, so each
- * worker needs its own bridge when native or toolshed OTel export is enabled.
- * Loading and attachment are fail-open so observability never blocks serving.
+ * worker needs its own bridge under Deno native OTel. A toolshed SDK provider
+ * registered in the main isolate is not visible here. Loading, attachment,
+ * and teardown are fail-open so observability never blocks serving.
  */
 export async function maybeAttachExecutorOtelBridge(
   runtime: ExecutorTelemetryRuntime,
@@ -53,7 +82,7 @@ export async function maybeAttachExecutorOtelBridge(
   const warn = options.warn ?? ((...args: unknown[]) => console.warn(...args));
   let detach: (() => void) | undefined;
   try {
-    if (!enabled(envGet("OTEL_DENO")) && !enabled(envGet("OTEL_ENABLED"))) {
+    if (!enabled(envGet("OTEL_DENO"))) {
       return undefined;
     }
 
@@ -69,22 +98,27 @@ export async function maybeAttachExecutorOtelBridge(
       metricAttributes["deployment.environment"] = deploymentEnvironment;
     }
 
-    detach = dependencies.attach(runtime.telemetry, {
-      tracer: dependencies.tracer,
-      meter: dependencies.meter,
-      attributes: {
-        "ct.runtime": "server-executor",
-      },
-      ...(options.spanAttributes !== undefined
-        ? { spanAttributes: options.spanAttributes }
-        : {}),
-      ...(Object.keys(metricAttributes).length > 0 ? { metricAttributes } : {}),
-    });
+    detach = safeDetach(
+      dependencies.attach(runtime.telemetry, {
+        tracer: dependencies.tracer,
+        meter: dependencies.meter,
+        attributes: {
+          "ct.runtime": "server-executor",
+        },
+        ...(options.spanAttributes !== undefined
+          ? { spanAttributes: options.spanAttributes }
+          : {}),
+        ...(Object.keys(metricAttributes).length > 0
+          ? { metricAttributes }
+          : {}),
+      }),
+      warn,
+    );
     runtime.scheduler.setEventPreflightTelemetryEnabled(true);
     return detach;
   } catch (error) {
     detach?.();
-    warn("Executor runtime OTel bridge attach failed:", error);
+    report(warn, "Executor runtime OTel bridge attach failed:", error);
     return undefined;
   }
 }
