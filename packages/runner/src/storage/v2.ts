@@ -28,6 +28,7 @@ import {
   type ClientCommit,
   type CommitPrecondition,
   type DocumentPath,
+  type EnsureOperation,
   type EntityDocument,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
@@ -82,6 +83,7 @@ import type {
   IStorageSubscription,
   IStorageTransaction,
   NativeStorageCommit,
+  NativeStorageCommitOperation,
   PullError,
   PushError,
   Result,
@@ -1652,6 +1654,31 @@ type NativeCommitOperation =
   }
   | { op: "delete"; id: URI; scope?: CellScope };
 
+type WireOnlyOperation = EnsureOperation;
+
+const isPromiseLike = <T>(value: T | Promise<T>): value is Promise<T> =>
+  typeof (value as { then?: unknown })?.then === "function";
+
+const normalizeWireOnlyOperations = (
+  operations: readonly NativeStorageCommitOperation[],
+): WireOnlyOperation[] =>
+  operations
+    .filter((operation) => operation.type === DOCUMENT_MIME)
+    .map((operation) => {
+      if (operation.op !== "ensure") {
+        throw new Error(
+          `native commit preparation may only produce ensure operations, got ${operation.op}`,
+        );
+      }
+      return {
+        op: "ensure" as const,
+        id: operation.id,
+        scope: operation.scope,
+        value: toExplicitDocument(operation.value),
+        ...(operation.ignore?.length ? { ignore: [...operation.ignore] } : {}),
+      };
+    });
+
 type SchedulerObservationBatchEntry = {
   commit: SchedulerObservationCommit;
   pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
@@ -1715,6 +1742,9 @@ class SpaceReplica implements ISpaceReplica {
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
   #queuedWatchRefreshScheduled = false;
   #watchRefreshFlushing = false;
+  // Wire sends are released in localSeq order. A cold artifact preparation may
+  // hold one turn without delaying later transactions' optimistic local apply.
+  #wireSendTail: Promise<void> = Promise.resolve();
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
@@ -2161,39 +2191,70 @@ class SpaceReplica implements ISpaceReplica {
       ? transaction.schedulerObservation
       : undefined;
     const preconditions = activeCommitPreconditions(transaction.preconditions);
-    const operations = withCommitTiming(
+    const { operations, wireOperations } = withCommitTiming(
       ["commitNative", "normalize"],
-      () =>
-        transaction.operations
-          .filter((operation) => operation.type === DOCUMENT_MIME)
-          .map((operation) =>
-            operation.op === "delete"
-              ? {
-                op: "delete" as const,
-                id: operation.id,
-                scope: operation.scope,
-              }
-              : operation.op === "patch"
-              ? {
-                op: "patch" as const,
-                id: operation.id,
-                scope: operation.scope,
-                patches: operation.patches,
-                value: toExplicitDocument(operation.value),
-              }
-              : {
-                op: "set" as const,
-                id: operation.id,
-                scope: operation.scope,
-                value: toExplicitDocument(operation.value),
-              }
-          ),
+      () => {
+        const operations: NativeCommitOperation[] = [];
+        const wireOperations: WireOnlyOperation[] = [];
+        for (const operation of transaction.operations) {
+          if (operation.type !== DOCUMENT_MIME) continue;
+          if (operation.op === "ensure") {
+            wireOperations.push(...normalizeWireOnlyOperations([operation]));
+          } else if (operation.op === "delete") {
+            operations.push({
+              op: "delete",
+              id: operation.id,
+              scope: operation.scope,
+            });
+          } else if (operation.op === "patch") {
+            operations.push({
+              op: "patch",
+              id: operation.id,
+              scope: operation.scope,
+              patches: operation.patches,
+              value: toExplicitDocument(operation.value),
+            });
+          } else {
+            operations.push({
+              op: "set",
+              id: operation.id,
+              scope: operation.scope,
+              value: toExplicitDocument(operation.value),
+            });
+          }
+        }
+        return { operations, wireOperations };
+      },
+    );
+
+    const deferredWireOperations: Promise<WireOnlyOperation[]>[] = [];
+    for (const preparation of transaction.preparations ?? []) {
+      try {
+        const prepared = preparation.prepare();
+        if (isPromiseLike(prepared)) {
+          deferredWireOperations.push(
+            Promise.resolve(prepared).then(normalizeWireOnlyOperations),
+          );
+        } else {
+          wireOperations.push(...normalizeWireOnlyOperations(prepared));
+        }
+      } catch (error) {
+        deferredWireOperations.push(Promise.reject(error));
+      }
+    }
+    const wirePreparation = deferredWireOperations.length === 0
+      ? undefined
+      : Promise.all(deferredWireOperations).then((groups) => groups.flat());
+    const confirmationCallbacks = (transaction.preparations ?? []).flatMap(
+      (preparation) =>
+        preparation.onConfirmed === undefined ? [] : [preparation.onConfirmed],
     );
 
     const sqliteOps = transaction.sqliteOps ?? [];
 
     if (
-      operations.length === 0 && schedulerObservation === undefined &&
+      operations.length === 0 && wireOperations.length === 0 &&
+      wirePreparation === undefined && schedulerObservation === undefined &&
       !preconditions?.length &&
       sqliteOps.length === 0
     ) {
@@ -2209,6 +2270,9 @@ class SpaceReplica implements ISpaceReplica {
           schedulerObservation,
           preconditions,
           sqliteOps,
+          wireOperations,
+          wirePreparation,
+          confirmationCallbacks,
         ),
     );
   }
@@ -2500,10 +2564,14 @@ class SpaceReplica implements ISpaceReplica {
     schedulerObservation?: unknown,
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
+    wireOperations: readonly WireOnlyOperation[] = [],
+    wirePreparation?: Promise<readonly WireOnlyOperation[]>,
+    confirmationCallbacks: readonly (() => void)[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const activePreconditions = activeCommitPreconditions(preconditions);
     if (
-      operations.length === 0 && sqliteOps.length === 0 &&
+      operations.length === 0 && wireOperations.length === 0 &&
+      wirePreparation === undefined && sqliteOps.length === 0 &&
       activePreconditions.length === 0
     ) {
       if (schedulerObservation === undefined) {
@@ -2515,6 +2583,16 @@ class SpaceReplica implements ISpaceReplica {
       );
     }
 
+    // Kick the existing observation prerequisite before allocating this
+    // semantic commit's localSeq / wire turn. It still settles asynchronously,
+    // so the containing value remains synchronously optimistic.
+    const schedulerFlushPrerequisite = operations.length > 0 &&
+        (this.#schedulerObservationBatch.length > 0 ||
+          this.#schedulerObservationFlushPromise)
+      ? (this.#schedulerObservationFlushPromise ??
+        this.startSchedulerObservationBatchFlush())
+      : undefined;
+
     const localSeq = this.#nextLocalSeq++;
     if (source !== undefined) {
       recordCommitLocalSeq(source, this.#space, localSeq);
@@ -2524,9 +2602,11 @@ class SpaceReplica implements ISpaceReplica {
       (): ClientCommit => ({
         localSeq,
         reads: this.buildReads(source, localSeq),
-        // Cell ops first, folded SQLite ops last (applied in array order by the
-        // engine; sqlite ops are not entity revisions and carry no id/scope).
+        // Artifact ensures first, containing cell ops next, folded SQLite ops
+        // last. The server applies the complete array atomically; ensures are
+        // wire-only and never enter the optimistic local replica.
         operations: [
+          ...wireOperations,
           ...operations.map((operation) => {
             switch (operation.op) {
               case "delete":
@@ -2606,6 +2686,9 @@ class SpaceReplica implements ISpaceReplica {
           operations,
           commit,
           source,
+          wirePreparation,
+          schedulerFlushPrerequisite,
+          confirmationCallbacks,
         ),
     );
     this.#commitPromises.add(promise);
@@ -2619,7 +2702,25 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     commit: ClientCommit,
     source?: IStorageTransaction,
+    wirePreparation?: Promise<readonly WireOnlyOperation[]>,
+    schedulerFlushPrerequisite?: Promise<
+      Result<Unit, StorageTransactionRejected>
+    >,
+    confirmationCallbacks: readonly (() => void)[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    const predecessor = this.#wireSendTail;
+    const turn = Promise.withResolvers<void>();
+    this.#wireSendTail = turn.promise;
+    let turnReleased = false;
+    const releaseTurn = () => {
+      if (turnReleased) return;
+      turnReleased = true;
+      turn.resolve();
+    };
+    const releaseTurnInOrder = async () => {
+      await predecessor;
+      releaseTurn();
+    };
     // Strategy 1: a commit whose read set lands on a still-catching-up id.
     const admissionMode = conflictAdmissionMode();
     if (admissionMode !== "off") {
@@ -2636,6 +2737,7 @@ class SpaceReplica implements ISpaceReplica {
             // Session/replica closing or reset: do not open/send a new session
             // while shutdown is in progress. Finalize the held rejection so the
             // optimistic write is dropped and close can drain promptly.
+            await releaseTurnInOrder();
             return await this.finalizeRejection(
               localSeq,
               operations,
@@ -2648,6 +2750,7 @@ class SpaceReplica implements ISpaceReplica {
               `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
               { localSeq, operations: operations.length },
             ]);
+            await releaseTurnInOrder();
             return await this.finalizeRejection(
               localSeq,
               operations,
@@ -2667,6 +2770,7 @@ class SpaceReplica implements ISpaceReplica {
             `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
             { localSeq, operations: operations.length },
           ]);
+          await releaseTurnInOrder();
           return await this.finalizeRejection(
             localSeq,
             operations,
@@ -2688,13 +2792,10 @@ class SpaceReplica implements ISpaceReplica {
       localSeq,
       spaceDid: this.#space,
     });
+    let submittedCommit = commit;
     try {
-      if (
-        operations.length > 0 &&
-        (this.#schedulerObservationBatch.length > 0 ||
-          this.#schedulerObservationFlushPromise)
-      ) {
-        const flushResult = await this.flushSchedulerObservationBatch();
+      if (schedulerFlushPrerequisite !== undefined) {
+        const flushResult = await schedulerFlushPrerequisite;
         const rejection = flushResult.error;
         if (rejection !== undefined) {
           const error = new Error(rejection.message);
@@ -2702,9 +2803,33 @@ class SpaceReplica implements ISpaceReplica {
           throw error;
         }
       }
+      if (wirePreparation !== undefined) {
+        const prepared = await wirePreparation;
+        if (prepared.length > 0) {
+          submittedCommit = {
+            ...commit,
+            operations: [...prepared, ...commit.operations],
+          };
+        }
+      }
       const { session } = await this.sessionHandle();
-      const applied = await session.transact(commit);
+      await predecessor;
+      const submitted = session.transact(submittedCommit);
+      // Release the next localSeq as soon as this commit has entered the
+      // session's causal chain; confirmation is intentionally not serialized.
+      releaseTurn();
+      const applied = await submitted;
       this.confirmPending(localSeq, operations, applied);
+      for (const callback of confirmationCallbacks) {
+        try {
+          callback();
+        } catch (error) {
+          logger.warn("commit-confirmation-callback-failed", () => [
+            `commit ${localSeq} was accepted but its local confirmation callback failed`,
+            String(error),
+          ]);
+        }
+      }
       telemetry?.submit({
         type: "storage.push.complete",
         id: pushOpId,
@@ -2712,7 +2837,8 @@ class SpaceReplica implements ISpaceReplica {
       });
       return { ok: {} };
     } catch (error) {
-      const rejection = toRejectedError(error, commit, this.#space);
+      await releaseTurnInOrder();
+      const rejection = toRejectedError(error, submittedCommit, this.#space);
       telemetry?.submit({
         type: "storage.push.error",
         id: pushOpId,
@@ -2720,7 +2846,7 @@ class SpaceReplica implements ISpaceReplica {
       });
       this.attachProviderReadyToRetry(rejection, localSeq);
       if (admissionMode !== "off" && rejection.name === "ConflictError") {
-        this.recordStaleFloor(commit, localSeq);
+        this.recordStaleFloor(submittedCommit, localSeq);
       }
       // Counted (even while silent) so multi-writer churn can be read back via
       // getLoggerCounts(): "commit-conflict" is a stale-seq-basis rejection that

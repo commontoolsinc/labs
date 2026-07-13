@@ -28,7 +28,12 @@ import type { CachedCompiledModule } from "./sandbox/module-record-compiler.ts";
 import type {
   CommitError,
   IExtendedStorageTransaction,
+  IStorageManager,
+  NativeStorageCommitOperation,
 } from "./storage/interface.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { V2StorageTransaction } from "./storage/v2-transaction.ts";
+import { toDocumentPath } from "@commonfabric/memory/v2";
 import {
   buildSourceDocs,
   type CompiledDoc,
@@ -327,6 +332,10 @@ export class PatternManager {
   // map is populated only after an awaited persistence succeeds or a complete
   // storage-backed source closure is verified in that exact space.
   private availableArtifactIdentities = new Map<MemorySpace, Set<string>>();
+  // Verified source closures retained for synchronous by-value publication.
+  // A cold source still enters through the async loader and populates this map
+  // before its containing commit reaches the wire.
+  private artifactPublicationModules = new Map<string, CacheableModule[]>();
 
   constructor(readonly runtime: Runtime) {}
 
@@ -368,6 +377,137 @@ export class PatternManager {
       if (space !== destination && identities.has(identity)) return space;
     }
     return undefined;
+  }
+
+  private artifactPublicationKey(
+    space: MemorySpace,
+    identity: string,
+  ): string {
+    return `${space}\0${identity}`;
+  }
+
+  private cacheArtifactPublicationModules(
+    space: MemorySpace,
+    identity: string,
+    modules: CacheableModule[],
+  ): void {
+    this.artifactPublicationModules.set(
+      this.artifactPublicationKey(space, identity),
+      modules,
+    );
+  }
+
+  /**
+   * Build the source-document ensures that make a by-value Factory@1 durable
+   * in `toSpace`. Warm verified source returns synchronously. A cold source
+   * returns a promise, which the v2 replica holds behind the already-visible
+   * speculative containing commit.
+   */
+  prepareArtifactPublication(
+    entryIdentity: string,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+  ):
+    | readonly NativeStorageCommitOperation[]
+    | Promise<readonly NativeStorageCommitOperation[]> {
+    if (this.isArtifactAvailableInSpace(entryIdentity, toSpace)) return [];
+
+    const cached = this.artifactPublicationModules.get(
+      this.artifactPublicationKey(fromSpace, entryIdentity),
+    );
+    if (cached !== undefined) {
+      return this.buildArtifactPublicationOperations(
+        cached,
+        entryIdentity,
+        toSpace,
+      );
+    }
+
+    return (async () => {
+      await Promise.allSettled([...this.pendingCacheWriteBacks]);
+      const closure = await this.loadVerifiedArtifactClosure(
+        fromSpace,
+        entryIdentity,
+        undefined,
+      );
+      if (closure === undefined) {
+        throw new Error(
+          `Artifact closure ${entryIdentity} is unavailable in source space ${fromSpace}`,
+        );
+      }
+      const modules = this.modulesFromVerifiedArtifactClosure(closure);
+      this.cacheArtifactPublicationModules(
+        fromSpace,
+        entryIdentity,
+        modules,
+      );
+      return this.buildArtifactPublicationOperations(
+        modules,
+        entryIdentity,
+        toSpace,
+      );
+    })();
+  }
+
+  /** Grant destination-space authority only after the atomic wire commit. */
+  noteArtifactPublicationConfirmed(
+    entryIdentity: string,
+    toSpace: MemorySpace,
+  ): void {
+    this.noteArtifactClosureAvailable(toSpace, [entryIdentity]);
+  }
+
+  private buildArtifactPublicationOperations(
+    modules: CacheableModule[],
+    entryIdentity: string,
+    toSpace: MemorySpace,
+  ): readonly NativeStorageCommitOperation[] {
+    // Build against an intentionally empty replica so every artifact document
+    // (including derived import-edge documents) is represented as an explicit
+    // ensure even when the real destination happens to be warm locally.
+    const emptyStorage = {
+      open: (space: MemorySpace) => ({
+        replica: {
+          did: () => space,
+          get: () => undefined,
+          getDocument: () => undefined,
+        },
+      }),
+    } as unknown as IStorageManager;
+    const base = new V2StorageTransaction(emptyStorage);
+    const draft = new ExtendedStorageTransaction(base);
+    try {
+      writeSourceDocs(this.runtime, toSpace, modules, entryIdentity, draft);
+      const native = base.getNativeCommit(toSpace);
+      if (native === undefined) {
+        throw new Error(
+          `Artifact closure ${entryIdentity} produced no publication documents`,
+        );
+      }
+      return native.operations.map((operation) => {
+        if (operation.op === "delete" || operation.op === "ensure") {
+          throw new Error(
+            `Artifact closure ${entryIdentity} produced unexpected ${operation.op} draft operation`,
+          );
+        }
+        return {
+          op: "ensure" as const,
+          id: operation.id,
+          type: operation.type,
+          scope: operation.scope,
+          value: operation.value,
+          // Product annotations and runtime-maintained CFC labels are not part
+          // of the module's content identity and must not create false
+          // mismatches against a pre-existing destination artifact.
+          ignore: [
+            toDocumentPath(["value", "annotations"]),
+            toDocumentPath(["cfc"]),
+          ],
+        };
+      });
+    } finally {
+      draft.abort("artifact publication draft complete");
+    }
   }
 
   /** Fail closed unless the exact containing space can cold-load `identity`. */
@@ -704,7 +844,13 @@ export class PatternManager {
       if (sourceDocs === undefined || !sourceDocs.has(entryIdentity)) {
         return undefined;
       }
-      if (runtimeVersion === undefined) return { sourceDocs };
+      const sourceClosure = { sourceDocs } satisfies VerifiedArtifactClosure;
+      this.cacheArtifactPublicationModules(
+        artifactSpace,
+        entryIdentity,
+        this.modulesFromVerifiedArtifactClosure(sourceClosure),
+      );
+      if (runtimeVersion === undefined) return sourceClosure;
 
       const compiledDocs = await loadCompiledClosure(
         this.runtime,
@@ -1982,6 +2128,7 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(persistence);
     try {
       await persistence;
+      this.cacheArtifactPublicationModules(space, entryIdentity, modules);
       this.noteArtifactClosureAvailable(
         space,
         modules.map((module) => module.identity),
@@ -2064,6 +2211,7 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(writeBack);
     try {
       await writeBack;
+      this.cacheArtifactPublicationModules(space, entryIdentity, modules);
       this.noteArtifactClosureAvailable(
         space,
         modules.map((module) => module.identity),

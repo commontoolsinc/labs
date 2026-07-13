@@ -527,11 +527,10 @@ callable; a decoded shell is never used as a lazy executable wrapper.
 `artifactSpace` is trusted boundary provenance, not a field accepted from
 `Factory@1`. It identifies where the content-addressed source closure is
 available. A pattern's serialized `spaceSelector` is applied later and chooses
-where the child executes. When a factory is copied rather than linked across
-spaces, the canonical writer/transport must make the artifact closure durable
-in the containing destination space before the Factory value commits, or
-reject the write. A linked value instead retains the link's source space. Wire
-data cannot grant or retain a different source-space authority.
+where the child executes. A linked value retains the link's source space. Wire
+data cannot grant or retain a different source-space authority. By-value copies
+use the publication protocol below so the destination can cold-resolve the
+factory without retaining or reading an origin-space link.
 
 Every executable runner exposure path uses this chokepoint: schema-driven
 `asFactory` reads, recursive Cell/query result materialization, dynamic module
@@ -543,6 +542,60 @@ the intentional shell-returning boundary.
 
 Materialization returns another function, not a wrapper object, and preserves
 the canonical codec state for reserialization.
+
+### Durable by-value publication
+
+A Factory value may become visible in a space only together with a durable,
+verified source closure for every factory ref recursively contained in that
+value. The containing write is determined after data-URI expansion, link
+normalization, and codec-state traversal; data URIs are transport syntax and do
+not create a separate durability exception.
+
+Publication preserves the memory system's optimistic local-commit contract:
+
+1. The authored write is staged normally. Committing it allocates its
+   `localSeq`, applies it to the local pending overlay, and emits the synchronous
+   speculative commit notification without waiting for artifact I/O.
+2. For every warm verified closure, the runner synchronously adds artifact
+   ensure operations to the wire commit. A warm publication introduces no
+   asynchronous readiness boundary.
+3. If a trusted source closure is not loaded, the same local commit remains
+   speculative while runner-owned preparation loads and verifies it. No
+   authored callback or setter becomes asynchronous.
+4. Wire submission for that logical session is held until preparation finishes.
+   Later transactions may build on the speculative overlay, but their wire
+   commits cannot pass the blocked lower `localSeq`.
+5. The server applies the artifact ensures and the containing value atomically.
+   A deterministic preparation or integrity failure rejects the containing
+   commit and follows ordinary speculative-revert and dependent-commit rules.
+
+An artifact ensure is resolved against durable server state, not expressed as
+a compare-and-swap read of the destination cache document:
+
+```text
+ensure(id, expected)
+  absent                      -> store expected
+  equal identity payload      -> success without a write
+  different identity payload  -> integrity failure
+```
+
+The equality payload is the canonical content-addressed artifact content;
+incidental annotations, cache metadata, and CFC representation are handled by
+their owning layers and cannot turn an identical artifact into a conflict.
+Concurrent publication of the same closure is therefore idempotent and does not
+reject either containing write. Different content under one content identity is
+not a harmless race and must fail closed.
+
+Artifact source provenance used during cold preparation is runner-private and
+transient. It is neither serialized into `Factory@1` nor retained by the
+destination. A context-free shell with neither destination availability nor
+trusted source provenance cannot authorize copying and fails closed.
+When context-free decode occurs as part of a Cell read, the runner may associate
+the returned shell with that containing Cell's space in a private weak table.
+This association is only a candidate source location: cold preparation must
+load and verify the complete closure there before the containing commit can
+reach the wire. The association itself grants no execution authority and is
+lost when the runtime or shell is collected.
 
 ### Inline document transport
 
@@ -564,10 +617,9 @@ UTF-8 legacy transports remain readable during migration.
 The new decoder therefore returns inert callable shells for `Factory@1`, just
 like direct context-free `valueFromJson()`. Inline transport never grants code
 loading or execution authority. Dual-format readers land before canonical
-writers switch. A canonical writer may emit a nested factory only after the
-complete artifact closure is durably available in the exact containing space;
-an awaited cross-space by-value copy replicates that closure before commit,
-while a synchronous writer without that proof rejects the value.
+writers switch. Once expanded into a containing document write, nested factories
+follow the same speculative-local, causally gated publication protocol as every
+other by-value write.
 
 ### Structured-clone runtime IPC
 
@@ -577,6 +629,13 @@ structured-cloneable, every such message projects the complete containing
 value through the canonical Fabric JSON codec before crossing the worker
 boundary. An out-of-band protocol discriminator selects that projection;
 authored strings are never sniffed or reinterpreted as Fabric envelopes.
+
+Factory detection and projection recurse through registered codec state, not
+only enumerable JavaScript properties. A factory nested in `UnknownValue`,
+`FabricError.cause` or extras, another codec-backed Fabric instance, an array,
+or an ordinary object therefore selects the canonical Fabric projection and
+round-trips the complete enclosing value. IPC preparation never flattens a
+codec-backed instance with `Object.entries()`.
 
 The receiving side performs context-free decode, so every factory leaf is an
 inert callable shell. Worker IPC does not grant materialization or code-loading
@@ -607,8 +666,16 @@ does not make them opaque to the graph builder.
 
 All Fabric-aware walks use the factory state accessor or a shared codec-state
 visitor. Builder traversal, alias conversion, CFC inspection, deep freeze,
-clone, equality, hashing, and serialization must not each invent a different
-view of factory state.
+clone, equality, hashing, serialization, IPC detection, and destination-artifact
+publication must not each invent a different view of factory state. Registered
+codec-backed Fabric instances recurse through their encoded state. Actual Cells
+and links remain atomic references whose own source-space provenance is
+preserved.
+
+Every canonical by-value write route uses this traversal, including direct Cell
+and stream writes, normal result/output binding, writable query-result proxies,
+runtime-client, CLI, and FUSE adapters. A route may not bypass publication merely
+because it reaches storage through a binding or proxy rather than `Cell.set()`.
 
 When a parent pattern is built, traversal recursively maps `params` and
 `spaceSelector`. Captured cells become normal aliases, captured factory state
@@ -792,7 +859,11 @@ Compilation or runtime fails clearly for:
 - an unresolved or kind-mismatched factory ref; and
 - an untransformed attempt to invoke a symbolic factory proxy.
 
-Generated names and capture-property order are deterministic.
+Generated names and capture-property order are deterministic. Canonical metadata
+orders strings with the repository's UTF-8 byte comparator, never
+locale-sensitive collation. Transformer emission, builder normalization, and
+cold bundle verification use the same comparator, including for non-ASCII JSON
+paths.
 
 ## Factory Schemas and Symbolic Invocation
 
@@ -823,6 +894,13 @@ eager pattern-building root it describes a symbolic binding. In a scheduled
 ordinary callable. Schema inspection, dependency tracking, and CFC traversal
 may inspect or subscribe to the `Factory@1` atom without loading code; authored
 runtime callback delivery may not expose the value until it is executable.
+
+Callback ownership and exposure are semantic rather than syntax-local. Inline
+callbacks, referenced arrow functions, referenced function expressions, and
+module-scoped function declarations receive the same schema injection,
+FrameworkProvided validation, and scheduled materialized-factory exposure.
+Moving a callback into a stable declaration must neither turn a scheduled
+factory argument into a symbolic proxy nor drop a pattern's public schemas.
 
 Version 1 requires the stored factory's canonical public schemas to equal the
 call site's generated schemas after reference resolution and normalization.
@@ -1002,11 +1080,14 @@ event is delayed/requeued with the same durable event intent: identity, origin
 lineage, commit/final callbacks, retry metadata, and deadline all remain
 attached. Readiness waiting is distinct from an authored handler attempt and
 does not consume the event's commit-retry budget, call its final callback, or
-mint a receipt. Transient artifact unavailability follows a dedicated bounded
+mint a receipt. Transient artifact unavailability follows one shared bounded
 readiness retry/backoff policy regardless of the authored event's `retries`
-setting; deterministic missing/forged/wrong-kind/schema failure is terminal
-and fail-closed. The enclosing handler stream subscription remains active so it
-can receive the event, but no handler body, normal success receipt/result graph,
+setting. The same policy applies to direct dynamic nodes and every list-factory
+coordinator; a list builtin may not terminate on the first transient
+`prepareFactory()` failure. Deterministic missing/forged/wrong-kind/schema
+failure is terminal and fail-closed. The enclosing handler stream subscription
+remains active so it can receive the event, but no handler body, normal success
+receipt/result graph,
 or event-created child/action subscription is created before readiness. Owner
 teardown cancels preparation so a late load cannot resurrect either a lift
 attempt or handler event.
@@ -1044,9 +1125,11 @@ without its root artifact; synchronous `run()` and transaction-bound setup do
 not enter this path. The other cold paths delay only the consuming
 node/attempt/event and always reread current state after loading. Linked values
 load from the resolved link's source space. A by-value Factory loads from its
-containing space, whose writer must have durably replicated the content-
-addressed artifact closure before committing or enqueueing that value. This
-applies equally to stored Cells, handler event payloads, CLI, and FUSE writes.
+containing space; the publication protocol guarantees that the server never
+confirms the containing value without its content-addressed source closure,
+while preserving immediate speculative local visibility. This applies equally
+to stored Cells, handler event payloads, result bindings, query-result writes,
+runtime-client, CLI, and FUSE writes.
 The bare `Factory@1` wire state remains only `{ identity, symbol }` and never
 names or grants an artifact source space.
 
@@ -1109,10 +1192,19 @@ The compiler records trusted framework-provided paths for each base factory.
 When a wrapper calls such a factory, it synthesizes those fields into the
 wrapper's argument schema and callback binding, then forwards their aliases to
 the inner factory node. The fields are system-facing inputs, not closure params:
-the tool adapter strips them from the model-facing schema, injects them from
-the wrapper tool instance's identity, and the synthetic forwarding path carries
-that exact value to the ultimate call. Wrapper chains repeat the same
-transitive forwarding.
+every invocation adapter strips them from its authored/model-facing schema,
+injects them from the stable callable or tool instance identity, and overwrites
+any authored value before the synthetic forwarding path carries the trusted
+value to the ultimate call. This includes LLM, CLI, and FUSE entry points.
+Wrapper chains repeat the same transitive forwarding.
+
+CLI and FUSE materialize the trusted base factory before publishing help or
+parsing arguments, because `FrameworkProvided` paths deliberately do not live
+in `Factory@1` wire state. They omit those paths from help/flag schemas. Their
+stable identity is derived from the containing callable call-site Cell,
+including its path, not from the linked source/artifact Cell. Raw JSON may
+contain the same property names syntactically, but adapters overwrite marked
+paths; if the call-site identity cannot be derived, invocation fails closed.
 
 Authored code may neither supply a literal for such a field nor capture a
 chosen value and forward it. If a required system value or stable tool identity
@@ -1330,7 +1422,15 @@ Each stage is independently testable and revertible.
 - Resume all factory kinds cold by content-addressed identity.
 - Resolve a cross-space linked factory from its artifact source while applying
   `spaceSelector` only as the child execution target; verify by-value transport
-  replicates the artifact closure without adding source authority to the wire.
+  publishes the artifact closure without adding source authority to the wire.
+- Preserve synchronous speculative visibility for warm and cold by-value
+  publication; hold later wire commits behind a cold lower `localSeq` while
+  allowing them to read its pending overlay.
+- Publish concurrent identical closures idempotently; reject different content
+  under the same artifact identity as an integrity failure.
+- Exercise factory publication through arrays, codec-backed Fabric instances,
+  ordinary output bindings, writable query-result proxies, runtime-client, CLI,
+  and FUSE.
 - Preserve CFC labels on the selection read and fail closed on forged refs or
   metadata.
 - Pin Stage 0's warm synchronous `run()` and cold asynchronous `setup()` split.
@@ -1339,7 +1439,8 @@ Each stage is independently testable and revertible.
 
 - Use an inline pattern that captures entries as an LLM tool.
 - Wrap a tool with a framework-provided `sandboxId`; verify synthetic forwarding
-  from the wrapper tool identity and reject authored/captured values.
+  from the wrapper tool identity and reject or overwrite authored/captured values
+  through LLM, CLI, and FUSE invocation.
 - Discover and invoke the same tool through runtime, CLI, and FUSE paths.
 - Reject the removed legacy tool and sibling-list shapes.
 - Verify no source caller or stored writer emits `extraParams`.

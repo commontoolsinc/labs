@@ -1314,7 +1314,7 @@ export class CellImpl<T extends FabricValue>
 
       const event = convertCellsToLinks(newValue) as AnyCellWrapping<T>;
       propagateRendererTrustedEvent(newValue, event);
-      assertFactoryArtifactsAvailableForWrite(
+      assertFactoryArtifactsPublishableForWrite(
         this.runtime,
         event,
         resolvedToValueLink.space,
@@ -1356,7 +1356,7 @@ export class CellImpl<T extends FabricValue>
         this.link,
         "writeRedirect",
       );
-      assertFactoryArtifactsAvailableForWrite(
+      assertFactoryArtifactsPublishableForWrite(
         this.runtime,
         transformedValue,
         writeLink.space,
@@ -1550,7 +1550,7 @@ export class CellImpl<T extends FabricValue>
     for (let i = 0; i < value.length; i++) {
       combined[array.length + i] = value[i];
     }
-    assertFactoryArtifactsAvailableForWrite(
+    assertFactoryArtifactsPublishableForWrite(
       this.runtime,
       value,
       resolvedLink.space,
@@ -1642,7 +1642,7 @@ export class CellImpl<T extends FabricValue>
     if (toAdd.length === 0) {
       return;
     }
-    assertFactoryArtifactsAvailableForWrite(
+    assertFactoryArtifactsPublishableForWrite(
       this.runtime,
       toAdd,
       resolvedLink.space,
@@ -2207,7 +2207,9 @@ export class CellImpl<T extends FabricValue>
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return fabric-layer values, not native ("wild
     // west") values.
-    return cloneIfNecessary(value, { frozen });
+    const result = cloneIfNecessary(value, { frozen });
+    this.runtime.noteFactoryArtifactSource(result, this.link.space);
+    return result;
   }
 
   setRaw(value: (NoInfer<T> & FabricValue) | undefined): void {
@@ -2222,7 +2224,7 @@ export class CellImpl<T extends FabricValue>
     if (!this.synced) this.sync();
 
     const inlined = findAndInlineDataUriLinks(value);
-    assertFactoryArtifactsAvailableForWrite(
+    assertFactoryArtifactsPublishableForWrite(
       this.runtime,
       inlined,
       this.link.space,
@@ -3428,16 +3430,16 @@ export function prepareFactoryStatesForWrite(
 }
 
 /**
- * Fail closed before a by-value Factory@1 write can outlive the artifact
- * closure needed to execute it from the containing space.
+ * Fail closed before a by-value Factory@1 write unless the artifact is already
+ * available in the destination or the runner has trusted source provenance for
+ * atomic publication at commit time.
  *
  * Links retain their own source-space provenance and are intentionally atomic
  * here. Callable factory values, including factories nested in factory state,
- * must already have a complete verified closure in the exact destination
- * space because Cell and stream writes are synchronous and cannot replicate it
- * before enqueueing or committing.
+ * keep their synchronous authored API: warm source is prepared synchronously;
+ * cold source delays only the containing commit's ordered wire submission.
  */
-function assertFactoryArtifactsAvailableForWrite(
+function assertFactoryArtifactsPublishableForWrite(
   runtime: Runtime,
   value: unknown,
   destinationSpace: MemorySpace,
@@ -3457,12 +3459,12 @@ function assertFactoryArtifactsAvailableForWrite(
         `Factory has no durable artifact ref for space ${destinationSpace}`,
       );
     }
-    runtime.patternManager.assertArtifactAvailableInSpace(
-      state.ref.identity,
+    runtime.assertFactoryArtifactsPublishableForWrite(
+      value,
       destinationSpace,
     );
     mapFactoryStateValues(state, (nested) => {
-      assertFactoryArtifactsAvailableForWrite(
+      assertFactoryArtifactsPublishableForWrite(
         runtime,
         nested,
         destinationSpace,
@@ -3474,15 +3476,26 @@ function assertFactoryArtifactsAvailableForWrite(
   }
 
   if (
-    value instanceof FabricSpecialObject || isCell(value) ||
-    isCellResultForDereferencing(value) || isCellLink(value)
+    isCell(value) || isCellResultForDereferencing(value) || isCellLink(value)
   ) {
     return;
   }
 
+  if (value instanceof FabricInstance) {
+    assertFactoryArtifactsPublishableForWrite(
+      runtime,
+      codecOf(value).encode(value),
+      destinationSpace,
+      seen,
+    );
+    return;
+  }
+
+  if (value instanceof FabricSpecialObject) return;
+
   if (Array.isArray(value)) {
     for (const nested of value) {
-      assertFactoryArtifactsAvailableForWrite(
+      assertFactoryArtifactsPublishableForWrite(
         runtime,
         nested,
         destinationSpace,
@@ -3494,7 +3507,7 @@ function assertFactoryArtifactsAvailableForWrite(
 
   if (isRecord(value)) {
     for (const nested of Object.values(value)) {
-      assertFactoryArtifactsAvailableForWrite(
+      assertFactoryArtifactsPublishableForWrite(
         runtime,
         nested,
         destinationSpace,

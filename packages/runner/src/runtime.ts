@@ -71,7 +71,16 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
-import { factoryStateOf } from "@commonfabric/data-model/fabric-factory";
+import {
+  factoryStateOf,
+  isAdmittedFabricFactory,
+  mapFactoryStateValues,
+} from "@commonfabric/data-model/fabric-factory";
+import {
+  FabricInstance,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import { codecOf } from "@commonfabric/data-model/codec-common";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
@@ -154,6 +163,49 @@ const isFullNormalizedLinkShape = (
     typeof link.space === "string" &&
     Array.isArray(link.path) &&
     (link.scope === undefined || isCellScope(link.scope));
+};
+
+const collectFactoryArtifactIdentities = (
+  value: unknown,
+  identities: Map<string, object[]>,
+  seen: Set<object> = new Set(),
+): void => {
+  if (value === null || value === undefined) return;
+  if (typeof value !== "object" && typeof value !== "function") return;
+  const object = value as object;
+  if (seen.has(object)) return;
+  seen.add(object);
+
+  if (isAdmittedFabricFactory(value)) {
+    const state = factoryStateOf(value);
+    if (state.ref === undefined) {
+      throw new Error("Factory has no durable artifact ref");
+    }
+    const factories = identities.get(state.ref.identity);
+    if (factories === undefined) {
+      identities.set(state.ref.identity, [object]);
+    } else {
+      factories.push(object);
+    }
+    mapFactoryStateValues(state, (nested) => {
+      collectFactoryArtifactIdentities(nested, identities, seen);
+      return nested;
+    });
+    return;
+  }
+
+  if (value instanceof FabricInstance) {
+    collectFactoryArtifactIdentities(
+      codecOf(value).encode(value as FabricValue),
+      identities,
+      seen,
+    );
+    return;
+  }
+
+  for (const nested of Object.values(value)) {
+    collectFactoryArtifactIdentities(nested, identities, seen);
+  }
 };
 
 // Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
@@ -607,6 +659,9 @@ export class Runtime {
   private defaultFrame?: Frame;
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
+  // Runner-private provenance for context-free Factory@1 shells read from a
+  // containing cell. Never serialized into Factory@1 state.
+  private factoryArtifactSources = new WeakMap<object, Set<MemorySpace>>();
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
@@ -1531,6 +1586,7 @@ export class Runtime {
   }
 
   prepareTxForCommit(tx: IExtendedStorageTransaction): void {
+    this.prepareFactoryArtifactPublications(tx);
     const state = tx.getCfcState();
     if (state.enforcementMode === "disabled") {
       // A vouched ingest still needs its provenance mark minted even where CFC
@@ -1571,6 +1627,115 @@ export class Runtime {
     }
     if (state.prepare.status === "unprepared") {
       tx.prepareCfc();
+    }
+  }
+
+  assertFactoryArtifactsPublishableForWrite(
+    value: unknown,
+    destination: MemorySpace,
+  ): void {
+    const identities = new Map<string, object[]>();
+    collectFactoryArtifactIdentities(value, identities);
+    for (const [identity, factories] of identities) {
+      if (
+        !this.patternManager.isArtifactAvailableInSpace(
+          identity,
+          destination,
+        ) &&
+        this.factoryArtifactSourceFor(factories, destination) === undefined &&
+        this.patternManager.artifactSourceSpace(identity, destination) ===
+          undefined
+      ) {
+        this.patternManager.assertArtifactAvailableInSpace(
+          identity,
+          destination,
+        );
+      }
+    }
+  }
+
+  noteFactoryArtifactSource(value: unknown, source: MemorySpace): void {
+    const identities = new Map<string, object[]>();
+    collectFactoryArtifactIdentities(value, identities);
+    for (const factories of identities.values()) {
+      for (const factory of factories) {
+        let sources = this.factoryArtifactSources.get(factory);
+        if (sources === undefined) {
+          sources = new Set();
+          this.factoryArtifactSources.set(factory, sources);
+        }
+        sources.add(source);
+      }
+    }
+  }
+
+  private factoryArtifactSourceFor(
+    factories: readonly object[],
+    destination: MemorySpace,
+  ): MemorySpace | undefined {
+    for (const factory of factories) {
+      for (const source of this.factoryArtifactSources.get(factory) ?? []) {
+        if (source !== destination) return source;
+      }
+    }
+    return undefined;
+  }
+
+  private prepareFactoryArtifactPublications(
+    tx: IExtendedStorageTransaction,
+  ): void {
+    const spaces = new Set<MemorySpace>();
+    for (const attempt of tx.getWriteAttemptLog?.() ?? []) {
+      spaces.add(attempt.space);
+    }
+    for (const write of tx.getReactivityLog?.().writes ?? []) {
+      spaces.add(write.space);
+    }
+
+    for (const destination of spaces) {
+      const native = tx.tx.getNativeCommit?.(destination);
+      if (native === undefined) continue;
+      const identities = new Map<string, object[]>();
+      for (const operation of native.operations) {
+        if (operation.op === "set" || operation.op === "patch") {
+          collectFactoryArtifactIdentities(operation.value, identities);
+        }
+      }
+
+      for (const [identity, factories] of identities) {
+        if (
+          this.patternManager.isArtifactAvailableInSpace(identity, destination)
+        ) {
+          continue;
+        }
+        const source = this.factoryArtifactSourceFor(factories, destination) ??
+          this.patternManager.artifactSourceSpace(identity, destination);
+        if (source === undefined) {
+          this.patternManager.assertArtifactAvailableInSpace(
+            identity,
+            destination,
+          );
+        }
+        if (tx.tx.addNativeCommitPreparation === undefined) {
+          throw new Error(
+            "storage transaction does not support atomic factory artifact publication",
+          );
+        }
+        tx.tx.addNativeCommitPreparation(destination, {
+          key: `factory-artifact:${identity}`,
+          prepare: () =>
+            this.patternManager.prepareArtifactPublication(
+              identity,
+              source!,
+              destination,
+            ),
+          onConfirmed: () =>
+            this.patternManager.noteArtifactPublicationConfirmed(
+              identity,
+              destination,
+            ),
+        });
+      }
     }
   }
 

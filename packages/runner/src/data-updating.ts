@@ -352,6 +352,7 @@ export function diffAndUpdate(
   context?: unknown,
   options?: IReadOptions,
 ): boolean {
+  runtime.assertFactoryArtifactsPublishableForWrite(newValue, link.space);
   const readOptions: IReadOptions = {
     ...options,
     meta: {

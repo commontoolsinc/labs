@@ -44,6 +44,7 @@ import type {
   MemorySpace,
   NativeStorageCommit,
   NativeStorageCommitOperation,
+  NativeStorageCommitPreparation,
   ReaderError,
   ReadError,
   Result,
@@ -885,6 +886,10 @@ export class V2StorageTransaction implements IStorageTransaction {
   >();
   // Folded SQLite write ops per space, applied in the same commit as cell ops.
   #sqliteOps = new Map<MemorySpace, SqliteOperation[]>();
+  #nativeCommitPreparations = new Map<
+    MemorySpace,
+    Map<string, NativeStorageCommitPreparation>
+  >();
   #writeSpace?: MemorySpace;
   // Multi-space write opt-in (see enableMultiSpaceWrites). When disabled the
   // transaction rejects writes to a second space; when enabled commit() splits
@@ -1094,6 +1099,19 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
+  addNativeCommitPreparation(
+    space: MemorySpace,
+    preparation: NativeStorageCommitPreparation,
+  ): void {
+    this.assertWritable("addNativeCommitPreparation()");
+    let preparations = this.#nativeCommitPreparations.get(space);
+    if (preparations === undefined) {
+      preparations = new Map();
+      this.#nativeCommitPreparations.set(space, preparations);
+    }
+    preparations.set(preparation.key, preparation);
+  }
+
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
     const branch = this.#branches.get(space);
     const schedulerObservation = this.schedulerObservationForNativeCommit(
@@ -1113,9 +1131,11 @@ export class V2StorageTransaction implements IStorageTransaction {
       ...createOnlyPreconditions,
     ];
     const sqliteOps = this.#sqliteOps.get(space);
+    const preparations = this.#nativeCommitPreparations.get(space);
     if (
       !branch && schedulerObservation === undefined &&
-      nativePreconditions.length === 0 && !sqliteOps?.length
+      nativePreconditions.length === 0 && !sqliteOps?.length &&
+      !preparations?.size
     ) {
       return undefined;
     }
@@ -1180,6 +1200,9 @@ export class V2StorageTransaction implements IStorageTransaction {
         ? { preconditions: nativePreconditions }
         : {}),
       ...(sqliteOps?.length ? { sqliteOps: [...sqliteOps] } : {}),
+      ...(preparations?.size
+        ? { preparations: [...preparations.values()] }
+        : {}),
     };
   }
 

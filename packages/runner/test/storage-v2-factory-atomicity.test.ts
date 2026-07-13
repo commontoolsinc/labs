@@ -100,3 +100,24 @@ Deno.test("storage v2 treats equal factory shells as a no-op and changed state a
   assertEquals(details[0].address.path, []);
   assertStrictEquals(details[0].value, replacement);
 });
+
+Deno.test("storage v2 carries one keyed wire preparation without committing it locally", () => {
+  const tx = new V2StorageTransaction(managerWith(undefined));
+  const preparation = {
+    key: "artifact:factory",
+    prepare: () => [{
+      op: "ensure" as const,
+      id: "pattern:factory" as const,
+      type: "application/json" as const,
+      value: { value: { kind: "source" } },
+    }],
+  };
+
+  tx.addNativeCommitPreparation(SPACE, preparation);
+  tx.addNativeCommitPreparation(SPACE, preparation);
+
+  const native = tx.getNativeCommit(SPACE);
+  assertEquals(native?.operations, []);
+  assertEquals(native?.preparations, [preparation]);
+  assertEquals([...tx.getWriteDetails(SPACE)], []);
+});

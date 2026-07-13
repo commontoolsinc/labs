@@ -416,6 +416,79 @@ describe("Factory@1 runner round trips", () => {
     expect(state.spaceSelector).toBe("execution-target");
     expect(destinationSpace).not.toBe(state.spaceSelector);
   });
+
+  it("atomically publishes every by-value factory kind into its destination space", async () => {
+    const { identity, factories, shells, states } = await storeFactories();
+    const tx = writer.edit();
+    const destination = writer.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "auto-published-factory-kinds",
+      undefined,
+      tx,
+    );
+    destination.set({ factories });
+
+    writer.prepareTxForCommit(tx);
+    expect(destination.getRaw()).toEqual({ factories });
+    expect((await tx.commit()).error).toBeUndefined();
+    expect(
+      writer.patternManager.isArtifactAvailableInSpace(
+        identity,
+        destinationSpace,
+      ),
+    ).toBe(true);
+
+    const cold = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    extraRuntimes.push(cold);
+    for (let index = 0; index < shells.length; index += 1) {
+      const materialized = await prepareFactory(shells[index], {
+        runtime: cold,
+        artifactSpace: destinationSpace,
+      });
+      expect(sealFactoryState(materialized)).toEqual(states[index]);
+    }
+  });
+
+  it("cold-loads private source provenance while keeping the destination write optimistic", async () => {
+    const { factories } = await storeFactories();
+    const sourceTx = writer.edit();
+    const source = writer.getCell<{ factories: FactoryTuple }>(
+      sourceSpace,
+      "cold-publication-source",
+      undefined,
+      sourceTx,
+    );
+    source.set({ factories });
+    writer.prepareTxForCommit(sourceTx);
+    expect((await sourceTx.commit()).error).toBeUndefined();
+
+    const mover = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    extraRuntimes.push(mover);
+    const carried = mover.getCell<{ factories: FactoryTuple }>(
+      sourceSpace,
+      "cold-publication-source",
+    ).getRaw()! as unknown as { factories: FactoryTuple };
+    const destinationTx = mover.edit();
+    const destination = mover.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "cold-publication-destination",
+      undefined,
+      destinationTx,
+    );
+    destination.set(carried);
+    mover.prepareTxForCommit(destinationTx);
+
+    // Source verification is async in this fresh PatternManager, but local
+    // speculative visibility is not.
+    expect(destination.getRaw()).toEqual(carried);
+    expect((await destinationTx.commit()).error).toBeUndefined();
+  });
 });
 
 describe("Factory@1 fresh-runtime value round trip", () => {
