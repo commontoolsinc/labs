@@ -480,7 +480,10 @@ interface ExecutionClaim {
 ```
 
 Claims ride the authenticated session/control feed and are not ordinary
-space documents. A durable policy may opt a space into server-primary
+space documents. Each session retains only a bounded suffix of control
+history; reconnect always installs a complete claim snapshot, so a cursor
+older than that suffix resynchronizes authority instead of growing an
+unbounded queue. A durable policy may opt a space into server-primary
 execution, but runtime ownership, liveness, generations, and exceptions do
 not belong in mutable user data.
 
@@ -914,8 +917,12 @@ background-piece-service must acquire a durable service-owned exclusion before
 constructing a Worker. That makes a branch/space with an active legacy
 controller ineligible for the new client-demand pool until the Worker stops and
 releases it. A dormant registration does not block because it has no competing
-runtime. Phase 3 imports that demand into this same slot and removes the
-exclusion; only then may client demand preempt a background generation.
+runtime. Acquire and renew responses include the server clock sampled with the
+authority transaction. The background manager converts the server-relative
+remaining duration into a request-start-anchored monotonic deadline; a response
+from an older host without that field fails closed. Phase 3 imports that demand
+into this same slot and removes the exclusion; only then may client demand
+preempt a background generation.
 Registry cleanup is not a prerequisite, but preventing two server runtimes is.
 A subprocess tier remains optional for hard isolation.
 
@@ -1268,8 +1275,8 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   `ExecutionClaim`, `ActionSettlement.inputBasisSeq`, whole-action scope
   firewall, passive claimed builtins, and egress parity (G5/G10/G11). Measure
   conflict rate, multi-client action volume, divergence, revocations, and
-  fallback latency. Fallback is claim removal. The operator runbook, product-
-  shaped multi-client fixtures, deterministic local enable/disable and failure
+  fallback latency. Fallback is claim removal. The operator runbook, literal
+  multi-client product fixtures, deterministic local enable/disable and failure
   drills, and browser CPU measurement are complete. A deployed-staging policy
   drill remains to be recorded. The browser measurement is recorded in the
   [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md).

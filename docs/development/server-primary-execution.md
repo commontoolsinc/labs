@@ -15,6 +15,10 @@ runs; client-compute suppression is a later, separately gated phase.
   `serverPrimaryExecutionV1`, claim routing, and builtin passivity together.
 - Start with one staging space whose active computations are same-space and
   space-scoped. Spaces owned by the legacy background service remain excluded.
+- Deploy the memory host and legacy background service together. Exclusion
+  acquire/renew responses carry the server clock used to derive a local
+  monotonic deadline; an older host that omits it makes the background worker
+  fail closed instead of risking overlap with the client-demand pool.
 - For a named space, `cf execution enable|disable` automatically uses the
   derived space identity that created it. For a raw DID while ACL mode is
   `off` or `observe`, the supplied identity must be the space key or a

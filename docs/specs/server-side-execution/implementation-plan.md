@@ -548,7 +548,9 @@ graduated sub-capability.
    every settlement outcome on one ordered reconnectable stream with explicit
    feed-sequence barriers. For committed outcomes,
    acceptedCommitSeq is an additional data-application gate, not a replacement
-   for control ordering.
+   for control ordering. Bound each session's retained event suffix; reconnect
+   always carries a complete claim snapshot so cursors older than the suffix
+   resynchronize without unbounded server memory.
 6. Authorize demand using the session's existing READ access. Sponsor
    eligibility is a separate WRITE check in W1.1.
 7. Add optional executionPolicy owner doc support at
@@ -708,7 +710,11 @@ and signing authority are separate.
    acquire its lease until that Worker stops and releases the exclusion. A
    dormant registry entry does not block the pool because it has no competing
    runtime. Existing background behavior continues. Phase 3 imports that
-   demand into the shared slot and removes the exclusion.
+   demand into the shared slot and removes the exclusion. Exclusion acquire and
+   renew responses carry the server clock sampled with the authority
+   transaction. Convert the remaining duration to a request-start-anchored
+   monotonic deadline in the background manager; missing timing data from an
+   older host fails closed.
 
 **Success criteria:**
 
@@ -1055,7 +1061,7 @@ per-action sink authority decision and pre-claim in-flight handoff.
 
 **Status:** implemented and locally validated, with one operational gate still
 pending. The owner CLI, runbook,
-bounded-cardinality health/latency signals, product-shaped multi-client
+bounded-cardinality health/latency signals, literal-product multi-client
 fixtures, deterministic authority/failure drills, and browser CPU measurement
 are present. A deployed-staging enable/disable drill is not yet recorded.
 
@@ -1074,13 +1080,17 @@ runbook using serverPrimaryExecution plus optional executionPolicy.
 
 **Success criteria:**
 
-- [x] Multi-client lunch-poll/group-chat product-shaped fixtures approach one
-      server action run per invalidation and zero client derived wire writes
-      for claimed actions (`server-execution-rollout-products.test.ts`). The
-      literal transformed product patterns' static claim surfaces are also
-      certified by `server-execution-product-fixtures.test.ts`.
-- [x] Unclaimed/scoped/cross-space actions remain behaviorally identical under
-      flag-off/flag-on parity (`server-execution-rollout-products.test.ts`).
+- [x] Multi-client literal lunch-poll/group-chat fixtures prove the Phase 2
+      authority split (`server-execution-rollout-products.test.ts`): a
+      claimable lunch-poll action gets one server attempt per invalidation and
+      zero client-derived wire writes; group-chat's entity-backed room-count
+      action gets an exact `unserved` settlement and revoke, then converges via
+      deterministic client-primary fallback with no committed/no-op server
+      settlement. Static claim surfaces for both full transformed products are
+      also certified by `server-execution-product-fixtures.test.ts`.
+- [x] Pure-computation output and derived-wire-commit counts remain identical
+      under flag-off/flag-on runs for unclaimed PerSpace, PerUser, PerSession,
+      and cross-space cases (`server-execution-rollout-products.test.ts`).
 - [ ] Enabling then disabling a staging space converges without data migration.
       The deterministic local analogue passes in `executor-claim-e2e.test.ts`
       ("shared execution pool transitions shadow to claimed and back without
