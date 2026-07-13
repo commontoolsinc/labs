@@ -1768,6 +1768,14 @@ Deno.test("memory v2 bounds retained exact-session scheduler contexts", async ()
       countRows(engine, "scheduler_observation_replay"),
       retainedLimit + 3,
     );
+    const retiredReplayPayloads = engine.database.prepare(`
+      SELECT
+        COUNT(*) AS retired,
+        SUM(CASE WHEN accepted_payload IS NULL THEN 1 ELSE 0 END) AS cleared
+      FROM scheduler_observation_replay
+      WHERE observation_id IS NULL
+    `).get() as { retired: number; cleared: number };
+    assertEquals(retiredReplayPayloads, { retired: 3, cleared: 3 });
     assertEquals(
       snapshots.some((snapshot) =>
         snapshot.executionContextKey.endsWith("session-retention-0")
@@ -2297,16 +2305,52 @@ Deno.test("memory v2 writer lookup uses a distinct snapshot delivery slot", asyn
         }],
       },
     });
+    const writerObservation = observationForAction(actionId, {
+      ownerSpace,
+      currentKnownWrites: [target],
+    });
     upsertSchedulerObservation(engine, {
       branch: "",
       ownerSpace,
       commitSeq: semantic.seq,
-      deliveryCommitSeq: semantic.seq + 1,
       observedAtSeq: semantic.seq,
-      observation: observationForAction(actionId, {
-        ownerSpace,
-        currentKnownWrites: [target],
-      }),
+      observation: writerObservation,
+    });
+    const nextSemantic = applyCommit(engine, {
+      sessionId: "session:scheduler-writer-delivery-slot",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:semantic-input",
+          value: { value: 2 },
+        }],
+      },
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      commitSeq: nextSemantic.seq,
+      observedAtSeq: nextSemantic.seq,
+      observation: writerObservation,
+    });
+    const delivery = engine.database.prepare(`
+      SELECT
+        o.commit_seq AS observation_commit_seq,
+        s.commit_seq AS snapshot_commit_seq
+      FROM scheduler_observation o
+      JOIN scheduler_action_snapshot s
+        ON s.observation_id = o.observation_id
+      WHERE o.action_id = :action_id
+    `).get({ action_id: actionId }) as {
+      observation_commit_seq: number | null;
+      snapshot_commit_seq: number | null;
+    };
+    assertEquals(delivery, {
+      observation_commit_seq: semantic.seq,
+      snapshot_commit_seq: nextSemantic.seq,
     });
 
     const candidate = writersForTargets(engine, {
@@ -2314,7 +2358,7 @@ Deno.test("memory v2 writer lookup uses a distinct snapshot delivery slot", asyn
       targets: [{ ...target, scopeKey: "space" }],
     })[0];
     assertEquals(candidate?.actionId, actionId);
-    assertEquals(candidate?.commitSeq, semantic.seq + 1);
+    assertEquals(candidate?.commitSeq, nextSemantic.seq);
   } finally {
     close(engine);
     await Deno.remove(path);

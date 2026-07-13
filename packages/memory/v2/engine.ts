@@ -6073,12 +6073,13 @@ function retireSchedulerObservationIfOrphaned(
   `).get({ observation_id: observationId }) as { active: number };
   if (row.active !== 0) return;
 
-  // Replay rows retain status, sequence, and the normalized payload needed to
-  // reject mismatched retries. Nulling only the retired active-row identity
-  // preserves idempotency without retaining the observation payload twice.
+  // Replay rows retain status, sequence, and the requested payload needed to
+  // reject mismatched retries. Once the active observation is retired, its
+  // canonical accepted payload is unreachable and would duplicate that data.
   engine.database.prepare(`
     UPDATE scheduler_observation_replay
-    SET observation_id = NULL
+    SET observation_id = NULL,
+        accepted_payload = NULL
     WHERE observation_id = :observation_id
   `).run({ observation_id: observationId });
   engine.database.prepare(`
