@@ -33,9 +33,11 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 // Create a runtime instance with configuration
 const runtime = new Runtime({
   apiUrl: new URL("https://example.com/"),
-  storageManager: new StorageManager({
-    address: "https://example.com/storage",
-    signer: myIdentitySigner,
+  // The StorageManager constructor is protected — use the factory methods
+  // (`open()` for a remote server, `emulate()` for in-process testing)
+  storageManager: StorageManager.open({
+    address: new URL("https://example.com/storage"),
+    as: myIdentitySigner,
   }),
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
@@ -228,6 +230,22 @@ const profileCell = runtime.getCell(
 // Get values
 const settings = settingsCell.get();
 
+// Subscribe to changes BEFORE mutating, so the callback observes both the
+// initial value and the update.
+// sink() will immediately call the callback with the current value,
+// and then call it again whenever the value changes
+const cleanup = settingsCell.sink((value) => {
+  console.log("Settings value:", value); // Called immediately, then on changes
+  // Sees theme "dark" (the default) initially, then "system" after the
+  // update below commits
+
+  // Can return a cleanup function that will be called when unsubscribing
+  // or before the next callback invocation
+  return () => {
+    console.log("Cleaning up subscription for value:", value);
+  };
+});
+
 // Mutations require a transaction (outside handlers, open one explicitly
 // with runtime.edit(); inside handlers the runtime provides it)
 const tx = runtime.edit();
@@ -238,20 +256,6 @@ const themeProperty = settingsCell.key("theme");
 themeProperty.withTx(tx).set("system");
 await tx.commit();
 
-// Subscribe to changes
-// sink() will immediately call the callback with the current value,
-// and then call it again whenever the value changes
-const cleanup = settingsCell.sink((value) => {
-  console.log("Settings value:", value); // Called immediately, then on changes
-  // Returns the current theme: "dark" initially, then "system" after the update
-
-  // Can return a cleanup function that will be called when unsubscribing
-  // or before the next callback invocation
-  return () => {
-    console.log("Cleaning up subscription for value:", value);
-  };
-});
-
 // Clean up subscription when done
 cleanup();
 ```
@@ -259,8 +263,9 @@ cleanup();
 ### Cells with Type-Safe Schemas
 
 Using cells with schemas is highly recommended as it provides type checking,
-validation, and automatic transformation of data. The `Schema<>` helper from the
-Builder package provides TypeScript type inference.
+validation, and automatic transformation of data. The `Schema<>` helper
+(exported from this package's builder surface) provides TypeScript type
+inference.
 
 > **Why these examples seed with a transaction.** This is untransformed embedder
 > code, so nothing here instantiates a piece: in transformer-compiled `.tsx`
@@ -475,14 +480,18 @@ const runtime = new Runtime({
 ```
 
 ```typescript
-// Sync a cell with storage
-await userCell.sync();
+const space = signer.did();
 
-// Sync by entity ID
-const cell = await runtime.storage.syncCellById("my-space", "entity-id");
+// Create (or address) a cell and sync it with storage
+const cell = runtime.getCell(space, "sync-example");
+await cell.sync();
+
+// Address an existing document by entity id, then sync it
+const byId = runtime.getCellFromEntityId(space, "of:fid1:...");
+await byId.sync();
 
 // Wait for all pending sync operations to complete
-await runtime.storage.synced();
+await runtime.storageManager.synced();
 
 // When cells with the same causal ID are synced across instances,
 // they will automatically be kept in sync with the latest value
