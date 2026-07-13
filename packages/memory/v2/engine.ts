@@ -3037,8 +3037,14 @@ const drainClientLeaseForBackground = (
 ): number | undefined => {
   const current = selectExecutionLeaseRow(engine, branch);
   if (current === null || !leaseIsLive(current, nowMs)) return undefined;
-  const drainDeadline = leaseExpiry(nowMs, drainTtlMs);
-  const expiresAt = Math.min(current.expires_at, drainDeadline);
+  // Validate the configured local drain grace, but do not shorten the durable
+  // row here. Another host can only enforce the expiry in the lease snapshot it
+  // already holds; letting background execution become ready before that
+  // advertised deadline could overlap its Worker and effect claims. A host
+  // that owns this exact lease can still revoke it early after its pool has
+  // stopped, while a remote/stale owner remains fenced by the original expiry.
+  leaseExpiry(nowMs, drainTtlMs);
+  const expiresAt = current.expires_at;
   engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
     branch: current.branch,
     lease_generation: current.lease_generation,

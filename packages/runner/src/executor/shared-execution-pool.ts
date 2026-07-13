@@ -337,7 +337,10 @@ export class SharedExecutionPool {
     }
     if (legacyOwned) {
       this.#cancelBackoff(slot);
-      await this.#shutdown(slot, false);
+      // Legacy acquisition has already fenced claims and is synchronously
+      // waiting for this listener. Stop abruptly so no Worker or broker
+      // authority can overlap the background-ready response.
+      await this.#shutdown(slot, true);
       slot.pieces = nextPieces;
       slot.state = "excluded";
       return;

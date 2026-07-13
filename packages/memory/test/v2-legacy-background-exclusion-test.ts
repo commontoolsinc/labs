@@ -82,14 +82,17 @@ Deno.test("background acquisition atomically drains the client lease", async () 
     const acquired = acquireBackground(engine, 200);
     assertExists(acquired);
     assertEquals(acquired.ready, false);
-    assertEquals(acquired.blockedUntil, 300);
+    // A different host may still be enforcing the lease snapshot it acquired.
+    // Background readiness therefore waits for that advertised deadline rather
+    // than the shorter host-local drain grace.
+    assertEquals(acquired.blockedUntil, 1_100);
     assertEquals(
       Engine.currentExecutionLease(engine, {
         space: SPACE,
         branch: "",
         nowMs: 201,
       }),
-      { ...client, state: "draining", expiresAt: 300 },
+      { ...client, state: "draining" },
     );
     assertEquals(
       Engine.renewExecutionLease(engine, {
@@ -111,17 +114,17 @@ Deno.test("background acquisition atomically drains the client lease", async () 
     assertExists(blocked);
     assertEquals(blocked.serverTime, 250);
     assertEquals(blocked.ready, false);
-    assertEquals(blocked.blockedUntil, 300);
+    assertEquals(blocked.blockedUntil, 1_100);
 
     const ready = Engine.renewLegacyBackgroundExclusion(engine, {
       exclusion: blocked.exclusion,
-      nowMs: 301,
+      nowMs: 1_101,
       ttlMs: 1_000,
       drainTtlMs: 100,
       authorizeService: () => true,
     });
     assertExists(ready);
-    assertEquals(ready.serverTime, 301);
+    assertEquals(ready.serverTime, 1_101);
     assertEquals(ready.ready, true);
     assertEquals(ready.blockedUntil, undefined);
   } finally {

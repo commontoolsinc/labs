@@ -31,6 +31,7 @@ import {
   type LegacyBackgroundExclusionReleaseRequest,
   type LegacyBackgroundExclusionReleaseResult,
   type LegacyBackgroundExclusionRenewRequest,
+  type LegacyBackgroundExclusionStatus,
   type LegacyBackgroundExclusionStatusResult,
   type MemoryProtocolFlags,
   type Operation,
@@ -2210,6 +2211,21 @@ export class Server {
     }) !== null;
   }
 
+  #fenceOwnedExecutionLeaseForLegacyBackground(
+    space: string,
+    branch: BranchName,
+  ): void {
+    const authority = this.#ownedExecutionLeases.get(
+      executionLeaseKey(space, branch),
+    );
+    if (authority === undefined) return;
+    // The durable exclusion transaction has already moved this exact lane to
+    // draining. Reject every new claim/effect immediately, then let the pool's
+    // synchronously awaited demand notification stop and revoke the Worker.
+    authority.drainRequested = true;
+    this.#revokeExecutionClaimsForLease(authority.handle);
+  }
+
   #executionDrainTimeoutMs(): number {
     const timeoutMs = this.options.executionControl?.drainTimeoutMs ?? 5_000;
     if (!isPositiveSafeInteger(timeoutMs)) {
@@ -2438,13 +2454,20 @@ export class Server {
     });
   }
 
-  #publishExecutionDemands(space: string, branch: BranchName): void {
-    const snapshot: ExecutionDemandSnapshot = Object.freeze({
+  #nextExecutionDemandSnapshot(
+    space: string,
+    branch: BranchName,
+  ): ExecutionDemandSnapshot {
+    return Object.freeze({
       space,
       branch,
       order: ++this.#executionDemandOrder,
       demands: this.listExecutionDemands(space, branch),
     });
+  }
+
+  #publishExecutionDemands(space: string, branch: BranchName): void {
+    const snapshot = this.#nextExecutionDemandSnapshot(space, branch);
     for (const listener of this.#executionDemandListeners) {
       try {
         const result = listener(snapshot);
@@ -2457,6 +2480,18 @@ export class Server {
         console.warn("execution demand listener failed", error);
       }
     }
+  }
+
+  async #publishExecutionDemandsAndWait(
+    space: string,
+    branch: BranchName,
+  ): Promise<void> {
+    const snapshot = this.#nextExecutionDemandSnapshot(space, branch);
+    await Promise.all(
+      [...this.#executionDemandListeners].map((listener) =>
+        Promise.resolve().then(() => listener(snapshot))
+      ),
+    );
   }
 
   #drainExecutionLeasesForDemand(
@@ -2681,6 +2716,42 @@ export class Server {
     };
   }
 
+  async #completeLegacyBackgroundTransition(
+    engine: Engine.Engine,
+    status: LegacyBackgroundExclusionStatus | null,
+    session: SessionState,
+    connection: Connection,
+  ): Promise<LegacyBackgroundExclusionStatus | null> {
+    if (status === null) return null;
+    this.#fenceOwnedExecutionLeaseForLegacyBackground(
+      status.exclusion.space,
+      status.exclusion.branch,
+    );
+    // A ready response is authority: do not release it until every host-local
+    // pool listener has finished fencing and stopping its matching Worker.
+    await this.#publishExecutionDemandsAndWait(
+      status.exclusion.space,
+      status.exclusion.branch,
+    );
+    const refreshed = Engine.renewLegacyBackgroundExclusion(engine, {
+      exclusion: status.exclusion,
+      nowMs: () => this.#executionNowMs(),
+      ttlMs: this.#executionLeaseTtlMs(),
+      drainTtlMs: this.#executionDrainTimeoutMs(),
+      authorizeService: this.#legacyBackgroundAuthorize(
+        status.exclusion.space,
+        session,
+        connection,
+      ),
+    });
+    if (refreshed === null) {
+      throw new Error(
+        "legacy background exclusion changed while fencing client execution",
+      );
+    }
+    return refreshed;
+  }
+
   async acquireLegacyBackgroundExclusion(
     message: LegacyBackgroundExclusionAcquireRequest,
     connection: Connection,
@@ -2701,7 +2772,7 @@ export class Server {
     }
     try {
       const engine = await this.openEngine(message.space);
-      const status = Engine.acquireLegacyBackgroundExclusion(engine, {
+      const acquired = Engine.acquireLegacyBackgroundExclusion(engine, {
         space: message.space,
         branch: message.branch,
         holderId: this.#legacyBackgroundHolderId(session),
@@ -2715,6 +2786,12 @@ export class Server {
           connection,
         ),
       });
+      const status = await this.#completeLegacyBackgroundTransition(
+        engine,
+        acquired,
+        session,
+        connection,
+      );
       return {
         type: "response",
         requestId: message.requestId,
@@ -2751,7 +2828,7 @@ export class Server {
     }
     try {
       const engine = await this.openEngine(message.space);
-      const status = Engine.renewLegacyBackgroundExclusion(engine, {
+      const renewed = Engine.renewLegacyBackgroundExclusion(engine, {
         exclusion: this.#legacyBackgroundToken(message, session),
         nowMs: () => this.#executionNowMs(),
         ttlMs: this.#executionLeaseTtlMs(),
@@ -2762,6 +2839,12 @@ export class Server {
           connection,
         ),
       });
+      const status = await this.#completeLegacyBackgroundTransition(
+        engine,
+        renewed,
+        session,
+        connection,
+      );
       return {
         type: "response",
         requestId: message.requestId,
@@ -2807,6 +2890,9 @@ export class Server {
           connection,
         ),
       });
+      if (released !== null) {
+        this.#publishExecutionDemands(message.space, message.branch);
+      }
       return {
         type: "response",
         requestId: message.requestId,
