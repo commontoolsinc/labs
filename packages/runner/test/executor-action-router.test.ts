@@ -442,6 +442,9 @@ Deno.test("executor action router carries an accepted builtin claim across async
   });
   const claims = new WeakMap<object, ExecutionClaim>();
   let candidateKey: ActionClaimKey | undefined;
+  let permanentFailure:
+    | { claim: ExecutionClaim; diagnosticCode: string }
+    | undefined;
   const router = createExecutorActionTransactionRouter({
     servedSpace: SPACE,
     branch: "",
@@ -449,6 +452,15 @@ Deno.test("executor action router carries an accepted builtin claim across async
     claimForAction: (sourceAction) => claims.get(sourceAction),
     onCandidate: (candidate) => {
       candidateKey = candidate.claimKey;
+    },
+    permanentUnservedReasonForAction: (sourceAction, liveClaim) => {
+      const failure = sourceAction === effectAction
+        ? permanentFailure
+        : undefined;
+      if (failure === undefined || failure.claim !== liveClaim) {
+        return undefined;
+      }
+      return failure.diagnosticCode;
     },
   });
   const initial = commit();
@@ -518,6 +530,50 @@ Deno.test("executor action router carries an accepted builtin claim across async
       leaseGeneration: 3,
       claimGeneration: 4,
     },
+  );
+
+  permanentFailure = {
+    claim,
+    diagnosticCode: "server-builtin-egress-blocked-destination",
+  };
+  const permanentlyUnserved = commit();
+  permanentlyUnserved.operations = [...continuation.operations];
+  permanentlyUnserved.schedulerObservation = undefined;
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: permanentlyUnserved,
+      sourceAction: effectAction,
+    }),
+    {
+      disposition: "unserved",
+      diagnosticCode: "server-builtin-egress-blocked-destination",
+    },
+  );
+  assertEquals(
+    (permanentlyUnserved.schedulerObservation as Record<string, unknown>)
+      .executionClaimAssertion,
+    {
+      contextKey: "space",
+      leaseGeneration: 3,
+      claimGeneration: 4,
+    },
+  );
+
+  permanentFailure = {
+    claim: { ...claim, claimGeneration: claim.claimGeneration + 1 },
+    diagnosticCode: "stale-permanent-failure",
+  };
+  const staleFailure = commit();
+  staleFailure.operations = [...continuation.operations];
+  staleFailure.schedulerObservation = undefined;
+  assertEquals(
+    await router({
+      space: SPACE,
+      commit: staleFailure,
+      sourceAction: effectAction,
+    }),
+    { disposition: "upstream" },
   );
 
   const forgedSchema = commit();

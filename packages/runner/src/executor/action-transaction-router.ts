@@ -47,6 +47,13 @@ export interface ExecutorActionTransactionRouterOptions {
   /** The Worker has a narrow host broker for supported builtin effects. */
   readonly builtinBrokerAvailable?: boolean;
   readonly claimForAction: (sourceAction: object) => ExecutionClaim | undefined;
+  /** Exact-incarnation permanent broker failure captured synchronously by the
+   * Worker. Returning a reason converts the continuation into one canonical
+   * observation-only unserved attempt. */
+  readonly permanentUnservedReasonForAction?: (
+    sourceAction: object,
+    claim: ExecutionClaim,
+  ) => string | undefined;
   readonly onCandidate: (
     candidate: CandidateClaim,
     sourceAction: object,
@@ -187,6 +194,19 @@ export function createExecutorActionTransactionRouter(
         claimKey,
       );
       return local;
+    }
+    const permanentUnservedReason = liveClaim === undefined
+      ? undefined
+      : options.permanentUnservedReasonForAction?.(sourceAction, liveClaim);
+    if (permanentUnservedReason !== undefined) {
+      attachClaimAssertion(input.commit, routedObservation, liveClaim!);
+      return unservedRoute(
+        reported,
+        options,
+        liveClaim!,
+        sourceAction,
+        permanentUnservedReason,
+      );
     }
     const brokeredBuiltinReady = staticDecision.status === "broker-required" &&
       options.builtinBrokerAvailable === true && builtinId !== undefined;

@@ -9,6 +9,22 @@ import type {
   ServerBuiltinFetchBroker,
   ServerBuiltinFetchRequest,
 } from "./server-builtin-egress.ts";
+import {
+  ServerBuiltinEgressError,
+  type ServerBuiltinEgressErrorCode,
+} from "./server-builtin-egress.ts";
+
+/** A deterministic broker policy/servability denial. The diagnostic crosses
+ * IPC, but no authority or user identity does. */
+export class ServerBuiltinUnservedError extends Error {
+  readonly diagnosticCode: string;
+
+  constructor(diagnosticCode: string, message: string) {
+    super(message);
+    this.name = "ServerBuiltinUnservedError";
+    this.diagnosticCode = diagnosticCode;
+  }
+}
 
 export interface ServerBuiltinBrokerContext {
   readonly space: MemorySpace;
@@ -93,6 +109,7 @@ type FetchWireResponse =
       readonly name: string;
       readonly message: string;
       readonly code?: string;
+      readonly unservedDiagnosticCode?: string;
     };
   };
 
@@ -121,7 +138,10 @@ export function createServerBuiltinBrokerHost(
       inflight.set(request.requestId, controller);
       validateClaimForRequest(request, options.context);
       if (!await options.isClaimLive(request.claim)) {
-        throw new Error("server builtin request requires an exact live claim");
+        throw new ServerBuiltinUnservedError(
+          "server-builtin-claim-not-live",
+          "server builtin request requires an exact live claim",
+        );
       }
       if (controller.signal.aborted) throw abortReason(controller.signal);
       const fetchRequest = {
@@ -170,7 +190,7 @@ export function createServerBuiltinBrokerHost(
           type: "server-builtin.fetch-result",
           requestId,
           ok: false,
-          error: serializeError(error),
+          error: serializeError(asPermanentUnservedError(error) ?? error),
         });
       }
     } finally {
@@ -230,8 +250,15 @@ export function createServerBuiltinBrokerClient(
       entry.signal.removeEventListener("abort", entry.onAbort);
     }
     if (!response.ok) {
-      const error = new Error(response.error.message);
-      error.name = response.error.name;
+      const error = response.error.unservedDiagnosticCode === undefined
+        ? new Error(response.error.message)
+        : new ServerBuiltinUnservedError(
+          response.error.unservedDiagnosticCode,
+          response.error.message,
+        );
+      if (!(error instanceof ServerBuiltinUnservedError)) {
+        error.name = response.error.name;
+      }
       if (response.error.code !== undefined) {
         (error as Error & { code?: string }).code = response.error.code;
       }
@@ -363,7 +390,10 @@ function validateClaimForRequest(
     claim.implementationFingerprint !==
       `impl:${serverBuiltinImplementationHash(request.builtinId)}`
   ) {
-    throw new Error("server builtin request claim does not match its lane");
+    throw new ServerBuiltinUnservedError(
+      "server-builtin-claim-not-live",
+      "server builtin request claim does not match its lane",
+    );
   }
 }
 
@@ -381,7 +411,9 @@ function parseFetchWireResponse(value: unknown): FetchWireResponse | undefined {
     const error = response.error as Record<string, unknown> | undefined;
     return error !== undefined && typeof error.name === "string" &&
         typeof error.message === "string" &&
-        (error.code === undefined || typeof error.code === "string")
+        (error.code === undefined || typeof error.code === "string") &&
+        (error.unservedDiagnosticCode === undefined ||
+          typeof error.unservedDiagnosticCode === "string")
       ? value as FetchWireResponse
       : undefined;
   }
@@ -463,9 +495,15 @@ function serializeError(error: unknown): {
   name: string;
   message: string;
   code?: string;
+  unservedDiagnosticCode?: string;
 } {
   const record = typeof error === "object" && error !== null
-    ? error as { name?: unknown; message?: unknown; code?: unknown }
+    ? error as {
+      name?: unknown;
+      message?: unknown;
+      code?: unknown;
+      diagnosticCode?: unknown;
+    }
     : undefined;
   return {
     name: typeof record?.name === "string" ? record.name : "Error",
@@ -473,7 +511,40 @@ function serializeError(error: unknown): {
       ? record.message
       : String(error),
     ...(typeof record?.code === "string" ? { code: record.code } : {}),
+    ...(error instanceof ServerBuiltinUnservedError
+      ? { unservedDiagnosticCode: error.diagnosticCode }
+      : {}),
   };
+}
+
+const PERMANENT_EGRESS_CODES: ReadonlySet<ServerBuiltinEgressErrorCode> =
+  new Set([
+    "invalid-serving-origin",
+    "invalid-url",
+    "blocked-scheme",
+    "blocked-destination",
+    "invalid-method",
+    "invalid-headers",
+    "request-body-too-large",
+    "too-many-redirects",
+    "response-headers-too-large",
+    "response-too-large",
+  ]);
+
+function asPermanentUnservedError(
+  error: unknown,
+): ServerBuiltinUnservedError | undefined {
+  if (error instanceof ServerBuiltinUnservedError) return error;
+  if (
+    error instanceof ServerBuiltinEgressError &&
+    PERMANENT_EGRESS_CODES.has(error.code)
+  ) {
+    return new ServerBuiltinUnservedError(
+      `server-builtin-egress-${error.code}`,
+      error.message,
+    );
+  }
+  return undefined;
 }
 
 function abortReason(signal: AbortSignal): unknown {

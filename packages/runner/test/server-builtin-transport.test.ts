@@ -3,6 +3,7 @@ import {
   authorizeDefaultServerBuiltinRequest,
   createDefaultServerBuiltinBroker,
 } from "../src/executor/server-builtin-transport.ts";
+import { ServerBuiltinUnservedError } from "../src/executor/server-builtin-channel.ts";
 
 Deno.test("default builtin transport reserves ambient fetch for raw-relative serving-origin calls", async () => {
   const ambient: string[] = [];
@@ -41,7 +42,7 @@ Deno.test("default builtin transport reserves ambient fetch for raw-relative ser
 });
 
 Deno.test("default builtin authorization fails closed for protected first-party routes", () => {
-  assertThrows(
+  const error = assertThrows(
     () =>
       authorizeDefaultServerBuiltinRequest({
         builtinId: "fetchJson",
@@ -57,8 +58,12 @@ Deno.test("default builtin authorization fails closed for protected first-party 
         onBehalfOf: "did:key:z6Mk-user",
         servingOrigin: new URL("https://toolshed.example/"),
       }),
-    Error,
+    ServerBuiltinUnservedError,
     "delegated user signing",
+  );
+  assertEquals(
+    (error as ServerBuiltinUnservedError).diagnosticCode,
+    "server-builtin-authorization-denied",
   );
 });
 

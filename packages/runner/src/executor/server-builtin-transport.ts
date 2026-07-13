@@ -1,7 +1,10 @@
 import { fetchPinnedHttp } from "@commonfabric/utils/pinned-http-fetch";
 import { isProtectedToolshedFirstPartyRoute } from "../toolshed-http-auth.ts";
-import type { AuthorizedServerBuiltinRequest } from "./server-builtin-channel.ts";
-import type { ServerBuiltinBrokerContext } from "./server-builtin-channel.ts";
+import {
+  type AuthorizedServerBuiltinRequest,
+  type ServerBuiltinBrokerContext,
+  ServerBuiltinUnservedError,
+} from "./server-builtin-channel.ts";
 import {
   createServerBuiltinEgressBroker,
   type ServerBuiltinFetchBroker,
@@ -70,7 +73,8 @@ export function authorizeDefaultServerBuiltinRequest(
       (request.fetch.method ?? "GET").trim(),
     )
   ) {
-    throw new Error(
+    throw new ServerBuiltinUnservedError(
+      "server-builtin-authorization-denied",
       "protected first-party builtin request requires delegated user signing",
     );
   }

@@ -26,7 +26,10 @@ import {
 } from "../src/storage/v2.ts";
 import { DenoSpaceExecutorFactory } from "../src/executor/deno-space-executor.ts";
 import { SharedExecutionPool } from "../src/executor/shared-execution-pool.ts";
-import type { ServerBuiltinFetchRequest } from "../src/executor/server-builtin-egress.ts";
+import {
+  ServerBuiltinEgressError,
+  type ServerBuiltinFetchRequest,
+} from "../src/executor/server-builtin-egress.ts";
 
 const FLAGS = {
   persistentSchedulerState: true,
@@ -63,6 +66,20 @@ const ASYNC_BUILTIN_PROGRAM: RuntimeProgram = {
       "export default pattern<{ url: string }>(({ url }) => ({",
       "  fetched: fetchText({ url }),",
       "  generated: generateText({ prompt: url }),",
+      "}));",
+    ].join("\n"),
+  }],
+};
+
+const FETCH_BUILTIN_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "/// <cts-enable />",
+      "import { pattern, fetchText } from 'commonfabric';",
+      "export default pattern<{ url: string }>(({ url }) => ({",
+      "  fetched: fetchText({ url }),",
       "}));",
     ].join("\n"),
   }],
@@ -1439,6 +1456,334 @@ Deno.test("shared execution pool transitions shadow to claimed and back without 
 
 Deno.test("replacement executor resumes shadow discovery before claim promotion", async () => {
   await exercisePoolAuthorityTransition({ replaceShadowWorker: true });
+});
+
+Deno.test("real Worker settles permanent builtin failures unserved but retains transient claims", async (t) => {
+  const cases = [
+    {
+      mode: "broker-policy" as const,
+      diagnosticCode: "server-builtin-egress-blocked-destination",
+      forbiddenStoredError: "blocked destination fixture",
+    },
+    {
+      mode: "causal-mismatch" as const,
+      diagnosticCode: "builtin-causal-actor-mismatch",
+      forbiddenStoredError:
+        "server builtin causal actor does not match the lease sponsor",
+    },
+    {
+      mode: "transient" as const,
+      storedError: "HTTP 503: temporary broker failure",
+    },
+  ];
+
+  for (const fixture of cases) {
+    await t.step(fixture.mode, async () => {
+      const sponsor = await Identity.fromPassphrase(
+        `executor builtin permanent sponsor ${fixture.mode} ${crypto.randomUUID()}`,
+      );
+      const other = await Identity.fromPassphrase(
+        `executor builtin permanent other ${fixture.mode} ${crypto.randomUUID()}`,
+      );
+      const space = sponsor.did();
+      const servingOrigin = new URL("https://toolshed.example/");
+      const server = new Server({
+        authorizeSessionOpen(message) {
+          const value = (message.authorization as { principal?: unknown })
+            ?.principal;
+          return typeof value === "string" ? value : undefined;
+        },
+        sessionOpenAuth: {
+          audience: "did:key:z6Mk-executor-builtin-permanent-e2e",
+        },
+        protocolFlags: BUILTIN_FLAGS,
+        acl: { mode: "off", serviceDids: [space] },
+      });
+      const authorize = (
+        principal: string,
+      ): MemoryClient.SessionOpenAuthFactory =>
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal },
+      });
+      const seedStorage = LoopbackStorageManager.connectTo(
+        server,
+        BUILTIN_FLAGS,
+        { as: sponsor },
+      );
+      const seedRuntime = new Runtime({
+        apiUrl: servingOrigin,
+        patternEnvironment: { apiUrl: servingOrigin },
+        storageManager: seedStorage,
+        fetch: () => Promise.reject(new Error("seed must not fetch")),
+        externalSinkDisposition: "suppress",
+        experimental: {
+          persistentSchedulerState: true,
+          serverPrimaryExecution: true,
+        },
+      });
+      let observerClient: MemoryClient.Client | undefined;
+      let otherClient: MemoryClient.Client | undefined;
+      let executor:
+        | Awaited<ReturnType<DenoSpaceExecutorFactory["start"]>>
+        | undefined;
+      let unsubscribeAccepted = () => {};
+      let unsubscribeControl = () => {};
+      const events: string[] = [];
+      try {
+        const compiled = await seedRuntime.patternManager.compilePattern(
+          FETCH_BUILTIN_PROGRAM,
+          { space },
+        );
+        const tx = seedRuntime.edit();
+        const input = seedRuntime.getCell<string>(
+          space,
+          `executor-builtin-permanent-input-${fixture.mode}`,
+          undefined,
+          tx,
+        );
+        input.set("/initial");
+        const result = seedRuntime.getCell<Record<string, unknown>>(
+          space,
+          `executor-builtin-permanent-result-${fixture.mode}`,
+          undefined,
+          tx,
+        );
+        const handle = seedRuntime.run(tx, compiled, { url: input }, result);
+        assertEquals((await tx.commit()).error, undefined);
+        await handle.pull();
+        await seedRuntime.settled();
+        await seedRuntime.storageManager.synced();
+        await seedRuntime.dispose();
+
+        observerClient = await MemoryClient.connect({
+          transport: MemoryClient.loopback(server),
+          protocolFlags: BUILTIN_FLAGS,
+        });
+        const observer = await observerClient.mount(
+          space,
+          {},
+          authorize(sponsor.did()),
+        );
+        await observer.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: `of:${space}:execution-policy`,
+            value: { value: { version: 1, serverPrimaryExecution: true } },
+          }],
+        });
+        await observer.setExecutionDemand("", [result.sourceURI]);
+        await observer.watchSet([{
+          id: `executor-builtin-permanent-watch-${fixture.mode}`,
+          kind: "graph",
+          query: {
+            roots: [{
+              id: result.sourceURI,
+              selector: { path: [], schema: true },
+            }],
+          },
+        }]);
+        const lease = await server.acquireExecutionLease(space, "", {
+          preferredOriginSessionId: observer.sessionId,
+        });
+        assertExists(lease);
+
+        const claimed = Promise.withResolvers<ExecutionClaim>();
+        const initialResult = Promise.withResolvers<void>();
+        const terminalSettlement = Promise.withResolvers<ActionSettlement>();
+        const transientErrorStored = Promise.withResolvers<void>();
+        const revisedIds = new Set<string>();
+        const settlements: ActionSettlement[] = [];
+        let revokes = 0;
+        unsubscribeControl = observer.subscribeExecutionControl((event) => {
+          events.push(
+            event.type === "session.execution.settlement"
+              ? event.type + ":" + event.settlement.outcome + ":" +
+                (event.settlement.diagnosticCode ?? "")
+              : event.type,
+          );
+          if (event.type === "session.execution.claim.set") {
+            claimed.resolve(event.claim);
+          } else if (event.type === "session.execution.claim.revoke") {
+            revokes++;
+          } else if (event.type === "session.execution.settlement") {
+            settlements.push(event.settlement);
+            if (
+              fixture.mode !== "transient" &&
+              event.settlement.outcome === "unserved"
+            ) {
+              terminalSettlement.resolve(event.settlement);
+            }
+          }
+        });
+        unsubscribeAccepted = server.subscribeAcceptedCommits(
+          space,
+          (event) => {
+            for (const revision of event.revisions) {
+              revisedIds.add(revision.id);
+              void server.readDocument(space, revision.id).then((document) => {
+                if (containsStoredValue(document, "initial response")) {
+                  initialResult.resolve();
+                }
+                if (
+                  fixture.mode === "transient" &&
+                  containsStoredValue(document, fixture.storedError)
+                ) {
+                  transientErrorStored.resolve();
+                }
+              });
+            }
+          },
+        );
+
+        let brokerCalls = 0;
+        const factory = new DenoSpaceExecutorFactory({
+          server,
+          apiUrl: servingOrigin,
+          patternApiUrl: servingOrigin,
+          experimental: {
+            persistentSchedulerState: true,
+            serverPrimaryExecution: true,
+          },
+          createBuiltinBroker: () => ({
+            fetch() {
+              brokerCalls++;
+              events.push(`broker:${fixture.mode}:${brokerCalls}`);
+              if (fixture.mode === "broker-policy") {
+                throw new ServerBuiltinEgressError(
+                  "blocked-destination",
+                  "blocked destination fixture",
+                );
+              }
+              if (fixture.mode === "transient") {
+                return Promise.resolve({
+                  response: new Response("retry later", {
+                    status: 503,
+                    statusText: "temporary broker failure",
+                  }),
+                  finalUrl: new URL("/transient", servingOrigin),
+                  redirectCount: 0,
+                });
+              }
+              return Promise.resolve({
+                response: new Response("initial response"),
+                finalUrl: new URL("/initial", servingOrigin),
+                redirectCount: 0,
+              });
+            },
+          }),
+          onCandidateDiagnostic: (diagnostic) =>
+            events.push(`diagnostic:${diagnostic.diagnosticCode}`),
+        });
+        executor = await factory.start({
+          space,
+          branch: "",
+          lease,
+          pieces: [result.sourceURI],
+          onCrash(error) {
+            events.push(`crash:${error}`);
+          },
+        });
+        const liveClaim = await awaitBarrier(
+          claimed.promise,
+          `${fixture.mode} claim`,
+          events,
+        );
+
+        if (fixture.mode === "causal-mismatch") {
+          await awaitBarrier(
+            initialResult.promise,
+            "causal mismatch initial result",
+            events,
+          );
+          otherClient = await MemoryClient.connect({
+            transport: MemoryClient.loopback(server),
+            protocolFlags: BUILTIN_FLAGS,
+          });
+          const otherSession = await otherClient.mount(
+            space,
+            {},
+            authorize(other.did()),
+          );
+          await otherSession.transact({
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: input.sourceURI,
+              value: { value: "/mismatched" },
+            }],
+          });
+        }
+
+        const terminal = fixture.mode === "transient"
+          ? (await awaitBarrier(
+            transientErrorStored.promise,
+            "transient builtin error writeback",
+            events,
+          ),
+            undefined)
+          : await awaitBarrier(
+            terminalSettlement.promise,
+            `${fixture.mode} terminal settlement`,
+            events,
+          );
+        await executor.settle();
+        const storedDocuments = await Promise.all(
+          [...revisedIds].map((id) => server.readDocument(space, id)),
+        );
+        assertEquals(events.some((event) => event.startsWith("crash:")), false);
+        assertEquals(brokerCalls, 1);
+
+        if (fixture.mode === "transient") {
+          assertEquals(
+            storedDocuments.some((document) =>
+              containsStoredValue(document, fixture.storedError)
+            ),
+            true,
+          );
+          assertEquals(
+            observer.executionClaims.some((entry) =>
+              entry.actionId === liveClaim.actionId &&
+              entry.claimGeneration === liveClaim.claimGeneration
+            ),
+            true,
+          );
+          assertEquals(revokes, 0);
+        } else {
+          assertExists(terminal);
+          assertEquals(terminal.outcome, "unserved");
+          assertEquals(terminal.diagnosticCode, fixture.diagnosticCode);
+          assertEquals(
+            settlements.filter((entry) => entry.outcome === "unserved").length,
+            1,
+          );
+          assertEquals(revokes, 1);
+          assertEquals(
+            storedDocuments.some((document) =>
+              containsStoredValue(document, fixture.forbiddenStoredError)
+            ),
+            false,
+          );
+          assertEquals(observer.executionClaims, []);
+        }
+      } finally {
+        unsubscribeControl();
+        unsubscribeAccepted();
+        await executor?.stop();
+        await otherClient?.close();
+        await observerClient?.close();
+        await seedRuntime.dispose();
+        await seedStorage.close();
+        await server.close();
+      }
+    });
+  }
 });
 
 Deno.test("claimed builtins use host broker while client sinks observe pending and result", async () => {

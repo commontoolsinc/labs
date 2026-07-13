@@ -102,6 +102,50 @@ describe("Runtime.editWithRetry", () => {
     expect(cell.get()).toBe(0);
   });
 
+  it("does not retry a terminal execution firewall rejection", async () => {
+    let attempts = 0;
+    const { error } = await runtime.editWithRetry((t) => {
+      attempts++;
+      Object.defineProperty(t, "commit", {
+        configurable: true,
+        value: () =>
+          Promise.resolve({
+            error: {
+              name: "ExecutionActionFirewallError",
+              message: "claimed action settled unserved",
+            },
+          }),
+      });
+    }, 5);
+
+    expect(error?.name).toBe("ExecutionActionFirewallError");
+    expect(attempts).toBe(1);
+  });
+
+  it("still retries a conflict after terminal rejection handling", async () => {
+    let attempts = 0;
+    const { ok, error } = await runtime.editWithRetry((t) => {
+      attempts++;
+      if (attempts === 1) {
+        Object.defineProperty(t, "commit", {
+          configurable: true,
+          value: () =>
+            Promise.resolve({
+              error: {
+                name: "ConflictError",
+                message: "stale input",
+              },
+            }),
+        });
+      }
+      return attempts;
+    }, 2);
+
+    expect(error).toBeUndefined();
+    expect(ok).toBe(2);
+    expect(attempts).toBe(2);
+  });
+
   it("uses DEFAULT_MAX_RETRIES when not provided", async () => {
     const cell = runtime.getCell<number>(
       space,

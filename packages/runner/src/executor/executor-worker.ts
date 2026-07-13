@@ -7,6 +7,7 @@ import {
   type BranchName,
   canonicalSchedulerPieceIdForDemandRoot,
   type ExecutionClaim,
+  executionClaimIncarnationKey,
   type WireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import {
@@ -37,6 +38,7 @@ import { prepareExecutorDemandPiece } from "./writer-discovery.ts";
 import {
   createServerBuiltinBrokerClient,
   type ServerBuiltinBrokerClient,
+  ServerBuiltinUnservedError,
 } from "./server-builtin-channel.ts";
 import { getTransactionSourceAction } from "../storage/transaction-source-context.ts";
 import { SelectiveDemandWakeQueue } from "./selective-demand-wake.ts";
@@ -80,6 +82,10 @@ const candidateActions = new Map<string, Action>();
 const actionsBySchedulerIdentity = new Map<string, Action>();
 const pendingCausalActorMatches = new Map<string, boolean>();
 let causalActorMatchesByAction = new WeakMap<object, boolean>();
+let permanentBuiltinFailureByAction = new WeakMap<
+  object,
+  { claim: ExecutionClaim; diagnosticCode: string }
+>();
 const claimedAttempts = new ClaimedAttemptLifecycle<Action>();
 let claimsByAction = new WeakMap<object, ExecutionClaim>();
 let demandGeneration = 0;
@@ -183,6 +189,60 @@ const registerCandidateCausalActor = (
   return matchesSponsor;
 };
 
+const permanentUnservedReasonForAction = (
+  action: object,
+  claim: ExecutionClaim,
+): string | undefined => {
+  const failure = permanentBuiltinFailureByAction.get(action);
+  const reason = failure !== undefined &&
+      executionClaimIncarnationKey(failure.claim) ===
+        executionClaimIncarnationKey(claim)
+    ? failure.diagnosticCode
+    : undefined;
+  return reason;
+};
+
+const recordPermanentBuiltinFailure = (
+  action: object,
+  claim: ExecutionClaim,
+  error: unknown,
+): void => {
+  if (!(error instanceof ServerBuiltinUnservedError)) return;
+  const live = claimsByAction.get(action);
+  if (
+    live === undefined ||
+    executionClaimIncarnationKey(live) !== executionClaimIncarnationKey(claim)
+  ) {
+    return;
+  }
+  const existing = permanentBuiltinFailureByAction.get(action);
+  if (
+    existing !== undefined &&
+    executionClaimIncarnationKey(existing.claim) ===
+      executionClaimIncarnationKey(claim)
+  ) {
+    return;
+  }
+  permanentBuiltinFailureByAction.set(action, {
+    claim,
+    diagnosticCode: error.diagnosticCode,
+  });
+};
+
+const clearPermanentBuiltinFailure = (
+  action: object,
+  claim: ExecutionClaim,
+): void => {
+  const failure = permanentBuiltinFailureByAction.get(action);
+  if (
+    failure !== undefined &&
+    executionClaimIncarnationKey(failure.claim) ===
+      executionClaimIncarnationKey(claim)
+  ) {
+    permanentBuiltinFailureByAction.delete(action);
+  }
+};
+
 const finishClaimedAttempt = (
   claim: ExecutionClaim,
   sourceAction: object,
@@ -198,6 +258,7 @@ const releaseClaimedAttempt = (
   // settlement, but later reactive reruns retain this claim. Release authority
   // whenever the action still names the exact incarnation, independently of
   // whether an activation lifecycle record remains.
+  clearPermanentBuiltinFailure(sourceAction, claim);
   finishClaimedAttempt(claim, sourceAction);
   if (!deleteExactClaimForAction(claimsByAction, claim, sourceAction)) return;
   worker.postMessage({ type, claim, diagnosticCode });
@@ -310,6 +371,10 @@ const replaceDemand = async (
     actionsBySchedulerIdentity.clear();
     pendingCausalActorMatches.clear();
     causalActorMatchesByAction = new WeakMap<object, boolean>();
+    permanentBuiltinFailureByAction = new WeakMap<
+      object,
+      { claim: ExecutionClaim; diagnosticCode: string }
+    >();
     claimsByAction = new WeakMap<object, ExecutionClaim>();
   }
   for (const [pieceId, cell] of demanded) {
@@ -356,6 +421,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     branch,
     builtinBrokerAvailable: true,
     claimForAction: (action) => claimsByAction.get(action),
+    permanentUnservedReasonForAction,
     onCandidate: (candidate, sourceAction) => {
       candidateActions.set(
         claimKey(candidate.claimKey),
@@ -461,9 +527,39 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
         ? "allow"
         : "suppress",
   }));
-  runtime.installServerBuiltinFetch((builtinId, rawUrl, init) =>
-    builtinBroker!.fetch(builtinId, rawUrl, init)
-  );
+  runtime.installServerBuiltinFetch((builtinId, rawUrl, init) => {
+    // Capture both object and exact claim before crossing an async broker
+    // boundary. Broker IPC never receives a causal actor identity.
+    const sourceAction = getTransactionSourceAction();
+    const claim = sourceAction === undefined
+      ? undefined
+      : claimsByAction.get(sourceAction);
+    if (
+      sourceAction !== undefined && claim !== undefined &&
+      causalActorMatchesByAction.get(sourceAction) !== true
+    ) {
+      const error = new ServerBuiltinUnservedError(
+        "builtin-causal-actor-mismatch",
+        "server builtin causal actor does not match the lease sponsor",
+      );
+      recordPermanentBuiltinFailure(sourceAction, claim, error);
+      return Promise.reject(error);
+    }
+    try {
+      const pending = builtinBroker!.fetch(builtinId, rawUrl, init);
+      return sourceAction === undefined || claim === undefined
+        ? pending
+        : pending.catch((error) => {
+          recordPermanentBuiltinFailure(sourceAction, claim, error);
+          throw error;
+        });
+    } catch (error) {
+      if (sourceAction !== undefined && claim !== undefined) {
+        recordPermanentBuiltinFailure(sourceAction, claim, error);
+      }
+      return Promise.reject(error);
+    }
+  });
   runtime.scheduler.setActionCommitRejectionHandler((
     action,
     error,
@@ -573,6 +669,10 @@ const stop = async (): Promise<void> => {
   actionsBySchedulerIdentity.clear();
   pendingCausalActorMatches.clear();
   causalActorMatchesByAction = new WeakMap<object, boolean>();
+  permanentBuiltinFailureByAction = new WeakMap<
+    object,
+    { claim: ExecutionClaim; diagnosticCode: string }
+  >();
 };
 
 const handle = async (request: WorkerRequest): Promise<void> => {

@@ -127,6 +127,7 @@ import type {
   WriteStackTraceMatcher,
 } from "./storage/write-stack-trace.ts";
 import { getTransactionSourceAction } from "./storage/transaction-source-context.ts";
+import { isTerminalRejection } from "./storage/rejection.ts";
 import {
   getWriteStackTrace,
   setWriteStackTraceMatchers,
@@ -1468,6 +1469,7 @@ export class Runtime {
     this.prepareTxForCommit(tx);
     return tx.commit().then(async ({ error }) => {
       if (error) {
+        if (isTerminalRejection(error)) return { error };
         if (maxRetries > 0) {
           // A CONFLICT means this replica is behind the authoritative
           // version: re-running immediately re-reads the same stale local
