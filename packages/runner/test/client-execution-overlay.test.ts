@@ -28,6 +28,10 @@ const signer = await Identity.fromPassphrase(
 const SPACE = signer.did() as MemorySpace;
 const INPUT = "of:client-overlay-input" as URI;
 const OUTPUT = "of:client-overlay-output" as URI;
+const CHAIN_SOURCE = "of:client-overlay-chain-source" as URI;
+const CHAIN_UNRELATED = "of:client-overlay-chain-unrelated" as URI;
+const CHAIN_INTERMEDIATE = "of:client-overlay-chain-intermediate" as URI;
+const CHAIN_DOWNSTREAM = "of:client-overlay-chain-downstream" as URI;
 const sourceAction = {};
 
 const claim: ExecutionClaim = {
@@ -109,6 +113,46 @@ const observation = () => ({
   },
   status: "success" as const,
 });
+
+const observationFor = (
+  actionClaim: ExecutionClaim,
+  reads: readonly URI[],
+  writes: readonly URI[],
+) => {
+  const address = (id: URI) => ({
+    space: SPACE,
+    scope: "space" as const,
+    id,
+    path: ["value"],
+  });
+  return {
+    ...observation(),
+    pieceId: actionClaim.pieceId,
+    actionId: actionClaim.actionId,
+    actionKind: actionClaim.actionKind,
+    implementationFingerprint: actionClaim.implementationFingerprint,
+    runtimeFingerprint: actionClaim.runtimeFingerprint,
+    reads: reads.map(address),
+    actualChangedWrites: writes.map(address),
+    currentKnownWrites: writes.map(address),
+    completeActionScopeSummary: {
+      version: 1 as const,
+      complete: true as const,
+      implementationFingerprint: actionClaim.implementationFingerprint,
+      runtimeFingerprint: actionClaim.runtimeFingerprint,
+      piece: {
+        space: SPACE,
+        scope: "space" as const,
+        id: actionClaim.pieceId.slice("space:".length),
+        path: ["value"],
+      },
+      reads: reads.map(address),
+      writes: writes.map(address),
+      materializerWriteEnvelopes: [],
+      directOutputs: writes.map(address),
+    },
+  };
+};
 
 const emptySync = (overrides: Partial<SessionSync> = {}): SessionSync => ({
   type: "sync",
@@ -263,12 +307,13 @@ async function writeClaimedOutput(
 function beginSourceInputWrite(
   storage: StorageManager,
   value: FabricValue,
+  id: URI = INPUT,
 ): Promise<unknown> {
   const tx = storage.edit();
   const writer = tx.writer(SPACE);
   if (writer.error) throw writer.error;
   const written = writer.ok.write({
-    id: INPUT,
+    id,
     type: "application/json",
     path: ["value"],
   }, value);
@@ -277,11 +322,47 @@ function beginSourceInputWrite(
 }
 
 function visibleOutput(storage: StorageManager): unknown {
+  return visibleValue(storage, OUTPUT);
+}
+
+function visibleValue(storage: StorageManager, id: URI): unknown {
   const document = storage.open(SPACE).replica.get({
-    id: OUTPUT,
+    id,
     type: "application/json",
   })?.is as { value?: unknown } | undefined;
   return document?.value;
+}
+
+async function writeClaimedChainValue(
+  storage: StorageManager,
+  action: object,
+  actionClaim: ExecutionClaim,
+  reads: readonly URI[],
+  output: URI,
+  value: FabricValue,
+): Promise<void> {
+  const tx = storage.edit();
+  tx.sourceAction = action;
+  tx.setSchedulerObservation?.(observationFor(actionClaim, reads, [output]));
+  for (const id of reads) {
+    const read = tx.read({
+      space: SPACE,
+      id,
+      type: "application/json",
+      path: ["value"],
+    });
+    if (read.error) throw read.error;
+  }
+  const writer = tx.writer(SPACE);
+  if (writer.error) throw writer.error;
+  const written = writer.ok.write({
+    id: output,
+    type: "application/json",
+    path: ["value"],
+  }, value);
+  if (written.error) throw written.error;
+  const result = await tx.commit();
+  if (result.error) throw new Error(result.error.message);
 }
 
 Deno.test("claimed client computation stays visible locally with zero wire commit", async () => {
@@ -799,6 +880,216 @@ Deno.test("two rapid source bases require settlement through the later basis", a
     }));
     await waitFor(() => visibleOutput(storage) === undefined);
   } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("chained claimed overlays expose the accepted non-transitive basis window and converge", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const intermediateClaim: ExecutionClaim = {
+    ...claim,
+    pieceId: "space:of:client-overlay-chain-piece",
+    actionId: "action:client-overlay-chain-intermediate",
+    implementationFingerprint: "impl:client-overlay-chain-intermediate",
+  };
+  const downstreamClaim: ExecutionClaim = {
+    ...claim,
+    pieceId: "space:of:client-overlay-chain-piece",
+    actionId: "action:client-overlay-chain-downstream",
+    implementationFingerprint: "impl:client-overlay-chain-downstream",
+  };
+  const intermediateAction = {};
+  const downstreamAction = {};
+  const factory = new OverlaySessionFactory();
+  factory.claims = [intermediateClaim, downstreamClaim];
+  const sourceApplied = Promise.withResolvers<AppliedCommit>();
+  factory.onTransact = () => sourceApplied.promise;
+  const storage = OverlayStorageManager.connect(factory);
+  const counts = getLoggerCountsBreakdown()["storage.v2"] ?? {};
+  const createdBaseline = counts["execution-overlay-created"]?.debug ?? 0;
+  const divergenceBaseline = counts["execution-overlay-divergence"]?.debug ??
+    0;
+  try {
+    await storage.open(SPACE).sync(CHAIN_SOURCE);
+    const sourceCommit = beginSourceInputWrite(
+      storage,
+      "source-new",
+      CHAIN_SOURCE,
+    );
+    await waitFor(() => factory.commits.length === 1);
+    factory.view.push(emptySync({
+      toSeq: 12,
+      upserts: [{
+        branch: "",
+        id: CHAIN_UNRELATED,
+        seq: 12,
+        doc: Object.freeze({ value: "unrelated-new" }),
+      }, {
+        branch: "",
+        id: CHAIN_INTERMEDIATE,
+        seq: 7,
+        doc: Object.freeze({ value: "intermediate-stale" }),
+      }, {
+        branch: "",
+        id: CHAIN_DOWNSTREAM,
+        seq: 8,
+        doc: Object.freeze({ value: "downstream-stale" }),
+      }],
+    }));
+    await waitFor(() =>
+      visibleValue(storage, CHAIN_UNRELATED) === "unrelated-new"
+    );
+    assertEquals(
+      visibleValue(storage, CHAIN_INTERMEDIATE),
+      "intermediate-stale",
+    );
+    assertEquals(
+      visibleValue(storage, CHAIN_DOWNSTREAM),
+      "downstream-stale",
+    );
+    await writeClaimedChainValue(
+      storage,
+      intermediateAction,
+      intermediateClaim,
+      [CHAIN_SOURCE],
+      CHAIN_INTERMEDIATE,
+      "intermediate-fresh",
+    );
+    await writeClaimedChainValue(
+      storage,
+      downstreamAction,
+      downstreamClaim,
+      [CHAIN_INTERMEDIATE, CHAIN_UNRELATED],
+      CHAIN_DOWNSTREAM,
+      "downstream-fresh",
+    );
+    sourceApplied.resolve({ seq: 11, branch: "", revisions: [] });
+    await sourceCommit;
+    assertEquals(
+      visibleValue(storage, CHAIN_DOWNSTREAM),
+      "downstream-fresh",
+    );
+    assertEquals(factory.commits.length, 1);
+    assertEquals(
+      getLoggerCountsBreakdown()["storage.v2"]?.[
+        "execution-overlay-created"
+      ]?.debug ?? 0,
+      createdBaseline + 2,
+    );
+
+    // The direct source commit receives S(L)=11. The downstream overlay read
+    // the speculative intermediate plus an unrelated confirmed input at 12.
+    // Its direct scalar basis is therefore 12, not the intermediate overlay's
+    // transitive dependency on S(L).
+    // The server can settle the downstream run at basis 12 after reading the
+    // stale confirmed intermediate. Dropping the overlay intentionally exposes
+    // that stale result for the accepted v1 non-transitive window.
+    factory.view.push(emptySync({
+      fromSeq: 12,
+      toSeq: 13,
+      upserts: [{
+        branch: "",
+        id: CHAIN_DOWNSTREAM,
+        seq: 13,
+        doc: { value: "downstream-from-stale-intermediate" },
+      }],
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim: downstreamClaim,
+            inputBasisSeq: toInputBasisSeq(12),
+            outcome: "committed",
+            acceptedCommitSeq: 13 as AcceptedCommitSeq,
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      visibleValue(storage, CHAIN_DOWNSTREAM) ===
+        "downstream-from-stale-intermediate"
+    );
+    assertEquals(
+      getLoggerCountsBreakdown()["storage.v2"]?.[
+        "execution-overlay-divergence"
+      ]?.debug ?? 0,
+      divergenceBaseline + 1,
+    );
+
+    // The intermediate then settles from the direct source basis. Once the
+    // downstream reruns against it, its next committed settlement converges the
+    // visible state deterministically without another client overlay.
+    factory.view.push(emptySync({
+      fromSeq: 13,
+      toSeq: 14,
+      upserts: [{
+        branch: "",
+        id: CHAIN_INTERMEDIATE,
+        seq: 14,
+        doc: { value: "intermediate-fresh" },
+      }],
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim: intermediateClaim,
+            inputBasisSeq: toInputBasisSeq(11),
+            outcome: "committed",
+            acceptedCommitSeq: 14 as AcceptedCommitSeq,
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      visibleValue(storage, CHAIN_INTERMEDIATE) === "intermediate-fresh"
+    );
+    assertEquals(
+      visibleValue(storage, CHAIN_DOWNSTREAM),
+      "downstream-from-stale-intermediate",
+    );
+
+    factory.view.push(emptySync({
+      fromSeq: 14,
+      toSeq: 15,
+      upserts: [{
+        branch: "",
+        id: CHAIN_DOWNSTREAM,
+        seq: 15,
+        doc: { value: "downstream-fresh" },
+      }],
+      execution: {
+        fromFeedSeq: 3,
+        toFeedSeq: 4,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim: downstreamClaim,
+            inputBasisSeq: toInputBasisSeq(14),
+            outcome: "committed",
+            acceptedCommitSeq: 15 as AcceptedCommitSeq,
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      visibleValue(storage, CHAIN_DOWNSTREAM) === "downstream-fresh"
+    );
+    assertEquals(
+      getLoggerCountsBreakdown()["storage.v2"]?.[
+        "execution-overlay-divergence"
+      ]?.debug ?? 0,
+      divergenceBaseline + 1,
+    );
+  } finally {
+    sourceApplied.resolve({ seq: 11, branch: "", revisions: [] });
     await storage.close();
     resetServerPrimaryExecutionConfig();
   }

@@ -3869,6 +3869,20 @@ class SpaceReplica implements ISpaceReplica {
     );
     const unresolvedBasisLocalSeqs = new Set<number>();
     for (const read of commit.reads.pending) {
+      if (this.#claimedOverlays.has(read.localSeq)) {
+        // A claimed-overlay dependency never receives a confirmation-assigned
+        // sequence of its own. Settlement basis is deliberately direct (not a
+        // transitive causal frontier), so retain only the confirmed base that
+        // the server can read beneath that overlay. Importing the upstream
+        // overlay's source dependencies would make chained overlays wait
+        // forever and would exceed the v1 scalar-basis contract.
+        basisSeq = Math.max(
+          basisSeq,
+          this.#docs.get(docKey(read.id as URI, read.scope))?.confirmed.seq ??
+            0,
+        );
+        continue;
+      }
       const confirmed = this.#confirmedSeqByLocalSeq.get(read.localSeq);
       if (confirmed === undefined) {
         unresolvedBasisLocalSeqs.add(read.localSeq);
