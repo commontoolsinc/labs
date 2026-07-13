@@ -1,8 +1,11 @@
 import { assertAlmostEquals, assertEquals, assertThrows } from "@std/assert";
 import {
+  analyzeCounterbalancedRendererCpu,
+  assertCounterbalancedRendererCpu,
   type CPUProfile,
   deltaRendererProcessCpu,
   parseBrowserProcessMetrics,
+  parseCpuBenchmarkEventCount,
   summarizeCPUProfile,
 } from "./cdp-profiler.ts";
 
@@ -258,22 +261,122 @@ Deno.test("deltaRendererProcessCpu rejects renderer churn and reset counters", (
   );
 });
 
-Deno.test("deltaRendererProcessCpu conservatively includes newly started renderers", () => {
-  const delta = deltaRendererProcessCpu(
-    {
-      processes: [{ type: "renderer", id: 1, cpuTimeSeconds: 2 }],
-    },
-    {
-      processes: [
-        { type: "renderer", id: 1, cpuTimeSeconds: 3 },
-        { type: "renderer", id: 2, cpuTimeSeconds: 0.5 },
-      ],
-    },
+Deno.test("deltaRendererProcessCpu rejects newly started renderers", () => {
+  assertThrows(
+    () =>
+      deltaRendererProcessCpu(
+        {
+          processes: [{ type: "renderer", id: 1, cpuTimeSeconds: 2 }],
+        },
+        {
+          processes: [
+            { type: "renderer", id: 1, cpuTimeSeconds: 3 },
+            { type: "renderer", id: 2, cpuTimeSeconds: 0.5 },
+          ],
+        },
+      ),
+    Error,
+    "renderer process 2 started during measurement",
   );
+});
 
-  assertAlmostEquals(delta.totalCpuTimeUs, 1_500_000);
-  assertEquals(delta.renderers, [
-    { id: 1, cpuTimeUs: 1_000_000, startedDuringMeasurement: false },
-    { id: 2, cpuTimeUs: 500_000, startedDuringMeasurement: true },
+Deno.test("parseCpuBenchmarkEventCount accepts only bounded canonical integers", () => {
+  assertEquals(parseCpuBenchmarkEventCount(undefined), 500);
+  assertEquals(parseCpuBenchmarkEventCount("500"), 500);
+  assertEquals(parseCpuBenchmarkEventCount("2000"), 2_000);
+  for (
+    const value of [
+      "",
+      "0",
+      "499",
+      "2001",
+      "500.5",
+      "Infinity",
+      "500events",
+      " 500",
+      "500 ",
+      "0500",
+    ]
+  ) {
+    assertThrows(
+      () => parseCpuBenchmarkEventCount(value),
+      Error,
+      "CF_SERVER_EXECUTION_CPU_EVENTS",
+    );
+  }
+});
+
+Deno.test("counterbalanced renderer CPU maps ABBA and BAAB phases exactly", () => {
+  const analysis = analyzeCounterbalancedRendererCpu([
+    100,
+    104,
+    106,
+    100,
+    105,
+    100,
+    100,
+    105,
   ]);
+  assertEquals(analysis.abba.disabledMeanUsPerEvent, 100);
+  assertEquals(analysis.abba.enabledMeanUsPerEvent, 105);
+  assertEquals(analysis.abba.enabledToDisabledRatio, 1.05);
+  assertEquals(analysis.baab.disabledMeanUsPerEvent, 100);
+  assertEquals(analysis.baab.enabledMeanUsPerEvent, 105);
+  assertEquals(analysis.baab.enabledToDisabledRatio, 1.05);
+  assertEquals(analysis.combined.disabledMeanUsPerEvent, 100);
+  assertEquals(analysis.combined.enabledMeanUsPerEvent, 105);
+  assertEquals(analysis.combined.enabledToDisabledRatio, 1.05);
+});
+
+Deno.test("counterbalanced renderer CPU rejects regression and noisy replicates", () => {
+  assertThrows(
+    () =>
+      assertCounterbalancedRendererCpu([
+        100,
+        112,
+        112,
+        100,
+        112,
+        100,
+        100,
+        112,
+      ]),
+    Error,
+    "exceeded 1.1",
+  );
+  assertThrows(
+    () =>
+      assertCounterbalancedRendererCpu([
+        100,
+        100,
+        100,
+        116,
+        100,
+        100,
+        116,
+        100,
+      ]),
+    Error,
+    "inconclusive/noisy",
+  );
+  assertThrows(
+    () => analyzeCounterbalancedRendererCpu([100, 100]),
+    Error,
+    "exactly eight",
+  );
+  assertThrows(
+    () =>
+      analyzeCounterbalancedRendererCpu([
+        100,
+        100,
+        100,
+        100,
+        100,
+        Number.NaN,
+        100,
+        100,
+      ]),
+    Error,
+    "positive finite",
+  );
 });

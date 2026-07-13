@@ -72,6 +72,168 @@ export interface RendererProcessCpuDelta {
   }>;
 }
 
+export interface CounterbalancedRendererCpuBlock {
+  readonly disabledMeanUsPerEvent: number;
+  readonly enabledMeanUsPerEvent: number;
+  readonly enabledToDisabledRatio: number;
+  readonly disabledReplicateSpread: number;
+  readonly enabledReplicateSpread: number;
+}
+
+export interface CounterbalancedRendererCpuAnalysis {
+  readonly abba: CounterbalancedRendererCpuBlock;
+  readonly baab: CounterbalancedRendererCpuBlock;
+  readonly combined: Omit<
+    CounterbalancedRendererCpuBlock,
+    "disabledReplicateSpread" | "enabledReplicateSpread"
+  >;
+}
+
+/** Parse the opt-in CPU workload without silently accepting partial numbers. */
+export function parseCpuBenchmarkEventCount(
+  value: string | undefined,
+  options: {
+    defaultValue?: number;
+    minimum?: number;
+    maximum?: number;
+  } = {},
+): number {
+  const defaultValue = options.defaultValue ?? 500;
+  const minimum = options.minimum ?? 500;
+  const maximum = options.maximum ?? 2_000;
+  const label = "CF_SERVER_EXECUTION_CPU_EVENTS";
+  const checkedBound = (bound: number, name: string): void => {
+    if (!Number.isSafeInteger(bound) || bound <= 0) {
+      throw new TypeError(`${label} ${name} must be a positive safe integer`);
+    }
+  };
+  checkedBound(defaultValue, "default");
+  checkedBound(minimum, "minimum");
+  checkedBound(maximum, "maximum");
+  if (minimum > maximum || defaultValue < minimum || defaultValue > maximum) {
+    throw new RangeError(`${label} parser bounds are inconsistent`);
+  }
+  if (value === undefined) return defaultValue;
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new TypeError(`${label} must be a canonical decimal integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new RangeError(
+      `${label} must be between ${minimum} and ${maximum}, inclusive`,
+    );
+  }
+  return parsed;
+}
+
+const arithmeticMean = (values: readonly number[]): number =>
+  values.reduce((total, value) => total + value, 0) / values.length;
+
+const replicateSpread = (values: readonly number[]): number => {
+  const minimum = Math.min(...values);
+  return (Math.max(...values) - minimum) / minimum;
+};
+
+const rendererCpuBlock = (
+  disabled: readonly [number, number],
+  enabled: readonly [number, number],
+): CounterbalancedRendererCpuBlock => {
+  const disabledMeanUsPerEvent = arithmeticMean(disabled);
+  const enabledMeanUsPerEvent = arithmeticMean(enabled);
+  return {
+    disabledMeanUsPerEvent,
+    enabledMeanUsPerEvent,
+    enabledToDisabledRatio: enabledMeanUsPerEvent /
+      disabledMeanUsPerEvent,
+    disabledReplicateSpread: replicateSpread(disabled),
+    enabledReplicateSpread: replicateSpread(enabled),
+  };
+};
+
+/**
+ * Interpret eight renderer-CPU phases as ABBA followed by BAAB. Each value is
+ * CPU microseconds per event; A is policy disabled and B is policy enabled.
+ */
+export function analyzeCounterbalancedRendererCpu(
+  phasesUsPerEvent: readonly number[],
+): CounterbalancedRendererCpuAnalysis {
+  if (phasesUsPerEvent.length !== 8) {
+    throw new Error(
+      "counterbalanced CPU analysis requires exactly eight phases",
+    );
+  }
+  for (const value of phasesUsPerEvent) {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(
+        "counterbalanced CPU phases must be positive finite values",
+      );
+    }
+  }
+  const [p0, p1, p2, p3, p4, p5, p6, p7] = phasesUsPerEvent as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const abba = rendererCpuBlock([p0, p3], [p1, p2]);
+  const baab = rendererCpuBlock([p5, p6], [p4, p7]);
+  const disabledMeanUsPerEvent = arithmeticMean([p0, p3, p5, p6]);
+  const enabledMeanUsPerEvent = arithmeticMean([p1, p2, p4, p7]);
+  return {
+    abba,
+    baab,
+    combined: {
+      disabledMeanUsPerEvent,
+      enabledMeanUsPerEvent,
+      enabledToDisabledRatio: enabledMeanUsPerEvent /
+        disabledMeanUsPerEvent,
+    },
+  };
+}
+
+/** Fail the CPU gate on regression; classify unstable replicates as noisy. */
+export function assertCounterbalancedRendererCpu(
+  phasesUsPerEvent: readonly number[],
+  options: {
+    maximumEnabledRatio?: number;
+    maximumReplicateSpread?: number;
+  } = {},
+): CounterbalancedRendererCpuAnalysis {
+  const maximumEnabledRatio = options.maximumEnabledRatio ?? 1.1;
+  const maximumReplicateSpread = options.maximumReplicateSpread ?? 0.15;
+  const analysis = analyzeCounterbalancedRendererCpu(phasesUsPerEvent);
+  for (
+    const [label, block] of [
+      ["ABBA", analysis.abba],
+      ["BAAB", analysis.baab],
+    ] as const
+  ) {
+    if (
+      block.disabledReplicateSpread > maximumReplicateSpread ||
+      block.enabledReplicateSpread > maximumReplicateSpread
+    ) {
+      throw new Error(
+        `${label} renderer CPU is inconclusive/noisy: replicate spread exceeded ${maximumReplicateSpread}`,
+      );
+    }
+    if (block.enabledToDisabledRatio > maximumEnabledRatio) {
+      throw new Error(
+        `${label} enabled/disabled renderer CPU ratio ${block.enabledToDisabledRatio} exceeded ${maximumEnabledRatio}`,
+      );
+    }
+  }
+  if (analysis.combined.enabledToDisabledRatio > maximumEnabledRatio) {
+    throw new Error(
+      `combined enabled/disabled renderer CPU ratio ${analysis.combined.enabledToDisabledRatio} exceeded ${maximumEnabledRatio}`,
+    );
+  }
+  return analysis;
+}
+
 /**
  * Parse cumulative process CPU counters from `SystemInfo.getProcessInfo`.
  * Chrome does not expose the Performance domain on dedicated-worker targets.
@@ -141,9 +303,8 @@ export function parseBrowserProcessMetrics(
 
 /**
  * Match renderer counters by process id and return their CPU delta. A renderer
- * absent from the baseline necessarily started during the interval, so its
- * entire cumulative CPU counter is conservatively included. A renderer that
- * disappears still fails closed because its final counter is unknowable.
+ * absent from either snapshot makes the interval incomparable and therefore
+ * fails closed. Counters must also remain monotonic.
  */
 export function deltaRendererProcessCpu(
   before: BrowserProcessMetrics,
@@ -196,13 +357,9 @@ export function deltaRendererProcessCpu(
       startedDuringMeasurement: false,
     });
   }
-  for (const [id, afterSeconds] of afterRenderers) {
+  for (const [id] of afterRenderers) {
     if (!beforeRenderers.has(id)) {
-      renderers.push({
-        id,
-        cpuTimeUs: afterSeconds * 1_000_000,
-        startedDuringMeasurement: true,
-      });
+      throw new Error(`renderer process ${id} started during measurement`);
     }
   }
   renderers.sort((left, right) => left.id - right.id);
@@ -316,14 +473,17 @@ export class CdpWorkerProfiler {
    * `AstralBrowser#wsEndpoint()`), discover all page targets, and auto-attach
    * to their dedicated workers.
    */
-  static async connect(browserWsEndpoint: string): Promise<CdpWorkerProfiler> {
+  static async connect(
+    browserWsEndpoint: string,
+    options: { attachWorkers?: boolean } = {},
+  ): Promise<CdpWorkerProfiler> {
     const ws = new WebSocket(browserWsEndpoint);
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve();
       ws.onerror = () => reject(new Error("Could not connect to browser CDP"));
     });
     const profiler = new CdpWorkerProfiler(ws);
-    await profiler.#discoverAndAttach();
+    if (options.attachWorkers !== false) await profiler.#discoverAndAttach();
     return profiler;
   }
 
