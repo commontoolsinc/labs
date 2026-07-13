@@ -135,7 +135,10 @@ import {
   visitFactoryForTraversal,
 } from "./builder/factory-traversal.ts";
 import type { FactoryContract } from "./factory-contract.ts";
-import { materializeScheduledFactoryInputs } from "./factory-input-preparation.ts";
+import {
+  materializeScheduledFactoryInputs,
+  prepareFactoryWithReadinessRetries,
+} from "./factory-input-preparation.ts";
 import {
   FactoryArtifactUnavailableError,
   type MaterializedFactory,
@@ -3672,7 +3675,7 @@ export class Runner {
       artifactSpace: MemorySpace,
       selectedGeneration: number,
     ): void => {
-      const task = prepareFactory(selection, {
+      const task = prepareFactoryWithReadinessRetries(selection, {
         runtime: this.runtime,
         artifactSpace,
         expected,

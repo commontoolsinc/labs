@@ -44,7 +44,7 @@ function retryReadinessOf(
     : undefined;
 }
 
-async function waitForFactoryReadiness(
+export async function prepareFactoryWithReadinessRetries(
   value: unknown,
   context: FactoryMaterializationContext,
 ): Promise<void> {
@@ -318,7 +318,10 @@ export function materializeScheduledFactoryInputs(
       } catch (error) {
         if (!(error instanceof FactoryArtifactUnavailableError)) throw error;
         readiness.push(() =>
-          waitForFactoryReadiness(currentValue, materializationContext)
+          prepareFactoryWithReadinessRetries(
+            currentValue,
+            materializationContext,
+          )
         );
         return currentValue;
       }

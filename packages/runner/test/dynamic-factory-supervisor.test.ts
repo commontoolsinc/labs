@@ -678,6 +678,72 @@ describe("dynamic Factory@1 supervisor", () => {
     expect(executions).toEqual([{ factory: "B", value: 6 }]);
   });
 
+  it("retries a transient direct cold load under the bounded readiness policy", async () => {
+    const executions: Execution[] = [];
+    const { factoryA } = makeFactories(executions);
+    let loadAttempts = 0;
+    let retryGates = 0;
+    runtime.patternManager.loadArtifactByIdentity = (
+      identity,
+      symbol,
+    ) => {
+      loadAttempts++;
+      expect({ identity, symbol }).toEqual(REFS.a);
+      if (loadAttempts < 3) {
+        return Promise.reject(Object.assign(
+          new Error(`transient direct factory load ${loadAttempts}`),
+          {
+            readyToRetry: () => {
+              retryGates++;
+              return Promise.resolve();
+            },
+          },
+        ));
+      }
+      warmArtifacts.set(refKey(identity, symbol), factoryA);
+      return Promise.resolve(factoryA);
+    };
+
+    const selector = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-transient-cold-selector",
+      undefined,
+      tx,
+    );
+    selector.set(createFactoryShell(sealFactoryState(factoryA)));
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "dynamic-factory-transient-cold-result",
+      RESULT_SCHEMA,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outerPattern(),
+      { factory: selector, value: 7 },
+      resultCell,
+    );
+    const recovered = Promise.withResolvers<{ result: number }>();
+    const cancelObservation = result.sink((current) => {
+      if (current?.result === 70) recovered.resolve(current);
+    });
+    try {
+      await commitAndRenew();
+
+      expect(
+        await within(
+          recovered.promise,
+          "transient direct factory recovery",
+        ),
+      ).toEqual({ result: 70 });
+      expect(loadAttempts).toBe(3);
+      expect(retryGates).toBe(2);
+      expect(executions).toEqual([{ factory: "A", value: 7 }]);
+    } finally {
+      cancelObservation();
+    }
+  });
+
   it("does not revive a cold selection after its owning piece is stopped", async () => {
     const executions: Execution[] = [];
     const { factoryA } = makeFactories(executions);
