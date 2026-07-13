@@ -45,7 +45,7 @@ const report = (
 const safeDetach = (
   detach: () => void,
   warn: (...args: unknown[]) => void,
-): (() => void) => {
+): () => void => {
   let detached = false;
   return () => {
     if (detached) return;
