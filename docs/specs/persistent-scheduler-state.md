@@ -1198,7 +1198,9 @@ are accepted and served.
   local cache state.
 - Implemented: retain at most 32 exact-session contexts per principal/action.
   Eviction is conservative because a missing session snapshot runs fresh;
-  space/user contexts are unaffected.
+  space/user contexts are unaffected. Eviction removes orphaned observation
+  payload rows while retaining replay status and normalized replay payloads for
+  idempotent retry validation.
 - Add garbage collection keyed by piece generation, branch lifecycle, and
   superseded action snapshots.
 - Add metrics for cold start skipped actions, unknown-action fallback, and

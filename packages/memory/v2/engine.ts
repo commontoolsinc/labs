@@ -3880,6 +3880,19 @@ function invalidateSchedulerExecutionContexts(
       ...statementParams,
       execution_context_key: executionContextKey,
     };
+    // The snapshot is the canonical owner of the observation payload row.
+    // Capture its identity before removing the active context so the payload
+    // can be collected once no scheduler indexes refer to it.
+    const observations = engine.database.prepare(`
+      SELECT observation_id
+      FROM scheduler_action_snapshot
+      WHERE branch = :branch
+        AND owner_space = :owner_space
+        AND piece_id = :piece_id
+        AND process_generation = :process_generation
+        AND action_id = :action_id
+        AND execution_context_key = :execution_context_key
+    `).all(params) as { observation_id: number }[];
     for (
       const table of [
         "scheduler_read_index",
@@ -3898,7 +3911,46 @@ function invalidateSchedulerExecutionContexts(
           AND execution_context_key = :execution_context_key
       `).run(params);
     }
+    for (const { observation_id } of observations) {
+      retireSchedulerObservationIfOrphaned(engine, observation_id);
+    }
   }
+}
+
+function retireSchedulerObservationIfOrphaned(
+  engine: Engine,
+  observationId: number,
+): void {
+  const row = engine.database.prepare(`
+    SELECT
+      EXISTS(
+        SELECT 1 FROM scheduler_action_snapshot
+        WHERE observation_id = :observation_id
+      ) OR EXISTS(
+        SELECT 1 FROM scheduler_read_index
+        WHERE observation_id = :observation_id
+      ) OR EXISTS(
+        SELECT 1 FROM scheduler_write_index
+        WHERE observation_id = :observation_id
+      ) OR EXISTS(
+        SELECT 1 FROM scheduler_action_state
+        WHERE latest_observation_id = :observation_id
+      ) AS active
+  `).get({ observation_id: observationId }) as { active: number };
+  if (row.active !== 0) return;
+
+  // Replay rows retain status, sequence, and the normalized payload needed to
+  // reject mismatched retries. Nulling only the retired active-row identity
+  // preserves idempotency without retaining the observation payload twice.
+  engine.database.prepare(`
+    UPDATE scheduler_observation_replay
+    SET observation_id = NULL
+    WHERE observation_id = :observation_id
+  `).run({ observation_id: observationId });
+  engine.database.prepare(`
+    DELETE FROM scheduler_observation
+    WHERE observation_id = :observation_id
+  `).run({ observation_id: observationId });
 }
 
 function normalizeSchedulerScope(scope: CellScope | undefined): CellScope {
@@ -4887,9 +4939,7 @@ const applyCommitTransaction = (
         localSeq: commit.localSeq,
       })
       : undefined;
-    const observationResult = observationReplay &&
-        (observationReplay.status === "dropped" ||
-          observationReplay.observation_id !== null)
+    const observationResult = observationReplay
       ? replayedSchedulerObservationResult(
         commit.localSeq,
         observationReplay,
@@ -5558,15 +5608,12 @@ const replayedSchedulerObservationResult = (
       reason: replay.reason ?? "stale-confirmed-read",
     };
   }
-  if (replay.observation_id === null) {
-    throw new ProtocolError(
-      `kept scheduler observation replay missing observation identity for localSeq ${localSeq}`,
-    );
-  }
   return {
     localSeq,
     status: "kept",
-    schedulerObservationId: replay.observation_id,
+    ...(replay.observation_id !== null
+      ? { schedulerObservationId: replay.observation_id }
+      : {}),
     ...(replay.execution_context_key !== null
       ? { executionContextKey: replay.execution_context_key }
       : {}),

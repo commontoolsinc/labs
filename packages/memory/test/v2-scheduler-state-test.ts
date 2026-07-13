@@ -1365,17 +1365,20 @@ Deno.test("memory v2 bounds retained exact-session scheduler contexts", async ()
   const ownerSpace = "did:key:session-retention-owner";
   const actionId = "pattern.tsx:computed:session-retention";
   const retainedLimit = 32;
+  const commitForSession = () => ({
+    localSeq: 1,
+    reads: { confirmed: [], pending: [] },
+    operations: [],
+    schedulerObservation: observationForAction(actionId, { ownerSpace }),
+  });
 
   try {
     for (let index = 0; index < retainedLimit + 3; index += 1) {
-      upsertSchedulerObservation(engine, {
-        ownerSpace,
-        observedAtSeq: index + 1,
-        scopeContext: {
-          principal,
-          sessionId: `session-retention-${index}`,
-        },
-        observation: observationForAction(actionId, { ownerSpace }),
+      applyCommit(engine, {
+        space: ownerSpace,
+        principal,
+        sessionId: `session-retention-${index}`,
+        commit: commitForSession(),
       });
     }
 
@@ -1389,6 +1392,13 @@ Deno.test("memory v2 bounds retained exact-session scheduler contexts", async ()
       findSchedulerReadersForWrite(engine, { write: sourceRead }).length,
       retainedLimit,
     );
+    assertEquals(countRows(engine, "scheduler_observation"), retainedLimit);
+    // Replay records retain the idempotency payload even after their inactive
+    // observation payload row is collected.
+    assertEquals(
+      countRows(engine, "scheduler_observation_replay"),
+      retainedLimit + 3,
+    );
     assertEquals(
       snapshots.some((snapshot) =>
         snapshot.executionContextKey.endsWith("session-retention-0")
@@ -1401,6 +1411,16 @@ Deno.test("memory v2 bounds retained exact-session scheduler contexts", async ()
       ),
       true,
     );
+    const prunedReplay = applyCommit(engine, {
+      space: ownerSpace,
+      principal,
+      sessionId: "session-retention-0",
+      commit: commitForSession(),
+    });
+    assertEquals(prunedReplay.schedulerObservationResults, [{
+      localSeq: 1,
+      status: "kept",
+    }]);
   } finally {
     close(engine);
     await Deno.remove(path);
