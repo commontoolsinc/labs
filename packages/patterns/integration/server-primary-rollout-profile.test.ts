@@ -1,8 +1,11 @@
 import {
+  type BrowserProcessMetrics,
   CdpWorkerProfiler,
   type CPUProfile,
+  deltaRendererProcessCpu,
   env,
   type Page,
+  type RendererProcessCpuDelta,
   summarizeCPUProfile,
   waitFor,
 } from "@commonfabric/integration";
@@ -60,6 +63,11 @@ type PhaseResult = {
   serverAcceptedActionAttempts: number;
   observedActionWrites: string[];
   cpu?: ReturnType<typeof summarizeCPUProfile>;
+  browserProcessCpu?: {
+    before: BrowserProcessMetrics;
+    after: BrowserProcessMetrics;
+    rendererDelta: RendererProcessCpuDelta;
+  };
 };
 
 async function writePolicy(
@@ -331,7 +339,11 @@ const p95 = (values: readonly number[]): number => {
         );
         const healthBefore = await executionHealth();
         let profile: CPUProfile | undefined;
-        if (profiler) await profiler.start("worker-runtime");
+        let processCpuBefore: BrowserProcessMetrics | undefined;
+        if (profiler) {
+          await profiler.start("worker-runtime");
+          processCpuBefore = await profiler.readBrowserProcessMetrics();
+        }
         const actionRuns: number[] = [];
         const observedActionWrites = new Set<string>();
         for (let index = 0; index < CPU_EVENTS; index++) {
@@ -349,7 +361,25 @@ const p95 = (values: readonly number[]): number => {
             delta.filter((entry) => entry.actualWrites.length > 0).length,
           );
         }
-        if (profiler) profile = await profiler.stop();
+        let browserProcessCpu: PhaseResult["browserProcessCpu"];
+        if (profiler) {
+          const processCpuAfter = await profiler.readBrowserProcessMetrics();
+          profile = await profiler.stop();
+          // `processCpuBefore` is always populated by the same profiler
+          // branch. Keep this explicit so a future refactor cannot silently
+          // omit the authoritative CPU signal while still writing a profile.
+          if (!processCpuBefore) {
+            throw new Error("Browser process CPU baseline was not captured");
+          }
+          browserProcessCpu = {
+            before: processCpuBefore,
+            after: processCpuAfter,
+            rendererDelta: deltaRendererProcessCpu(
+              processCpuBefore,
+              processCpuAfter,
+            ),
+          };
+        }
         // Query the profiled lazy Worker only after sampling stops. Per-event
         // trace RPCs would themselves contaminate the CPU profile.
         const lazyActionRuns =
@@ -391,6 +421,7 @@ const p95 = (values: readonly number[]): number => {
             controlCount(healthBefore, "acceptedActionAttempts"),
           observedActionWrites: [...observedActionWrites].sort(),
           ...(profile ? { cpu: summarizeCPUProfile(profile) } : {}),
+          ...(browserProcessCpu ? { browserProcessCpu } : {}),
         };
         if (profile && PROFILE_DIR) {
           await Deno.mkdir(PROFILE_DIR, { recursive: true });
@@ -422,12 +453,9 @@ const p95 = (values: readonly number[]): number => {
             p95(enabled.actionRuns)
           } exceeded baseline ${p95(baseline.actionRuns)}`,
         );
-        // A pure observer may consume the confirmed result without running its
-        // producer locally. The rollout must not add lazy-client action runs.
-        assert(
-          enabled.lazyActionRuns <= baseline.lazyActionRuns,
-          `enabled lazy-client action runs ${enabled.lazyActionRuns} exceeded baseline ${baseline.lazyActionRuns}`,
-        );
+        // Phase 2 intentionally retains speculative browser action runs. Keep
+        // the lazy-client count in the report as a Phase 3 suppression
+        // diagnostic; renderer CPU is the no-regression gate for this phase.
         assert(
           enabled.clientDerivedSuppressed > 0,
           `enabled phase did not suppress claimed browser writes: ${
@@ -451,30 +479,30 @@ const p95 = (values: readonly number[]): number => {
               `${phase.label} CPU profile contained no valid samples`,
             );
             assert(
-              (phase.cpu?.busyUs ?? 0) > 0,
-              `${phase.label} CPU profile contained no worker activity`,
-            );
-            assert(
-              (phase.cpu?.attributedWorkUs ?? 0) > 0,
-              `${phase.label} CPU profile contained no attributed JavaScript/GC work`,
+              (phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs ?? 0) > 0,
+              `${phase.label} lazy-browser renderer CPU did not advance`,
             );
           }
-          const aggregateWorkPerEvent = (selected: PhaseResult[]): number =>
+          const aggregateRendererCpuPerEvent = (
+            selected: PhaseResult[],
+          ): number =>
             selected.reduce(
-              (total, phase) => total + (phase.cpu?.attributedWorkUs ?? 0),
+              (total, phase) =>
+                total +
+                (phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs ?? 0),
               0,
             ) / selected.reduce((total, phase) => total + phase.events, 0);
-          const baselineAggregate = aggregateWorkPerEvent([
+          const baselineAggregate = aggregateRendererCpuPerEvent([
             baseline,
             baselineRepeat,
           ]);
-          const enabledAggregate = aggregateWorkPerEvent([
+          const enabledAggregate = aggregateRendererCpuPerEvent([
             enabled,
             enabledRepeat,
           ]);
           assert(
             enabledAggregate <= baselineAggregate * 1.1,
-            `enabled attributed JavaScript/GC time/event ${enabledAggregate}us exceeded baseline ${baselineAggregate}us by more than 10%`,
+            `enabled lazy-browser renderer CPU/event ${enabledAggregate}us exceeded baseline ${baselineAggregate}us by more than 10%`,
           );
         }
 

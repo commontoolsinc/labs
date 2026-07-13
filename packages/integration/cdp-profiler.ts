@@ -50,109 +50,157 @@ export interface CPUProfileSummary {
   busyFraction: number;
 }
 
-/** Cumulative CPU counters reported by CDP's Performance domain. */
-export interface WorkerPerformanceMetrics {
-  taskDurationSeconds: number;
-  scriptDurationSeconds: number;
+/** One cumulative process CPU counter from `SystemInfo.getProcessInfo`. */
+export interface BrowserProcessMetric {
+  type: string;
+  id: number;
+  cpuTimeSeconds: number;
 }
 
-/** CPU consumed between two worker Performance snapshots. */
-export interface WorkerPerformanceDelta {
-  taskDurationUs: number;
-  scriptDurationUs: number;
+/** Browser-wide process counters, including their type and process id. */
+export interface BrowserProcessMetrics {
+  processes: BrowserProcessMetric[];
+}
+
+/** Renderer CPU consumed between two process snapshots. */
+export interface RendererProcessCpuDelta {
+  totalCpuTimeUs: number;
+  renderers: Array<{ id: number; cpuTimeUs: number }>;
 }
 
 /**
- * Parse the cumulative CPU counters needed by the rollout benchmark from a
- * raw `Performance.getMetrics` response. Worker CPU profiles do not reliably
- * emit `(idle)` samples, so these counters are the benchmark's authoritative
- * CPU signal. Missing, duplicate, or invalid counters are an explicit error:
- * a browser that cannot provide the metrics must not silently pass the gate.
+ * Parse cumulative process CPU counters from `SystemInfo.getProcessInfo`.
+ * Chrome does not expose the Performance domain on dedicated-worker targets.
+ * A separately launched lazy-client browser nevertheless gives us a reliable
+ * worker-inclusive signal by summing its renderer processes. Invalid process
+ * data and a missing renderer are explicit benchmark failures.
  */
-export function parseWorkerPerformanceMetrics(
+export function parseBrowserProcessMetrics(
   result: unknown,
-): WorkerPerformanceMetrics {
+): BrowserProcessMetrics {
   if (
     typeof result !== "object" || result === null ||
-    !("metrics" in result) || !Array.isArray(result.metrics)
+    !("processInfo" in result) || !Array.isArray(result.processInfo)
   ) {
     throw new Error(
-      "CDP Performance.getMetrics did not return a metrics array",
+      "CDP SystemInfo.getProcessInfo did not return a processInfo array",
     );
   }
 
-  const required = new Map<"TaskDuration" | "ScriptDuration", number>();
-  for (const metric of result.metrics) {
-    if (typeof metric !== "object" || metric === null || !("name" in metric)) {
-      continue;
-    }
-    const name = metric.name;
-    if (name !== "TaskDuration" && name !== "ScriptDuration") continue;
-    if (required.has(name)) {
+  const processes: BrowserProcessMetric[] = [];
+  const ids = new Set<number>();
+  for (const process of result.processInfo) {
+    if (typeof process !== "object" || process === null) {
       throw new Error(
-        `CDP Performance.getMetrics returned duplicate ${name}`,
+        "CDP SystemInfo.getProcessInfo returned an invalid process",
       );
     }
-    const value = "value" in metric ? metric.value : undefined;
-    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    const type = "type" in process ? process.type : undefined;
+    const id = "id" in process ? process.id : undefined;
+    const cpuTime = "cpuTime" in process ? process.cpuTime : undefined;
+    if (typeof type !== "string" || type.length === 0) {
       throw new Error(
-        `CDP Performance.getMetrics returned invalid ${name}: ${value}`,
+        `CDP SystemInfo.getProcessInfo returned invalid process type: ${type}`,
       );
     }
-    required.set(name, value);
-  }
-
-  for (const name of ["TaskDuration", "ScriptDuration"] as const) {
-    if (!required.has(name)) {
-      throw new Error(
-        `CDP Performance.getMetrics is missing required ${name}`,
-      );
-    }
-  }
-
-  return {
-    taskDurationSeconds: required.get("TaskDuration")!,
-    scriptDurationSeconds: required.get("ScriptDuration")!,
-  };
-}
-
-/** Convert two cumulative Performance snapshots into monotonic CPU deltas. */
-export function deltaWorkerPerformanceMetrics(
-  before: WorkerPerformanceMetrics,
-  after: WorkerPerformanceMetrics,
-): WorkerPerformanceDelta {
-  const delta = (
-    label: "TaskDuration" | "ScriptDuration",
-    beforeSeconds: number,
-    afterSeconds: number,
-  ): number => {
     if (
-      !Number.isFinite(beforeSeconds) || beforeSeconds < 0 ||
-      !Number.isFinite(afterSeconds) || afterSeconds < 0
+      typeof id !== "number" || !Number.isFinite(id) || id < 0 ||
+      !Number.isInteger(id)
     ) {
       throw new Error(
-        `Worker Performance ${label} contains an invalid counter`,
+        `CDP SystemInfo.getProcessInfo returned invalid process id: ${id}`,
       );
+    }
+    if (ids.has(id)) {
+      throw new Error(
+        `CDP SystemInfo.getProcessInfo returned duplicate process id ${id}`,
+      );
+    }
+    if (
+      typeof cpuTime !== "number" || !Number.isFinite(cpuTime) || cpuTime < 0
+    ) {
+      throw new Error(
+        `CDP SystemInfo.getProcessInfo returned invalid cpuTime for process ${id}: ${cpuTime}`,
+      );
+    }
+    ids.add(id);
+    processes.push({ type, id, cpuTimeSeconds: cpuTime });
+  }
+  processes.sort((left, right) => left.id - right.id);
+  if (!processes.some((process) => process.type === "renderer")) {
+    throw new Error(
+      "CDP SystemInfo.getProcessInfo returned no renderer process",
+    );
+  }
+  return { processes };
+}
+
+/**
+ * Match renderer counters by process id and return their CPU delta. Renderer
+ * churn fails closed so process replacement cannot masquerade as lower CPU.
+ */
+export function deltaRendererProcessCpu(
+  before: BrowserProcessMetrics,
+  after: BrowserProcessMetrics,
+): RendererProcessCpuDelta {
+  const rendererMap = (
+    snapshot: BrowserProcessMetrics,
+    label: "before" | "after",
+  ): Map<number, number> => {
+    const result = new Map<number, number>();
+    for (const process of snapshot.processes) {
+      if (process.type !== "renderer") continue;
+      if (result.has(process.id)) {
+        throw new Error(
+          `${label} snapshot contains duplicate renderer process ${process.id}`,
+        );
+      }
+      if (
+        !Number.isInteger(process.id) || process.id < 0 ||
+        !Number.isFinite(process.cpuTimeSeconds) || process.cpuTimeSeconds < 0
+      ) {
+        throw new Error(
+          `${label} snapshot contains invalid renderer process ${process.id}`,
+        );
+      }
+      result.set(process.id, process.cpuTimeSeconds);
+    }
+    if (result.size === 0) {
+      throw new Error(`${label} snapshot contains no renderer process`);
+    }
+    return result;
+  };
+
+  const beforeRenderers = rendererMap(before, "before");
+  const afterRenderers = rendererMap(after, "after");
+  const renderers: Array<{ id: number; cpuTimeUs: number }> = [];
+  for (const [id, beforeSeconds] of beforeRenderers) {
+    const afterSeconds = afterRenderers.get(id);
+    if (afterSeconds === undefined) {
+      throw new Error(`renderer process ${id} disappeared during measurement`);
     }
     if (afterSeconds < beforeSeconds) {
       throw new Error(
-        `Worker Performance ${label} decreased from ${beforeSeconds}s to ${afterSeconds}s; the worker may have restarted`,
+        `renderer process ${id} CPU time decreased from ${beforeSeconds}s to ${afterSeconds}s`,
       );
     }
-    return (afterSeconds - beforeSeconds) * 1_000_000;
-  };
-
+    renderers.push({
+      id,
+      cpuTimeUs: (afterSeconds - beforeSeconds) * 1_000_000,
+    });
+  }
+  for (const id of afterRenderers.keys()) {
+    if (!beforeRenderers.has(id)) {
+      throw new Error(`new renderer process ${id} appeared during measurement`);
+    }
+  }
+  renderers.sort((left, right) => left.id - right.id);
   return {
-    taskDurationUs: delta(
-      "TaskDuration",
-      before.taskDurationSeconds,
-      after.taskDurationSeconds,
+    totalCpuTimeUs: renderers.reduce(
+      (total, renderer) => total + renderer.cpuTimeUs,
+      0,
     ),
-    scriptDurationUs: delta(
-      "ScriptDuration",
-      before.scriptDurationSeconds,
-      after.scriptDurationSeconds,
-    ),
+    renderers,
   };
 }
 
@@ -236,7 +284,6 @@ export class CdpWorkerProfiler {
   >();
   #workers = new Map<string, AttachedWorker>();
   #profilingSessionId: string | undefined;
-  #performanceEnabledSessions = new Set<string>();
 
   private constructor(ws: WebSocket) {
     this.#ws = ws;
@@ -313,7 +360,6 @@ export class CdpWorkerProfiler {
     } else if (msg.method === "Target.detachedFromTarget") {
       const params = msg.params as { sessionId: string };
       this.#workers.delete(params.sessionId);
-      this.#performanceEnabledSessions.delete(params.sessionId);
       // A command sent to a detached session never gets a response.
       this.#rejectAll("target detached", params.sessionId);
     } else if (msg.method === "Target.targetCreated") {
@@ -428,29 +474,15 @@ export class CdpWorkerProfiler {
     await this.#send("Profiler.start", {}, worker.sessionId);
   }
 
-  /**
-   * Snapshot cumulative TaskDuration and ScriptDuration counters on the worker
-   * currently selected by `start()`. Throws when Chrome does not expose the
-   * Performance domain or either required counter.
-   */
-  async readPerformanceMetrics(): Promise<WorkerPerformanceMetrics> {
-    const sessionId = this.#profilingSessionId;
-    if (!sessionId) {
-      throw new Error(
-        "Worker profiler was not started before reading Performance metrics.",
-      );
-    }
+  /** Snapshot cumulative CPU time for every process in this browser. */
+  async readBrowserProcessMetrics(): Promise<BrowserProcessMetrics> {
     try {
-      if (!this.#performanceEnabledSessions.has(sessionId)) {
-        await this.#send("Performance.enable", {}, sessionId);
-        this.#performanceEnabledSessions.add(sessionId);
-      }
-      return parseWorkerPerformanceMetrics(
-        await this.#send("Performance.getMetrics", {}, sessionId),
+      return parseBrowserProcessMetrics(
+        await this.#send("SystemInfo.getProcessInfo"),
       );
     } catch (cause) {
       throw new Error(
-        `Worker Performance metrics are unavailable: ${
+        `Browser process CPU metrics are unavailable: ${
           cause instanceof Error ? cause.message : String(cause)
         }`,
         { cause },

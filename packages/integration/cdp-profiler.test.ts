@@ -1,8 +1,8 @@
 import { assertAlmostEquals, assertEquals, assertThrows } from "@std/assert";
 import {
   type CPUProfile,
-  deltaWorkerPerformanceMetrics,
-  parseWorkerPerformanceMetrics,
+  deltaRendererProcessCpu,
+  parseBrowserProcessMetrics,
   summarizeCPUProfile,
 } from "./cdp-profiler.ts";
 
@@ -137,80 +137,133 @@ Deno.test("summarizeCPUProfile separates ambiguous program samples from attribut
   assertEquals(summary.busyUs, 1_300);
 });
 
-Deno.test("parseWorkerPerformanceMetrics extracts cumulative worker CPU counters", () => {
+Deno.test("parseBrowserProcessMetrics extracts deterministic cumulative process counters", () => {
   assertEquals(
-    parseWorkerPerformanceMetrics({
-      metrics: [
-        { name: "Timestamp", value: 123.5 },
-        { name: "ScriptDuration", value: 0.125 },
-        { name: "TaskDuration", value: 0.375 },
-        { name: "LayoutDuration", value: 99 },
+    parseBrowserProcessMetrics({
+      processInfo: [
+        { type: "renderer", id: 42, cpuTime: 0.375 },
+        { type: "browser", id: 7, cpuTime: 1.25 },
       ],
     }),
     {
-      taskDurationSeconds: 0.375,
-      scriptDurationSeconds: 0.125,
+      processes: [
+        { type: "browser", id: 7, cpuTimeSeconds: 1.25 },
+        { type: "renderer", id: 42, cpuTimeSeconds: 0.375 },
+      ],
     },
   );
 });
 
-Deno.test("parseWorkerPerformanceMetrics rejects unavailable or invalid counters", () => {
+Deno.test("parseBrowserProcessMetrics rejects unavailable or invalid counters", () => {
   assertThrows(
-    () => parseWorkerPerformanceMetrics({}),
+    () => parseBrowserProcessMetrics({}),
     Error,
-    "metrics array",
+    "processInfo array",
   );
   assertThrows(
     () =>
-      parseWorkerPerformanceMetrics({
-        metrics: [{ name: "TaskDuration", value: 1 }],
+      parseBrowserProcessMetrics({
+        processInfo: [{ type: "renderer", id: -1, cpuTime: 1 }],
       }),
     Error,
-    "missing required ScriptDuration",
+    "invalid process id",
   );
   assertThrows(
     () =>
-      parseWorkerPerformanceMetrics({
-        metrics: [
-          { name: "TaskDuration", value: -1 },
-          { name: "ScriptDuration", value: 1 },
+      parseBrowserProcessMetrics({
+        processInfo: [
+          { type: "renderer", id: 1, cpuTime: Number.NaN },
         ],
       }),
     Error,
-    "invalid TaskDuration",
+    "invalid cpuTime",
   );
   assertThrows(
     () =>
-      parseWorkerPerformanceMetrics({
-        metrics: [
-          { name: "TaskDuration", value: 1 },
-          { name: "TaskDuration", value: 2 },
-          { name: "ScriptDuration", value: 1 },
+      parseBrowserProcessMetrics({
+        processInfo: [
+          { type: "renderer", id: 1, cpuTime: 1 },
+          { type: "renderer", id: 1, cpuTime: 2 },
         ],
       }),
     Error,
-    "duplicate TaskDuration",
+    "duplicate process id 1",
   );
-});
-
-Deno.test("deltaWorkerPerformanceMetrics returns monotonic CPU deltas in microseconds", () => {
-  const delta = deltaWorkerPerformanceMetrics(
-    { taskDurationSeconds: 10.25, scriptDurationSeconds: 4.125 },
-    { taskDurationSeconds: 10.375, scriptDurationSeconds: 4.175 },
-  );
-
-  assertAlmostEquals(delta.taskDurationUs, 125_000);
-  assertAlmostEquals(delta.scriptDurationUs, 50_000);
-});
-
-Deno.test("deltaWorkerPerformanceMetrics rejects reset worker counters", () => {
   assertThrows(
     () =>
-      deltaWorkerPerformanceMetrics(
-        { taskDurationSeconds: 2, scriptDurationSeconds: 1 },
-        { taskDurationSeconds: 1, scriptDurationSeconds: 0.5 },
+      parseBrowserProcessMetrics({
+        processInfo: [{ type: "browser", id: 1, cpuTime: 1 }],
+      }),
+    Error,
+    "no renderer process",
+  );
+});
+
+Deno.test("deltaRendererProcessCpu matches renderer ids and sums CPU deltas", () => {
+  const delta = deltaRendererProcessCpu(
+    {
+      processes: [
+        { type: "browser", id: 7, cpuTimeSeconds: 100 },
+        { type: "renderer", id: 42, cpuTimeSeconds: 10.25 },
+        { type: "renderer", id: 43, cpuTimeSeconds: 4.125 },
+      ],
+    },
+    {
+      processes: [
+        { type: "browser", id: 7, cpuTimeSeconds: 101 },
+        { type: "renderer", id: 42, cpuTimeSeconds: 10.375 },
+        { type: "renderer", id: 43, cpuTimeSeconds: 4.175 },
+      ],
+    },
+  );
+
+  assertAlmostEquals(delta.totalCpuTimeUs, 175_000);
+  assertEquals(delta.renderers.map(({ id }) => id), [42, 43]);
+  assertAlmostEquals(delta.renderers[0]!.cpuTimeUs, 125_000);
+  assertAlmostEquals(delta.renderers[1]!.cpuTimeUs, 50_000);
+});
+
+Deno.test("deltaRendererProcessCpu rejects renderer churn and reset counters", () => {
+  assertThrows(
+    () =>
+      deltaRendererProcessCpu(
+        {
+          processes: [{ type: "renderer", id: 1, cpuTimeSeconds: 2 }],
+        },
+        {
+          processes: [{ type: "renderer", id: 1, cpuTimeSeconds: 1 }],
+        },
       ),
     Error,
-    "TaskDuration decreased",
+    "renderer process 1 CPU time decreased",
+  );
+  assertThrows(
+    () =>
+      deltaRendererProcessCpu(
+        {
+          processes: [{ type: "renderer", id: 1, cpuTimeSeconds: 2 }],
+        },
+        {
+          processes: [{ type: "renderer", id: 2, cpuTimeSeconds: 3 }],
+        },
+      ),
+    Error,
+    "renderer process 1 disappeared",
+  );
+  assertThrows(
+    () =>
+      deltaRendererProcessCpu(
+        {
+          processes: [{ type: "renderer", id: 1, cpuTimeSeconds: 2 }],
+        },
+        {
+          processes: [
+            { type: "renderer", id: 1, cpuTimeSeconds: 3 },
+            { type: "renderer", id: 2, cpuTimeSeconds: 0.5 },
+          ],
+        },
+      ),
+    Error,
+    "new renderer process 2 appeared",
   );
 });
