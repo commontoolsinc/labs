@@ -7,9 +7,9 @@
  * re-check) and on the storage subscription path (`watchIdForEntry` is hit
  * once per watch registration).
  *
- * Tracked metrics live under `bench: packages/runner/test/cfc-canonicalize.bench.ts > ...`
- * once `benchmarks.yml` runs on a main-branch push and the artifact is
- * ingested by `tasks/perf-regression.ts`.
+ * The `benchmarks.yml` workflow runs this file on main and publishes the
+ * results in its `bench-results` artifact, which the team ops dashboard
+ * charts on its /bench page.
  */
 
 import { preparedDigestFor, type PreparedDigestInput } from "../src/cfc/mod.ts";
@@ -177,8 +177,8 @@ const LARGE_INPUT: PreparedDigestInput = {
 // `hashStringOf()` tiebreaker. With the chokepoint freeze in place each
 // frozen input is cache-eligible, so the within-sort cache fires from
 // iteration two onward; without it, every comparator call rehashes from
-// scratch. Synthetic worst case, included so the regression detector flags
-// any future regression in the cache-eligibility pathway.
+// scratch. Synthetic worst case, included so a future regression in the
+// cache-eligibility pathway shows up in the benchmark trends.
 const TIEBREAK_HEAVY_INPUT: PreparedDigestInput = {
   consumedReads: [],
   attemptedWrites: [],
@@ -205,7 +205,7 @@ const TIEBREAK_HEAVY_INPUT: PreparedDigestInput = {
 // calls in real workloads reach the path step, so this fixture is closer
 // to "production shape" than `LARGE_INPUT` (which has all-distinct ids).
 // Included so any future regression in path-canonicalization or the
-// path-step compare pathway will surface in the hourly drift detector.
+// path-step compare pathway shows up in the benchmark trends.
 const PATH_HEAVY_INPUT: PreparedDigestInput = {
   consumedReads: Array.from({ length: 12 }, (_, i) => ({
     space: SPACE,

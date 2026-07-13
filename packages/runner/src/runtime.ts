@@ -92,6 +92,14 @@ import {
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
+import {
+  cfcPolicyManifestDocId,
+  type PolicyArtifactManifestV1,
+  validateCfcPolicyArtifactManifest,
+} from "./cfc/policy.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
@@ -518,6 +526,11 @@ export const spaceCellSchema = internSchema(
   },
 );
 
+const CFC_POLICY_MANIFEST_DOC_SCHEMA = {
+  type: "object",
+  additionalProperties: true,
+} as const satisfies JSONSchema;
+
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
 }
@@ -599,6 +612,206 @@ export class Runtime {
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
+  readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
+  readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
+
+  registerCfcPolicyManifests(
+    space: MemorySpace | undefined,
+    inputs: readonly unknown[],
+  ): void {
+    for (const input of inputs) {
+      const artifact = validateCfcPolicyArtifactManifest(input);
+      const existing = this.#policyManifests.get(artifact.policyDigest);
+      // Reaching this branch requires a collision in the canonical SHA-256
+      // digest: validation recomputes the digest for both artifacts.
+      if (existing !== undefined && !deepEqual(existing, artifact)) {
+        throw new Error(
+          `cfcPolicyManifest: immutable digest collision for ${artifact.policyDigest}`,
+        );
+      }
+      this.#policyManifests.set(artifact.policyDigest, artifact);
+      let spaces = this.#policyManifestSpaces.get(artifact.policyDigest);
+      if (spaces === undefined) {
+        spaces = new Set();
+        this.#policyManifestSpaces.set(artifact.policyDigest, spaces);
+      }
+      if (space !== undefined) spaces.add(space);
+    }
+  }
+
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    tx?: IExtendedStorageTransaction,
+    destinationSpace?: MemorySpace,
+    bindCommit = true,
+  ): PolicyArtifactManifestV1 | undefined {
+    if (tx === undefined) return this.#registeredCfcPolicyManifest(reference);
+    if (destinationSpace !== undefined) {
+      return this.#readCfcPolicyManifest(
+        destinationSpace,
+        reference,
+        tx,
+        bindCommit,
+      );
+    }
+    let artifact: PolicyArtifactManifestV1 | undefined;
+    const spaces = new Set<MemorySpace>();
+    const log = tx.getReactivityLog?.();
+    for (const address of [...(log?.writes ?? []), ...(log?.reads ?? [])]) {
+      spaces.add(address.space);
+    }
+    for (const space of spaces) {
+      artifact = this.#readCfcPolicyManifest(space, reference, tx);
+      if (artifact !== undefined) {
+        if (bindCommit) {
+          artifact = this.#readCfcPolicyManifest(space, reference, tx, true);
+        }
+        break;
+      }
+    }
+    return artifact;
+  }
+
+  #registeredCfcPolicyManifest(
+    reference: unknown,
+  ): PolicyArtifactManifestV1 | undefined {
+    if (
+      !reference || typeof reference !== "object" || Array.isArray(reference)
+    ) {
+      return undefined;
+    }
+    const candidate = reference as Record<string, unknown>;
+    if (typeof candidate.policyDigest !== "string") return undefined;
+    const artifact = this.#policyManifests.get(candidate.policyDigest);
+    return artifact !== undefined &&
+        artifact.manifest.moduleIdentity === candidate.moduleIdentity &&
+        artifact.manifest.symbol === candidate.symbol
+      ? artifact
+      : undefined;
+  }
+
+  hasCfcPolicyManifest(
+    space: MemorySpace,
+    reference: unknown,
+    tx?: IExtendedStorageTransaction,
+  ): boolean {
+    const artifact = tx === undefined
+      ? this.#registeredCfcPolicyManifest(reference)
+      : this.#readCfcPolicyManifest(space, reference, tx);
+    return artifact !== undefined &&
+      this.#policyManifestSpaces.get(artifact.policyDigest)?.has(space) ===
+        true;
+  }
+
+  installCfcPolicyManifest(
+    space: MemorySpace,
+    reference: unknown,
+    tx?: IExtendedStorageTransaction,
+  ): boolean {
+    const artifact = this.#registeredCfcPolicyManifest(reference) ??
+      (tx === undefined
+        ? undefined
+        : this.#readCfcPolicyManifest(space, reference, tx));
+    if (artifact === undefined) return false;
+    if (tx !== undefined) {
+      const cell = this.getCellFromEntityId(
+        space,
+        cfcPolicyManifestDocId(artifact.policyDigest),
+        [],
+        CFC_POLICY_MANIFEST_DOC_SCHEMA,
+        tx,
+      );
+      const existing = snapshotQueryResult(cell.get());
+      if (existing === undefined) {
+        cell.set(artifact);
+        tx.markCreateOnly?.(cell.getAsNormalizedFullLink());
+      } else {
+        let verified: PolicyArtifactManifestV1;
+        try {
+          verified = validateCfcPolicyArtifactManifest(existing);
+        } catch (error) {
+          throw new Error(
+            `cfcPolicyManifest: invalid destination artifact for ${artifact.policyDigest}`,
+            { cause: error },
+          );
+        }
+        if (!deepEqual(verified, artifact)) {
+          throw new Error(
+            `cfcPolicyManifest: immutable destination collision for ${artifact.policyDigest}`,
+          );
+        }
+      }
+    }
+    // Both registered and durable-loaded artifacts pass through
+    // registerCfcPolicyManifests(), which creates this companion set.
+    const spaces = this.#policyManifestSpaces.get(artifact.policyDigest)!;
+    spaces.add(space);
+    return true;
+  }
+
+  #readCfcPolicyManifest(
+    space: MemorySpace,
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+    bindCommit = false,
+  ): PolicyArtifactManifestV1 | undefined {
+    if (
+      !reference || typeof reference !== "object" || Array.isArray(reference)
+    ) return undefined;
+    const candidate = reference as Record<string, unknown>;
+    if (typeof candidate.policyDigest !== "string") return undefined;
+    const cell = this.getCellFromEntityId(
+      space,
+      cfcPolicyManifestDocId(candidate.policyDigest),
+      [],
+      CFC_POLICY_MANIFEST_DOC_SCHEMA,
+      tx,
+    );
+    const stored = snapshotQueryResult(cell.get());
+    if (bindCommit) {
+      const link = cell.getAsNormalizedFullLink();
+      const rawStored = tx.readOrThrow({
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+        type: "application/json",
+        path: ["value"],
+      });
+      const alreadyWritten = tx.getReactivityLog?.().writes.some((address) =>
+        address.space === link.space && address.id === link.id &&
+        address.scope === link.scope
+      ) ?? false;
+      if (!alreadyWritten) {
+        if (!tx.addCommitPrecondition) {
+          throw new Error(
+            "cfcPolicyManifest: storage cannot bind manifest consultation",
+          );
+        }
+        tx.addCommitPrecondition(space, {
+          kind: "entity-value-hash",
+          id: link.id,
+          scope: link.scope,
+          valueHash: rawStored === undefined
+            ? null
+            : commitPreconditionValueHash(rawStored),
+        });
+      }
+    }
+    if (stored === undefined) return undefined;
+    let artifact: PolicyArtifactManifestV1;
+    try {
+      artifact = validateCfcPolicyArtifactManifest(stored);
+    } catch {
+      return undefined;
+    }
+    if (
+      artifact.policyDigest !== candidate.policyDigest ||
+      artifact.manifest.moduleIdentity !== candidate.moduleIdentity ||
+      artifact.manifest.symbol !== candidate.symbol
+    ) return undefined;
+    this.registerCfcPolicyManifests(space, [artifact]);
+    return artifact;
+  }
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
@@ -688,6 +901,12 @@ export class Runtime {
     });
 
     this.storageManager = options.storageManager;
+    // Hand the storage layer the telemetry bus so it can emit the
+    // storage.push/pull markers (duck-typed: only the v2 StorageManager
+    // implements it; emulated/test managers simply don't have the method).
+    (this.storageManager as {
+      setTelemetry?: (telemetry: RuntimeTelemetry) => void;
+    }).setTelemetry?.(this.telemetry);
     this.moduleByteCache = options.moduleByteCache;
     // Validated + digested + frozen before the trust-snapshot provider
     // default below, whose `revision` covers the config digest (a trust
@@ -950,6 +1169,22 @@ export class Runtime {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
     const wrapped = new ExtendedStorageTransaction(tx, {
+      resolvePolicyManifest: (
+        reference,
+        tx,
+        destinationSpace,
+        bindCommit,
+      ) =>
+        this.resolveCfcPolicyManifest(
+          reference,
+          tx,
+          destinationSpace,
+          bindCommit,
+        ),
+      hasPolicyManifest: (space, reference, tx) =>
+        this.hasCfcPolicyManifest(space, reference, tx),
+      installPolicyManifest: (space, reference, tx) =>
+        this.installCfcPolicyManifest(space, reference, tx),
       onRelevantTx: () => {
         this.cfcStats.cfcRelevantTx += 1;
       },

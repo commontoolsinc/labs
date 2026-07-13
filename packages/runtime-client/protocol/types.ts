@@ -117,12 +117,17 @@ export interface IPCClientMessage {
   data: IPCClientRequest;
 }
 
+export enum RuntimeErrorCode {
+  CompilerStackLoadFailed = "compiler-stack-load-failed",
+}
+
 export type IPCRemoteResponse = {
   msgId: MessageId;
   data?: RemoteResponse;
 } | {
   msgId: MessageId;
   error: string;
+  code?: RuntimeErrorCode;
 };
 
 export type IPCRemoteMessage = IPCRemoteNotification | IPCRemoteResponse;
@@ -844,6 +849,7 @@ export interface NavigateRequestNotification {
 export interface ErrorNotification {
   type: NotificationType.ErrorReport;
   message: string;
+  code?: RuntimeErrorCode;
   pieceId?: string;
   space?: string;
   patternId?: string;

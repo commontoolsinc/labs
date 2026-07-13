@@ -137,6 +137,13 @@ const matchPatternValue = (
   if (isMalformedVarBearingRecord(pattern)) {
     return null;
   }
+  // The trusted module-policy resolver may seed THIS_POLICY.subject from a
+  // label-carried commitment. Evidence remains plaintext locally, so the
+  // commitment can appear on the PATTERN side as well as the value side.
+  // Equality is symmetric; no digest is opened and a mismatch stays closed.
+  if (isCfcFieldCommitment(pattern)) {
+    return commitmentAwareEquals(pattern, value) ? bindings : null;
+  }
   // A committed VALUE field (inv-12 Stage 1): a fully CONCRETE pattern
   // matches iff the pattern value's canonical digest equals the commitment
   // (same-form matching — the pattern side is digested and compared, the

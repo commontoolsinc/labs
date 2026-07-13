@@ -1,5 +1,6 @@
 import type { CellScope, JSONSchema } from "../builder/types.ts";
 import type { FabricValue } from "@commonfabric/api";
+import type { CfcModulePolicyRefAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
 import type { Metadata } from "../storage/interface.ts";
@@ -165,29 +166,34 @@ export type CfcSandboxResult = {
  *   references, where per-slot link entries already label each reference.
  *   A CONCRETE-path structure entry applies only to reads at exactly its
  *   path (observing the container is observing its shape); reads strictly
- *   below it are pointer handling and stay clean. On DECLARED
- *   list-coordinator containers (the S16 `recordCfcStructureContainer`
- *   hook — filter/flatMap results, where the membership decision lives)
- *   the runtime additionally mints three `*`-child CLASS TEMPLATES at
- *   `[...container, "*"]` beside the container-anchored
- *   `observes:"enumerate"` stamp — `shape`, `value`, `followRef` —
- *   carrying the same per-tx J (docs/specs/cfc-template-population.md §3):
- *   templates ARE consumed at matching child paths, so a per-child
- *   existence probe or a slot-pointer observation consumes the
- *   membership/assignment decision (the SC-4/SC-8 residual fixes) while
- *   `readConsumesEntry`'s class table keeps probes clean of content taint
- *   — the pointer/content split moves onto the class axis instead of
- *   hanging on path anchoring alone. Two machinery boundaries keep
- *   scaffolding out (measured on the phase-B pointwise suite): reads
- *   covered by a same-tx dereference trace are resolution machinery and
- *   skip templates (the C0 §6.1 row-4 rule extended to plain reads), and
- *   a transaction re-deriving a container's membership stamps does not
- *   consume the entries it replaces (§8.12.8 replace-from-criteria
- *   readback exclusion). Update discipline matches `derived` (templates
- *   replace-from-criteria with the enumerate stamp they accompany;
- *   concrete `observes:"shape"` existence entries freeze at creation).
- *   Readers that predate this component treat its entries as covering
- *   (over-taint, fail-safe).
+ *   below it are pointer handling and stay clean. On every structure
+ *   container — DECLARED list-coordinator containers (the S16
+ *   `recordCfcStructureContainer` hook — filter/flatMap results, where the
+ *   membership decision lives) and the container nodes of generic
+ *   pure-link-structure value writes — the runtime additionally mints
+ *   three `*`-child CLASS TEMPLATES at `[...container, "*"]` beside the
+ *   container-anchored `observes:"enumerate"` stamp — `shape`, `value`,
+ *   `followRef` — carrying the same per-tx J
+ *   (docs/specs/cfc-template-population.md §3): templates ARE consumed at
+ *   matching child paths, so a per-child existence probe or a slot-pointer
+ *   observation consumes the membership/assignment decision (the SC-4/SC-8
+ *   residual fixes) while `readConsumesEntry`'s class table keeps probes
+ *   clean of content taint — the pointer/content split moves onto the
+ *   class axis instead of hanging on path anchoring alone. Three machinery
+ *   boundaries keep scaffolding out (the first two measured on the phase-B
+ *   pointwise suite, the third what let the generic route mint — the SC-8
+ *   remainder): reads covered by a same-tx dereference trace are
+ *   resolution machinery and skip templates (the C0 §6.1 row-4 rule
+ *   extended to plain reads); a transaction re-deriving a container's
+ *   membership stamps does not consume the entries it replaces (§8.12.8
+ *   replace-from-criteria readback exclusion); and the op-instantiation/
+ *   wiring machinery's reads of plumbing containers carry the
+ *   `machineryRead` marker (reactivity-log.ts) and skip template
+ *   consumption while keeping every other consumption. Update discipline
+ *   matches `derived` (templates replace-from-criteria with the enumerate
+ *   stamp they accompany; concrete `observes:"shape"` existence entries
+ *   freeze at creation). Readers that predate this component treat its
+ *   entries as covering (over-taint, fail-safe).
  * - `external-ingest`: the `ExternalIngest` provenance mark a vouched ingest
  *   channel mints onto the value it durably appends. Builtin-authored from
  *   verified channel metadata only (the split-mint), so it bypasses the
@@ -442,6 +448,16 @@ export type ConsultedGrant = {
   readonly digest: string;
 };
 
+/**
+ * One exact module-policy reference consulted by boundary evaluation. Both a
+ * present manifest and an absent lookup are decision inputs; recording the
+ * complete reference prevents pair/subject aliasing.
+ */
+export type ConsultedPolicyManifest = {
+  readonly reference: CfcModulePolicyRefAtom;
+  readonly state: "present" | "absent";
+};
+
 export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
   readonly attemptedWrites: readonly AttemptedWrite[];
@@ -472,6 +488,7 @@ export type PreparedDigestInput = {
   // cannot commit under another. Absent when no grants were consulted, so
   // pre-existing digests are unchanged; canonicalized address-sorted.
   readonly consultedGrants?: readonly ConsultedGrant[];
+  readonly consultedPolicyManifests?: readonly ConsultedPolicyManifest[];
   // Label-metadata observations (inv-12 Stage 2): boundary-decision inputs —
   // they change the flow join and the consumed set — bound under the same
   // discipline as writePolicyInputs. Absent when none were recorded, so
@@ -693,6 +710,9 @@ export type CfcTxState = {
   // this transaction (§8.12.7 route 2a), recorded by the runner-side grant
   // resolver, deduplicated by address. Folded into PreparedDigestInput.
   consultedGrants: ConsultedGrant[];
+  // Exact module-policy manifest lookups (present and absent), deduplicated by
+  // reference and folded into PreparedDigestInput.
+  consultedPolicyManifests: ConsultedPolicyManifest[];
   // Label-metadata observations recorded by the introspection surface
   // (inv-12 Stage 2, `recordCfcLabelMetadataObservation`): application
   // observations of first-layer label metadata, carrying their §4.6.4.2

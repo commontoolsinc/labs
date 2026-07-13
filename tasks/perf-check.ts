@@ -84,6 +84,11 @@ import {
   writePerfMetricsBackfillFile,
   writePerfMetricsFile,
 } from "./perf-lib.ts";
+import {
+  fillMissingFamiliesFromFingerprint,
+  inferCurrentRunFallbackState,
+  recordUnstampedBaselineRunState,
+} from "./perf-cache-state.ts";
 import * as path from "@std/path";
 import {
   collectCoverageDebtMetricsFromLcov,
@@ -216,6 +221,19 @@ export async function fetchMainHeadSha(): Promise<string> {
     `/repos/${REPO}/branches/main`,
   );
   return branch.commit.sha;
+}
+
+/**
+ * The head SHA of the latest prior baseline run — the run whose compile cache
+ * the current main push would have restored. Used to fingerprint-classify a
+ * main push that carries no recorded cache state. Undefined when there is no
+ * prior baseline run (e.g. an empty run history).
+ */
+export async function fetchLatestBaselineRunSha(): Promise<string | undefined> {
+  const recent = await githubGet<{ workflow_runs: WorkflowRun[] }>(
+    workflowRunsPathForBaseline(1),
+  );
+  return recent.workflow_runs[0]?.head_sha;
 }
 
 function pluralize(value: number, unit: string): string {
@@ -970,7 +988,7 @@ export function evaluateTimingMetric(
 
   const baseline = computeBaseline(
     samples.map((s) => s.durationSeconds),
-    metric.startsWith("bench:") ? 0 : MIN_ABSOLUTE_DELTA,
+    MIN_ABSOLUTE_DELTA,
   );
 
   const stats = baseline && {
@@ -1422,6 +1440,20 @@ export async function main() {
     `Compile cache states: ${formatCompileCacheStates(currentCacheStates)}`,
   );
 
+  // Fallback for families with no recorded state (artifact missing, upload or
+  // download failed): infer the run-level state from the compile fingerprint —
+  // the PR's changed files, or the compare against the previous main run — and
+  // fill only the families with no recorded state. Recorded states are ground
+  // truth and win (see inferCurrentRunFallbackState /
+  // fillMissingFamiliesFromFingerprint).
+  const inferredRunState = await inferCurrentRunFallbackState({
+    isPullRequestRun: !!prNumber,
+    prFiles,
+    headSha: currentRunInfo.head_sha,
+    fetchLatestBaselineSha: fetchLatestBaselineRunSha,
+  });
+  fillMissingFamiliesFromFingerprint(currentCacheStates, inferredRunState);
+
   // Extract per-test metrics from JUnit artifacts
   try {
     // Newest per name: a re-run of a flagged test job must refresh its metric.
@@ -1570,6 +1602,21 @@ export async function main() {
     );
   }
 
+  // For each baseline run, its predecessor in the (newest-first) baseline
+  // list — the run whose saved compile cache it would have restored. Fuels
+  // retro-classification of runs whose artifacts predate the recorded stamp;
+  // once stamped artifacts fill the window this map goes unused.
+  const runsNewestFirst = [...baselineRuns].sort((a, b) =>
+    b.created_at.localeCompare(a.created_at) || b.id - a.id
+  );
+  const predecessorShaByRunId = new Map<number, string>();
+  for (let i = 0; i < runsNewestFirst.length - 1; i++) {
+    predecessorShaByRunId.set(
+      runsNewestFirst[i].id,
+      runsNewestFirst[i + 1].head_sha,
+    );
+  }
+
   await githubApiOrSkip(
     "building baseline timelines",
     () =>
@@ -1591,10 +1638,21 @@ export async function main() {
           timelines,
           artifacts,
         );
+        if (artifactResult.added && artifactResult.compileCacheStates) {
+          cacheStatesByRunId.set(run.id, artifactResult.compileCacheStates);
+        } else {
+          // Unstamped run (an artifact carrying no recorded stamp — a backfill
+          // or a live extraction): retro-classify it from the compile
+          // fingerprint against its predecessor (see
+          // recordUnstampedBaselineRunState).
+          await recordUnstampedBaselineRunState(
+            cacheStatesByRunId,
+            run,
+            predecessorShaByRunId.get(run.id),
+            pr ? `PR #${pr.number}` : run.head_sha.slice(0, 8),
+          );
+        }
         if (artifactResult.added) {
-          if (artifactResult.compileCacheStates) {
-            cacheStatesByRunId.set(run.id, artifactResult.compileCacheStates);
-          }
           return;
         }
 
@@ -1834,7 +1892,7 @@ export async function main() {
     "\n::group::All collected metrics:" +
       `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
         MIN_REGRESSION_PCT * 100
-      }% (whichever is higher); non-bench metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
+      }% (whichever is higher); timing metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
   );
   console.log(
     "Coverage debt metrics use a latest-main ratchet for changed source groups.",
@@ -1871,8 +1929,6 @@ export async function main() {
         return "Test files";
       case "subtest":
         return "Subtests";
-      case "bench":
-        return "Benchmarks";
       case "coverage-debt":
         return "Coverage Debt";
       default:
@@ -1884,7 +1940,6 @@ export async function main() {
     "Steps",
     "Test files",
     "Subtests",
-    "Benchmarks",
     "Coverage Debt",
   ];
   // Sort order within each kind: most at-risk of failing the check first.

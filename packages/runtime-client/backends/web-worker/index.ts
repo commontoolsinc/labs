@@ -12,10 +12,12 @@ import {
   isIPCClientMessage,
   isIPCClientNotification,
   RequestType,
+  RuntimeErrorCode,
 } from "../../protocol/mod.ts";
 import { RuntimeProcessor } from "../mod.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
+import { CompilerStackLoadError } from "../../../runner/src/harness/deferred-compiler-stack.ts";
 
 // Count-only ledger of request traffic as seen by the worker: one
 // `received/<type>` per request that reached this message handler and one
@@ -231,9 +233,13 @@ self.addEventListener("message", async (event: MessageEvent) => {
     console.error("[RuntimeWorker] Error:", error);
     const type = isIPCClientMessage(message) ? message.data.type : "invalid";
     ipcLogger.debug(`responded-error/${type}`, () => []);
+    const code = error instanceof CompilerStackLoadError
+      ? RuntimeErrorCode.CompilerStackLoadFailed
+      : undefined;
     self.postMessage({
       msgId: message.msgId,
       error: error instanceof Error ? error.message : String(error),
+      ...(code ? { code } : {}),
     });
   }
 });

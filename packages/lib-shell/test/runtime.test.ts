@@ -559,12 +559,16 @@ describe("RuntimeInternals", () => {
     });
   });
 
-  // A deploy must always load the fresh worker bundle: the worker URL is
-  // cache-busted with `?v=<buildHash>` whenever the build manifest provides
-  // a hash (no feature gate).
+  // A deployed page must keep its worker and lazy chunks on the same immutable
+  // module graph. Local/legacy builds retain the root worker URL and manifest
+  // cache-buster.
   describe("worker URL versioning", () => {
     async function workerUrlFromCreate(
-      getBuildHash: () => Promise<string | undefined>,
+      options: {
+        getBuildHash: () => Promise<string | undefined>;
+        clientVersion?: string;
+        useDefaultWorkerUrl?: boolean;
+      },
     ): Promise<URL> {
       const { RuntimeInternals } = await import("@commonfabric/lib-shell");
       const { Identity } = await import("@commonfabric/identity");
@@ -589,34 +593,71 @@ describe("RuntimeInternals", () => {
       }
 
       const OriginalWorker = globalThis.Worker;
+      const locationGlobal = globalThis as unknown as {
+        location: URL | undefined;
+      };
+      const originalLocation = locationGlobal.location;
       (globalThis as { Worker: unknown }).Worker = StubWorker;
+      locationGlobal.location = new URL("http://shell.test/");
       try {
         await expect(RuntimeInternals.create({
           identity,
           apiUrl: new URL("http://shell.test/"),
-          workerUrl: new URL("http://shell.test/scripts/worker-runtime.js"),
-          getBuildHash,
+          ...(options.useDefaultWorkerUrl ? {} : {
+            workerUrl: new URL(
+              "http://shell.test/scripts/worker-runtime.js",
+            ),
+          }),
+          clientVersion: options.clientVersion,
+          getBuildHash: options.getBuildHash,
         })).rejects.toThrow("stub worker");
       } finally {
         (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+        locationGlobal.location = originalLocation;
       }
       expect(capturedUrls).toHaveLength(1);
       return new URL(capturedUrls[0]);
     }
 
-    it("always consults getBuildHash and sets ?v= when a hash is present", async () => {
+    it("keeps a deployed worker in its immutable build namespace", async () => {
       let calls = 0;
-      const url = await workerUrlFromCreate(() => {
-        calls += 1;
-        return Promise.resolve("hash-123");
+      const url = await workerUrlFromCreate({
+        clientVersion: "commit-123",
+        useDefaultWorkerUrl: true,
+        getBuildHash: () => {
+          calls += 1;
+          return Promise.resolve("newer-root-hash");
+        },
+      });
+      expect(calls).toBe(0);
+      expect(url.pathname).toBe(
+        "/builds/commit-123/scripts/worker-runtime.js",
+      );
+      expect(url.search).toBe("");
+      expect(new URL("./chunk-COMPILER.js", url).pathname).toBe(
+        "/builds/commit-123/scripts/chunk-COMPILER.js",
+      );
+    });
+
+    it("cache-busts the mutable root fallback", async () => {
+      let calls = 0;
+      const url = await workerUrlFromCreate({
+        useDefaultWorkerUrl: true,
+        getBuildHash: () => {
+          calls += 1;
+          return Promise.resolve("hash-123");
+        },
       });
       expect(calls).toBe(1);
       expect(url.pathname).toBe("/scripts/worker-runtime.js");
       expect(url.searchParams.get("v")).toBe("hash-123");
     });
 
-    it("omits ?v= when the build manifest provides no hash", async () => {
-      const url = await workerUrlFromCreate(() => Promise.resolve(undefined));
+    it("keeps an explicit worker URL when the manifest has no hash", async () => {
+      const url = await workerUrlFromCreate({
+        getBuildHash: () => Promise.resolve(undefined),
+      });
+      expect(url.pathname).toBe("/scripts/worker-runtime.js");
       expect(url.searchParams.has("v")).toBe(false);
     });
   });

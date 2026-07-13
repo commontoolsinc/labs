@@ -79,6 +79,7 @@ import {
   type CfcTxState,
   type CfcWriteFloorMode,
   type ConsultedGrant,
+  type ConsultedPolicyManifest,
   type ConsumedRead,
   DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
   DEFAULT_CFC_ENFORCEMENT_MODE,
@@ -102,6 +103,7 @@ import {
   type TrustSnapshot,
   type WritePolicyInput,
 } from "../cfc/mod.ts";
+import { CFC_POLICY_MANIFEST_ID_PREFIX } from "../cfc/policy.ts";
 
 const logger = getLogger("extended-storage-transaction", {
   enabled: false,
@@ -127,6 +129,22 @@ type CfcInstrumentationHooks = {
   // one summary per prepared transaction that measured a protected write.
   // When absent — the default — the prepare gate skips all measurement.
   onPrefixProvenance?(summary: CfcPrefixProvenanceSummary): void;
+  resolvePolicyManifest?(
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+    destinationSpace?: MemorySpace,
+    bindCommit?: boolean,
+  ): unknown;
+  hasPolicyManifest?(
+    space: MemorySpace,
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+  ): boolean;
+  installPolicyManifest?(
+    space: MemorySpace,
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+  ): boolean;
 };
 
 // Read-only view of the transaction's CFC state, returned by getCfcState().
@@ -278,6 +296,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     diagnostics: [],
     unprivilegedSystemWrites: [],
     consultedGrants: [],
+    consultedPolicyManifests: [],
     labelMetadataObservations: [],
   };
   private reportedCfcRelevant = false;
@@ -356,6 +375,35 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // Read-only view, not the live object — see readOnlyCfcView. Internal
     // code mutates `this.#cfcState` directly and never goes through here.
     return readOnlyCfcView(this.#cfcState);
+  }
+
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    destinationSpace?: MemorySpace,
+    bindCommit?: boolean,
+  ): unknown {
+    return this.cfcInstrumentation.resolvePolicyManifest?.(
+      reference,
+      this,
+      destinationSpace,
+      bindCommit,
+    );
+  }
+
+  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.cfcInstrumentation.hasPolicyManifest?.(
+      space,
+      reference,
+      this,
+    ) ?? false;
+  }
+
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.cfcInstrumentation.installPolicyManifest?.(
+      space,
+      reference,
+      this,
+    ) ?? false;
   }
 
   setCfcEnforcementMode(mode: CfcEnforcementMode): void {
@@ -647,6 +695,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // prepareBoundaryCommit, so the record stays inert there.
   private noteSystemWrite(address: IMemorySpaceAddress): void {
     if (this.#privilegedSystemWriteDepth > 0) return;
+    if (address.id.startsWith(CFC_POLICY_MANIFEST_ID_PREFIX)) {
+      throw new Error(
+        `cfcPolicyManifest: ${address.id} is immutable reserved policy state`,
+      );
+    }
     // Reserved grant documents (§8.12.7 route 2a, cfc/grants.ts): the WHOLE
     // document is policy state — a forged grant at the derived address would
     // spend another principal's release authority — so any unprivileged
@@ -893,6 +946,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // same invalidation posture as every other recorder above.
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("consulted-grant-added");
+    }
+  }
+
+  recordCfcConsultedPolicyManifest(
+    consulted: ConsultedPolicyManifest,
+  ): void {
+    const index = this.#cfcState.consultedPolicyManifests.findIndex(
+      (existing) => deepEqual(existing.reference, consulted.reference),
+    );
+    if (index !== -1) {
+      if (
+        this.#cfcState.consultedPolicyManifests[index].state === consulted.state
+      ) {
+        return;
+      }
+      this.#cfcState.consultedPolicyManifests[index] = deepFreeze(consulted);
+      if (this.#cfcState.prepare.status === "prepared") {
+        this.invalidateCfc("consulted-policy-manifest-changed");
+      }
+      return;
+    }
+    this.#cfcState.consultedPolicyManifests.push(deepFreeze(consulted));
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("consulted-policy-manifest-added");
     }
   }
 
@@ -1159,6 +1236,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // revocation then takes effect on the next evaluation (design §2.2).
       ...(this.#cfcState.consultedGrants.length > 0
         ? { consultedGrants: [...this.#cfcState.consultedGrants] }
+        : {}),
+      ...(this.#cfcState.consultedPolicyManifests.length > 0
+        ? {
+          consultedPolicyManifests: [
+            ...this.#cfcState.consultedPolicyManifests,
+          ],
+        }
         : {}),
       // Label-metadata observations (inv-12 Stage 2): boundary-decision
       // inputs (they change the flow join and the consumed set), bound like
@@ -1908,6 +1992,32 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcConsultedGrant(consulted: ConsultedGrant): void {
     this.wrapped.recordCfcConsultedGrant(consulted);
+  }
+
+  recordCfcConsultedPolicyManifest(
+    consulted: ConsultedPolicyManifest,
+  ): void {
+    this.wrapped.recordCfcConsultedPolicyManifest(consulted);
+  }
+
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    destinationSpace?: MemorySpace,
+    bindCommit?: boolean,
+  ): unknown {
+    return this.wrapped.resolveCfcPolicyManifest(
+      reference,
+      destinationSpace,
+      bindCommit,
+    );
+  }
+
+  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.wrapped.hasCfcPolicyManifest(space, reference);
+  }
+
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean {
+    return this.wrapped.installCfcPolicyManifest(space, reference);
   }
 
   recordCfcLabelMetadataObservation(

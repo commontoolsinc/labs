@@ -91,6 +91,10 @@ export const LABEL_FIELD_CLASSIFICATION:
     // is the narrow direction.
     entry({ type: CFC_ATOM_TYPE.Policy }, ["name"], "public"),
     entry({ type: CFC_ATOM_TYPE.Policy }, ["hash"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["policyRefKind"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["moduleIdentity"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["symbol"], "public"),
+    entry({ type: CFC_ATOM_TYPE.Policy }, ["policyDigest"], "public"),
     entry({ type: CFC_ATOM_TYPE.Policy }, ["subject"], "commitment"),
     entry({ type: CFC_ATOM_TYPE.Context }, ["name"], "public"),
     entry({ type: CFC_ATOM_TYPE.Context }, ["hash"], "public"),

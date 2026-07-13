@@ -225,7 +225,9 @@ import {
 // Before interacting: wait until the shell has exposed its settle hook, then
 // settle the view so the click lands on a bound handler.
 await waitForCondition(page, () =>
-  typeof globalThis.commonfabric?.viewSettled === "function");
+  typeof (globalThis as {
+    commonfabric?: { viewSettled?: unknown };
+  }).commonfabric?.viewSettled === "function");
 await awaitViewSettled(page);
 const button = await page.waitForSelector("cf-button[role='button']");
 await button.click(); // delivered to a bound handler

@@ -54,6 +54,7 @@ import type {
   CfcTxState,
   CfcWriteFloorMode,
   ConsultedGrant,
+  ConsultedPolicyManifest,
   ImplementationIdentity,
   PostCommitSideEffect,
   TrustSnapshot,
@@ -1056,6 +1057,24 @@ export interface IExtendedStorageTransaction
    */
   recordCfcConsultedGrant(consulted: ConsultedGrant): void;
 
+  /** Records a present/absent exact module-policy manifest lookup. */
+  recordCfcConsultedPolicyManifest(
+    consulted: ConsultedPolicyManifest,
+  ): void;
+
+  /** Runtime-verified module policy manifest lookup (read-only). */
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    destinationSpace?: MemorySpace,
+    bindCommit?: boolean,
+  ): unknown;
+
+  /** Whether the exact manifest is installed for a destination space. */
+  hasCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean;
+
+  /** Atomically stages a compiler-verified manifest for the destination. */
+  installCfcPolicyManifest(space: MemorySpace, reference: unknown): boolean;
+
   /**
    * Records a label-METADATA observation (inv-12 Stage 2, spec §4.6.4.1-.2):
    * the introspection surface observed first-layer label metadata, and the
@@ -1577,6 +1596,14 @@ export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
   value?: Immutable<FabricValue>;
   previousValue?: Immutable<FabricValue>;
+  /**
+   * Pre-transaction slot presence at `address.path` — distinguishes an
+   * absent slot from a present slot holding `undefined`, which
+   * `previousValue` alone cannot (the storage write path keeps presence
+   * distinct from value). Optional: transactions that cannot compute it
+   * omit it, and consumers fall back to `previousValue` definedness.
+   */
+  previousPresent?: boolean;
 }
 
 export interface TransactionReadDetail {

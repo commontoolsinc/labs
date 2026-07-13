@@ -4,11 +4,77 @@ import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { asObjectSchema, getTypeFromCode, getTypeFromFiles } from "../utils.ts";
 
 describe("Schema: CFC authoring aliases", () => {
-  it("lowers Confidential and OpaqueInput through the canonical Cfc carrier", async () => {
+  it("lowers AnyOf as one explicit confidentiality clause", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
       type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
-      type OpaqueInput<T, Spec extends true | { schema?: unknown; allowPassThrough?: boolean } = true> = Cfc<T, { opaque: Spec }>;
+      type AnyOf<X extends readonly unknown[]> = { readonly __ct_cfc_any_of__?: X };
+
+      interface SchemaRoot {
+        conjunctive: Confidential<string, readonly ["reader-a", "reader-b"]>;
+        disjunctive: Confidential<string, readonly [AnyOf<readonly ["reader-a", "reader-b"]>]>;
+      }
+    `;
+
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    expect((schema.properties?.conjunctive as any).ifc?.confidentiality)
+      .toEqual(["reader-a", "reader-b"]);
+    expect((schema.properties?.disjunctive as any).ifc?.confidentiality)
+      .toEqual([{ anyOf: ["reader-a", "reader-b"] }]);
+  });
+
+  it("lowers renamed imports of PolicyOf and AnyOf", async () => {
+    const { type, checker } = await getTypeFromFiles(
+      {
+        "/cfc-types.ts": `
+          export type PolicyOf<Binding> = {
+            readonly __ct_cfc_policy_of__?: Binding;
+          };
+          export type AnyOf<X extends readonly unknown[]> = {
+            readonly __ct_cfc_any_of__?: X;
+          };
+        `,
+        "/entry.ts": `
+          import type { AnyOf as Or, PolicyOf as P } from "./cfc-types.ts";
+          type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+          type Confidential<T, X extends readonly unknown[]> =
+            Cfc<T, { confidentiality: X }>;
+          declare const rules: unknown;
+
+          interface SchemaRoot {
+            policy: Confidential<string, readonly [P<typeof rules>]>;
+            either: Confidential<string, readonly [
+              Or<readonly ["reader-a", "reader-b"]>
+            ]>;
+          }
+        `,
+      },
+      "/entry.ts",
+      "SchemaRoot",
+    );
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    expect((schema.properties?.policy as any).ifc?.confidentiality).toEqual([{
+      type: "https://commonfabric.org/cfc/atom/Policy",
+      policyRefKind: "module",
+      __ctPolicyIdentityOf: { file: "/entry.ts", path: ["rules"] },
+      subject: { __ctOwningSpace: true },
+    }]);
+    expect((schema.properties?.either as any).ifc?.confidentiality).toEqual([{
+      anyOf: ["reader-a", "reader-b"],
+    }]);
+  });
+
+  it("lowers Confidential and projection aliases through the canonical Cfc carrier", async () => {
+    const code = `
+      type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };
+      type Confidential<T, X extends readonly unknown[]> = Cfc<T, { confidentiality: X }>;
       type ProjectionPath<T, From extends string, Path extends readonly unknown[]> = Cfc<T, { projection: { from: From; path: Path } }>;
       type ProjectionOf<Root, PathTuple extends readonly unknown[]> = ProjectionPath<Root, "/", PathTuple>;
       type Ref<Root, Path extends readonly unknown[]> = {
@@ -22,7 +88,6 @@ describe("Schema: CFC authoring aliases", () => {
 
       interface SchemaRoot {
         secret: Confidential<string, readonly ["secret"]>;
-        token: OpaqueInput<string>;
         projectionOf: ProjectionOf<{ title: string }, readonly ["title"]>;
         projectionPath: ProjectionPath<{ title: string }, "/source", readonly ["nested", "path"]>;
         projection: Projection<Ref<{ title: string }, readonly ["nested", "path"]>>;
@@ -37,10 +102,6 @@ describe("Schema: CFC authoring aliases", () => {
     const secret = schema.properties?.secret as any;
     expect(secret.type).toBe("string");
     expect(secret.ifc?.confidentiality).toEqual(["secret"]);
-
-    const token = schema.properties?.token as any;
-    expect(token.type).toBe("string");
-    expect(token.ifc?.opaque).toBe(true);
 
     const projectionOf = schema.properties?.projectionOf as any;
     expect(projectionOf.type).toBe("object");
@@ -110,6 +171,11 @@ describe("Schema: CFC authoring aliases", () => {
     expect(labelled.ifc?.confidentiality).toEqual(["prompt-influence"]);
   });
 
+  // The collection/opaque aliases below are NOT canonical (the helpers were
+  // removed from @commonfabric/api/cfc because the runner rejects those ifc
+  // keys fail-closed) — with explicit type arguments they resolve through
+  // the Cfc carrier as plain payload passthrough, which is the structural
+  // mechanism this test covers alongside the remaining canonical aliases.
   it("lowers the remaining canonical metadata aliases and merges nested Cfc metadata", async () => {
     const code = `
       type Cfc<T, Meta> = T & { readonly __ct_cfc__?: Meta };

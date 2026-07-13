@@ -254,12 +254,16 @@ The comparison rules follow from the tagging:
 - The coverage-debt ratchet uses the latest non-cold main sample, so a cold
   main run cannot lower the baseline that warm PRs are held to.
 
-Runs with unknown cache state — anything before this mechanism rolled out, and
-backfill-derived runs — behave exactly as before: their samples are kept and
-their metrics gate normally.
+A run without a recorded cache state — an artifact carrying no stamp, a
+backfill-derived run, or a run whose cache-state artifact failed to upload — is
+retro-classified from the compile fingerprint (`tasks/perf-cache-state.ts`
+mirrors the `cc-*` key globs, drift-guarded by a test that parses the workflow):
+if the fingerprint paths changed against the run's predecessor, every family is
+treated as cold; if unchanged, warm. The same fingerprint inference backstops
+the current run when its cache-state artifact is missing. Fingerprint inference
+cannot see non-fingerprint cold causes (cache eviction, cache-service outages):
+a run cold for those reasons and lacking a recorded state stays unknown, so its
+samples are kept and gate normally.
 
-Two gaps remain. Cold compile duration itself is not gated, so a regression
-that only shows up on a cold cache passes unnoticed; a dedicated cold-compile
-bench could cover that later. And cold main runs from before the rollout stay
-unknown, so they can still skew baselines until they age out of the 20-run
-baseline window.
+Cold compile duration itself is not gated, so a regression that shows up only on
+a cold cache passes unnoticed; a dedicated cold-compile bench would cover it.

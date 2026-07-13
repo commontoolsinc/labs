@@ -1573,6 +1573,15 @@ export class Scheduler {
       );
     }
 
+    this.runtime.telemetry.submit({
+      type: "scheduler.settle",
+      durationMs: settleResult.settleDurationMs,
+      iterations: settleResult.iterationsRun,
+      settledEarly: settleResult.settledEarly,
+      seedCount: initialSeeds.size,
+      workSetSize: settleResult.lastWorkSet.size,
+    });
+
     this.clearProvisionalDemandAtPassEnd();
     this.activePassId = undefined;
 
