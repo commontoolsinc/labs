@@ -936,6 +936,64 @@ Deno.test("rejected source basis discards its dependent overlay", async () => {
   }
 });
 
+Deno.test("source rejection transfers a pending no-op before an immediate rerun", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const sourceApplied = Promise.withResolvers<AppliedCommit>();
+  factory.onTransact = () => sourceApplied.promise;
+  const storage = OverlayStorageManager.connect(factory);
+  const query = {
+    space: SPACE,
+    branch: "",
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    const sourceCommit = beginSourceInputWrite(storage, "doomed-source");
+    await waitFor(() => factory.commits.length === 1);
+    await writeClaimedOutput(storage, "doomed-overlay", true);
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
+    );
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics(query).actions[0]
+        ?.pendingSettlementCount,
+      1,
+    );
+
+    sourceApplied.reject(Object.assign(new Error("source rejected"), {
+      name: "TransactionError",
+    }));
+    await sourceCommit;
+    await waitFor(() => visibleOutput(storage) === undefined);
+
+    await writeClaimedOutput(storage, "immediate-rerun-overlay");
+    assertEquals(visibleOutput(storage), undefined);
+    const settled = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(settled.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(settled.actions[0]?.pendingSettlementCount, 0);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
 Deno.test("early no-op preserves a pending committed barrier after overlay loss", async () => {
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();

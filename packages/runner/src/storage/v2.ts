@@ -4447,6 +4447,7 @@ class SpaceReplica implements ISpaceReplica {
       (overlay) => overlay.unresolvedBasisLocalSeqs.has(localSeq),
       { dirtyProducer: true, diagnosticCode: "source-basis-rejected" },
     );
+    this.reconcilePendingExecutionSettlements();
   }
 
   private applyReplicaExecutionSync(sync: SessionSync): void {
