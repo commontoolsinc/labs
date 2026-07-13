@@ -2293,20 +2293,23 @@ function _combineSchemaUncached(
         ? parentRequired
         : linkRequired;
       const mergedDefs = { ...linkDefs, ...parentDefs };
-      // When combining these object types, if they both have properties,
-      // we only want to include any properties that they both have.
-      // If only one has properties, we will use that set
-      // If neither have properties, since that enables all, we will leave
-      // that alone.
-      // Our additionalProperties default is based on whether we we have defined
-      // properties
-      // If one schema has a property defined, and another schema has an
-      // additionalProperties that covers that, we use the defined property
+      // Combine the two objects' properties below. A property that only one
+      // side defines is combined against the OTHER side's additionalProperties,
+      // which defaults to open (`true`) when absent — per JSON Schema, listing
+      // `properties` without `additionalProperties` does not close the object.
+      // An open default therefore preserves a one-sided property's own schema.
+      // An explicitly authored `additionalProperties: false` still closes the
+      // world: a property the closed side lacks combines to an unsatisfiable
+      // `false`. (`undefined` and `false` are not the same thing.) This
+      // previously defaulted to `properties === undefined`, i.e. closed-world
+      // `false` as soon as a side listed any properties, which turned a link
+      // that had simply never heard of a field into a permanent read void. See
+      // topic "combineSchema manufactures closed-world additionalProperties".
+      // For a property both sides define we use the combined defined schemas
       // and don't pick up flags like asCell from additionalProperties.
       const parentAdditionalProperties = parentSchema.additionalProperties ??
-        (parentSchema.properties === undefined);
-      const linkAdditionalProperties = linkSchema.additionalProperties ??
-        (linkSchema.properties === undefined);
+        true;
+      const linkAdditionalProperties = linkSchema.additionalProperties ?? true;
       if (
         parentSchema.properties === undefined &&
         ContextualFlowControl.isTrueSchema(parentAdditionalProperties)

@@ -328,3 +328,28 @@ permissive than expected.
   ]
 }
 ```
+
+## Combining Link and Reader Schemas
+
+A link can carry its own schema, and a reader accessing through it brings
+another (for example, reading one cell's field as a differently-typed cell).
+When both are object schemas we combine them: shared properties are combined
+recursively, and a property that only one side defines is kept — combined
+against the _other_ side's `additionalProperties`.
+
+Because an absent `additionalProperties` is open (see
+[Special Handling of additionalProperties](#special-handling-of-additionalproperties)),
+one side's silence about a property does **not** forbid it: the property keeps
+its own schema. Only an explicitly authored `additionalProperties: false` closes
+the object, so that a property the closed side lacks becomes an unsatisfiable
+`false` subschema. `undefined` (open) and `false` (closed) stay distinct here,
+the same as everywhere else.
+
+Defaulting an absent `additionalProperties` to `false` in this combination (as
+we once did, on the theory that "listing any properties means closed") would
+manufacture a restriction neither schema authored. Worse, combined with a
+`required` list that survives the merge, it produces a statically unsatisfiable
+field and the read voids permanently — no write can heal it. That inverts the
+design stance above: a derived schema may end up _more permissive_ than intended
+and that is acceptable (it still limits linked-cell and field access), but it
+must never be _more restrictive_ than either author wrote.
