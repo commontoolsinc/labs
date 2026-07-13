@@ -409,32 +409,27 @@ const p95 = (values: readonly number[]): number => {
             rendererDelta,
           };
         }
+        if (profile && PROFILE_DIR) {
+          await Deno.mkdir(PROFILE_DIR, { recursive: true });
+          await Deno.writeTextFile(
+            join(PROFILE_DIR, `${label}.cpuprofile`),
+            JSON.stringify(profile),
+          );
+        }
         // Query the profiled lazy Worker only after sampling stops. Per-event
         // trace RPCs would themselves contaminate the CPU profile.
         const lazyActionRuns =
           (await actionTrace(lazyPage)).filter((entry) =>
             entry.actualWrites.length > 0
           ).length;
-        if (policyEnabled) {
-          const acceptedBefore = controlCount(
-            healthBefore,
-            "acceptedActionAttempts",
-          );
-          await waitFor(
-            async () =>
-              controlCount(
-                await executionHealth(),
-                "acceptedActionAttempts",
-              ) > acceptedBefore,
-            { timeout: TIMEOUT, delay: 100 },
-          );
-        }
         const loadAfter = await collectBrowserLoadSummary(
           actorPage,
           `${label}-after`,
         );
-        const healthAfter = await executionHealth();
-        const result: PhaseResult = {
+        const healthAfterBracket = await executionHealth();
+        const buildResult = (
+          healthAfter: ServerExecutionHealth,
+        ): PhaseResult => ({
           label,
           policyEnabled,
           events: CPU_EVENTS,
@@ -451,15 +446,55 @@ const p95 = (values: readonly number[]): number => {
           observedActionWrites: [...observedActionWrites].sort(),
           ...(profile ? { cpu: summarizeCPUProfile(profile) } : {}),
           ...(browserProcessCpu ? { browserProcessCpu } : {}),
-        };
-        if (profile && PROFILE_DIR) {
-          await Deno.mkdir(PROFILE_DIR, { recursive: true });
-          await Deno.writeTextFile(
-            join(PROFILE_DIR, `${label}.cpuprofile`),
-            JSON.stringify(profile),
+        });
+        if (policyEnabled) {
+          const acceptedBefore = controlCount(
+            healthBefore,
+            "acceptedActionAttempts",
           );
+          try {
+            await waitFor(
+              async () =>
+                controlCount(
+                  await executionHealth(),
+                  "acceptedActionAttempts",
+                ) > acceptedBefore,
+              { timeout: TIMEOUT, delay: 100 },
+            );
+          } catch (cause) {
+            const healthAfterTimeout = await executionHealth();
+            const evidence = {
+              capturedAt: new Date().toISOString(),
+              label,
+              phase: buildResult(healthAfterTimeout),
+              healthBefore,
+              healthAfterBracket,
+              healthAfterTimeout,
+              error: cause instanceof Error
+                ? {
+                  name: cause.name,
+                  message: cause.message,
+                  stack: cause.stack,
+                }
+                : String(cause),
+            };
+            console.error(
+              `server-primary phase failed after CPU bracket: ${
+                JSON.stringify(evidence)
+              }`,
+            );
+            if (PROFILE_DIR) {
+              await Deno.mkdir(PROFILE_DIR, { recursive: true });
+              await Deno.writeTextFile(
+                join(PROFILE_DIR, `${label}-failure.json`),
+                JSON.stringify(evidence, null, 2),
+              );
+            }
+            throw cause;
+          }
         }
-        return result;
+        const healthAfter = await executionHealth();
+        return buildResult(healthAfter);
       };
 
       try {
