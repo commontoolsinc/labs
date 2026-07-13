@@ -366,7 +366,7 @@ exist only on the admitted type.
 // An entity version: memory-v2 seq is per-space (a space-global Lamport
 // clock, monotone per entity), so versions are only comparable within the
 // same space. Read via the changes projection (§10.1). Used by the
-// seen-state track (§5) and by watchers (§5.5); never by the notice
+// seen-state track (§5) and by watchers (§5.1); never by the notice
 // lifecycle itself.
 type EntityVersion = { space: string; seq: number };
 
@@ -502,7 +502,7 @@ type NoticeDisposition = {
   surface: string;
   // Who did it: the user's DID, or the steward's module identity for
   // system dispositions (expiry sweep, thread displacement, watcher
-  // retraction — §4.7, §5.5).
+  // retraction — §4.7, §5.1).
   actor: string;
   ext?: Record<string, unknown>; // product extension (e.g. calibration
                               // feedback like "not-useful"); same
