@@ -406,6 +406,85 @@ describe("scheduled Factory@1 input materialization", () => {
     }
   });
 
+  it("terminates factory discovery through recursive root definitions", () => {
+    const ordinary = { value: "root", next: { value: "child" } };
+    const schema = {
+      $ref: "#/$defs/Node",
+      $defs: {
+        Node: {
+          type: "object",
+          properties: {
+            value: { type: "string" },
+            next: { $ref: "#/$defs/Node" },
+          },
+          required: ["value"],
+        },
+      },
+    } as const satisfies JSONSchema;
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "recursive-factory-discovery-input",
+        schema,
+        tx,
+      );
+
+      expect(
+        materializeScheduledFactoryInputs(ordinary, schema, {
+          runtime,
+          tx,
+          inputsCell,
+        }),
+      ).toBe(ordinary);
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
+  it("does not discover factories through non-root-definition refs", () => {
+    let factoryReads = 0;
+    const payload = Object.create(null) as Record<string, unknown>;
+    Object.defineProperty(payload, "factory", {
+      enumerable: true,
+      get() {
+        factoryReads++;
+        throw new Error("non-canonical ref must remain opaque");
+      },
+    });
+    const ordinary = { payload };
+    const schema = {
+      type: "object",
+      properties: {
+        payload: { $ref: "#/properties/factoryContainer" },
+        factoryContainer: {
+          type: "object",
+          properties: { factory: { asFactory: CONTRACTS.module } },
+        },
+      },
+    } as const satisfies JSONSchema;
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "non-definition-factory-ref-input",
+        schema,
+        tx,
+      );
+
+      expect(
+        materializeScheduledFactoryInputs(ordinary, schema, {
+          runtime,
+          tx,
+          inputsCell,
+        }),
+      ).toBe(ordinary);
+      expect(factoryReads).toBe(0);
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
   it("materializes tuple factory leaves through prefixItems", () => {
     const selected = selectFactory("module", space, true);
     const tupleSchema = {

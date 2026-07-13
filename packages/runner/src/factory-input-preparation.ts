@@ -136,7 +136,7 @@ function resolveFactoryDiscoverySchema(
   const seen = new Set<string>();
   while (
     isRecord(current) && typeof current.$ref === "string" &&
-    current.$ref.startsWith("#/") && isRecord(root)
+    /^#\/\$defs\/[^/]+$/.test(current.$ref) && isRecord(root)
   ) {
     if (seen.has(current.$ref)) return current;
     seen.add(current.$ref);
@@ -220,10 +220,20 @@ export function materializeScheduledFactoryInputs(
   // earlier load should escape unobserved or do needless work.
   const readiness: Array<() => Promise<void>> = [];
   const fullSchema = schema;
+  const resolvedSchemaMemo = new WeakMap<object, JSONSchema | undefined>();
   const resolvedSchemaFor = (
     candidate: JSONSchema | undefined,
-  ): JSONSchema | undefined =>
-    resolveFactoryDiscoverySchema(candidate, fullSchema);
+  ): JSONSchema | undefined => {
+    if (!isRecord(candidate)) {
+      return resolveFactoryDiscoverySchema(candidate, fullSchema);
+    }
+    if (resolvedSchemaMemo.has(candidate)) {
+      return resolvedSchemaMemo.get(candidate);
+    }
+    const resolved = resolveFactoryDiscoverySchema(candidate, fullSchema);
+    resolvedSchemaMemo.set(candidate, resolved);
+    return resolved;
+  };
   const factorySchemaMemo = new WeakMap<object, boolean>();
   const schemaContainsFactory = (
     candidate: JSONSchema | undefined,
