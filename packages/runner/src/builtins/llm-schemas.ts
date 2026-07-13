@@ -318,7 +318,10 @@ export const GenerateTextResultSchema = internSchema(
         },
       },
     },
-    required: ["pending", "result"],
+    // Older persisted failures predate concrete unavailable result markers and
+    // contain only pending/error. Keep those states materializable; current
+    // producers still always write result for pending and terminal outcomes.
+    required: ["pending"],
   } as const,
 );
 
@@ -340,6 +343,8 @@ export const GenerateObjectResultSchema = internSchema(
       // No `groundingSources` here — generateObject's JSON-mode path returns
       // only the object, not the grounded response. Use generateText for sources.
     },
-    required: ["pending", "result"],
+    // See GenerateTextResultSchema: result is optional for persisted legacy
+    // failures, while current writes include a concrete value or marker.
+    required: ["pending"],
   } as const,
 );

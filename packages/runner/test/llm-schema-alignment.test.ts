@@ -437,6 +437,32 @@ describe("LLM schema alignment", () => {
       expect(value.error).toBe("invalid structured output");
       expect(value.result).toBe(marker);
     });
+
+    it("materializes legacy generateText state without result", () => {
+      const value = materialize<any>(
+        runtime,
+        tx,
+        label(),
+        { pending: false, error: "legacy text failure" },
+        GenerateTextResultSchema,
+      );
+
+      expect(value.error).toBe("legacy text failure");
+      expect(value.result).toBeUndefined();
+    });
+
+    it("materializes legacy generateObject state without result", () => {
+      const value = materialize<any>(
+        runtime,
+        tx,
+        label(),
+        { pending: false, error: "legacy object failure" },
+        GenerateObjectResultSchema,
+      );
+
+      expect(value.error).toBe("legacy object failure");
+      expect(value.result).toBeUndefined();
+    });
   });
 
   describe("edge cases", () => {
