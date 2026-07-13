@@ -137,6 +137,17 @@ narrow the request to the corresponding state. You do not need to handle every
 state: if a computation only consumes `resultOf(request)`, unavailability
 propagates through it and the computation runs once usable data exists.
 
+### Migrating fallback-while-loading code
+
+`resultOf(request)` is a type projection, not a defaulting operator. Do not
+translate an old expression such as `request.result ?? previousValue` into
+`resultOf(request) ?? previousValue`: the runtime marker is intentionally
+preserved and is truthy, so the fallback does not provide continuity. Keep the
+request for explicit pending/error branches. If the requirement is to retain
+the last successful value across a new request, use explicit persisted state
+for now; the planned `latestComplete()` helper will provide that behavior
+without hand-written snapshot cells.
+
 ## URLs
 
 Use whichever URL fits the data:

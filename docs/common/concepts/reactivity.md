@@ -38,6 +38,36 @@ they test, so code can render an error while continuing to wait through other
 states. See [Fetching Data](../capabilities/fetch.md) and
 [LLM Generation](../capabilities/llm.md) for the complete APIs.
 
+Availability policy is attached at the exact stable reactive path captured by
+a computation. Hoist dynamic selection outside the computation so the
+transformer can name that path:
+
+```tsx
+// Shown for illustration only.
+const selectedRequest = requests[index];
+const content = computed(() =>
+  hasError(selectedRequest)
+    ? <div>{selectedRequest.error.message}</div>
+    : <RepoCard repo={resultOf(selectedRequest)} />
+);
+```
+
+Writing `hasError(requests[index])` inside `computed()` is diagnosed because
+the serialized policy cannot identify which array element the dynamic access
+will select. Gating is capture-granular: if a computation captures a projected
+result, it waits whenever that capture is unavailable even when the branch it
+would have taken did not read the value.
+
+When an unavailable value reaches JSX without an explicit guard, rendering
+uses suspense semantics. Before the first usable value it contributes no
+visible content; after a usable value has rendered, that last subtree remains
+in place until another usable value arrives. Use guards when the UI should show
+loading or failure state instead of this default continuity behavior.
+
+The public pattern type `AsyncResult<T>` is the availability union described
+here. An unrelated internal memory utility also uses the name `AsyncResult`
+with an error type parameter; it is not part of the pattern authoring API.
+
 ## Core Principle: Writable<> is About Write Access, Not Reactivity
 
 **The most important thing to understand:** Everything in Common Fabric is reactive by default. The `Writable<>` wrapper in type signatures doesn't enable reactivity—it indicates **write intent**.

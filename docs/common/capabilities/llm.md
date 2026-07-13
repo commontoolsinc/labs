@@ -59,6 +59,12 @@ const idea = resultOf(ideaRequest);
   )}
 ```
 
+The generated object is validated strictly against the schema inferred from
+`T`. A response that violates it becomes the terminal `schema-mismatch` state
+and is not automatically retried until the generation inputs change. The
+marker intentionally carries no schema detail; enable the `generateObject`
+debug logger to inspect the exact validation failure.
+
 ## Processing Arrays
 
 Map over items - caching is automatic per-item:
@@ -93,6 +99,16 @@ Use `generateTextStream` or `generateObjectStream<T>` when a pattern needs
 partial output or generation metadata. These advanced forms return a state
 object whose `result` field is itself an `AsyncResult<T>`; the ordinary
 `generateText` and `generateObject` calls remain the concise default.
+
+Persisted advanced state from before the direct-result migration may contain a
+terminal `{ pending: false, error }` without a `result` field. The runtime still
+materializes that legacy state; newly produced state always writes the explicit
+availability marker in `result`.
+
+As with fetch, `resultOf(request) ?? previousValue` is not a
+fallback-while-loading mechanism: an unavailable marker remains present at
+runtime. Keep the request for explicit status UI, or retain a last successful
+snapshot in state until the planned `latestComplete()` helper is available.
 
 ### Valid Model Names
 

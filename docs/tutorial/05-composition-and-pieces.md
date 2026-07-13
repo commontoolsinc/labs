@@ -131,9 +131,13 @@ const itemsWithAisles = items.map((item) => {
     prompt: `Store layout:\n${effectiveLayout}\n\nItem: ${item.title}\n...`,
     model: "anthropic:claude-haiku-4-5",
   });
-  return { item, aisle: resultOf(aisleRequest) };
+  return { item, aisleRequest };
 });
 ```
+
+Keeping the request beside the item lets each JSX leaf render pending or error
+state before projecting the usable aisle with `resultOf(aisleRequest)`. This is
+the same state/usable-view split as the single-request example above.
 
 Model names must be `vendor:model` (e.g. `"anthropic:claude-sonnet-4-5"`,
 `"openai:gpt-4o"`); a malformed name fails with an unhelpful `TypeError`.

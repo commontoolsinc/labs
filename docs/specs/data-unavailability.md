@@ -59,8 +59,10 @@ runtime value has flowed through an API whose static type is only `T`.
   by invoked code keep their existing error behavior.
 - Changing the meaning of authored `undefined`. It remains a first-class
   `FabricValue` and is valid whenever the declared schema admits it.
-- Converting interactive or multi-channel APIs such as `llmDialog` in the first
-  migration.
+- Converting remaining stateful or multi-channel APIs such as `compileAndRun`,
+  `sqliteQuery`, `llmDialog`, or `wish` in the first migration. They retain
+  their existing result contracts until each API gets a separate state-machine
+  decision; mixed idioms are expected during that staged migration.
 - Converting `streamData` in the first migration. It is a long-lived,
   multi-result subscription rather than a single-result asynchronous operation;
   replacing its state object requires a separate contract for initial pending,
@@ -237,6 +239,19 @@ unions. Semantically, `resultOf()`:
 - does not accept or consume an unavailable runtime value; and
 - leaves downstream runner preflight to propagate the marker without invoking
   a computation which expects the usable type.
+
+There is deliberately no positive `isResult()` guard. A useful positive guard
+would have to accept every unavailable reason at its computation boundary so
+that it could return `false`; it would therefore be an accept-all observation
+operation disguised as a simple success predicate. `resultOf()` expresses the
+common "wait for usable data" path, while reason-specific guards make explicit
+which unavailable states a computation can observe.
+
+A public accept-all `isUnavailable()` guard remains a possible follow-up for
+code which genuinely treats every reason alike. It is not part of v1 because
+reason-specific guards keep policies narrower, and the migration did not yet
+establish enough authoring demand to fix its name and status-projection
+semantics.
 
 An ordinary pattern establishes separate state and usable views:
 
@@ -462,11 +477,23 @@ at that path; it does not implicitly accept markers anywhere below a container.
 This avoids accidentally swallowing an unavailable list element because a
 caller observed the list itself.
 
+The path must also be statically stable. A helper guard over
+`requests[index]` inside an existing computation cannot name the selected
+capture path in serialized metadata. The transformer diagnoses that form with
+`availability:unobserved-compute-guard`; authors hoist the dynamic selection to
+pattern context and capture the resulting stable alias. Policy remains
+capture-granular: a captured projected result gates the whole computation even
+when the branch the author expected to take would not read it.
+
 The policy, not a structural schema match, authorizes the callback to receive a
 control value. Generated schemas still include the widened TypeScript union so
 the accepted FabricType can be materialized. For v1, the schema generator may
 represent the `DataUnavailable` arm as an opaque object branch; the runner
-checks the concrete class and reason before schema traversal.
+checks the concrete class and reason before schema traversal. That arm
+structurally admits arbitrary objects for non-object usable types, a known
+property documented in the
+[schema-generator README](../../packages/schema-generator/README.md#availability-marker-union-arms);
+non-runner schema consumers must not treat it as brand authentication.
 
 ### Transformer behavior
 
@@ -581,25 +608,49 @@ V1 does not accumulate markers. If later usage shows that callers need every
 failure, a separate aggregate variant can include paths and positions without
 changing the deterministic single-marker rule.
 
+The preflight walk is depth-first, cycle-safe, and bounded by the serialized
+input tree, but v1 still pays that walk on each run and each handler readiness
+check. Read metadata is shared so schema-less modules do not perform duplicate
+effective reads; that does not eliminate traversal cost. Add a representative
+wide/deep input benchmark before expanding the walk or introducing more
+availability-aware boundaries, and optimize only with measured evidence.
+
 ### Nodes with no value output
 
-An event handler or effect with no value output is not invoked while it has an
-unaccepted unavailable input. It has nowhere to propagate the value and keeps
-the existing gated behavior.
+An event handler or effect with no value output cannot propagate a marker.
+Transient and terminal reasons therefore have different queue behavior.
 
-For an event handler, an unaccepted unavailable captured input, including a
-mutable capture, gates the event before dispatch. The original queued event
-remains at the head of the global FIFO queue, and later events remain behind
-it. While the input is unavailable, the handler is not invoked, no event
-transaction or receipt is produced, and its `onCommit` callback does not fire.
-The scheduler waits on the captured reads; when they change, it rechecks the
-same event and dispatches it once the inputs are usable.
+For `pending` and `syncing`, an unavailable captured input, including a mutable
+capture, gates the event before dispatch. The original queued event remains at
+the head of the global FIFO queue, and later events remain behind it. The
+handler is not invoked, no event transaction or receipt is produced, and its
+`onCommit` callback does not fire. The scheduler waits on the captured reads;
+when they change, it rechecks the same event and dispatches it once the inputs
+are usable.
+
+An input-parked head is scheduler-quiescent: `runtime.idle()` resolves while it
+waits. Fetch, generation, and mutex producers may themselves await idle before
+publishing the value that wakes the handler, so including the input park in
+idle would create a producer/consumer deadlock. Opt-in
+`scheduler.event.preflight` telemetry reports the parked reason and queue depth
+with `skipped: true`.
+
+Terminal `error` and `schema-mismatch` inputs do not park. They dispatch
+through ordinary argument validation, suppress the invalid handler invocation,
+and settle the event as a no-op so later queue entries can proceed. They remain
+observable at value-producing computation boundaries where a guard or
+propagated output can represent them.
 
 The immutable `$event` payload is deliberately excluded from that wait. A
 malformed event cannot become valid while queued, so it is dispatched through
 ordinary argument validation and settled as that event's final no-op outcome.
 It must be removed from the queue and settle its `onCommit` callback so it
 cannot deadlock later events.
+
+A bound `Writable<T>` or Cell is also excluded from value gating. The handle is
+a usable capability even when the value it points to is currently unavailable;
+the handler runs and reads that state with `.get()`. Binding a plain `T`
+requests snapshot semantics and participates in the transient wait above.
 
 An effect which also owns a data result, including a fetch or generation
 built-in, does propagate an unavailable input to that result while suppressing
@@ -610,6 +661,21 @@ Container operators apply the rule at their actual compute boundary. If the
 entire list input is unavailable, the entire output is unavailable. If a
 mapped element is unavailable, that element's sub-computation propagates the
 marker to the corresponding result position.
+
+## Renderer Semantics
+
+Renderer reads do not pass through a value-producing computation, so the HTML
+renderers recognize concrete `DataUnavailable` values directly. An unavailable
+root or child contributes no visible content before its first usable value.
+After a usable value has rendered, an unavailable update preserves the last
+rendered subtree until another usable value arrives. It is never stringified as
+`{}` and is not reported as invalid VDOM.
+
+This suspense behavior is the unguarded default, not a loading or error UI.
+Authors use the reason-specific guards when the interface should replace the
+prior subtree with explicit status content. Confidentiality and integrity
+render policy checks run before suspense preservation, so an unavailable update
+cannot retain content which has become disallowed.
 
 ## Asynchronous Built-in State Machines
 
@@ -637,6 +703,18 @@ but they are not terminal cache hits. On resume, the producer reconciles a
 persisted transient marker against its request and synchronization state.
 `error` remains stable until inputs change or the operation is retried.
 
+`generateObject<T>()` validates successful provider output strictly against
+the declared result schema. A violation writes `schema-mismatch`, does not
+auto-retry until inputs change, and logs the detailed validation failure through
+the `generateObject` debug logger because the public marker intentionally
+carries no schema or payload detail.
+
+Resume reconciliation must preserve a persisted unavailable marker while an
+input list is still transiently absent; `map`, `filter`, and `flatMap` must not
+replace it with a fabricated empty list. Likewise, exhaustion of bounded
+linked-document loading becomes a terminal `error` for subsequent demand
+rather than leaving an unwakeable `syncing` value.
+
 ### Auxiliary generation state
 
 The advanced generation state objects also expose values which are not simple
@@ -658,6 +736,13 @@ implementation do not create that stream.
 
 `llmDialog` remains stateful and is outside this direct-result migration. Its
 implemented cancellation stream is unchanged.
+
+Legacy persisted generation state may contain `{ pending: false, error }`
+without a `result` field. Advanced state schemas continue to materialize that
+shape until reconciliation; new producers always write an explicit result or
+availability marker. A child generation used by `llmDialog` waits only for
+transient pending/syncing states and fails the tool call immediately for error
+or schema mismatch instead of consuming the full tool timeout.
 
 ## Planned `latestComplete()` Snapshot Helper
 
@@ -730,6 +815,22 @@ boundary cannot expose that distinction.
 now-shipped `AsyncResult<T>`, `resultOf()`, status-bearing reads, and unavailable
 union schema handling.
 
+It is the intended follow-up for the ecosystem's previous
+`request.result ?? priorValue` continuity idiom. Until it ships, authors who
+need continuity must keep an explicit persisted snapshot; `resultOf()` alone
+deliberately exposes current unavailability to downstream preflight.
+
+## Deferred Authoring Views
+
+Some pattern outputs expose loading and failure as ordinary data rather than
+using them only for internal control flow. The initial migration keeps those
+contracts explicit, even when that means locally projecting an
+`AsyncResult<T>` into `{ pending, result, error }`. A blessed status-projection
+view and an accept-all `isUnavailable()` guard are deferred until the repeated
+boundary use cases establish whether one helper should cover both. They must
+not be confused with `latestComplete()`, which is a stateful coherent snapshot
+and intentionally hides current failures behind the last complete value.
+
 ## Error Semantics
 
 `DataUnavailable("error")` represents a failed producer or effect. Its
@@ -751,6 +852,18 @@ This is a source-breaking API migration for patterns that read `.result`,
 must migrate those uses as part of the public-name cutover. Ordinary consumers
 now call `resultOf(request)` once to obtain a statically usable value; consumers
 which render availability states keep the `AsyncResult<T>` and use guards.
+
+Fallback-while-loading code requires special review. Replacing
+`request.result ?? fallback` with `resultOf(request) ?? fallback` is incorrect:
+the runtime marker remains present and truthy even though TypeScript exposes the
+usable type. Use explicit guarded fallback UI, explicit persisted state for a
+last-successful value, or the planned `latestComplete()` snapshot. This is the
+headline migration hazard for out-of-repository patterns and a candidate for a
+future lint over falsy/defaulting operations on projected results.
+
+Within pattern code and these docs, `AsyncResult<T>` means the public
+availability union. The internal memory package has an unrelated generic named
+`AsyncResult<T, E>`; that implementation type is not part of this API.
 
 Internal operation-state containers remain implementation details. Direct
 built-ins project their output from the result cell while advanced generation
@@ -820,6 +933,8 @@ runtime/compiler version gate before patterns emit the new type or policy.
   externalized observation cast.
 - Diagnostics for a plain unobserved guard and for an observation cast inside
   the compute.
+- Diagnostics for helper guards whose caller argument uses an unstable dynamic
+  path instead of silently dropping policy.
 - Selective reasons, aliases, destructuring, generic `T`, nested generated
   computed blocks, hoisting, serialization, and reload.
 - Exact-path policy: accepting an outer value must not accept a nested marker.
@@ -836,12 +951,20 @@ runtime/compiler version gate before patterns emit the new type or policy.
 - Result scope, CFC labels, policy inputs, pull scheduling, and durable
   observation behavior match a normal result write.
 - Per-element propagation through map-like operators.
+- Handler pending/syncing parking preserves FIFO and event identity while
+  remaining quiescent for `idle()`; terminal reasons settle without blocking.
+- Opt-in handler preflight telemetry records unavailable reason and queue depth.
+- Renderer roots and children are blank initially and preserve their last
+  usable subtree across later markers.
 
 ### Built-ins
 
 - Initial, pending, success, error, result-schema mismatch, input-change, retry,
   and rehydration transitions.
 - No stale successful value after inputs change.
+- Resume preserves list-operator markers, linked-load exhaustion becomes an
+  error, and child tool failures reject without waiting for timeout.
+- Legacy persisted generation errors without a result remain materializable.
 - Direct APIs and advanced streaming APIs share one operation rather than
   issuing duplicate requests.
 - End-to-end patterns demonstrate a default `resultOf()` projection, a

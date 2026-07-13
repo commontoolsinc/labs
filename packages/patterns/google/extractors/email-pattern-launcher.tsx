@@ -18,11 +18,9 @@
  * 3. Link: cf piece link google-auth/auth email-pattern-launcher/overrideAuth
  */
 import {
-  //compileAndRun,
   computed,
   fetchJson,
   hasError,
-  //fetchProgram,
   isPending,
   NAME,
   navigateTo,
@@ -236,28 +234,6 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Launch each matched pattern - use .map() for reactive pattern instantiation
   const launchedPatterns = patternMatches.map((matchInfo) => {
-    /*
-    const url = computed(() => `/api/patterns/${matchInfo.patternUri}`);
-
-    // Fetch the pattern program
-    const programRequest = fetchProgram({ url });
-    const program = resultOf(programRequest);
-
-    // Filter out undefined elements to handle race condition where array proxy
-    // pre-allocates with undefined before populating elements
-    const compileParams = computed(() => ({
-      // Note: Type predicate removed - doesn't work with OpaqueCell types after transformation
-      files: program.files.filter(
-        (f) => f !== undefined && f !== null && typeof f.name === "string",
-      ),
-      main: program.main,
-      input: { overrideAuth },
-    }));
-
-    // Compile and run the pattern
-    const compiled = compileAndRun(compileParams);
-    */
-
     const result = computed<Record<string, unknown> | null>(() => {
       const child = patterns[matchInfo.patternUri]?.({ overrideAuth });
       if (!child) return null;
@@ -272,15 +248,10 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       patternUri: matchInfo.patternUri,
       entry: matchInfo.entry,
       matchedEmails: matchInfo.matchedEmails,
-      pending: false, /*computed(
-        () => isPending(programRequest) || compiled.pending,
-      ),*/
+      // Registry-backed child factories instantiate synchronously. The only
+      // asynchronous state in this pattern is the registry fetch above.
+      pending: false,
       error: null,
-      /* error: computed(
-        () => hasError(programRequest)
-          ? programRequest.error.message
-          : compiled.error,
-      ),*/
       result,
     } satisfies LaunchedPatternInfo;
   });
