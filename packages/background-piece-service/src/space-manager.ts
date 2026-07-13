@@ -181,6 +181,7 @@ export class SpaceManager {
     }
     this.isRunning = true;
     this.isStopping = false;
+    this.stopPromise = null;
     console.log(`${this.did} Piece scheduler starting...`);
     if (this.backgroundExclusionControl !== undefined) {
       this.beginAcquireBackgroundExclusion();

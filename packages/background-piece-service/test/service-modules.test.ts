@@ -696,6 +696,72 @@ describe("SpaceManager", () => {
     assertEquals(events.at(-1), "release:1");
   });
 
+  it("can stop every lifecycle after being restarted", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    let generation = 0;
+    let workers = 0;
+    let shutdowns = 0;
+    let releases = 0;
+    const status = (): LegacyBackgroundExclusionStatus => ({
+      exclusion: {
+        version: 1,
+        space: TEST_DID,
+        branch: "",
+        exclusionGeneration: generation,
+        holderId: "background:restart",
+        servicePrincipal: identity.did(),
+        expiresAt: 1_000,
+      },
+      ready: true,
+    });
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      now: () => 0,
+      setTimer: () => 1,
+      clearTimer: () => {},
+      backgroundExclusion: {
+        acquire: () => {
+          generation++;
+          return Promise.resolve(status());
+        },
+        renew: () => Promise.resolve(status()),
+        release: () => {
+          releases++;
+          return Promise.resolve(status().exclusion);
+        },
+      },
+      createWorkerController: () => {
+        workers++;
+        return {
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => {
+            shutdowns++;
+            return Promise.resolve();
+          },
+          terminateNow: () => {},
+        } as never;
+      },
+    });
+
+    manager.start();
+    await manager.idle();
+    await manager.stop();
+    manager.start();
+    await manager.idle();
+    await manager.stop();
+
+    assertEquals(workers, 2);
+    assertEquals(shutdowns, 2);
+    assertEquals(releases, 2);
+  });
+
   it("waits for client drain and hard-fences renewal loss", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     let now = 100;
