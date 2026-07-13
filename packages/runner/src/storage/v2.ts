@@ -4443,7 +4443,13 @@ class SpaceReplica implements ISpaceReplica {
         touched.map(({ id, scope }) => snapshotState(this, id, scope)),
       )
       : undefined;
-    for (const record of this.#docs.values()) {
+    // Every pending version owned by these overlays was created from their
+    // recorded touched set. Visit only those exact documents: scanning the
+    // whole replica for every server settlement makes claimed speculation
+    // proportional to unrelated space size.
+    for (const { id, scope } of touched) {
+      const record = this.#docs.get(docKey(id, scope));
+      if (record === undefined) continue;
       if (!record.pending.some((entry) => localSeqs.has(entry.localSeq))) {
         continue;
       }
