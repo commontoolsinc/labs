@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { toCell } from "../src/back-to-cell.ts";
@@ -61,6 +63,12 @@ describe("plain-schema array traversal", () => {
 
   async function seed(id: string, value: unknown): Promise<void> {
     runtime.getCell(space, id, undefined, tx).set(value);
+    await tx.commit();
+    tx = runtime.edit();
+  }
+
+  async function seedRaw(id: string, value: FabricValue): Promise<void> {
+    runtime.getCell(space, id, undefined, tx).setRawUntyped(value);
     await tx.commit();
     tx = runtime.edit();
   }
@@ -137,5 +145,116 @@ describe("plain-schema array traversal", () => {
       tx,
     );
     expect(cell.get()).toEqual([{ label: "fallback" }]);
+  });
+
+  it("preserves primitive-array validation semantics", async () => {
+    await seedRaw("undefined-items", [[1]]);
+    const undefinedItems = runtime.getCell<undefined[][]>(
+      space,
+      "undefined-items",
+      {
+        type: "array",
+        items: { type: "array", items: { type: "undefined" } },
+      },
+      tx,
+    );
+    expect(undefinedItems.get()).toEqual([[undefined]]);
+
+    await seedRaw("null-items", [[1]]);
+    const nullItems = runtime.getCell<null[][]>(
+      space,
+      "null-items",
+      {
+        type: "array",
+        items: { type: "array", items: { type: "null" } },
+      },
+      tx,
+    );
+    expect(nullItems.get()).toEqual([[null]]);
+
+    await seedRaw("invalid-string-items", [[1]]);
+    const invalidStringItems = runtime.getCell<string[][]>(
+      space,
+      "invalid-string-items",
+      {
+        type: "array",
+        items: { type: "array", items: { type: "string" } },
+      },
+      tx,
+    );
+    expect(invalidStringItems.get()).toBeUndefined();
+  });
+
+  it("falls back when primitive arrays contain links", async () => {
+    await seed("linked-string", "linked");
+    const linkedString = runtime.getCell<string>(
+      space,
+      "linked-string",
+      undefined,
+      tx,
+    );
+    runtime.getCell(space, "linked-string-array", undefined, tx).setRawUntyped(
+      [[linkedString.getAsLink()]],
+    );
+    await tx.commit();
+    tx = runtime.edit();
+
+    const cell = runtime.getCell<string[][]>(
+      space,
+      "linked-string-array",
+      {
+        type: "array",
+        items: { type: "array", items: { type: "string" } },
+      },
+      tx,
+    );
+    expect(cell.get()).toEqual([["linked"]]);
+  });
+
+  it("falls back when a linked item has no stored target", async () => {
+    const missing = runtime.getCell(
+      space,
+      "missing-linked-item",
+      undefined,
+      tx,
+    );
+    runtime.getCell(space, "missing-item-array", undefined, tx).setRawUntyped(
+      [missing.getAsLink()],
+    );
+    await tx.commit();
+    tx = runtime.edit();
+
+    const cell = runtime.getCell<Record<string, never>[]>(
+      space,
+      "missing-item-array",
+      { type: "array", items: { type: "object", properties: {} } },
+      tx,
+    );
+    expect(cell.get()).toBeUndefined();
+  });
+
+  it("preserves object-item leaf and invalid-type handling", async () => {
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+    await seed("special-object-items", [bytes]);
+    const schema = {
+      type: "array",
+      items: { type: "object", properties: {} },
+    } as const satisfies JSONSchema;
+    const specialObjects = runtime.getCell<FabricBytes[]>(
+      space,
+      "special-object-items",
+      schema,
+      tx,
+    );
+    expect(specialObjects.get()).toEqual([bytes]);
+
+    await seed("invalid-object-items", [1]);
+    const invalidObjects = runtime.getCell<Record<string, never>[]>(
+      space,
+      "invalid-object-items",
+      schema,
+      tx,
+    );
+    expect(invalidObjects.get()).toBeUndefined();
   });
 });

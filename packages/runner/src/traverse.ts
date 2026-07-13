@@ -3524,6 +3524,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
    * Materialize an exact type/properties/items subtree without repeatedly
    * re-deriving child schemas and re-entering the general schema dispatcher.
    * Returns undefined when link or array semantics require that general path.
+   * The prepared plan is finite and rejects recursive schema graphs, so shapes
+   * that need cycle tracking stay on the general path as well.
    */
   private traversePlainSchema(
     doc: IMemorySpaceValueAttestation,
@@ -3549,16 +3551,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
       const newValue = new Array<Immutable<FabricValue>>(doc.value.length);
       const newLink = link ?? getNormalizedLink(doc.address, plan.schema);
-      using t = this.tracker.include(
-        doc.value,
-        plan.schema,
-        newValue,
-        doc,
-      );
-      if (t === null) {
-        return { ok: this.tracker.getExisting(doc.value, plan.schema) };
-      }
-
       // Match traverseArrayWithSchema's structural and per-index reads.
       this.tx.read(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
       const valid = doc.value.every((item, index) => {
@@ -3591,16 +3583,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
     const newValue: Record<string, Immutable<FabricValue>> = {};
     const newLink = link ?? getNormalizedLink(doc.address, plan.schema);
-    using t = this.tracker.include(
-      doc.value,
-      plan.schema,
-      newValue,
-      doc,
-    );
-    if (t === null) {
-      return { ok: this.tracker.getExisting(doc.value, plan.schema) };
-    }
-
     for (const [propKey, propValue] of Object.entries(doc.value)) {
       const childPlan = plan.properties.get(propKey);
       if (childPlan === undefined) {
@@ -3665,14 +3647,6 @@ export class SchemaObjectTraverser<V extends FabricValue>
       path: target.path,
       schema: selector.schema,
     };
-    using t = this.tracker.include(
-      doc.value!,
-      targetSelector.schema,
-      null,
-      doc,
-    );
-    if (t === null) return undefined;
-
     const { ok, error } = this.tx.read(target, READ_NON_RECURSIVE);
     if (error !== undefined || ok.value === undefined) return undefined;
     return [{ address: target, value: ok.value }, targetSelector];
