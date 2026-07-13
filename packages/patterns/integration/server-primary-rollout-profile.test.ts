@@ -1027,6 +1027,7 @@ const assertRendererCountersContinue = (
             typeof assertCounterbalancedRendererCpu
           >
           | undefined;
+        let cpuGateError: unknown;
         if (CPU_BENCH) {
           const cpuPerEvent = phases.map((phase) => {
             const total = phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs;
@@ -1065,15 +1066,24 @@ const assertRendererCountersContinue = (
               ),
             );
           }
-          cpuAnalysis = assertCounterbalancedRendererCpu(cpuPerEvent, {
-            maximumEnabledRatio: 1.1,
-            maximumReplicateSpread: 0.15,
-          });
-          console.log(
-            `authoritative lazy-browser CPU analysis: ${
-              JSON.stringify(cpuAnalysis)
-            }`,
-          );
+          try {
+            cpuAnalysis = assertCounterbalancedRendererCpu(cpuPerEvent, {
+              maximumEnabledRatio: 1.1,
+              maximumReplicateSpread: 0.15,
+            });
+            console.log(
+              `authoritative lazy-browser CPU analysis: ${
+                JSON.stringify(cpuAnalysis)
+              }`,
+            );
+          } catch (cause) {
+            cpuGateError = cause;
+            console.warn(
+              `authoritative lazy-browser CPU gate failed; collecting the non-gating worker profile before surfacing it: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }`,
+            );
+          }
         }
 
         if (PROFILE_DIR) {
@@ -1175,6 +1185,7 @@ const assertRendererCountersContinue = (
             sampler?.close();
           }
         }
+        if (cpuGateError !== undefined) throw cpuGateError;
       } finally {
         processMonitor?.close();
         await cancelLazyFinalObserver(lazyPage);
