@@ -1,10 +1,9 @@
 # Server-Primary Execution
 
 Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
-and deterministic failure gates are locally validated. The previous parked-
-worker claim-readiness failure is fixed with deterministic cold-wake and
-replacement coverage; fresh counterbalanced browser/CPU acceptance and the
-deployed-staging enable/disable drill remain pending. Phases 3+ remain design.
+and deterministic failure gates are locally validated, including the accepted
+500-event counterbalanced browser/CPU gate. The deployed-staging enable/disable
+drill remains pending. Phases 3+ remain design.
 Author: design session
 2026-07-06; revised 2026-07-07 (doc-centric demand, SQLite-primary state,
 transient executor passes, reactive interpreter de-scoped); revised
@@ -13,7 +12,8 @@ sponsored shared workers, positive per-action authority, writer-index
 producer lookup, scope-safe fallback, causal settlement acknowledgements,
 and server egress parity); revised 2026-07-12 after Phase 2 implementation and
 local rollout validation; revised 2026-07-13 after the parked-worker wake,
-causal-actor, permanent-builtin-failure, and bounded-observability follow-ups.
+causal-actor, permanent-builtin-failure, bounded-observability, and accepted
+500-event browser/CPU follow-ups.
 Completed work-order status is
 recorded inline; unimplemented phases remain design requirements rather than
 descriptions of current behavior. Operator procedure lives in the
@@ -788,10 +788,13 @@ Per space with C connected clients, piece graph of size G, event rate E:
   server compute so it can remove duplicate commits and external effects; it
   does not yet remove N× local speculative computation.
 - Client compute: the complete graph still runs by default so unsupported
-  actions and immediate overlays remain correct. A later, separately gated
-  closure/claim-snapshot optimization may leave remotely owned actions cold
-  until local speculation demands them. First paint therefore retains today's
-  browser compile path; zero-execution first paint requires D/projector output.
+  actions and immediate local-source overlays remain correct. An exactly
+  claimed computation may coalesce remote feed invalidations behind one
+  non-sliding 50 ms observation-adoption grace; `idle()` waits for its bounded
+  local fallback. A later, separately gated closure/claim-snapshot optimization
+  may leave remotely owned actions cold until local speculation demands them.
+  First paint therefore retains today's browser compile path; zero-execution
+  first paint requires D/projector output.
 - Server subscription serving: today's graph-query path remains for unclaimed
   actions. After exact closure parity (§6.4), claimed closures can move toward
   O(commits × sessions × set-membership + patch size).
@@ -1281,19 +1284,21 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   transfer plus indexed parked-reader wake (G0/G2/G3/G4). Background-registry
   consolidation is deferred, but legacy-owned spaces are excluded immediately
   so a second server Worker cannot start.
-- **Phase 2 — positive B claims (implemented; local rollout validation in
-  progress, default-off).** Add client overlay routing, ephemeral
+- **Phase 2 — positive B claims (implemented and locally validated,
+  default-off).** Add client overlay routing, ephemeral
   `ExecutionClaim`, `ActionSettlement.inputBasisSeq`, whole-action scope
   firewall, passive claimed builtins, and egress parity (G5/G10/G11). Measure
   conflict rate, multi-client action volume, divergence, revocations, and
   fallback latency. Fallback is claim removal. The operator runbook,
   product-derived/literal multi-client fixtures, and deterministic local
-  enable/disable and failure drills are complete. The previous parked-worker
-  claim-readiness failure is fixed with deterministic cold-wake and replacement
-  coverage; fresh counterbalanced CPU acceptance and a deployed-staging policy
-  drill remain pending. The initial, superseded
+  enable/disable and failure drills are complete. The parked-worker
+  claim-readiness failure is fixed, and the 500-event counterbalanced CPU gate
+  passes; only a deployed-staging policy drill remains pending. The initial,
+  superseded
   occupancy-proxy measurement is retained only as a historical snapshot in the
-  [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md).
+  [initial rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md),
+  and the accepted result is recorded in the
+  [500-event rollout report](../../history/development/performance/server-primary-rollout-2026-07-13.md).
 - **Phase 3 — background demand + narrower feeds.** Fold existing background
   registrations into the same lower-priority pool and retire graph-query
   subscriptions only after the doc-set feed has parity. Separately gate

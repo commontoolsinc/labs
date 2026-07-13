@@ -4,11 +4,10 @@ Companion to [README.md](./README.md). Read the design first; this plan turns
 it into reviewable, red-green work orders.
 
 Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
-and deterministic failure gates are locally validated. The previous parked-
-worker claim-readiness failure is fixed with deterministic cold-wake and
-replacement coverage; fresh counterbalanced browser/CPU acceptance and the
-deployed-staging enable/disable drill remain pending. Later background, feed,
-scoped, and handler work is outlined only.
+and deterministic failure gates are locally validated, including the accepted
+500-event counterbalanced browser/CPU gate. The deployed-staging enable/disable
+drill remains pending. Later background, feed, scoped, and handler work is
+outlined only.
 
 Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
 its facade, commit-gated starts, cancellation semantics, bounded settle,
@@ -953,7 +952,8 @@ Phase exit:
 **Depends on:** W0.6, W1.3.
 
 **Status:** implemented with exact synchronous client routing, replica-ordered
-claim snapshots, and local pending-layer overlays.
+claim snapshots, local pending-layer overlays, and bounded remote-feed
+speculation coalescing.
 
 **Steps:**
 
@@ -983,6 +983,15 @@ claim snapshots, and local pending-layer overlays.
    offline queue behavior.
 8. Keep clients trusted in v1: protocol tests pin compliance; CFC/server
    enforcement arrives later.
+9. Keep local source/setup/UI invalidations immediate. A remote `integrate`
+   that invalidates an exactly claimed computation may wait behind one
+   non-sliding 50 ms observation-adoption grace. The scheduler marks dirt and
+   CFC trigger causes immediately, `idle()` waits for the bounded fallback,
+   and a stalled/missing authority always executes locally at the deadline.
+   Retain a successful settlement that arrives before the overlay and apply
+   the ordinary input-basis and accepted-data barriers when that overlay is
+   later created. This is bounded Phase 2 coalescing, not Phase 3's complete-
+   closure cold suppression.
 
 **Success criteria:**
 
@@ -1000,6 +1009,9 @@ claim snapshots, and local pending-layer overlays.
       derived wire commit; reconnect claim-snapshot barrier prevents a stale
       flush and then converges.
 - [x] Flag off has byte-identical commit and control traffic.
+- [x] Remote claimed invalidations coalesce behind a fixed leading deadline;
+      local commits remain immediate, authority stalls fall open, and an early
+      no-op/committed settlement cannot strand the later overlay.
 
 ---
 
@@ -1087,14 +1099,13 @@ per-action sink authority decision and pre-claim in-flight handoff.
 
 **Depends on:** W1.5, W2.2, W2.3.
 
-**Status:** implementation is complete and local validation is in progress. The
+**Status:** implementation and local validation are complete. The
 owner CLI, runbook, bounded-cardinality health/latency signals,
 product-derived/literal multi-client fixtures, and deterministic
-authority/failure drills are present. The previous parked-worker claim-
-readiness failure is fixed with exact cold-wake, sponsor-preference, settle-
-watermark, and replacement coverage. Fresh counterbalanced browser/CPU
-acceptance remains pending along with the deployed-staging enable/disable
-drill.
+authority/failure drills are present. The parked-worker claim-readiness
+failure is fixed with exact cold-wake, sponsor-preference, settle-watermark,
+and replacement coverage. The 500-event counterbalanced browser/CPU gate
+passes; the deployed-staging enable/disable drill remains pending.
 
 **Deliverable:** perf fixtures, operational metrics, and an enable/disable
 runbook using serverPrimaryExecution plus optional executionPolicy.
@@ -1131,13 +1142,14 @@ runbook using serverPrimaryExecution plus optional executionPolicy.
       migration"); a deployed-staging CLI drill and record are still required.
 - [x] Kill/restart/sponsor-loss drills demonstrate fail-open authority and no
       duplicate worker commits (`executor-drain-barrier.test.ts`).
-- [ ] Browser compute and lazy-client CPU are measured with a reliable
-      lazy-browser renderer-process counter, but no A/B/B/A result is accepted
-      while the long-run claimed phase can suppress client writes without a
-      server attempt or settlement. Fix that authority-readiness failure, then
-      demonstrate the first rollout is no worse; later complete-closure
-      suppression remains tracked explicitly in Phase 3. See the
-      [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md)
+- [x] Browser compute and lazy-client CPU pass the 500-event ABBA + BAAB
+      renderer-process gate. ABBA enabled/disabled is 1.0347, BAAB is 1.0387,
+      and combined is 1.0366 against the 1.10 ceiling; same-policy spreads are
+      at most 0.0586 against the 0.15 ceiling. Every enabled phase suppresses
+      all 500 derived client wire commits and completes exact authority and
+      settlement barriers. Later complete-closure suppression remains tracked
+      explicitly in Phase 3. See the
+      [accepted Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-13.md)
       and `server-primary-rollout-profile.test.ts`.
 
 ---
