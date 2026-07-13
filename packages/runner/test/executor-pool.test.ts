@@ -2,6 +2,8 @@ import { assertEquals } from "@std/assert";
 import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 import type { BranchName, ExecutionLease } from "@commonfabric/memory/v2";
 import type {
+  AcceptedCommitEvent,
+  AcceptedCommitListener,
   AuthenticatedExecutionDemand,
   ExecutionDemandListener,
   ExecutionDemandSnapshot,
@@ -41,11 +43,54 @@ const demand = (
   pieces,
 });
 
+const acceptedCommit = ({
+  branch = BRANCH,
+  dataSeq = 1,
+  originSessionId,
+  stale = true,
+}: {
+  branch?: BranchName;
+  dataSeq?: number;
+  originSessionId?: string;
+  stale?: boolean;
+} = {}): AcceptedCommitEvent => ({
+  order: dataSeq,
+  deliverySeq: dataSeq,
+  space: SPACE,
+  ...(originSessionId !== undefined ? { originSessionId } : {}),
+  branch,
+  dataSeq,
+  revisions: [],
+  schedulerUpdateIds: [],
+  staleDemandedReaders: stale
+    ? [{
+      branch,
+      pieceId: "space:piece:a",
+      processGeneration: 1,
+      actionId: "action:stale",
+      executionContextKey: "space",
+      latestObservationId: 1,
+      directDirtySeq: dataSeq,
+      staleSeq: null,
+      unknownReason: null,
+    }]
+    : [],
+});
+
 class FakeExecutionControl {
   readonly events: string[];
+  readonly acceptedCommitListeners = new Map<
+    string,
+    Set<AcceptedCommitListener>
+  >();
+  readonly acquisitionOptions: (
+    | { preferredOriginSessionId?: string }
+    | undefined
+  )[] = [];
   listener: ExecutionDemandListener | undefined;
   current: ExecutionLeaseHandle | null = null;
   acquired = 0;
+  acquisitionSucceeds = true;
   renewals = 0;
   renewalSucceeds = true;
   renewalError: unknown;
@@ -65,8 +110,30 @@ class FakeExecutionControl {
     };
   }
 
-  acquireExecutionLease(): Promise<ExecutionLeaseHandle | null> {
+  subscribeAcceptedCommits(
+    space: string,
+    listener: AcceptedCommitListener,
+  ): () => void {
+    let listeners = this.acceptedCommitListeners.get(space);
+    if (listeners === undefined) {
+      listeners = new Set();
+      this.acceptedCommitListeners.set(space, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.acceptedCommitListeners.delete(space);
+    };
+  }
+
+  acquireExecutionLease(
+    _space?: string,
+    _branch?: BranchName,
+    options?: { preferredOriginSessionId?: string },
+  ): Promise<ExecutionLeaseHandle | null> {
     this.acquired++;
+    this.acquisitionOptions.push(options);
+    if (!this.acquisitionSucceeds) return Promise.resolve(null);
     this.current ??= lease(this.acquired);
     return Promise.resolve(this.current);
   }
@@ -121,6 +188,17 @@ class FakeExecutionControl {
     };
     return this.listener?.(snapshot);
   }
+
+  async emitAccepted(event: AcceptedCommitEvent): Promise<void> {
+    const listeners = [
+      ...(this.acceptedCommitListeners.get(event.space) ?? []),
+    ];
+    await Promise.all(listeners.map((listener) => listener(event)));
+  }
+
+  acceptedCommitListenerCount(space = SPACE): number {
+    return this.acceptedCommitListeners.get(space)?.size ?? 0;
+  }
 }
 
 Deno.test("shared execution pool fails closed without a legacy ownership interlock", async () => {
@@ -128,6 +206,7 @@ Deno.test("shared execution pool fails closed without a legacy ownership interlo
   const factory = new FakeExecutorFactory();
   const controlWithoutInterlock: ExecutionPoolControl = {
     subscribeExecutionDemands: control.subscribeExecutionDemands.bind(control),
+    subscribeAcceptedCommits: control.subscribeAcceptedCommits.bind(control),
     acquireExecutionLease: control.acquireExecutionLease.bind(control),
     renewExecutionLease: control.renewExecutionLease.bind(control),
     beginExecutionLeaseDrain: control.beginExecutionLeaseDrain.bind(control),
@@ -254,6 +333,144 @@ class ManualTimers {
   }
 }
 
+Deno.test("accepted commit cold-starts parked demand on behalf of its origin", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    control.acquisitionSucceeds = false;
+    await control.emit(1, [
+      demand(1, ["piece:a"]),
+      demand(2, ["piece:b"]),
+    ]);
+    await pool.idle();
+
+    assertEquals(control.acquired, 1);
+    assertEquals(factory.starts.length, 0);
+    assertEquals(control.acceptedCommitListenerCount(), 1);
+
+    control.acquisitionSucceeds = true;
+    await control.emitAccepted(acceptedCommit({
+      dataSeq: 7,
+      originSessionId: "session:2",
+    }));
+    await pool.idle();
+
+    assertEquals(factory.starts.length, 1);
+    assertEquals(control.acquisitionOptions, [
+      undefined,
+      { preferredOriginSessionId: "session:2" },
+    ]);
+
+    // A live Worker owns the accepted-commit feed for its realm. The pool
+    // must neither duplicate that wake nor start another generation.
+    await control.emitAccepted(acceptedCommit({
+      dataSeq: 8,
+      originSessionId: "session:1",
+    }));
+    await pool.idle();
+    assertEquals(factory.starts.length, 1);
+    assertEquals(factory.executors[0]?.wakes, 0);
+
+    await pool.close();
+    assertEquals(control.acceptedCommitListenerCount(), 0);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("accepted commit wake ignores wrong-branch and unstale events", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    control.acquisitionSucceeds = false;
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    assertEquals(control.acquired, 1);
+
+    await control.emitAccepted(acceptedCommit({
+      branch: "alternate" as BranchName,
+      dataSeq: 2,
+      originSessionId: "session:1",
+    }));
+    await control.emitAccepted(acceptedCommit({
+      dataSeq: 3,
+      originSessionId: "session:1",
+      stale: false,
+    }));
+    await pool.idle();
+
+    assertEquals(control.acquired, 1);
+    assertEquals(factory.starts.length, 0);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("accepted commit wake honors settle watermark and coalesces replacements", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    const active = [
+      demand(1, ["piece:a"]),
+      demand(2, ["piece:b"]),
+    ];
+    await control.emit(1, active);
+    await pool.idle();
+    const first = factory.executors[0]!;
+    first.settleResult = 10;
+    const settleGate = Promise.withResolvers<void>();
+    first.settleGate = settleGate.promise;
+
+    control.emit(2, []);
+    await first.settleStarted.promise;
+    const redemanded = control.emit(3, active);
+    control.legacyOwned = true;
+    settleGate.resolve();
+    await redemanded;
+    await pool.idle();
+
+    assertEquals(first.stopped, 1);
+    assertEquals(factory.starts.length, 1);
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "excluded");
+
+    control.legacyOwned = false;
+    await control.emitAccepted(acceptedCommit({
+      dataSeq: 10,
+      originSessionId: "session:1",
+    }));
+    await pool.idle();
+    assertEquals(control.acquired, 1);
+    assertEquals(factory.starts.length, 1);
+
+    await Promise.all(
+      [11, 12, 13].map((dataSeq) =>
+        control.emitAccepted(acceptedCommit({
+          dataSeq,
+          originSessionId: "session:2",
+        }))
+      ),
+    );
+    await pool.idle();
+
+    assertEquals(factory.starts.length, 2);
+    assertEquals(control.acquired, 2);
+    assertEquals(control.acquisitionOptions[1], {
+      preferredOriginSessionId: "session:2",
+    });
+  } finally {
+    await pool.close();
+  }
+});
+
 Deno.test("shared execution pool unions ten client references into one worker", async () => {
   const control = new FakeExecutionControl();
   const factory = new FakeExecutorFactory();
@@ -308,6 +525,7 @@ Deno.test("shared execution pool unions ten client references into one worker", 
     assertEquals(factory.executors[0]?.stopped, 1);
     assertEquals(control.finished, 1);
     assertEquals(pool.snapshot(SPACE, BRANCH), undefined);
+    assertEquals(control.acceptedCommitListenerCount(), 0);
     assertEquals(pool.metrics(), {
       activeLanes: 0,
       activeWorkers: 0,
