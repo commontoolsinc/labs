@@ -32,8 +32,8 @@ question §12.12.
 Elena must take tacrolimus by 9pm; a glance must not silence the reminder.
 Her one-time adopted policy carries `{clamp: {min: "interrupt"},
 bypassQuietHours: true, realert: {everyMs: 600_000}}`, and `realert` does
-the whole job on its own: a matched notice is **exempt from
-seen-satisfaction** — glancing at the reminder does not clear it; only a
+the whole job on its own: a matched notice is **exempt from watcher
+retraction** (§5.1) — glancing at the reminder does not clear it; only a
 terminal disposition (logging the dose → `acted`, or an explicit dismiss)
 does — and it re-alerts on the cadence while live (§7, §9.3). The med
 pattern may still re-post as the deadline nears (fresh event key, same
@@ -179,7 +179,7 @@ inquiry retract buyer #1's.
 Jonas is offline 16 days: ~300 notices, ~80 unseen artifact changes across
 12 spaces. The joins do most of the collapsing for free — 16 days of one
 chat is *one* notice (coalescing + thread displacement), everything he
-handled from his phone abroad is already satisfied everywhere (seen-join),
+handled from his phone abroad is already retracted everywhere (the seen watcher, §5.1),
 expired 2FA/fare-holds are hidden and swept, matured ladder rungs displaced
 each other. Two rules close the rest: the sweep's **aging** demotes
 unhandled `heads-up` older than 7 days to `review` (§4.5), so the bell

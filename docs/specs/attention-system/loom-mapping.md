@@ -31,3 +31,27 @@ receipts' internals, stance vocabularies — upstream product machinery
 (§Division of labor); stance policies compile down to plain clamps/watches
 (§7). A receipt *summary* enters as an ordinary candidate.
 
+
+## Already live: the Home Briefing pipeline
+
+The mapping above targets the `attention-candidate-v1` draft, but the
+surface actually shipping today is Loom mobile's **Home Briefing**: a
+curator agent authors a briefing (`.Fabric/briefing.json`), the daemon
+validates and projects it into a dedicated fabric cell, and the mobile
+Home renders headline + blocks/items with tap targets and a staleness
+label (`commontoolsinc/loom`: `.ops/prompts/sweep-curator.md`,
+`.ops/patterns/cf-loom-mobile/briefing.ts`,
+`.ops/services/loom-daemon/sync/briefing-cell.ts`). Fit with this spec:
+
+- The curator's governing rules (*write about the user's world, never the
+  machine*; *"you're clear" is a real answer — never manufacture content*)
+  are the calm thesis, currently enforced in a prompt with no runtime
+  underneath.
+- `BriefingItem` (`label`/`sublabel`/`badge`/`target`) is a near-degenerate
+  notice (`title`/`body`/`kind`/`subject`); the briefing's end-state under
+  this spec is a *view over the notice ledger* (a §9.2 digest surface),
+  not a bespoke store.
+- The recap section is a natural early consumer of the changes projection.
+
+Adoption path: the briefing folds into the notice/seen-state model from
+the Loom side as phases land; no spec changes required.

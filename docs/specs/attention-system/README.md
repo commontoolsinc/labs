@@ -30,6 +30,15 @@ merged phantom concepts, and split this spec into its current directory
 form: [`changes-projection.md`](./changes-projection.md) — independently
 approvable — plus [`prior-art.md`](./prior-art.md),
 [`stories.md`](./stories.md), and [`loom-mapping.md`](./loom-mapping.md)).
+Revised 2026-07-13 on framework-author review (PR #4691): the notice
+lifecycle is decoupled from version machinery (once disposed, disposed;
+new news is a new notice; **watchers** — §5.1 — bridge entity changes to
+notices, with the generic seen watcher preserving cross-device
+auto-retract); intake is split space-wide vs directed-via-profile with
+home-space aggregation (§6.1); the pattern-author surface is specified
+(§6.1b and [`authoring.md`](./authoring.md)); sqlite write-authorization
+is assessed easy and the ledger's steady-state backing accordingly
+(§4.5, §10.3).
 
 ## Last Updated
 
@@ -63,8 +72,9 @@ Five load-bearing moves:
    the wire on every query result; exposing it is one small read-only
    primitive, the changes projection (§10.1). Seen-state is one small
    relation — last observed version per (user, entity) — and "unseen
-   change", "while you were away", notice currency, and the artifact
-   lifecycle all fall out as joins against it (§5). For in-fabric sources, a
+   change", "while you were away", and the artifact lifecycle all fall out
+   as joins against it (§5), while **watchers** (§5.1) bridge it to
+   notices without version machinery ever entering the notice contract. For in-fabric sources, a
    notice is a *view over* "an artifact you care about changed", which
    dissolves the "every pattern must remember to send notifications"
    problem.
@@ -107,7 +117,10 @@ auto-surfacing system — this is a routing fold, not a suggestion engine.)
 of stores (notices, dispositions, seen — §4.5). *Lane* — a shell projection
 over attention state (most lanes correspond to a posture rung; some, like
 the snoozed lane, are lifecycle views). *Watch set* — the entity set whose
-changes the user's attention system observes (§5). *Artifact* — a
+changes the user's attention system observes (§5). *Watcher* — steward-run
+logic that turns watched changes into posted notices and reports moot
+claims for retraction (§5.1); the generic seen watcher is built in,
+per-kind watchers refine it. *Artifact* — a
 user-meaningful entity, typically a piece's result cell; the spec says
 "entity" where the memory-v2 identity (versioning, `seq`) is what matters.
 
@@ -192,9 +205,15 @@ feature branch as of 2026-07-12) defines *prepared claims*, an
 attention-posture ladder, a capacity-bounded Today block, and a
 default-weekly digest — materialized in product-local storage; its current
 "unseen" affordance is a localStorage last-seen timestamp per browser.
-Pond's donut prototype ranks pieces spatially by an attention score. Both
-need the same substrate: durable per-user seen-state, a trustworthy
-canonical ledger, and per-user routing policy. This spec is that substrate —
+Pond's donut prototype ranks pieces spatially by an attention score. And
+one surface is already *live*: Loom mobile's **Home Briefing** pipeline (a
+curator agent authors a briefing; the daemon projects it into a fabric
+cell; the mobile home renders headline + items) — a digest adapter waiting
+for a ledger, whose `BriefingItem` is a near-degenerate notice and whose
+recap section is a natural early changes-projection consumer
+([`loom-mapping.md`](./loom-mapping.md)). All of them need the same
+substrate: durable per-user seen-state, a trustworthy canonical ledger,
+and per-user routing policy. This spec is that substrate —
 and only that substrate; Loom's work-start machinery and stance-bearing
 judgment policies stay product-side (Division of labor, in the Summary).
 
@@ -344,9 +363,11 @@ exist only on the admitted type.
 
 ```ts
 // Shown for illustration only.
-// A subject-entity version: memory-v2 seq is per-space (a space-global
-// Lamport clock, monotone per entity), so versions are only comparable
-// within the same space. Read via the changes projection (§10.1).
+// An entity version: memory-v2 seq is per-space (a space-global Lamport
+// clock, monotone per entity), so versions are only comparable within the
+// same space. Read via the changes projection (§10.1). Used by the
+// seen-state track (§5) and by watchers (§5.5); never by the notice
+// lifecycle itself.
 type EntityVersion = { space: string; seq: number };
 
 // What a source posts (into the notice inbox, §6.1). Everything on the
@@ -354,19 +375,25 @@ type EntityVersion = { space: string; seq: number };
 // raise loudness (§4.2).
 type NoticeCandidate = {
   // THE entity this notice is about (a stored cell link, not a query
-  // string). The notice is the invitation; the subject is the truth.
-  // Satisfaction, coalescing, and re-emergence all key on it: once your
-  // seen mark on subject reaches subjectVersion, the notice retracts
-  // everywhere (alreadySeen, below).
+  // string). The notice is the invitation; the subject is the truth —
+  // navigation, policy matching, and watcher-driven retraction (§5.1)
+  // all key on it.
   subject: unknown;           // asCell: ["cell"]
-  // The subject's version at posting. Drives coalescing (same id,
-  // advancing version) and re-emergence tombstones (§4.7).
-  subjectVersion: EntityVersion;
+  // OPTIONAL watcher metadata: the subject's version at posting, stamped
+  // by watchers that derive notices from entity changes (§5.1) so the
+  // generic seen watcher can retract on observation. Deliberately NOT
+  // part of the notice contract — a notice's lifecycle never requires
+  // reading versions (the contract: once disposed, disposed; new news is
+  // a new notice).
+  subjectVersion?: EntityVersion;
   // Source classification ("group-chat", "importer", "agent-run", ...).
-  // BOUND BY THE STEWARD to the source's verified identity: the first-seen
-  // kind for a given source sticks; a source changing its declared kind
-  // is itself a reputation signal (and does not escape kind-matched
-  // clamps, which follow the source identity). Policy matching (§7) and
+  // BOUND BY THE STEWARD to the source's verified identity as a per-source
+  // SET: first use of a kind adds it to the source's set (set growth is
+  // itself a reputation signal), so a multi-genre trusted source (one
+  // product emitting agent-run, calendar-prep, email-draft, ...) is
+  // first-class, while kind churn still cannot launder anything —
+  // kind-matched clamps follow the source identity, and kind can never
+  // raise posture regardless (§4.2). Policy matching (§7) and
   // digest grouping (§9.2) key on it. Self-declared — see §4.2's
   // raise-authority tiers and the match-schema comment (§7) for what may
   // therefore never key on it.
@@ -460,11 +487,12 @@ type NoticeAction = {
 };
 
 // Append-only per-notice disposition log — what the user (or the steward,
-// on the user's behalf) did with the notice. Deliberately small: "seen"
-// is NOT a disposition (it lives in the seen store, §4.5/§5, and
-// notice-seen is a join); "muted" is NOT a disposition (mute IS a policy
-// write, §7). Cause-preservation across the three terminal types is the
-// point: undo, history, and calibration all key on it.
+// on the user's behalf) did with the notice. Deliberately small: opening
+// a notice records as acted {key: "open"}; entity-level seen-state is NOT
+// notice state (it lives in the seen store, §5, and feeds the generic
+// seen watcher); "muted" is NOT a disposition (mute IS a policy write,
+// §7). Cause-preservation across the three terminal types is the point:
+// undo, history, and calibration all key on it.
 type NoticeDisposition = {
   noticeId: string;
   at: number;
@@ -473,15 +501,9 @@ type NoticeDisposition = {
   // only" (§9.3).
   surface: string;
   // Who did it: the user's DID, or the steward's module identity for
-  // system dispositions (expiry sweep, thread displacement — §4.7).
+  // system dispositions (expiry sweep, thread displacement, watcher
+  // retraction — §4.7, §5.5).
   actor: string;
-  // The subjectVersion this disposition was taken against. A dismissal
-  // tombstones that version; if the subject advances past it, the notice
-  // re-emerges (the steward's coalesce advances subjectVersion past the
-  // tombstone — one operation, not a separate mechanism) and the old
-  // dismissal no longer applies. Comparable only within
-  // subjectVersion.space.
-  againstVersion: EntityVersion;
   ext?: Record<string, unknown>; // product extension (e.g. calibration
                               // feedback like "not-useful"); same
                               // discipline as NoticeCandidate.ext
@@ -494,41 +516,38 @@ type NoticeDisposition = {
 ```
 
 Nothing stores `active`, `dismissed`, or `unread` flags — dispositions are
-derived. And critically, **currency is a local join, not a cross-space
-read**: a notice is satisfied once the user's own seen mark on its *subject*
-reaches the notice's version. This is the Android behavioral gold standard —
-view the source anywhere, the notification retracts everywhere — computed
-entirely from the user's own stores:
+derived, and the lifecycle contract is deliberately simple (framework-author
+review tightened it): **once a notice is disposed, it stays disposed; new
+news is a new notice** (fresh event key, same `threadKey` — thread
+displacement retires the old one, §6.4). No tombstone versioning, no
+re-emergence, no version reads anywhere in the read path:
 
 ```ts
 // Shown for illustration only.
-const sameSpaceGte = (a: EntityVersion, b: EntityVersion) =>
-  a.space === b.space && a.seq >= b.seq;
 const terminal = (n: Notice, log: NoticeDisposition[]) =>
   log.some((d) =>
-    (d.type === "dismissed" || d.type === "archived" || d.type === "acted") &&
-    sameSpaceGte(d.againstVersion, n.subjectVersion)
+    d.type === "dismissed" || d.type === "archived" || d.type === "acted"
   );
-const alreadySeen = (n: Notice, seen: SeenStore) =>
-  sameSpaceGte(seen.versionOf(n.subject), n.subjectVersion);
-const visible = (
-  n: Notice, log: NoticeDisposition[], seen: SeenStore, now: number,
-) =>
-  // realert-matched notices skip the alreadySeen term (§7): they clear
-  // only on a terminal disposition.
-  !terminal(n, log) && !alreadySeen(n, seen) && !snoozed(log, now) &&
+const visible = (n: Notice, log: NoticeDisposition[], now: number) =>
+  !terminal(n, log) && !snoozed(log, now) &&
   (n.notBefore === undefined || now >= n.notBefore) &&
   (n.expiresAt === undefined || now < n.expiresAt);
 ```
 
-Notices that should outlive observation (a todo is not done because you
-looked at it; a medication reminder must nag) are handled by a user-adopted
-`realert` policy — semantics in §7: matched notices are exempt from
-seen-satisfaction and clear only terminally. Sources re-post at newer
-versions for *content* escalation, not liveness.
-Satisfaction that doesn't involve the user looking (someone else handled it;
-the trip ended) is the steward's job: its fold observes the subject change and
-terminally retracts the notice (system disposition by module identity).
+Opening a notice (focused open of its target, from any surface) writes an
+`acted {key: "open"}` disposition — terminal, so a notice handled on one
+device retracts on every device and OS tray via ordinary store sync.
+Satisfaction that doesn't go through the notice — you read the conversation
+in the source UI; someone else handled it; the trip ended — is
+**watcher-driven** (§5.1): the steward retracts with a system disposition
+when a watcher reports the claim moot. The generic seen watcher covers the
+common case (your own seen mark on the subject advanced past the notice's
+posting) without any per-kind code; the Android auto-retract behavior —
+view the source anywhere, the notification clears everywhere — survives
+intact, just steward-side instead of read-path-side. Notices that must
+outlive observation (medication must nag) carry a user-adopted `realert`
+policy (§7): matched notices are exempt from watcher retraction and clear
+only on an explicit terminal disposition.
 
 A caveat on "cheap": pull-based scheduling makes *unobserved* queries free
 (`docs/specs/pull-based-scheduler/README.md`), not observed ones. A mounted
@@ -556,14 +575,16 @@ three stores, and the three backings are not ad-hoc — they derive from a
    `packages/runner/src/cfc/prepare.ts`). Coalescing (same `id`, subject
    advanced) is an in-place element update by the single leased steward
    instance (§6.2); coalescing **refreshes** content, `expiresAt`, and
-   `progress` — a re-emerged notice carries the new posting's lifetime, not
-   a stale one. This is deliberately *not* sqlite yet: `writeAuthorizedBy`
-   is enforced on the cell-write prepare path and **does not gate
-   `db.exec`** today — sqlite's implemented CFC covers confidentiality
-   ceilings and row-label rules, not write authorization
-   (`docs/specs/sqlite-builtin/06-cfc.md`). Migrating `notices` to a sqlite
-   table (better ranking/pagination/retention at volume) is gated on the
-   net-new work item in §10.3, and on giving it **its own database**: every
+   `progress` — but never resurrects a disposed notice: a dismissed `id`
+   stays dismissed, and genuinely new news arrives as a new notice. This starts as an array cell rather than sqlite because
+   `writeAuthorizedBy` is enforced on the cell-write prepare path and
+   **does not gate `db.exec`** today — sqlite's implemented CFC covers
+   confidentiality ceilings and row-label rules, not write authorization
+   (`docs/specs/sqlite-builtin/06-cfc.md`). Framework-author review
+   assessed adding that gate as easy (§10.3), so sqlite (better
+   ranking/pagination/retention at volume) is the likely steady-state
+   backing rather than a distant maybe; the remaining constraint is giving
+   the ledger **its own database**: every
    `db.exec` serializes on the database handle cell's `rev`, so one shared
    db cannot hold both a steward-only table and an everyone-writes table
    without gating both or neither.
@@ -590,8 +611,11 @@ three stores, and the three backings are not ad-hoc — they derive from a
    when it advances** (`newSeq > seenSeq` — re-renders and repeat views are
    no-ops, which is also what breaks any render→write→render cycle) and
    **debounced per focus session** (at most one write per entity per
-   focused open). A focused open writes *only* the seen mark — notice-seen
-   is a join (`alreadySeen`, §4.4), not a second record.
+   focused open). A focused open of an entity writes the seen mark;
+   opening *via a notice* additionally writes that notice's
+   `acted {key: "open"}` disposition (§4.4) — two stores, two facts, no
+   duplication: the mark is about the entity, the disposition about the
+   notice.
 
 Two rules regardless of backing:
 
@@ -611,8 +635,8 @@ is the read-side shadow of it, so an expired notice is hidden immediately
 and reaped eventually), **ages the bell** — unhandled `heads-up` notices
 older than N days (default 7; realert-matched notices exempt) demote to
 `review` as a posture transition, so a long absence returns to a digest,
-not a wall of stale urgency — and reaps notices that are terminal with
-`subjectVersion` below a watermark, plus their dispositions. Sweeping is an
+not a wall of stale urgency — and reaps notices that have been terminal
+longer than a retention window, plus their dispositions. Sweeping is an
 steward duty (it owns the ledger), bounded and boring by design. Because
 sweeping only reaps terminal rows, per-source intake quotas (§6.1) are what
 bound a flooding source, not retention.
@@ -650,19 +674,17 @@ transition named once:
 ADMITTED --now < notBefore--> EMBARGOED --time--> VISIBLE
 EMBARGOED --steward: subject satisfied / superseded--> TERMINAL
          (a pre-scheduled reminder is retracted when its reason ends)
-VISIBLE --user: dismissed|archived|acted--> TERMINAL
-VISIBLE --steward: subject satisfied / thread displaced / expiry sweep
-         (system disposition)--> TERMINAL
+VISIBLE --user: dismissed|archived|acted (incl. acted{open})--> TERMINAL
+VISIBLE --steward: watcher reports claim moot (§5.1) / thread displaced /
+         expiry sweep (system disposition)--> TERMINAL
+         (realert-matched notices are exempt from watcher retraction —
+         they clear only on an explicit terminal disposition, §7)
 VISIBLE --user: snoozed--> SNOOZED --until--> VISIBLE
-VISIBLE --seen mark on subject reaches subjectVersion--> SATISFIED
-         (hidden; no disposition row — pure join; does NOT apply to
-         realert-matched notices, which clear only terminally, §7)
 VISIBLE --now ≥ expiresAt--> hidden immediately (read-side),
          TERMINAL at next sweep (write-side)
-TERMINAL --steward coalesce advances subjectVersion past tombstone-->
-         VISIBLE (re-emergence: a consequence of coalescing, not a
-         separate mechanism; silent unless a realert policy applies, §9.3)
-TERMINAL + below watermark --sweep--> reaped
+TERMINAL --(no exit for this id: disposed stays disposed; new news is a
+         new notice in the same threadKey)
+TERMINAL + past retention window --sweep--> reaped
 ```
 
 Posture may change after admission (escalation raises it, collective
@@ -717,11 +739,12 @@ Everything else is the **changes projection** (§10.1) joined against marks:
 
 **Derivation beats posting.** For in-fabric sources, a candidate is *derived
 from* artifact-change + watch set — the attention system watches; patterns
-just write their artifacts. Explicit posting remains for sources with no
-artifact (external ingress, transient events), but it is the minority path.
-This is the platform's grain: derived state over stored state, and no
-parallel event journal duplicating what memory-v2's commit log already
-records.
+just write their artifacts. The mechanism is the watcher (§5.1): version
+machinery stays inside watchers and the seen-state track, never in the
+notice contract. Explicit posting remains for sources with no artifact
+(external ingress, transient events), but it is the minority path. This is
+the platform's grain: derived state over stored state, and no parallel
+event journal duplicating what memory-v2's commit log already records.
 
 **Run-level grouping.** One agent run touching twelve artifacts must not be
 twelve scattered dots. From phase 1, agent-shaped sources post one
@@ -741,38 +764,100 @@ watch/unwatch policies (§7). Getting the defaults right is an open question
 (§12.2); getting them wrong in the "too broad" direction is the failure
 mode to avoid (dots everywhere = dots nowhere).
 
+### 5.1 Watchers — turning changes into notices
+
+The bridge between the two tracks (seen-state over entities; notices) is
+the **watcher**: steward-run logic that observes sources and, when a change
+is *newsworthy for this user*, posts a notice — and, when a claim has
+become moot, reports it so the steward retracts (system disposition). This
+is the framework-author-preferred shape: entity watching is scoped out of
+the notice contract entirely; a watcher per kind turns changes into
+messages.
+
+- **Per-kind watchers** know their world: a chat watcher posts one notice
+  per burst of unread messages (fresh event key per burst, thread-displaced
+  by the next) and reports the claim moot when the conversation's own
+  read-marker advances; a deadline watcher posts the ladder rungs; an
+  agent-run watcher posts the receipt. Watchers are ordinary pattern code
+  folded by the steward — proposable, inspectable, per-source.
+- **The generic seen watcher** is built in and covers every source with no
+  per-kind watcher: it compares the user's seen marks against the
+  `subjectVersion` stamps on derived notices and reports moot any notice
+  whose subject the user has since focused-open. This is what preserves
+  the cross-device auto-retract (read it anywhere → clears everywhere)
+  as a default, with zero source cooperation. One carve-out: it **skips
+  notices that carry `actions`** — an approval must not vanish because
+  the user glanced at the itinerary; action-bearing notices clear on a
+  disposition, expiry, thread displacement, or a per-kind watcher's moot
+  report (someone else approved). The residual gaming surface — adding a
+  decorative button to extend liveness — buys an emitter nothing above
+  the `review` ceiling and spends the same quota and reputation as any
+  other notice.
+- Watchers run *in the steward's fold* (wake-on-commit / on-lease), read
+  through the changes projection (§10.1), and write nothing directly —
+  they produce candidates and mootness reports; the steward remains the
+  only ledger writer (§6.2).
+
 ## 6. The steward
 
 **One logical steward per user.** It admits candidates, folds policies,
-assigns postures and weights, coalesces (same `id` when the same subject
-advances — re-emergence is this same operation crossing a tombstone),
-applies thread displacement (§6.4), retracts satisfied notices, and sweeps
-retention (§4.5).
+assigns postures and weights, coalesces (same `id`, content refresh only —
+never resurrection), applies thread displacement (§6.4), runs watchers and
+retracts moot notices on their reports (§5.1), and sweeps retention (§4.5).
 
-### 6.1 The notice inbox
+### 6.1 Intake: space-wide, directed, derived
 
 Candidates must be **durable before admission**: the steward may be asleep or
 absent (interim mode, closed clients), and ephemeral candidates would be
-silently lost, not delayed. Intake shape:
+silently lost, not delayed. Three intake shapes, split by *addressing* —
+the key multi-user fact being that another user's home space is unknowable
+(only their **profile** is addressable):
 
-- In-fabric artifact changes need no *posting* — they are derived (§5).
-  (They do need *reach*: until server-side cross-space wake exists, changes
-  in other spaces reach a server-side steward via the same forwarding path as
-  posted candidates below; a client-side steward reads them directly through
-  the user's ordinary sessions.)
-- Posted candidates land in the **notice inbox in the user's home space** —
-  a cross-principal, quota-gated append surface, named net-new work
-  (§10.2), because it is the one place untrusted-ish writers meet the
-  user's home space: the write gate enforces per-source quotas against the
-  *verified writer identity*, not against self-reported fields. Until
-  §10.2 lands, candidates rest in a durable per-source cell in the space
-  where they arise and the steward reads them there (client-side interim),
-  with quotas enforced at fold time — weaker (a flood bloats the
-  source-space cell, not the home space) but sound.
+- **Space-wide candidates** (the default): the poster stores the candidate
+  **in the shared space itself** — a durable per-space notice list, written
+  once under the poster's ordinary authority (Alice's DID posts; she never
+  enumerates recipients, which the platform forbids anyway). Every member's
+  steward reads the spaces the user has joined and lanes per its own
+  policies. This is the cheap path and scales to public and
+  many-reader spaces: posting cost is O(1), and paying attention is the
+  *reader's* choice, which is the whole design.
+- **Directed candidates** (mentions, DMs, explicit shares): addressed to a
+  **profile** — the recipient's addressable identity — via the profile's
+  notice inbox, a cross-principal, quota-gated append surface (net-new,
+  §10.2): the write gate enforces per-source quotas against the *verified
+  writer identity*, not self-reported fields. The user's home space
+  **aggregates across their profiles' inboxes** (a user with work and
+  personal profiles has two inboxes feeding two independent stewards, §8).
+  Until §10.2 lands, directed candidates rest in a durable per-source cell
+  in the space where they arise and the steward reads them there
+  (client-side interim), with quotas enforced at fold time — weaker (a
+  flood bloats the source-space cell, not the inbox) but sound.
+- **Derived candidates** need no posting at all — watchers turn watched
+  changes into notices (§5, §5.1). They do need *reach*: a client-side
+  steward reads joined spaces directly through the user's ordinary
+  sessions; a server-side steward needs change notifications from other
+  spaces, which is the **space-to-space change-notification** need —
+  moving just a dirty bit between spaces — noted in §10.2 as shared
+  infrastructure (the same need surfaces in other cross-space contexts;
+  it should be designed once, not as an attention special).
 - Webhook ingress: the receiving handler persists the payload durably at
   ingress (§4.5); the ephemeral stream is transport, not storage.
 - Quota pressure and dismiss-without-open feed the same **learned-policy**
   signal (§7): the source's baseline clamps down, legibly.
+
+### 6.1b Posting from a pattern
+
+The authoring surface is deliberately the platform's most ordinary shape —
+**a stream returned by a handler**: a pattern wishes or is handed a posting
+endpoint; calling `.send()` with a `NoticeCandidate` invokes the endpoint's
+handler, which appends the candidate to the right durable list (the shared
+space's notice list, or a profile inbox for directed notices). The stream
+is transport; the handler owns durability (§4.5's stream rule); the
+steward folds from the durable lists. Pattern authors never touch the
+ledger, never pick posture, and never track recipients — post once,
+per-viewer routing is not their business. The full pattern-author guide —
+what to post, threading, actions/replyTo, proposing policies, what you
+cannot do — is [`authoring.md`](./authoring.md).
 
 ### 6.2 Trust and instance discipline
 
@@ -837,10 +922,11 @@ explicitly an edge adapter fed by wake-on-commit, not a hot loop.
 
 Two mechanisms at two altitudes:
 
-- **`id` is identity**: the same notice at a newer subject version.
-  Coalescing updates the notice in place (refreshing content, expiry,
-  progress); crossing a dismissal tombstone is re-emergence. Identity is
-  steward-derived from verified provenance (§4.4), so it cannot be forged.
+- **`id` is identity**: the same claim, refreshed. Coalescing updates the
+  notice in place (content, expiry, progress) and never resurrects a
+  disposed one — a source with genuinely new news posts a new event key.
+  Identity is steward-derived from verified provenance (§4.4), so it
+  cannot be forged.
 - **`threadKey` is the thread**, and displacement is a *derived rule over
   it*: **within a threadKey, only the newest live notice is visible**;
   older live notices in the thread are terminally retracted by the steward
@@ -884,12 +970,13 @@ type AttentionPolicy = {
     // Exempts this policy's min from quiet-hours clamping (the babysitter
     // thread breaks through). User-authored only.
     bypassQuietHours?: boolean;
-    // Nag-until-done: a matched notice is EXEMPT from seen-satisfaction —
-    // it clears only on a terminal disposition (acted/dismissed/archived),
-    // never because the user glanced at the subject — and re-alerts on
-    // this cadence while live. The one consented exception to §9.3's
-    // alert-once rule. User-authored only; the cadence needs timer
-    // wake (§10.5) to fire between commits.
+    // Nag-until-done: a matched notice is EXEMPT from watcher retraction
+    // (§5.1) — it clears only on an explicit terminal disposition
+    // (acted/dismissed/archived), never because a watcher judged it moot
+    // or the user glanced at the subject — and re-alerts on this cadence
+    // while live. The one consented exception to §9.3's alert-once rule.
+    // User-authored only; the cadence needs timer wake (§10.5) to fire
+    // between commits.
     realert?: { everyMs: number };
     coalesceWindowMs?: number;
     // Time-conditional clamp sugar: during these hours/days, apply
@@ -1115,9 +1202,9 @@ there:
   **replaces silently** on every surface (Android `setOnlyAlertOnce`
   semantics, made unconditional: the emitter cannot choose to re-buzz).
   The invariant bends in exactly **one consented way**: a user-authored
-  `realert` policy (§7) re-alerts a live matched notice on its cadence —
-  nag-until-done for medication-grade obligations, grantable only by the
-  user. (A *fresh* notice first materializing at an alert-bearing rung
+  `realert` policy (§7) re-alerts a live matched notice on its cadence
+  (and exempts it from watcher retraction, §5.1) — nag-until-done for
+  medication-grade obligations, grantable only by the user. (A *fresh* notice first materializing at an alert-bearing rung
   alerting is the base rule, not an exception — but state its consequence
   honestly: alert-once is per-*notice*, so a source holding a user-granted
   floor can alert once per genuinely new event; per-*source* frequency is
@@ -1200,23 +1287,29 @@ that first needs it (§11), and each needs its own (small) design pass.
    [`changes-projection.md`](./changes-projection.md) — deliberately
    independently approvable.
 
-2. **Notice inbox append gate** *(phase 1; hardened by phase 2)*. A
-   home-space inbox cell with **restricted cross-principal append**: other
-   principals' patterns may append candidates (the rosters
-   contribute-your-own idiom, reversed) but the write gate enforces
-   per-source quotas against the verified writer identity. This is what
-   makes dead-device delivery an authority question with an answer instead
-   of an open question — the full chain "someone messages me while all my
-   devices are closed → my phone buzzes" is inbox append → home-space
-   wake → steward fold → dispatcher push.
+2. **Profile notice inbox append gate** *(phase 1; hardened by phase 2)*.
+   A **profile-space** inbox cell with **restricted cross-principal
+   append**: other principals' patterns may append directed candidates
+   (the rosters contribute-your-own idiom, reversed) but the write gate
+   enforces per-source quotas against the verified writer identity. It
+   lives on the profile because that is the recipient's only addressable
+   identity — home spaces are unknowable to others — and the home space
+   aggregates across the user's profiles (§6.1). This is what makes
+   dead-device delivery an authority question with an answer: "someone
+   DMs me while all my devices are closed → my phone buzzes" is inbox
+   append → aggregation → steward fold → dispatcher push. Related shared
+   infrastructure, needed for derived candidates to reach a server-side
+   steward at scale: **space-to-space change notification** (moving a
+   dirty bit between spaces) — wanted in other cross-space contexts too;
+   design once.
 3. **Write-authorization for sqlite** *(pre-migration of the ledger to
    sqlite; not needed for phase 1's array-cell backing)*.
    `writeAuthorizedBy` is enforced on the cell-write prepare path only;
    `db.exec` today checks confidentiality ceilings and row-label rules but
-   not write authorization. Gating `db.exec` per database handle (the `rev`
-   bump is a cell write, so the prepare path sees it) needs specification
-   and a security review of its own, including whether any sqlite write
-   path bypasses the rev write.
+   not write authorization. Framework-author review (PR #4691) assessed
+   adding this gate as easy — so treat it as near-term, not speculative;
+   it still needs a short security review of its own (whether any sqlite
+   write path bypasses the `rev` cell write the prepare path would gate).
 4. **Steward lease** *(phase 1)*. A small mutex-cell convention (claim with
    expiry, renew, steal-on-expiry) for single-instance election of the
    interim client-side steward (§6.2). Generalizes beyond attention.

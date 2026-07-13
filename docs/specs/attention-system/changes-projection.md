@@ -96,5 +96,6 @@ process-the-delta); retention/GC watermarks (reap below `toSeq`).
   non-empty → change dots (main spec §5).
 - "While you were away" = one `changes(watchSet, basis, attribution: true)`
   call, grouped by attribution then space (main spec §5).
-- The steward's fold uses head reads to stamp `subjectVersion` and evaluate
-  currency at fold time (main spec §6).
+- Watchers (main spec §5.1) read through it to derive notices from entity
+  changes and to stamp the optional `subjectVersion` metadata the generic
+  seen watcher compares against seen marks.
