@@ -245,11 +245,11 @@ Deno.test("a reopen ProtocolError closes only the incompatible space session", a
     },
     sessionOpenAuth: { audience: TEST_SESSION_OPEN_AUDIENCE },
     acl: { mode: "enforce", serviceDids: [OWNER] },
-    protocolFlags: { serverPrimaryExecutionV1: true },
+    protocolFlags: executionProtocolFlags,
   });
   const ownerClient = await MemoryClient.connect({
     transport: MemoryClient.loopback(server),
-    protocolFlags: { serverPrimaryExecutionV1: true },
+    protocolFlags: executionProtocolFlags,
   });
   const ownerAuth = authFactory(OWNER);
   const policyOwner = await ownerClient.mount(POLICY_SPACE, {}, ownerAuth);
@@ -314,7 +314,7 @@ Deno.test("a reopen ProtocolError closes only the incompatible space session", a
     const protocolError = await assertRejects(
       () => policySession.queryGraph({ roots: [] }),
       Error,
-      "requires memory capability server-primary-execution-v1",
+      "requires memory capabilities server-primary-execution-v1",
     );
     assertEquals(protocolError.name, "ProtocolError");
     const query = await clientPrimarySession.queryGraph({ roots: [] });

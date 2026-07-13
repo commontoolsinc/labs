@@ -455,6 +455,39 @@ export type ExecutionDemandListener = (
   snapshot: ExecutionDemandSnapshot,
 ) => void | Promise<void>;
 
+type ExecutionProtocolCapabilities = Pick<
+  MemoryProtocolFlags,
+  | "serverPrimaryExecutionV1"
+  | "serverPrimaryExecutionClaimRoutingV1"
+  | "serverPrimaryExecutionBuiltinPassivityV1"
+>;
+
+const missesRequiredExecutionCapability = (
+  required: ExecutionProtocolCapabilities,
+  actual: ExecutionProtocolCapabilities,
+): boolean =>
+  (required.serverPrimaryExecutionV1 &&
+    !actual.serverPrimaryExecutionV1) ||
+  (required.serverPrimaryExecutionClaimRoutingV1 &&
+    !actual.serverPrimaryExecutionClaimRoutingV1) ||
+  (required.serverPrimaryExecutionBuiltinPassivityV1 &&
+    !actual.serverPrimaryExecutionBuiltinPassivityV1);
+
+const requiredExecutionCapabilityNames = (
+  required: ExecutionProtocolCapabilities,
+): string =>
+  [
+    required.serverPrimaryExecutionV1
+      ? "server-primary-execution-v1"
+      : undefined,
+    required.serverPrimaryExecutionClaimRoutingV1
+      ? "claim-routing-v1"
+      : undefined,
+    required.serverPrimaryExecutionBuiltinPassivityV1
+      ? "builtin-passivity-v1"
+      : undefined,
+  ].filter((name): name is string => name !== undefined).join(", ");
+
 const executionDemandKey = (
   connectionId: string,
   space: string,
@@ -1650,14 +1683,16 @@ export class Server {
         "execution policy must be exactly {version:1,serverPrimaryExecution:boolean}",
       );
     }
+    const requiredExecutionCapabilities = this.memoryProtocolFlags();
     if (
       policy?.serverPrimaryExecution === true &&
-      this.memoryProtocolFlags().serverPrimaryExecutionV1 &&
+      requiredExecutionCapabilities.serverPrimaryExecutionV1 &&
       this.#sessions.sessionsForSpace(space).some((session) =>
         session.ownerConnectionId !== null &&
-        (!session.serverPrimaryExecutionV1 ||
-          !session.serverPrimaryExecutionClaimRoutingV1 ||
-          !session.serverPrimaryExecutionBuiltinPassivityV1)
+        missesRequiredExecutionCapability(
+          requiredExecutionCapabilities,
+          session,
+        )
       )
     ) {
       return toError(
@@ -4043,18 +4078,22 @@ export class Server {
         engine,
         message.space,
       );
+      const requiredExecutionCapabilities = this.memoryProtocolFlags();
       if (
-        this.memoryProtocolFlags().serverPrimaryExecutionV1 &&
+        requiredExecutionCapabilities.serverPrimaryExecutionV1 &&
         executionPolicyEnabled &&
-        (!connection.serverPrimaryExecutionV1 ||
-          !connection.serverPrimaryExecutionClaimRoutingV1 ||
-          !connection.serverPrimaryExecutionBuiltinPassivityV1)
+        missesRequiredExecutionCapability(
+          requiredExecutionCapabilities,
+          connection,
+        )
       ) {
         return respondTypedError<SessionOpenResult>(
           message.requestId,
           toError(
             "ProtocolError",
-            `Space ${message.space} requires memory capabilities server-primary-execution-v1, claim-routing-v1, and builtin-passivity-v1`,
+            `Space ${message.space} requires memory capabilities ${
+              requiredExecutionCapabilityNames(requiredExecutionCapabilities)
+            }`,
           ),
         );
       }
