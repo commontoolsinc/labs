@@ -3,9 +3,9 @@
 Companion to [README.md](./README.md). Read the design first; this plan turns
 it into reviewable, red-green work orders.
 
-Status: Phases 0–2, including W2.4's local staging-equivalent rollout gates,
-are implemented behind the default-off flag. Later background, feed, scoped,
-and handler work is outlined only.
+Status: Phases 0–2 and W2.4's local rollout gates are implemented behind the
+default-off flag. The deployed-staging enable/disable drill remains pending.
+Later background, feed, scoped, and handler work is outlined only.
 
 Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
 its facade, commit-gated starts, cancellation semantics, bounded settle,
@@ -1053,11 +1053,11 @@ per-action sink authority decision and pre-claim in-flight handoff.
 
 **Depends on:** W1.5, W2.2, W2.3.
 
-**Status:** implemented and locally validated. The owner CLI, runbook,
+**Status:** implemented and locally validated, with one operational gate still
+pending. The owner CLI, runbook,
 bounded-cardinality health/latency signals, product-shaped multi-client
 fixtures, deterministic authority/failure drills, and browser CPU measurement
-are present. This is staging-equivalent local evidence; it does not claim that
-the implementation PR mutated a deployed staging space.
+are present. A deployed-staging enable/disable drill is not yet recorded.
 
 **Deliverable:** perf fixtures, operational metrics, and an enable/disable
 runbook using serverPrimaryExecution plus optional executionPolicy.
@@ -1081,9 +1081,10 @@ runbook using serverPrimaryExecution plus optional executionPolicy.
       certified by `server-execution-product-fixtures.test.ts`.
 - [x] Unclaimed/scoped/cross-space actions remain behaviorally identical under
       flag-off/flag-on parity (`server-execution-rollout-products.test.ts`).
-- [x] Enabling then disabling a staging-equivalent space converges without
-      data migration (`executor-claim-e2e.test.ts`, "shared execution pool
-      transitions shadow to claimed and back without migration").
+- [ ] Enabling then disabling a staging space converges without data migration.
+      The deterministic local analogue passes in `executor-claim-e2e.test.ts`
+      ("shared execution pool transitions shadow to claimed and back without
+      migration"); a deployed-staging CLI drill and record are still required.
 - [x] Kill/restart/sponsor-loss drills demonstrate fail-open authority and no
       duplicate worker commits (`executor-drain-barrier.test.ts`).
 - [x] Browser compute and lazy-client CPU are measured; the first local

@@ -1,8 +1,8 @@
 # Server-Primary Execution
 
-Status: Phases 0–2, including the W2.4 local staging-equivalent rollout
-gates, are implemented behind the default-off flag; Phases 3+ remain design.
-Author: design session
+Status: Phases 0–2 and W2.4's local rollout gates are implemented behind the
+default-off flag. The deployed-staging enable/disable drill remains pending;
+Phases 3+ remain design. Author: design session
 2026-07-06; revised 2026-07-07 (doc-centric demand, SQLite-primary state,
 transient executor passes, reactive interpreter de-scoped); revised
 2026-07-11 after implementation review (scheduler-v2 as the base, user-
@@ -1269,8 +1269,9 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   firewall, passive claimed builtins, and egress parity (G5/G10/G11). Measure
   conflict rate, multi-client action volume, divergence, revocations, and
   fallback latency. Fallback is claim removal. The operator runbook, product-
-  shaped multi-client fixtures, enable/disable and failure drills, and local
-  browser CPU measurement are complete. The measurement is recorded in the
+  shaped multi-client fixtures, deterministic local enable/disable and failure
+  drills, and browser CPU measurement are complete. A deployed-staging policy
+  drill remains to be recorded. The browser measurement is recorded in the
   [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md).
 - **Phase 3 — background demand + narrower feeds.** Fold existing background
   registrations into the same lower-priority pool and retire graph-query
