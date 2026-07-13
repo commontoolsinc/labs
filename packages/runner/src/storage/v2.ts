@@ -3255,15 +3255,30 @@ class SpaceReplica implements ISpaceReplica {
         ),
       };
     }
+    const localSeq = this.#nextLocalSeq++;
     const unservedCommit = toCanonicalExecutionUnservedCommit(
       commit,
-      this.#nextLocalSeq++,
+      localSeq,
       route.diagnosticCode,
     );
+    const telemetry = this.#getTelemetry();
+    const pushOpId = `push:${this.#space}:${localSeq}`;
+    telemetry?.submit({
+      type: "storage.push.start",
+      id: pushOpId,
+      operation: "transact",
+      localSeq,
+      spaceDid: this.#space,
+    });
     try {
       const { session } = await this.sessionHandle();
       const applied = await session.transact(unservedCommit);
       session.noteAppliedCommit?.(applied.seq);
+      telemetry?.submit({
+        type: "storage.push.complete",
+        id: pushOpId,
+        sessionId: session.sessionId,
+      });
       try {
         route.onSettled?.();
       } catch (error) {
@@ -3280,7 +3295,13 @@ class SpaceReplica implements ISpaceReplica {
         ),
       };
     } catch (error) {
-      return { error: toRejectedError(error, unservedCommit, this.#space) };
+      const rejection = toRejectedError(error, unservedCommit, this.#space);
+      telemetry?.submit({
+        type: "storage.push.error",
+        id: pushOpId,
+        error: rejection.name ?? "TransactionError",
+      });
+      return { error: rejection };
     }
   }
 
@@ -3428,6 +3449,11 @@ class SpaceReplica implements ISpaceReplica {
     } catch (error) {
       const diagnosticCode = executionFirewallDiagnostic(error);
       let rejection = toRejectedError(error, commit, this.#space);
+      telemetry?.submit({
+        type: "storage.push.error",
+        id: pushOpId,
+        error: rejection.name ?? "TransactionError",
+      });
       if (diagnosticCode !== undefined && route !== undefined) {
         const unserved = await this.publishUnservedAttempt(commit, {
           disposition: "unserved",
@@ -3444,11 +3470,6 @@ class SpaceReplica implements ISpaceReplica {
           rejection = unserved.error;
         }
       }
-      telemetry?.submit({
-        type: "storage.push.error",
-        id: pushOpId,
-        error: rejection.name ?? "TransactionError",
-      });
       this.attachProviderReadyToRetry(rejection, localSeq);
       if (admissionMode !== "off" && rejection.name === "ConflictError") {
         this.recordStaleFloor(commit, localSeq);

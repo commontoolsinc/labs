@@ -157,9 +157,11 @@ Deno.test("conflicted unserved settlement retains the claim for retry", async ()
     ));
   });
   let released = false;
+  const telemetry: RuntimeTelemetryMarker[] = [];
   const storage = ScriptedStorageManager.connectTo(factory, () => {
     released = true;
   });
+  storage.setTelemetry({ submit: (marker) => telemetry.push(marker) });
   try {
     const result = await storage.open(SPACE).replica.commitNative!({
       operations: [{
@@ -174,6 +176,18 @@ Deno.test("conflicted unserved settlement retains the claim for retry", async ()
     assertEquals(result.error?.name, "ConflictError");
     assertEquals(factory.commits.length, 2);
     assertEquals(released, false);
+    assertEquals(
+      telemetry.filter((marker) => marker.type.endsWith(".error")),
+      [{
+        type: "storage.push.error",
+        id: `push:${SPACE}:1`,
+        error: "ExecutionActionFirewallError",
+      }, {
+        type: "storage.push.error",
+        id: `push:${SPACE}:2`,
+        error: "ConflictError",
+      }],
+    );
   } finally {
     await storage.close();
   }
