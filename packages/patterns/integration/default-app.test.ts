@@ -11,6 +11,7 @@ import {
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import {
   waitForActiveSpaceRoot,
+  vdomHasButton,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
 } from "./cfc-browser-helpers.ts";
@@ -3358,42 +3359,6 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
       renderedButtonTexts: renderedButtonTexts.slice(0, 40),
     };
   });
-}
-
-async function vdomHasButton(page: Page, label: string): Promise<boolean> {
-  return await page.evaluate(async (needle) => {
-    const tree = await (globalThis.commonfabric as any)?.vdom?.tree?.();
-    const seen = new Set<object>();
-    const textOf = (value: unknown): string => {
-      if (typeof value === "string") return value;
-      if (Array.isArray(value)) return value.map(textOf).join("");
-      if (value === null || typeof value !== "object") return "";
-      return Object.values(value as Record<string, unknown>).map(textOf).join(
-        "",
-      );
-    };
-    let found = false;
-    const visit = (value: unknown): void => {
-      if (found || value === null || typeof value !== "object") return;
-      if (seen.has(value as object)) return;
-      seen.add(value as object);
-      if (Array.isArray(value)) {
-        value.forEach(visit);
-        return;
-      }
-      const record = value as Record<string, unknown>;
-      if (
-        record.type === "vnode" && record.name === "cf-button" &&
-        textOf(record.children).replace(/\s+/g, " ").trim().includes(needle)
-      ) {
-        found = true;
-        return;
-      }
-      Object.values(record).forEach(visit);
-    };
-    visit(tree);
-    return found;
-  }, { args: [label] });
 }
 
 async function clickPieceLinkWithText(
