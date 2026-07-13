@@ -92,6 +92,7 @@ the cell's declared name, or an anonymous `{ $generated: N }` counter, with
 mints the entity id from the piece's result cell and that partial cause:
 
 ```ts
+// Shown for illustration only.
 createRef({}, { parent, type: "internal", cause: descriptor.partialCause })
 ```
 
