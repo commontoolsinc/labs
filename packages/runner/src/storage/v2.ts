@@ -103,6 +103,7 @@ import type {
   StorageTransactionRejected,
   Unit,
 } from "./interface.ts";
+
 import { SelectorTracker } from "./selector-tracker.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import {
@@ -169,6 +170,21 @@ export type {
   ReplicaSessionHandle,
   ReplicaWatchView,
 } from "./v2-replica-session.ts";
+
+// These protocol records contain only FabricValue-compatible fields. Keep the
+// cast at this boundary so cloning preserves Fabric primitives and the normal
+// immutable snapshot semantics instead of using the native structured clone.
+const cloneExecutionClaim = (claim: ExecutionClaim): ExecutionClaim =>
+  cloneIfNecessary(
+    claim as unknown as FabricValue,
+  ) as unknown as ExecutionClaim;
+
+const cloneActionSettlement = (
+  settlement: ActionSettlement,
+): ActionSettlement =>
+  cloneIfNecessary(
+    settlement as unknown as FabricValue,
+  ) as unknown as ActionSettlement;
 
 const logger = getLogger("storage.v2", {
   enabled: true,
@@ -2227,7 +2243,7 @@ class SpaceReplica implements ISpaceReplica {
       .sort((left, right) =>
         actionClaimMapKey(left).localeCompare(actionClaimMapKey(right))
       )
-      .map((claim) => structuredClone(claim));
+      .map(cloneExecutionClaim);
     const actions: ExecutionRoutingActionDiagnostics[] = [...actionKeys]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([mapKey, key]) => {
@@ -2244,7 +2260,7 @@ class SpaceReplica implements ISpaceReplica {
         return {
           key,
           ...(liveClaim !== undefined
-            ? { liveClaim: structuredClone(liveClaim) }
+            ? { liveClaim: cloneExecutionClaim(liveClaim) }
             : {}),
           upstreamRoutes: record?.upstreamRoutes ?? 0,
           claimedOverlayRoutes: record?.claimedOverlayRoutes ?? 0,
@@ -2260,7 +2276,7 @@ class SpaceReplica implements ISpaceReplica {
           ).length,
           pendingSettlementCount: pendingSettlements.length,
           ...(lastSettlement !== undefined
-            ? { lastSettlement: structuredClone(lastSettlement) }
+            ? { lastSettlement: cloneActionSettlement(lastSettlement) }
             : {}),
         };
       });
@@ -4192,7 +4208,7 @@ class SpaceReplica implements ISpaceReplica {
     } else {
       record.settlements[settlement.outcome]++;
     }
-    record.lastSettlement = structuredClone(settlement);
+    record.lastSettlement = cloneActionSettlement(settlement);
   }
 
   private retainEarlyExecutionSettlement(
@@ -4205,15 +4221,54 @@ class SpaceReplica implements ISpaceReplica {
     }
     const incarnation = executionClaimIncarnationKey(settlement.claim);
     const current = this.#earlyExecutionSettlements.get(incarnation);
-    if (
-      current === undefined ||
-      current.inputBasisSeq <= settlement.inputBasisSeq
-    ) {
+    if (current === undefined) {
       this.#earlyExecutionSettlements.set(
         incarnation,
-        structuredClone(settlement),
+        cloneActionSettlement(settlement),
       );
+      return;
     }
+
+    // This cache is a successful-settlement frontier, not merely the latest
+    // event. A newer no-op may advance the covered input basis, but it cannot
+    // erase an accepted-data barrier contributed by an earlier commit.
+    const inputBasisSeq = current.inputBasisSeq > settlement.inputBasisSeq
+      ? current.inputBasisSeq
+      : settlement.inputBasisSeq;
+    const currentAcceptedCommitSeq = current.outcome === "committed"
+      ? current.acceptedCommitSeq
+      : undefined;
+    const nextAcceptedCommitSeq = settlement.outcome === "committed"
+      ? settlement.acceptedCommitSeq
+      : undefined;
+    const requiredAcceptedCommitSeq = currentAcceptedCommitSeq === undefined
+      ? nextAcceptedCommitSeq
+      : nextAcceptedCommitSeq === undefined ||
+          currentAcceptedCommitSeq > nextAcceptedCommitSeq
+      ? currentAcceptedCommitSeq
+      : nextAcceptedCommitSeq;
+    this.#earlyExecutionSettlements.set(
+      incarnation,
+      cloneActionSettlement(
+        requiredAcceptedCommitSeq === undefined
+          ? {
+            branch: settlement.branch,
+            claim: settlement.claim,
+            inputBasisSeq,
+            outcome: "no-op",
+            ...(settlement.diagnosticCode === undefined
+              ? {}
+              : { diagnosticCode: settlement.diagnosticCode }),
+          }
+          : {
+            branch: settlement.branch,
+            claim: settlement.claim,
+            inputBasisSeq,
+            outcome: "committed",
+            acceptedCommitSeq: requiredAcceptedCommitSeq,
+          },
+      ),
+    );
   }
 
   private reconcileEarlyExecutionSettlement(claim: ExecutionClaim): void {

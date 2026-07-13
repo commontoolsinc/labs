@@ -1,6 +1,7 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertInstanceOf, assertThrows } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace, Signer, URI } from "@commonfabric/memory/interface";
 import {
   type AcceptedCommitSeq,
@@ -683,6 +684,66 @@ Deno.test("a committed settlement arriving before speculation retains its data b
     });
     assertEquals(diagnostics.actions[0]?.pendingOverlayCount, 0);
     assertEquals(diagnostics.actions[0]?.basisCoveredOverlayDrops, 1);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("a later early no-op retains an earlier committed data barrier", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "committed",
+            acceptedCommitSeq: 5 as AcceptedCommitSeq,
+          },
+        }, {
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(1),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics({
+        space: SPACE,
+        branch: "",
+        pieceId: claim.pieceId,
+        actionId: claim.actionId,
+      }).executionFeedSeq === 3
+    );
+
+    await writeClaimedOutput(storage, "held-for-earlier-committed-data");
+    assertEquals(visibleOutput(storage), "held-for-earlier-committed-data");
+
+    factory.view.push(emptySync({
+      toSeq: 5,
+      upserts: [{
+        branch: "",
+        id: OUTPUT,
+        seq: 5,
+        doc: { value: "authoritative-after-merged-barrier" },
+      }],
+    }));
+    await waitFor(() =>
+      visibleOutput(storage) === "authoritative-after-merged-barrier"
+    );
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
@@ -1748,6 +1809,62 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
     assertEquals(outcomes.actions[0]?.lastSettlement?.outcome, "unserved");
   } finally {
     sourceApplied.resolve({ seq: 6, branch: "", revisions: [] });
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("execution diagnostics clone fabric claim values canonically", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const metadata = FabricHash.fromString("sha256:abcd");
+  const claimWithMetadata = { ...claim, metadata };
+  const factory = new OverlaySessionFactory();
+  factory.claims = [claimWithMetadata];
+  const storage = OverlayStorageManager.connect(factory);
+  const query = {
+    space: SPACE,
+    branch: "",
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    const routedClaim = storage.getExecutionRoutingDiagnostics(query)
+      .claims[0] as ExecutionClaim & { metadata: FabricHash };
+    assertInstanceOf(routedClaim.metadata, FabricHash);
+    assertEquals(routedClaim.metadata.taggedHashString, "sha256:abcd");
+
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim: claimWithMetadata,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    await waitFor(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
+    );
+
+    const routedSettlement = storage.getExecutionRoutingDiagnostics(query)
+      .actions[0]?.lastSettlement as
+        | (ActionSettlement & {
+          claim: ExecutionClaim & { metadata: FabricHash };
+        })
+        | undefined;
+    assertInstanceOf(routedSettlement?.claim.metadata, FabricHash);
+    assertEquals(
+      routedSettlement?.claim.metadata.taggedHashString,
+      "sha256:abcd",
+    );
+  } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
   }
