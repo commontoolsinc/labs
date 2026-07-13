@@ -329,6 +329,26 @@ Deno.test("counterbalanced renderer CPU maps ABBA and BAAB phases exactly", () =
 });
 
 Deno.test("counterbalanced renderer CPU rejects regression and noisy replicates", () => {
+  const worstBlockRegression = [
+    100,
+    120,
+    120,
+    100,
+    200,
+    200,
+    200,
+    200,
+  ];
+  assertEquals(
+    analyzeCounterbalancedRendererCpu(worstBlockRegression).combined
+      .enabledToDisabledRatio < 1.1,
+    true,
+  );
+  assertThrows(
+    () => assertCounterbalancedRendererCpu(worstBlockRegression),
+    Error,
+    "ABBA enabled/disabled renderer CPU ratio 1.2 exceeded 1.1",
+  );
   assertThrows(
     () =>
       assertCounterbalancedRendererCpu([
