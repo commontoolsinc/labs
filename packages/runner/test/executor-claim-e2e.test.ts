@@ -1,5 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
+import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import {
   addMockResponse,
   enableMockMode,
@@ -9,6 +10,7 @@ import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import type {
   ActionSettlement,
   ClientCommit,
+  ExecutionControlEvent,
   MemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
@@ -21,6 +23,7 @@ import {
   StorageManager,
 } from "../src/storage/v2.ts";
 import { DenoSpaceExecutorFactory } from "../src/executor/deno-space-executor.ts";
+import { SharedExecutionPool } from "../src/executor/shared-execution-pool.ts";
 import type { ServerBuiltinFetchRequest } from "../src/executor/server-builtin-egress.ts";
 
 const FLAGS = {
@@ -143,6 +146,465 @@ const containsStoredValue = (value: unknown, expected: string): boolean =>
     : typeof value === "object" && value !== null
     ? Object.values(value).some((entry) => containsStoredValue(entry, expected))
     : false);
+
+async function exercisePoolAuthorityTransition(): Promise<void> {
+  const principal = await Identity.fromPassphrase(
+    `executor pool transition ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-executor-pool-transition" },
+    protocolFlags: FLAGS,
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  const authorize: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: space },
+  });
+  const clientCommits: ClientCommit[] = [];
+  const seedStorage = LoopbackStorageManager.connectTo(
+    server,
+    FLAGS,
+    { as: principal },
+    (commit) => clientCommits.push(commit),
+  );
+  const seedRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: seedStorage,
+    experimental: {
+      persistentSchedulerState: true,
+      serverPrimaryExecution: true,
+    },
+  });
+  let observerClient: MemoryClient.Client | null = null;
+  let clientStorage: LoopbackStorageManager | null = null;
+  let clientRuntime: Runtime | null = null;
+  let coldStorage: LoopbackStorageManager | null = null;
+  let coldRuntime: Runtime | null = null;
+  let pool: SharedExecutionPool | null = null;
+  let unsubscribeControl = () => {};
+  let cancelWarmSink = () => {};
+  let seedRuntimeDisposed = false;
+  let seedStorageClosed = false;
+  const acceptedEvents: string[] = [];
+
+  try {
+    const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
+      space,
+    });
+    const seedTx = seedRuntime.edit();
+    const input = seedRuntime.getCell<number>(
+      space,
+      "executor-pool-transition-input",
+      undefined,
+      seedTx,
+    );
+    input.set(5);
+    const result = seedRuntime.getCell<number>(
+      space,
+      "executor-pool-transition-result",
+      undefined,
+      seedTx,
+    );
+    const stableInputId = input.sourceURI;
+    const stableInputLink = input.getAsNormalizedFullLink();
+    const stableResultId = result.sourceURI;
+    const stableResultLink = result.getAsNormalizedFullLink();
+    const seedHandle = seedRuntime.run(
+      seedTx,
+      compiled,
+      { value: input },
+      result,
+    );
+    assertEquals((await seedTx.commit()).error, undefined);
+    assertEquals(await seedHandle.pull(), 10);
+    await seedRuntime.settled();
+    await seedRuntime.storageManager.synced();
+    const seedPieceDocument = await server.readDocument(
+      space,
+      stableResultId,
+    ) as
+      & Record<string, unknown>
+      & { value: { "/": { "link@1": { id: string } } } };
+    const stableOutputId = seedPieceDocument.value["/"]["link@1"].id;
+    assertEquals(
+      (await server.readDocument(space, stableOutputId) as { value?: unknown })
+        ?.value,
+      10,
+    );
+    observerClient = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: FLAGS,
+    });
+    const observer = await observerClient.mount(space, {
+      sessionId: `session:pool-transition-observer:${crypto.randomUUID()}`,
+    }, authorize);
+    await observer.watchSet([{
+      id: "executor-pool-transition-piece",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: stableResultId,
+          selector: { path: [], schema: true },
+        }],
+      },
+    }]);
+
+    const controlEvents: ExecutionControlEvent[] = [];
+    const controlListeners = new Set<
+      (event: ExecutionControlEvent) => void
+    >();
+    unsubscribeControl = observer.subscribeExecutionControl((event) => {
+      controlEvents.push(event);
+      acceptedEvents.push(event.type);
+      for (const listener of controlListeners) listener(event);
+    });
+    const waitForControl = async <T extends ExecutionControlEvent>(
+      predicate: (event: ExecutionControlEvent) => event is T,
+      name: string,
+    ): Promise<T> => {
+      const existing = controlEvents.find(predicate);
+      if (existing !== undefined) return existing;
+      const found = Promise.withResolvers<T>();
+      const listener = (event: ExecutionControlEvent) => {
+        if (predicate(event)) found.resolve(event);
+      };
+      controlListeners.add(listener);
+      try {
+        return await awaitBarrier(found.promise, name, acceptedEvents);
+      } finally {
+        controlListeners.delete(listener);
+      }
+    };
+
+    let candidateActionId: string | undefined;
+    const shadowRejected = Promise.withResolvers<void>();
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      patternApiUrl: new URL("https://toolshed.example/"),
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+      onCandidateClaim(candidate) {
+        candidateActionId = candidate.claimKey.actionId;
+        acceptedEvents.push(`candidate:${candidate.claimKey.actionId}`);
+      },
+      onCandidateDiagnostic(diagnostic) {
+        acceptedEvents.push(`diagnostic:${diagnostic.diagnosticCode}`);
+        if (diagnostic.diagnosticCode === "execution-policy-disabled") {
+          shadowRejected.resolve();
+        }
+      },
+    });
+    pool = new SharedExecutionPool({
+      control: server,
+      factory,
+      settleTimeoutMs: 10_000,
+    });
+    pool.start();
+    await observer.setExecutionDemand("", [stableResultId]);
+    await pool.idle();
+    assertEquals(pool.snapshot(space, ""), {
+      state: "live",
+      referenceCount: 1,
+      pieces: [stableResultId],
+      leaseGeneration: 1,
+    });
+    assertEquals(pool.metrics().workersStarted, 1);
+
+    // Keep the creator runtime warm as the client. Its action has already run
+    // and is subscribed, exactly like a browser that was open before the
+    // server shadow pool started; the final phase still proves a cold resume.
+    clientStorage = seedStorage;
+    clientRuntime = seedRuntime;
+    const visibleResult = seedRuntime.getCellFromLink(stableResultLink);
+    assertEquals(visibleResult.sourceURI, stableResultId);
+    cancelWarmSink = visibleResult.sink(() => {});
+    await seedRuntime.settled();
+    clientCommits.length = 0;
+
+    let observerLocalSeq = 0;
+    const assertStableIdentity = async (): Promise<void> => {
+      assertEquals(input.sourceURI, stableInputId);
+      assertEquals(input.getAsNormalizedFullLink(), stableInputLink);
+      assertEquals(result.sourceURI, stableResultId);
+      assertEquals(result.getAsNormalizedFullLink(), stableResultLink);
+      const pieceDocument = await server.readDocument(space, stableResultId) as
+        & Record<string, unknown>
+        & { value: { "/": { "link@1": { id: string } } } };
+      assertEquals(pieceDocument.value["/"]["link@1"].id, stableOutputId);
+    };
+    const writePolicy = async (enabled: boolean): Promise<void> => {
+      await observer.transact({
+        localSeq: ++observerLocalSeq,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${space}:execution-policy`,
+          value: {
+            value: { version: 1, serverPrimaryExecution: enabled },
+          },
+        }],
+      });
+    };
+    const runSource = async (value: number): Promise<number> => {
+      const outputAccepted = Promise.withResolvers<void>();
+      const unsubscribeAccepted = server.subscribeAcceptedCommits(
+        space,
+        (event) => {
+          acceptedEvents.push(
+            `accepted:${
+              event.revisions.map((revision) => revision.id).join(",")
+            }`,
+          );
+          if (
+            event.revisions.some((revision) => revision.id === stableOutputId)
+          ) {
+            outputAccepted.resolve();
+          }
+        },
+      );
+      let sourceSeq = 0;
+      try {
+        const source = await observer.transact({
+          localSeq: ++observerLocalSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: stableInputId,
+            value: { value },
+          }],
+        });
+        sourceSeq = source.seq;
+        await clientStorage!.synced();
+        await visibleResult.pull();
+        await clientRuntime!.settled();
+        await awaitBarrier(
+          outputAccepted.promise,
+          `pool transition output ${value}`,
+          acceptedEvents,
+        );
+      } finally {
+        unsubscribeAccepted();
+      }
+      await clientStorage!.synced();
+      assertEquals(await visibleResult.pull(), value * 2);
+      await clientRuntime!.settled();
+      assertEquals(
+        (await server.readDocument(space, stableOutputId) as {
+          value?: unknown;
+        })?.value,
+        value * 2,
+      );
+      await assertStableIdentity();
+      return sourceSeq;
+    };
+    const isDerivedWireCommit = (commit: ClientCommit): boolean => {
+      const observation = commit.schedulerObservation as {
+        actionId?: string;
+        actionKind?: string;
+      } | undefined;
+      return observation?.actionId === candidateActionId &&
+        observation?.actionKind === "computation" &&
+        commit.operations.length > 0;
+    };
+    const loggerCount = (key: string): number => {
+      const value = getLoggerCountsBreakdown()["storage.v2"]?.[key];
+      if (typeof value === "number") return value;
+      return value?.debug ?? value?.total ?? 0;
+    };
+
+    // Absent policy: the pool owns one shadow Worker, but authority and the
+    // accepted derived write remain client-side.
+    clientCommits.length = 0;
+    await runSource(6);
+    await awaitBarrier(
+      shadowRejected.promise,
+      "shadow policy rejection",
+      acceptedEvents,
+    );
+    assertExists(candidateActionId);
+    assertEquals(server.listExecutionClaims(space), []);
+    assertEquals(clientCommits.some(isDerivedWireCommit), true);
+
+    // Enable in place. The first invalidation promotes the already-running
+    // shadow Worker; no piece or document is recreated.
+    await writePolicy(true);
+    clientCommits.length = 0;
+    const promotionSeq = await runSource(7);
+    const claimEvent = await waitForControl(
+      (event): event is Extract<
+        ExecutionControlEvent,
+        { type: "session.execution.claim.set" }
+      > =>
+        event.type === "session.execution.claim.set" &&
+        event.claim.actionId === candidateActionId,
+      "pool transition claim",
+    );
+    const claim = claimEvent.claim;
+    await waitForControl(
+      (event): event is Extract<
+        ExecutionControlEvent,
+        { type: "session.execution.settlement" }
+      > =>
+        event.type === "session.execution.settlement" &&
+        event.settlement.claim.actionId === claim.actionId &&
+        event.settlement.claim.claimGeneration === claim.claimGeneration &&
+        event.settlement.inputBasisSeq >= promotionSeq,
+      "pool transition promotion settlement",
+    );
+    await clientStorage.synced();
+    await clientRuntime.settled();
+    assertEquals(server.listExecutionClaims(space), [claim]);
+    assertEquals(pool.metrics().workersStarted, 1);
+
+    // A subsequent invalidation measures the stable claimed posture: only the
+    // server writes, any client speculation is local and settles away.
+    const overlaysCreatedBefore = loggerCount("execution-overlay-created");
+    const overlaysDroppedBefore = loggerCount("execution-overlay-dropped");
+    const settlementsBefore = server.executionStats.settlementsPublished;
+    clientCommits.length = 0;
+    const claimedSeq = await runSource(8);
+    const claimedSettlement = await waitForControl(
+      (event): event is Extract<
+        ExecutionControlEvent,
+        { type: "session.execution.settlement" }
+      > =>
+        event.type === "session.execution.settlement" &&
+        event.settlement.claim.claimGeneration === claim.claimGeneration &&
+        event.settlement.inputBasisSeq >= claimedSeq,
+      "pool transition claimed settlement",
+    );
+    assertEquals(
+      claimedSettlement.settlement.outcome === "committed" ||
+        claimedSettlement.settlement.outcome === "no-op",
+      true,
+    );
+    await clientStorage.synced();
+    await clientRuntime.settled();
+    assertEquals(clientCommits.some(isDerivedWireCommit), false);
+    assertEquals(
+      server.executionStats.settlementsPublished > settlementsBefore,
+      true,
+    );
+    const overlaysCreated = loggerCount("execution-overlay-created") -
+      overlaysCreatedBefore;
+    const snapshots = await observer.listSchedulerActionSnapshots({
+      actionId: claim.actionId,
+      pieceId: claim.pieceId,
+    });
+    const acceptedObservation = snapshots.snapshots.at(-1)?.observation as {
+      executionProvenance?: { onBehalfOf?: string };
+    };
+    assertEquals(acceptedObservation.executionProvenance?.onBehalfOf, space);
+
+    // Disable in place. Revocation clears claim authority before the next
+    // source write, so the same client action resumes wire ownership without
+    // creating another claimed overlay.
+    await writePolicy(false);
+    await waitForControl(
+      (event): event is Extract<
+        ExecutionControlEvent,
+        { type: "session.execution.claim.revoke" }
+      > =>
+        event.type === "session.execution.claim.revoke" &&
+        event.claim.actionId === claim.actionId &&
+        event.leaseGeneration === claim.leaseGeneration &&
+        event.claimGeneration === claim.claimGeneration,
+      "pool transition claim revoke",
+    );
+    await clientStorage.synced();
+    await clientRuntime.settled();
+    assertEquals(server.listExecutionClaims(space), []);
+    const overlaysDropped = loggerCount("execution-overlay-dropped") -
+      overlaysDroppedBefore;
+    assertEquals(overlaysDropped >= overlaysCreated, true);
+    const overlayCountAfterDisable = loggerCount("execution-overlay-created");
+    clientCommits.length = 0;
+    await runSource(9);
+    assertEquals(clientCommits.some(isDerivedWireCommit), true);
+    assertEquals(
+      loggerCount("execution-overlay-created"),
+      overlayCountAfterDisable,
+    );
+    assertEquals(server.listExecutionClaims(space), []);
+    assertEquals(pool.metrics().crashes, 0);
+    assertEquals(pool.metrics().workersStarted, 1);
+
+    // Close every warm executor/runtime, then resume through a fresh client
+    // realm. Durable state alone must name the same cells and converge.
+    await observer.setExecutionDemand("", []);
+    cancelWarmSink();
+    cancelWarmSink = () => {};
+    await clientRuntime.dispose();
+    seedRuntimeDisposed = true;
+    clientRuntime = null;
+    await clientStorage.close();
+    seedStorageClosed = true;
+    clientStorage = null;
+    await pool.close();
+    pool = null;
+    assertEquals(server.listExecutionClaims(space), []);
+
+    const coldCommits: ClientCommit[] = [];
+    coldStorage = LoopbackStorageManager.connectTo(
+      server,
+      FLAGS,
+      { as: principal },
+      (commit) => coldCommits.push(commit),
+    );
+    coldRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: coldStorage,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+    });
+    await coldRuntime.patternManager.compilePattern(PROGRAM, { space });
+    const coldResult = coldRuntime.getCellFromLink(stableResultLink);
+    await coldResult.sync();
+    assertEquals(coldResult.sourceURI, stableResultId);
+    assertEquals(await coldRuntime.start(coldResult), true);
+    assertEquals(await coldResult.pull(), 18);
+    await coldRuntime.settled();
+    await coldStorage.synced();
+    await assertStableIdentity();
+    assertEquals(server.listExecutionClaims(space), []);
+    assertEquals(
+      coldCommits.filter((commit) => commit.operations.length > 0),
+      [],
+    );
+  } finally {
+    unsubscribeControl();
+    cancelWarmSink();
+    await coldRuntime?.dispose().catch(() => undefined);
+    await coldStorage?.close().catch(() => undefined);
+    await clientRuntime?.dispose().catch(() => undefined);
+    await clientStorage?.close().catch(() => undefined);
+    await pool?.close().catch(() => undefined);
+    if (!seedRuntimeDisposed) {
+      await seedRuntime.dispose().catch(() => undefined);
+    }
+    if (!seedStorageClosed) await seedStorage.close().catch(() => undefined);
+    await observerClient?.close().catch(() => undefined);
+    await server.close();
+  }
+}
 
 Deno.test("explicit claim routing commits a real pure computation under its sponsor", async () => {
   const principal = await Identity.fromPassphrase(
@@ -675,6 +1137,10 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     await observerClient?.close();
     await server.close();
   }
+});
+
+Deno.test("shared execution pool transitions shadow to claimed and back without migration", async () => {
+  await exercisePoolAuthorityTransition();
 });
 
 Deno.test("claimed builtins use host broker while client sinks observe pending and result", async () => {
