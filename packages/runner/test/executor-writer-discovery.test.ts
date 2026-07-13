@@ -65,6 +65,56 @@ Deno.test("executor selects a pre-existing redirected target by writer identity"
   }
 });
 
+Deno.test("executor preserves local writer identity across a cross-space redirect", async () => {
+  const env = createSchedulerTestRuntime(import.meta.url);
+  try {
+    const target = env.runtime.getCell(
+      space,
+      "executor-cross-space-redirect-target",
+      undefined,
+      env.tx,
+    );
+    const foreign = env.runtime.getCell(
+      "did:key:z6Mk-executor-writer-discovery-foreign-space" as typeof space,
+      "executor-cross-space-redirect-foreign",
+      undefined,
+      env.tx,
+    );
+    target.setRaw(foreign.getAsWriteRedirectLink());
+
+    const writer = writerFor(
+      target.getAsNormalizedFullLink(),
+      "impl:executor-cross-space-redirect-writer",
+    );
+    env.runtime.scheduler.register(writer, {
+      rehydrateFromStorage: {
+        space,
+        pieceId: PIECE_ID,
+        processGeneration: 0,
+      },
+    });
+
+    const discovery = await prepareExecutorDemandPiece({
+      runtime: env.runtime,
+      branch: "",
+      pieceId: PIECE_ID,
+      target,
+      instantiate: () => Promise.resolve(),
+    });
+
+    assertEquals(discovery.indexMiss, false);
+    assertEquals(discovery.writers.length, 1);
+    assertStrictEquals(
+      discovery.writers[0]?.actionId.includes(
+        "impl:executor-cross-space-redirect-writer",
+      ),
+      true,
+    );
+  } finally {
+    await disposeSchedulerTestRuntime(env);
+  }
+});
+
 Deno.test("executor index miss instantiates the demanded piece before discovery", async () => {
   const env = createSchedulerTestRuntime(import.meta.url);
   try {

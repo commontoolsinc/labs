@@ -71,7 +71,7 @@ export async function prepareExecutorDemandPiece(options: {
     options.runtime.scheduler.writersForTargets(
       options.branch,
       options.target.space as MemorySpace,
-      targets(),
+      targets().filter((target) => target.space === options.target.space),
     ).catch(() => []);
 
   const before = await lookup();
