@@ -49,6 +49,23 @@ export function preferDataUnavailable(
     : current as DataUnavailableVariant;
 }
 
+/** Converts schema traversal's availability status into its control value. */
+export function dataUnavailableFromTransformFailure(status: {
+  unavailableReason?: "syncing" | "error";
+  unavailableError?: Error;
+}): DataUnavailableVariant | undefined {
+  if (status.unavailableReason === "syncing") {
+    return DataUnavailable.syncing();
+  }
+  if (status.unavailableReason === "error") {
+    return DataUnavailable.error(
+      status.unavailableError ??
+        new Error("Linked document synchronization failed"),
+    );
+  }
+  return undefined;
+}
+
 /**
  * Selects a concrete marker from an already-materialized raw value. Arrays and
  * plain objects are walked depth-first in serialized order; Fabric instances,
@@ -128,10 +145,12 @@ export function selectUnavailableInput(
         const status = getCellWithStatus(
           source.asSchema(definedValueSchema).withTx(resolution.tx),
         );
-        if ("error" in status && status.unavailableReason === "syncing") {
+        if ("error" in status) {
+          const unavailable = dataUnavailableFromTransformFailure(status);
+          if (unavailable === undefined) return;
           selected = preferDataUnavailable(
             selected,
-            DataUnavailable.syncing(),
+            unavailable,
           );
           return;
         }
@@ -149,7 +168,6 @@ export function selectUnavailableInput(
         ]);
         if (seenLinks.has(linkKey)) return;
         seenLinks.add(linkKey);
-        if ("error" in status) return;
         visit(target.withTx(resolution.tx).getRaw(), path);
       }
       return;
@@ -214,8 +232,9 @@ export function readAvailabilityAwareCell<T>(
     const status = getCellWithStatus(
       cell.withTx(tx).asSchema(definedValueSchema),
     );
-    if ("error" in status && status.unavailableReason === "syncing") {
-      return DataUnavailable.syncing();
+    if ("error" in status) {
+      const unavailable = dataUnavailableFromTransformFailure(status);
+      if (unavailable !== undefined) return unavailable;
     }
   }
   return cell.withTx(tx).get();

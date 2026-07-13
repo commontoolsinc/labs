@@ -173,11 +173,14 @@ const MISSING_DOC_RETRY_MAX_MS = 1_000;
 const MISSING_DOC_MAX_ATTEMPTS = 3;
 
 type MissingDocLoadEntry = {
-  status: "pending" | "retry-ready" | "settled";
+  status: "pending" | "retry-ready" | "settled" | "error";
   attempts: number;
   waiters: Map<Action, ExternalDependencyActionToken>;
+  error?: Error;
   cancelRetryDelay?: () => void;
 };
+
+export type LinkedDocLoadStatus = "pending" | "settled" | "error";
 
 /**
  * Match the identity passed to `StorageManager.syncCell()`: scope defaults to
@@ -1317,27 +1320,38 @@ export class Runtime {
    */
   ensureLinkedDocLoaded(
     link: NormalizedFullLink,
-  ): "pending" | "settled" {
+  ): LinkedDocLoadStatus {
     return this.ensureLinkedDocLoad(link, true);
+  }
+
+  linkedDocLoadError(link: NormalizedFullLink): Error | undefined {
+    return this.missingDocLoads.get(missingDocLoadKey(link))?.error;
   }
 
   private ensureLinkedDocLoad(
     link: NormalizedFullLink,
     observeSettlement: boolean,
-  ): "pending" | "settled" {
+  ): LinkedDocLoadStatus {
     const key = missingDocLoadKey(link);
     const token = observeSettlement
       ? this.scheduler.getExecutingActionToken()
       : undefined;
     const existing = this.missingDocLoads.get(key);
     if (existing !== undefined) {
-      if (existing.status !== "settled" && token !== undefined) {
+      if (
+        existing.status !== "settled" && existing.status !== "error" &&
+        token !== undefined
+      ) {
         existing.waiters.set(token.action, token);
       }
       if (existing.status === "retry-ready") {
         this.startMissingDocLoadAttempt(key, link, existing);
       }
-      return existing.status === "settled" ? "settled" : "pending";
+      return existing.status === "settled"
+        ? "settled"
+        : existing.status === "error"
+        ? "error"
+        : "pending";
     }
 
     const entry: MissingDocLoadEntry = {
@@ -1373,13 +1387,17 @@ export class Runtime {
         this.wakeMissingDocLoadWaiters(entry);
         entry.waiters.clear();
       },
-      () => {
+      (cause) => {
         if (this.missingDocLoads.get(key) !== entry) return;
         if (entry.attempts >= MISSING_DOC_MAX_ATTEMPTS) {
-          // Give convergence waiters a bounded outcome under a persistently
-          // offline provider. The visible value remains `syncing`; a later
-          // dependency change/read starts a fresh bounded retry cycle.
-          this.missingDocLoads.delete(key);
+          // Exhaustion is terminal for this runtime. Wake every consumer so
+          // the visible value becomes an error instead of remaining an
+          // unwakeable syncing marker.
+          entry.status = "error";
+          entry.error = cause instanceof Error
+            ? cause
+            : new Error(String(cause));
+          this.wakeMissingDocLoadWaiters(entry);
           entry.waiters.clear();
           return;
         }

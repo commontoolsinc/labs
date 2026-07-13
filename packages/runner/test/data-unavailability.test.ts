@@ -9,7 +9,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { Module, Pattern } from "../src/builder/types.ts";
-import { type Cell, createCell } from "../src/cell.ts";
+import { type Cell, createCell, getCellWithStatus } from "../src/cell.ts";
 import { getDerivedInternalCell, parseLink } from "../src/link-utils.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -1204,6 +1204,7 @@ describe("JavaScript-node data unavailability", () => {
       const run = runValueNode({
         argument: { value: target.getAsLink() },
         argumentSchema: { type: "number" },
+        isEffect: true,
         implementation: () => "should not run",
       });
       const bounded = new Promise<never>((_resolve, reject) => {
@@ -1212,9 +1213,28 @@ describe("JavaScript-node data unavailability", () => {
           2_000,
         );
       });
-      expect(await Promise.race([run, bounded])).toBe(
-        DataUnavailable.syncing(),
+      const output = await Promise.race([run, bounded]);
+      expect(output).toBeInstanceOf(DataUnavailable);
+      expect((output as DataUnavailable).reason).toBe("syncing");
+
+      const probe = runtime.getCell(
+        space,
+        `offline readiness probe ${nextResultId++}`,
       );
+      const writeTx = runtime.edit();
+      probe.withTx(writeTx).setRaw(target.getAsLink());
+      await writeTx.commit();
+      const readTx = runtime.edit();
+      const terminal = getCellWithStatus(
+        probe.asSchema({ type: "number" }).withTx(readTx),
+      );
+      expect("error" in terminal).toBe(true);
+      if (!("error" in terminal)) throw new Error("expected traversal error");
+      expect(terminal.unavailableReason).toBe("error");
+      expect(terminal.unavailableError?.message).toBe(
+        "provider offline",
+      );
+      await readTx.commit();
       expect(attempts).toBe(4);
       expect(storageManager.pendingCrossSpacePromiseCount()).toBe(0);
     } finally {

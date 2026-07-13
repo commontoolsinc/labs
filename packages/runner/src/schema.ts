@@ -923,7 +923,8 @@ export type ValidateAndTransformResult =
   | { ok: any }
   | {
     error: unknown;
-    unavailableReason?: "syncing";
+    unavailableReason?: "syncing" | "error";
+    unavailableError?: Error;
   };
 
 export function validateAndTransform(
@@ -1110,13 +1111,23 @@ export function validateAndTransformResult(
       resolvedValueLink.path.some(
         (part, index) => part !== valueResolutionSource.path[index],
       )
-    ) &&
-    runtime.ensureLinkedDocLoaded(resolvedValueLink) === "pending"
+    )
   ) {
+    const loadStatus = runtime.ensureLinkedDocLoaded(resolvedValueLink);
     // A followed link can target replica coverage that is not established yet
     // even within the same space after a dynamic retarget. Once the selector
     // sync settles, an absent target falls through as a schema mismatch.
-    return { error: valueRead.error, unavailableReason: "syncing" };
+    if (loadStatus === "pending") {
+      return { error: valueRead.error, unavailableReason: "syncing" };
+    }
+    if (loadStatus === "error") {
+      return {
+        error: valueRead.error,
+        unavailableReason: "error",
+        unavailableError: runtime.linkedDocLoadError(resolvedValueLink) ??
+          new Error("Linked document synchronization failed"),
+      };
+    }
   }
   if (
     valueRead.error !== undefined &&
@@ -1137,7 +1148,10 @@ export function validateAndTransformResult(
   };
   // TODO(@ubik2): these constructor parameters are complex enough that we should
   // use an options struct
-  let pendingLinkedDoc = false;
+  let linkedDocUnavailable:
+    | { unavailableReason: "syncing" }
+    | { unavailableReason: "error"; unavailableError: Error }
+    | undefined;
   const traverser = new SchemaObjectTraverser<any>(
     tx!,
     selector,
@@ -1147,16 +1161,26 @@ export function validateAndTransformResult(
       undefined,
       // Absent linked targets establish selector coverage asynchronously.
       (missing) => {
-        if (runtime.ensureLinkedDocLoaded(missing) === "pending") {
-          pendingLinkedDoc = true;
+        const loadStatus = runtime.ensureLinkedDocLoaded(missing);
+        if (loadStatus === "error") {
+          linkedDocUnavailable = {
+            unavailableReason: "error",
+            unavailableError: runtime.linkedDocLoadError(missing) ??
+              new Error("Linked document synchronization failed"),
+          };
+        } else if (
+          loadStatus === "pending" &&
+          linkedDocUnavailable?.unavailableReason !== "error"
+        ) {
+          linkedDocUnavailable = { unavailableReason: "syncing" };
         }
       },
     ),
     objectCreator,
   );
   const result = traverser.traverse(doc, link);
-  return "error" in result && pendingLinkedDoc
-    ? { ...result, unavailableReason: "syncing" }
+  return "error" in result && linkedDocUnavailable !== undefined
+    ? { ...result, ...linkedDocUnavailable }
     : result;
 }
 

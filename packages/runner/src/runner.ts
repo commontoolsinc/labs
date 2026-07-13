@@ -116,7 +116,10 @@ import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
 import { SchemaObjectTraverser } from "./traverse.ts";
 import { assertValidUnavailableInputPolicy } from "./unavailable-input-policy.ts";
-import { dataUnavailableReasonPrecedes } from "./data-unavailability.ts";
+import {
+  dataUnavailableFromTransformFailure,
+  dataUnavailableReasonPrecedes,
+} from "./data-unavailability.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -393,26 +396,23 @@ function scanUnavailableInputs(
       const status = getCellWithStatus(
         source.asSchema(AVAILABILITY_DEFINED_VALUE_SCHEMA).withTx(tx),
       );
-      if ("error" in status && status.unavailableReason === "syncing") {
-        const syncing = DataUnavailable.syncing();
-        if (policyAcceptsUnavailableInput(policy, path, "syncing")) {
-          accepted.push({ value: syncing, path, overlayTarget: link });
-        } else {
-          if (
-            selected === undefined ||
-            dataUnavailableReasonPrecedes(
-              syncing.reason,
-              selected.value.reason,
-            )
-          ) {
-            selected = { value: syncing, path };
-            selectedIsSyntheticSyncing = true;
-          }
+      if ("error" in status) {
+        const unavailable = dataUnavailableFromTransformFailure(status);
+        if (unavailable === undefined) return;
+        if (policyAcceptsUnavailableInput(policy, path, unavailable.reason)) {
+          accepted.push({ value: unavailable, path, overlayTarget: link });
+        } else if (
+          selected === undefined ||
+          dataUnavailableReasonPrecedes(
+            unavailable.reason,
+            selected.value.reason,
+          )
+        ) {
+          selected = { value: unavailable, path };
+          selectedIsSyntheticSyncing = unavailable.reason === "syncing";
         }
         return;
       }
-
-      if ("error" in status) return;
       activeLinks.add(linkKey);
       try {
         // The readiness schema is deliberately broad and cannot authenticate
@@ -3229,12 +3229,11 @@ export class Runner {
       : inputsCell.asSchema(module.argumentSchema);
     const transformed = getCellWithStatus(schemaCell);
     if ("error" in transformed) {
+      const unavailable = dataUnavailableFromTransformFailure(transformed);
       return {
         argument: undefined,
         isValidArgument: false,
-        unavailable: transformed.unavailableReason === "syncing"
-          ? DataUnavailable.syncing()
-          : DataUnavailable.schemaMismatch(),
+        unavailable: unavailable ?? DataUnavailable.schemaMismatch(),
       };
     }
     return {
