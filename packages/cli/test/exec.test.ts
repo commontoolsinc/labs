@@ -1868,6 +1868,56 @@ describe("mounted callable resolution and execution", () => {
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
   });
 
+  it("resolves linked PatternFactory tools in their source space", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: true,
+      canonicalFactory: canonicalSearchFactory,
+      factoryLinkSourceSpace: "did:key:linked-factory-source",
+      toolResult: { echoed: "tea" },
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    const resolved = await resolveMountedCallableFile(filePath, {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+    });
+    const result = await executeMountedCallableFile(
+      filePath,
+      ["--query", "tea"],
+      {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        prepareFactory: (factory, context) => {
+          expect(factory).toBe(canonicalSearchFactory);
+          harness.tracker.factoryMaterializationSpace = context.artifactSpace;
+          return Promise.resolve(factory);
+        },
+      },
+    );
+
+    expect(resolved.commandSpec.inputSchema).toEqual(
+      (factoryStateOf(canonicalSearchFactory) as {
+        argumentSchema: JSONSchema;
+      }).argumentSchema,
+    );
+    expect(harness.tracker.factoryMaterializationSpace).toBe(
+      "did:key:linked-factory-source",
+    );
+    expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
+  });
+
   it("idles before committing mounted tool results and syncs before waiting", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
@@ -2541,6 +2591,7 @@ function createExecHarness(options: {
   };
   canonicalFactory?: unknown;
   factorySourceSpace?: string;
+  factoryLinkSourceSpace?: string;
   toolResult?: unknown;
   toolResultGetValue?: unknown;
   toolResultPullValue?: unknown;
@@ -2571,12 +2622,20 @@ function createExecHarness(options: {
       options.pattern?.resultSchema ?? true,
     )
     : undefined;
-  const callableValue = options.canonicalFactory ??
+  const canonicalValue = options.canonicalFactory ??
     (options.callableKind === "tool"
       ? defaultToolFactory
       : options.sparseHandlerCell
       ? undefined
       : { $stream: true });
+  const callableValue = options.factoryLinkSourceSpace
+    ? {
+      $link: {
+        id: "of:linked-factory",
+        space: options.factoryLinkSourceSpace,
+      },
+    }
+    : canonicalValue;
   const runtimeErrors: Array<{ message: string }> = [];
   const handlerSend = function (
     this: unknown,
@@ -2623,6 +2682,12 @@ function createExecHarness(options: {
         },
         normalizedLink: options.factorySourceSpace
           ? { space: options.factorySourceSpace }
+          : undefined,
+        resolvedValue: options.factoryLinkSourceSpace
+          ? canonicalValue
+          : undefined,
+        resolvedNormalizedLink: options.factoryLinkSourceSpace
+          ? { space: options.factoryLinkSourceSpace }
           : undefined,
       },
   );
@@ -2745,6 +2810,8 @@ function createMockCell(
     ) => void;
     isStream?: () => boolean;
     normalizedLink?: { space?: string };
+    resolvedValue?: unknown;
+    resolvedNormalizedLink?: { space?: string };
   },
 ) {
   const cell = {
@@ -2757,7 +2824,12 @@ function createMockCell(
     },
     send: options?.send,
     isStream: options?.isStream,
-    resolveAsCell: () => cell,
+    resolveAsCell: () =>
+      options?.resolvedValue === undefined
+        ? cell
+        : createMockCell(options.resolvedValue, schema, {
+          normalizedLink: options.resolvedNormalizedLink,
+        }),
     getAsNormalizedFullLink: () => options?.normalizedLink ?? {},
     key: (key: string) => {
       if (options?.childOverrides?.[key]) {

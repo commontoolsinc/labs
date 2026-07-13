@@ -124,31 +124,62 @@ function canonicalFactorySelection(callableCell: CallableCellLike): {
   factory: unknown;
   leafCell: CallableCellLike;
 } | undefined {
-  let value: unknown;
+  const resolvedCell = resolveSourceCell(callableCell);
+  for (const value of readCellCandidates(resolvedCell)) {
+    if (isAdmittedFabricFactory(value)) {
+      if (factoryStateOf(value).kind === "pattern") {
+        return { factory: value, leafCell: resolvedCell };
+      }
+      continue;
+    }
+    const factory = patternFactoryFromCallableEntry(value);
+    if (factory !== undefined) {
+      return {
+        factory,
+        leafCell: resolveSourceCell(resolvedCell.key("pattern")),
+      };
+    }
+  }
+
   try {
-    value = callableCell.getRaw?.() ?? callableCell.get();
-  } catch {
-    value = undefined;
-  }
-  if (isAdmittedFabricFactory(value)) {
-    return factoryStateOf(value).kind === "pattern"
-      ? { factory: value, leafCell: callableCell }
-      : undefined;
-  }
-  const factory = patternFactoryFromCallableEntry(value);
-  if (factory !== undefined) {
-    return { factory, leafCell: callableCell.key("pattern") };
-  }
-  try {
-    const leafCell = callableCell.key("pattern");
-    const nested = leafCell.getRaw?.() ?? leafCell.get();
-    return isAdmittedFabricFactory(nested) &&
+    const leafCell = resolveSourceCell(resolvedCell.key("pattern"));
+    for (const nested of readCellCandidates(leafCell)) {
+      if (
+        isAdmittedFabricFactory(nested) &&
         factoryStateOf(nested).kind === "pattern"
-      ? { factory: nested, leafCell }
-      : undefined;
+      ) {
+        return { factory: nested, leafCell };
+      }
+    }
   } catch {
-    return undefined;
+    // A missing descriptor child simply means this is not a canonical factory.
   }
+  return undefined;
+}
+
+function resolveSourceCell(cell: CallableCellLike): CallableCellLike {
+  try {
+    return cell.resolveAsCell?.() ?? cell;
+  } catch {
+    return cell;
+  }
+}
+
+function readCellCandidates(cell: CallableCellLike): unknown[] {
+  const candidates: unknown[] = [];
+  if (typeof cell.getRaw === "function") {
+    try {
+      candidates.push(cell.getRaw());
+    } catch {
+      // A raw read may be unavailable even when the resolved read is valid.
+    }
+  }
+  try {
+    candidates.push(cell.get());
+  } catch {
+    // Treat unreadable cells as having no callable value.
+  }
+  return candidates;
 }
 
 function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
@@ -204,22 +235,21 @@ export function detectCallableKind(
   callableValue: unknown,
   callableCell: CallableCellLike,
 ): CallableKind | null {
-  let resolvedValue = callableValue;
-  try {
-    resolvedValue = callableCell?.getRaw?.() ?? callableCell?.get?.() ??
-      callableValue;
-  } catch {
-    resolvedValue = callableValue;
+  const resolvedCell = resolveSourceCell(callableCell);
+  const candidates = [
+    callableValue,
+    ...readCellCandidates(resolvedCell),
+    resolvedCell,
+  ];
+  for (const candidate of candidates) {
+    const callableKind = classifyCallableEntry(
+      candidate,
+      callableCell.schema ?? resolvedCell.schema,
+    );
+    if (callableKind) {
+      return callableKind;
+    }
   }
-
-  const callableKind =
-    classifyCallableEntry(callableValue, callableCell?.schema) ??
-      classifyCallableEntry(resolvedValue, callableCell?.schema) ??
-      classifyCallableEntry(callableCell, callableCell?.schema);
-  if (callableKind) {
-    return callableKind;
-  }
-
   return null;
 }
 
