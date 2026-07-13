@@ -299,6 +299,116 @@ Deno.test("pattern curry accepts the same rooted ref from a stricter source sche
   );
 });
 
+Deno.test("pattern curry preserves conjunctive constraints on ref siblings", () => {
+  const base = {
+    type: "object",
+    properties: {
+      first: { type: "string" },
+      second: { type: "string" },
+    },
+    required: ["first"],
+  } as const satisfies JSONSchema;
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      selected: {
+        $ref: "#/$defs/Base",
+        required: ["second"],
+        asCell: ["cell"],
+      },
+    },
+    required: ["selected"],
+    $defs: { Base: base },
+  } as const satisfies JSONSchema;
+  const sourceSchema = {
+    type: "object",
+    properties: base.properties,
+    required: ["second"],
+    asCell: ["cell"],
+  } as const satisfies JSONSchema;
+
+  assertThrows(
+    () =>
+      assertValidPatternParams(
+        { selected: symbolic(sourceSchema) },
+        paramsSchema,
+      ),
+    TypeError,
+    "symbolic binding schema mismatch",
+  );
+});
+
+Deno.test("pattern curry accepts sanitized nested cell metadata only from a real Cell", async () => {
+  const signer = await Identity.fromPassphrase(
+    "factory-params-sanitized-nested-cell-test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const sourceSchema = {
+    type: "object",
+    properties: {
+      subject: {
+        anyOf: [{ type: "undefined" }, { type: "string" }],
+      },
+    },
+  } as const satisfies JSONSchema;
+  const paramsSchema = {
+    type: "object",
+    properties: {
+      selected: {
+        $ref: "#/$defs/Selection",
+        asCell: ["cell"],
+      },
+    },
+    required: ["selected"],
+    $defs: {
+      Selection: {
+        type: "object",
+        properties: {
+          subject: {
+            anyOf: [{ type: "undefined" }, { type: "string" }],
+            asCell: ["cell"],
+          },
+        },
+      },
+    },
+  } as const satisfies JSONSchema;
+
+  try {
+    const selectedCell = runtime.getCell(
+      signer.did(),
+      "factory-params-sanitized-nested-cell",
+      sourceSchema,
+    );
+    for (
+      const selected of [
+        selectedCell.getAsReactiveProxy(),
+        selectedCell.getAsNormalizedFullLink(),
+      ]
+    ) {
+      assertEquals(
+        assertValidPatternParams({ selected }, paramsSchema),
+        undefined,
+      );
+    }
+    assertThrows(
+      () =>
+        assertValidPatternParams(
+          { selected: symbolic({ ...sourceSchema, asCell: ["cell"] }) },
+          paramsSchema,
+        ),
+      TypeError,
+      "symbolic binding schema mismatch",
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
 Deno.test("pattern curry validates a symbolic Cell default when content schema is deferred", () => {
   const paramsSchema = {
     type: "object",

@@ -40,6 +40,27 @@ function schemaAtRef(
   const { $ref: _, ...siblings } = schema;
   if (Object.keys(siblings).length === 0) return current as JSONSchema;
   if (current === false) return false;
+  if (current !== true) {
+    const overlappingKeys = Object.keys(siblings).filter((key) =>
+      Object.hasOwn(current, key)
+    );
+    if (overlappingKeys.length > 0) {
+      const combined: Record<string, unknown> = {
+        allOf: [current, siblings],
+      };
+      // These runtime contract annotations must remain visible at the schema
+      // root while the overlapping JSON Schema constraints retain their
+      // conjunctive `$ref`-sibling meaning inside `allOf`.
+      for (const key of ["asCell", "asFactory", "scope"] as const) {
+        if (Object.hasOwn(current, key) !== Object.hasOwn(siblings, key)) {
+          combined[key] = Object.hasOwn(siblings, key)
+            ? siblings[key]
+            : current[key];
+        }
+      }
+      return schemaWithRootDefinitions(combined as JSONSchema, root);
+    }
+  }
   return schemaWithRootDefinitions(
     current === true ? siblings : { ...current, ...siblings },
     root,
@@ -112,6 +133,12 @@ function isSymbolicValue(value: unknown): boolean {
   return isReactive(value) || isCellLink(value);
 }
 
+function isRunnerCellBinding(value: unknown): boolean {
+  if (isCell(value) || isCellLink(value)) return true;
+  if (!isReactive(value)) return false;
+  return isCell(value.export().cell);
+}
+
 function schemaWithRootDefinitions(
   schema: JSONSchema,
   root: JSONSchema,
@@ -136,6 +163,20 @@ function withoutAsCell(schema: JSONSchema): JSONSchema {
   const contentSchema = { ...schema };
   delete contentSchema.asCell;
   return contentSchema;
+}
+
+function withoutNestedAsCell(schema: JSONSchema): JSONSchema {
+  if (schema === true || schema === false) return schema;
+  const visit = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(visit);
+    if (!isRecord(value)) return value;
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key !== "asCell")
+        .map(([key, child]) => [key, visit(child)]),
+    );
+  };
+  return visit(schema) as JSONSchema;
 }
 
 function asCellEntry(value: unknown):
@@ -365,6 +406,18 @@ function symbolicFailure(
   const sourceContent = withoutAsCell(
     schemaWithRootDefinitions(resolvedSourceSchema, sourceSchema),
   );
+  // A runner Cell binding (live or serialized) has already established the
+  // outer symbolic capability. Its exported content schema may have nested
+  // `asCell` annotations removed by durable-link schema sanitization, so
+  // compare the remaining content contract without treating that serialization
+  // detail as authored evidence. Reactive-shaped objects do not receive this.
+  const runnerCellBinding = isRunnerCellBinding(value);
+  const comparableExpected = runnerCellBinding
+    ? withoutNestedAsCell(expectedContent)
+    : expectedContent;
+  const comparableSource = runnerCellBinding
+    ? withoutNestedAsCell(sourceContent)
+    : sourceContent;
   if (
     sourceSchema !== true && sourceSchema !== false &&
     Object.hasOwn(sourceSchema, "default") &&
@@ -376,8 +429,8 @@ function symbolicFailure(
   ) {
     return undefined;
   }
-  return factorySchemasEqual(expectedContent, sourceContent) ||
-      sourceSchemaContainsExpected(expectedContent, sourceContent) ||
+  return factorySchemasEqual(comparableExpected, comparableSource) ||
+      sourceSchemaContainsExpected(comparableExpected, comparableSource) ||
       rootedSchema !== true && rootedSchema !== false &&
         Array.isArray(rootedSchema.asCell) &&
         rootedSchema.asCell.map(asCellEntry).some((entry) =>
@@ -386,7 +439,7 @@ function symbolicFailure(
         symbolicCellEntries(sourceSchema, value).some((entry) =>
           entry.kind === "stream"
         ) &&
-        sourceSchemaContainsExpected(sourceContent, expectedContent)
+        sourceSchemaContainsExpected(comparableSource, comparableExpected)
     ? undefined
     : `symbolic binding schema mismatch: expected ${
       JSON.stringify(expectedContent)
