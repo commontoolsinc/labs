@@ -471,7 +471,7 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
   }
 });
 
-Deno.test("claimed fetch and generate builtins execute once through the host broker and persist async results", async () => {
+Deno.test("claimed builtins use host broker while client sinks observe pending and result", async () => {
   const principal = await Identity.fromPassphrase(
     `executor builtin e2e ${crypto.randomUUID()}`,
   );
@@ -520,8 +520,16 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
   let unsubscribeAccepted = () => {};
   const clientRuntimes: Runtime[] = [];
   const clientStorages: LoopbackStorageManager[] = [];
+  const clientSinkCancels: (() => void)[] = [];
   const events: string[] = [];
   const brokerRequests: ServerBuiltinFetchRequest[] = [];
+  let heldBrokerRound:
+    | {
+      requestCount: number;
+      started: PromiseWithResolvers<void>;
+      release: Promise<void>;
+    }
+    | undefined;
   try {
     const compiled = await seedRuntime.patternManager.compilePattern(
       ASYNC_BUILTIN_PROGRAM,
@@ -625,9 +633,15 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
         serverPrimaryExecution: true,
       },
       createBuiltinBroker: () => ({
-        fetch(request) {
+        async fetch(request) {
           events.push(`broker:${request.url}`);
           brokerRequests.push(request);
+          const heldRound = heldBrokerRound;
+          if (heldRound !== undefined) {
+            heldRound.requestCount += 1;
+            if (heldRound.requestCount === 2) heldRound.started.resolve();
+            await heldRound.release;
+          }
           const response = request.url.startsWith("/api/ai/llm")
             ? Response.json({
               role: "assistant",
@@ -635,11 +649,11 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
               id: "server-generate-e2e",
             })
             : new Response("server response");
-          return Promise.resolve({
+          return {
             response,
             finalUrl: new URL(request.url, servingOrigin),
             redirectCount: 0,
-          });
+          };
         },
       }),
       authorizeBuiltinRequest: () => {
@@ -703,6 +717,41 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
       );
     };
     const clientWireCommits: ClientCommit[] = [];
+    const clientDerivedWrites = () =>
+      clientWireCommits.filter((commit) =>
+        commit.schedulerObservation !== undefined &&
+        commit.operations.length > 0
+      );
+    const clientPendingObserved = Promise.withResolvers<void>();
+    const clientResultsObserved = Promise.withResolvers<void>();
+    const clientPendingKinds = new Set<"fetch" | "generate">();
+    const clientResultKinds = new Set<"fetch" | "generate">();
+    let observeClientTransition = false;
+    const observeBuiltin = (
+      kind: "fetch" | "generate",
+      expectedResult: string,
+      value: unknown,
+    ) => {
+      if (!observeClientTransition) return;
+      const state = (value ?? {}) as {
+        pending?: boolean;
+        result?: unknown;
+      };
+      events.push(
+        `client:${kind}:${String(state.pending)}:${String(state.result)}`,
+      );
+      if (state.pending === true) {
+        clientPendingKinds.add(kind);
+        if (clientPendingKinds.size === 2) clientPendingObserved.resolve();
+      }
+      if (
+        state.pending === false && state.result === expectedResult &&
+        clientPendingKinds.has(kind)
+      ) {
+        clientResultKinds.add(kind);
+        if (clientResultKinds.size === 2) clientResultsObserved.resolve();
+      }
+    };
     for (let index = 0; index < 3; index++) {
       const storage = LoopbackStorageManager.connectTo(
         server,
@@ -728,22 +777,30 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
       const resumed = runtime.getCellFromLink(resultLink);
       await resumed.sync();
       assertEquals(await runtime.start(resumed), true);
+      if (index === 0) {
+        clientSinkCancels.push(
+          resumed.key("fetched").sink((value) =>
+            observeBuiltin("fetch", "server response", value)
+          ),
+          resumed.key("generated").sink((value) =>
+            observeBuiltin("generate", "generated response", value)
+          ),
+        );
+      }
       await resumed.pull();
       await runtime.settled();
     }
     clientNetworkRequests.length = 0;
     clientWireCommits.length = 0;
+    observeClientTransition = true;
 
-    const secondServerRound = Promise.withResolvers<void>();
-    const originalBrokerCount = brokerRequests.length;
-    const unsubscribeSecondRound = server.subscribeAcceptedCommits(
-      space,
-      () => {
-        if (brokerRequests.length >= originalBrokerCount + 2) {
-          secondServerRound.resolve();
-        }
-      },
-    );
+    const secondBrokerStarted = Promise.withResolvers<void>();
+    const releaseSecondBrokerRound = Promise.withResolvers<void>();
+    heldBrokerRound = {
+      requestCount: 0,
+      started: secondBrokerStarted,
+      release: releaseSecondBrokerRound.promise,
+    };
     try {
       await observer.transact({
         localSeq: 2,
@@ -755,29 +812,46 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
         }],
       });
       await awaitBarrier(
-        secondServerRound.promise,
-        "passive builtin server round",
+        secondBrokerStarted.promise,
+        "server broker requests",
+        events,
+      );
+      await awaitBarrier(
+        clientPendingObserved.promise,
+        "client builtin pending state",
+        events,
+      );
+      assertEquals(heldBrokerRound.requestCount, 2);
+      assertEquals(clientNetworkRequests, []);
+      assertEquals(clientDerivedWrites(), []);
+      releaseSecondBrokerRound.resolve();
+      await awaitBarrier(
+        clientResultsObserved.promise,
+        "client builtin result state",
         events,
       );
     } finally {
-      unsubscribeSecondRound();
+      releaseSecondBrokerRound.resolve();
+      heldBrokerRound = undefined;
     }
     for (const runtime of clientRuntimes) await runtime.settled();
     assertEquals(clientNetworkRequests, []);
-    assertEquals(
-      clientWireCommits.filter((commit) => {
-        const observation = commit.schedulerObservation as {
-          actionKind?: string;
-        } | undefined;
-        return observation?.actionKind === "effect" &&
-          commit.operations.length > 0;
-      }),
-      [],
-    );
+    assertEquals(clientDerivedWrites(), []);
 
     // Permanent authority removal releases the same three clients back to the
     // existing durable mutex. Exactly one fetch and one generation may leave
     // the browser cohort; no polling or heartbeat grants authority.
+    const claimsRevoked = Promise.withResolvers<void>();
+    const unsubscribeClaimsRevoked = observer.subscribeExecutionControl(
+      (event) => {
+        if (
+          event.type === "session.execution.claim.revoke" &&
+          observer.executionClaims.length === 0
+        ) {
+          claimsRevoked.resolve();
+        }
+      },
+    );
     await observer.transact({
       localSeq: 3,
       reads: { confirmed: [], pending: [] },
@@ -787,9 +861,14 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
         value: { value: { version: 1, serverPrimaryExecution: false } },
       }],
     });
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (observer.executionClaims.length === 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    try {
+      await awaitBarrier(
+        claimsRevoked.promise,
+        "builtin claims revoked",
+        events,
+      );
+    } finally {
+      unsubscribeClaimsRevoked();
     }
     assertEquals(observer.executionClaims, []);
     clientNetworkRequests.length = 0;
@@ -847,11 +926,11 @@ Deno.test("claimed fetch and generate builtins execute once through the host bro
       events,
     );
     for (const runtime of clientRuntimes) await runtime.settled();
-    await new Promise((resolve) => setTimeout(resolve, 20));
     assertEquals(clientFallbackKinds, new Set(["fetch", "generate"]));
   } finally {
     resetMockMode();
     unsubscribeAccepted();
+    for (const cancel of clientSinkCancels) cancel();
     for (const runtime of clientRuntimes) await runtime.dispose();
     for (const storage of clientStorages) await storage.close();
     await executor?.stop();
