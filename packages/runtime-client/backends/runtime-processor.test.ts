@@ -348,6 +348,37 @@ describe("page slug metadata", () => {
 
     expect(result).toEqual({ slug: undefined });
   });
+
+  it("accepts bare and of:-schemed pageIds as the same entity", async () => {
+    // CellHandle.id() emits the full schemed URI while PageHandle.id() emits
+    // the bare routing form; the pageId intake must resolve both to the SAME
+    // entity. Without normalization, "of:fid1:H" parses as a hash whose tag
+    // is "of:fid1" and silently addresses the nonexistent of:of:fid1:H.
+    const received: string[] = [];
+    const processor = {
+      getSpaceCtx: homeSpaceCtx,
+      runtime: {
+        getCellFromEntityId: (_space: unknown, entityId: unknown) => {
+          received.push(String(entityId));
+          return {
+            sync: () => Promise.resolve(),
+            getMetaRaw: () => undefined,
+          };
+        },
+      },
+      pieceManager: {
+        getSpace: () => "did:key:z6Mk-runtime-processor-slug",
+      },
+    };
+
+    const bare = fid("schemed-piece");
+    for (const pageId of [bare, `of:${bare}`]) {
+      await (RuntimeProcessor.prototype as any).handlePageGetSlug
+        .call(processor, { type: RequestType.PageGetSlug, pageId });
+    }
+
+    expect(received).toEqual([bare, bare]);
+  });
 });
 
 describe("page slug redirects", () => {

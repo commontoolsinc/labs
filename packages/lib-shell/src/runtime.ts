@@ -578,7 +578,10 @@ export class RuntimeInternals extends EventTarget {
     e: RuntimeClientEvents["navigaterequest"][0],
   ): Promise<void> {
     const { cell } = e;
-    const pieceId = cell.id();
+    // `CellHandle.id()` is the full schemed URI; routing pieceIds are bare
+    // (the `PageHandle.id()` convention) — URLs and the pageId protocol
+    // fields expect the `of:`-stripped form.
+    const pieceId = cell.id().replace(/^of:/, "");
     logger.log("navigate", `Navigating to piece: ${pieceId}`);
 
     void this.registerNavigatedPiece(cell);
