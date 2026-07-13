@@ -3536,7 +3536,7 @@ export class Runner {
     let fastPreemptedSelection = false;
     let childCancel: Cancel | undefined;
     let sinkCancel: Cancel | undefined;
-    let selectionSourceLink: NormalizedFullLink | undefined;
+    let selectionSourceLinks: readonly NormalizedFullLink[] = [];
     let fastSelectionQueued = false;
     const resolvedExecutionSpaces = new Map<string, MemorySpace>();
     const callSiteLink = resultCell.getAsNormalizedFullLink();
@@ -3561,19 +3561,26 @@ export class Runner {
       selection: unknown;
       artifactSpace: MemorySpace;
       sourceLink: NormalizedFullLink;
+      dereferenceSources: readonly NormalizedFullLink[];
       cfcLabel: unknown;
     } => {
       const readTx = this.runtime.readTx();
+      const dereferenceSources: NormalizedFullLink[] = [];
       const resolved = resolveLink(
         this.runtime,
         readTx,
         bindingLink,
+        "value",
+        {
+          onDereferenceSource: (source) => dereferenceSources.push(source),
+        },
       );
       return {
         selection: bindingCell.withTx(readTx)
           .getWithoutFactoryMaterialization(),
         artifactSpace: resolved.space,
         sourceLink: resolved,
+        dereferenceSources,
         cfcLabel: cfcLabelViewForCell(bindingCell.withTx(readTx)),
       };
     };
@@ -3796,7 +3803,10 @@ export class Runner {
         fastPreemptedSelection = false;
         if (selection === undefined) return;
         const current = readCurrent();
-        selectionSourceLink = current.sourceLink;
+        selectionSourceLinks = [
+          ...current.dereferenceSources,
+          current.sourceLink,
+        ];
         activateSelection(
           selection,
           current.artifactSpace,
@@ -3816,7 +3826,10 @@ export class Runner {
       if (selection === undefined) return;
 
       const current = readCurrent();
-      selectionSourceLink = current.sourceLink;
+      selectionSourceLinks = [
+        ...current.dereferenceSources,
+        current.sourceLink,
+      ];
       activateSelection(selection, current.artifactSpace, selectedGeneration);
     };
 
@@ -3888,7 +3901,10 @@ export class Runner {
             (change.address.scope ?? "space") === (link.scope ?? "space")
           );
         };
-        if (!touches(bindingLink) && !touches(selectionSourceLink)) {
+        if (
+          !touches(bindingLink) &&
+          !selectionSourceLinks.some((link) => touches(link))
+        ) {
           return { done: false };
         }
         if (!fastSelectionQueued) {
@@ -3898,7 +3914,10 @@ export class Runner {
             if (!active) return;
             try {
               const current = readCurrent();
-              selectionSourceLink = current.sourceLink;
+              selectionSourceLinks = [
+                ...current.dereferenceSources,
+                current.sourceLink,
+              ];
               preemptSelection(current.selection, current.cfcLabel);
             } catch (error) {
               this.runtime.scheduler.reportError(error, {

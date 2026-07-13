@@ -46,6 +46,7 @@ type CanonicalSelection = {
 type CurrentSelection = CanonicalSelection & {
   raw: unknown;
   sourceLink: NormalizedFullLink;
+  dereferenceSources: readonly NormalizedFullLink[];
 };
 
 export type MaterializedListPatternSelection = {
@@ -75,11 +76,15 @@ function readSelection(
   tx: IExtendedStorageTransaction,
   bindingLink: NormalizedFullLink,
 ): CurrentSelection {
+  const dereferenceSources: NormalizedFullLink[] = [];
   const resolvedOp = resolveLink(
     runtime,
     tx,
     bindingLink,
     "value",
+    {
+      onDereferenceSource: (source) => dereferenceSources.push(source),
+    },
   );
   const sourceCell = runtime.getCellFromLink(resolvedOp, undefined, tx);
   // The coordinator needs the value for generic materialization and reactive
@@ -97,6 +102,7 @@ function readSelection(
     canonical: canonicalSelection(raw),
     cfcLabel: cfcLabelViewForCell(sourceCell),
     sourceLink: resolvedOp,
+    dereferenceSources,
   };
 }
 
@@ -157,7 +163,7 @@ export function createListPatternFactorySupervisor(
 } {
   let active = true;
   let bindingLink: NormalizedFullLink | undefined;
-  let selectionSourceLink: NormalizedFullLink | undefined;
+  let selectionSourceLinks: readonly NormalizedFullLink[] = [];
   let activeSelection: CanonicalSelection | undefined;
   let preempted = false;
   let generation = 0;
@@ -187,7 +193,10 @@ export function createListPatternFactorySupervisor(
             (change.address.scope ?? "space") === (link.scope ?? "space")
           );
         };
-        if (!touches(bindingLink) && !touches(selectionSourceLink)) {
+        if (
+          !touches(bindingLink) &&
+          !selectionSourceLinks.some((link) => touches(link))
+        ) {
           return { done: false };
         }
         if (!fastSelectionQueued) {
@@ -201,7 +210,10 @@ export function createListPatternFactorySupervisor(
                 runtime.readTx(),
                 bindingLink,
               );
-              selectionSourceLink = current.sourceLink;
+              selectionSourceLinks = [
+                ...current.dereferenceSources,
+                current.sourceLink,
+              ];
               if (
                 activeSelection !== undefined &&
                 !sameSelection(current, activeSelection)
@@ -233,7 +245,10 @@ export function createListPatternFactorySupervisor(
     materialize(tx, opBindingCell, builtinName) {
       bindingLink = opBindingCell.getAsNormalizedFullLink();
       const current = readSelection(runtime, tx, bindingLink);
-      selectionSourceLink = current.sourceLink;
+      selectionSourceLinks = [
+        ...current.dereferenceSources,
+        current.sourceLink,
+      ];
       installFastSubscription();
 
       if (

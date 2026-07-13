@@ -295,6 +295,100 @@ describe("dynamic Factory@1 supervisor", () => {
     expect(executions).toContainEqual({ factory: "B", value: 3 });
   });
 
+  it("cancels stale async work when an intermediate selector redirect retargets", async () => {
+    const staleAEntered = Promise.withResolvers<void>();
+    const releaseStaleA = Promise.withResolvers<void>();
+    const executions: Execution[] = [];
+    const factoryA = commonfabric.lift(
+      (async ({ value }: { value: number }) => {
+        executions.push({ factory: "A", value });
+        staleAEntered.resolve();
+        await releaseStaleA.promise;
+        return { result: value * 10 };
+      }) as unknown as (input: { value: number }) => { result: number },
+      ARGUMENT_SCHEMA,
+      RESULT_SCHEMA,
+    );
+    const factoryB = commonfabric.lift(
+      ({ value }: { value: number }) => {
+        executions.push({ factory: "B", value });
+        return { result: value * 100 };
+      },
+      ARGUMENT_SCHEMA,
+      RESULT_SCHEMA,
+    );
+    setDurableArtifactEntryRef(factoryA, REFS.a);
+    setDurableArtifactEntryRef(factoryB, REFS.b);
+    warmArtifacts.set(refKey(REFS.a.identity, REFS.a.symbol), factoryA);
+    warmArtifacts.set(refKey(REFS.b.identity, REFS.b.symbol), factoryB);
+
+    const selectorA = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-redirect-selector-a",
+      undefined,
+      tx,
+    );
+    const selectorB = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-redirect-selector-b",
+      undefined,
+      tx,
+    );
+    const intermediate = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-redirect-intermediate",
+      undefined,
+      tx,
+    );
+    const alias = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-redirect-alias",
+      undefined,
+      tx,
+    );
+    selectorA.set(createFactoryShell(sealFactoryState(factoryA)));
+    selectorB.set(createFactoryShell(sealFactoryState(factoryB)));
+    intermediate.setRaw(selectorA.getAsWriteRedirectLink());
+    alias.setRaw(intermediate.getAsWriteRedirectLink());
+
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "dynamic-factory-redirect-result",
+      RESULT_SCHEMA,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outerPattern(),
+      { factory: alias, value: 2 },
+      resultCell,
+    );
+    await commitAndRenew();
+    await within(staleAEntered.promise, "redirected stale A execution");
+
+    const observed: number[] = [];
+    const cancelObservation = result.sink((current) => {
+      if (typeof current?.result === "number") observed.push(current.result);
+    });
+    try {
+      intermediate.withTx(tx).setRaw(
+        selectorB.withTx(tx).getAsWriteRedirectLink(),
+      );
+      await commitAndRenew();
+      releaseStaleA.resolve();
+      await within(runtime.idle(), "redirected B replacement");
+
+      expect(await within(result.pull(), "redirected B result")).toEqual({
+        result: 200,
+      });
+      expect(observed).not.toContain(20);
+      expect(executions).toContainEqual({ factory: "B", value: 2 });
+    } finally {
+      cancelObservation();
+      releaseStaleA.resolve();
+    }
+  });
+
   it("never executes cold A when its load completes after warm B is selected", async () => {
     const executions: Execution[] = [];
     const { factoryA, factoryB } = makeFactories(executions);

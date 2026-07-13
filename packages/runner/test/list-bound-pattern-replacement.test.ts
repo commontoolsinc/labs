@@ -362,6 +362,42 @@ describe("bound list pattern replacement", () => {
       undefined,
       tx,
     );
+    const mapReplacementSelector = runtime.getCell<unknown>(
+      space,
+      "list-map-replacement-selector",
+      undefined,
+      tx,
+    );
+    const filterReplacementSelector = runtime.getCell<unknown>(
+      space,
+      "list-filter-replacement-selector",
+      undefined,
+      tx,
+    );
+    const mapIntermediate = runtime.getCell<unknown>(
+      space,
+      "list-map-selector-intermediate",
+      undefined,
+      tx,
+    );
+    const filterIntermediate = runtime.getCell<unknown>(
+      space,
+      "list-filter-selector-intermediate",
+      undefined,
+      tx,
+    );
+    const mapAlias = runtime.getCell<unknown>(
+      space,
+      "list-map-selector-alias",
+      undefined,
+      tx,
+    );
+    const filterAlias = runtime.getCell<unknown>(
+      space,
+      "list-filter-selector-alias",
+      undefined,
+      tx,
+    );
     sourceA.set(1);
     sourceB.set(5);
     element.set(2);
@@ -381,6 +417,20 @@ describe("bound list pattern replacement", () => {
       adjustment: 0,
       source: sourceALink,
     }));
+    mapReplacementSelector.set(bound(mapB, {
+      tag: "B2",
+      adjustment: 100,
+      source: sourceBLink,
+    }));
+    filterReplacementSelector.set(bound(filterB, {
+      tag: "B2",
+      adjustment: 10,
+      source: sourceBLink,
+    }));
+    mapIntermediate.setRaw(mapSelector.getAsWriteRedirectLink());
+    filterIntermediate.setRaw(filterSelector.getAsWriteRedirectLink());
+    mapAlias.setRaw(mapIntermediate.getAsWriteRedirectLink());
+    filterAlias.setRaw(filterIntermediate.getAsWriteRedirectLink());
 
     const mapNode = createNodeFactory({ type: "ref", implementation: "map" });
     const filterNode = createNodeFactory({
@@ -409,7 +459,7 @@ describe("bound list pattern replacement", () => {
     const result = runtime.run(
       tx,
       outer,
-      { values: [element], mapOp: mapSelector, filterOp: filterSelector },
+      { values: [element], mapOp: mapAlias, filterOp: filterAlias },
       resultCell,
     );
     await commitAndRenew();
@@ -448,16 +498,12 @@ describe("bound list pattern replacement", () => {
     await commitAndRenew();
     await within(staleAEntered.promise, "stale A1 map execution");
 
-    mapSelector.withTx(tx).set(bound(mapB, {
-      tag: "B2",
-      adjustment: 100,
-      source: sourceBLink,
-    }));
-    filterSelector.withTx(tx).set(bound(filterB, {
-      tag: "B2",
-      adjustment: 10,
-      source: sourceBLink,
-    }));
+    mapIntermediate.withTx(tx).setRaw(
+      mapReplacementSelector.withTx(tx).getAsWriteRedirectLink(),
+    );
+    filterIntermediate.withTx(tx).setRaw(
+      filterReplacementSelector.withTx(tx).getAsWriteRedirectLink(),
+    );
     await commitAndRenew();
     releaseStaleA.resolve();
     await within(runtime.idle(), "B2 replacement after stale A1 completion");
@@ -488,12 +534,12 @@ describe("bound list pattern replacement", () => {
       map: mapBRuns.length,
       filter: filterBRuns.length,
     };
-    mapSelector.withTx(tx).set(bound(mapB, {
+    mapReplacementSelector.withTx(tx).set(bound(mapB, {
       tag: "B2",
       adjustment: 100,
       source: sourceBLink,
     }));
-    filterSelector.withTx(tx).set(bound(filterB, {
+    filterReplacementSelector.withTx(tx).set(bound(filterB, {
       tag: "B2",
       adjustment: 10,
       source: sourceBLink,
@@ -515,12 +561,12 @@ describe("bound list pattern replacement", () => {
     expect(await within(result.key("mapped").pull(), "B2 map after source A"))
       .toEqual([107]);
 
-    mapSelector.withTx(tx).set(bound(mapA, {
+    mapReplacementSelector.withTx(tx).set(bound(mapA, {
       tag: "A3",
       adjustment: 1_000,
       source: sourceALink,
     }));
-    filterSelector.withTx(tx).set(bound(filterA, {
+    filterReplacementSelector.withTx(tx).set(bound(filterA, {
       tag: "A3",
       adjustment: 1,
       source: sourceALink,
@@ -575,12 +621,12 @@ describe("bound list pattern replacement", () => {
     expect(await within(result.key("flattened").pull(), "removed flatMap row"))
       .toEqual([]);
 
-    mapSelector.withTx(tx).set(bound(mapB, {
+    mapReplacementSelector.withTx(tx).set(bound(mapB, {
       tag: "B4",
       adjustment: 200,
       source: sourceBLink,
     }));
-    filterSelector.withTx(tx).set(bound(filterB, {
+    filterReplacementSelector.withTx(tx).set(bound(filterB, {
       tag: "B4",
       adjustment: 6,
       source: sourceBLink,

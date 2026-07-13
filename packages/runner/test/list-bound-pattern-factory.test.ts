@@ -11,6 +11,8 @@ import {
 import { createNodeFactory } from "../src/builder/module.ts";
 import { setDurableArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 import { withPatternParamsSchema } from "../src/builder/pattern.ts";
+import { createListPatternFactorySupervisor } from "../src/builtins/list-factory-materialization.ts";
+import { useCancelGroup } from "../src/cancel.ts";
 import type {
   BuilderFunctionsAndConstants,
   JSONSchema,
@@ -399,6 +401,62 @@ describe("bound PatternFactory list operations", () => {
 
     expect(await within(result.key("mapped").pull(), "replacement bytes map"))
       .toEqual([10]);
+  });
+
+  it("fast-preempts when an intermediate factory redirect retargets", async () => {
+    const selectedA = boundMapOp(10);
+    const selectedB = boundMapOp(20);
+    const sourceA = runtime.getCell<unknown>(
+      space,
+      "bound list fast source A",
+      undefined,
+      tx,
+    );
+    const sourceB = runtime.getCell<unknown>(
+      space,
+      "bound list fast source B",
+      undefined,
+      tx,
+    );
+    const intermediate = runtime.getCell<unknown>(
+      space,
+      "bound list fast intermediate",
+      undefined,
+      tx,
+    );
+    const alias = runtime.getCell<unknown>(
+      space,
+      "bound list fast alias",
+      undefined,
+      tx,
+    );
+    sourceA.set(createFactoryShell(sealFactoryState(selectedA)));
+    sourceB.set(createFactoryShell(sealFactoryState(selectedB)));
+    intermediate.setRaw(sourceA.getAsWriteRedirectLink());
+    alias.setRaw(intermediate.getAsWriteRedirectLink());
+
+    let preemptions = 0;
+    const [cancelAll, addCancel] = useCancelGroup();
+    const supervisor = createListPatternFactorySupervisor(
+      runtime,
+      addCancel,
+      () => preemptions++,
+    );
+    try {
+      supervisor.materialize(tx, alias, "map");
+      await commitAndRenew();
+
+      intermediate.withTx(tx).setRaw(
+        sourceB.withTx(tx).getAsWriteRedirectLink(),
+      );
+      await commitAndRenew();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(preemptions).toBe(1);
+    } finally {
+      cancelAll();
+    }
   });
 
   it("rebinds a mapped element when an intermediate redirect retargets", async () => {
