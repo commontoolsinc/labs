@@ -544,6 +544,11 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       action,
       rejection.diagnosticCode,
     );
+    // The exact claim is gone synchronously. Re-running this same rejected
+    // input through the generic scheduler retry path would immediately acquire
+    // a new incarnation and bypass that revocation; wait for a fresh durable
+    // invalidation instead.
+    return "suppress-retry";
   });
   // Executor shadows independently run durable clean computations at startup
   // and rerun remote invalidations to discover candidate authority.

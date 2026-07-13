@@ -219,9 +219,20 @@ const hasExecutionClaimAssertion = (commit: ClientCommit): boolean => {
 
 class RejectNextClaimedCommitServer extends Server {
   #rejectNextClaimedCommit = false;
+  #delayNextUnclaimedCommitResponse = false;
+  #releaseDelayedUnclaimedCommitResponse = Promise.withResolvers<void>();
 
   rejectNextClaimedCommit(): void {
     this.#rejectNextClaimedCommit = true;
+  }
+
+  delayNextUnclaimedCommitResponse(): void {
+    this.#delayNextUnclaimedCommitResponse = true;
+    this.#releaseDelayedUnclaimedCommitResponse = Promise.withResolvers<void>();
+  }
+
+  releaseDelayedUnclaimedCommitResponse(): void {
+    this.#releaseDelayedUnclaimedCommitResponse.resolve();
   }
 
   override transact(
@@ -241,7 +252,18 @@ class RejectNextClaimedCommitServer extends Server {
         },
       });
     }
-    return super.transact(message);
+    const response = super.transact(message);
+    if (
+      this.#delayNextUnclaimedCommitResponse &&
+      !hasExecutionClaimAssertion(message.commit)
+    ) {
+      this.#delayNextUnclaimedCommitResponse = false;
+      return response.then(async (value) => {
+        await this.#releaseDelayedUnclaimedCommitResponse.promise;
+        return value;
+      });
+    }
+    return response;
   }
 }
 
@@ -1217,8 +1239,27 @@ Deno.test("a later claimed rerun rejection revokes its exact live Worker claim",
     const revoked = Promise.withResolvers<void>();
     const rejectedDiagnostic = Promise.withResolvers<string>();
     const settlements: ActionSettlement[] = [];
-    let firstSourceSeq = Number.POSITIVE_INFINITY;
+    const expectedFirstAttempt: {
+      claim?: ExecutionClaim;
+      sourceSeq: number;
+    } = { sourceSeq: Number.POSITIVE_INFINITY };
     let liveClaim: ExecutionClaim | undefined;
+    const resolveFirstCommittedSettlement = (
+      settlement: ActionSettlement,
+    ): void => {
+      if (
+        expectedFirstAttempt.claim !== undefined &&
+        settlement.outcome === "committed" &&
+        settlement.claim.actionId === expectedFirstAttempt.claim.actionId &&
+        settlement.claim.leaseGeneration ===
+          expectedFirstAttempt.claim.leaseGeneration &&
+        settlement.claim.claimGeneration ===
+          expectedFirstAttempt.claim.claimGeneration &&
+        settlement.inputBasisSeq >= expectedFirstAttempt.sourceSeq
+      ) {
+        firstSettled.resolve(settlement);
+      }
+    };
     unsubscribeControl = observer.subscribeExecutionControl((event) => {
       events.push(event.type);
       if (event.type === "session.execution.claim.set") {
@@ -1226,9 +1267,10 @@ Deno.test("a later claimed rerun rejection revokes its exact live Worker claim",
         claimed.resolve(event.claim);
       } else if (event.type === "session.execution.settlement") {
         settlements.push(event.settlement);
-        if (event.settlement.inputBasisSeq >= firstSourceSeq) {
-          firstSettled.resolve(event.settlement);
+        if (event.settlement.outcome === "committed") {
+          server.releaseDelayedUnclaimedCommitResponse();
         }
+        resolveFirstCommittedSettlement(event.settlement);
       } else if (
         event.type === "session.execution.claim.revoke" &&
         liveClaim !== undefined &&
@@ -1268,7 +1310,11 @@ Deno.test("a later claimed rerun rejection revokes its exact live Worker claim",
       },
     });
 
-    const firstSource = await observer.transact({
+    // Force the accepted commit notification to win the source transaction
+    // response. A later coalesced no-op may share this input basis, so the
+    // assertion must recover the already buffered committed settlement.
+    server.delayNextUnclaimedCommitResponse();
+    const firstSourcePromise = observer.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
       operations: [{
@@ -1277,8 +1323,17 @@ Deno.test("a later claimed rerun rejection revokes its exact live Worker claim",
         value: { value: 7 },
       }],
     });
-    firstSourceSeq = firstSource.seq;
     const exactClaim = await awaitBarrier(claimed.promise, "claim", events);
+    expectedFirstAttempt.claim = exactClaim;
+    const firstSource = await awaitBarrier(
+      firstSourcePromise,
+      "first source response after committed settlement",
+      events,
+    );
+    expectedFirstAttempt.sourceSeq = firstSource.seq;
+    for (const settlement of settlements) {
+      resolveFirstCommittedSettlement(settlement);
+    }
     const accepted = await awaitBarrier(
       firstSettled.promise,
       "first settlement",
@@ -1319,6 +1374,7 @@ Deno.test("a later claimed rerun rejection revokes its exact live Worker claim",
     );
     assertEquals(events.some((event) => event.startsWith("crash:")), false);
   } finally {
+    server.releaseDelayedUnclaimedCommitResponse();
     unsubscribeControl();
     await executor?.stop().catch(() => undefined);
     await seedRuntime.dispose().catch(() => undefined);

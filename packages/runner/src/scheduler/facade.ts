@@ -75,6 +75,7 @@ import {
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
 import {
+  type ActionCommitRejectionDirective,
   type ActionCommitRejectionDisposition,
   runSchedulerAction,
   type SchedulerActionRunState,
@@ -571,7 +572,7 @@ export class Scheduler {
     action: Action,
     error: unknown,
     disposition: ActionCommitRejectionDisposition,
-  ) => void;
+  ) => ActionCommitRejectionDirective;
   private actionObservationAdoptionGuard?: (action: Action) => boolean;
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
@@ -645,7 +646,7 @@ export class Scheduler {
         action: Action,
         error: unknown,
         disposition: ActionCommitRejectionDisposition,
-      ) => void)
+      ) => ActionCommitRejectionDirective)
       | undefined,
   ): void {
     this.actionCommitRejectionHandler = handler;

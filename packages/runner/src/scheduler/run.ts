@@ -119,7 +119,7 @@ export function watchReactiveActionCommit(state: {
   readonly onCommitRejected?: (
     error: unknown,
     disposition: ActionCommitRejectionDisposition,
-  ) => void;
+  ) => ActionCommitRejectionDirective;
 }): void {
   state.commitPromise.then(async ({ error }) => {
     if (!error) {
@@ -135,15 +135,17 @@ export function watchReactiveActionCommit(state: {
     );
     const reportRejection = (
       disposition: ActionCommitRejectionDisposition,
-    ): void => {
+    ): boolean => {
       try {
-        state.onCommitRejected?.(error, disposition);
+        return state.onCommitRejected?.(error, disposition) ===
+          "suppress-retry";
       } catch (callbackError) {
         logger.warn(
           "action-commit-rejection-callback",
           "Action commit rejection callback failed",
           callbackError,
         );
+        return false;
       }
     };
 
@@ -166,7 +168,10 @@ export function watchReactiveActionCommit(state: {
     // coalesce). Restore the consumed trigger reads (§8.9.2) so the re-run's
     // transaction still carries their flow labels.
     if (isConflictRejection(error)) {
-      reportRejection("retrying");
+      if (reportRejection("retrying")) {
+        state.retries.delete(state.action);
+        return;
+      }
       // Re-arm immediately (restore the consumed trigger reads §8.9.2, then
       // resubscribe) so the subscription stays fresh and a concurrent
       // reader-dirty can re-trigger the action while we wait for the catch-up.
@@ -226,7 +231,10 @@ export function watchReactiveActionCommit(state: {
     const retries = (state.retries.get(state.action) ?? 0) + 1;
     state.retries.set(state.action, retries);
     if (retries < MAX_RETRIES_FOR_REACTIVE) {
-      reportRejection("retrying");
+      if (reportRejection("retrying")) {
+        state.retries.delete(state.action);
+        return;
+      }
       // Resubscribe sets up dependencies/triggers from the log so the action
       // re-runs when its inputs change. The run still exists only because of the
       // consumed trigger reads (§8.9.2), so restore them for its tx.
@@ -250,6 +258,11 @@ export function watchReactiveActionCommit(state: {
 }
 
 export type ActionCommitRejectionDisposition = "retrying" | "abandoned";
+
+/** Host-only control can end the generic scheduler retry sequence after it
+ * synchronously revokes attempt-specific authority. Ordinary runtimes install
+ * no handler and retain the existing bounded retry behavior. */
+export type ActionCommitRejectionDirective = "suppress-retry" | undefined;
 
 export function appendActionRunTrace(state: {
   readonly actionRunTrace: ActionRunTraceEntry[];
@@ -335,7 +348,7 @@ export interface SchedulerActionRunState {
     action: Action,
     error: unknown,
     disposition: ActionCommitRejectionDisposition,
-  ) => void;
+  ) => ActionCommitRejectionDirective;
 }
 
 export async function runSchedulerAction(

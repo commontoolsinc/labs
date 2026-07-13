@@ -18,7 +18,10 @@ import type {
   ReactivityLog,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
-import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
+import {
+  type ActionCommitRejectionDirective,
+  watchReactiveActionCommit,
+} from "../src/scheduler/run.ts";
 
 describe("reactive retries", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -120,6 +123,7 @@ describe("reactive retries", () => {
   const runWatcher = async (
     errorName: string | undefined,
     initialRetries: number,
+    rejectionDirective?: ActionCommitRejectionDirective,
   ) => {
     const action = (() => {}) as unknown as Action;
     const retries = new WeakMap<Action, number>();
@@ -150,6 +154,7 @@ describe("reactive retries", () => {
       restoreInvalidCauses: () => {},
       onCommitRejected: (_error, disposition) => {
         rejectionDispositions.push(disposition);
+        return rejectionDirective;
       },
     });
     await commitPromise;
@@ -201,6 +206,21 @@ describe("reactive retries", () => {
       const r = await runWatcher("TransactionError", 0);
       expect(r.queued).toBe(1);
       expect(r.retries.get(r.action)).toBe(1);
+      expect(r.rejectionDispositions).toEqual(["retrying"]);
+    },
+  );
+
+  it(
+    "lets executor control suppress a generic retry after revoking authority",
+    async () => {
+      const r = await runWatcher(
+        "AuthorizationError",
+        3,
+        "suppress-retry",
+      );
+      expect(r.queued).toBe(0);
+      expect(r.resubscribed).toBe(0);
+      expect(r.retries.has(r.action)).toBe(false);
       expect(r.rejectionDispositions).toEqual(["retrying"]);
     },
   );
