@@ -784,23 +784,15 @@ const remoteStorageManager = StorageManager.open({
   memoryHost: new URL("https://example.com/"),
   as: signer,
 });
+
+// Tests only (requires importing `storage/cache.deno` instead):
+// const testStorageManager = StorageManager.emulate({ as: signer });
 ```
 
 `@commonfabric/runner/storage/cache` provides the production implementation of
 the `IStorageManager` interface:
 
 - `StorageManager.open({ memoryHost, as })` — remote memory-v2 server
-
-For Deno tests and local, self-contained examples, the `.deno` entrypoint also
-provides an in-process emulator:
-
-```ts
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { Identity } from "@commonfabric/identity";
-
-const signer = await Identity.fromPassphrase("test-passphrase");
-const storageManager = StorageManager.emulate({ as: signer });
-```
 
 ## TypeScript Support
 
