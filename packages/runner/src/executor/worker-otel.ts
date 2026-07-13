@@ -23,6 +23,10 @@ type ExecutorOtelOptions = {
   warn?: (...args: unknown[]) => void;
 };
 
+type DisposableExecutorRuntime = {
+  dispose(): Promise<void>;
+};
+
 const enabled = (value: string | undefined): boolean =>
   value === "true" || value === "1";
 
@@ -121,4 +125,28 @@ export async function maybeAttachExecutorOtelBridge(
     report(warn, "Executor runtime OTel bridge attach failed:", error);
     return undefined;
   }
+}
+
+/**
+ * Preserve executor teardown ordering while containing observability cleanup.
+ * The caller receives the Runtime error only after the bridge has detached so
+ * it can finish clearing the rest of the Worker-owned resources before
+ * surfacing the original failure.
+ */
+export async function disposeExecutorRuntimeAndTelemetry(
+  runtime: DisposableExecutorRuntime,
+  detach: (() => void) | undefined,
+  options: Pick<ExecutorOtelOptions, "warn"> = {},
+): Promise<unknown | undefined> {
+  const warn = options.warn ?? ((...args: unknown[]) => console.warn(...args));
+  let runtimeError: unknown;
+  try {
+    await runtime.dispose();
+  } catch (error) {
+    runtimeError = error;
+  }
+  if (detach !== undefined) {
+    safeDetach(detach, warn)();
+  }
+  return runtimeError;
 }

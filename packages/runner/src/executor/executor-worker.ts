@@ -45,7 +45,10 @@ import {
   schedulerIdentityKeyForAction,
   schedulerIdentityKeyForStaleReader,
 } from "./scheduler-wake-identity.ts";
-import { maybeAttachExecutorOtelBridge } from "./worker-otel.ts";
+import {
+  disposeExecutorRuntimeAndTelemetry,
+  maybeAttachExecutorOtelBridge,
+} from "./worker-otel.ts";
 
 type WorkerRequest = {
   type:
@@ -632,15 +635,17 @@ const stop = async (): Promise<void> => {
   await settle();
   for (const cancel of demandSinks.values()) cancel();
   demandSinks.clear();
+  let shutdownError: unknown;
   if (runtime !== null) {
-    try {
-      await runtime.dispose();
-    } finally {
-      detachOtelBridge?.();
-      detachOtelBridge = undefined;
-    }
+    const detach = detachOtelBridge;
+    detachOtelBridge = undefined;
+    shutdownError = await disposeExecutorRuntimeAndTelemetry(runtime, detach);
   } else if (storage !== null) {
-    await storage.close();
+    try {
+      await storage.close();
+    } catch (error) {
+      shutdownError = error;
+    }
   }
   builtinBroker?.dispose();
   builtinBroker = null;
@@ -660,6 +665,7 @@ const stop = async (): Promise<void> => {
     object,
     { claim: ExecutionClaim; diagnosticCode: string }
   >();
+  if (shutdownError !== undefined) throw shutdownError;
 };
 
 const handle = async (request: WorkerRequest): Promise<void> => {
