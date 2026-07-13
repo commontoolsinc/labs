@@ -244,19 +244,10 @@ async function waitForExactClientClaim(
     }
   }
 
-  // The session enqueues the same control sync to the replica before emitting
-  // claim.set. Wait until that queued sync is actually applied, then pin the
-  // exact incarnation through the public routing diagnostics.
-  for (let attempt = 0; attempt < 1_000; attempt++) {
-    const diagnostics = storage.getExecutionRoutingDiagnostics({
-      space,
-      branch: claim.branch,
-      pieceId: claim.pieceId,
-      actionId: claim.actionId,
-    });
-    if (diagnostics.claims.some(isExact)) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
+  // SpaceSession enqueues the control sync to its WatchView before publishing
+  // claim.set. Promise continuations therefore resume after the already-
+  // queued replica consumer; pin that ordering through the public diagnostics
+  // instead of introducing a timing sleep or polling loop.
   const diagnostics = storage.getExecutionRoutingDiagnostics({
     space,
     branch: claim.branch,
@@ -629,14 +620,36 @@ Deno.test("persistent host restart rehydrates one fenced replacement without dup
     await clientRuntimeA.settled();
 
     const claimA = Promise.withResolvers<ExecutionClaim>();
-    const settlementA = Promise.withResolvers<ActionSettlement>();
+    const settlementsA: ActionSettlement[] = [];
+    const settlementWaitersA: Array<PromiseWithResolvers<ActionSettlement>> =
+      [];
     unsubscribeControlA = observerA.subscribeExecutionControl((event) => {
       if (event.type === "session.execution.claim.set") {
         claimA.resolve(event.claim);
       } else if (event.type === "session.execution.settlement") {
-        settlementA.resolve(event.settlement);
+        settlementsA.push(event.settlement);
+        for (const waiter of settlementWaitersA) {
+          waiter.resolve(event.settlement);
+        }
       }
     });
+    const waitForCommittedSettlementA = (
+      inputBasisSeq: number,
+    ): Promise<ActionSettlement> => {
+      const existing = settlementsA.find((settlement) =>
+        settlement.outcome === "committed" &&
+        settlement.inputBasisSeq >= inputBasisSeq
+      );
+      if (existing !== undefined) return Promise.resolve(existing);
+      const waiter = Promise.withResolvers<ActionSettlement>();
+      settlementWaitersA.push(waiter);
+      return waiter.promise.then((settlement) =>
+        settlement.outcome === "committed" &&
+          settlement.inputBasisSeq >= inputBasisSeq
+          ? settlement
+          : waitForCommittedSettlementA(inputBasisSeq)
+      );
+    };
     const outputA = Promise.withResolvers<void>();
     let outputRevisionsA = 0;
     unsubscribeAcceptedA = hostA.subscribeAcceptedCommits(space, (event) => {
@@ -682,7 +695,7 @@ Deno.test("persistent host restart rehydrates one fenced replacement without dup
     const firstClaim = await within(claimA.promise, "host A execution claim");
     await within(outputA.promise, "host A claimed output");
     const firstSettlement = await within(
-      settlementA.promise,
+      waitForCommittedSettlementA(sourceA.seq),
       "host A claimed settlement",
     );
     assertEquals(firstSettlement.outcome, "committed");
