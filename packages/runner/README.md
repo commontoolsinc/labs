@@ -28,7 +28,7 @@ All services are now accessed through a `Runtime` instance:
 
 ```typescript
 import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 
 // Create a runtime instance with configuration
 const runtime = new Runtime({
@@ -178,12 +178,15 @@ Cells are now created through the Runtime instance rather than global functions:
 
 ```typescript
 import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { Identity } from "@commonfabric/identity";
 
-// Set up storage manager
+// Connect to the remote memory-v2 server
 const signer = await Identity.fromPassphrase("example-passphrase");
-const storageManager = StorageManager.emulate({ as: signer });
+const storageManager = StorageManager.open({
+  memoryHost: new URL("https://example.com/"),
+  as: signer,
+});
 
 // Create a runtime instance first
 const runtime = new Runtime({
@@ -280,13 +283,16 @@ inference.
 
 ```typescript
 import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import type { JSONSchema } from "@commonfabric/runner";
 import { Identity } from "@commonfabric/identity";
 
-// Set up storage manager
+// Connect to the remote memory-v2 server
 const signer = await Identity.fromPassphrase("example-passphrase");
-const storageManager = StorageManager.emulate({ as: signer });
+const storageManager = StorageManager.open({
+  memoryHost: new URL("https://example.com/"),
+  as: signer,
+});
 
 // Create runtime instance
 const runtime = new Runtime({
@@ -377,12 +383,15 @@ dependencies and updates results automatically.
 
 ```typescript
 import { createBuilder, Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { Identity } from "@commonfabric/identity";
 
-// Set up storage manager
+// Connect to the remote memory-v2 server
 const signer = await Identity.fromPassphrase("example-passphrase");
-const storageManager = StorageManager.emulate({ as: signer });
+const storageManager = StorageManager.open({
+  memoryHost: new URL("https://example.com/"),
+  as: signer,
+});
 
 // Create runtime instance
 const runtime = new Runtime({
@@ -505,13 +514,16 @@ You can map and transform data using cells with schemas:
 
 ```typescript
 import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import type { JSONSchema } from "@commonfabric/runner";
 import { Identity } from "@commonfabric/identity";
 
-// Set up storage manager
+// Connect to the remote memory-v2 server
 const signer = await Identity.fromPassphrase("example-passphrase");
-const storageManager = StorageManager.emulate({ as: signer });
+const storageManager = StorageManager.open({
+  memoryHost: new URL("https://example.com/"),
+  as: signer,
+});
 
 // Create runtime instance
 const runtime = new Runtime({
@@ -603,12 +615,15 @@ Cells can react to changes in deeply nested structures:
 
 ```typescript
 import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { Identity } from "@commonfabric/identity";
 
-// Set up storage manager
+// Connect to the remote memory-v2 server
 const signer = await Identity.fromPassphrase("example-passphrase");
-const storageManager = StorageManager.emulate({ as: signer });
+const storageManager = StorageManager.open({
+  memoryHost: new URL("https://example.com/"),
+  as: signer,
+});
 
 // Create runtime instance
 const runtime = new Runtime({
@@ -699,11 +714,14 @@ await idle();
 
 // NEW (current):
 import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("my-passphrase");
-const storageManager = StorageManager.emulate({ as: signer });
+const storageManager = StorageManager.open({
+  memoryHost: new URL("https://example.com/"),
+  as: signer,
+});
 
 const runtime = new Runtime({
   apiUrl: new URL("https://examplehost.com"),
@@ -756,13 +774,10 @@ The storage manager opens storage providers for different memory spaces. The
 StorageManager provides convenient factory methods:
 
 ```ts
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("my-passphrase");
-
-// For development and testing - emulated storage
-const emulatedStorageManager = StorageManager.emulate({ as: signer });
 
 // For production - remote storage
 const remoteStorageManager = StorageManager.open({
@@ -771,12 +786,21 @@ const remoteStorageManager = StorageManager.open({
 });
 ```
 
-`@commonfabric/runner/storage/cache` (and its `.deno` variant) provides the
-default implementation of the `IStorageManager` interface:
+`@commonfabric/runner/storage/cache` provides the production implementation of
+the `IStorageManager` interface:
 
-- `StorageManager.emulate({ as })` — in-process memory-v2 server (tests, local
-  tooling)
 - `StorageManager.open({ memoryHost, as })` — remote memory-v2 server
+
+For Deno tests and local, self-contained examples, the `.deno` entrypoint also
+provides an in-process emulator:
+
+```ts
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { Identity } from "@commonfabric/identity";
+
+const signer = await Identity.fromPassphrase("test-passphrase");
+const storageManager = StorageManager.emulate({ as: signer });
+```
 
 ## TypeScript Support
 
