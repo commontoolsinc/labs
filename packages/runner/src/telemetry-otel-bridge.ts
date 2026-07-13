@@ -34,9 +34,9 @@ export interface OtelBridgeOptions {
   meter: Meter;
   /**
    * Attributes stamped on every emitted span and metric — the dimensions the
-   * markers themselves don't carry. Set here once at attach time from the host's
-   * session/identity, e.g.:
-   *   { "user.did": principal, "space.did": space, "ct.runtime": "bg-piece" }
+   * markers themselves don't carry. Keep these bounded, for example:
+   *   { "ct.runtime": "bg-piece" }
+   * Put high-cardinality session/identity context in `spanAttributes` instead.
    */
   attributes?: Attributes;
   /**
