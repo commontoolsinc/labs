@@ -22,8 +22,11 @@ import {
   partitionGuardCapturesByCallbackInput,
   renameAvailabilityCapturePaths,
 } from "../src/availability/captures.ts";
+import { AvailabilityAnalysisTransformer } from "../src/availability/transformer.ts";
 import { getStableConstAliasInitializer } from "../src/ast/stable-const-alias.ts";
+import { getLiftAppliedInputAndCallback } from "../src/ast/call-kind.ts";
 import { TransformationContext } from "../src/core/context.ts";
+import { CrossStageState } from "../src/core/cross-stage-state.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 
 interface TestContext {
@@ -71,6 +74,7 @@ function withContext(source: string, run: (test: TestContext) => void): void {
   };
   const program = ts.createProgram(["/test.ts"], options, host);
   const sourceFile = program.getSourceFile("/test.ts")!;
+  const state = new CrossStageState();
   let transformation!: ts.TransformationContext;
   const transformed = ts.transform(sourceFile, [
     (context) => {
@@ -84,6 +88,7 @@ function withContext(source: string, run: (test: TestContext) => void): void {
         program,
         sourceFile,
         tsContext: transformation,
+        options: { state },
       }),
       sourceFile,
       transformation,
@@ -487,6 +492,13 @@ Deno.test("availability capture utilities cover composite and callback paths", (
         "literal-name": observed,
         [input.request.reason]: observed,
       };
+      const wrappedComposite = (((<{
+        first: AsyncResult<Repo>;
+      }> ({ first: observed })) as {
+        first: AsyncResult<Repo>;
+      })! satisfies { first: AsyncResult<Repo> });
+      const cyclicCompositeA = cyclicCompositeB;
+      const cyclicCompositeB = cyclicCompositeA;
       const list = [observed, , wrapped];
       const guards = () =>
         hasError(input["request"]) || isPending(input.request) || hasError(make());
@@ -516,6 +528,20 @@ Deno.test("availability capture utilities cover composite and callback paths", (
           context,
         ).map((entry) => entry.path),
         [["0"], ["2"]],
+      );
+      assertEquals(
+        collectObservedAvailabilityInputPaths(
+          initializer(sourceFile, "wrappedComposite"),
+          context,
+        ).map((entry) => entry.path),
+        [["first"]],
+      );
+      assertEquals(
+        collectObservedAvailabilityInputPaths(
+          initializer(sourceFile, "cyclicCompositeA"),
+          context,
+        ),
+        [],
       );
 
       const guards = initializer(sourceFile, "guards") as ts.ArrowFunction;
@@ -599,6 +625,183 @@ Deno.test("availability capture utilities cover composite and callback paths", (
       assert(merged[0]?.source);
     },
   );
+});
+
+Deno.test("explicit helper guards preserve stable caller paths", () => {
+  withContext(
+    `
+      import { AsyncResult, hasError } from "commonfabric";
+      type Repo = { name: string };
+      interface Joined {
+        repo: AsyncResult<Repo>;
+      }
+      interface RequestList {
+        [index: number]: AsyncResult<Repo>;
+      }
+      declare const joined: Joined;
+      declare const requests: RequestList;
+
+      function objectHelper({ repo }: Joined) {
+        return hasError(repo);
+      }
+      function indexedHelper(values: RequestList) {
+        return hasError(values[0]);
+      }
+      function closureHelper() {
+        return hasError(joined.repo);
+      }
+      function secondParameterHelper(
+        _label: string,
+        value: AsyncResult<Repo>,
+      ) {
+        return hasError(value);
+      }
+      function tupleHelper([, value]: [string, AsyncResult<Repo>]) {
+        return hasError(value);
+      }
+      declare const dynamicKey: "ignored";
+      function computedBindingHelper(
+        { [dynamicKey]: _ignored, repo }: Joined & { ignored: string },
+      ) {
+        return hasError(repo);
+      }
+      function mismatchedShapeHelper(
+        value: { nested: { repo: AsyncResult<Repo> } },
+      ) {
+        return hasError(value.nested.repo);
+      }
+      declare const untyped: any;
+
+      const objectGuard = () => objectHelper(joined);
+      const indexedGuard = () => indexedHelper(requests);
+      const closureGuard = () => closureHelper();
+      const secondParameterGuard = () => secondParameterHelper("repo", joined.repo);
+      const tupleGuard = () => tupleHelper(["repo", joined.repo]);
+      const computedBindingGuard = () => computedBindingHelper({
+        ignored: "repo",
+        repo: joined.repo,
+      });
+      const mismatchedShapeGuard = () => mismatchedShapeHelper(untyped);
+    `,
+    ({ context, sourceFile }) => {
+      const capturePaths = (name: string): readonly (readonly string[])[] => {
+        const callback = initializer(sourceFile, name) as ts.ArrowFunction;
+        return collectExplicitAvailabilityGuardCaptures(
+          callback.body,
+          context,
+        ).map((entry) => entry.path);
+      };
+
+      assertEquals(capturePaths("objectGuard"), [["joined", "repo"]]);
+      assertEquals(capturePaths("indexedGuard"), [["requests", "0"]]);
+      assertEquals(capturePaths("closureGuard"), [["joined", "repo"]]);
+      assertEquals(capturePaths("secondParameterGuard"), [["joined", "repo"]]);
+      assertEquals(capturePaths("tupleGuard"), []);
+      assertEquals(capturePaths("computedBindingGuard"), []);
+      assertEquals(capturePaths("mismatchedShapeGuard"), []);
+      assertEquals(
+        context.diagnostics.map((diagnostic) => diagnostic.type),
+        [
+          "availability:unobserved-compute-guard",
+          "availability:unobserved-compute-guard",
+          "availability:unobserved-compute-guard",
+        ],
+      );
+    },
+  );
+});
+
+Deno.test("availability analysis propagates observations through composite lift bindings", () => {
+  withContext(
+    `
+      import {
+        AsyncResult,
+        lift,
+        observeAvailability,
+      } from "commonfabric";
+      type Repo = { name: string };
+      declare const request: AsyncResult<Repo>;
+      const observed = observeAvailability(request, "error");
+      const shorthand = observed;
+      const composite = {
+        shorthand,
+        assigned: observed,
+        ignored: 1,
+        method() {},
+      };
+      const wrappedComposite = (((composite as typeof composite)!) satisfies
+        typeof composite);
+      const objectLift = lift(({
+        shorthand: fromShorthand,
+        "assigned": fromAssignment,
+        missing,
+        ...rest
+      }) => ({ fromShorthand, fromAssignment, missing, rest }))(wrappedComposite);
+
+      declare const declaredComposite: {
+        shorthand: AsyncResult<Repo>;
+      };
+      const declaredObjectLift = lift(({ shorthand: declared }) => declared)(
+        declaredComposite,
+      );
+
+      const tuple = [observed, "separator", observed] as const;
+      const arrayLift = lift(([first, , third]) => ({ first, third }))(tuple);
+      declare const declaredTuple: readonly [AsyncResult<Repo>];
+      const declaredArrayLift = lift(([declared]) => declared)(declaredTuple);
+    `,
+    ({ context, sourceFile }) => {
+      const objectLift = initializer(sourceFile, "objectLift");
+      assert(ts.isCallExpression(objectLift));
+      assert(getLiftAppliedInputAndCallback(objectLift, context.checker));
+      new AvailabilityAnalysisTransformer({ state: context.options.state })
+        .transform(context);
+
+      const reasonsFor = (
+        liftName: string,
+        name: string,
+      ): readonly string[] | undefined => {
+        const liftCall = initializer(sourceFile, liftName);
+        assert(ts.isCallExpression(liftCall));
+        const callback = getLiftAppliedInputAndCallback(
+          liftCall,
+          context.checker,
+        )?.callback;
+        assert(callback);
+        const symbol = context.checker.getSymbolAtLocation(
+          identifierIn(callback.parameters[0]!.name, name),
+        );
+        return symbol
+          ? context.lookupAvailabilityObservation(symbol)?.reasons
+          : undefined;
+      };
+
+      assertEquals(reasonsFor("objectLift", "fromShorthand"), ["error"]);
+      assertEquals(reasonsFor("objectLift", "fromAssignment"), ["error"]);
+      assertEquals(reasonsFor("arrayLift", "first"), ["error"]);
+      assertEquals(reasonsFor("arrayLift", "third"), ["error"]);
+      assertEquals(reasonsFor("objectLift", "missing"), undefined);
+      assertEquals(reasonsFor("declaredObjectLift", "declared"), undefined);
+    },
+  );
+});
+
+Deno.test("availability observation registry follows original nodes", () => {
+  const state = new CrossStageState();
+  const original = ts.factory.createIdentifier("request");
+  const replacement = ts.setOriginalNode(
+    ts.factory.createIdentifier("request"),
+    original,
+  );
+  const observation = {
+    source: original,
+    reasons: ["pending"],
+  } as const;
+
+  state.recordAvailabilityObservation(replacement, observation);
+
+  assertEquals(state.lookupAvailabilityObservation(original), observation);
+  assertEquals(state.lookupAvailabilityObservation(replacement), observation);
 });
 
 Deno.test("stable const aliases reconstruct destructured static access paths", () => {
