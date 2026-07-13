@@ -78,6 +78,7 @@ type CandidateAwareFactoryOptions = DenoSpaceExecutorFactoryOptions & {
 
 class FakeWorker extends EventTarget implements ExecutorWorkerLike {
   readonly messages: unknown[] = [];
+  readonly pendingClaimedRunIds: number[] = [];
   terminated = false;
   settledSeq = 41;
   acknowledgeClaimedRuns = true;
@@ -128,6 +129,22 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
     );
   }
 
+  acknowledgeLatestClaimedRun(): void {
+    const requestId = this.pendingClaimedRunIds.pop();
+    if (requestId === undefined) throw new Error("claimed run request missing");
+    this.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "complete", requestId },
+      }),
+    );
+  }
+
+  acknowledgePendingClaimedRuns(): void {
+    while (this.pendingClaimedRunIds.length > 0) {
+      this.acknowledgeLatestClaimedRun();
+    }
+  }
+
   writerDiscovery(discovery: WriterDiscovery): void {
     this.dispatchEvent(
       new MessageEvent("message", {
@@ -138,7 +155,11 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
 
   postMessage(message: unknown, _transfer?: Transferable[]): void {
     this.messages.push(message);
-    const request = message as { type?: string; requestId?: number };
+    const request = message as {
+      type?: string;
+      requestId?: number;
+      resetClaims?: boolean;
+    };
     if (request.type === "initialize") {
       this.dispatchEvent(
         new MessageEvent("message", {
@@ -156,10 +177,26 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
         }),
       );
     } else if (
+      request.type === "run-claimed-action" &&
+      !this.acknowledgeClaimedRuns
+    ) {
+      if (request.requestId === undefined) {
+        throw new Error("claimed run request missing");
+      }
+      this.pendingClaimedRunIds.push(request.requestId);
+    } else if (
       request.type === "set-demand" || request.type === "wake" ||
       request.type === "stop" ||
       (request.type === "run-claimed-action" && this.acknowledgeClaimedRuns)
     ) {
+      if (
+        request.type === "stop" ||
+        (request.type === "set-demand" && request.resetClaims === true)
+      ) {
+        // The real Worker cancels exact activation waiters before acknowledging
+        // stop or a claim-resetting demand change.
+        this.acknowledgePendingClaimedRuns();
+      }
       this.dispatchEvent(
         new MessageEvent("message", {
           data: { type: "complete", requestId: request.requestId },
@@ -455,6 +492,49 @@ Deno.test("live executor claims renew before their server-authored deadline", as
   }
 });
 
+Deno.test("claim renewal is not blocked by a still-running activation", async () => {
+  let nextTimer = 0;
+  const timers = new Map<
+    number,
+    { callback: () => void; delayMs: number }
+  >();
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    acknowledgeClaimedRuns: false,
+    startupTimeoutMs: 90_000,
+    claimTimers: {
+      now: () => 0,
+      setTimer(callback, delayMs) {
+        const timer = ++nextTimer;
+        timers.set(timer, { callback, delayMs });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        timers.delete(timer);
+      },
+    },
+  });
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+
+    const renewal = [...timers.values()].find((timer) =>
+      timer.delayMs === 40_000
+    );
+    if (renewal === undefined) throw new Error("renewal timer missing");
+    renewal.callback();
+    await flushClaimControl();
+
+    assertEquals(server.renewRequests, [CLAIM]);
+    assertEquals(server.revoked, []);
+    assertEquals(crashes, []);
+  } finally {
+    worker.acknowledgeLatestClaimedRun();
+    await flushClaimControl();
+    await executor.stop({ abrupt: true });
+  }
+});
+
 Deno.test("unacknowledged claim activation is revoked and crashes the Worker", async () => {
   let nextTimer = 0;
   const timers = new Map<
@@ -495,6 +575,78 @@ Deno.test("unacknowledged claim activation is revoked and crashes the Worker", a
     assertEquals(worker.terminated, true);
   } finally {
     await executor.stop();
+  }
+});
+
+Deno.test("abrupt stop cancels an unacknowledged claim activation", async () => {
+  const { worker, server, executor } = await startExecutor({
+    routing: true,
+    acknowledgeClaimedRuns: false,
+  });
+  worker.candidate(CLAIM_KEY);
+  await flushClaimControl();
+  let stopped = false;
+  const stopping = (async () => {
+    await executor.stop({ abrupt: true });
+    stopped = true;
+  })();
+  try {
+    await flushClaimControl();
+    assertEquals(stopped, true);
+    assertEquals(server.revoked, [CLAIM]);
+    assertEquals(worker.terminated, true);
+  } finally {
+    if (!stopped) {
+      worker.acknowledgeLatestClaimedRun();
+    }
+    await stopping;
+  }
+});
+
+Deno.test("graceful stop does not wait for claimed action settlement", async () => {
+  const { worker, server, executor } = await startExecutor({
+    routing: true,
+    acknowledgeClaimedRuns: false,
+  });
+  worker.candidate(CLAIM_KEY);
+  await flushClaimControl();
+  let stopped = false;
+  const stopping = (async () => {
+    await executor.stop();
+    stopped = true;
+  })();
+  try {
+    await flushClaimControl();
+    assertEquals(stopped, true);
+    assertEquals(server.revoked, [CLAIM]);
+    assertEquals(worker.terminated, true);
+  } finally {
+    if (!stopped) worker.acknowledgeLatestClaimedRun();
+    await stopping;
+  }
+});
+
+Deno.test("demand shrink does not wait for claimed action settlement", async () => {
+  const { worker, server, executor } = await startExecutor({
+    routing: true,
+    acknowledgeClaimedRuns: false,
+  });
+  worker.candidate(CLAIM_KEY);
+  await flushClaimControl();
+  let changed = false;
+  const changing = (async () => {
+    await executor.setDemand(["space:of:other-piece"]);
+    changed = true;
+  })();
+  try {
+    await flushClaimControl();
+    assertEquals(changed, true);
+    assertEquals(server.revoked, [CLAIM]);
+  } finally {
+    if (!changed) worker.acknowledgeLatestClaimedRun();
+    await changing;
+    await flushClaimControl();
+    await executor.stop({ abrupt: true });
   }
 });
 

@@ -109,11 +109,12 @@ Deno.test("action transaction router keeps executor-shadow writes local", async 
 });
 
 Deno.test("action transaction router can send an exact action upstream", async () => {
-  const settled: unknown[] = [];
+  const lifecycle: unknown[] = [];
   await withServer(
     () => ({
       disposition: "upstream",
-      onCommitSettled: (result) => settled.push(result),
+      afterRouteSelected: () => lifecycle.push("selected"),
+      onCommitSettled: (result) => lifecycle.push(["settled", result]),
     }),
     async (server, storage) => {
       const result = await storage.open(SPACE).replica.commitNative!({
@@ -129,7 +130,7 @@ Deno.test("action transaction router can send an exact action upstream", async (
       assertEquals(await server.readDocument(SPACE, OUTPUT), {
         value: { route: "upstream" },
       });
-      assertEquals(settled, [{ ok: {} }]);
+      assertEquals(lifecycle, ["selected", ["settled", { ok: {} }]]);
     },
   );
 });

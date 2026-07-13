@@ -62,6 +62,12 @@ export interface ExecutorActionTransactionRouterOptions {
     sourceAction: object,
     diagnosticCode: string,
   ) => void;
+  /** Exact attempt readiness after storage accepts an upstream/unserved
+   * route, distinct from eventual commit settlement. */
+  readonly onAttemptStarted?: (
+    claim: ExecutionClaim,
+    sourceAction: object,
+  ) => void;
   readonly onAttemptSettled?: (
     claim: ExecutionClaim,
     sourceAction: object,
@@ -250,6 +256,12 @@ export function createExecutorActionTransactionRouter(
     }
     return {
       disposition: "upstream",
+      ...(options.onAttemptStarted
+        ? {
+          afterRouteSelected: () =>
+            options.onAttemptStarted!(liveClaim, sourceAction),
+        }
+        : {}),
       ...(options.onAttemptSettled
         ? {
           onCommitSettled: (result: ActionTransactionCommitResult) =>
@@ -596,6 +608,12 @@ function unservedRoute(
   return {
     disposition: "unserved",
     diagnosticCode,
+    ...(options.onAttemptStarted
+      ? {
+        afterRouteSelected: () =>
+          options.onAttemptStarted!(claim, sourceAction),
+      }
+      : {}),
     ...(options.onUnserved
       ? {
         onSettled: () => {

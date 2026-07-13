@@ -126,6 +126,7 @@ describe("reactive retries", () => {
     if (initialRetries > 0) retries.set(action, initialRetries);
     let queued = 0;
     let resubscribed = 0;
+    const rejectionDispositions: string[] = [];
     const error = errorName === undefined
       ? undefined
       : { name: errorName, message: `injected ${errorName}` };
@@ -147,10 +148,13 @@ describe("reactive retries", () => {
         queued++;
       },
       restoreInvalidCauses: () => {},
+      onCommitRejected: (_error, disposition) => {
+        rejectionDispositions.push(disposition);
+      },
     });
     await commitPromise;
     await new Promise((r) => setTimeout(r, 0));
-    return { queued, resubscribed, retries, action };
+    return { queued, resubscribed, retries, action, rejectionDispositions };
   };
 
   it(
@@ -165,6 +169,7 @@ describe("reactive retries", () => {
       const r = await runWatcher("RowLabelCommitError", 3);
       expect(r.queued).toBe(0);
       expect(r.retries.has(r.action)).toBe(false);
+      expect(r.rejectionDispositions).toEqual(["abandoned"]);
     },
   );
 
@@ -174,6 +179,7 @@ describe("reactive retries", () => {
       const r = await runWatcher("PreconditionFailedError", 3);
       expect(r.queued).toBe(0);
       expect(r.retries.has(r.action)).toBe(false);
+      expect(r.rejectionDispositions).toEqual(["abandoned"]);
     },
   );
 
@@ -185,6 +191,17 @@ describe("reactive retries", () => {
       const r = await runWatcher("TransactionError", 0);
       expect(r.queued).toBe(1);
       expect(r.retries.get(r.action)).toBe(1);
+      expect(r.rejectionDispositions).toEqual(["retrying"]);
+    },
+  );
+
+  it(
+    "reports a transient rejection as abandoned when its retry budget is exhausted",
+    async () => {
+      const r = await runWatcher("TransactionError", 9);
+      expect(r.queued).toBe(0);
+      expect(r.retries.get(r.action)).toBe(10);
+      expect(r.rejectionDispositions).toEqual(["abandoned"]);
     },
   );
 

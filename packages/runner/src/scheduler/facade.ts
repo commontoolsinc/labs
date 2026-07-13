@@ -75,6 +75,7 @@ import {
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
 import {
+  type ActionCommitRejectionDisposition,
   runSchedulerAction,
   type SchedulerActionRunState,
   schedulerImplementationFingerprint,
@@ -569,6 +570,7 @@ export class Scheduler {
   private actionCommitRejectionHandler?: (
     action: Action,
     error: unknown,
+    disposition: ActionCommitRejectionDisposition,
   ) => void;
   private actionObservationAdoptionGuard?: (action: Action) => boolean;
   private consoleHandler: ConsoleHandler;
@@ -638,7 +640,13 @@ export class Scheduler {
    * claim when CFC/ACL rejects before ordinary transaction routing can settle
    * it. It carries no authority and is unset in ordinary runtimes. */
   setActionCommitRejectionHandler(
-    handler: ((action: Action, error: unknown) => void) | undefined,
+    handler:
+      | ((
+        action: Action,
+        error: unknown,
+        disposition: ActionCommitRejectionDisposition,
+      ) => void)
+      | undefined,
   ): void {
     this.actionCommitRejectionHandler = handler;
   }
@@ -2470,8 +2478,8 @@ export class Scheduler {
         this.executingAction = null;
         this.currentActionId = undefined;
       },
-      handleActionCommitRejected: (target, error) =>
-        this.actionCommitRejectionHandler?.(target, error),
+      handleActionCommitRejected: (target, error, disposition) =>
+        this.actionCommitRejectionHandler?.(target, error, disposition),
     };
   }
 

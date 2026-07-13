@@ -10,8 +10,10 @@ import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import type {
   ActionSettlement,
   ClientCommit,
+  ExecutionClaim,
   ExecutionControlEvent,
   MemoryProtocolFlags,
+  TransactRequest,
 } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { Server } from "@commonfabric/memory/v2/server";
@@ -146,6 +148,48 @@ const containsStoredValue = (value: unknown, expected: string): boolean =>
     : typeof value === "object" && value !== null
     ? Object.values(value).some((entry) => containsStoredValue(entry, expected))
     : false);
+
+const hasExecutionClaimAssertion = (commit: ClientCommit): boolean => {
+  const observations = [
+    commit.schedulerObservation,
+    ...(commit.schedulerObservationBatch ?? []).map((entry) =>
+      entry.schedulerObservation
+    ),
+  ];
+  return observations.some((observation) =>
+    typeof observation === "object" && observation !== null &&
+    "executionClaimAssertion" in observation &&
+    observation.executionClaimAssertion !== undefined
+  );
+};
+
+class RejectNextClaimedCommitServer extends Server {
+  #rejectNextClaimedCommit = false;
+
+  rejectNextClaimedCommit(): void {
+    this.#rejectNextClaimedCommit = true;
+  }
+
+  override transact(
+    message: TransactRequest,
+  ): ReturnType<Server["transact"]> {
+    if (
+      this.#rejectNextClaimedCommit &&
+      hasExecutionClaimAssertion(message.commit)
+    ) {
+      this.#rejectNextClaimedCommit = false;
+      return Promise.resolve({
+        type: "response",
+        requestId: message.requestId,
+        error: {
+          name: "AuthorizationError",
+          message: "injected claimed rerun rejection",
+        },
+      });
+    }
+    return super.transact(message);
+  }
+}
 
 async function exercisePoolAuthorityTransition(
   options: { replaceShadowWorker?: boolean } = {},
@@ -648,6 +692,216 @@ async function exercisePoolAuthorityTransition(
   }
 }
 
+Deno.test("a later claimed rerun rejection revokes its exact live Worker claim", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor later rerun rejection ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const server = new RejectNextClaimedCommitServer({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-executor-rerun-rejection" },
+    protocolFlags: FLAGS,
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  const authorize: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: space },
+  });
+  const seedStorage = LoopbackStorageManager.connectTo(server, FLAGS, {
+    as: principal,
+  });
+  const seedRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: seedStorage,
+    experimental: {
+      persistentSchedulerState: true,
+      serverPrimaryExecution: true,
+    },
+  });
+  let observerClient: MemoryClient.Client | null = null;
+  let executor: Awaited<ReturnType<DenoSpaceExecutorFactory["start"]>> | null =
+    null;
+  let unsubscribeControl = () => {};
+  const events: string[] = [];
+  try {
+    const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
+      space,
+    });
+    const tx = seedRuntime.edit();
+    const input = seedRuntime.getCell<number>(
+      space,
+      "executor-rerun-rejection-input",
+      undefined,
+      tx,
+    );
+    input.set(5);
+    const result = seedRuntime.getCell<number>(
+      space,
+      "executor-rerun-rejection-result",
+      undefined,
+      tx,
+    );
+    const handle = seedRuntime.run(tx, compiled, { value: input }, result);
+    assertEquals((await tx.commit()).error, undefined);
+    assertEquals(await handle.pull(), 10);
+    await seedRuntime.settled();
+    await seedRuntime.storageManager.synced();
+
+    observerClient = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: FLAGS,
+    });
+    const observer = await observerClient.mount(space, {}, authorize);
+    await observer.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${space}:execution-policy`,
+        value: { value: { version: 1, serverPrimaryExecution: true } },
+      }],
+    });
+    await observer.setExecutionDemand("", [result.sourceURI]);
+    await observer.watchSet([{
+      id: "executor-rerun-rejection-piece",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: result.sourceURI,
+          selector: { path: [], schema: true },
+        }],
+      },
+    }]);
+    const lease = await server.acquireExecutionLease(space, "");
+    assertExists(lease);
+
+    const claimed = Promise.withResolvers<ExecutionClaim>();
+    const firstSettled = Promise.withResolvers<ActionSettlement>();
+    const revoked = Promise.withResolvers<void>();
+    const rejectedDiagnostic = Promise.withResolvers<string>();
+    const settlements: ActionSettlement[] = [];
+    let firstSourceSeq = Number.POSITIVE_INFINITY;
+    let liveClaim: ExecutionClaim | undefined;
+    unsubscribeControl = observer.subscribeExecutionControl((event) => {
+      events.push(event.type);
+      if (event.type === "session.execution.claim.set") {
+        liveClaim = event.claim;
+        claimed.resolve(event.claim);
+      } else if (event.type === "session.execution.settlement") {
+        settlements.push(event.settlement);
+        if (event.settlement.inputBasisSeq >= firstSourceSeq) {
+          firstSettled.resolve(event.settlement);
+        }
+      } else if (
+        event.type === "session.execution.claim.revoke" &&
+        liveClaim !== undefined &&
+        event.claim.actionId === liveClaim.actionId &&
+        event.leaseGeneration === liveClaim.leaseGeneration &&
+        event.claimGeneration === liveClaim.claimGeneration
+      ) {
+        revoked.resolve();
+      }
+    });
+
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      patternApiUrl: new URL("https://toolshed.example/"),
+      protocolFlags: FLAGS,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+      onCandidateDiagnostic(diagnostic) {
+        events.push(`diagnostic:${diagnostic.diagnosticCode}`);
+        if (
+          diagnostic.diagnosticCode === "commit-rejected:AuthorizationError"
+        ) {
+          rejectedDiagnostic.resolve(diagnostic.diagnosticCode);
+        }
+      },
+    });
+    executor = await factory.start({
+      space,
+      branch: "",
+      lease,
+      pieces: [result.sourceURI],
+      onCrash(error) {
+        events.push(`crash:${error}`);
+      },
+    });
+
+    const firstSource = await observer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 7 },
+      }],
+    });
+    firstSourceSeq = firstSource.seq;
+    const exactClaim = await awaitBarrier(claimed.promise, "claim", events);
+    const accepted = await awaitBarrier(
+      firstSettled.promise,
+      "first settlement",
+      events,
+    );
+    assertEquals(accepted.outcome, "committed");
+    assertEquals(await executor.settle() >= firstSource.seq, true);
+
+    // The successful activation lifecycle has ended, but its authority remains
+    // attached to the live Action for later reactive reruns.
+    server.rejectNextClaimedCommit();
+    const rejectedSource = await observer.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: input.sourceURI,
+        value: { value: 8 },
+      }],
+    });
+    assertEquals(
+      await awaitBarrier(
+        rejectedDiagnostic.promise,
+        "rejected rerun diagnostic",
+        events,
+      ),
+      "commit-rejected:AuthorizationError",
+    );
+    await awaitBarrier(revoked.promise, "exact claim revoke", events);
+    await executor.settle();
+
+    assertEquals(server.hasLiveExecutionClaim(exactClaim), false);
+    assertEquals(
+      settlements.some((settlement) =>
+        settlement.inputBasisSeq >= rejectedSource.seq
+      ),
+      false,
+    );
+    assertEquals(events.some((event) => event.startsWith("crash:")), false);
+  } finally {
+    unsubscribeControl();
+    await executor?.stop().catch(() => undefined);
+    await seedRuntime.dispose().catch(() => undefined);
+    await seedStorage.close().catch(() => undefined);
+    await observerClient?.close().catch(() => undefined);
+    await server.close();
+  }
+});
+
 Deno.test("explicit claim routing commits a real pure computation under its sponsor", async () => {
   const principal = await Identity.fromPassphrase(
     `executor claim e2e ${crypto.randomUUID()}`,
@@ -962,10 +1216,12 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     );
 
     // Phase 2 deliberately keeps client computation live for speculative UI
-    // latency. Its rollout gate is therefore exact action-run parity, not a
-    // timing claim: enabling authority must not increase lazy-client runs for
-    // the same constant-size graph. CPU sampling is a separate browser
-    // measurement because scheduler duration is elapsed time, not CPU time.
+    // latency. Each lazy replica may either run once or adopt an observation;
+    // which replicas do each is timing-dependent, so aggregate enabled versus
+    // disabled cardinality is not a stable authority metric. This runner gate
+    // instead forbids per-client duplicate work and client-derived writes. CPU
+    // sampling is a separate browser measurement because scheduler duration is
+    // elapsed time, not CPU time.
     const actionId = clientSettlement.claim.actionId;
     const isDerivedWireCommit = (commit: ClientCommit): boolean => {
       const observation = commit.schedulerObservation as {
@@ -982,18 +1238,13 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
         runtime.scheduler.setActionRunTraceEnabled(true);
       }
     };
-    const clientActionRunCount = (): number =>
-      clientRuntimes.reduce(
-        (total, runtime) =>
-          total + runtime.scheduler.getActionRunTrace().filter((entry) =>
+    const clientActionRunCounts = (): number[] =>
+      clientRuntimes.map(
+        (runtime) =>
+          runtime.scheduler.getActionRunTrace().filter((entry) =>
             entry.actionId === actionId && entry.actionType === "computation"
           ).length,
-        0,
       );
-    const p95 = (samples: readonly number[]): number => {
-      const sorted = [...samples].sort((left, right) => left - right);
-      return sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
-    };
 
     let observerLocalSeq = 4;
     const writePolicy = async (enabled: boolean): Promise<void> => {
@@ -1009,7 +1260,7 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
         }],
       });
     };
-    const runInvalidation = async (value: number): Promise<number> => {
+    const runInvalidation = async (value: number): Promise<number[]> => {
       resetClientActionTraces();
       const accepted = Promise.withResolvers<void>();
       const unsubscribe = server.subscribeAcceptedCommits(space, (event) => {
@@ -1055,10 +1306,10 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
           ?.value,
         value * 2,
       );
-      return clientActionRunCount();
+      return clientActionRunCounts();
     };
-    const runPhase = async (startValue: number): Promise<number[]> => {
-      const samples: number[] = [];
+    const runPhase = async (startValue: number): Promise<number[][]> => {
+      const samples: number[][] = [];
       for (let offset = 0; offset < 20; offset++) {
         samples.push(await runInvalidation(startValue + offset));
       }
@@ -1093,7 +1344,10 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     assertEquals(clientDerivedCommits.some(isDerivedWireCommit), true);
     clientDerivedCommits.length = 0;
     const disabledRuns = await runPhase(101);
-    assertEquals(disabledRuns.every((runs) => runs > 0), true);
+    assertEquals(
+      disabledRuns.every((perClient) => perClient.some((runs) => runs > 0)),
+      true,
+    );
 
     // This test drives DenoSpaceExecutorFactory directly, outside the shared
     // pool that normally renews the lease. Refresh the direct fixture's lease
@@ -1157,14 +1411,12 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     const enabledRuns = await runPhase(202);
     assertEquals(clientDerivedCommits.some(isDerivedWireCommit), false);
 
-    const disabledP95 = p95(disabledRuns);
-    const enabledP95 = p95(enabledRuns);
     assertEquals(
-      enabledP95 <= disabledP95,
+      enabledRuns.every((perClient) => perClient.every((runs) => runs <= 1)),
       true,
-      `enabled p95 client action runs/invalidation ${enabledP95} exceeded disabled ${disabledP95}; disabled=${
-        disabledRuns.join(",")
-      }; enabled=${enabledRuns.join(",")}`,
+      `enabled client action runs contained duplicates: ${
+        enabledRuns.map((perClient) => perClient.join(",")).join(";")
+      }`,
     );
   } finally {
     unsubscribeAccepted();
@@ -1532,6 +1784,12 @@ Deno.test("claimed builtins use host broker while client sinks observe pending a
       await awaitBarrier(
         secondBrokerStarted.promise,
         "server broker requests",
+        events,
+      );
+      assertExists(executor);
+      await awaitBarrier(
+        executor.wake(),
+        "executor wake while claimed broker work remains unsettled",
         events,
       );
       await awaitBarrier(

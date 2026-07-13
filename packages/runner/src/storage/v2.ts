@@ -588,6 +588,9 @@ export type ActionTransactionCommitResult = Result<
 export type ActionTransactionRoute =
   | {
     readonly disposition: "upstream";
+    /** Called after the router result is accepted by storage and before the
+     * upstream commit begins. Used for exact claimed-attempt readiness. */
+    readonly afterRouteSelected?: () => void;
     readonly onFirewallRejected?: (diagnosticCode: string) => void;
     /** Exact result of this routed attempt, after the provider has either
      * accepted it upstream or completed its rejection path. */
@@ -610,6 +613,7 @@ export type ActionTransactionRoute =
   | {
     readonly disposition: "unserved";
     readonly diagnosticCode: string;
+    readonly afterRouteSelected?: () => void;
     readonly onSettled?: () => void;
   };
 
@@ -2795,6 +2799,19 @@ class SpaceReplica implements ISpaceReplica {
           operations: commit.operations.length,
         },
       ]);
+    }
+    if (
+      route.disposition !== "local" &&
+      route.afterRouteSelected !== undefined
+    ) {
+      try {
+        route.afterRouteSelected();
+      } catch (error) {
+        logger.warn("execution-route", () => [
+          "Action transaction route-selection callback failed",
+          error,
+        ]);
+      }
     }
     if (route.disposition === "unserved") {
       return await this.publishUnservedAttempt(commit, route);

@@ -7,7 +7,6 @@ import {
   type BranchName,
   canonicalSchedulerPieceIdForDemandRoot,
   type ExecutionClaim,
-  executionClaimIncarnationKey,
   type WireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
 import {
@@ -26,9 +25,10 @@ import {
 import { createExecutorActionTransactionRouter } from "./action-transaction-router.ts";
 import { HostStorageManager } from "../storage/v2-host-provider.ts";
 import {
-  isPermanentRejection,
-  isTerminalRejection,
-} from "../storage/rejection.ts";
+  ClaimedAttemptLifecycle,
+  claimedAttemptRejection,
+  deleteExactClaimForAction,
+} from "./claimed-attempt-lifecycle.ts";
 import { prepareExecutorDemandPiece } from "./writer-discovery.ts";
 import {
   createServerBuiltinBrokerClient,
@@ -73,10 +73,7 @@ const instantiatedDemand = new Set<string>();
 const pendingDemand = new Map<string, UnavailableCellAddress>();
 const demandSinks = new Map<string, Cancel>();
 const candidateActions = new Map<string, Action>();
-const claimedAttempts = new Map<
-  string,
-  { action: Action; settled: PromiseWithResolvers<void> }
->();
+const claimedAttempts = new ClaimedAttemptLifecycle<Action>();
 let claimsByAction = new WeakMap<object, ExecutionClaim>();
 let demandGeneration = 0;
 let selectiveWake: SelectiveDemandWakeQueue | null = null;
@@ -88,9 +85,9 @@ const denyExternalBuiltinFetch: typeof globalThis.fetch = () =>
     new TypeError("external builtins are disabled in executor shadow mode"),
   );
 
-const enqueue = (operation: () => Promise<void>): Promise<void> => {
+const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
   const next = work.then(operation, operation);
-  work = next.catch(() => undefined);
+  work = next.then(() => undefined, () => undefined);
   return next;
 };
 
@@ -102,12 +99,27 @@ const claimKey = (claim: ActionClaimKey): string => actionClaimMapKey(claim);
 const finishClaimedAttempt = (
   claim: ExecutionClaim,
   sourceAction: object,
+): boolean => claimedAttempts.finish(claim, sourceAction as Action);
+
+const releaseClaimedAttempt = (
+  type: "unserved-claim" | "invalidated-claim",
+  claim: ExecutionClaim,
+  sourceAction: object,
+  diagnosticCode: string,
 ): void => {
-  const key = executionClaimIncarnationKey(claim);
-  const pending = claimedAttempts.get(key);
-  if (pending === undefined || pending.action !== sourceAction) return;
-  claimedAttempts.delete(key);
-  pending.settled.resolve();
+  // The activation waiter is already gone after the first successful
+  // settlement, but later reactive reruns retain this claim. Release authority
+  // whenever the action still names the exact incarnation, independently of
+  // whether an activation lifecycle record remains.
+  finishClaimedAttempt(claim, sourceAction);
+  if (!deleteExactClaimForAction(claimsByAction, claim, sourceAction)) return;
+  worker.postMessage({ type, claim, diagnosticCode });
+};
+
+const cancelClaimedAttempts = (): void => {
+  for (const { claim, action } of claimedAttempts.cancelAll()) {
+    deleteExactClaimForAction(claimsByAction, claim, action);
+  }
 };
 
 const unavailableAddress = (cell: Cell<unknown>): UnavailableCellAddress => {
@@ -130,13 +142,6 @@ const postFatal = (error: unknown): void => {
     type: "fatal",
     message: error instanceof Error ? error.message : String(error),
   });
-};
-
-const invalidatesExecutorClaim = (error: unknown): boolean => {
-  const named = error as { name?: string } | undefined | null;
-  return named?.name === "StorageTransactionAborted" ||
-    named?.name === "AuthorizationError" ||
-    isPermanentRejection(named) || isTerminalRejection(named);
 };
 
 const activateDemand = async (
@@ -278,18 +283,23 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       worker.postMessage({ type: "candidate-diagnostic", diagnostic });
     },
     onUnserved: (claim, sourceAction, diagnosticCode) => {
-      finishClaimedAttempt(claim, sourceAction);
-      claimsByAction.delete(sourceAction);
-      worker.postMessage({ type: "unserved-claim", claim, diagnosticCode });
+      releaseClaimedAttempt(
+        "unserved-claim",
+        claim,
+        sourceAction,
+        diagnosticCode,
+      );
     },
     onInvalidated: (claim, sourceAction, diagnosticCode) => {
-      finishClaimedAttempt(claim, sourceAction);
-      claimsByAction.delete(sourceAction);
-      worker.postMessage({
-        type: "invalidated-claim",
+      releaseClaimedAttempt(
+        "invalidated-claim",
         claim,
+        sourceAction,
         diagnosticCode,
-      });
+      );
+    },
+    onAttemptStarted: (claim, sourceAction) => {
+      claimedAttempts.markRouted(claim, sourceAction as Action);
     },
     onAttemptSettled: (claim, sourceAction, result) => {
       if (result.error === undefined) {
@@ -352,17 +362,21 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   runtime.installServerBuiltinFetch((builtinId, rawUrl, init) =>
     builtinBroker!.fetch(builtinId, rawUrl, init)
   );
-  runtime.scheduler.setActionCommitRejectionHandler((action, error) => {
+  runtime.scheduler.setActionCommitRejectionHandler((
+    action,
+    error,
+    disposition,
+  ) => {
     const claim = claimsByAction.get(action);
-    if (claim === undefined || !invalidatesExecutorClaim(error)) return;
-    claimsByAction.delete(action);
-    worker.postMessage({
-      type: "invalidated-claim",
+    if (claim === undefined) return;
+    const rejection = claimedAttemptRejection(error, disposition);
+    if (!rejection.release) return;
+    releaseClaimedAttempt(
+      "invalidated-claim",
       claim,
-      diagnosticCode: `commit-rejected:${
-        (error as { name?: string })?.name ?? "unknown"
-      }`,
-    });
+      action,
+      rejection.diagnosticCode,
+    );
   });
   runtime.scheduler.setActionObservationAdoptionGuard((action) =>
     claimsByAction.has(action)
@@ -376,7 +390,13 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   await enqueue(() => replaceDemand(request.pieces!));
 };
 
-const runClaimedAction = async (claim: ExecutionClaim): Promise<void> => {
+type StartedClaimedAction = {
+  finalSettlement: Promise<void>;
+};
+
+const startClaimedAction = async (
+  claim: ExecutionClaim,
+): Promise<StartedClaimedAction> => {
   if (runtime === null || storage === null || space === null) {
     throw new Error("executor Worker is not initialized");
   }
@@ -384,22 +404,23 @@ const runClaimedAction = async (claim: ExecutionClaim): Promise<void> => {
   if (action === undefined) {
     throw new Error("claimed executor action is no longer live");
   }
-  const key = executionClaimIncarnationKey(claim);
-  if (claimedAttempts.has(key)) {
-    throw new Error("claimed executor action is already activating");
-  }
-  const settled = Promise.withResolvers<void>();
-  claimedAttempts.set(key, { action, settled });
+  const attempt = claimedAttempts.start(claim, action);
   try {
     storage.discardShadowWritesForAction(space, action);
     claimsByAction.set(action, claim);
     (action as Action & { prepareClaimedRerun?: () => void })
       .prepareClaimedRerun?.();
+    // Scheduler completion means the action transaction has been kicked off,
+    // but the storage router can still be selecting its async route. The exact
+    // afterRouteSelected callback is the readiness acknowledgement; eventual
+    // accepted settlement remains deliberately outside the global work lane.
     await runtime.scheduler.run(action);
-    await settled.promise;
-  } finally {
-    const current = claimedAttempts.get(key);
-    if (current?.settled === settled) claimedAttempts.delete(key);
+    await attempt.routeReady;
+    return { finalSettlement: attempt.finalSettlement };
+  } catch (error) {
+    finishClaimedAttempt(claim, action);
+    deleteExactClaimForAction(claimsByAction, claim, action);
+    throw error;
   }
 };
 
@@ -407,6 +428,7 @@ const settle = async (): Promise<number> => {
   if (runtime === null || storage === null) return 0;
   while (true) {
     await work;
+    await claimedAttempts.settled();
     const throughSeq = await storage.acceptedCommitsSettled();
     await selectiveWake?.settled();
     await work;
@@ -422,6 +444,9 @@ const settle = async (): Promise<number> => {
 const stop = async (): Promise<void> => {
   if (stopped) return;
   stopped = true;
+  // Final-settlement waiters intentionally sit outside `work`. End their exact
+  // local authority before settle waits on queued demand/pull operations.
+  cancelClaimedAttempts();
   await settle();
   for (const cancel of demandSinks.values()) cancel();
   demandSinks.clear();
@@ -437,11 +462,6 @@ const stop = async (): Promise<void> => {
   space = null;
   branch = "";
   selectiveWake = null;
-  const stoppedError = new Error("executor Worker stopped");
-  for (const attempt of claimedAttempts.values()) {
-    attempt.settled.reject(stoppedError);
-  }
-  claimedAttempts.clear();
   demanded.clear();
   instantiatedDemand.clear();
   pendingDemand.clear();
@@ -456,8 +476,12 @@ const handle = async (request: WorkerRequest): Promise<void> => {
     if (request.claim === undefined) {
       throw new Error("claimed executor rerun has no claim");
     }
-    await enqueue(() => runClaimedAction(request.claim!));
+    const started = await enqueue(() => startClaimedAction(request.claim!));
     worker.postMessage({ type: "complete", requestId: request.requestId });
+    // Do not await this on `work` or the request/control handler: a conflict,
+    // broker call, or delayed settlement must not starve renewal, demand
+    // changes, selective pulls, settle, or stop.
+    void started.finalSettlement.catch(postFatal);
     return;
   }
   switch (request.type) {
@@ -476,6 +500,7 @@ const handle = async (request: WorkerRequest): Promise<void> => {
         throw new Error("executor demand generation is malformed");
       }
       demandGeneration = Number(request.demandGeneration);
+      if (request.resetClaims === true) cancelClaimedAttempts();
       await enqueue(() => replaceDemand(request.pieces!, request.resetClaims));
       break;
     case "wake":

@@ -399,13 +399,13 @@ class DenoSpaceExecutor implements SpaceExecutor {
     if (this.#stopped) return;
     this.#stopped = true;
     try {
-      await this.#claimControl;
       if (options.abrupt === true) {
         const error = new Error("executor Worker stopped abruptly");
         this.#booted.reject(error);
         this.#rejectPending(error);
-      } else if (!this.#failed) {
-        await this.#request("stop");
+      } else {
+        await this.#claimControl;
+        if (!this.#failed) await this.#request("stop");
       }
     } finally {
       this.#revokeClaims();
@@ -541,10 +541,38 @@ class DenoSpaceExecutor implements SpaceExecutor {
         claimGeneration: claim.claimGeneration,
       },
     });
-    const response = await this.#awaitClaimActivation(activated, claim);
-    if (response.type !== "complete") {
-      throw new Error("executor Worker returned an invalid claim activation");
+    // Claim installation remains serialized, but route readiness/final work
+    // must not occupy the control lane: renewal, demand shrink, and graceful
+    // stop all need to proceed while an action is slow or retrying.
+    void this.#monitorClaimActivation(activated, claim).catch((error) =>
+      this.#fail(error)
+    );
+  }
+
+  async #monitorClaimActivation(
+    activation: Promise<WorkerResponse>,
+    claim: ExecutionClaim,
+  ): Promise<void> {
+    try {
+      const response = await this.#awaitClaimActivation(activation, claim);
+      if (!this.#claimIsCurrent(claim) || this.#stopped || this.#failed) return;
+      if (response.type !== "complete") {
+        throw new Error("executor Worker returned an invalid claim activation");
+      }
+    } catch (error) {
+      // A revoke/replacement intentionally cancels Worker route readiness. A
+      // delayed timeout/rejection from that old request must never crash or
+      // revoke the replacement incarnation.
+      if (!this.#claimIsCurrent(claim) || this.#stopped || this.#failed) return;
+      throw error;
     }
+  }
+
+  #claimIsCurrent(claim: ExecutionClaim): boolean {
+    const current = this.#claims.get(candidateKey({ claimKey: claim }));
+    return current !== undefined &&
+      current.leaseGeneration === claim.leaseGeneration &&
+      current.claimGeneration === claim.claimGeneration;
   }
 
   async #awaitClaimActivation(
@@ -592,10 +620,11 @@ class DenoSpaceExecutor implements SpaceExecutor {
     const timer = this.#setTimer(() => {
       this.#claimRenewalTimers.delete(key);
       if (this.#stopped || this.#failed) return;
-      const renew = () => this.#renewClaim(claim);
-      this.#claimControl = this.#claimControl.then(renew, renew).catch((
-        error,
-      ) => this.#fail(error));
+      // Renewal is a lease-safety path, not an action-completion path. A
+      // claimed computation may legitimately remain in flight beyond one TTL;
+      // serializing this behind activation/final settlement would guarantee
+      // expiry for slow or conflict-retrying work.
+      void this.#renewClaim(claim).catch((error) => this.#fail(error));
     }, Math.max(1, Math.floor(remaining / 2)));
     this.#claimRenewalTimers.set(key, timer);
   }
@@ -615,7 +644,14 @@ class DenoSpaceExecutor implements SpaceExecutor {
     if (renewed === null) {
       throw new Error("executor claim renewal lost authority");
     }
-    if (this.#stopped || this.#failed) {
+    const current = this.#claims.get(key);
+    if (
+      this.#stopped || this.#failed || current === undefined ||
+      current.leaseGeneration !== expected.leaseGeneration ||
+      current.claimGeneration !== expected.claimGeneration
+    ) {
+      // Release/revoke may race the async renewal. Never reinsert a locally
+      // ended incarnation after its server round trip returns.
       this.#revokeClaim(renewed);
       return;
     }

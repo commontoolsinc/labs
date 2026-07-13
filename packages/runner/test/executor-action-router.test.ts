@@ -106,6 +106,7 @@ Deno.test("executor action router reoffers an unclaimed pure action then routes 
     counts["execution-server-authoritative-action-run"]?.debug ?? 0;
   const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const started: Array<{ claim: ExecutionClaim; sourceAction: object }> = [];
   const claims = new WeakMap<object, ExecutionClaim>();
   const router = createExecutorActionTransactionRouter({
     servedSpace: SPACE,
@@ -114,6 +115,8 @@ Deno.test("executor action router reoffers an unclaimed pure action then routes 
     onCandidate: (candidate, sourceAction) =>
       candidates.push({ claimKey: candidate.claimKey, sourceAction }),
     onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    onAttemptStarted: (claim, sourceAction) =>
+      started.push({ claim, sourceAction }),
   });
 
   const first = commit();
@@ -164,14 +167,18 @@ Deno.test("executor action router reoffers an unclaimed pure action then routes 
   };
   claims.set(action, claim);
   const claimed = commit();
-  assertEquals(
-    await router({
-      space: SPACE,
-      commit: claimed,
-      sourceAction: action,
-    }),
-    { disposition: "upstream" },
-  );
+  const claimedRoute = await router({
+    space: SPACE,
+    commit: claimed,
+    sourceAction: action,
+  });
+  assertEquals(claimedRoute.disposition, "upstream");
+  if (claimedRoute.disposition !== "upstream") {
+    throw new Error("expected claimed upstream route");
+  }
+  assertEquals(started, []);
+  claimedRoute.afterRouteSelected?.();
+  assertEquals(started, [{ claim, sourceAction: action }]);
   assertEquals(
     (claimed.schedulerObservation as Record<string, unknown>)
       .executionClaimAssertion,

@@ -115,7 +115,10 @@ export function watchReactiveActionCommit(state: {
   readonly markInvalid: (action: Action) => void;
   readonly queueExecution: () => void;
   readonly restoreInvalidCauses: () => void;
-  readonly onCommitRejected?: (error: unknown) => void;
+  readonly onCommitRejected?: (
+    error: unknown,
+    disposition: ActionCommitRejectionDisposition,
+  ) => void;
 }): void {
   state.commitPromise.then(async ({ error }) => {
     if (!error) {
@@ -129,15 +132,19 @@ export function watchReactiveActionCommit(state: {
       "Error committing transaction",
       error,
     );
-    try {
-      state.onCommitRejected?.(error);
-    } catch (callbackError) {
-      logger.warn(
-        "action-commit-rejection-callback",
-        "Action commit rejection callback failed",
-        callbackError,
-      );
-    }
+    const reportRejection = (
+      disposition: ActionCommitRejectionDisposition,
+    ): void => {
+      try {
+        state.onCommitRejected?.(error, disposition);
+      } catch (callbackError) {
+        logger.warn(
+          "action-commit-rejection-callback",
+          "Action commit rejection callback failed",
+          callbackError,
+        );
+      }
+    };
 
     // A reactive compute is not a transactional retrier. A CONFLICT (stale read)
     // means one of its inputs moved: the authoritative version is ahead of this
@@ -158,6 +165,7 @@ export function watchReactiveActionCommit(state: {
     // coalesce). Restore the consumed trigger reads (§8.9.2) so the re-run's
     // transaction still carries their flow labels.
     if (isConflictRejection(error)) {
+      reportRejection("retrying");
       // Re-arm immediately (restore the consumed trigger reads §8.9.2, then
       // resubscribe) so the subscription stays fresh and a concurrent
       // reader-dirty can re-trigger the action while we wait for the catch-up.
@@ -198,6 +206,7 @@ export function watchReactiveActionCommit(state: {
     // Resubscribe still happens (finalizeReactiveActionCommit), so a real input
     // change re-triggers.
     if (isPermanentRejection(error) || isTerminalRejection(error)) {
+      reportRejection("abandoned");
       state.retries.delete(state.action);
       return;
     }
@@ -211,6 +220,7 @@ export function watchReactiveActionCommit(state: {
     const retries = (state.retries.get(state.action) ?? 0) + 1;
     state.retries.set(state.action, retries);
     if (retries < MAX_RETRIES_FOR_REACTIVE) {
+      reportRejection("retrying");
       // Resubscribe sets up dependencies/triggers from the log so the action
       // re-runs when its inputs change. The run still exists only because of the
       // consumed trigger reads (§8.9.2), so restore them for its tx.
@@ -220,6 +230,7 @@ export function watchReactiveActionCommit(state: {
       state.pending.add(state.action);
       state.queueExecution();
     } else {
+      reportRejection("abandoned");
       // WATCH(scheduler-v2): exhausted retries can leave a piece registered
       // against rolled-back data (accepted zombie — spec §15 decision 9).
     }
@@ -231,6 +242,8 @@ export function watchReactiveActionCommit(state: {
     );
   });
 }
+
+export type ActionCommitRejectionDisposition = "retrying" | "abandoned";
 
 export function appendActionRunTrace(state: {
   readonly actionRunTrace: ActionRunTraceEntry[];
@@ -315,6 +328,7 @@ export interface SchedulerActionRunState {
   readonly handleActionCommitRejected: (
     action: Action,
     error: unknown,
+    disposition: ActionCommitRejectionDisposition,
   ) => void;
 }
 
@@ -566,8 +580,8 @@ function finalizeReactiveActionCommit(
         restoreInvalidCauses(state.nodes, args.action, args.invalidCauses);
       }
     },
-    onCommitRejected: (error) =>
-      state.handleActionCommitRejected(args.action, error),
+    onCommitRejected: (error, disposition) =>
+      state.handleActionCommitRejected(args.action, error, disposition),
   });
 
   logger.debug("schedule-run-complete", () => [
