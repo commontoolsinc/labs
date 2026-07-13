@@ -72,6 +72,8 @@ Deno.test("executor worker OTel bridges its isolated runtime and detaches", asyn
   assertStrictEquals(attachedOptions?.meter, meter);
   assertEquals(attachedOptions?.attributes, {
     "ct.runtime": "server-executor",
+  });
+  assertEquals(attachedOptions?.spanAttributes, {
     "space.did": "did:key:z6Mk-space",
     "user.did": "did:key:z6Mk-sponsor",
   });

@@ -101,6 +101,7 @@ describe("createRuntimeTelemetryOtelBridge", () => {
 
   const setup = (options: {
     attributes?: Attributes;
+    spanAttributes?: Attributes;
     metricAttributes?: Attributes;
   } = {}) => {
     const m = makeRecordingMeter();
@@ -312,6 +313,30 @@ describe("createRuntimeTelemetryOtelBridge", () => {
     // present in both resource and attribute context as ambiguous)
     expect(spans[0].attributes["service.name"]).toBeUndefined();
     expect(spans[0].attributes["user.did"]).toBe("did:key:alice");
+  });
+
+  it("stamps spanAttributes on spans but never on metrics", () => {
+    setup({
+      attributes: { "ct.runtime": "server-executor" },
+      spanAttributes: {
+        "space.did": "did:key:space",
+        "user.did": "did:key:sponsor",
+      },
+    });
+    bridge.handleMarker(marker({ type: "cell.update" }));
+    bridge.handleMarker(marker({
+      id: "op-span-only",
+      type: "storage.push.start",
+      operation: "send",
+    }));
+    expect(meterCalls[0].attributes).toEqual({
+      "ct.runtime": "server-executor",
+    });
+    expect(spans[0].attributes).toEqual({
+      "ct.runtime": "server-executor",
+      "space.did": "did:key:space",
+      "user.did": "did:key:sponsor",
+    });
   });
 
   it("closes in-flight storage spans on shutdown", () => {
