@@ -1,5 +1,5 @@
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -2309,6 +2309,35 @@ function createToolResultMessages(
   });
 }
 
+type ToolResultClassification =
+  | { readonly status: "wait" }
+  | { readonly status: "value"; readonly value: unknown }
+  | { readonly status: "error"; readonly error: Error };
+
+function classifyToolResult(
+  rawResult: unknown,
+  materializedResult: unknown,
+): ToolResultClassification {
+  if (isDataUnavailable(rawResult)) {
+    if (rawResult.reason === "error") {
+      return {
+        status: "error",
+        error: rawResult.error.toNativeValue(false),
+      };
+    }
+    if (rawResult.reason === "schema-mismatch") {
+      return {
+        status: "error",
+        error: new Error("Tool result did not match its declared schema"),
+      };
+    }
+    return { status: "wait" };
+  }
+  return materializedResult === undefined
+    ? { status: "wait" }
+    : { status: "value", value: materializedResult };
+}
+
 export const llmDialogTestHelpers = {
   getCellSchema,
   parseLLMFriendlyLink,
@@ -2326,6 +2355,7 @@ export const llmDialogTestHelpers = {
   prepareSchemaForLLM,
   resolveRefsForLLM,
   toolAllowsObservedConfidentiality,
+  classifyToolResult,
 };
 
 /**
@@ -2679,7 +2709,7 @@ async function handleInvoke(
     identityCell,
   );
 
-  const { resolve, promise } = Promise.withResolvers<any>();
+  const { resolve, reject, promise } = Promise.withResolvers<any>();
 
   // Create result cell reference that will be set in the transaction
   let result: Cell<any> = null as any;
@@ -2720,7 +2750,9 @@ async function handleInvoke(
     // Read the resolved raw cell because the pattern's ordinary object schema
     // can materialize the opaque marker as `{}` before this callback sees it.
     const rawResult = result.resolveAsCell().getRaw();
-    r !== undefined && !(rawResult instanceof DataUnavailable) && resolve(r);
+    const outcome = classifyToolResult(rawResult, r);
+    if (outcome.status === "value") resolve(outcome.value);
+    else if (outcome.status === "error") reject(outcome.error);
   });
 
   let timeout;
