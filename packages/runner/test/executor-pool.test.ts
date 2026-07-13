@@ -10,6 +10,7 @@ import {
   SharedExecutionPool,
   type SpaceExecutor,
   type SpaceExecutorFactory,
+  type SpaceExecutorStartOptions,
 } from "../src/executor/shared-execution-pool.ts";
 
 const SPACE = "did:key:z6Mk-shared-execution-pool";
@@ -688,4 +689,36 @@ Deno.test("shared execution pool fences a crashed worker before replacement", as
   } finally {
     await pool.close();
   }
+});
+
+Deno.test("closing the pool aborts a Worker generation still starting", async () => {
+  const control = new FakeExecutionControl();
+  const started = Promise.withResolvers<void>();
+  let startupAborted = false;
+  const factory: SpaceExecutorFactory = {
+    start(options: SpaceExecutorStartOptions): Promise<SpaceExecutor> {
+      started.resolve();
+      const signal = options.signal;
+      if (signal === undefined) {
+        throw new Error("pool did not supply startup cancellation");
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          startupAborted = true;
+          reject(signal.reason);
+        }, { once: true });
+      });
+    },
+  };
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  const demandUpdate = control.emit(1, [demand(1, ["piece:a"])]);
+  await started.promise;
+  await pool.close();
+  await demandUpdate;
+
+  assertEquals(startupAborted, true);
+  assertEquals(control.finished, 1);
+  assertEquals(pool.metrics().activeLanes, 0);
 });

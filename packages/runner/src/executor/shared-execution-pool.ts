@@ -39,6 +39,8 @@ export interface SpaceExecutorStartOptions {
   readonly branch: BranchName;
   readonly lease: ExecutionLeaseHandle;
   readonly pieces: readonly string[];
+  /** Pool-owned cancellation for a generation that has not finished starting. */
+  readonly signal?: AbortSignal;
   /** Terminal realm failure. The pool fences this generation before retry. */
   readonly onCrash: (error: unknown) => void;
 }
@@ -105,6 +107,7 @@ type Slot = {
   executor: SpaceExecutor | null;
   generationToken: object | null;
   crashToken: object | null;
+  startupAbort: AbortController | null;
   renewTimer: number | null;
   backoffTimer: number | null;
   crashAttempts: number;
@@ -236,6 +239,9 @@ export class SharedExecutionPool {
     this.#closed = true;
     this.#unsubscribe?.();
     this.#unsubscribe = null;
+    for (const slot of this.#slots.values()) {
+      slot.startupAbort?.abort(new Error("execution pool is closing"));
+    }
     await this.idle();
     const stops = [...this.#slots.values()].map((slot) =>
       this.#enqueue(slot, () => this.#shutdown(slot, false))
@@ -262,6 +268,7 @@ export class SharedExecutionPool {
         executor: null,
         generationToken: null,
         crashToken: null,
+        startupAbort: null,
         renewTimer: null,
         backoffTimer: null,
         crashAttempts: 0,
@@ -273,6 +280,9 @@ export class SharedExecutionPool {
     this.#metrics.demandSnapshots++;
     slot.order = snapshot.order;
     slot.demands = snapshot.demands;
+    if (snapshot.demands.length === 0) {
+      slot.startupAbort?.abort(new Error("execution demand was removed"));
+    }
     return this.#enqueue(slot, () => this.#reconcile(slot!));
   }
 
@@ -376,12 +386,15 @@ export class SharedExecutionPool {
     const token = {};
     slot.generationToken = token;
     slot.crashToken = null;
+    const startupAbort = new AbortController();
+    slot.startupAbort = startupAbort;
     try {
       const executor = await this.#factory.start({
         space: slot.space,
         branch: slot.branch,
         lease: acquired,
         pieces: nextPieces,
+        signal: startupAbort.signal,
         onCrash: (error) => {
           if (
             slot.generationToken !== token || slot.crashToken === token
@@ -395,6 +408,7 @@ export class SharedExecutionPool {
           void this.#enqueue(slot, () => this.#reconcile(slot));
         },
       });
+      if (slot.startupAbort === startupAbort) slot.startupAbort = null;
       this.#metrics.workersStarted++;
       if (slot.generationToken !== token || this.#closed) {
         await executor.stop();
@@ -409,6 +423,7 @@ export class SharedExecutionPool {
         await this.#reconcile(slot);
       }
     } catch (error) {
+      if (slot.startupAbort === startupAbort) slot.startupAbort = null;
       slot.crashToken = token;
       await this.#shutdown(slot, true);
       console.warn(

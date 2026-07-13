@@ -66,6 +66,8 @@ export interface DenoSpaceExecutorFactoryOptions {
   now?: () => number;
   setTimer?: (callback: () => void, delayMs: number) => number;
   clearTimer?: (timer: number) => void;
+  /** Maximum time for Worker boot plus initialize acknowledgement. */
+  startupTimeoutMs?: number;
 }
 
 export interface CandidateClaim {
@@ -234,6 +236,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
   readonly #now: () => number;
   readonly #setTimer: (callback: () => void, delayMs: number) => number;
   readonly #clearTimer: (timer: number) => void;
+  readonly #startupTimeoutMs: number;
   readonly #pending = new Map<
     number,
     PromiseWithResolvers<WorkerResponse>
@@ -266,6 +269,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
       now: () => number;
       setTimer: (callback: () => void, delayMs: number) => number;
       clearTimer: (timer: number) => void;
+      startupTimeoutMs: number;
     },
   ) {
     this.#worker = worker;
@@ -275,6 +279,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
     this.#now = control.now;
     this.#setTimer = control.setTimer;
     this.#clearTimer = control.clearTimer;
+    this.#startupTimeoutMs = control.startupTimeoutMs;
     this.#server = control.server;
     this.#protocolFlags = control.protocolFlags ?? {};
     this.#onCandidateClaim = control.onCandidateClaim;
@@ -306,23 +311,59 @@ class DenoSpaceExecutor implements SpaceExecutor {
     patternApiUrl?: URL;
     experimental?: ExperimentalOptions;
     protocolFlags?: Partial<WireMemoryProtocolFlags>;
+    signal?: AbortSignal;
   }): Promise<void> {
-    await this.#booted.promise;
-    await this.#request("initialize", {
-      space: this.#startOptions.space,
-      branch: this.#startOptions.branch,
-      principal: this.#startOptions.lease.onBehalfOf,
-      leaseGeneration: this.#startOptions.lease.leaseGeneration,
-      pieces: [...this.#startOptions.pieces],
-      port: this.#provider.port,
-      builtinBrokerPort: this.#builtinBrokerPort,
-      apiUrl: options.apiUrl.href,
-      patternApiUrl: (options.patternApiUrl ?? options.apiUrl).href,
-      experimental: options.experimental ?? {},
-      ...(options.protocolFlags !== undefined
-        ? { protocolFlags: options.protocolFlags }
-        : {}),
-    }, [this.#provider.port, this.#builtinBrokerPort]);
+    const startup = (async () => {
+      await this.#booted.promise;
+      options.signal?.throwIfAborted();
+      await this.#request("initialize", {
+        space: this.#startOptions.space,
+        branch: this.#startOptions.branch,
+        principal: this.#startOptions.lease.onBehalfOf,
+        leaseGeneration: this.#startOptions.lease.leaseGeneration,
+        pieces: [...this.#startOptions.pieces],
+        port: this.#provider.port,
+        builtinBrokerPort: this.#builtinBrokerPort,
+        apiUrl: options.apiUrl.href,
+        patternApiUrl: (options.patternApiUrl ?? options.apiUrl).href,
+        experimental: options.experimental ?? {},
+        ...(options.protocolFlags !== undefined
+          ? { protocolFlags: options.protocolFlags }
+          : {}),
+      }, [this.#provider.port, this.#builtinBrokerPort]);
+    })();
+    await this.#awaitStartup(startup, options.signal);
+  }
+
+  async #awaitStartup(
+    startup: Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const timeout = Promise.withResolvers<void>();
+    const timer = this.#setTimer(
+      () =>
+        timeout.reject(
+          new Error(
+            `executor Worker did not initialize within ${this.#startupTimeoutMs}ms`,
+          ),
+        ),
+      this.#startupTimeoutMs,
+    );
+    const aborted = Promise.withResolvers<void>();
+    const onAbort = () =>
+      aborted.reject(
+        signal?.reason instanceof Error
+          ? signal.reason
+          : new Error("executor Worker startup was cancelled"),
+      );
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      await Promise.race([startup, timeout.promise, aborted.promise]);
+    } finally {
+      this.#clearTimer(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   async setDemand(pieces: readonly string[]): Promise<void> {
@@ -360,7 +401,9 @@ class DenoSpaceExecutor implements SpaceExecutor {
     try {
       await this.#claimControl;
       if (options.abrupt === true) {
-        this.#rejectPending(new Error("executor Worker stopped abruptly"));
+        const error = new Error("executor Worker stopped abruptly");
+        this.#booted.reject(error);
+        this.#rejectPending(error);
       } else if (!this.#failed) {
         await this.#request("stop");
       }
@@ -637,6 +680,15 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
       protocolFlags: options.protocolFlags ??
         wireMemoryProtocolFlags(options.server.memoryProtocolFlags()),
     };
+    if (
+      this.options.startupTimeoutMs !== undefined &&
+      (!Number.isSafeInteger(this.options.startupTimeoutMs) ||
+        this.options.startupTimeoutMs <= 0)
+    ) {
+      throw new TypeError(
+        "executor startup timeout must be a positive integer",
+      );
+    }
     this.#createWorker = this.options.createWorker ??
       (() =>
         new Worker(new URL("./executor-worker.ts", import.meta.url).href, {
@@ -692,6 +744,7 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
       clearTimer: this.options.clearTimer ??
         ((timer) =>
           clearTimeout(timer as unknown as ReturnType<typeof setTimeout>)),
+      startupTimeoutMs: this.options.startupTimeoutMs ?? 30_000,
     });
     try {
       await executor.initialize({
@@ -699,10 +752,11 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
         patternApiUrl: this.options.patternApiUrl,
         experimental: this.options.experimental,
         protocolFlags: this.options.protocolFlags,
+        signal: options.signal,
       });
       return executor;
     } catch (error) {
-      await executor.stop();
+      await executor.stop({ abrupt: true });
       throw error;
     }
   }

@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import type { BranchName } from "@commonfabric/memory/v2";
 import type {
   ExecutionLeaseHandle,
@@ -111,6 +111,52 @@ Deno.test("Deno executor controller transfers only an opaque provider and sponso
     worker.messages.map((message) => (message as { type?: string }).type),
     ["initialize", "set-demand", "wake", "stop"],
   );
+  assertEquals(worker.terminated, true);
+  assertEquals(disposed, 1);
+});
+
+Deno.test("Deno executor startup times out and disposes a Worker that never boots", async () => {
+  const worker = new FakeWorker();
+  const channel = new MessageChannel();
+  const timers = new Map<number, { callback: () => void; delayMs: number }>();
+  let nextTimer = 0;
+  let disposed = 0;
+  const factory = new DenoSpaceExecutorFactory({
+    server: {} as Server,
+    apiUrl: new URL("https://toolshed.example/"),
+    protocolFlags: {},
+    startupTimeoutMs: 17,
+    setTimer(callback, delayMs) {
+      const timer = ++nextTimer;
+      timers.set(timer, { callback, delayMs });
+      return timer;
+    },
+    clearTimer: (timer) => {
+      timers.delete(timer);
+    },
+    createWorker: () => worker,
+    createProvider: () => ({
+      port: channel.port1,
+      dispose: () => {
+        disposed++;
+        channel.port2.close();
+        return Promise.resolve();
+      },
+    }),
+  });
+
+  const starting = factory.start({
+    space: SPACE,
+    branch: BRANCH,
+    lease: LEASE,
+    pieces: ["fid1:piece-a"],
+    onCrash: () => {},
+  });
+  await Promise.resolve();
+  assertEquals([...timers.values()].map((timer) => timer.delayMs), [17]);
+  [...timers.values()][0]!.callback();
+
+  await assertRejects(() => starting, Error, "did not initialize");
   assertEquals(worker.terminated, true);
   assertEquals(disposed, 1);
 });
