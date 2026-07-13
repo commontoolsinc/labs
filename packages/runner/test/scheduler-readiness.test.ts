@@ -275,6 +275,14 @@ describe("scheduler RetryWhenReady", () => {
     expect(otherRuns).toBe(1);
     expect(commitCalls).toBe(0);
 
+    let durableIdleSettled = false;
+    const durableIdle = runtime.scheduler.idleWithPendingCommits().then(() => {
+      durableIdleSettled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(durableIdleSettled).toBe(false);
+
     ready = true;
     readiness.resolve();
     await Promise.resolve();
@@ -288,6 +296,7 @@ describe("scheduler RetryWhenReady", () => {
     expect(output.get()).toBe(7);
     expect(commitCalls).toBe(1);
     expect(commitStatus).toBe("done");
+    await durableIdle;
   });
 
   it("fences a parked event after handler cancellation and settles its callback", async () => {

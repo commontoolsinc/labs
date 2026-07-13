@@ -404,6 +404,7 @@ export type {
   TriggerTraceValueSummary,
 } from "./types.ts";
 export { txToReactivityLog } from "./reactivity.ts";
+export { RetryWhenReady } from "./retry-when-ready.ts";
 
 export {
   allowMutableTransactionRead,
@@ -558,6 +559,7 @@ export class Scheduler {
   // $value writes and server pushes. See
   // docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
   private wakeShaper = new WakeShaper();
+  private pendingDurableEventReadiness = new Set<Promise<void>>();
   // Head event parked on in-flight document loads (CT-1795). Keyed by event
   // id; released by loadsSettled, which either re-queues execution on success
   // or drops the at-most-once event on an explicit load failure.
@@ -1284,6 +1286,16 @@ export class Scheduler {
         // terminal failure) and then re-check: a landed commit can dirty
         // readers and re-trigger scheduler work.
         this.runtime.storageManager.pendingCommitsSettled().then(recheck);
+      } else if (
+        awaitPendingCommits && this.pendingDurableEventReadiness.size > 0
+      ) {
+        // A user event whose handler is waiting for cold factory code is still
+        // an unprocessed durable intent. Plain idle stays available to
+        // unrelated work, but the client-facing safe-reload barrier must wait
+        // until that intent is requeued, canceled, or rejected.
+        Promise.allSettled([...this.pendingDurableEventReadiness]).then(
+          recheck,
+        );
       } else if (
         this.gates.hasWakeTimer() &&
         ((this.eventQueue.length > 0 &&
@@ -2488,6 +2500,7 @@ export class Scheduler {
     return {
       runtime: this.runtime,
       eventQueue: this.eventQueue,
+      pendingDurableEventReadiness: this.pendingDurableEventReadiness,
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.collectPendingLoadParkKeys(event, deps),

@@ -518,6 +518,7 @@ export function dropStaleQueuedEvent(state: {
 export interface SchedulerEventExecutionState {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
+  readonly pendingDurableEventReadiness: Set<Promise<void>>;
   readonly backpressure: CommitBackpressurePolicy;
   readonly collectPendingLoadParkKeys: (
     event: QueuedEvent,
@@ -924,6 +925,7 @@ export async function processPullQueuedEventDuringExecute(
   await dispatchQueuedEvent({
     runtime: state.runtime,
     eventQueue: state.eventQueue,
+    pendingDurableEventReadiness: state.pendingDurableEventReadiness,
     backpressure: state.backpressure,
     setRunningPromise: (promise) => {
       state.setRunningPromise(promise);
@@ -945,6 +947,7 @@ export async function processPullQueuedEventDuringExecute(
 export async function dispatchQueuedEvent(state: {
   readonly runtime: Runtime;
   readonly eventQueue: QueuedEvent[];
+  readonly pendingDurableEventReadiness: Set<Promise<void>>;
   readonly backpressure: CommitBackpressurePolicy;
   readonly setRunningPromise: (promise: Promise<unknown>) => void;
   readonly getActionId: (action: Action | EventHandler) => string;
@@ -1152,6 +1155,11 @@ export async function dispatchQueuedEvent(state: {
       if (tx.status().status === "ready") {
         tx.abort(error);
       }
+      const durableReadiness = Promise.withResolvers<void>();
+      state.pendingDurableEventReadiness.add(durableReadiness.promise);
+      durableReadiness.promise.finally(() => {
+        state.pendingDurableEventReadiness.delete(durableReadiness.promise);
+      });
       let parked = true;
       const clearParkedReadiness = () => {
         if (!parked) return false;
@@ -1169,6 +1177,7 @@ export async function dispatchQueuedEvent(state: {
         }
         runFinalCommitCallback();
         logger.debug("scheduler", reason, { eventId: queuedEvent.id });
+        durableReadiness.resolve();
       };
       queuedEvent.cancelPending = cancelParkedReadiness;
       queuedEvent.handlerRegistration.readinessCancels.add(
@@ -1191,6 +1200,7 @@ export async function dispatchQueuedEvent(state: {
             }
             runFinalCommitCallback();
           }
+          durableReadiness.resolve();
         },
         (readinessError) => {
           if (!clearParkedReadiness()) return;
@@ -1205,6 +1215,7 @@ export async function dispatchQueuedEvent(state: {
             state.handleError(normalizeThrownError(readinessError), action);
           } finally {
             runFinalCommitCallback();
+            durableReadiness.resolve();
           }
         },
       );
