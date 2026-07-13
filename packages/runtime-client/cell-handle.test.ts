@@ -16,7 +16,11 @@ import {
   factoryStateOf,
   isAdmittedFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
-import { encodeFactoryAwareIPCValue } from "./fabric-value-ipc.ts";
+import { UnknownValue } from "@commonfabric/data-model/fabric-instances";
+import {
+  decodeFactoryAwareIPCValue,
+  encodeFactoryAwareIPCValue,
+} from "./fabric-value-ipc.ts";
 
 describe("CellHandle Factory@1 IPC", () => {
   const ref: CellRef = {
@@ -73,6 +77,39 @@ describe("CellHandle Factory@1 IPC", () => {
     expect(factoryStateOf(value?.factory)).toEqual(factoryStateOf(factory));
     expect(() => (value?.factory as () => void)()).toThrow(
       "factory requires runner materialization",
+    );
+  });
+
+  it("preserves codec-backed instance state around nested factories", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const runtime = {
+      [$conn]: () => ({
+        request: (request: Record<string, unknown>) => {
+          requests.push(request);
+          return Promise.resolve({});
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    } as unknown as RuntimeClient;
+    const cell = new CellHandle<UnknownValue>(runtime, ref);
+    const wrapped = new UnknownValue("FutureValue@1", { factory });
+
+    await cell.set(wrapped);
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].valueEncoding).toBe("fabric-json");
+    const decoded = decodeFactoryAwareIPCValue(
+      requests[0].value as never,
+      requests[0].valueEncoding as never,
+    );
+    expect(decoded).toBeInstanceOf(UnknownValue);
+    const decodedFactory = (decoded as UnknownValue).state as {
+      factory: unknown;
+    };
+    expect(isAdmittedFabricFactory(decodedFactory.factory)).toBe(true);
+    expect(factoryStateOf(decodedFactory.factory)).toEqual(
+      factoryStateOf(factory),
     );
   });
 });

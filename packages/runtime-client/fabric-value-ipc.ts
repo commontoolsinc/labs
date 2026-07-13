@@ -1,4 +1,8 @@
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricInstance,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import { codecOf } from "@commonfabric/data-model/codec-common";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
 import {
   jsonFromValue,
@@ -24,6 +28,9 @@ function containsFabricFactory(
   if (seen.has(value)) return false;
   seen.add(value);
   try {
+    if (value instanceof FabricInstance) {
+      return containsFabricFactory(codecOf(value).encode(value), seen);
+    }
     return Object.values(value).some((nested) =>
       containsFabricFactory(nested, seen)
     );

@@ -28,6 +28,7 @@ import { isRecord } from "@commonfabric/utils/types";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import {
   decodeFactoryAwareIPCValue,
   encodeFactoryAwareIPCValue,
@@ -500,6 +501,8 @@ export class CellHandle<T = unknown> {
     value: readonly any[] | Record<string, any> | any,
   ): any {
     if (isAdmittedFabricFactory(value)) {
+      return value;
+    } else if (value instanceof FabricSpecialObject) {
       return value;
     } else if (isCellHandle(value)) {
       value = value.ref();
