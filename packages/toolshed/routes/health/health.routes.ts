@@ -34,6 +34,7 @@ export const stats = createRoute({
         timingStats: z.any(),
         slowQueries: z.array(z.any()),
         serverExecutionPool: z.any().nullable(),
+        serverExecutionControl: z.record(z.number()).nullable(),
       }),
       "Logger counts and timing statistics",
     ),

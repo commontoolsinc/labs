@@ -1375,6 +1375,21 @@ export class Server {
    *  would break that traffic). */
   readonly aclStats = { wouldDeny: 0, denied: 0 };
 
+  /** Bounded-cardinality rollout counters for server-primary authority. */
+  readonly executionStats = {
+    policyInactiveClaimAttempts: 0,
+    claimsIssued: 0,
+    claimsRevoked: 0,
+    acceptedActionAttempts: 0,
+    settlementsPublished: 0,
+    settlementsCommitted: 0,
+    settlementsNoOp: 0,
+    settlementsFailed: 0,
+    settlementsUnserved: 0,
+    leaseFenceRejects: 0,
+    actionFirewallRejects: 0,
+  };
+
   /** space → (principal key → capability). Invalidated whenever a commit
    *  touches the space's ACL document. */
   #aclCapabilities = new Map<string, Map<string, Capability | null>>();
@@ -3070,6 +3085,7 @@ export class Server {
   }
 
   #publishExecutionClaimRevoke(claim: ExecutionClaim): void {
+    this.executionStats.claimsRevoked += 1;
     this.#publishExecutionControl(Object.freeze({
       type: "session.execution.claim.revoke",
       branch: claim.branch,
@@ -3188,6 +3204,7 @@ export class Server {
     const now = this.#executionNowMs();
     const engine = await this.openEngine(claimInput.space);
     if (!this.#reconcileExecutionPolicy(engine, claimInput.space)) {
+      this.executionStats.policyInactiveClaimAttempts += 1;
       return null;
     }
     const current = Engine.currentExecutionLease(engine, {
@@ -3232,6 +3249,7 @@ export class Server {
       expiresAt: Math.min(now + ttlMs, current.expiresAt),
     });
     this.#executionClaims.set(key, claim);
+    this.executionStats.claimsIssued += 1;
     this.#publishExecutionControl(Object.freeze({
       type: "session.execution.claim.set",
       claim,
@@ -3377,6 +3395,21 @@ export class Server {
         this.#revokeExecutionClaimsForSpace(live.space);
       }
       return false;
+    }
+    this.executionStats.settlementsPublished += 1;
+    switch (settlement.outcome) {
+      case "committed":
+        this.executionStats.settlementsCommitted += 1;
+        break;
+      case "no-op":
+        this.executionStats.settlementsNoOp += 1;
+        break;
+      case "failed":
+        this.executionStats.settlementsFailed += 1;
+        break;
+      case "unserved":
+        this.executionStats.settlementsUnserved += 1;
+        break;
     }
     this.#publishExecutionControl(Object.freeze({
       type: "session.execution.settlement",
@@ -4616,6 +4649,12 @@ export class Server {
             ok: commit,
           };
         } catch (error) {
+          if (error instanceof Engine.ExecutionLeaseFenceError) {
+            this.executionStats.leaseFenceRejects += 1;
+          }
+          if (error instanceof Engine.ExecutionActionFirewallError) {
+            this.executionStats.actionFirewallRejects += 1;
+          }
           let retryAfterSeq: number | undefined;
           if (error instanceof Engine.ConflictError) {
             span.setAttribute("ct.conflict", true);
@@ -5956,6 +5995,8 @@ export class Server {
   }
 
   #publishAcceptedActionAttempts(commit: Engine.AppliedCommit): void {
+    this.executionStats.acceptedActionAttempts +=
+      commit.actionAttempts?.length ?? 0;
     for (const attempt of commit.actionAttempts ?? []) {
       const settlement: ActionSettlement = attempt.outcome === "committed"
         ? {

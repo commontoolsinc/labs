@@ -29,6 +29,8 @@ Deno.test("health routes", async (t) => {
       const json = await response.json();
       assertEquals("serverExecutionPool" in json, true);
       assertEquals(json.serverExecutionPool, null);
+      assertEquals("serverExecutionControl" in json, true);
+      assertEquals(json.serverExecutionControl, null);
     },
   );
 });

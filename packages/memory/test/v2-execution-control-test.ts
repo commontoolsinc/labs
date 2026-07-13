@@ -779,6 +779,9 @@ Deno.test("positive claims require enabled policy and disabling it revokes autho
         .length,
       1,
     );
+    assertEquals(server.executionStats.policyInactiveClaimAttempts, 2);
+    assertEquals(server.executionStats.claimsIssued, 1);
+    assertEquals(server.executionStats.claimsRevoked, 1);
   } finally {
     unsubscribe();
     await client.close();
@@ -1382,6 +1385,10 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       inputBasisSeq: source.seq,
       outcome: "failed",
     });
+    assertEquals(server.executionStats.acceptedActionAttempts, 3);
+    assertEquals(server.executionStats.settlementsCommitted, 1);
+    assertEquals(server.executionStats.settlementsNoOp, 1);
+    assertEquals(server.executionStats.settlementsFailed, 1);
   } finally {
     unbind();
     unsubscribeControl();
