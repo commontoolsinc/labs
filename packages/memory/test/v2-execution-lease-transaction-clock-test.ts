@@ -214,7 +214,7 @@ Deno.test("leased commits sample the configured clock after BEGIN IMMEDIATE", as
       false,
       "an elapsed lease must not commit after waiting for the write lock",
     );
-    assertEquals(commit.errorName, "TransactionError");
+    assertEquals(commit.errorName, "ExecutionLeaseFenceError");
     assertEquals(commit.errorMessage?.includes("execution lease"), true);
     assertEquals(commit.document, null);
   });

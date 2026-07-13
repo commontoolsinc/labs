@@ -628,10 +628,10 @@ Deno.test("policy disable revokes claims and immediately fences a draining execu
   const executorClient = await connect(server);
   const executor = await mount(executorClient, OWNER);
   try {
+    await setPolicy(sponsor, 1);
     await sponsor.setExecutionDemand("", ["space:piece"]);
     const lease = await server.acquireExecutionLease(SPACE, "");
     assertExists(lease);
-    await setPolicy(sponsor, 1);
     server.bindExecutionSession(SPACE, executor.sessionId, lease);
     await server.setExecutionClaim(lease, {
       branch: "",
@@ -652,7 +652,7 @@ Deno.test("policy disable revokes claims and immediately fences a draining execu
       (await server.currentExecutionLease(SPACE, ""))?.state,
       "draining",
     );
-    await assertRejects(
+    const fenced = await assertRejects(
       () =>
         executor.transact({
           localSeq: 1,
@@ -665,6 +665,7 @@ Deno.test("policy disable revokes claims and immediately fences a draining execu
         }),
       Error,
     );
+    assertEquals(fenced.name, "ExecutionLeaseFenceError");
     assertEquals(
       await server.readDocument(SPACE, "of:disabled-policy-output"),
       null,
