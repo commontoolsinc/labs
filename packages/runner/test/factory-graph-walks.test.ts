@@ -153,6 +153,19 @@ describe("factory-aware graph and static walks", () => {
     ]);
   });
 
+  it("keeps an explicit space scope when the containing factory is user-scoped", () => {
+    const { pattern, Writable } = createTrustedBuilder(runtime).commonfabric;
+    const containingPattern = pattern(() => {
+      const shared = Writable.perSpace.of("");
+      return { shared };
+    });
+    const userScoped = containingPattern.asScope("user");
+
+    expect(userScoped.derivedInternalCells).toEqual([
+      expect.objectContaining({ scope: "space" }),
+    ]);
+  });
+
   it("keeps special values atomic in graph and serialization walks", () => {
     const bytes = new FabricBytes(new Uint8Array([10, 11, 12]));
     const factory = bindPattern({ bytes });

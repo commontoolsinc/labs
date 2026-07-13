@@ -644,7 +644,7 @@ function factoryFromPattern<T, R>(
       derivedInternalCells.push({
         partialCause,
         ...(descriptorSchema !== undefined && { schema: descriptorSchema }),
-        ...(scope !== undefined && scope !== "space" && { scope }),
+        ...(scope !== undefined && { scope }),
       });
     }
   });
