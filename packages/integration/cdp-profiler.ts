@@ -30,6 +30,65 @@ export type CPUProfile = {
   endTime: number;
 };
 
+export interface CPUProfileSummary {
+  /** Profiler interval. This is elapsed time, not CPU time. */
+  wallUs: number;
+  /** Sum of valid sample deltas, including V8's explicit idle samples. */
+  sampledUs: number;
+  /** Sample time attributed to V8's explicit `(idle)` node. */
+  idleUs: number;
+  /** Sampling-derived worker CPU occupancy: sampledUs minus idleUs. */
+  busyUs: number;
+  /** busyUs / sampledUs, or zero when the profile has no samples. */
+  busyFraction: number;
+}
+
+/**
+ * Distill a worker CPU profile without mistaking the profiling interval for
+ * CPU time. Chrome's `endTime - startTime` is wall time, while `timeDeltas`
+ * attribute the sampling interval to nodes including an explicit `(idle)`
+ * node. Only that node is excluded from busy time: garbage collection,
+ * `(program)`, runtime overhead, and unknown node ids conservatively count as
+ * worker activity.
+ *
+ * CDP emits microseconds for both the profile interval and sample deltas, so
+ * the summary keeps those units and leaves per-invalidation normalization to
+ * the caller that owns the workload barrier.
+ */
+export function summarizeCPUProfile(
+  profile: CPUProfile,
+): CPUProfileSummary {
+  const wallDelta = profile.endTime - profile.startTime;
+  const wallUs = Number.isFinite(wallDelta) && wallDelta > 0 ? wallDelta : 0;
+  const functionByNodeId = new Map(
+    profile.nodes.map((node) => [node.id, node.callFrame.functionName]),
+  );
+  let sampledUs = 0;
+  let idleUs = 0;
+
+  if (profile.samples !== undefined && profile.timeDeltas !== undefined) {
+    for (let index = 0; index < profile.samples.length; index++) {
+      const delta = profile.timeDeltas[index];
+      if (delta === undefined || !Number.isFinite(delta) || delta <= 0) {
+        continue;
+      }
+      sampledUs += delta;
+      if (functionByNodeId.get(profile.samples[index]!) === "(idle)") {
+        idleUs += delta;
+      }
+    }
+  }
+
+  const busyUs = sampledUs - idleUs;
+  return {
+    wallUs,
+    sampledUs,
+    idleUs,
+    busyUs,
+    busyFraction: sampledUs === 0 ? 0 : busyUs / sampledUs,
+  };
+}
+
 type AttachedWorker = {
   sessionId: string;
   targetId: string;
