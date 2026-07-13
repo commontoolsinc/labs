@@ -30,6 +30,7 @@ import type {
   SchedulerGraphSnapshot,
 } from "../telemetry.ts";
 import {
+  CLAIMED_REMOTE_SPECULATION_GRACE_MS,
   CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
   MAX_SETTLE_STATS_HISTORY,
@@ -957,6 +958,7 @@ export class Scheduler {
       record.invalidCauses = [];
     }
     this.pending.delete(action);
+    this.gates.releaseClaimedRemoteSpeculation(action);
     return true;
   }
 
@@ -1249,6 +1251,7 @@ export class Scheduler {
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
+    this.gates.releaseClaimedRemoteSpeculation(action);
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
     this.runtime.storageManager.unregisterExecutionAction?.(action);
     this.materializers.clearAction(action);
@@ -2126,8 +2129,8 @@ export class Scheduler {
       recordTriggerTrace: (entry) =>
         recordTriggerTraceState({ triggerTrace: this.triggerTrace }, entry),
       scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
-      markInvalid: (target, cause) =>
-        this.markAndScheduleInvalidAction(target, cause),
+      markInvalid: (target, cause, options) =>
+        this.markAndScheduleInvalidAction(target, cause, options),
       isInvalid: (target) => this.isInvalidAction(target),
       materializerIndex: this.materializers,
       queueExecution: () => this.queueExecution(),
@@ -2603,10 +2606,25 @@ export class Scheduler {
   private markActionInvalid(
     action: Action,
     cause?: IMemorySpaceAddress,
+    options: { readonly deferClaimedRemote?: boolean } = {},
   ): void {
     const record = this.nodes.get(action);
     if (!record) return;
     markInvalidRecord(this.nodes, action, cause);
+    const deferClaimedRemote = record.kind === "computation" &&
+      options.deferClaimedRemote === true &&
+      this.runtime.storageManager.hasLiveExecutionClaimForAction?.(action) ===
+        true;
+    if (deferClaimedRemote) {
+      this.gates.holdClaimedRemoteSpeculation(
+        action,
+        performance.now() + CLAIMED_REMOTE_SPECULATION_GRACE_MS,
+      );
+    } else {
+      // Local optimistic writes, authority loss, and every unclaimed/effect
+      // path retain the existing immediate speculative behavior.
+      this.gates.releaseClaimedRemoteSpeculation(action);
+    }
     // Trailing computation debounce re-arms on every invalidation (§8.1:
     // debounceReadyAt resets while gated). Arming here — in the one
     // invalid-setter — covers every path (channel, registration, retry), so
@@ -2627,13 +2645,15 @@ export class Scheduler {
       this.nodes.setStatus(action, "clean");
     }
     record.invalidCauses = [];
+    this.gates.releaseClaimedRemoteSpeculation(action);
   }
 
   private markAndScheduleInvalidAction(
     action: Action,
     cause?: IMemorySpaceAddress,
+    options: { readonly deferClaimedRemote?: boolean } = {},
   ): void {
-    this.markActionInvalid(action, cause);
+    this.markActionInvalid(action, cause, options);
 
     if (this.nodes.effects.has(action) && this.gates.getDebounce(action)) {
       this.scheduleWithDebounce(action);
