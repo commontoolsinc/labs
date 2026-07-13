@@ -1,11 +1,12 @@
 import type { EntityDocument } from "../v2.ts";
+import type { URI } from "../interface.ts";
 
 export interface ExecutionPolicyV1 {
   version: 1;
   serverPrimaryExecution: boolean;
 }
 
-export const executionPolicyId = (space: string): string =>
+export const executionPolicyId = (space: string): URI =>
   `of:${space}:execution-policy`;
 
 export const parseExecutionPolicy = (

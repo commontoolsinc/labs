@@ -1279,6 +1279,13 @@ export const toDocumentPath = (path: readonly string[]): DocumentPath =>
 export const toValuePath = (path: readonly string[]): ValuePath =>
   path as ValuePath;
 
+export {
+  executionPolicyId,
+  type ExecutionPolicyV1,
+  isExecutionPolicyEnabled,
+  parseExecutionPolicy,
+} from "./v2/execution-policy.ts";
+
 /**
  * Builds a document-level selector (path rooted under `"value"`) from a schema
  * path selector. The result is interned-and-frozen via `internPathSelector()`,
