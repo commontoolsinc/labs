@@ -17,6 +17,13 @@
  * not the committed setup transaction and does not fall back to the ambient
  * tx-less read path.
  *
+ * A separate read-journal group uses the full item schema to measure the cost
+ * shifted out of get() by lazy read-activity expansion:
+ *
+ *   - get() alone
+ *   - get() followed by fully materializing getReadActivities()
+ *   - materializing getReadActivities() after an untimed get()
+ *
  * Environment controls:
  * - SCHEMA_READ_DEPTH_N: list size, default 1000
  */
@@ -25,6 +32,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
+import { getTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("bench schema read depth");
 const space = signer.did();
@@ -122,3 +130,77 @@ for (const [label, schema] of VARIANTS) {
     },
   });
 }
+
+const READ_JOURNAL_VARIANTS = [
+  ["get() only", false],
+  ["get() + materialize read activities", true],
+] as const;
+
+for (const [label, materializeReadActivities] of READ_JOURNAL_VARIANTS) {
+  Deno.bench({
+    name: `schema read journal - ${label} (${N} items)`,
+    group: "schema-read-journal",
+    baseline: !materializeReadActivities,
+    async fn(b) {
+      const { runtime, storageManager } = setup();
+      await seed(runtime);
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        space,
+        "schema-read-depth-doc",
+        { type: "array", items: FULL_ITEM_SCHEMA },
+        tx,
+      );
+      let readCount: number | undefined;
+      try {
+        b.start();
+        cell.get();
+        if (materializeReadActivities) {
+          readCount = Array.from(getTransactionReadActivities(tx)).length;
+        }
+        b.end();
+        if (readCount !== undefined && readCount < N) {
+          throw new Error(
+            `Expected at least ${N} read activities, got ${readCount}`,
+          );
+        }
+      } finally {
+        if (tx.status().status === "ready") tx.abort();
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    },
+  });
+}
+
+Deno.bench({
+  name: `schema read journal - materialize read activities only (${N} items)`,
+  group: "schema-read-journal-expansion",
+  async fn(b) {
+    const { runtime, storageManager } = setup();
+    await seed(runtime);
+    const tx = runtime.edit();
+    const cell = runtime.getCell(
+      space,
+      "schema-read-depth-doc",
+      { type: "array", items: FULL_ITEM_SCHEMA },
+      tx,
+    );
+    let readCount = 0;
+    try {
+      cell.get();
+      b.start();
+      readCount = Array.from(getTransactionReadActivities(tx)).length;
+      b.end();
+      if (readCount < N) {
+        throw new Error(
+          `Expected at least ${N} read activities, got ${readCount}`,
+        );
+      }
+    } finally {
+      if (tx.status().status === "ready") tx.abort();
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  },
+});
