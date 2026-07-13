@@ -15,6 +15,7 @@ import {
   prepareWorkspace,
   revertWorkspace,
   runBuildWithSignalCleanup,
+  toolshedCompileArgs,
 } from "./build-binaries.ts";
 import {
   computeCompilerVersion,
@@ -161,6 +162,17 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
       join(root, "packages", "toolshed", "index.ts"),
     );
     assertEquals(
+      config.toolshedExecutorWorkerPath(),
+      join(
+        root,
+        "packages",
+        "runner",
+        "src",
+        "executor",
+        "executor-worker.ts",
+      ),
+    );
+    assertEquals(
       config.bgPieceServiceEntryPath(),
       join(root, "packages", "background-piece-service", "src", "main.ts"),
     );
@@ -204,6 +216,24 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
         "compile-cache-version.ts",
       ),
     );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("toolshed compile includes the server executor Worker module", async () => {
+  const root = await makeFakeRepo();
+  try {
+    const config = new BuildConfig({
+      root,
+      toolshedFlags: ["--allow-net"],
+    });
+    const args = toolshedCompileArgs(config);
+    const workerIndex = args.indexOf(config.toolshedExecutorWorkerPath());
+
+    assertNotEquals(workerIndex, -1);
+    assertEquals(args[workerIndex - 1], "--include");
+    assertEquals(args.at(-1), config.toolshedEntryPath());
   } finally {
     await Deno.remove(root, { recursive: true });
   }
