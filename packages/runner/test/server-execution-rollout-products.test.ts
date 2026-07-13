@@ -46,40 +46,56 @@ const FLAGS = {
   serverPrimaryExecutionBuiltinPassivityV1: true,
 } as const satisfies Partial<MemoryProtocolFlags>;
 
-const PACKAGES_ROOT = join(import.meta.dirname!, "../..");
+const PATTERNS_ROOT = join(import.meta.dirname!, "../../patterns");
 
 type ProductCase = {
   readonly name: string;
   readonly sourcePath: string;
   readonly resolverRoot: string;
   readonly inputName: string;
+  readonly rootPiece: boolean;
   readonly initialValue: unknown;
   readonly warmValue: unknown;
   readonly measuredValue: unknown;
+  readonly warmTargetValue: unknown;
+  readonly measuredTargetValue: unknown;
 };
 
 const PRODUCT_CASES: readonly ProductCase[] = [{
   name: "lunch-poll",
   sourcePath: join(
-    import.meta.dirname!,
-    "fixtures/server-execution-lunch-poll-product.tsx",
+    PATTERNS_ROOT,
+    "lunch-poll/main.tsx",
   ),
-  resolverRoot: PACKAGES_ROOT,
-  inputName: "voteCount",
-  initialValue: 0,
-  warmValue: 1,
-  measuredValue: 2,
+  resolverRoot: PATTERNS_ROOT,
+  inputName: "adminName",
+  rootPiece: true,
+  initialValue: "",
+  warmValue: "Alice",
+  measuredValue: "Bob",
+  warmTargetValue: "Alice",
+  measuredTargetValue: "Bob",
 }, {
   name: "group-chat",
   sourcePath: join(
-    import.meta.dirname!,
-    "fixtures/server-execution-group-chat-product.tsx",
+    PATTERNS_ROOT,
+    "cfc-group-chat-demo/main.tsx",
   ),
-  resolverRoot: PACKAGES_ROOT,
-  inputName: "roomCount",
-  initialValue: 0,
-  warmValue: 1,
-  measuredValue: 2,
+  resolverRoot: PATTERNS_ROOT,
+  inputName: "rooms",
+  rootPiece: false,
+  initialValue: {},
+  warmValue: {
+    list: [{ name: "Ops", messages: [], createdAt: 1 }],
+  },
+  measuredValue: {
+    list: [
+      { name: "Ops", messages: [], createdAt: 1 },
+      { name: "Planning", messages: [], createdAt: 2 },
+    ],
+  },
+  warmTargetValue: "1 room",
+  measuredTargetValue: "2 rooms",
 }];
 
 class LoopbackSessionFactory implements SessionFactory {
@@ -171,6 +187,23 @@ const valueAtPath = (value: unknown, path: readonly string[]): unknown => {
   return current;
 };
 
+const replaceAtPath = (
+  current: unknown,
+  path: readonly string[],
+  value: unknown,
+): unknown => {
+  if (path.length === 0) return value;
+  const [head, ...tail] = path;
+  const record = typeof current === "object" && current !== null &&
+      !Array.isArray(current)
+    ? current as Record<string, unknown>
+    : {};
+  return {
+    ...record,
+    [head]: replaceAtPath(record[head], tail, value),
+  };
+};
+
 const rawAddressToLink = (
   address: IMemorySpaceAddress,
 ): NormalizedFullLink => ({
@@ -232,13 +265,10 @@ async function seedProduct(
       tx,
     );
     const resultLink = result.getAsNormalizedFullLink();
-    const inputBindings: Record<string, unknown> = {
-      [product.inputName]: source,
-    };
     const handle = runtime.run(
       tx,
       compiled,
-      inputBindings,
+      { [product.inputName]: source },
       result,
     );
     runtime.prepareTxForCommit(tx);
@@ -247,9 +277,10 @@ async function seedProduct(
     await runtime.settled();
     await storage.synced();
 
-    // Select from the actions that actually re-ran for this product input,
-    // instead of guessing through nested argument/result redirect documents.
-    // This update is excluded from the measured shared-pool invalidation.
+    // Drive real product inputs, then select the claim-ready computation whose
+    // direct output proves that input was consumed. Lunch uses its PerSpace
+    // admin name. Group chat uses its real PerSpace rooms list and selects the
+    // room-count label; entity-backed room-name traversal remains outside v1.
     commits.length = 0;
     const selectionTx = runtime.edit();
     source.withTx(selectionTx).set(product.warmValue);
@@ -259,34 +290,33 @@ async function seedProduct(
     await runtime.settled();
     await storage.synced();
 
-    const observations = commits.flatMap((commit) => {
-      const observation = commit.schedulerObservation;
-      return typeof observation === "object" && observation !== null &&
-          !Array.isArray(observation) &&
-          (observation as { transactionKind?: unknown }).transactionKind ===
-            "action-run"
-        ? [observation as SchedulerActionObservation]
-        : [];
-    }).filter((observation) =>
-      observation.actionKind === "computation" &&
-      observation.completeActionScopeSummary !== undefined &&
-      classifyStaticActionServability(observation, space).status ===
-        "claim-ready"
-    ).sort((left, right) => left.actionId.localeCompare(right.actionId));
-    assertEquals(
-      observations.length,
-      1,
-      `${product.name} fixture must have one claim-ready computation`,
+    const observationsByAction = new Map(
+      commits.flatMap((commit) => {
+        const observation = commit.schedulerObservation;
+        return typeof observation === "object" && observation !== null &&
+            !Array.isArray(observation) &&
+            (observation as { transactionKind?: unknown }).transactionKind ===
+              "action-run"
+          ? [observation as SchedulerActionObservation]
+          : [];
+      }).filter((observation) =>
+        observation.actionKind === "computation" &&
+        observation.completeActionScopeSummary !== undefined &&
+        classifyStaticActionServability(observation, space).status ===
+          "claim-ready"
+      ).map((observation) => [observation.actionId, observation]),
     );
 
-    let selected:
-      | {
-        observation: SchedulerActionObservation;
-        target: IMemorySpaceAddress;
-        value: unknown;
-      }
-      | undefined;
-    for (const observation of observations) {
+    const selected: Array<{
+      observation: SchedulerActionObservation;
+      target: IMemorySpaceAddress;
+      value: unknown;
+    }> = [];
+    for (const observation of observationsByAction.values()) {
+      if (
+        product.rootPiece &&
+        observation.completeActionScopeSummary!.piece.id !== resultLink.id
+      ) continue;
       for (const target of observation.actualChangedWrites) {
         if (
           !observation.completeActionScopeSummary!.directOutputs.some(
@@ -295,24 +325,24 @@ async function seedProduct(
         ) continue;
         const document = await server.readDocument(space, target.id);
         const value = valueAtPath(document, target.path);
-        if (value !== undefined) {
-          selected = { observation, target, value };
-          break;
+        if (Object.is(value, product.warmTargetValue)) {
+          selected.push({ observation, target, value });
         }
       }
-      if (selected !== undefined) break;
     }
-    assertExists(
-      selected,
-      `${product.name} claim-ready computation had no changed direct output`,
+    assertEquals(
+      selected.length,
+      1,
+      `${product.name} must expose one claim-ready product-data computation`,
     );
+    const selection = selected[0];
     return {
       program,
       resultLink,
       sourceLink: source.getAsNormalizedFullLink(),
-      actionId: selected.observation.actionId,
-      targetLink: rawAddressToLink(selected.target),
-      initialTargetValue: selected.value,
+      actionId: selection.observation.actionId,
+      targetLink: rawAddressToLink(selection.target),
+      initialTargetValue: selection.value,
     };
   } finally {
     await runtime.dispose();
@@ -327,15 +357,22 @@ type ProviderMessage = {
 function instrumentProviderPort(
   hostPort: MessagePort,
   commits: ClientCommit[],
-): { port: MessagePort; dispose(): void } {
+): {
+  port: MessagePort;
+  subscribeCommit(listener: (commit: ClientCommit) => void): () => void;
+  dispose(): void;
+} {
   const relay = new MessageChannel();
   const relayHost = relay.port1;
+  const listeners = new Set<(commit: ClientCommit) => void>();
   relayHost.addEventListener("message", (event: MessageEvent<unknown>) => {
     const message = event.data as ProviderMessage;
     if (message.type === "memory" && typeof message.payload === "string") {
       const parsed = parseClientMessage(message.payload);
       if (parsed?.type === "transact") {
-        commits.push(structuredClone(parsed.commit));
+        const commit = structuredClone(parsed.commit);
+        commits.push(commit);
+        for (const listener of listeners) listener(commit);
       }
     }
     hostPort.postMessage(event.data);
@@ -347,7 +384,12 @@ function instrumentProviderPort(
   hostPort.start();
   return {
     port: relay.port2,
+    subscribeCommit(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     dispose() {
+      listeners.clear();
       relayHost.close();
       hostPort.close();
     },
@@ -468,6 +510,20 @@ class ProductClientWorker {
     return pending.promise;
   }
 
+  waitForCommit(
+    predicate: (commit: ClientCommit) => boolean,
+  ): Promise<ClientCommit> {
+    const existing = this.commits.find(predicate);
+    if (existing !== undefined) return Promise.resolve(existing);
+    const pending = Promise.withResolvers<ClientCommit>();
+    const unsubscribe = this.#relay.subscribeCommit((commit) => {
+      if (!predicate(commit)) return;
+      unsubscribe();
+      pending.resolve(commit);
+    });
+    return pending.promise;
+  }
+
   async dispose(): Promise<void> {
     const requestId = ++this.#nextRequestId;
     const pending = Promise.withResolvers<Record<string, unknown>>();
@@ -492,7 +548,10 @@ const isExactDerivedCommit = (
 };
 
 for (const product of PRODUCT_CASES) {
-  Deno.test(`${product.name} uses one shared server action attempt for three client demands`, async () => {
+  const testName = product.name === "group-chat"
+    ? "group-chat revokes an unserved literal rooms action and converges client-primary"
+    : "lunch-poll uses one shared literal action attempt for three client demands";
+  Deno.test(testName, async () => {
     const principal = await Identity.fromPassphrase(
       `server execution rollout ${product.name} ${crypto.randomUUID()}`,
     );
@@ -585,6 +644,7 @@ for (const product of PRODUCT_CASES) {
         }],
       });
 
+      const executorCommits: ClientCommit[] = [];
       const denoFactory = new DenoSpaceExecutorFactory({
         server,
         apiUrl: new URL("https://toolshed.example/"),
@@ -593,6 +653,17 @@ for (const product of PRODUCT_CASES) {
         experimental: {
           persistentSchedulerState: true,
           serverPrimaryExecution: true,
+        },
+        createProvider(options) {
+          const channel = createHostProviderChannel(options);
+          const relay = instrumentProviderPort(channel.port, executorCommits);
+          return {
+            port: relay.port,
+            async dispose() {
+              relay.dispose();
+              await channel.dispose();
+            },
+          };
         },
         onCandidateClaim(candidate) {
           events.push(`candidate:${candidate.claimKey.actionId}`);
@@ -621,6 +692,10 @@ for (const product of PRODUCT_CASES) {
         control: server,
         factory: trackingFactory,
         settleTimeoutMs: 20_000,
+        // These are explicit hosted-client demands. Ignore the legacy
+        // background-registry exclusion so this rollout test exercises the P1
+        // client path independently of the lower-priority registry cleanup.
+        legacyBackgroundActive: () => false,
       });
       pool.start();
 
@@ -639,9 +714,17 @@ for (const product of PRODUCT_CASES) {
         );
       }
       await pool.idle();
-      assertEquals(pool.metrics().activeWorkers, 1);
       assertEquals(pool.metrics().activeDemands, 3);
       assertEquals(pool.snapshot(space, "")?.referenceCount, 3);
+      assertEquals(
+        pool.metrics().activeWorkers,
+        1,
+        JSON.stringify({
+          metrics: pool.metrics(),
+          snapshot: pool.snapshot(space, ""),
+          events,
+        }),
+      );
       assertExists(liveExecutor);
 
       let localSeq = 1;
@@ -658,15 +741,19 @@ for (const product of PRODUCT_CASES) {
             id: seeded.sourceLink.id,
             value: {
               ...(current as Record<string, unknown>),
-              value: value as FabricValue,
+              value: replaceAtPath(
+                (current as Record<string, unknown>).value,
+                seeded.sourceLink.path,
+                value,
+              ) as FabricValue,
             },
           }],
         });
       };
       // The first invalidation publishes the shadow attempt that establishes
-      // the claim. A claim only governs subsequent attempts, so use a second,
-      // excluded warm invalidation before measuring the next one.
-      await writeSource(product.initialValue);
+      // the claim. A claim only governs subsequent attempts, so successful
+      // ownership uses a second, excluded warm invalidation before measuring.
+      const initialSource = await writeSource(product.initialValue);
       await liveExecutor.settle();
       await liveExecutor.wake();
       await liveExecutor.settle();
@@ -695,6 +782,134 @@ for (const product of PRODUCT_CASES) {
         event.settlement.claim.claimGeneration === claim.claimGeneration &&
         event.settlement.inputBasisSeq >= sourceSeq;
 
+      if (product.name === "group-chat") {
+        // Recomputing the literal room-count path establishes the claim, but
+        // v1 admission rejects its additional collection read.
+        const unserved = await waitWithin(
+          waitForControl((event): event is Extract<
+            ExecutionControlEvent,
+            { type: "session.execution.settlement" }
+          > =>
+            exactSettlement(event, initialSource.seq) &&
+            event.settlement.outcome === "unserved"
+          ),
+          "group-chat unserved rooms settlement",
+          events,
+        );
+        assertEquals(unserved.settlement.diagnosticCode, "unobserved-read");
+        await waitWithin(
+          waitForControl((event): event is Extract<
+            ExecutionControlEvent,
+            { type: "session.execution.claim.revoke" }
+          > =>
+            event.type === "session.execution.claim.revoke" &&
+            event.claim.actionId === claim.actionId &&
+            event.leaseGeneration === claim.leaseGeneration &&
+            event.claimGeneration === claim.claimGeneration
+          ),
+          "group-chat unserved claim revoke",
+          events,
+        );
+        // The literal room-count path materializes the non-empty entity list,
+        // which v1 rejects at admission. Stop that shared executor after the
+        // canonical revoke so the same three clients deterministically resume
+        // ordinary client-primary ownership.
+        await pool.close();
+        pool = undefined;
+        for (const client of clients) {
+          client.commits.length = 0;
+          await client.request("reset", claim);
+        }
+        executorCommits.length = 0;
+        const settlementStart = controlEvents.length;
+        const clientCommit = Promise.any(
+          clients.map((client) =>
+            client.waitForCommit((commit) =>
+              isExactDerivedCommit(commit, seeded.actionId)
+            )
+          ),
+        );
+        const targetAccepted = Promise.withResolvers<void>();
+        const unsubscribeAccepted = server.subscribeAcceptedCommits(
+          space,
+          (event) => {
+            if (
+              event.revisions.some((revision) =>
+                revision.id === seeded.targetLink.id
+              )
+            ) targetAccepted.resolve();
+          },
+        );
+        let roomsSourceSeq = 0;
+        try {
+          roomsSourceSeq = (await writeSource(product.measuredValue)).seq;
+          await waitWithin(
+            Promise.all([clientCommit, targetAccepted.promise]),
+            "group-chat client-primary accepted target commit",
+            events,
+          );
+        } finally {
+          unsubscribeAccepted();
+        }
+        const measurements = await waitWithin(
+          Promise.all(
+            clients.map((client) => client.request("measure", claim)),
+          ),
+          "group-chat accepted target convergence",
+          events,
+        );
+        const exactSettlements = controlEvents.slice(settlementStart).filter(
+          (event): event is Extract<
+            ExecutionControlEvent,
+            { type: "session.execution.settlement" }
+          > => exactSettlement(event, roomsSourceSeq),
+        );
+        assertEquals(
+          exactSettlements.filter((event) =>
+            event.settlement.outcome === "committed" ||
+            event.settlement.outcome === "no-op"
+          ),
+          [],
+        );
+        assertEquals(
+          executorCommits.filter((commit) =>
+            isExactDerivedCommit(commit, seeded.actionId)
+          ),
+          [],
+          "the measured fallback must not emit a server-derived commit",
+        );
+        const clientAttempts = clients.flatMap((client) =>
+          client.commits.filter((commit) =>
+            isExactDerivedCommit(commit, seeded.actionId)
+          )
+        );
+        assert(
+          clientAttempts.length > 0,
+          "a client must resume wire ownership after the unserved revoke",
+        );
+        const targetDocument = await server.readDocument(
+          space,
+          seeded.targetLink.id,
+        );
+        const durableValue = valueAtPath(targetDocument, [
+          "value",
+          ...seeded.targetLink.path,
+        ]);
+        assertEquals(durableValue, product.measuredTargetValue);
+        assert(
+          measurements.some((measurement) =>
+            typeof measurement.upstream === "number" &&
+            measurement.upstream > 0
+          ),
+          "client routing must record an upstream derived commit",
+        );
+        for (const measurement of measurements) {
+          assertEquals(measurement.claimIntegrated, false);
+          assertEquals(measurement.value, durableValue);
+        }
+        return;
+      }
+
       const warmSource = await writeSource(product.warmValue);
       await liveExecutor.settle();
       await liveExecutor.wake();
@@ -720,9 +935,8 @@ for (const product of PRODUCT_CASES) {
         client.commits.length = 0;
         await client.request("reset", claim);
       }
+      executorCommits.length = 0;
       const settlementStart = controlEvents.length;
-      const acceptedAttemptsBefore = server.executionStats
-        .acceptedActionAttempts;
       const measuredSource = await writeSource(product.measuredValue);
       const measurementsPromise = Promise.all(
         clients.map((client) => client.request("measure", claim)),
@@ -757,8 +971,13 @@ for (const product of PRODUCT_CASES) {
         measuredSettlement.settlement.outcome === "committed" ||
           measuredSettlement.settlement.outcome === "no-op",
       );
+      // The literal products can legitimately dirty other actions from the
+      // same primitive update. Count only the selected claimed action here:
+      // it gets exactly one executor wire attempt and one accepted settlement.
       assertEquals(
-        server.executionStats.acceptedActionAttempts - acceptedAttemptsBefore,
+        executorCommits.filter((commit) =>
+          isExactDerivedCommit(commit, seeded.actionId)
+        ).length,
         1,
       );
       for (const client of clients) {
