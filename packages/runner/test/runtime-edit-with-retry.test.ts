@@ -122,6 +122,27 @@ describe("Runtime.editWithRetry", () => {
     expect(attempts).toBe(1);
   });
 
+  it("does not retry a permanent precondition rejection", async () => {
+    let attempts = 0;
+    const { error } = await runtime.editWithRetry((t) => {
+      attempts++;
+      Object.defineProperty(t, "commit", {
+        configurable: true,
+        value: () =>
+          Promise.resolve({
+            error: {
+              name: "PreconditionFailedError",
+              message: "event receipt already exists",
+              precondition: "receipt-exists",
+            },
+          }),
+      });
+    }, 5);
+
+    expect(error?.name).toBe("PreconditionFailedError");
+    expect(attempts).toBe(1);
+  });
+
   it("does not retry a stale execution lease fence", async () => {
     let attempts = 0;
     const { error } = await runtime.editWithRetry((t) => {

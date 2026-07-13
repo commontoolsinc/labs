@@ -377,9 +377,7 @@ export class SharedExecutionPool {
     }
     if (slot.pendingWakeSeq === null || event.dataSeq > slot.pendingWakeSeq) {
       slot.pendingWakeSeq = event.dataSeq;
-      if (event.originSessionId !== undefined) {
-        slot.preferredOriginSessionId = event.originSessionId;
-      }
+      slot.preferredOriginSessionId = event.originSessionId;
     } else if (
       event.dataSeq === slot.pendingWakeSeq &&
       event.originSessionId !== undefined

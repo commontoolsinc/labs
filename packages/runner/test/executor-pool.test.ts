@@ -539,6 +539,34 @@ Deno.test("accepted commit cold-starts parked demand on behalf of its origin", a
   }
 });
 
+Deno.test("a newer originless accepted commit clears a stale sponsor preference", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    control.acquisitionSucceeds = false;
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+
+    control.acquisitionSucceeds = true;
+    await Promise.all([
+      control.emitAccepted(acceptedCommit({
+        dataSeq: 7,
+        originSessionId: "session:stale",
+      })),
+      control.emitAccepted(acceptedCommit({ dataSeq: 8 })),
+    ]);
+    await pool.idle();
+
+    assertEquals(factory.starts.length, 1);
+    assertEquals(control.acquisitionOptions, [undefined, undefined]);
+  } finally {
+    await pool.close();
+  }
+});
+
 Deno.test("accepted commit wake ignores wrong-branch and unstale events", async () => {
   const control = new FakeExecutionControl();
   const factory = new FakeExecutorFactory();

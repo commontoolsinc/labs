@@ -113,7 +113,7 @@ const key: ActionClaimKey = {
   runtimeFingerprint: "runtime:action-router",
 };
 
-Deno.test("executor action router reoffers an unclaimed pure action then routes its exact claim upstream", async () => {
+Deno.test("executor action router offers an unclaimed pure action once then routes its exact claim upstream", async () => {
   const counts = getLoggerCountsBreakdown()["execution.executor"] ?? {};
   const shadowBaseline = counts["execution-server-shadow-action-run"]?.debug ??
     0;
@@ -169,10 +169,7 @@ Deno.test("executor action router reoffers an unclaimed pure action then routes 
   if (stillUnclaimedRoute.kind === "executor-shadow") {
     stillUnclaimedRoute.afterLocalApply?.();
   }
-  assertEquals(candidates, [
-    { claimKey: key, sourceAction: action },
-    { claimKey: key, sourceAction: action },
-  ]);
+  assertEquals(candidates, [{ claimKey: key, sourceAction: action }]);
 
   const claim: ExecutionClaim = {
     ...key,

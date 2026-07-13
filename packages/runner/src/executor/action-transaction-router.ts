@@ -257,14 +257,16 @@ export function createExecutorActionTransactionRouter(
         ]);
       }
       const encoded = JSON.stringify(claimKey);
-      reported.set(sourceAction, encoded);
       return {
         ...local,
-        afterLocalApply: () =>
+        afterLocalApply: () => {
+          if (reported.get(sourceAction) === encoded) return;
+          reported.set(sourceAction, encoded);
           options.onCandidate({
             claimKey,
             ...(builtinId !== undefined ? { builtinId } : {}),
-          }, sourceAction),
+          }, sourceAction);
+        },
       };
     }
 

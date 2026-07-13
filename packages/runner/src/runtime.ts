@@ -129,6 +129,7 @@ import type {
 import { getTransactionSourceAction } from "./storage/transaction-source-context.ts";
 import {
   isExecutionLeaseFenceRejection,
+  isPermanentRejection,
   isTerminalRejection,
 } from "./storage/rejection.ts";
 import {
@@ -1473,7 +1474,7 @@ export class Runtime {
     return tx.commit().then(async ({ error }) => {
       if (error) {
         if (
-          isTerminalRejection(error) ||
+          isPermanentRejection(error) || isTerminalRejection(error) ||
           isExecutionLeaseFenceRejection(error)
         ) return { error };
         if (maxRetries > 0) {
