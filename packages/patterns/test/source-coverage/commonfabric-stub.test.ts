@@ -278,7 +278,13 @@ export function fetchBinary(
 
 type PendingResult = { pending: true };
 type ErrorResult = { error: Error };
-type UnavailableResult = PendingResult | ErrorResult;
+type SyncingResult = { syncing: true };
+type SchemaMismatchResult = { schemaMismatch: true };
+type UnavailableResult =
+  | PendingResult
+  | ErrorResult
+  | SyncingResult
+  | SchemaMismatchResult;
 
 function currentGenerateTextValue(): string | UnavailableResult {
   if (generateTextResult.pending) return { pending: true };
@@ -306,6 +312,22 @@ export function isPending(value: unknown): value is PendingResult {
 export function hasError(value: unknown): value is ErrorResult {
   return typeof value === "object" && value !== null &&
     (value as { error?: unknown }).error instanceof Error;
+}
+
+export function isSyncing(value: unknown): value is SyncingResult {
+  return typeof value === "object" && value !== null &&
+    (value as { syncing?: unknown }).syncing === true;
+}
+
+export function hasSchemaMismatch(
+  value: unknown,
+): value is SchemaMismatchResult {
+  return typeof value === "object" && value !== null &&
+    (value as { schemaMismatch?: unknown }).schemaMismatch === true;
+}
+
+export function observeAvailability<T>(value: T): T {
+  return value;
 }
 
 export function generateObject<T>(
