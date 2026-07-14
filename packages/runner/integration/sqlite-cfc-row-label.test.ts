@@ -71,8 +71,8 @@ async function runTest(base: URL) {
           | undefined;
         const cleared = result.key("qClear").resolveAsCell().key("rows")
           .getRaw() as
-          | unknown[]
-          | undefined;
+            | unknown[]
+            | undefined;
         if (
           Array.isArray(arr) && arr.length === 2 && Array.isArray(skim) &&
           count?.reason === "error" && Array.isArray(cleared)

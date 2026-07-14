@@ -8,8 +8,7 @@ import {
 Deno.test("pending render state marks retained content inert and busy", () => {
   const attributes = new Map<string, string>();
   const element = {
-    setAttribute: (name: string, value: string) =>
-      attributes.set(name, value),
+    setAttribute: (name: string, value: string) => attributes.set(name, value),
     removeAttribute: (name: string) => attributes.delete(name),
   } as unknown as Node;
 
@@ -30,9 +29,7 @@ Deno.test("pending render styles install once in the active shadow root", () => 
   const root = {
     nodeType: 11,
     querySelector: () =>
-      styles.find((style) =>
-        style.attributes.has("data-cf-pending-styles")
-      ),
+      styles.find((style) => style.attributes.has("data-cf-pending-styles")),
     appendChild: (style: (typeof styles)[number]) => styles.push(style),
   };
   const container = {
