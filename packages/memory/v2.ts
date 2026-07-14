@@ -1066,7 +1066,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 let persistentSchedulerStateEnabled = true;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
-let serverPrimaryExecutionEnabled = false;
+let serverPrimaryExecutionEnabled = true;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -1087,11 +1087,11 @@ export function resetPersistentSchedulerStateConfig(): void {
 
 /**
  * Ambient runtime flag for the server-primary execution protocol. The
- * capability is optional and defaults off; when enabled, compatible peers
- * use server-primary authority for every eligible claimed action.
+ * capability defaults on with an explicit false rollback override; compatible
+ * peers use server-primary authority for every eligible claimed action.
  */
 export function setServerPrimaryExecutionConfig(enabled?: boolean): void {
-  serverPrimaryExecutionEnabled = enabled ?? false;
+  serverPrimaryExecutionEnabled = enabled ?? true;
 }
 
 export function getServerPrimaryExecutionConfig(): boolean {
@@ -1099,7 +1099,7 @@ export function getServerPrimaryExecutionConfig(): boolean {
 }
 
 export function resetServerPrimaryExecutionConfig(): void {
-  serverPrimaryExecutionEnabled = false;
+  serverPrimaryExecutionEnabled = true;
 }
 
 /**
