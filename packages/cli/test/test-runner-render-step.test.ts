@@ -17,7 +17,7 @@ function fixture(name: string): string {
 
 async function withCoverage(
   name: string,
-  continuousUI = false,
+  options: { continuousUI?: boolean; verbose?: boolean } = {},
 ): Promise<{
   lateHitCount: number;
   afterRenderHitCount: number;
@@ -29,7 +29,8 @@ async function withCoverage(
     const result = await runTests(fixture(name), {
       root: FIXTURES,
       patternCoverageDir: coverageDir,
-      continuousUI,
+      continuousUI: options.continuousUI,
+      verbose: options.verbose,
     });
     const files: string[] = [];
     for await (const entry of Deno.readDir(coverageDir)) {
@@ -78,10 +79,21 @@ describe(
   { sanitizeOps: false, sanitizeResources: false },
   () => {
     it("materializes late-state VDOM and stays transparent to results", async () => {
-      const result = await withCoverage("render-step.test.tsx");
+      const result = await withCoverage("render-step.test.tsx", {
+        verbose: true,
+      });
       expect(result.lateHitCount).toBeGreaterThan(0);
       expect(result.stepResultCount).toBe(1);
       expect(result.passed).toBe(1);
+    });
+
+    it("accepts primitive VDOM roots", async () => {
+      const { failed, passed } = await runTests(
+        fixture("primitive-render.test.tsx"),
+        { root: FIXTURES },
+      );
+      expect(failed).toBe(0);
+      expect(passed).toBe(1);
     });
 
     it("preserves the headless default when no render step is present", async () => {
@@ -91,7 +103,9 @@ describe(
     });
 
     it("does not materialize a skipped render step", async () => {
-      const result = await withCoverage("skipped-render.test.tsx");
+      const result = await withCoverage("skipped-render.test.tsx", {
+        verbose: true,
+      });
       expect(result.lateHitCount).toBe(0);
       expect(result.passed).toBe(1);
     });
@@ -115,7 +129,9 @@ describe(
     });
 
     it("uses the same primitive in multi-user workers", async () => {
-      const result = await withCoverage("multi-user.test.tsx");
+      const result = await withCoverage("multi-user.test.tsx", {
+        verbose: true,
+      });
       expect(result.lateHitCount).toBeGreaterThan(0);
       expect(result.stepResultCount).toBe(1);
       expect(result.passed).toBe(1);
@@ -128,7 +144,10 @@ describe(
     });
 
     it("continuously demands an exported $UI for the full run", async () => {
-      const result = await withCoverage("continuous-ui.test.tsx", true);
+      const result = await withCoverage("continuous-ui.test.tsx", {
+        continuousUI: true,
+        verbose: true,
+      });
       expect(result.lateHitCount).toBeGreaterThan(0);
       expect(result.passed).toBe(1);
     });
@@ -136,7 +155,7 @@ describe(
     it("continuously demands each multi-user participant's $UI", async () => {
       const result = await withCoverage(
         "continuous-multi-user.test.tsx",
-        true,
+        { continuousUI: true },
       );
       expect(result.lateHitCount).toBeGreaterThan(0);
       expect(result.passed).toBe(1);
