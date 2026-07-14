@@ -107,6 +107,18 @@ export type ScriptedTransportMessage = {
   commit?: unknown;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertScriptedTransportMessage(
+  value: unknown,
+): asserts value is ScriptedTransportMessage {
+  if (!isRecord(value) || typeof value.type !== "string") {
+    throw new TypeError("Expected a memory transport message with a type");
+  }
+}
+
 /**
  * Base class for scripted memory-v2 transports: owns the session ceremony
  * every scripted server answers identically — `hello` (with sessionOpen
@@ -160,7 +172,9 @@ export abstract class ScriptedSessionTransport
   /** Wire codec seams — override together when a harness needs a specific
    * reconstruction context. */
   protected decode(payload: string): ScriptedTransportMessage {
-    return decodeMemoryBoundary(payload) as unknown as ScriptedTransportMessage;
+    const message = decodeMemoryBoundary(payload);
+    assertScriptedTransportMessage(message);
+    return message;
   }
   protected encode(message: unknown): string {
     return encodeMemoryBoundary(message as FabricValue);

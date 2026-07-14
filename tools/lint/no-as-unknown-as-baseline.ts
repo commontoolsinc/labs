@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/memory-v2-test-utils.ts": [
-    "163:41:1mosc8p",
-  ],
   "packages/runner/test/module.test.ts": [
     "453:24:1wics4p",
     "699:9:f27qce",
