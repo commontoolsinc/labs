@@ -2,6 +2,7 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { URI } from "@commonfabric/memory/interface";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { resolveLink } from "../src/link-resolution.ts";
@@ -17,6 +18,14 @@ type StoredEntry = {
   label: { confidentiality?: string[]; integrity?: unknown[] };
   origin?: string;
   observes?: string;
+};
+
+type StoredCfc = Record<string, unknown> & {
+  labelMap?: { entries?: StoredEntry[] };
+};
+
+type StoredCfcDocument = {
+  cfc?: StoredCfc;
 };
 
 // Epic C stage C3 + follow-up — the existence channel (C0 §5, SC-4) and
@@ -56,7 +65,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     cause: string,
     value: unknown,
     entries: LabelMapEntry[],
-  ): Promise<string> => {
+  ): Promise<URI> => {
     const seed = rt.edit();
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
@@ -72,35 +81,31 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     return id;
   };
 
-  const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  const entriesOf = (id: URI): StoredEntry[] => {
+    const document = storageManager!.open(space).replica.getDocument(id) as
+      | StoredCfcDocument
+      | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
 
-  const readAddress = (id: string, path: string[]) => ({
+  const readAddress = (id: URI, path: string[]) => ({
     space,
     scope: "space" as const,
-    id: id as `${string}:${string}`,
+    id,
     type: "application/json" as const,
     path: ["value", ...path],
   });
-
-  const uri = (id: string) => id as `${string}:${string}`;
 
   // Root-writes `value` into a fresh doc while consuming `sourceId`,
   // returning the new doc's id. Root writeOrThrow: leaf-diffing set() would
   // not cover the stamped path on the later overwrite.
   const writeTainted = async (
     rt: Runtime,
-    sourceId: string | undefined,
+    sourceId: URI | undefined,
     outCause: string,
     value: Record<string, unknown>,
     writePath: string[] = [],
-  ): Promise<string> => {
+  ): Promise<URI> => {
     const tx = rt.edit();
     if (sourceId !== undefined) {
       tx.readOrThrow(readAddress(sourceId, []));
@@ -108,7 +113,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const out = rt.getCell(space, outCause, undefined, tx);
     const outId = out.getAsNormalizedFullLink().id;
     tx.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", ...writePath] },
+      { space, scope: "space", id: outId, path: ["value", ...writePath] },
       value,
     );
     tx.prepareCfc();
@@ -116,7 +121,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     return outId;
   };
 
-  const shapeEntriesAt = (id: string, path: string[]): StoredEntry[] =>
+  const shapeEntriesAt = (id: URI, path: string[]): StoredEntry[] =>
     entriesOf(id).filter((e) =>
       e.observes === "shape" && e.path.join("/") === path.join("/")
     );
@@ -139,7 +144,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     // Clean overwrite: reads nothing labeled, root-overwrites the doc.
     const tx = rt.edit();
     tx.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { copied: false },
     );
     tx.prepareCfc();
@@ -174,7 +179,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const tx = rt.edit();
     tx.readOrThrow(readAddress(publicId, []));
     tx.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { copied: false },
     );
     tx.prepareCfc();
@@ -206,7 +211,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const tainted = rt.edit();
     tainted.readOrThrow(readAddress(sourceId, []));
     tainted.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       { deep: true },
     );
     tainted.prepareCfc();
@@ -216,7 +221,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     // Clean ROOT overwrite: descendant pair cleared, existence folds to [].
     const tx = rt.edit();
     tx.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { flat: true },
     );
     tx.prepareCfc();
@@ -257,7 +262,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const create = rt.edit();
     create.readOrThrow(readAddress(secretOne, []));
     create.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       { deep: true },
     );
     create.prepareCfc();
@@ -269,7 +274,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     // entry survives the deletion itself (the documented over-taint arm).
     const del = rt.edit();
     del.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { other: 2 },
     );
     del.prepareCfc();
@@ -283,7 +288,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const recreate = rt.edit();
     recreate.readOrThrow(readAddress(secretTwo, []));
     recreate.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       { back: true },
     );
     recreate.prepareCfc();
@@ -312,7 +317,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const create = rt.edit();
     create.readOrThrow(readAddress(secretOne, []));
     create.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       { deep: true },
     );
     create.prepareCfc();
@@ -320,7 +325,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
 
     const del = rt.edit();
     del.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { other: 2 },
     );
     del.prepareCfc();
@@ -333,7 +338,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       {
         space,
         scope: "space",
-        id: uri(outId),
+        id: outId,
         path: ["value", "child", "deep"],
       },
       true,
@@ -366,7 +371,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const create = rt.edit();
     create.readOrThrow(readAddress(secretOne, []));
     create.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       { deep: true },
     );
     create.prepareCfc();
@@ -379,7 +384,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     // carries through this overwrite too.
     const toUndef = rt.edit();
     toUndef.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       undefined,
     );
     toUndef.prepareCfc();
@@ -393,7 +398,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const overwrite = rt.edit();
     overwrite.readOrThrow(readAddress(secretTwo, []));
     overwrite.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { other: 2, child: 5 },
     );
     overwrite.prepareCfc();
@@ -424,7 +429,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const create = rt.edit();
     create.readOrThrow(readAddress(secretOne, []));
     create.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       { deep: true },
     );
     create.prepareCfc();
@@ -432,7 +437,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
 
     const toUndef = rt.edit();
     toUndef.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       undefined,
     );
     toUndef.prepareCfc();
@@ -446,7 +451,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const overwrite = rt.edit();
     overwrite.readOrThrow(readAddress(secretTwo, []));
     overwrite.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       5,
     );
     overwrite.prepareCfc();
@@ -473,7 +478,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const create = rt.edit();
     create.readOrThrow(readAddress(secretOne, []));
     create.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       { deep: true },
     );
     create.prepareCfc();
@@ -481,7 +486,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
 
     const del = rt.edit();
     del.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { other: 2 },
     );
     del.prepareCfc();
@@ -490,7 +495,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
 
     const recreate = rt.edit();
     recreate.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "child"] },
+      { space, scope: "space", id: outId, path: ["value", "child"] },
       { back: true },
     );
     recreate.prepareCfc();
@@ -514,16 +519,12 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       copied: true,
     });
     // Rewrite the stored metadata into the pre-C2 single-covering shape.
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): { cfc?: { labelMap?: { entries: unknown[] } } };
-    };
-    const stored = replica.getDocument(outId).cfc! as Record<
-      string,
-      unknown
-    >;
+    const stored = (storageManager!.open(space).replica.getDocument(outId) as
+      | StoredCfcDocument
+      | undefined)?.cfc as Record<string, unknown>;
     const legacy = rt.edit();
     legacy.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["cfc"] },
+      { space, scope: "space", id: outId, path: ["cfc"] },
       {
         ...stored,
         labelMap: {
@@ -540,7 +541,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
 
     const tx = rt.edit();
     tx.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { copied: false },
     );
     tx.prepareCfc();
@@ -576,7 +577,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
 
     const tx2 = rt.edit();
     tx2.writeOrThrow(
-      { space, scope: "space", id: uri(listId), path: ["value"] },
+      { space, scope: "space", id: listId, path: ["value"] },
       { replaced: true },
     );
     tx2.prepareCfc();
@@ -602,7 +603,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const taint = rt.edit();
     taint.readOrThrow(readAddress(sourceId, []));
     taint.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "slot"] },
+      { space, scope: "space", id: outId, path: ["value", "slot"] },
       { copied: true },
     );
     taint.prepareCfc();
@@ -639,7 +640,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const taint = rt.edit();
     taint.readOrThrow(readAddress(sourceId, []));
     taint.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "secret"] },
+      { space, scope: "space", id: outId, path: ["value", "secret"] },
       "tainted",
     );
     taint.prepareCfc();
@@ -658,7 +659,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     );
     const clean = rt.edit();
     clean.writeValueOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "secret"] },
+      { space, scope: "space", id: outId, path: ["value", "secret"] },
       "fresh",
     );
     clean.recordCfcWritePolicyInput({
@@ -666,7 +667,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       target: {
         space,
         scope: "space",
-        id: uri(outId),
+        id: outId,
         path: ["value", "secret"],
       },
       schemaHash: declared.taggedHashString,
@@ -708,7 +709,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const taint = rt.edit();
     taint.readOrThrow(readAddress(sourceId, []));
     taint.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "secret"] },
+      { space, scope: "space", id: outId, path: ["value", "secret"] },
       "tainted",
     );
     taint.prepareCfc();
@@ -728,7 +729,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     });
     const clean = rt.edit();
     clean.writeValueOrThrow(
-      { space, scope: "space", id: uri(elsewhereId), path: ["value"] },
+      { space, scope: "space", id: elsewhereId, path: ["value"] },
       { unrelated: 2 },
     );
     clean.recordCfcWritePolicyInput({
@@ -736,7 +737,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       target: {
         space,
         scope: "space",
-        id: uri(outId),
+        id: outId,
         path: ["value", "secret"],
       },
       schemaHash: declared.taggedHashString,
@@ -766,12 +767,11 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
 
     // Flip the stored existence clause to the reversed byte form, as a
     // peer's view merge could have persisted it.
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): { cfc?: Record<string, unknown> };
-    };
-    const stored = replica.getDocument(outId).cfc! as {
-      labelMap: { entries: StoredEntry[] };
-    };
+    const stored = (storageManager!.open(space).replica.getDocument(outId) as
+      | StoredCfcDocument
+      | undefined)?.cfc as StoredCfc & {
+        labelMap: { entries: StoredEntry[] };
+      };
     const flipped = {
       ...stored,
       labelMap: {
@@ -788,7 +788,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     };
     const flip = rt.edit();
     flip.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["cfc"] },
+      { space, scope: "space", id: outId, path: ["cfc"] },
       flipped as never,
     );
     expect((await flip.commit()).ok).toBeDefined();
@@ -798,7 +798,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const tx = rt.edit();
     tx.readOrThrow(readAddress(sourceId, []));
     tx.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { copied: false },
     );
     tx.prepareCfc();
@@ -814,7 +814,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const again = rt.edit();
     again.readOrThrow(readAddress(sourceId, []));
     again.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { copied: 2 },
     );
     again.prepareCfc();
@@ -837,7 +837,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       { path: [], label: { confidentiality: ["bob"] } },
     ]);
 
-    const stampList = async (readIds: string[], members: string[]) => {
+    const stampList = async (readIds: URI[], members: string[]) => {
       const tx = rt.edit();
       for (const id of readIds) tx.readOrThrow(readAddress(id, []));
       const cells = members.map((cause) =>
@@ -899,19 +899,18 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const taint = rt.edit();
     taint.readOrThrow(readAddress(sourceId, []));
     taint.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value", "slot"] },
+      { space, scope: "space", id: outId, path: ["value", "slot"] },
       { copied: true },
     );
     taint.prepareCfc();
     expect((await taint.commit()).ok).toBeDefined();
     // Rewrite stored metadata: ONE legacy covering derived entry at the slot.
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): { cfc?: Record<string, unknown> };
-    };
-    const stored = replica.getDocument(outId).cfc! as Record<string, unknown>;
+    const stored = (storageManager!.open(space).replica.getDocument(outId) as
+      | StoredCfcDocument
+      | undefined)?.cfc as Record<string, unknown>;
     const legacy = rt.edit();
     legacy.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["cfc"] },
+      { space, scope: "space", id: outId, path: ["cfc"] },
       {
         ...stored,
         labelMap: {
@@ -963,7 +962,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const out = rt.getCell(space, "ec-mixed-out", undefined, tx);
     const outId = out.getAsNormalizedFullLink().id;
     tx.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { text: "x" },
     );
     const el = rt.getCell(space, "ec-mixed-el", undefined, tx);
@@ -997,7 +996,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     const overwrite = async (value: Record<string, unknown>) => {
       const tx = rt.edit();
       tx.writeOrThrow(
-        { space, scope: "space", id: uri(outId), path: ["value"] },
+        { space, scope: "space", id: outId, path: ["value"] },
         value,
       );
       tx.prepareCfc();
@@ -1059,10 +1058,10 @@ describe("CFC slot-pointer channel (C3, SC-8 end-to-end)", () => {
     const tx = runtime.edit();
     const slotLink: NormalizedFullLink = {
       space,
-      id: holderId as `${string}:${string}`,
+      id: holderId,
       path: ["slot"],
       scope: "space",
-    } as NormalizedFullLink;
+    };
     resolveLink(runtime, tx, slotLink, "top");
     const out = runtime.getCell(space, "sp-out", undefined, tx);
     const outId = out.getAsNormalizedFullLink().id;
@@ -1070,7 +1069,7 @@ describe("CFC slot-pointer channel (C3, SC-8 end-to-end)", () => {
       {
         space,
         scope: "space",
-        id: outId as `${string}:${string}`,
+        id: outId,
         path: ["value"],
       },
       { observed: true },
@@ -1078,13 +1077,12 @@ describe("CFC slot-pointer channel (C3, SC-8 end-to-end)", () => {
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
-    const replica = storageManager.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    const derived = (replica.getDocument(outId)?.cfc?.labelMap?.entries ?? [])
-      .filter((e) => e.origin === "derived");
+    const document = storageManager.open(space).replica.getDocument(outId) as
+      | StoredCfcDocument
+      | undefined;
+    const derived = (document?.cfc?.labelMap?.entries ?? []).filter((e) =>
+      e.origin === "derived"
+    );
     expect(
       derived.flatMap((e) => e.label.confidentiality ?? []),
     ).toContainEqual("pointer-label");

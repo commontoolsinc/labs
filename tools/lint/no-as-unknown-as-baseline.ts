@@ -1,11 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-existence-channel.test.ts": [
-    "76:56:10q9jc",
-    "517:56:1n5gi8u",
-    "769:56:kh5c0b",
-    "908:56:kh5c0b",
-    "1081:55:1n5qe5z",
-  ],
   "packages/runner/test/cfc-flow-labels.test.ts": [
     "483:51:hpsqtz",
     "721:17:xbrtnq",
