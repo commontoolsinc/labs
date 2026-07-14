@@ -5,6 +5,7 @@ import {
   EvaluateFunction,
   EvaluateOptions,
   GoToOptions,
+  InteractionObserver,
   Keyboard,
   Page as AstralPage,
   PageEventMap,
@@ -13,6 +14,10 @@ import {
   WaitForOptions,
   WaitForSelectorOptions,
 } from "@astral/astral";
+import type {
+  Page_screencastFrame,
+  Page_screencastFrameEvent,
+} from "../vendor-astral/bindings/celestial.ts";
 import { sleep } from "@commonfabric/utils/sleep";
 import { Mutable } from "@commonfabric/utils/types";
 import * as path from "@std/path";
@@ -222,6 +227,60 @@ export class Page extends EventTarget {
   get keyboard(): Keyboard {
     this.checkIsOk();
     return this.page!.keyboard;
+  }
+
+  setInteractionObserver(observer?: InteractionObserver): void {
+    this.checkIsOk();
+    this.page!.setInteractionObserver(observer);
+  }
+
+  setDefaultTypeDelay(delay: number): void {
+    this.checkIsOk();
+    this.page!.keyboard.setDefaultTypeDelay(delay);
+  }
+
+  async setViewportSize(
+    size: { width: number; height: number },
+  ): Promise<void> {
+    this.checkIsOk();
+    await this.page!.setViewportSize(size);
+  }
+
+  async startScreencast(options: {
+    format?: "jpeg" | "png";
+    quality?: number;
+    maxWidth?: number;
+    maxHeight?: number;
+    everyNthFrame?: number;
+  } = {}): Promise<void> {
+    this.checkIsOk();
+    await this.page!.unsafelyGetCelestialBindings().Page.startScreencast(
+      options,
+    );
+  }
+
+  async stopScreencast(): Promise<void> {
+    this.checkIsOk();
+    await this.page!.unsafelyGetCelestialBindings().Page.stopScreencast();
+  }
+
+  async acknowledgeScreencastFrame(sessionId: number): Promise<void> {
+    this.checkIsOk();
+    await this.page!.unsafelyGetCelestialBindings().Page.screencastFrameAck({
+      sessionId,
+    });
+  }
+
+  onScreencastFrame(
+    listener: (frame: Page_screencastFrame) => void,
+  ): () => void {
+    this.checkIsOk();
+    const celestial = this.page!.unsafelyGetCelestialBindings();
+    const handler: EventListener = (event) => {
+      listener((event as Page_screencastFrameEvent).detail);
+    };
+    celestial.addEventListener("Page.screencastFrame", handler);
+    return () => celestial.removeEventListener("Page.screencastFrame", handler);
   }
 
   // Passthru of `@astral/astral`'s `Page#evaluate`

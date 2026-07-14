@@ -205,18 +205,18 @@ export class ElementHandle {
 
     const { x, y } = getTopLeft(model.content);
 
-    if (opts?.offset) {
-      await this.#page.mouse.click(
-        x + opts.offset.x,
-        y + opts.offset.y,
-        opts,
-      );
-    } else {
-      await this.#page.mouse.click(
-        x + (model.width / 2),
-        y + (model.height / 2),
-        opts,
-      );
+    const point = opts?.offset
+      ? { x: x + opts.offset.x, y: y + opts.offset.y }
+      : { x: x + (model.width / 2), y: y + (model.height / 2) };
+    await this.#page.notifyBeforeClick(this, point);
+    let error: unknown;
+    try {
+      await this.#page.mouse.click(point.x, point.y, opts);
+    } catch (cause) {
+      error = cause;
+      throw cause;
+    } finally {
+      await this.#page.notifyAfterClick(this, point, error);
     }
   }
 
@@ -328,7 +328,16 @@ export class ElementHandle {
    */
   async type(text: string, opts?: KeyboardTypeOptions) {
     await this.focus();
-    await this.#page.keyboard.type(text, opts);
+    await this.#page.notifyBeforeType(this, text);
+    let error: unknown;
+    try {
+      await this.#page.keyboard.type(text, opts);
+    } catch (cause) {
+      error = cause;
+      throw cause;
+    } finally {
+      await this.#page.notifyAfterType(this, text, error);
+    }
   }
 
   /**

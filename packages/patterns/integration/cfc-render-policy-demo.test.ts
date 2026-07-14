@@ -10,6 +10,7 @@ import {
 } from "./pieces-controller.ts";
 import {
   clickTrustedActionAndWaitForText,
+  StepTimer,
   waitForRuntimeIdle,
   waitForText,
   waitForTextAbsent,
@@ -18,7 +19,9 @@ import {
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 describe("cfc render policy demo integration test", () => {
-  const shell = new ShellIntegration();
+  const shell = new ShellIntegration({
+    presentation: { label: "Policy demo", color: "#7c3aed" },
+  });
   shell.bindLifecycle();
 
   let identity: Identity;
@@ -62,6 +65,7 @@ describe("cfc render policy demo integration test", () => {
   });
 
   it("blocks raw confidential content and reveals it through the trusted surface", async () => {
+    const timeline = new StepTimer();
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -73,29 +77,46 @@ describe("cfc render policy demo integration test", () => {
     });
     await waitForRuntimeIdle(page);
 
-    await waitForText(page, "#raw-health-attempt", "Content hidden by policy");
-    await waitForText(
-      page,
-      "#trusted-health-surface",
-      "Content hidden by policy",
-    );
-    await waitForTextAbsent(
-      page,
-      "#raw-health-attempt",
-      "Sensitive health data:",
+    await timeline.run(
+      "Confidential data starts hidden on every untrusted surface",
+      async () => {
+        await waitForText(
+          page,
+          "#raw-health-attempt",
+          "Content hidden by policy",
+        );
+        await waitForText(
+          page,
+          "#trusted-health-surface",
+          "Content hidden by policy",
+        );
+        await waitForTextAbsent(
+          page,
+          "#raw-health-attempt",
+          "Sensitive health data:",
+        );
+      },
     );
 
-    await clickTrustedActionAndWaitForText(
-      page,
-      "TrustedRevealHealthData",
-      "#trusted-health-visible",
-      "Sensitive health data: migraine treatment plan",
-      { timeout: 45_000 },
+    await timeline.run(
+      "A trusted action reveals the approved value only inside its trusted surface",
+      () =>
+        clickTrustedActionAndWaitForText(
+          page,
+          "TrustedRevealHealthData",
+          "#trusted-health-visible",
+          "Sensitive health data: migraine treatment plan",
+          { timeout: 45_000 },
+        ),
     );
-    await waitForTextAbsent(
-      page,
-      "#raw-health-attempt",
-      "Sensitive health data:",
+    await timeline.run(
+      "The raw pattern output remains hidden after the trusted reveal",
+      () =>
+        waitForTextAbsent(
+          page,
+          "#raw-health-attempt",
+          "Sensitive health data:",
+        ),
     );
   });
 });

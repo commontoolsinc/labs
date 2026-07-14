@@ -31,10 +31,15 @@ export class Keyboard {
   #celestial: Celestial;
   #pageData: KeyboardPageData;
   #pressedKeys = new Set<string>();
+  #defaultTypeDelay = 0;
 
   constructor(celestial: Celestial, pageData?: KeyboardPageData) {
     this.#celestial = celestial;
     this.#pageData = pageData || { modifiers: 0 };
+  }
+
+  setDefaultTypeDelay(delay: number): void {
+    this.#defaultTypeDelay = delay;
   }
 
   /**
@@ -181,7 +186,7 @@ export class Keyboard {
    * Sends a `keydown`, `keypress`/`input`, and `keyup` event for each character in the text.
    */
   async type(text: string | KeyInput[], options: KeyboardTypeOptions = {}) {
-    const delay = options.delay;
+    const delay = options.delay ?? this.#defaultTypeDelay;
     for (const char of text) {
       const key = char as KeyInput;
       if (key in KEY_DEFINITIONS) {
