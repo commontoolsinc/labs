@@ -1,12 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/sandbox-id-auto-provision.test.ts": [
-    "189:38:1ffzxwo",
-    "335:14:yqzshn",
-    "439:44:s052ks",
-    "440:44:s052ks",
-    "513:50:s052ks",
-    "578:24:fbvuaw",
-  ],
   "packages/runner/test/scheduler-event-identity.test.ts": [
     "106:55:1rwuvne",
     "145:6:ueps3d",

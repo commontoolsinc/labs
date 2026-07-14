@@ -93,6 +93,8 @@ const PRESENT_SCHEMA: JSONSchema = {
   required: ["ok"],
 };
 
+const llmTool = (tool: BuiltInLLMTool): BuiltInLLMTool => tool;
+
 describe("auto-provided sandboxId", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -179,14 +181,14 @@ describe("auto-provided sandboxId", () => {
     );
 
     const toolDef = extraParams
-      ? patternTool(echoSandbox, extraParams as never)
-      : patternTool(echoSandbox);
+      ? llmTool(patternTool(echoSandbox, extraParams as never))
+      : llmTool(patternTool(echoSandbox));
 
     const testPattern = pattern<Record<string, never>>(() =>
       generateObject({
         prompt: `auto-sandbox-${tag}`,
         schema: PRESENT_SCHEMA,
-        tools: { echoSandbox: toolDef as unknown as BuiltInLLMTool },
+        tools: { echoSandbox: toolDef },
       })
     );
 
@@ -329,10 +331,10 @@ describe("auto-provided sandboxId", () => {
           prompt: "pin-via-extra",
           schema: PRESENT_SCHEMA,
           tools: {
-            echoSandbox: patternTool(
+            echoSandbox: llmTool(patternTool(
               echoSandbox,
               { sandboxId: "pinned-by-pattern" } as never,
-            ) as unknown as BuiltInLLMTool,
+            )),
           },
         })
       );
@@ -436,8 +438,8 @@ describe("auto-provided sandboxId", () => {
           prompt: "two-bash-tools",
           schema: PRESENT_SCHEMA,
           tools: {
-            toolA: patternTool(echoSandbox) as unknown as BuiltInLLMTool,
-            toolB: patternTool(echoSandbox) as unknown as BuiltInLLMTool,
+            toolA: llmTool(patternTool(echoSandbox)),
+            toolB: llmTool(patternTool(echoSandbox)),
           },
         })
       );
@@ -510,7 +512,7 @@ describe("auto-provided sandboxId", () => {
           prompt: "strip-model-schema",
           schema: PRESENT_SCHEMA,
           tools: {
-            echoSandbox: patternTool(echoSandbox) as unknown as BuiltInLLMTool,
+            echoSandbox: llmTool(patternTool(echoSandbox)),
           },
         })
       );
@@ -575,7 +577,7 @@ describe("framework-provided field helpers", () => {
   } as never;
 
   it("stripFrameworkProvidedFields: leaves a non-object schema unchanged", () => {
-    const schema = true as unknown as JSONSchema;
+    const schema: JSONSchema = true;
     expect(stripFrameworkProvidedFields(schema)).toBe(schema);
   });
 
