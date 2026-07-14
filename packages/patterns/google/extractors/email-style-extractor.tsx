@@ -21,11 +21,13 @@ import {
   generateObjectStream,
   handler,
   hasError,
+  hasSchemaMismatch,
   isPending,
+  isSyncing,
   JSONSchema,
   NAME,
+  observeAvailability,
   pattern,
-  resultOf,
   safeDateNow,
   UI,
   type VNode,
@@ -243,18 +245,27 @@ Extract the writing style patterns from these emails.`;
         "You are an expert linguist analyzing email writing patterns. Extract consistent style patterns across all provided emails. Be specific and use examples from the actual text.",
       model: "anthropic:claude-sonnet-4-5",
     });
-    const styleResult = resultOf(styleRequest);
+    const observedStyleRequest = observeAvailability(styleRequest);
+    const styleState = computed(() => {
+      const pending = isPending(observedStyleRequest) ||
+        isSyncing(observedStyleRequest);
+      if (
+        pending || hasError(observedStyleRequest) ||
+        hasSchemaMismatch(observedStyleRequest)
+      ) {
+        return { pending, result: undefined };
+      }
+      return { pending: false, result: observedStyleRequest };
+    });
 
     // Auto-save LLM result to persistent Writable
     const _autoSaveStyle = computed(() => {
-      const pending = isPending(styleRequest);
+      const pending = styleState.pending;
+      const result = styleState.result;
       const currentSavedStyle = savedStyle.get();
 
-      if (
-        !pending && !hasError(styleRequest) &&
-        styleResult !== currentSavedStyle
-      ) {
-        savedStyle.set(styleResult);
+      if (!pending && result && result !== currentSavedStyle) {
+        savedStyle.set(result);
         const now = new Date(safeDateNow()).toISOString();
         lastAnalyzedAt.set(now);
         const emails = allEmails || [];
@@ -264,7 +275,7 @@ Extract the writing style patterns from these emails.`;
       return null;
     });
 
-    const isAnalyzing = isPending(styleRequest);
+    const isAnalyzing = computed(() => styleState.pending);
 
     // Whether a style has been extracted yet
     const hasStyle = !!savedStyle.get();
