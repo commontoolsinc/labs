@@ -585,6 +585,15 @@ export class PatternManager {
       }
     }
 
+    // Verification is the single authority for retaining publication source.
+    // Every caller that successfully loads a closure — compiled-cache hits,
+    // runtime-version recovery, ordinary pattern compilation, and explicit
+    // closure verification — now warms the same synchronous publication path.
+    this.cacheArtifactPublicationModules(
+      artifactSpace,
+      entryIdentity,
+      this.modulesFromVerifiedArtifactClosure({ sourceDocs: verified }),
+    );
     return verified;
   }
 
@@ -857,11 +866,6 @@ export class PatternManager {
         return undefined;
       }
       const sourceClosure = { sourceDocs } satisfies VerifiedArtifactClosure;
-      this.cacheArtifactPublicationModules(
-        artifactSpace,
-        entryIdentity,
-        this.modulesFromVerifiedArtifactClosure(sourceClosure),
-      );
       if (runtimeVersion === undefined) return sourceClosure;
 
       const compiledDocs = await loadCompiledClosure(

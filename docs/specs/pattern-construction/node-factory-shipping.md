@@ -568,7 +568,10 @@ Publication preserves the memory system's optimistic local-commit contract:
    speculative commit notification without waiting for artifact I/O.
 2. For every warm verified closure, the runner synchronously adds artifact
    ensure operations to the wire commit. A warm publication introduces no
-   asynchronous readiness boundary.
+   asynchronous readiness boundary. Every successful source-verification path,
+   including a storage-backed compiled-cache load and runtime-version source
+   recovery, retains the complete verified module set in the exact source-space
+   publication cache before returning the live artifact.
 3. If a trusted source closure is not loaded, the same local commit remains
    speculative while runner-owned preparation loads and verifies it. No
    authored callback or setter becomes asynchronous.

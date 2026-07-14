@@ -23,6 +23,7 @@ import type {
 } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { convertCellsToLinks } from "../src/cell.ts";
+import { setCompileCacheRuntimeVersionForTesting } from "../src/compilation-cache/cell-cache.ts";
 import {
   type MaterializedFactory,
   materializeFactory,
@@ -266,6 +267,67 @@ describe("Factory@1 runner round trips", () => {
     expect(hashOf(secondPattern).toString()).toBe(
       hashOf(independentlyLoaded[0]).toString(),
     );
+  });
+
+  it("publishes synchronously after a storage-backed compiled artifact load", async () => {
+    const { identity, shells } = await storeFactories();
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    extraRuntimes.push(runtime);
+
+    await prepareFactory(shells[0], {
+      runtime,
+      artifactSpace: sourceSpace,
+    });
+    const publication = runtime.patternManager.prepareArtifactPublication(
+      identity,
+      sourceSpace,
+      destinationSpace,
+    );
+
+    expect(Array.isArray(publication)).toBe(true);
+    expect((publication as readonly unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("publishes synchronously after source recovery for a new runtime version", async () => {
+    const restoreVersionA = setCompileCacheRuntimeVersionForTesting(
+      "factory-publication-version-a",
+    );
+    try {
+      const { identity, shells } = await storeFactories();
+      const restoreVersionB = setCompileCacheRuntimeVersionForTesting(
+        "factory-publication-version-b",
+      );
+      try {
+        const runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+        });
+        extraRuntimes.push(runtime);
+
+        await prepareFactory(shells[0], {
+          runtime,
+          artifactSpace: sourceSpace,
+        });
+        expect(runtime.patternManager.getCompileCacheStats().byIdentityHits)
+          .toBe(0);
+        const publication = runtime.patternManager.prepareArtifactPublication(
+          identity,
+          sourceSpace,
+          destinationSpace,
+        );
+
+        expect(Array.isArray(publication)).toBe(true);
+        expect((publication as readonly unknown[]).length).toBeGreaterThan(0);
+        await runtime.patternManager.flushCompileCacheWrites();
+      } finally {
+        restoreVersionB();
+      }
+    } finally {
+      restoreVersionA();
+    }
   });
 
   it("warm-materializes a decoded root PatternFactory before synchronous run", async () => {
