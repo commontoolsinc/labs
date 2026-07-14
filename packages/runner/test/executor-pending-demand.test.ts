@@ -146,9 +146,10 @@ Deno.test("executor retries pending demand only for its exact creation commit", 
     assertEquals(ordinaryMissingError?.name, "Error");
     assertEquals(ordinaryMissingError?.message, "No data at cell");
 
-    // Prepare two valid pieces without committing either root. The first is the
-    // future target of a demanded redirect that will be removed before it lands;
-    // the second remains directly demanded until its creation commit arrives.
+    // Prepare three valid pieces without committing their roots. The first is
+    // the future target of a demanded redirect that will be removed before it
+    // lands; the second remains directly demanded until its creation commit
+    // arrives; the third is added after the second is already live.
     const removedTargetTx = seedRuntime.edit();
     const removedTargetInput = seedRuntime.getCell<number>(
       space,
@@ -189,6 +190,27 @@ Deno.test("executor retries pending demand only for its exact creation commit", 
       compiled,
       { value: arrivingRootInput },
       arrivingRoot,
+    );
+
+    const growthRootTx = seedRuntime.edit();
+    const growthRootInput = seedRuntime.getCell<number>(
+      space,
+      "pending-demand-growth-root-input",
+      undefined,
+      growthRootTx,
+    );
+    growthRootInput.set(4);
+    const growthRoot = seedRuntime.getCell<number>(
+      space,
+      "pending-demand-growth-root",
+      undefined,
+      growthRootTx,
+    );
+    seedRuntime.run(
+      growthRootTx,
+      compiled,
+      { value: growthRootInput },
+      growthRoot,
     );
 
     observerClient = await MemoryClient.connect({
@@ -284,6 +306,28 @@ Deno.test("executor retries pending demand only for its exact creation commit", 
     assertEquals(discoveries, [arrivingRoot.sourceURI]);
     assertEquals(candidates.length, 1);
 
+    // Growing demand attempts only the newly added root. Re-pulling the
+    // already-live graph would install another temporary pull effect and add a
+    // scheduler run even though no source invalidated it.
+    const executionMetrics = executor.executionMetrics?.bind(executor);
+    assertExists(executionMetrics);
+    const schedulerRunsBeforeGrowth = executionMetrics().schedulerRuns;
+    await executor.setDemand([
+      arrivingRoot.sourceURI,
+      growthRoot.sourceURI,
+    ]);
+    assertEquals(
+      executionMetrics().schedulerRuns,
+      schedulerRunsBeforeGrowth,
+    );
+    assertEquals((await growthRootTx.commit()).error, undefined);
+    await executor.settle();
+    assertEquals(discoveries, [
+      arrivingRoot.sourceURI,
+      growthRoot.sourceURI,
+    ]);
+    assertEquals(candidates.length, 2);
+
     // The persistent demand consumer is lifecycle-owned by the root. Shrink
     // releases it and stops the instantiated piece, so later source commits do
     // not produce another candidate from the removed graph.
@@ -298,7 +342,7 @@ Deno.test("executor retries pending demand only for its exact creation commit", 
       }],
     });
     await executor.settle();
-    assertEquals(candidates.length, 1);
+    assertEquals(candidates.length, 2);
     assertEquals(crashes, []);
   } finally {
     await executor?.stop().catch(() => undefined);

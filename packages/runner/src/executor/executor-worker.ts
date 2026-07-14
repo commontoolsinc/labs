@@ -370,6 +370,8 @@ const replaceDemand = async (
   }
   const next = [...new Set(pieces)].sort();
   const nextSet = new Set(next);
+  const growsOnly = !resetClaims &&
+    [...demanded.keys()].every((pieceId) => nextSet.has(pieceId));
   if (resetClaims) {
     for (const [pieceId, cell] of demanded) {
       demandSinks.get(pieceId)?.();
@@ -398,6 +400,7 @@ const replaceDemand = async (
     instantiatedDemand.delete(pieceId);
     pendingDemand.delete(pieceId);
   }
+  const added = new Set<string>();
   for (const pieceId of next) {
     if (demanded.has(pieceId)) continue;
     const cell = runtime.getCellFromEntityId<unknown>(
@@ -405,8 +408,16 @@ const replaceDemand = async (
       entityIdFrom(normalizePieceId(pieceId)),
     );
     demanded.set(pieceId, cell);
+    added.add(pieceId);
   }
-  await pullDemand();
+  // Existing roots retain a standing sink and receive their own selective
+  // invalidation wakes. Re-pulling them for an unrelated demand addition
+  // installs redundant temporary pull effects and serially re-traverses every
+  // active graph. A shrink/reset still rebuilds and pulls every survivor.
+  await pullDemand(
+    undefined,
+    growsOnly ? added : new Set(demanded.keys()),
+  );
 };
 
 const initialize = async (request: WorkerRequest): Promise<void> => {
