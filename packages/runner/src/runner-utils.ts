@@ -1,5 +1,6 @@
 import {
   type FabricValue,
+  isFabricPlainObject,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
@@ -291,9 +292,18 @@ function mergeSchemaDefaultsInternal(
 ): unknown {
   if (defaults === undefined) return value;
   if (
-    !isRecord(defaults) || Array.isArray(defaults) || isCellLink(defaults)
+    !isFabricPlainObject(defaults) || isCellLink(defaults)
   ) {
     return value === undefined ? defaults : value;
+  }
+  // Defaults only fill absent values or recursively merge plain records. A
+  // defined scalar, sparse array, Fabric special object, or sigil link is
+  // durable user state, not an empty object to replace with defaults.
+  if (
+    value !== undefined &&
+    (!isFabricPlainObject(value) || isCellLink(value))
+  ) {
+    return value;
   }
 
   const resolved = typeof schema === "object" && schema !== null && schema.$ref
@@ -310,10 +320,7 @@ function mergeSchemaDefaultsInternal(
     return mergeObjects(value as object | undefined, defaults);
   }
 
-  const existing = isRecord(value) && !Array.isArray(value) &&
-      !isCellLink(value)
-    ? value
-    : {};
+  const existing = value ?? {};
   const result: Record<string, unknown> = { ...existing };
   const required = new Set(resolved.required ?? []);
   for (const [key, defaultValue] of Object.entries(defaults)) {

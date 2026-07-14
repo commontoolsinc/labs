@@ -777,8 +777,9 @@ export class PieceManager {
     );
     await piece.sync();
     const start = options?.start ?? true;
+    let currentPiece = piece;
     if (start) {
-      await this.runtime.runSynced(piece, pattern, inputs, {
+      currentPiece = await this.runtime.runSynced(piece, pattern, inputs, {
         expectedPatternIdentity: options?.expectedPatternIdentity,
       });
     } else {
@@ -787,12 +788,12 @@ export class PieceManager {
       }
       await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
-    await this.syncPattern(piece);
+    await this.syncPattern(currentPiece);
     if (start) {
-      await this.getResult(piece).pull();
+      await this.getResult(currentPiece).pull();
     }
 
-    return piece;
+    return currentPiece;
   }
 
   /**

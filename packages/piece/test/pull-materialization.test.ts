@@ -181,7 +181,11 @@ function compiledSchemaEvolutionProgram(version: 1 | 2 | 3): RuntimeProgram {
 }
 
 function compiledResultNarrowingProgram(
-  resultType: "string | number" | "string" | "number",
+  resultType:
+    | "string | number | boolean"
+    | "string | number"
+    | "string"
+    | "number",
 ): RuntimeProgram {
   const value = resultType === "string" ? "String(input)" : "input";
   return {
@@ -234,6 +238,67 @@ function compiledOptionalNumberFieldProgram(version: 1 | 2): RuntimeProgram {
         input,
         "export default pattern<Input>(({ value }) => ({ value }));",
       ].join("\n"),
+    }],
+  };
+}
+
+function compiledDefaultedOptionsProgram(version: 1 | 2): RuntimeProgram {
+  const contents = version === 1
+    ? [
+      "import { pattern } from 'commonfabric';",
+      "interface Input { value: number; }",
+      "export default pattern<Input>(({ value }) => ({ value }));",
+    ]
+    : [
+      "import { Default, pattern } from 'commonfabric';",
+      "interface Options { attempts: number | Default<1>; }",
+      "interface Input { value: number; options?: Options; }",
+      "export default pattern<Input>(({ value }) => ({ value }));",
+    ];
+  return {
+    main: "/main.tsx",
+    files: [{ name: "/main.tsx", contents: contents.join("\n") }],
+  };
+}
+
+function linkedSettingsSourcePattern(): Pattern {
+  return {
+    argumentSchema: { type: "object" },
+    resultSchema: {
+      type: "object",
+      properties: {
+        settings: {
+          type: "object",
+          properties: { mode: { type: "string" } },
+          required: ["mode"],
+        },
+      },
+      required: ["settings"],
+    },
+    result: { settings: { mode: "linked" } },
+    nodes: [],
+  };
+}
+
+function compiledLinkedSettingsProgram(version: 1 | 2): RuntimeProgram {
+  const attempts = version === 1 ? "" : "  attempts?: number | Default<1>;";
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        `import { ${
+          version === 1 ? "pattern" : "Default, pattern"
+        } } from 'commonfabric';`,
+        "interface Settings {",
+        "  mode: string;",
+        attempts,
+        "}",
+        "interface Input { settings: Settings; }",
+        "export default pattern<Input>(({ settings }) => ({",
+        "  mode: settings.mode,",
+        "}));",
+      ].filter(Boolean).join("\n"),
     }],
   };
 }
@@ -430,6 +495,89 @@ describe("piece pull materialization", () => {
     });
   });
 
+  it("updates a piece whose durable arguments contain links", async () => {
+    const source = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      "linked-update-source-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledMultiplierProgram("v1", 2),
+      { space: manager.getSpace() },
+    );
+    const target = await manager.runPersistent(
+      firstPattern,
+      { input: 1 },
+      "linked-update-target-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await manager.link(
+      entityRefToString(source.entityId),
+      ["output"],
+      entityRefToString(target.entityId),
+      ["input"],
+    );
+
+    expect(await controller.input.get()).toEqual({ input: 10 });
+    expect(await controller.result.get()).toEqual({
+      version: "v1",
+      output: 20,
+    });
+    const rawBefore = (await controller.input.getCell()).getRaw();
+    expect(rawBefore).not.toEqual({ input: 10 });
+
+    await controller.setPattern(compiledMultiplierProgram("v2", 10));
+
+    expect((await controller.input.getCell()).getRaw()).toEqual(rawBefore);
+    expect(await controller.input.get()).toEqual({ input: 10 });
+    expect(await controller.result.get()).toEqual({
+      version: "v2",
+      output: 100,
+    });
+  });
+
+  it("preserves linked objects while adding nested defaults", async () => {
+    const source = await manager.runPersistent(
+      trustPattern(runtime, linkedSettingsSourcePattern()),
+      {},
+      "linked-object-default-source-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledLinkedSettingsProgram(1),
+      { space: manager.getSpace() },
+    );
+    const target = await manager.runPersistent(
+      firstPattern,
+      { settings: { mode: "local" } },
+      "linked-object-default-target-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await manager.link(
+      entityRefToString(source.entityId),
+      ["settings"],
+      entityRefToString(target.entityId),
+      ["settings"],
+    );
+    const rawBefore = (await controller.input.getCell()).getRaw();
+    expect(await controller.input.get()).toMatchObject({
+      settings: { mode: "linked" },
+    });
+
+    await controller.setPattern(compiledLinkedSettingsProgram(2));
+
+    expect((await controller.input.getCell()).getRaw()).toEqual(rawBefore);
+    expect(await controller.input.get()).toMatchObject({
+      settings: { mode: "linked" },
+    });
+    expect(await controller.result.get()).toEqual({ mode: "linked" });
+  });
+
   it("rejects an incompatible schema update before changing the piece", async () => {
     const firstPattern = await runtime.patternManager.compilePattern(
       compiledSchemaEvolutionProgram(1),
@@ -473,6 +621,54 @@ describe("piece pull materialization", () => {
     expect(rawInput).toEqual({ value: 4 });
     expect(validateSchemaValue(updatedPattern.argumentSchema, rawInput))
       .toBeUndefined();
+  });
+
+  it("does not hydrate an invalid partial ref default on first start", async () => {
+    const pattern = await runtime.patternManager.compilePattern(
+      compiledOptionalPartialDefaultProgram(2),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      pattern,
+      { value: 4 },
+      "optional-partial-default-first-start-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const rawInput = (await controller.input.getCell()).getRaw();
+
+    expect(rawInput).toEqual({ value: 4 });
+    expect(validateSchemaValue(pattern.argumentSchema, rawInput))
+      .toBeUndefined();
+  });
+
+  it("preserves conflicting defined values while merging object defaults", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledDefaultedOptionsProgram(1),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { value: 4 },
+      "defined-object-default-conflict-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const inputCell = await controller.input.getCell();
+    await runtime.editWithRetry((tx) => {
+      inputCell.withTx(tx).setRawUntyped({
+        value: 4,
+        options: "legacy",
+      });
+    });
+    const previousRef = getPatternIdentityRef(piece);
+
+    await expect(
+      controller.setPattern(compiledDefaultedOptionsProgram(2)),
+    ).rejects.toThrow(/updated arguments do not match the candidate schema/);
+
+    expect(getPatternIdentityRef(piece)).toEqual(previousRef);
+    expect(inputCell.getRaw()).toEqual({ value: 4, options: "legacy" });
   });
 
   it("rejects an optional field update that conflicts with durable raw args", async () => {
@@ -640,10 +836,12 @@ describe("piece pull materialization", () => {
     }
   });
 
-  it("starts the current winner after a post-commit update race", async () => {
-    const initialProgram = compiledMultiplierProgram("initial", 1);
-    const firstProgram = compiledMultiplierProgram("first", 2);
-    const winnerProgram = compiledMultiplierProgram("winner", 10);
+  it("returns the current winner's schema after a post-commit update race", async () => {
+    const initialProgram = compiledResultNarrowingProgram(
+      "string | number | boolean",
+    );
+    const firstProgram = compiledResultNarrowingProgram("string | number");
+    const winnerProgram = compiledResultNarrowingProgram("number");
     const initialPattern = await runtime.patternManager.compilePattern(
       initialProgram,
       { space: manager.getSpace() },
@@ -710,24 +908,107 @@ describe("piece pull materialization", () => {
       const winnerUpdate = controller.setPattern(winnerProgram);
       await winnerPostCommitSync.promise;
 
-      releaseFirst.resolve();
-      await firstUpdate;
       releaseWinner.resolve();
       await winnerUpdate;
+      releaseFirst.resolve();
+      await firstUpdate;
       await runtime.idle();
 
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );
-      expect(await controller.result.get()).toEqual({
-        version: "winner",
-        output: 50,
-      });
+      expect(
+        controller.getCell().getAsNormalizedFullLink().schema,
+      ).toEqual(winnerPattern.resultSchema);
+      expect(await controller.result.get()).toEqual({ value: 5 });
+      expect(
+        validateSchemaValue(
+          controller.getCell().getAsNormalizedFullLink().schema!,
+          { value: "invalid-for-winner" },
+        ),
+      ).toMatch(/value does not match type number/);
+      expect(await controller.result.get()).toEqual({ value: 5 });
     } finally {
       releaseFirst.resolve();
       releaseWinner.resolve();
       runnerInternals.syncCellsForRunningPattern = originalSync;
       runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
+  it("syncs dependencies after a remote pattern supersedes local setup", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledMultiplierProgram("local", 2),
+      { space: manager.getSpace() },
+    );
+    const remotePattern = await runtime.patternManager.compilePattern(
+      compiledMultiplierProgram("remote", 10),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { input: 5 },
+      "remote-preparation-supersession-" + crypto.randomUUID(),
+      { start: false },
+    );
+    const id = entityRefToString(piece.entityId);
+    const session = await createSession({
+      identity: signer,
+      spaceName: manager.getSpaceName()!,
+    });
+    const remoteRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager,
+    });
+    const remoteManager = new PieceManager(session, remoteRuntime);
+
+    try {
+      await remoteManager.synced();
+      await remoteManager.runWithPattern(
+        remotePattern,
+        id,
+        { input: 5 },
+        { start: false },
+      );
+      await remoteManager.synced();
+      await manager.synced();
+      await piece.pull();
+      expect(getPatternIdentityRef(piece)).toEqual(
+        runtime.patternManager.getArtifactEntryRef(remotePattern),
+      );
+
+      const runnerInternals = runtime.runner as unknown as {
+        syncCellsForRunningPattern(
+          resultCell: unknown,
+          pattern: Pattern,
+          inputs?: unknown,
+        ): Promise<boolean>;
+      };
+      const originalSync = runnerInternals.syncCellsForRunningPattern.bind(
+        runtime.runner,
+      );
+      let dependencySyncs = 0;
+      runnerInternals.syncCellsForRunningPattern = async (
+        resultCell,
+        pattern,
+        inputs,
+      ) => {
+        if (pattern === remotePattern) dependencySyncs++;
+        return await originalSync(resultCell, pattern, inputs);
+      };
+      try {
+        await runtime.start(piece);
+      } finally {
+        runnerInternals.syncCellsForRunningPattern = originalSync;
+      }
+
+      expect(dependencySyncs).toBeGreaterThan(0);
+      expect(await piece.pull()).toEqual({
+        version: "remote",
+        output: 50,
+      });
+    } finally {
+      await remoteRuntime.dispose();
     }
   });
 

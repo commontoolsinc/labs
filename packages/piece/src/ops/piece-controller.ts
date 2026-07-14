@@ -103,7 +103,13 @@ export class PieceController<T = unknown> {
   async setInput(input: object): Promise<void> {
     const pattern = await this.getPattern();
     // Use setup/start so we can update inputs without forcing reschedule
-    await execute(this.#manager, this.id, pattern, input, { start: true });
+    this.#cell = await execute(
+      this.#manager,
+      this.id,
+      pattern,
+      input,
+      { start: true },
+    ) as Cell<T>;
   }
 
   async getPattern(): Promise<Pattern> {
@@ -176,11 +182,10 @@ export class PieceController<T = unknown> {
     }
     const pattern = await compileProgram(this.#manager, program);
     assertPatternSchemasBackwardCompatible(previousPattern, pattern);
-    await execute(this.#manager, this.id, pattern, undefined, {
+    this.#cell = await execute(this.#manager, this.id, pattern, undefined, {
       start: true,
       expectedPatternIdentity: previousRef,
-    });
-    this.#cell = this.#cell.asSchema(pattern.resultSchema);
+    }) as Cell<T>;
   }
 
   async readingFrom(): Promise<PieceController[]> {
@@ -207,6 +212,6 @@ async function execute(
     start?: boolean;
     expectedPatternIdentity?: { identity: string; symbol: string };
   },
-): Promise<void> {
-  await manager.runWithPattern(pattern, pieceId, input, options);
+): Promise<Cell<unknown>> {
+  return await manager.runWithPattern(pattern, pieceId, input, options);
 }

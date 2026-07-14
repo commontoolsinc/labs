@@ -92,6 +92,38 @@ describe("piece schema compatibility", () => {
       .not.toThrow();
   });
 
+  it("keeps embedded ref roots while comparing unchanged native schemas", () => {
+    const vnode = {
+      $ref: "https://commonfabric.org/schemas/vnode.json",
+    } as const;
+    const previous = pattern(
+      oldPattern.argumentSchema,
+      {
+        type: "object",
+        properties: {
+          $UI: vnode,
+          value: { type: "number" },
+        },
+        required: ["$UI", "value"],
+      },
+    );
+    const candidate = pattern(
+      oldPattern.argumentSchema,
+      {
+        type: "object",
+        properties: {
+          $UI: vnode,
+          value: { type: "number" },
+          extra: { type: "string" },
+        },
+        required: ["$UI", "value"],
+      },
+    );
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
+      .not.toThrow();
+  });
+
   it("checks changed definitions behind unchanged local references", () => {
     const previous = pattern(
       {
@@ -923,6 +955,49 @@ describe("piece schema compatibility", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(previousTyped, compatibleTyped)
     ).not.toThrow();
+  });
+
+  it("checks new named fields against prior patternProperties", () => {
+    const previousArgument = pattern(
+      {
+        type: "object",
+        patternProperties: { "^x": { type: "string" } },
+      },
+      oldPattern.resultSchema,
+    );
+    const candidateArgument = pattern(
+      {
+        type: "object",
+        properties: { xMode: { type: "number" } },
+        patternProperties: { "^x": { type: "string" } },
+      },
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        previousArgument,
+        candidateArgument,
+      )
+    ).toThrow(/argument\.xMode/);
+
+    const previousResult = pattern(
+      oldPattern.argumentSchema,
+      {
+        type: "object",
+        patternProperties: { "^x": { type: "string" } },
+      },
+    );
+    const candidateResult = pattern(
+      oldPattern.argumentSchema,
+      {
+        type: "object",
+        properties: { xMode: { type: "number" } },
+        patternProperties: { "^x": { type: "string" } },
+      },
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previousResult, candidateResult)
+    ).toThrow(/result\.xMode/);
   });
 
   it("checks scalar constraints that cannot be safely changed", () => {

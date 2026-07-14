@@ -5,6 +5,7 @@ import {
   type Pattern,
 } from "@commonfabric/runner";
 import {
+  resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
@@ -116,11 +117,21 @@ function schemaSubsetIssue(
   path: string,
   context: CompatibilityContext,
 ): string | undefined {
-  const source = resolveSchema(sourceInput, context.sourceRoot);
-  const target = resolveSchema(targetInput, context.targetRoot);
-  if (source === undefined || target === undefined) {
+  const sourceResolution = resolveSchema(sourceInput, context.sourceRoot);
+  const targetResolution = resolveSchema(targetInput, context.targetRoot);
+  if (
+    sourceResolution.schema === undefined ||
+    targetResolution.schema === undefined
+  ) {
     return `${path}: cannot resolve a local schema reference`;
   }
+  const source = sourceResolution.schema;
+  const target = targetResolution.schema;
+  context = {
+    ...context,
+    sourceRoot: sourceResolution.root,
+    targetRoot: targetResolution.root,
+  };
   if (schemasResolveEqually(source, target, context)) return undefined;
 
   if (source === false || target === true) return undefined;
@@ -214,6 +225,9 @@ function objectSubsetIssue(
   const candidateProperties = context.role === "argument"
     ? targetProperties
     : sourceProperties;
+  const previousPatternProperties = context.role === "argument"
+    ? source.patternProperties
+    : target.patternProperties;
 
   for (const property of Object.keys(previousProperties)) {
     if (!(property in candidateProperties)) {
@@ -238,11 +252,28 @@ function objectSubsetIssue(
 
     const previousAdditional = source.additionalProperties ?? true;
     for (const property of Object.keys(candidateProperties)) {
+      const matchedPatterns = matchingPatternPropertySchemas(
+        previousPatternProperties,
+        property,
+      );
+      if (typeof matchedPatterns === "string") {
+        return `${path}: ${matchedPatterns}`;
+      }
+      for (const patternSchema of matchedPatterns) {
+        const issue = schemaSubsetIssue(
+          patternSchema,
+          targetProperties[property],
+          `${path}.${property}`,
+          context,
+        );
+        if (issue) return issue;
+      }
       // Open objects remain evolvable by adding optional/defaulted fields.
       // A typed index signature is different: it promised that every unknown
       // property accepted values of that type, including this newly named one.
       if (
         property in previousProperties ||
+        matchedPatterns.length > 0 ||
         typeof previousAdditional === "boolean"
       ) {
         continue;
@@ -275,7 +306,26 @@ function objectSubsetIssue(
 
     const previousAdditional = target.additionalProperties ?? true;
     for (const property of Object.keys(candidateProperties)) {
-      if (property in previousProperties || previousAdditional === true) {
+      const matchedPatterns = matchingPatternPropertySchemas(
+        previousPatternProperties,
+        property,
+      );
+      if (typeof matchedPatterns === "string") {
+        return `${path}: ${matchedPatterns}`;
+      }
+      for (const patternSchema of matchedPatterns) {
+        const issue = schemaSubsetIssue(
+          sourceProperties[property],
+          patternSchema,
+          `${path}.${property}`,
+          context,
+        );
+        if (issue) return issue;
+      }
+      if (
+        property in previousProperties || matchedPatterns.length > 0 ||
+        previousAdditional === true
+      ) {
         continue;
       }
       if (previousAdditional === false) {
@@ -302,6 +352,23 @@ function objectSubsetIssue(
   }
 
   return additionalPropertiesSubsetIssue(source, target, path, context);
+}
+
+function matchingPatternPropertySchemas(
+  patternProperties: Record<string, JSONSchema> | undefined,
+  property: string,
+): JSONSchema[] | string {
+  const matches: JSONSchema[] = [];
+  for (const [source, schema] of Object.entries(patternProperties ?? {})) {
+    let pattern: RegExp;
+    try {
+      pattern = new RegExp(source);
+    } catch {
+      return `invalid patternProperties expression ${source}`;
+    }
+    if (pattern.test(property)) matches.push(schema);
+  }
+  return matches;
 }
 
 function additionalPropertiesSubsetIssue(
@@ -609,11 +676,14 @@ function schemaProvidesValidDefault(
 function resolveSchema(
   schema: JSONSchema,
   root: JSONSchema,
-): JSONSchema | undefined {
-  const resolved = typeof schema === "object" && schema !== null && schema.$ref
-    ? resolveCfcSchemaRefs(schema, root)
-    : schema;
-  return resolved === undefined ? undefined : internSchema(resolved);
+): { schema: JSONSchema | undefined; root: JSONSchema } {
+  const hasRef = typeof schema === "object" && schema !== null && schema.$ref;
+  const owningRoot = hasRef ? resolveCfcSchemaRefRoot(schema, root) : root;
+  const resolved = hasRef ? resolveCfcSchemaRefs(schema, root) : schema;
+  return {
+    schema: resolved === undefined ? undefined : internSchema(resolved),
+    root: owningRoot,
+  };
 }
 
 function pairIsActive(
