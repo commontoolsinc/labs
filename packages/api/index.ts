@@ -1488,7 +1488,7 @@ export type FactoryInput<T> =
  * Recursively removes unavailable control values and unwraps reactive cell
  * inputs to the complete value shape retained by `latestComplete()`.
  */
-export type LatestCompleteValue<T> = T extends DataUnavailableVariant ? never
+export type LatestCompleteValue<T> = T extends DataUnavailable ? never
   : T extends AnyBrandedCell<infer U> ? LatestCompleteValue<U>
   : T extends readonly unknown[] ? {
       [K in keyof T]: LatestCompleteValue<T[K]>;
