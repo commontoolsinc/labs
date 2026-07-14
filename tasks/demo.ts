@@ -13,6 +13,32 @@ export type DemoOptions = {
   viewport?: string;
 };
 
+export type DemoDependencies = {
+  now(): Date;
+  preflight(): Promise<void>;
+  runIntegration(
+    args: string[],
+    cwd: string,
+    env: Record<string, string>,
+  ): Promise<{ success: boolean; code: number }>;
+};
+
+const defaultDependencies: DemoDependencies = {
+  now: () => new Date(),
+  preflight: async () => {
+    await findFfmpeg();
+  },
+  runIntegration: async (args, cwd, env) =>
+    await new Deno.Command(Deno.execPath(), {
+      args,
+      cwd,
+      env,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    }).spawn().status,
+};
+
 export function parseDemoArgs(args: string[]): DemoOptions {
   const positional: string[] = [];
   let outputPath: string | undefined;
@@ -78,11 +104,12 @@ export async function resolveDemoTest(
 export async function runDemo(
   options: DemoOptions,
   rootDir = Deno.cwd(),
+  dependencies: DemoDependencies = defaultDependencies,
 ): Promise<number> {
   const testFile = await resolveDemoTest(rootDir, options);
   const testName = testFile.replace(/\.test\.ts$/, "");
-  await findFfmpeg();
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  await dependencies.preflight();
+  const stamp = dependencies.now().toISOString().replace(/[:.]/g, "-");
   const runDir = resolve(
     rootDir,
     "tmp",
@@ -105,14 +132,11 @@ export async function runDemo(
   };
   console.log(`Recording ${options.packageName}/${testFile}`);
   console.log(`Demo artifacts: ${runDir}`);
-  const status = await new Deno.Command(Deno.execPath(), {
-    args: integrationArgs,
-    cwd: rootDir,
+  const status = await dependencies.runIntegration(
+    integrationArgs,
+    rootDir,
     env,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-  }).spawn().status;
+  );
   if (!status.success) {
     const manifestPath = join(runDir, "manifest.json");
     try {

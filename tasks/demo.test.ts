@@ -1,5 +1,10 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
-import { parseDemoArgs, resolveDemoTest } from "./demo.ts";
+import {
+  type DemoDependencies,
+  parseDemoArgs,
+  resolveDemoTest,
+  runDemo,
+} from "./demo.ts";
 
 Deno.test("parseDemoArgs accepts deterministic demo options", () => {
   assertEquals(
@@ -53,3 +58,133 @@ Deno.test("resolveDemoTest requires exactly one file", async () => {
     await Deno.remove(root, { recursive: true });
   }
 });
+
+Deno.test("runDemo names and copies a successful video", async () => {
+  await withDemoFixture(async (root) => {
+    let preflighted = false;
+    const dependencies = demoDependencies({
+      preflight: () => {
+        preflighted = true;
+        return Promise.resolve();
+      },
+      runIntegration: async (args, cwd, env) => {
+        assertEquals(args, [
+          "task",
+          "integration",
+          "--port-offset=500",
+          "patterns",
+          "one-demo",
+        ]);
+        assertEquals(cwd, root);
+        assertEquals(env.CF_DEMO_NAME, "one-demo");
+        assertEquals(env.CF_DEMO_KEEP_FRAMES, "1");
+        assertEquals(env.CF_DEMO_VIEWPORT, "960x720");
+        await Deno.writeTextFile(
+          `${env.CF_DEMO_OUTPUT_DIR}/one-demo.mp4`,
+          "video bytes",
+        );
+        return { success: true, code: 0 };
+      },
+    });
+    const result = await runDemo(
+      {
+        packageName: "patterns",
+        filter: "one-demo",
+        keepFrames: true,
+        outputPath: "copied/one-demo.mp4",
+        viewport: "960x720",
+        portOffset: 500,
+      },
+      root,
+      dependencies,
+    );
+
+    assertEquals(result, 0);
+    assertEquals(preflighted, true);
+    assertEquals(
+      await Deno.readTextFile(`${root}/copied/one-demo.mp4`),
+      "video bytes",
+    );
+  });
+});
+
+Deno.test("runDemo preserves a failing integration status and manifest", async () => {
+  await withDemoFixture(async (root) => {
+    const result = await runDemo(
+      {
+        packageName: "patterns",
+        filter: "one-demo",
+        keepFrames: false,
+      },
+      root,
+      demoDependencies({
+        runIntegration: async (_args, _cwd, env) => {
+          await Deno.writeTextFile(
+            `${env.CF_DEMO_OUTPUT_DIR}/manifest.json`,
+            JSON.stringify({ status: "passed" }),
+          );
+          return { success: false, code: 7 };
+        },
+      }),
+    );
+
+    assertEquals(result, 7);
+    const manifest = JSON.parse(
+      await Deno.readTextFile(
+        `${demoRunDir(root)}/manifest.json`,
+      ),
+    );
+    assertEquals(manifest.status, "test-failed");
+    assertEquals(manifest.error, "integration test exited with code 7");
+  });
+});
+
+Deno.test("runDemo rejects a successful test without a video", async () => {
+  await withDemoFixture(async (root) => {
+    await assertRejects(
+      () =>
+        runDemo(
+          {
+            packageName: "patterns",
+            filter: "one-demo",
+            keepFrames: false,
+          },
+          root,
+          demoDependencies(),
+        ),
+      Error,
+      "did not produce one-demo.mp4",
+    );
+  });
+});
+
+const FIXED_NOW = new Date("2026-07-14T00:00:00.000Z");
+
+function demoDependencies(
+  overrides: Partial<DemoDependencies> = {},
+): DemoDependencies {
+  return {
+    now: () => FIXED_NOW,
+    preflight: () => Promise.resolve(),
+    runIntegration: () => Promise.resolve({ success: true, code: 0 }),
+    ...overrides,
+  };
+}
+
+function demoRunDir(root: string): string {
+  return `${root}/tmp/demos/patterns-one-demo-2026-07-14T00-00-00-000Z`;
+}
+
+async function withDemoFixture(
+  fn: (root: string) => Promise<void>,
+): Promise<void> {
+  const root = await Deno.makeTempDir();
+  try {
+    const dir = `${root}/packages/patterns/integration`;
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(`${dir}/one-demo.test.ts`, "");
+    await fn(root);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+}
