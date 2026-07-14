@@ -155,7 +155,7 @@ Deno.test("no un-allowlisted polling waitFor in integration tests", async () => 
     violations,
     [],
     "New polling waitFor usage found in integration test(s). Migrate to " +
-      "waitForCondition / awaitViewSettled (see docs/development/waitfor-migration.md), " +
+      "waitForCondition / awaitViewSettled (see docs/development/waiting-in-tests.md), " +
       "or, for a genuine exception, add the file to ALLOWLIST in tasks/check-no-waitfor.ts.",
   );
 });
@@ -205,7 +205,7 @@ Deno.test("main reports the offender and returns 1 on a violation", async () => 
     assertEquals(code, 1);
     assert(err.includes("packages/foo/integration/bad.test.ts"));
     assert(err.includes("waitForCondition"));
-    assert(err.includes("docs/development/waitfor-migration.md"));
+    assert(err.includes("docs/development/waiting-in-tests.md"));
   } finally {
     await Deno.remove(root, { recursive: true });
   }

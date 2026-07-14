@@ -17,8 +17,8 @@
 // the ALLOWLIST below.
 //
 // The ALLOWLIST holds the files that are exempt from this check; the reason for
-// each is recorded in the "Intentional exceptions" section of
-// docs/development/waitfor-migration.md.
+// each is recorded in the "Where a bounded poll is the right tool" section of
+// docs/development/waiting-in-tests.md.
 //
 // Usage: deno run --allow-read ./tasks/check-no-waitfor.ts
 
@@ -29,8 +29,8 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
 // Files exempt from this check: they keep the polling `waitFor` from
 // "@commonfabric/integration". Each entry is a repo-relative path; the reason
-// for each is documented under "Intentional exceptions" in
-// docs/development/waitfor-migration.md.
+// for each is documented under "Where a bounded poll is the right tool" in
+// docs/development/waiting-in-tests.md.
 export const ALLOWLIST: ReadonlySet<string> = new Set([
   // Headless cell pull: no page to attach an in-page waiter to.
   "packages/generated-patterns/integration/pattern-harness.ts",
@@ -149,13 +149,13 @@ function reportViolations(violations: string[]): void {
     "registers (a cell sink, a subscription's next, a scheduler onError) instead",
     "of polling.",
     "",
-    "See docs/development/waitfor-migration.md for the rationale and the full",
+    "See docs/development/waiting-in-tests.md for the rationale and the full",
     "toolkit.",
     "",
     "If an event-driven wait genuinely cannot express this (for example a",
     "cross-page condition or a headless cell read), add the file to ALLOWLIST in",
     "tasks/check-no-waitfor.ts with a one-line reason and record it under",
-    '"Intentional exceptions" in docs/development/waitfor-migration.md.',
+    '"Where a bounded poll is the right tool" in docs/development/waiting-in-tests.md.',
     "",
   ];
   console.error(lines.join("\n"));

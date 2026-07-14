@@ -274,7 +274,7 @@ never poll-and-pray, and never re-click.
 A CI check enforces this for the polling `waitFor`: `deno task check-no-waitfor`
 fails when an integration test imports `waitFor` from
 `@commonfabric/integration`. See
-[`waitfor-migration.md`](./waitfor-migration.md) for the rationale, the full
+[`waiting-in-tests.md`](./waiting-in-tests.md) for the rationale, the full
 event-driven toolkit, and the allowlist of intentional exceptions.
 
 ## Best Practices
