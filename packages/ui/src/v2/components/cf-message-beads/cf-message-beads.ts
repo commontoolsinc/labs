@@ -88,6 +88,15 @@ export class CFMessageBeads extends BaseElement {
         border-radius: 12px;
         padding: 2px 6px;
       }
+      .bead-list {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 3px;
+        align-items: center;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
       @keyframes bead-in {
         from {
           opacity: 0;
@@ -99,60 +108,49 @@ export class CFMessageBeads extends BaseElement {
         }
       }
       .bead {
-        appearance: none;
+        display: block;
         width: 6px;
         height: 6px;
         margin: 0;
         padding: 0;
         border: 0;
         border-radius: 50%;
-        cursor: pointer;
+        cursor: help;
         flex-shrink: 0;
         transition: transform 100ms ease, box-shadow 100ms ease;
         animation: bead-in 250ms ease-out both;
       }
-      .bead:hover,
-      .bead:focus-visible {
+      .bead:hover {
         transform: scale(1.6);
-      }
-      .bead:focus-visible {
-        outline: 2px solid
-          var(--cf-theme-color-focus-ring, var(--cf-colors-primary-500, #4979fa));
-        outline-offset: 2px;
       }
       .bead.blue {
         background: #3b82f6;
       }
-      .bead.blue:hover,
-      .bead.blue:focus-visible {
+      .bead.blue:hover {
         box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
       }
       .bead.green {
         background: #22c55e;
       }
-      .bead.green:hover,
-      .bead.green:focus-visible {
+      .bead.green:hover {
         box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3);
       }
       .bead.amber {
         background: #f59e0b;
       }
-      .bead.amber:hover,
-      .bead.amber:focus-visible {
+      .bead.amber:hover {
         box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
       }
       .bead.purple {
         background: #a855f7;
       }
-      .bead.purple:hover,
-      .bead.purple:focus-visible {
+      .bead.purple:hover {
         box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.3);
       }
       .bead.gray {
         background: #9ca3af;
       }
-      .bead.gray:hover,
-      .bead.gray:focus-visible {
+      .bead.gray:hover {
         box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.3);
       }
       .label {
@@ -328,10 +326,6 @@ export class CFMessageBeads extends BaseElement {
     this.#unmountTooltip();
   };
 
-  private _onBeadBlur = () => {
-    this.#unmountTooltip();
-  };
-
   private _onRefineClick = () => {
     this.emit("cf-refine", {});
   };
@@ -354,18 +348,15 @@ export class CFMessageBeads extends BaseElement {
     const beads = msgs.map((msg, i) => {
       const color = classifyMessage(msg);
       return html`
-        <button
-          type="button"
+        <li
+          role="listitem"
           class="bead ${color}"
           style="animation-delay: ${i * 30}ms"
           aria-label="${beadLabel(msg)}"
           @mouseenter="${(e: Event) => this._onBeadEnter(e, i)}"
           @mouseleave="${this._onBeadLeave}"
-          @focus="${(e: Event) => this._onBeadEnter(e, i)}"
-          @blur="${this._onBeadBlur}"
-          @click="${(e: Event) => this._onBeadEnter(e, i)}"
         >
-        </button>
+        </li>
       `;
     });
 
@@ -374,7 +365,15 @@ export class CFMessageBeads extends BaseElement {
         ? html`
           <span class="label">${this.label}</span>
         `
-        : nothing} ${beads} ${this.pending
+        : nothing}
+      <ul
+        class="bead-list"
+        role="list"
+        aria-label="${this.label || "Message history"}"
+      >
+        ${beads}
+      </ul>
+      ${this.pending
         ? html`
           <div class="spinner"></div>
         `

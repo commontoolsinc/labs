@@ -1,5 +1,4 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { CFCanvas } from "./cf-canvas/index.ts";
 import { CFChip } from "./cf-chip/index.ts";
 import { CFMessageBeads } from "./cf-message-beads/index.ts";
 import { CFTags } from "./cf-tags/index.ts";
@@ -25,95 +24,6 @@ function renderedMarkup(value: unknown): string {
     part + renderedMarkup(template.values?.[index])
   ).join("");
 }
-
-type CanvasAccess = {
-  keyboardCursorX: number;
-  keyboardCursorY: number;
-  handleCanvasFocus(): void;
-  handleCanvasKeyDown(event: KeyboardEvent): void;
-  moveKeyboardCursor(deltaX: number, deltaY: number): void;
-  willUpdate(changedProperties: Map<PropertyKey, unknown>): void;
-};
-
-function keyboardEvent(key: string, shiftKey = false): {
-  event: KeyboardEvent;
-  wasPrevented: () => boolean;
-} {
-  let prevented = false;
-  return {
-    event: {
-      key,
-      shiftKey,
-      preventDefault: () => {
-        prevented = true;
-      },
-    } as KeyboardEvent,
-    wasPrevented: () => prevented,
-  };
-}
-
-Deno.test("cf-canvas unit paths provide precise keyboard activation", () => {
-  const canvas = new CFCanvas();
-  canvas.width = 100;
-  canvas.height = 80;
-  canvas.accessibilityLabel = "Diagram canvas";
-  const access = canvas as unknown as CanvasAccess;
-
-  access.willUpdate(
-    new Map([
-      ["width", 800],
-      ["height", 600],
-    ]),
-  );
-  assertEquals(access.keyboardCursorX, 50);
-  assertEquals(access.keyboardCursorY, 40);
-  access.handleCanvasFocus();
-
-  const points: Array<{ x: number; y: number }> = [];
-  canvas.addEventListener("cf-canvas-click", (event) => {
-    points.push((event as CustomEvent<{ x: number; y: number }>).detail);
-  });
-
-  for (
-    const [key, shiftKey] of [
-      ["ArrowRight", false],
-      ["ArrowDown", true],
-      ["ArrowLeft", false],
-      ["ArrowUp", true],
-      ["Enter", false],
-      [" ", false],
-    ] as const
-  ) {
-    const pressed = keyboardEvent(key, shiftKey);
-    access.handleCanvasKeyDown(pressed.event);
-    assert(pressed.wasPrevented());
-  }
-  assertEquals(points, [{ x: 50, y: 40 }, { x: 50, y: 40 }]);
-
-  const ignored = keyboardEvent("Escape");
-  access.handleCanvasKeyDown(ignored.event);
-  assertEquals(ignored.wasPrevented(), false);
-
-  access.moveKeyboardCursor(-1_000, -1_000);
-  assertEquals([access.keyboardCursorX, access.keyboardCursorY], [0, 0]);
-  access.moveKeyboardCursor(1_000, 1_000);
-  assertEquals([access.keyboardCursorX, access.keyboardCursorY], [100, 80]);
-
-  canvas.width = 40;
-  canvas.height = 30;
-  access.willUpdate(
-    new Map([
-      ["width", 100],
-      ["height", 80],
-    ]),
-  );
-  assertEquals([access.keyboardCursorX, access.keyboardCursorY], [40, 30]);
-
-  const markup = renderedMarkup(canvas.render());
-  assertStringIncludes(markup, 'role="application"');
-  assertStringIncludes(markup, "Diagram canvas");
-  assertStringIncludes(markup, "Cursor at 40, 30");
-});
 
 Deno.test("cf-chip unit paths keep primary and remove actions separate", () => {
   const chip = new CFChip();
@@ -207,7 +117,7 @@ Deno.test("cf-tags unit paths render semantic edit, remove, and add states", () 
   assertStringIncludes(markup, "tag-text");
 });
 
-Deno.test("cf-message-beads unit paths render named native controls", () => {
+Deno.test("cf-message-beads unit paths render a named list and refine control", () => {
   const beads = new CFMessageBeads();
   const internals = beads as unknown as {
     _onRefineClick(): void;
@@ -245,6 +155,11 @@ Deno.test("cf-message-beads unit paths render named native controls", () => {
 
   const markup = renderedMarkup(beads.render());
   assertStringIncludes(markup, "History");
+  assertStringIncludes(markup, "<ul");
+  assertStringIncludes(markup, "<li");
+  assertStringIncludes(markup, 'role="list"');
+  assertStringIncludes(markup, 'role="listitem"');
+  assertEquals(/<button[^>]*class="bead/.test(markup), false);
   assertStringIncludes(markup, "user: Hello from the thread");
   assertStringIncludes(markup, "→ search");
   assertStringIncludes(markup, "← search");

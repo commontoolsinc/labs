@@ -18,7 +18,9 @@ import type { ColorIntent, ComponentSize } from "../theme-context.ts";
  * @fires cf-click - Fired when chip is clicked (if interactive)
  *
  * @slot icon - Optional icon before the label
- * @slot - Main content (overrides label)
+ * @slot - Non-interactive main content (overrides label). When `interactive`,
+ *   this slot is rendered inside the primary button and must not contain links,
+ *   buttons, or other interactive descendants.
  *
  * @example
  * <cf-chip label="Tools" color="neutral"></cf-chip>

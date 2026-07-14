@@ -64,6 +64,25 @@ agent-browser snapshot -i              # → textbox "Title" [ref=e4]
 agent-browser type @e4 "Quarterly plan"
 ```
 
+### Accessibility shape for custom elements
+
+Choose the semantic anchor from the component's interaction model:
+
+- Put role, state, focus, and keyboard handling on the custom-element host when
+  the component represents one logical control.
+- Use separately named native controls inside the shadow root when a composite
+  component exposes multiple independent actions. A single host role cannot
+  represent actions such as both opening and removing a chip.
+- Use list and list-item semantics for informational collections; do not turn
+  information-only items into buttons or tab stops for automation.
+
+The native-shadow approach is simpler and preserves browser behavior, but
+shadow-blind DOM walkers cannot see those controls. The supported role/name
+locators in agent-browser and Playwright consume the flattened accessibility
+tree and do see them. See
+[Testing Shadow DOM Components](../../development/UI_TESTING.md) for the full
+decision table and fallback locator strategy.
+
 ## Component Index
 
 One row per component directory in `packages/ui/src/v2/components/`. "Bindable

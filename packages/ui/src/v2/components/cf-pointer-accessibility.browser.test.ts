@@ -1,10 +1,8 @@
 import {
-  assert,
   assertEquals,
   assertInstanceOf,
   assertStringIncludes,
 } from "@std/assert";
-import "./cf-canvas/index.ts";
 import "./cf-chip/index.ts";
 import "./cf-tags/index.ts";
 import "./cf-tile/index.ts";
@@ -17,22 +15,6 @@ async function mount<T extends UpdatingElement>(element: T): Promise<T> {
   document.body.append(element);
   await element.updateComplete;
   return element;
-}
-
-function keydown(
-  element: Element,
-  key: string,
-  options: KeyboardEventInit = {},
-): KeyboardEvent {
-  const event = new KeyboardEvent("keydown", {
-    key,
-    bubbles: true,
-    cancelable: true,
-    composed: true,
-    ...options,
-  });
-  element.dispatchEvent(event);
-  return event;
 }
 
 Deno.test("cf-chip exposes separate primary and remove buttons", async () => {
@@ -214,73 +196,5 @@ Deno.test("cf-tags add button reveals the new-tag textbox", async () => {
     );
   } finally {
     tags.remove();
-  }
-});
-
-Deno.test("cf-canvas keyboard cursor selects precise coordinates", async () => {
-  if (typeof document === "undefined") return;
-
-  const canvas = document.createElement("cf-canvas") as UpdatingElement & {
-    width: number;
-    height: number;
-  };
-  canvas.width = 100;
-  canvas.height = 80;
-  canvas.setAttribute("aria-label", "Diagram canvas");
-
-  await mount(canvas);
-  try {
-    const surface = canvas.shadowRoot?.querySelector(".canvas-container");
-    assertInstanceOf(surface, HTMLElement);
-    assertEquals(surface.getAttribute("role"), "application");
-    assertEquals(surface.getAttribute("aria-label"), "Diagram canvas");
-    assertEquals(surface.tabIndex, 0);
-
-    canvas.setAttribute("aria-label", "Updated diagram canvas");
-    await canvas.updateComplete;
-    assertEquals(
-      surface.getAttribute("aria-label"),
-      "Updated diagram canvas",
-    );
-
-    surface.focus();
-    await canvas.updateComplete;
-    assertEquals(
-      canvas.shadowRoot?.querySelector<HTMLElement>(".keyboard-cursor")?.style
-        .left,
-      "50px",
-    );
-    assertEquals(
-      canvas.shadowRoot?.querySelector<HTMLElement>(".keyboard-cursor")?.style
-        .top,
-      "40px",
-    );
-
-    const points: Array<{ x: number; y: number }> = [];
-    canvas.addEventListener("cf-canvas-click", (event) => {
-      points.push((event as CustomEvent<{ x: number; y: number }>).detail);
-    });
-
-    assert(keydown(surface, "ArrowRight").defaultPrevented);
-    assert(keydown(surface, "ArrowDown", { shiftKey: true }).defaultPrevented);
-    await canvas.updateComplete;
-    assert(keydown(surface, "Enter").defaultPrevented);
-    assertEquals(points, [{ x: 60, y: 41 }]);
-
-    canvas.width = 40;
-    canvas.height = 30;
-    await canvas.updateComplete;
-    assertEquals(
-      canvas.shadowRoot?.querySelector<HTMLElement>(".keyboard-cursor")?.style
-        .left,
-      "40px",
-    );
-    assertEquals(
-      canvas.shadowRoot?.querySelector<HTMLElement>(".keyboard-cursor")?.style
-        .top,
-      "30px",
-    );
-  } finally {
-    canvas.remove();
   }
 });

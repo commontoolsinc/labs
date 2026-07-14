@@ -11,7 +11,9 @@ import { BaseElement } from "../../core/base-element.ts";
  * @attr {string} summary - Summary text to display
  * @attr {boolean} clickable - Whether the tile is clickable
  *
- * @fires cf-click - Fired when tile is clicked with detail: { item }
+ * @fires cf-click - Fired when the tile's primary action is activated with
+ * detail: { item }. Interacting with the nested summary/details does not fire
+ * the tile action.
  *
  * @example
  * <cf-tile .item="${page}" summary="Pages: 2, Lists: 1" @cf-click="${handleClick}"></cf-tile>
