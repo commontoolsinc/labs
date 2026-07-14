@@ -4,8 +4,8 @@ This plan covers two follow-ups to the
 [`DataUnavailable` specification](../specs/data-unavailability.md): the pending
 renderer continuity behavior and the staged migration of the remaining
 asynchronous APIs. The renderer portion, `latestComplete()`, direct streaming
-generation results, and direct compilation results are implemented; the later
-API stages remain.
+generation results, direct compilation results, structured SQLite queries, and
+availability-aware Wish results are implemented; the later API stages remain.
 
 The complementary `latestComplete()` helper is now implemented and specified in
 the [DataUnavailable spec](../specs/data-unavailability.md#latestcomplete-snapshot-helper).
@@ -15,7 +15,7 @@ unavailability; `latestComplete()` retains a coherent prior value.
 ## Status
 
 - Pending renderer continuity: implemented and tested.
-- Remaining asynchronous API migration: A1-A3 complete; A4 is next.
+- Remaining asynchronous API migration: A1-A4 complete; A5 is next.
 
 Keep this file live while any API stage remains. When all stages are complete,
 update the DataUnavailable spec and archive this plan under
@@ -270,17 +270,17 @@ const note = resultOf(noteWish.result);
 {hasError(noteWish.result) ? <span>{noteWish.result.error.message}</span> : noteWish}
 ```
 
-- [ ] Change `WishState<T>.result` from `T | undefined` to `AsyncResult<T>`.
-- [ ] Publish pending while discovery inputs or scoped indexes are still
+- [x] Change `WishState<T>.result` from `T | undefined` to `AsyncResult<T>`.
+- [x] Publish pending while discovery inputs or scoped indexes are still
       loading, error for a completed failed resolution, and `T` for the current
       selection.
-- [ ] Remove the duplicate `error` field from the new public surface after
+- [x] Remove the duplicate `error` field from the new public surface after
       compatibility migration; keep `candidates` and `[UI]` independent.
-- [ ] Keep an empty candidates array distinct from an unresolved result. Do not
+- [x] Keep an empty candidates array distinct from an unresolved result. Do not
       use `[]` itself as an availability signal.
-- [ ] Preserve current single-match, multi-match, headless, profile-switcher,
+- [x] Preserve current single-match, multi-match, headless, profile-switcher,
       scope, sharing, and result-cell-link behavior.
-- [ ] Migrate non-null assertions and optional fallbacks to `resultOf`; explicit
+- [x] Migrate non-null assertions and optional fallbacks to `resultOf`; explicit
       creation/error UIs guard the original result channel.
 
 **A4 exit:** wish selection remains a state machine, but absence, loading, and

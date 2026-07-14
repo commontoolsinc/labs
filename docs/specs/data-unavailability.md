@@ -64,10 +64,9 @@ originating request or an honest availability union.
   by invoked code keep their existing error behavior.
 - Changing the meaning of authored `undefined`. It remains a first-class
   `FabricValue` and is valid whenever the declared schema admits it.
-- Converting remaining stateful or multi-channel APIs such as `llmDialog` or
-  `wish` in the first migration. They retain
-  their existing result contracts until each API gets a separate state-machine
-  decision; mixed idioms are expected during that staged migration.
+- Flattening stateful, multi-channel APIs such as `wish` and `llmDialog` into a
+  single result. Their state objects remain, while each data-bearing result
+  channel migrates to `AsyncResult<T>` in its own stage.
 - Converting `streamData` in the first migration. It is a long-lived,
   multi-result subscription rather than a single-result asynchronous operation;
   replacing its state object requires a separate contract for initial pending,

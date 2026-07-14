@@ -149,11 +149,13 @@ import {
   Default,
   equals,
   handler,
+  hasError,
   NAME,
   pattern,
   type PerSession,
   type PerSpace,
   type PerUser,
+  resultOf,
   safeDateNow,
   Stream,
   UI,
@@ -279,12 +281,15 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
-    // Derived viewer-facing values. Falls back gracefully if the profile has
-    // not resolved yet (e.g. user has no profile, or it is still loading).
-    const myName = computed(() => profileNameWish.result ?? "");
-    const myAvatar = computed(() => profileAvatarWish.result ?? "");
+    // Explicitly handle the no-profile error. Pending values still wait.
+    const myName = hasError(profileNameWish.result)
+      ? ""
+      : resultOf(profileNameWish.result);
+    const myAvatar = hasError(profileAvatarWish.result)
+      ? ""
+      : resultOf(profileAvatarWish.result);
     // The live profile cell — passed to the join handler as the identity key.
-    const myProfile = profileWish.result;
+    const myProfile = resultOf(profileWish.result);
 
     const participants = roster.participants;
     const participantCount = participants.length;
@@ -384,7 +389,8 @@ for the complete pattern. The shape:
 ```tsx
 // Shown inside a pattern body.
 const profileWish = wish({ query: "#profile" }); // result is ProfileHomeOutput-shaped
-// In the join handler, push { profile: profileWish.result, joinedAt }.
+const profile = resultOf(profileWish.result);
+// In the join handler, push { profile, joinedAt }.
 // Render each entry with: <cf-profile-badge $profile={entry.profile} />
 //   — live, carries the verified-identity seal + bio/pinned tooltip, visitable.
 ```

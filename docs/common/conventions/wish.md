@@ -1,4 +1,4 @@
-<!-- @reviewed 2026-02-06 wish-result-shape -->
+<!-- @reviewed 2026-07-14 wish-async-result -->
 
 # wish()
 
@@ -15,24 +15,41 @@ const wishResult = wish<{ content: string }>({ query: "#note" });
 
 `wish()` returns a `WishState<T>` with the following properties:
 
-| Property     | Type    | Description                                           |
-|--------------|---------|-------------------------------------------------------|
-| `result`     | `T`     | The resolved piece (auto-confirmed or user-selected)  |
-| `candidates` | `T[]`   | All matching pieces                                   |
-| `[UI]`       | `VNode` | Built-in UI: picker (multiple matches) or result cell |
-| `error`      | `any`   | Error message if resolution failed                    |
+| Property     | Type             | Description                                           |
+|--------------|------------------|-------------------------------------------------------|
+| `result`     | `AsyncResult<T>` | Resolved piece or its current availability            |
+| `candidates` | `T[]`            | All matching pieces                                   |
+| `[UI]`       | `VNode`          | Built-in UI: picker (multiple matches) or result cell |
 
-Access the resolved piece via `wishResult.result`:
+Keep the result channel for guards and use `resultOf()` for the ordinary `T`
+view:
 
 ```tsx
 // Shown for illustration only.
 const wishResult = wish<{ content: string }>({ query: "#note" });
+const note = resultOf(wishResult.result);
 
 // Read a property from the resolved piece
-const text = wishResult.result.content;
+const text = note.content;
 
 // Render the resolved piece's own UI
-return { [UI]: <div>{wishResult.result}</div> };
+return { [UI]: <div>{note}</div> };
+```
+
+The common case does not inspect availability. Nodes which consume `note` wait
+while the wish is pending and propagate errors automatically. A surface which
+handles failure explicitly guards the original channel:
+
+```tsx
+// Shown for illustration only.
+const noteWish = wish<Note>({ query: "#note" });
+const note = resultOf(noteWish.result);
+
+return {
+  [UI]: hasError(noteWish.result)
+    ? <div>{noteWish.result.error.message}</div>
+    : <NoteCard note={note} />,
+};
 ```
 
 ### Single match auto-confirms
@@ -141,8 +158,8 @@ for `wish({ query: "#profile" })`:
 
 - **0 profiles:** the trusted profile-create surface (same input as the home
   Profile tab). Submitting a name creates the viewer's first profile and leaves
-  the current view in place; the wish reacts once the link exists. `.result` is
-  `undefined` and `error` is set until the first profile exists.
+  the current view in place; the wish reacts once the link exists. `.result`
+  carries an `error` availability value until the first profile exists.
 - **1 profile:** a link to that profile.
 - **2+ profiles, a valid default set:** a link to the default profile.
 - **2+ profiles, no valid default:** the **profile picker**
@@ -204,11 +221,12 @@ reactive constructs:
 export default pattern<Input>(({ enableSearch }) => {
   // ✅ Call wish() once at pattern level
   const searchPiece = wish<SearchOutput>({ query: "#search" });
+  const search = resultOf(searchPiece.result);
 
   // Use computed() to conditionally process the result
   const searchData = computed(() => {
     if (!enableSearch) return null;
-    return searchPiece.result?.data;
+    return search.data;
   });
 
   return { searchData, [UI]: <div>{searchData}</div> };
@@ -232,7 +250,8 @@ To add new pieces to the space, wish for the `addPiece` handler as a `Stream`:
 const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
   query: "#default",
 });
-defaultApp.result.addPiece.send({ piece: newPiece });
+const { addPiece } = resultOf(defaultApp.result);
+addPiece.send({ piece: newPiece });
 ```
 
 Do **not** wish for `allPieces` as a `Writable` — see

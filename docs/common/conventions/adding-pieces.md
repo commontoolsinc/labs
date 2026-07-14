@@ -59,9 +59,10 @@ const createNoteHandler = handler<
 const defaultApp = wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
   query: "#default",
 });
+const { addPiece } = resultOf(defaultApp.result);
 
 return {
-  createNote: createNoteHandler({ addPiece: defaultApp.result.addPiece }),
+  createNote: createNoteHandler({ addPiece }),
 };
 ```
 
