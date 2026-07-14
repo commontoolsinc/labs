@@ -47,9 +47,14 @@ describe("combineSchema type handling", () => {
     b: JSONSchema;
   }[] = [
     {
-      name: "number and integer can overlap",
+      name: "integer and number",
       a: { type: "number" },
       b: { type: "integer" },
+    },
+    {
+      name: "integer is excluded from disjointness checks",
+      a: { type: "integer" },
+      b: { type: "string" },
     },
     {
       name: "a type union can overlap one member",

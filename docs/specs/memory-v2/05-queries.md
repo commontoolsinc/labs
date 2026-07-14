@@ -357,7 +357,7 @@ combineSchema(parentSchema, linkSchema):
     return parentSchema  (link accepts anything, use parent's constraint)
 
   compare parentSchema.type and linkSchema.type:
-    treat unknown or an absent type as unconstrained
+    let integer, unknown, or an absent type use legacy parent precedence
     if their possible types cannot overlap, return false
 
   if both are type:"object":

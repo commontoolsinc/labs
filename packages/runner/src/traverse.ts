@@ -2433,16 +2433,15 @@ function schemaTypesAreDisjoint(
 
   const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
   const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
-  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
+  if (
+    parentTypes.includes("unknown") || linkTypes.includes("unknown") ||
+    parentTypes.includes("integer") || linkTypes.includes("integer")
+  ) {
     return false;
   }
 
   return !parentTypes.some((parent) =>
-    linkTypes.some((link) =>
-      parent === link ||
-      (parent === "number" && link === "integer") ||
-      (parent === "integer" && link === "number")
-    )
+    linkTypes.some((link) => parent === link)
   );
 }
 
