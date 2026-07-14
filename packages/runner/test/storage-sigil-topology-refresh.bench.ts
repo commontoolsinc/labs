@@ -8,10 +8,9 @@ const DOC_COUNT = 48;
 const UPDATE_COUNT = 5;
 const LINKS_PER_DOC = 4;
 
-type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
-  open(space: string): infer T;
-} ? T
-  : never;
+type TestProvider = ReturnType<
+  ReturnType<typeof StorageManager.emulate>["open"]
+>;
 
 const docUri = (index: number) => `of:sigil-topology-refresh-${index}` as const;
 const targetUri = (index: number, version: number) =>
@@ -106,7 +105,7 @@ const setup = async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider: TestProvider = storageManager.open(space);
 
   await (provider as any).send(
     Array.from(
