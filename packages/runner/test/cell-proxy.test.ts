@@ -111,13 +111,15 @@ describe("createProxy", () => {
     ).toBe(true);
   });
 
-  it.skip("should handle array methods on previously undefined arrays", () => {
+  it("should handle array methods on previously undefined arrays", () => {
     const c = runtime.getCell<{ data: any }>(
       space,
       "should handle array methods on previously undefined arrays",
+      undefined,
+      tx,
     );
     c.set({ data: {} });
-    const proxy = c.getAsQueryResult();
+    const proxy = c.getAsQueryResult([], tx, true);
 
     // Array doesn't exist yet
     expect(proxy.data.array).toBeUndefined();
@@ -137,7 +139,8 @@ describe("createProxy", () => {
     const log = txToReactivityLog(tx);
     expect(
       log.writes.some((write) =>
-        write.path[0] === "data" && write.path[1] === "array"
+        write.path[0] === "value" && write.path[1] === "data" &&
+        write.path[2] === "array"
       ),
     ).toBe(true);
   });
