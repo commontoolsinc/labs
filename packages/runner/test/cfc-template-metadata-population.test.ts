@@ -19,6 +19,7 @@ import { cfcLabelViewFromMetadata } from "../src/cfc/label-view-state.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { CfcMetadata, LabelMapEntry } from "../src/cfc/types.ts";
+import type { URI } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase(
   "runner-cfc-template-metadata-population",
@@ -34,6 +35,10 @@ type StoredEntry = {
   label: { confidentiality?: unknown[]; integrity?: unknown[] };
   origin?: string;
   observes?: string;
+};
+
+type StoredDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
 };
 
 const SOURCE_A = { space: "did:key:remote-a", id: "of:origin-a", path: [] };
@@ -112,7 +117,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     cause: string,
     value: unknown,
     entries: LabelMapEntry[],
-  ): Promise<string> => {
+  ): Promise<URI> => {
     const seed = rt.edit();
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
@@ -128,19 +133,17 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     return id;
   };
 
-  const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  const entriesOf = (id: URI): StoredEntry[] => {
+    const document = storageManager!.open(space).replica.getDocument(id) as
+      | StoredDocument
+      | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
 
-  const readAddress = (id: string, path: string[]) => ({
+  const readAddress = (id: URI, path: string[]) => ({
     space,
     scope: "space" as const,
-    id: id as `${string}:${string}`,
+    id,
     type: "application/json" as const,
     path: ["value", ...path],
   });
@@ -150,9 +153,9 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
   const deriveOutDoc = async (
     rt: Runtime,
     outCause: string,
-    criteriaId: string,
+    criteriaId: URI,
     value: unknown = { observed: true },
-  ): Promise<string> => {
+  ): Promise<URI> => {
     const tx = rt.edit();
     tx.readOrThrow(readAddress(criteriaId, []));
     const out = rt.getCell(space, outCause, undefined, tx);
@@ -274,7 +277,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       {
         space,
         scope: "space",
-        id: outId as `${string}:${string}`,
+        id: outId,
         path: [
           "value",
         ],
@@ -298,7 +301,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       {
         space,
         scope: "space",
-        id: outId as `${string}:${string}`,
+        id: outId,
         path: [
           "value",
         ],
@@ -340,7 +343,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       {
         space,
         scope: "space",
-        id: outId as `${string}:${string}`,
+        id: outId,
         path: [
           "value",
         ],
@@ -531,7 +534,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       templateEntry([], ["source"], ["tmpl-only-atom"]),
     ]);
 
-    const derivedConfidentiality = (id: string): unknown[] =>
+    const derivedConfidentiality = (id: URI): unknown[] =>
       entriesOf(id)
         .filter((e) => e.origin === "derived")
         .flatMap((e) => e.label.confidentiality ?? []);
@@ -576,7 +579,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     txRaw.readOrThrow({
       space,
       scope: "space",
-      id: seededId as `${string}:${string}`,
+      id: seededId,
       type: "application/json",
       path: ["cfc"],
     });

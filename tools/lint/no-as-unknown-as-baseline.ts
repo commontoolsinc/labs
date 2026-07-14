@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-template-metadata-population.test.ts": [
-    "132:56:10q9jc",
-  ],
   "packages/runner/test/cfc-template-population.test.ts": [
     "93:56:10q9jc",
     "580:56:10q9jc",
