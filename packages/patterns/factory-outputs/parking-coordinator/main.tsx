@@ -4,11 +4,13 @@ import {
   computed,
   Default,
   handler,
+  hasError,
   NAME,
   nonPrivateRandom,
   pattern,
   type PerSpace,
   type RequiresIntegrity,
+  resultOf,
   safeDateNow,
   Stream,
   UI,
@@ -431,9 +433,12 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
       ParkingAdminManagerCredential | null
     >(null);
 
-    const nowTimestamp = wish<number>({ query: "#now" });
+    const nowRequest = wish<number>({ query: "#now" });
+    const nowTimestamp = resultOf(nowRequest.result);
     const todayStr = computed(() =>
-      toLocalDateStr(nowTimestamp.result || safeDateNow())
+      toLocalDateStr(
+        hasError(nowRequest.result) ? safeDateNow() : nowTimestamp,
+      )
     );
     const weekDatesArr = computed(() => getWeekDates(todayStr));
 
