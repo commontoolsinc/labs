@@ -79,8 +79,8 @@ const simplePieceProgram: RuntimeProgram = {
 // Simulate the PRE-#4158 writer: stored source = the INJECTED bytes,
 // identities computed over the injected bytes (same recipe as the runner's
 // load-by-identity tolerance tests, byte-calibrated against the real
-// production dump in packages/ts-transformers/test/core/legacy-envelope
-// .test.ts).
+// production sample in packages/ts-transformers/test/corpus/legacy-envelope/
+// backlinks-index.stored.tsx.txt).
 async function buildLegacyClosure(
   engine: Engine,
   program: RuntimeProgram,

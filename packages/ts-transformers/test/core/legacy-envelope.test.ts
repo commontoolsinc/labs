@@ -6,7 +6,7 @@
  * runner's cold-load path can tolerate verified stored input without
  * weakening the authoring guard.
  *
- * The primary fixture is REAL: `fixtures/legacy-envelope/
+ * The primary corpus sample is REAL: `corpus/legacy-envelope/
  * backlinks-index.stored.tsx.txt` is the byte-exact `code` field of a
  * poisoned `pattern:<identity>` source doc dumped read-only from the
  * production space that motivated CT-1838 (entry
@@ -28,7 +28,7 @@ import {
 
 const REAL_DUMP = await Deno.readTextFile(
   new URL(
-    "../fixtures/legacy-envelope/backlinks-index.stored.tsx.txt",
+    "../corpus/legacy-envelope/backlinks-index.stored.tsx.txt",
     import.meta.url,
   ),
 );
