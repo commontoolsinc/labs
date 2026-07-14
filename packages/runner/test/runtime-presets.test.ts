@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   EXPERIMENTAL_ENV_VARS,
@@ -7,8 +7,12 @@ import {
   type RuntimeOptionKey,
   runtimePresets,
 } from "../src/runtime-presets.ts";
-import type { ExperimentalOptions, RuntimeOptions } from "../src/runtime.ts";
-import type { IStorageManager } from "../src/storage/interface.ts";
+import type {
+  ExperimentalOptions,
+  ModuleByteCache,
+  RuntimeOptions,
+} from "../src/runtime.ts";
+import { RuntimeTelemetry } from "../src/telemetry.ts";
 import { Runtime, signer, StorageManager } from "./engine-test-support.ts";
 
 /**
@@ -33,9 +37,7 @@ type PresetName = keyof typeof runtimePresets;
 const PRESET_NAMES = Object.keys(runtimePresets) as PresetName[];
 
 const apiUrl = new URL("https://conformance.example/api");
-const storageManager = {
-  id: "conformance-storage",
-} as unknown as IStorageManager;
+const storageManager = StorageManager.emulate({ as: signer });
 const experimental: ExperimentalOptions = { modernCellRep: true };
 const minimalCore = { apiUrl, storageManager, experimental };
 
@@ -110,6 +112,10 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
 };
 
 describe("runtimePresets conformance (CT-1814)", () => {
+  afterAll(async () => {
+    await storageManager.close();
+  });
+
   it("every registered option key gets its declared treatment in every preset", () => {
     for (const key of RUNTIME_OPTION_KEYS) {
       const treatment = MINIMAL_TREATMENT[key];
@@ -168,24 +174,20 @@ describe("runtimePresets conformance (CT-1814)", () => {
   });
 
   describe("delta routing (full-args goldens)", () => {
-    const fetchSentinel = (() =>
-      Promise.reject(
-        new Error("sentinel"),
-      )) as unknown as typeof globalThis.fetch;
+    const fetchSentinel: typeof globalThis.fetch = () =>
+      Promise.reject(new Error("sentinel"));
     const errorHandlers = [() => {}];
     const navigateCallback = () => {};
     const consoleHandler = (
       { args }: { args: unknown[] },
     ) => args;
     const pieceCreatedCallback = () => {};
-    const moduleByteCache = {
-      get: () => undefined,
-      set: () => {},
-    } as unknown as NonNullable<RuntimeOptions["moduleByteCache"]>;
+    const moduleByteCache: ModuleByteCache = {
+      getCompleteSet: () => undefined,
+      putAll: () => {},
+    };
     const trustSnapshotProvider = () => undefined;
-    const telemetry = {
-      dispatchEvent: () => true,
-    } as unknown as NonNullable<RuntimeOptions["telemetry"]>;
+    const telemetry = new RuntimeTelemetry();
     const commitBackpressure = { retryWindowMs: 100 };
     const spaceHostMap = { "did:key:zSpace": "https://host.example" };
     const clientVersion = "build-sha-x";
@@ -193,19 +195,21 @@ describe("runtimePresets conformance (CT-1814)", () => {
 
     it("productionServer", () => {
       const patternApiUrl = new URL("https://public.example/api");
-      expect(runtimePresets.productionServer({
+      const actual = runtimePresets.productionServer({
         ...minimalCore,
         patternApiUrl,
         consoleHandler,
         errorHandlers,
         telemetry,
-      })).toEqual({
+      });
+      expect(actual).toEqual({
         ...minimalOutputs.productionServer,
         patternEnvironment: { apiUrl: patternApiUrl },
         consoleHandler,
         errorHandlers,
         telemetry,
       });
+      expect(actual.telemetry).toBe(telemetry);
     });
 
     it("remoteClient", () => {
@@ -243,7 +247,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
     });
 
     it("browserWorker", () => {
-      expect(runtimePresets.browserWorker({
+      const actual = runtimePresets.browserWorker({
         ...minimalCore,
         spaceHostMap,
         clientVersion,
@@ -256,7 +260,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
         navigateCallback,
         pieceCreatedCallback,
         onVersionSkew,
-      })).toEqual({
+      });
+      expect(actual).toEqual({
         ...minimalOutputs.browserWorker,
         spaceHostMap,
         clientVersion,
@@ -270,6 +275,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         pieceCreatedCallback,
         onVersionSkew,
       });
+      expect(actual.telemetry).toBe(telemetry);
     });
 
     it("unitTest", () => {

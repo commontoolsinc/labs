@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/runtime-presets.test.ts": [
-    "38:2:1eyu8bq",
-    "174:9:1cv42je",
-    "184:6:olnd2n",
-    "188:6:e73xzy",
-  ],
   "packages/runner/test/sandbox-id-auto-provision.test.ts": [
     "189:38:1ffzxwo",
     "335:14:yqzshn",
