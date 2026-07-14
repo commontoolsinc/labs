@@ -113,7 +113,7 @@ surveillance tool.
 | production | synthetic HTTP check | `PROD_URL` (optional; defaults to production) |
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz 5xx rate | `SIGNOZ_URL`, `SIGNOZ_API_KEY` |
-| cloud spend | BigQuery billing export, via the REST API | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
+| cloud spend | BigQuery billing export, via the REST API | `GCP_BILLING_TABLE` (+ Workload Identity, or secret `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | github ci spend | GitHub Actions billing, projected to month-end (USD), with a 45-day daily-spend sparkline | `GH_TOKEN` (with org billing read); optional `GH_BILLING_ORG` |
 | benchmark | a runtime benchmark's ~45-day trend, from the `benchmarks.yml` deno-bench artifacts on main | `GH_TOKEN`; optional `BENCH_METRIC` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs, summed | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
@@ -172,16 +172,13 @@ creating one requires an Admin.
 Don't use an **ingestion** key (`signoz-ingestion-key`, write-only for telemetry);
 the tile needs the read/query API key.
 
-### `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY`)
+### `GCP_BILLING_TABLE`
 
 Powers **cloud spend**. The tile queries BigQuery over its REST API — no `bq` or
 `gcloud` CLI. There's no API key for BigQuery (a key doesn't identify a
-principal), so it authenticates as a service account and gets an access token one
-of two ways: in GKE the metadata server hands one out for the pod's own account
-(Workload Identity, no key stored); locally, set `GCP_SA_KEY` to a service-account
-key JSON and the tile signs a JWT and exchanges it for a token. The account needs
-**BigQuery Job User** on the query project plus **BigQuery Data Viewer** on the
-dataset.
+principal), so it authenticates as a service account and gets an access token
+from the GKE metadata server (Workload Identity). The account needs **BigQuery
+Job User** on the query project plus **BigQuery Data Viewer** on the dataset.
 
 1. Console → **Billing** → select the billing account → **Billing export**.
 2. Create a BigQuery **dataset** to hold the export (a US or EU multi-region
@@ -198,8 +195,14 @@ dataset.
    on the project plus **roles/bigquery.dataViewer** on the export dataset (point
    `dashboard_billing_dataset` at that dataset). Enabling the tile is then just
    setting `GCP_BILLING_TABLE`.
-6. For local development instead, grant those two roles to a service account,
-   download a key for it, and set `GCP_SA_KEY` to the file's contents.
+
+### `GCP_SA_KEY`
+
+Powers **cloud spend** for local development only. This is a secret
+service-account key JSON (the whole downloaded file as the env value), used when
+Workload Identity is unavailable. Grant the service account **BigQuery Job User**
+on the query project plus **BigQuery Data Viewer** on the export dataset, then
+download a key for it and treat that JSON as a credential.
 
 The tile sums the raw `cost` column, i.e. total GCP spend across all services,
 gross of credits.
@@ -264,7 +267,6 @@ it.
 |---|---|---|
 | `GH_BILLING_ORG` | github ci spend | org login for billing (default: the org from `DASHBOARD_REPO` — `commontoolsinc`). |
 | `MODEL_MONTHLY_BUDGET` | model spend | combined monthly USD budget across providers. |
-| `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. |
 | `PROD_URL` | production | override the production URL. |
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
