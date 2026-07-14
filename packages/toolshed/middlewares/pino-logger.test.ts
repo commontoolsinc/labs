@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { redactHeaders } from "./pino-logger.ts";
+import { redactHeaders, serializeResponse } from "./pino-logger.ts";
 
 Deno.test("redactHeaders removes sensitive Headers values", () => {
   assertEquals(
@@ -7,12 +7,14 @@ Deno.test("redactHeaders removes sensitive Headers values", () => {
       new Headers({
         authorization: "Bearer secret",
         cookie: "session=secret",
+        "set-cookie": "session=response-secret",
         "user-agent": "diagnostic-browser",
       }),
     ),
     {
       authorization: "[redacted]",
       cookie: "[redacted]",
+      "set-cookie": "[redacted]",
       "user-agent": "diagnostic-browser",
     },
   );
@@ -37,5 +39,26 @@ Deno.test("redactHeaders handles plain objects case-insensitively", () => {
 
 Deno.test("redactHeaders preserves non-header values", () => {
   assertEquals(redactHeaders(undefined), undefined);
+  assertEquals(redactHeaders(null), null);
   assertEquals(redactHeaders("headers unavailable"), "headers unavailable");
+  assertEquals(redactHeaders([]), []);
+});
+
+Deno.test("response serializer redacts sensitive headers", () => {
+  assertEquals(
+    serializeResponse({
+      statusCode: 200,
+      headers: new Headers({
+        "content-type": "application/json",
+        "set-cookie": "session=response-secret",
+      }),
+    }),
+    {
+      status: 200,
+      headers: JSON.stringify({
+        "content-type": "application/json",
+        "set-cookie": "[redacted]",
+      }),
+    },
+  );
 });

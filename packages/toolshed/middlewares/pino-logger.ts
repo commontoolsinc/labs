@@ -33,20 +33,25 @@ export function redactHeaders(headers: unknown): unknown {
   );
 }
 
+export function serializeResponse(response: {
+  statusCode: number;
+  headers: unknown;
+}): { status: number; headers: string } | undefined {
+  if (env.DISABLE_LOG_REQ_RES) {
+    return undefined;
+  }
+  return {
+    status: response.statusCode,
+    headers: JSON.stringify(redactHeaders(response.headers)),
+  };
+}
+
 export function pinoLogger() {
   return logger({
     pino: pino({
       level: env.LOG_LEVEL || "info",
       serializers: {
-        res: (res) => {
-          if (env.DISABLE_LOG_REQ_RES) {
-            return undefined;
-          }
-          return {
-            status: res.statusCode,
-            headers: JSON.stringify(res.headers),
-          };
-        },
+        res: serializeResponse,
         req: (req) => {
           if (env.DISABLE_LOG_REQ_RES) {
             return undefined;
