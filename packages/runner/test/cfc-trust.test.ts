@@ -53,6 +53,20 @@ const config = (overrides: Partial<CfcTrustConfigInput> = {}) =>
     ...overrides,
   })!;
 
+const malformedTrustConfig = (value: unknown): CfcTrustConfigInput =>
+  value as CfcTrustConfigInput;
+
+const setTrustConfigThroughConcreteTx = (
+  tx: ReturnType<Runtime["edit"]>,
+  config: unknown,
+): void => {
+  const setter = Reflect.get(tx, "setCfcTrustConfig");
+  if (typeof setter !== "function") {
+    throw new Error("setCfcTrustConfig is not available");
+  }
+  Reflect.apply(setter, tx, [config]);
+};
+
 describe("CFC trust closure (B3)", () => {
   describe("conceptSatisfied", () => {
     it("satisfies a concept via a delegated statement and a matching atom", () => {
@@ -303,12 +317,12 @@ describe("CFC trust closure (B3)", () => {
     });
 
     it("fails closed on malformed config", () => {
-      expect(() => buildCfcTrustConfig({ typo: [] } as unknown as never))
+      expect(() => buildCfcTrustConfig(malformedTrustConfig({ typo: [] })))
         .toThrow(/unknown key "typo"/);
       expect(() =>
-        buildCfcTrustConfig({
+        buildCfcTrustConfig(malformedTrustConfig({
           statements: [{ implements: AGE_ROUNDING, verifier: AUDITOR }],
-        } as unknown as never)
+        }))
       ).toThrow(/needs a concrete atom pattern/);
       expect(() =>
         buildCfcTrustConfig({
@@ -329,23 +343,25 @@ describe("CFC trust closure (B3)", () => {
         })
       ).toThrow(/delegation\.concepts entry/);
       expect(() =>
-        buildCfcTrustConfig({
+        buildCfcTrustConfig(malformedTrustConfig({
           delegations: [{
             delegator: ALICE,
             verifier: AUDITOR,
             concepts: "all",
           }],
-        } as unknown as never)
+        }))
       ).toThrow(/delegation\.concepts must be an array/);
       expect(() =>
-        buildCfcTrustConfig({
+        buildCfcTrustConfig(malformedTrustConfig({
           conceptEdges: [{ from: AGE_ROUNDING }],
-        } as unknown as never)
+        }))
       ).toThrow(/concept edge to/);
-      expect(() => buildCfcTrustConfig({ statements: {} } as unknown as never))
+      expect(() =>
+        buildCfcTrustConfig(malformedTrustConfig({ statements: {} }))
+      )
         .toThrow(/statements must be an array/);
       expect(() =>
-        buildCfcTrustConfig({ statements: ["nope"] } as unknown as never)
+        buildCfcTrustConfig(malformedTrustConfig({ statements: ["nope"] }))
       ).toThrow(/statement must be an object/);
       expect(() =>
         buildCfcTrustConfig({
@@ -356,7 +372,7 @@ describe("CFC trust closure (B3)", () => {
           }],
         })
       ).toThrow(/delegation\.delegator/);
-      expect(() => buildCfcTrustConfig("nope" as unknown as never))
+      expect(() => buildCfcTrustConfig(malformedTrustConfig("nope")))
         .toThrow(/config must be an object/);
     });
   });
@@ -387,9 +403,7 @@ describe("CFC trust closure (B3)", () => {
         expect(tx.getCfcState().trustSnapshot?.revision)
           .toContain(runtime.cfcTrustConfig!.digest);
         // Write-once: no mid-tx swap.
-        (tx as unknown as {
-          setCfcTrustConfig: (c: unknown) => void;
-        }).setCfcTrustConfig({
+        setTrustConfigThroughConcreteTx(tx, {
           statements: [],
           delegations: [],
           conceptEdges: [],
@@ -419,9 +433,7 @@ describe("CFC trust closure (B3)", () => {
         const tx = runtime.edit();
         expect(tx.getCfcState().trustConfig).toBeUndefined();
         expect(tx.getCfcState().trustSnapshot?.revision).toBe(runtime.id);
-        (tx as unknown as {
-          setCfcTrustConfig: (c: unknown) => void;
-        }).setCfcTrustConfig({
+        setTrustConfigThroughConcreteTx(tx, {
           statements: [],
           delegations: [],
           conceptEdges: [],

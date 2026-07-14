@@ -1,15 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-trust.test.ts": [
-    "306:52:trmbk9",
-    "311:10:30l9v3",
-    "338:10:cvf8il",
-    "343:10:hd3vnf",
-    "345:58:1dh6xh1",
-    "348:53:niyda9",
-    "359:46:ddohjd",
-    "390:12:kntp4b",
-    "422:12:kntp4b",
-  ],
   "packages/runner/test/cfc-writer-fit.test.ts": [
     "22:60:1vjves4",
   ],
