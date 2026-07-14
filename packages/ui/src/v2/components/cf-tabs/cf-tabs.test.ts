@@ -151,7 +151,7 @@ import { CFTabs } from "./index.ts";
  * cell controller bound (as firstUpdated would do). Returns helpers to drive
  * and observe it.
  */
-function makeTabs(cell: CellHandle<string>, tabValues: string[]) {
+function makeTabs(cell: CellHandle<string> | string, tabValues: string[]) {
   const tabs = new CFTabs();
   const fakeTabs = tabValues.map((v) => new FakeTab(v));
   const fakePanels = tabValues.map((v) => new FakeTabPanel(v));
@@ -166,10 +166,10 @@ function makeTabs(cell: CellHandle<string>, tabValues: string[]) {
   };
 
   // Bind the cell the way firstUpdated() does, and seed initial selection.
-  (tabs as unknown as { value: CellHandle<string> }).value = cell;
+  (tabs as unknown as { value: CellHandle<string> | string }).value = cell;
   const ctrl = (tabs as unknown as {
     _cellController: {
-      bind: (v: CellHandle<string>, s: unknown) => void;
+      bind: (v: CellHandle<string> | string, s: unknown) => void;
     };
   })._cellController;
   ctrl.bind(cell, stringSchema);
@@ -469,5 +469,219 @@ describe("CFTabs pure-on-mount contract (safe inside computed)", () => {
 
     expect(writes()).toBe(0);
     expect(h.selectedTab()).toBe(undefined); // no enabled tab to default to
+  });
+});
+
+/**
+ * Plain-string `value` contract (the "one-behind" highlight regression).
+ *
+ * A consumer whose selection truth is NOT a single string cell (e.g. Loom
+ * mobile's PageViewer, which keys per-page selections in a map) binds a PLAIN
+ * string value and listens to oncf-change:
+ *
+ *   <cf-tabs value={activeId} oncf-change={writeSelectionState}>
+ *
+ * — typically re-created inside a render computed, so each state write
+ * re-renders cf-tabs with the string the click just produced. Two defects
+ * stranded the highlight one state behind on every tap:
+ *
+ * 1. Click-time: emitUserChange → setValue has no backing store for a plain
+ *    binding, so the onChange sync's getValue() re-read returned the STALE
+ *    bound literal and the visual update no-oped. (Fixed: onChange syncs from
+ *    the delivered value.)
+ * 2. Re-render-time: the consumer's recompute re-creates the tab children
+ *    (all unselected) and patches `value` to the clicked string — but
+ *    updated()'s `currentValue !== _lastKnownValue` guard saw the value it
+ *    had already recorded at click time and skipped the re-sync entirely.
+ *    (Fixed: a changed `value` PROPERTY always re-syncs.)
+ */
+describe("CFTabs plain-string value contract (one-behind regression)", () => {
+  // Simulate the consumer's recompute: replace every cf-tab child with a
+  // fresh, unselected element (the VDOM re-creates them), patch the `value`
+  // property, and drive the lit lifecycle the way a property change does.
+  function reRender(
+    h: ReturnType<typeof makeTabs>,
+    newValue: string,
+    oldValue: string,
+  ) {
+    const fresh = h.fakeTabs.map((t) => {
+      const nt = new FakeTab(t.value);
+      nt.onClickDispatch = t.onClickDispatch;
+      return nt;
+    });
+    h.fakeTabs.splice(0, h.fakeTabs.length, ...fresh);
+    (h.tabs as unknown as { value: string }).value = newValue;
+    const changed = new Map<string | number | symbol, unknown>([[
+      "value",
+      oldValue,
+    ]]);
+    (h.tabs as unknown as {
+      willUpdate: (c: Map<string | number | symbol, unknown>) => void;
+    }).willUpdate(changed);
+    (h.tabs as unknown as {
+      updated: (c: Map<string | number | symbol, unknown>) => void;
+    }).updated(changed);
+  }
+
+  it("a user click highlights the clicked tab immediately (no cell to write back through)", () => {
+    const h = makeTabs("steps", ["steps", "notes", "log"]);
+    expect(h.selectedTab()).toBe("steps");
+
+    h.clickTab("notes");
+
+    // One gesture event, and the highlight tracks the tap at click time —
+    // pre-fix the onChange getValue() re-read left "steps" selected.
+    expect(h.changes.length).toBe(1);
+    expect(h.changes[0]).toEqual({ value: "notes", oldValue: "steps" });
+    expect(h.selectedTab()).toBe("notes");
+  });
+
+  it("consumer re-render carrying the clicked value re-syncs freshly created tabs", () => {
+    const h = makeTabs("steps", ["steps", "notes", "log"]);
+
+    h.clickTab("notes");
+    // The oncf-change consumer writes its state; its computed re-runs and
+    // re-creates the tab row with value="notes" — the SAME string the click
+    // produced. Pre-fix, updated() read this as no-change and left the fresh
+    // (unselected) children unselected: the visible highlight was whatever
+    // the PREVIOUS render carried — one behind, forever.
+    reRender(h, "notes", "steps");
+    expect(h.selectedTab()).toBe("notes");
+
+    // And it stays correct across the next tap: the exact reported repro
+    // (each render used to show the previous click's target).
+    h.clickTab("log");
+    reRender(h, "log", "notes");
+    expect(h.selectedTab()).toBe("log");
+
+    h.clickTab("steps");
+    reRender(h, "steps", "log");
+    expect(h.selectedTab()).toBe("steps");
+  });
+
+  it("re-render to a DIFFERENT value than the click (controlled rejection) wins", () => {
+    // The consumer is authoritative: if its state write resolves to another
+    // id (e.g. a guard/fallback), the re-rendered value must override the
+    // click-time highlight.
+    const h = makeTabs("steps", ["steps", "notes", "log"]);
+
+    h.clickTab("log");
+    reRender(h, "notes", "steps"); // consumer resolved the tap to "notes"
+    expect(h.selectedTab()).toBe("notes");
+  });
+});
+
+/**
+ * Deferred-retry supersession + slot-listener lifetime.
+ *
+ * Review follow-ups on the one-behind fix (PR #4711): the deferred rAF retry
+ * now CAPTURES its call's valueOverride, so a retry left armed across a newer
+ * synchronous pass would replay the older delivery next frame; and the
+ * cf-tab-list slotchange listener must survive the VDOM replacing the
+ * tab-list element (previously a one-shot boolean pinned it to the first).
+ */
+describe("CFTabs deferred retry + slot listener lifetime", () => {
+  it("a newer sync pass cancels a pending deferred retry (stale delivery must not replay)", () => {
+    // Capturable rAF: the module-level shim swallows callbacks; these stubs
+    // record them so the test can fire (or prove the cancellation of) the
+    // deferred retry deterministically.
+    const rafCbs = new Map<number, () => void>();
+    let nextRafId = 1;
+    const origRaf = g.requestAnimationFrame;
+    const origCaf = g.cancelAnimationFrame;
+    g.requestAnimationFrame = (cb: () => void) => {
+      const id = nextRafId++;
+      rafCbs.set(id, cb);
+      return id;
+    };
+    g.cancelAnimationFrame = (id: number) => {
+      rafCbs.delete(id);
+    };
+    try {
+      const cell = createMockCellHandle<string>("");
+      const h = makeTabs(cell, ["a", "b"]);
+      // Simulate the VDOM timing gap: tab elements exist, properties not yet
+      // assigned — the condition that arms the deferred retry.
+      h.fakeTabs.forEach((t) => {
+        (t as unknown as { value?: string }).value = undefined;
+      });
+
+      pushUpdate(cell, "a"); // delivery "a" can't apply → arms a retry carrying "a"
+      expect(rafCbs.size).toBe(1);
+
+      // Properties arrive, then a NEWER delivery applies synchronously.
+      h.fakeTabs[0].value = "a";
+      h.fakeTabs[1].value = "b";
+      pushUpdate(cell, "b");
+      expect(h.selectedTab()).toBe("b");
+
+      // The stale "a" retry must be gone — pre-fix it survived here...
+      expect(rafCbs.size).toBe(0);
+      // ...and firing any survivor must not overwrite the latest selection
+      // (pre-fix this replayed "a" over "b" on the next frame).
+      for (const cb of [...rafCbs.values()]) cb();
+      expect(h.selectedTab()).toBe("b");
+    } finally {
+      g.requestAnimationFrame = origRaf;
+      g.cancelAnimationFrame = origCaf;
+    }
+  });
+
+  it("re-attaches the slotchange listener when the cf-tab-list element is replaced, and its slotchange re-syncs", () => {
+    // Fake cf-tab-list: just the surface setupTabListSlotListener touches — a
+    // shadow root exposing a <slot> that records slotchange listeners.
+    function makeFakeTabList() {
+      const listeners: Array<() => void> = [];
+      const slot = {
+        addEventListener: (_type: string, cb: () => void) => {
+          listeners.push(cb);
+        },
+        // Empty: skip the "tabs already present" immediate-sync branch so the
+        // test exercises the LISTENER path explicitly via fireSlotChange.
+        assignedElements: () => [] as unknown[],
+      };
+      return {
+        el: {
+          tagName: "CF-TAB-LIST",
+          shadowRoot: {
+            querySelector: (sel: string) => (sel === "slot" ? slot : null),
+          },
+        },
+        listeners,
+        fireSlotChange: () => listeners.forEach((cb) => cb()),
+      };
+    }
+
+    const cell = createMockCellHandle<string>("a");
+    const h = makeTabs(cell, ["a", "b"]);
+    const listA = makeFakeTabList();
+    const listB = makeFakeTabList();
+    let currentTabList: unknown = listA.el;
+    (h.tabs as unknown as {
+      querySelector: (sel: string) => unknown;
+    }).querySelector = (sel: string) =>
+      sel === "cf-tab-list" ? currentTabList : null;
+    const setup = (h.tabs as unknown as {
+      setupTabListSlotListener: () => void;
+    }).setupTabListSlotListener.bind(h.tabs);
+
+    setup();
+    expect(listA.listeners.length).toBe(1);
+    setup(); // same element: idempotent, no duplicate listener
+    expect(listA.listeners.length).toBe(1);
+
+    // The VDOM re-renders the consumer's tab row, re-creating cf-tab-list.
+    currentTabList = listB.el;
+    setup();
+    // Pre-fix the one-shot boolean left the replacement without a listener
+    // (0 here) — cf-tabs went deaf to every subsequent tab change.
+    expect(listB.listeners.length).toBe(1);
+
+    // And the re-attached listener actually re-syncs: knock the selection out
+    // from under the component (as freshly created, unselected children would
+    // be), then fire B's slotchange.
+    h.fakeTabs.forEach((t) => (t.selected = false));
+    listB.fireSlotChange();
+    expect(h.selectedTab()).toBe("a");
   });
 });
