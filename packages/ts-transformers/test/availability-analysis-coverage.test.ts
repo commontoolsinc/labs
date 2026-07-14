@@ -166,6 +166,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
       import {
         AsyncResult,
         HasError,
+        SqliteDb,
         compileAndRun,
         fetchJsonUnchecked,
         fetchText,
@@ -176,6 +177,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
         observeAvailability,
         partialResultOf,
         resultOf,
+        sqliteQuery,
       } from "commonfabric";
       import * as cf from "commonfabric";
 
@@ -197,6 +199,18 @@ Deno.test("availability provenance and observations cover retained and invalid f
         files: [{ name: "/main.tsx", contents: "export default 1" }],
         main: "/main.tsx",
       });
+      declare const db: SqliteDb;
+      const queried = sqliteQuery<Repo>({ db, sql: "SELECT name FROM repos" });
+      const queryAlias = sqliteQuery;
+      const aliasedQuery = queryAlias<Repo>({
+        db,
+        sql: "SELECT name FROM repos",
+      });
+      const namespaceQuery = cf.sqliteQuery<Repo>({
+        db,
+        sql: "SELECT name FROM repos",
+      });
+      const methodQuery = db.query<Repo>("SELECT name FROM repos");
       const objectGenerated = generateObject<Repo>({ prompt: "repo" });
       const objectStream = generateObjectStream<Repo>({ prompt: "repo" });
       const objectStreamAlias = objectStream;
@@ -235,6 +249,22 @@ Deno.test("availability provenance and observations cover retained and invalid f
         "async-result",
       );
       for (const name of ["compiled", "aliasedCompiled", "namespaceCompiled"]) {
+        assertEquals(
+          resolveAvailabilityValueProvenance(
+            initializer(sourceFile, name),
+            context,
+          )?.kind,
+          "async-result",
+        );
+      }
+      for (
+        const name of [
+          "queried",
+          "aliasedQuery",
+          "namespaceQuery",
+          "methodQuery",
+        ]
+      ) {
         assertEquals(
           resolveAvailabilityValueProvenance(
             initializer(sourceFile, name),
