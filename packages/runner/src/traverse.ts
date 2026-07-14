@@ -2457,11 +2457,12 @@ function _combineSchemaUncached(
       // additionalProperties that covers that, we use the defined property
       // and don't pick up flags like asCell from additionalProperties.
       const parentAdditionalProperties = parentSchema.additionalProperties ??
-        (parentSchema.properties === undefined);
+        ((parentSchema.properties === undefined) || undefined);
       const linkAdditionalProperties = linkSchema.additionalProperties ??
-        (linkSchema.properties === undefined);
+        ((linkSchema.properties === undefined) || undefined);
       if (
         parentSchema.properties === undefined &&
+        parentAdditionalProperties !== undefined &&
         ContextualFlowControl.isTrueSchema(parentAdditionalProperties)
       ) {
         const additionalProperties =
@@ -2481,6 +2482,7 @@ function _combineSchemaUncached(
         });
       } else if (
         linkSchema.properties === undefined &&
+        linkAdditionalProperties !== undefined &&
         ContextualFlowControl.isTrueSchema(linkAdditionalProperties)
       ) {
         if (parentSchema.additionalProperties !== undefined) {
@@ -2512,9 +2514,13 @@ function _combineSchemaUncached(
               parentSchema.properties[key],
               value,
             );
+          } else if (parentAdditionalProperties === undefined) {
+            // we have parentSchema.properties, but nothing for this property
+            // so just use the linkSchema's value
+            mergedSchemaProperties[key] = value;
           } else {
             mergedSchemaProperties[key] = combineSchema(
-              parentAdditionalProperties,
+              parentAdditionalProperties!,
               value,
             );
           }
@@ -2527,6 +2533,10 @@ function _combineSchemaUncached(
             linkSchema.properties[key] !== undefined
           ) {
             continue; // already handled
+          } else if (linkAdditionalProperties === undefined) {
+            // we have linkSchema.properties, but nothing for this property
+            // so just use the parentSchema's value
+            mergedSchemaProperties[key] = value;
           } else {
             mergedSchemaProperties[key] = combineSchema(
               value,
