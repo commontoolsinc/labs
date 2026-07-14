@@ -891,6 +891,18 @@ export interface IStorageTransaction {
   ): Result<IAttestation, ReadError>;
 
   /**
+   * Records several already-loaded paths in one document as transaction reads
+   * without loading their values. Implementations may batch document-level
+   * bookkeeping; the resulting activities must match calling `read()` with
+   * `trackReadWithoutLoad: true` for each path in iteration order.
+   */
+  trackReadPaths?(
+    address: Omit<IMemorySpaceAddress, "path">,
+    paths: readonly (readonly MemoryAddressPathComponent[])[],
+    options?: Omit<IReadOptions, "trackReadWithoutLoad">,
+  ): Result<Unit, ReadError>;
+
+  /**
    * Creates a memory space writer for this transaction. Fails if transaction is
    * no longer in progress or if writer for the different space was already open
    * on this transaction. Requesting a writer for the same memory space will

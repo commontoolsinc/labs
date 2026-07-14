@@ -21,6 +21,7 @@ import ts from "typescript";
 export { ts };
 export {
   CommonFabricTransformerPipeline,
+  isLegacyInjectedEnvelope,
   ReactiveErrorTransformer,
   transformCfDirective,
 } from "@commonfabric/ts-transformers";

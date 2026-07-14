@@ -375,6 +375,76 @@ describe("deep-freeze", () => {
     });
   });
 
+  describe("`isDeepFrozenFabricValue()` identity cache", () => {
+    it("does not revalidate an already-proven frozen Fabric value", () => {
+      let childReads = 0;
+      const child = Object.freeze({ value: 1 });
+      const value = new Proxy(Object.freeze({ child }), {
+        get(target, property, receiver) {
+          childReads++;
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      Object.freeze(value);
+
+      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      const readsAfterProof = childReads;
+      expect(readsAfterProof).toBeGreaterThan(0);
+
+      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      expect(childReads).toBe(readsAfterProof);
+    });
+
+    it("revalidates accessor-backed values whose result changes", () => {
+      let child: unknown = Object.freeze({ value: 1 });
+      const value = Object.freeze({
+        get child() {
+          return child;
+        },
+      });
+
+      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      child = () => "not a Fabric value";
+      expect(isDeepFrozenFabricValue(value)).toBe(false);
+    });
+
+    it("rejects an accessor result that becomes mutable", () => {
+      let child: unknown = Object.freeze({ value: 1 });
+      const value = Object.freeze({
+        get child() {
+          return child;
+        },
+      });
+
+      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      child = { value: 2 };
+      expect(isDeepFrozenFabricValue(value)).toBe(false);
+    });
+
+    it("revalidates frozen arrays with accessor elements", () => {
+      let elementReads = 0;
+      let element: unknown = 1;
+      const value: unknown[] = [];
+      Object.defineProperty(value, "0", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          elementReads++;
+          return element;
+        },
+      });
+      Object.freeze(value);
+
+      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      const readsAfterFirstProof = elementReads;
+      expect(readsAfterFirstProof).toBeGreaterThan(0);
+
+      element = () => "not a Fabric value";
+      expect(isDeepFrozenFabricValue(value)).toBe(false);
+      expect(elementReads).toBeGreaterThan(readsAfterFirstProof);
+    });
+  });
+
   // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
   // 4-arm dispatch) and the analogous arms of `checkValue` inside
   // `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and

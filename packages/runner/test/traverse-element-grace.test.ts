@@ -20,6 +20,10 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  getLogger,
+  getLoggerCountsBreakdown,
+} from "@commonfabric/utils/logger";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type {
@@ -198,5 +202,49 @@ describe("element-level required grace for unresolvable links (B2)", () => {
 
     expect(result).toBeUndefined();
     expect(error).toBeDefined();
+  });
+});
+
+describe("array-void diagnosability", () => {
+  // The 2026-07-10 board outage presented as a blanked array with a bare
+  // "Item doesn't match" log — nothing named WHICH element was at fault. Pin
+  // that the (unchanged) strict void now leaves an info breadcrumb carrying
+  // the failing index + doc address (the message body is a lazy lambda: it
+  // only runs when the level admits it).
+  it("still voids on a mismatched element, and names the failing index + doc at info", () => {
+    const traverseLogger = getLogger("traverse");
+    const priorLevel = traverseLogger.level;
+    traverseLogger.level = "info";
+    try {
+      const infoCount = () => {
+        const breakdown = getLoggerCountsBreakdown()["traverse"] as
+          | Record<string, { info?: number }>
+          | undefined;
+        return breakdown?.["traverse"]?.info ?? 0;
+      };
+      const store = new Map<string, Revision<State>>();
+      const rootUri = "of:void-diag-root" as URI;
+      const badUri = "of:void-diag-bad" as URI;
+      putDoc(store, badUri, "not-an-object");
+      const rootValue = {
+        messages: [{ author: "alice", profile: linkTo(badUri) }],
+      };
+      putDoc(store, rootUri, rootValue, 2);
+
+      const before = infoCount();
+      const { ok: result, error } = traverseRoot(
+        store,
+        rootUri,
+        rootValue,
+        listSchema,
+      );
+      // Strict semantics unchanged: the mismatched element voids the read.
+      expect(result).toBeUndefined();
+      expect(error).toBeDefined();
+      // And the void is attributable: at least one info breadcrumb fired.
+      expect(infoCount() - before).toBeGreaterThanOrEqual(1);
+    } finally {
+      traverseLogger.level = priorLevel;
+    }
   });
 });

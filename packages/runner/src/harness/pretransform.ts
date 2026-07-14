@@ -17,16 +17,44 @@ export function pretransformProgram(
 // For each source file in the program, inject the internal helper import used
 // by the AST transformer by default. Files can explicitly opt out with
 // `/// <cf-disable-transform />`.
+//
+// `tolerateStoredLegacyEnvelope` (CT-1838): pre-#4158 pipelines persisted the
+// helper-INJECTED form as the source-of-record, so re-injecting a stored
+// legacy doc trips the reserved-symbol guard (`checkCFHelperVar`) and bricks
+// every pre-#4158 pattern on cold load. When the option is set, files whose
+// bytes are EXACTLY the legacy envelope (`isLegacyInjectedEnvelope` — exact
+// prefix + trailer, nothing looser) pass through UNCHANGED: they already
+// carry the helper import and `h` shim the compiler needs, and they never
+// reach `transformCfDirective`, so the guard never fires for them. Set this
+// ONLY for storage-fetched, Merkle-verified input (the engine's cold
+// recovery path and fabric mounts). Authoring paths
+// (`pretransformProgram(ForModules)`) never set it — authored source
+// containing `__cfHelpers` keeps throwing, so the poison can never be
+// WRITTEN again; tolerance exists only for what history already stored.
+// Skipping `normalizeMixedModuleImports` for these files is safe: the
+// pre-#4158 pipeline normalized before storage, so stored legacy bytes are
+// already normalized.
 export function transformInjectHelperModule(
   program: RuntimeProgram,
+  options: { tolerateStoredLegacyEnvelope?: boolean } = {},
 ): RuntimeProgram {
   // Deferred compiler stack (parses + prints): pretransform only runs on
   // compile flows, which await ensureCompilerStack() at their entry.
-  const { transformCfDirective } = compilerStack();
+  const { isLegacyInjectedEnvelope, transformCfDirective } = compilerStack();
   return {
     main: program.main,
     files: program.files.map((source) => {
       if (source.name.endsWith(".d.ts")) {
+        return { name: source.name, contents: source.contents };
+      }
+      // CT-1838 tolerance: an exact legacy-envelope stored doc passes
+      // through unchanged. Checked before the directive warning below —
+      // envelope docs are machine-written pretransform output, not authored
+      // source, so the author-facing warning would be noise on them.
+      if (
+        options.tolerateStoredLegacyEnvelope === true &&
+        isLegacyInjectedEnvelope(source.contents)
+      ) {
         return { name: source.name, contents: source.contents };
       }
       // `/// <cf-disable-transform />` disables the transform only at column

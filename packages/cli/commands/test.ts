@@ -150,6 +150,7 @@ export const test = new Command()
       storageStats: options.storageStats,
       storageStatsLimit: options.storageStatsLimit,
       patternCoverageDir,
+      continuousUI: Deno.env.get("CF_TEST_CONTINUOUS_UI") === "1",
     });
 
     // Exit with error code if any tests failed

@@ -3,7 +3,6 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { unclaimed } from "@commonfabric/memory/fact";
 import type {
   CommitPrecondition,
   PatchOp,
@@ -85,6 +84,7 @@ import {
   isUiInputBlindWriteTx,
 } from "./reactivity-log.ts";
 import { hasValueAtPath, readValueAtPath } from "./v2-path.ts";
+import { toTransactionDocumentValue } from "./v2-document.ts";
 import {
   buildMergeableIntent,
   foldMergeableIntent,
@@ -103,7 +103,6 @@ const DOCUMENT_MIME = "application/json" as const;
 
 type ReadDocumentEntry = {
   initial: RootAttestation;
-  seq?: number;
   validated: boolean;
   current?: RootAttestation;
   frozenReads?: PathKeyMap<FabricValue | undefined>;
@@ -114,7 +113,6 @@ type ReadDocumentEntry = {
 type WritableDocumentEntry = {
   initial: RootAttestation;
   current: RootAttestation;
-  seq?: number;
   validated: boolean;
   frozenReads: PathKeyMap<FabricValue | undefined>;
   writeDetails: Map<string, TransactionWriteDetail>;
@@ -945,7 +943,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { status: "ready", journal: this.journal };
   }
 
-  getReadActivities() {
+  getReadActivities(): readonly IReadActivity[] {
     return this.#readActivities;
   }
 
@@ -1360,6 +1358,54 @@ export class V2StorageTransaction implements IStorageTransaction {
         value: frozenValue,
       },
     };
+  }
+
+  trackReadPaths(
+    address: Omit<IMemorySpaceAddress, "path">,
+    paths: readonly (readonly string[])[],
+    options?: Omit<IReadOptions, "trackReadWithoutLoad">,
+  ): Result<Unit, ReadError> {
+    if (paths.length === 0) return { ok: {} };
+    const ready = this.editable();
+    if (ready.error) return { error: ready.error };
+
+    const branch = this.branch(address.space);
+    const { doc } = this.document(branch, address);
+    if (address.id.startsWith("data:")) return { ok: {} };
+
+    const readMeta = options?.meta ?? EMPTY_META;
+    const skipCommitPrecondition = isUiInputBlindWriteTx(this);
+    const activityMeta = skipCommitPrecondition
+      ? { ...readMeta, ...ignoreReadForCommit }
+      : readMeta;
+    const scope = normalizeCellScope(address.scope);
+    if (options?.nonRecursive === true) {
+      for (let index = 0; index < paths.length; index++) {
+        this.#readActivities.push({
+          space: address.space,
+          scope,
+          id: address.id,
+          path: paths[index],
+          meta: activityMeta,
+          nonRecursive: true,
+          journalIndex: this.#activityClock++,
+        });
+      }
+    } else {
+      for (let index = 0; index < paths.length; index++) {
+        this.#readActivities.push({
+          space: address.space,
+          scope,
+          id: address.id,
+          path: paths[index],
+          meta: activityMeta,
+          journalIndex: this.#activityClock++,
+        });
+      }
+    }
+    if (!skipCommitPrecondition) doc.validated = true;
+    this.invalidateReactivityLog();
+    return { ok: {} };
   }
 
   write(
@@ -2191,7 +2237,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   private document(
     branch: SpaceBranch,
     address: Pick<IMemoryAddress, "id" | "type" | "scope">,
-  ): { doc: DocumentEntry; meta: { seq?: number } } {
+  ): { doc: DocumentEntry } {
     const scope = normalizeCellScope(address.scope);
     if (
       this.#lastDocument?.branch === branch &&
@@ -2199,24 +2245,15 @@ export class V2StorageTransaction implements IStorageTransaction {
       this.#lastDocument.type === (address.type ?? DOCUMENT_MIME) &&
       this.#lastDocument.scope === scope
     ) {
-      return {
-        doc: this.#lastDocument.doc,
-        meta: {
-          ...(typeof this.#lastDocument.doc.seq === "number"
-            ? { seq: this.#lastDocument.doc.seq }
-            : {}),
-        },
-      };
+      return { doc: this.#lastDocument.doc };
     }
 
     const key = this.docKey(address);
     let doc = branch.docs.get(key);
     if (!doc) {
       const loaded = this.loadRoot(branch, address);
-      const seq = this.readSeq(branch, address);
       doc = {
         initial: loaded,
-        seq,
         validated: false,
       };
       branch.docs.set(key, doc);
@@ -2228,10 +2265,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       scope,
       doc,
     };
-    return {
-      doc,
-      meta: { ...(typeof doc.seq === "number" ? { seq: doc.seq } : {}) },
-    };
+    return { doc };
   }
 
   private loadRoot(
@@ -2247,14 +2281,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       return loaded.ok as RootAttestation;
     }
 
-    const state = branch.replica.get({
-      id: address.id,
-      type,
-      scope: address.scope,
-    }) ?? unclaimed({
-      of: address.id,
-      the: type,
-    });
+    const value = toTransactionDocumentValue(
+      branch.replica.getDocument(address.id, address.scope),
+    );
 
     return {
       address: {
@@ -2263,23 +2292,8 @@ export class V2StorageTransaction implements IStorageTransaction {
         path: [],
         scope: normalizeCellScope(address.scope),
       },
-      value: state.is,
+      value,
     };
-  }
-
-  private readSeq(
-    branch: SpaceBranch,
-    address: Pick<IMemoryAddress, "id" | "type" | "scope">,
-  ): number | undefined {
-    if (address.id.startsWith("data:")) {
-      return undefined;
-    }
-    const state = branch.replica.get({
-      id: address.id,
-      type: address.type ?? DOCUMENT_MIME,
-      scope: address.scope,
-    }) as { since?: number } | undefined;
-    return typeof state?.since === "number" ? state.since : undefined;
   }
 
   private validate(): Result<Unit, IStorageTransactionInconsistent> {
