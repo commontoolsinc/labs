@@ -215,6 +215,7 @@ export default pattern(() => {
       { assertion: assert_public_output_count },
       { assertion: assert_public_output_policy },
       { assertion: assert_public_output_is_profile_free },
+      // With no profile wish resolved, this materializes the non-admin branch.
       { render: lobby[UI] },
     ],
     roster,

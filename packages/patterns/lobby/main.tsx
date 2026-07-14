@@ -546,28 +546,31 @@ const LobbyParticipantRow = pattern<
               {adminLabel}
             </cf-badge>
           </cf-hstack>
-          <cf-hstack align="center" gap="2" wrap>
-            <cf-button
-              data-ui-action={TRUSTED_LOBBY_ACTION}
-              color="neutral"
-              variant="outline"
-              size="sm"
-              disabled={computed(() => !currentUserIsAdmin || everyoneIsAdmin)}
-              onClick={toggleAdmin}
-            >
-              {toggleLabel}
-            </cf-button>
-            <cf-button
-              data-ui-action={TRUSTED_LOBBY_ACTION}
-              color="danger"
-              variant="ghost"
-              size="sm"
-              disabled={computed(() => !currentUserIsAdmin)}
-              onClick={remove}
-            >
-              Remove
-            </cf-button>
-          </cf-hstack>
+          {currentUserIsAdmin
+            ? (
+              <cf-hstack align="center" gap="2" wrap>
+                <cf-button
+                  data-ui-action={TRUSTED_LOBBY_ACTION}
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  disabled={everyoneIsAdmin}
+                  onClick={toggleAdmin}
+                >
+                  {toggleLabel}
+                </cf-button>
+                <cf-button
+                  data-ui-action={TRUSTED_LOBBY_ACTION}
+                  color="danger"
+                  variant="ghost"
+                  size="sm"
+                  onClick={remove}
+                >
+                  Remove
+                </cf-button>
+              </cf-hstack>
+            )
+            : null}
         </cf-hstack>
       </cf-card>
     ),
@@ -612,9 +615,7 @@ const Lobby = pattern<LobbyInput, LobbyOutput>(({ roster, adminRegistry }) => {
   const adminSummary = computed(() =>
     everyoneIsAdmin
       ? "Open fallback: every joined person is an admin."
-      : currentUserIsAdmin
-      ? "Only explicitly named admins can manage this lobby."
-      : "This lobby is managed by explicit admins."
+      : "Only explicitly named admins can manage this lobby."
   );
 
   const participants = roster.participants;
@@ -734,37 +735,45 @@ const Lobby = pattern<LobbyInput, LobbyOutput>(({ roster, adminRegistry }) => {
                 )}
             </cf-vstack>
 
-            <cf-card>
-              <cf-vstack slot="content" gap="3">
-                <cf-hstack align="start" justify="between" gap="3" wrap>
-                  <cf-vstack gap="1">
-                    <cf-heading level={3}>Admin access</cf-heading>
-                    <cf-text tone="muted">{adminSummary}</cf-text>
+            {currentUserIsAdmin
+              ? (
+                <cf-card>
+                  <cf-vstack slot="content" gap="3">
+                    <cf-hstack
+                      align="start"
+                      justify="between"
+                      gap="3"
+                      wrap
+                    >
+                      <cf-vstack gap="1">
+                        <cf-heading level={3}>Admin access</cf-heading>
+                        <cf-text tone="muted">{adminSummary}</cf-text>
+                      </cf-vstack>
+                      <cf-badge
+                        color={computed(() =>
+                          everyoneIsAdmin ? "accent" : "neutral"
+                        )}
+                      >
+                        {computed(() =>
+                          everyoneIsAdmin ? "Open" : "Explicit admins"
+                        )}
+                      </cf-badge>
+                    </cf-hstack>
+                    <cf-checkbox
+                      data-ui-action={TRUSTED_LOBBY_ACTION}
+                      checked={everyoneIsAdmin}
+                      onClick={setEveryoneIsAdmin}
+                    >
+                      Everyone is admin
+                    </cf-checkbox>
+                    <cf-text variant="caption" tone="muted">
+                      This is on by default when no explicit admins exist.
+                      Turning it off keeps you as the first admin.
+                    </cf-text>
                   </cf-vstack>
-                  <cf-badge
-                    color={computed(() =>
-                      everyoneIsAdmin ? "accent" : "neutral"
-                    )}
-                  >
-                    {computed(() =>
-                      everyoneIsAdmin ? "Open" : "Explicit admins"
-                    )}
-                  </cf-badge>
-                </cf-hstack>
-                <cf-checkbox
-                  data-ui-action={TRUSTED_LOBBY_ACTION}
-                  checked={everyoneIsAdmin}
-                  disabled={computed(() => !currentUserIsAdmin)}
-                  onClick={setEveryoneIsAdmin}
-                >
-                  Everyone is admin
-                </cf-checkbox>
-                <cf-text variant="caption" tone="muted">
-                  This is on by default when no explicit admins exist. Turning
-                  it off keeps you as the first admin.
-                </cf-text>
-              </cf-vstack>
-            </cf-card>
+                </cf-card>
+              )
+              : null}
           </cf-vstack>
         </cf-screen>
       </cf-theme>
