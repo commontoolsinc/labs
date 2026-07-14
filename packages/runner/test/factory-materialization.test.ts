@@ -387,6 +387,40 @@ describe("runner-owned factory materialization", () => {
     ).not.toThrow();
   });
 
+  it("accepts reordered enum contracts while preserving trusted canonical state", () => {
+    const trustedArgumentSchema = {
+      type: "object",
+      properties: {
+        source: { enum: ["catalog", "url", "piece"] },
+      },
+    } as const satisfies JSONSchema;
+    const base = pattern(
+      ({ source }: { source: string }) => ({ result: source }),
+      trustedArgumentSchema,
+      { type: "object", properties: { result: { type: "string" } } },
+    );
+    setDurableArtifactEntryRef(base, REFS.pattern);
+    const trustedState = sealFactoryState(base);
+    warm.set(key(REFS.pattern.identity, REFS.pattern.symbol), base);
+
+    const carried = createFactoryShell({
+      ...trustedState,
+      argumentSchema: {
+        type: "object",
+        properties: {
+          source: { enum: ["piece", "catalog", "url"] },
+        },
+      },
+    });
+    const materialized = materializeFactory(carried, {
+      runtime,
+      artifactSpace,
+    });
+
+    expect(materialized).toBe(base);
+    expect(sealFactoryState(materialized)).toEqual(trustedState);
+  });
+
   it("warm-materializes an exactly carried recursive pattern schema", () => {
     const recursiveArgumentSchema = {
       type: "object",

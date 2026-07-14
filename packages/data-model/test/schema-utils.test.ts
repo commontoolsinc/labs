@@ -1201,6 +1201,27 @@ describe("schema-utils", () => {
       expect(factorySchemasEqual(undefined, true)).toBe(false);
     });
 
+    it("compares enum members as an unordered set", () => {
+      expect(factorySchemasEqual(
+        {
+          type: "object",
+          properties: {
+            source: { enum: ["piece", "catalog", "url"] },
+          },
+        },
+        {
+          type: "object",
+          properties: {
+            source: { enum: ["catalog", "url", "piece"] },
+          },
+        },
+      )).toBe(true);
+      expect(factorySchemasEqual(
+        { enum: ["piece", "catalog", "url"] },
+        { enum: ["piece", "catalog", "other"] },
+      )).toBe(false);
+    });
+
     it("resolves local $defs and legacy definitions before comparison", () => {
       const byDefs: JSONSchema = {
         $defs: {

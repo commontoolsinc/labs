@@ -204,6 +204,22 @@ function normalizeSchemaKeyword(
   value: unknown,
   context: SchemaNormalizationContext,
 ): SchemaNormalizationResult {
+  if (key === "enum") {
+    if (!Array.isArray(value)) return SCHEMA_NORMALIZATION_FAILED;
+    const normalized: NormalizedSchemaValue[] = [];
+    for (const entry of value) {
+      const result = normalizeSchemaData(entry, context);
+      if (result === SCHEMA_NORMALIZATION_FAILED) return result;
+      normalized.push(result);
+    }
+    // JSON Schema defines `enum` as a set. `normalizeSchemaData()` has already
+    // sorted object keys, so JSON serialization gives each valid JSON member a
+    // deterministic ordering key without weakening equality of its contents.
+    normalized.sort((left, right) =>
+      utf8Compare(JSON.stringify(left), JSON.stringify(right))
+    );
+    return normalized;
+  }
   if (SINGLE_SCHEMA_KEYWORDS.has(key)) {
     return normalizeSchemaNode(value as JSONSchema, context);
   }

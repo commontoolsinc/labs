@@ -531,7 +531,19 @@ export class PatternManager {
       available = new Set<string>();
       this.availableArtifactIdentities.set(artifactSpace, available);
     }
-    for (const identity of identities) available.add(identity);
+    for (const identity of identities) {
+      available.add(identity);
+      // A factory can be evaluated and indexed before the containing commit
+      // publishes its closure. Commit confirmation is the point at which that
+      // exact content identity becomes durable authority, so upgrade every
+      // already-live symbol without requiring a re-evaluation.
+      const indexed = this.addressableByIdentity.get(identity);
+      if (indexed !== undefined) {
+        for (const [symbol, value] of indexed) {
+          setDurableArtifactEntryRef(value, { identity, symbol });
+        }
+      }
+    }
   }
 
   /**
@@ -1980,7 +1992,10 @@ export class PatternManager {
     // value is, by content identity, the original. `getArtifactEntryRef`
     // consumers tolerate this (it resolves to a real, addressable artifact).
     const ref = { identity, symbol };
-    if (durable) {
+    // Availability may have been confirmed before a later re-evaluation of the
+    // same content identity. Once any exact space holds a verified closure, a
+    // newly indexed live value may safely expose the space-neutral durable ref.
+    if (durable || this.artifactSourceSpace(identity) !== undefined) {
       setDurableArtifactEntryRef(value, ref);
     } else {
       setArtifactEntryRef(value, ref);

@@ -440,6 +440,33 @@ function applyModifiers(
   return materialized;
 }
 
+function nonSchemaFactoryState(state: FactoryStateV1): FabricValue {
+  switch (state.kind) {
+    case "pattern":
+      return {
+        kind: state.kind,
+        ref: state.ref,
+        ...(Object.hasOwn(state, "params") ? { params: state.params } : {}),
+        ...(Object.hasOwn(state, "defaultScope")
+          ? { defaultScope: state.defaultScope }
+          : {}),
+        ...(Object.hasOwn(state, "spaceSelector")
+          ? { spaceSelector: state.spaceSelector }
+          : {}),
+      } as FabricValue;
+    case "module":
+      return {
+        kind: state.kind,
+        ref: state.ref,
+        ...(Object.hasOwn(state, "defaultScope")
+          ? { defaultScope: state.defaultScope }
+          : {}),
+      } as FabricValue;
+    case "handler":
+      return { kind: state.kind, ref: state.ref };
+  }
+}
+
 function materializeResolved(
   resolved: unknown,
   carried: FactoryStateV1,
@@ -460,8 +487,8 @@ function materializeResolved(
   }
   if (
     !valueEqual(
-      resultingState as unknown as FabricValue,
-      carried as unknown as FabricValue,
+      nonSchemaFactoryState(resultingState),
+      nonSchemaFactoryState(carried),
     )
   ) {
     throw new Error(

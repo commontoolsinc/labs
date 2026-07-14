@@ -541,7 +541,11 @@ value before calling the materializer. Context-free `valueFromJson()` remains
 the intentional shell-returning boundary.
 
 Materialization returns another function, not a wrapper object, and preserves
-the canonical codec state for reserialization.
+the canonical codec state for reserialization. Preservation requires exact
+kind, ref, bound params, scope, and space-selector state. Public schemas are
+checked through the normalized contract comparison above, so a harmless `enum`
+reorder does not fail the final state check; the materialized callable
+reserializes the trusted artifact's canonical schema representation.
 
 ### Durable by-value publication
 
@@ -575,6 +579,12 @@ Publication preserves the memory system's optimistic local-commit contract:
 5. The server applies the artifact ensures and the containing value atomically.
    A deterministic preparation or integrity failure rejects the containing
    commit and follows ordinary speculative-revert and dependent-commit rules.
+   Only confirmation of that atomic commit grants destination-space artifact
+   availability. At confirmation, the runner also upgrades every already-indexed
+   live factory under the confirmed content identity with its durable artifact
+   ref; a factory evaluated before publication therefore becomes synchronously
+   sealable without re-evaluation. Later evaluations of the same verified
+   identity receive the same durable ref immediately.
 
 Consequently, a remote runtime cannot observe a canonical factory ref before
 the referenced artifact closure is durable in that value's space. A local
@@ -927,8 +937,13 @@ factory argument into a symbolic proxy nor drop a pattern's public schemas.
 
 Version 1 requires the stored factory's canonical public schemas to equal the
 call site's generated schemas after reference resolution and normalization.
-Schema variance is deferred. The resolved trusted artifact is authoritative;
-wire-carried schema hints never grant execution or CFC authority.
+Because JSON Schema defines `enum` as a set, normalization compares its members
+independently of array order while still requiring the exact same member values.
+This permits schema sanitization and Fabric round-tripping to reorder an enum
+without creating a false factory-contract mismatch; no other array-valued
+keyword is made order-insensitive by this rule. Schema variance is deferred.
+The resolved trusted artifact is authoritative; wire-carried schema hints never
+grant execution or CFC authority.
 
 The compiler must preserve that exact public contract even when TypeScript
 widens a factory expression to `PatternFactory<Input, any>` or merges several

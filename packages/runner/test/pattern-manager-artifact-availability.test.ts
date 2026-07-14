@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { factoryStateOf } from "@commonfabric/data-model/fabric-factory";
 
 import {
   getCompileCacheRuntimeVersion,
@@ -101,6 +102,23 @@ describe("PatternManager exact-space artifact availability", () => {
     ).toThrow(
       `Factory artifact ${ref.identity} is not available in space ${spaceA}`,
     );
+  });
+
+  it("upgrades already-indexed factories after their publication commit is confirmed", async () => {
+    const pattern = await runtime.patternManager.compilePattern(PROGRAM);
+    const ref = runtime.patternManager.getArtifactEntryRef(pattern)!;
+
+    expect(factoryStateOf(pattern).ref).toBeUndefined();
+
+    runtime.patternManager.noteArtifactPublicationConfirmed(
+      ref.identity,
+      spaceA,
+    );
+
+    expect(factoryStateOf(pattern).ref).toEqual(ref);
+    expect(
+      runtime.patternManager.isArtifactAvailableInSpace(ref.identity, spaceA),
+    ).toBe(true);
   });
 
   it("marks only the exact space after awaited source and compiled persistence", async () => {
