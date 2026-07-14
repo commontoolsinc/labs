@@ -1,7 +1,7 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { StaticCacheFS } from "@commonfabric/static";
 
-import { transformSource } from "./utils.ts";
+import { transformSource, validateSource } from "./utils.ts";
 
 const commonfabricTypes = await new StaticCacheFS().getText(
   "types/commonfabric.d.ts",
@@ -77,4 +77,24 @@ Deno.test("aliased and namespace latestComplete calls inject a schema", async ()
 
   assertEquals(output.match(/schema:/g)?.length, 2);
   assertEquals(output.match(/name: \{/g)?.length! >= 2, true);
+});
+
+Deno.test("latestComplete diagnoses an unresolved complete-value type", async () => {
+  const { diagnostics } = await validateSource(
+    `
+      import { latestComplete, pattern } from "commonfabric";
+
+      export default pattern((input: { value: unknown }) => ({
+        snapshot: latestComplete(input.value),
+      }));
+    `,
+    { types: { "commonfabric.d.ts": commonfabricTypes } },
+  );
+
+  assertEquals(
+    diagnostics.some((diagnostic) =>
+      diagnostic.type === "latest-complete:unresolved-type"
+    ),
+    true,
+  );
 });
