@@ -3,8 +3,8 @@
 This plan covers two follow-ups to the
 [`DataUnavailable` specification](../specs/data-unavailability.md): the pending
 renderer continuity behavior and the staged migration of the remaining
-asynchronous APIs. The renderer portion is implemented in the current work;
-the API stages remain planned.
+asynchronous APIs. The renderer portion, `latestComplete()`, and direct
+streaming generation results are implemented; the later API stages remain.
 
 The complementary `latestComplete()` helper is now implemented and specified in
 the [DataUnavailable spec](../specs/data-unavailability.md#latestcomplete-snapshot-helper).
@@ -14,7 +14,7 @@ unavailability; `latestComplete()` retains a coherent prior value.
 ## Status
 
 - Pending renderer continuity: implemented and tested.
-- Remaining asynchronous API migration: A0 compatibility work in progress.
+- Remaining asynchronous API migration: A1 complete; A2 is next.
 
 Keep this file live while any API stage remains. When all stages are complete,
 update the DataUnavailable spec and archive this plan under
@@ -175,16 +175,17 @@ const partialRequest = partialResultOf(request);
 const partialText = resultOf(partialRequest);
 ```
 
-- [ ] Make the stream call return its final `AsyncResult<T>` directly.
-- [ ] Add `partialResultOf(request)` as a zero-node associated projection. Text
+- [x] Make the stream call return its final `AsyncResult<T>` directly.
+- [x] Add `partialResultOf(request)` as a zero-node associated projection. Text
       and object streams expose the accumulated provider text they actually
       receive. A true partial-object channel requires a future streaming object
       provider contract.
-- [ ] Keep grounding or message metadata only through separately named helpers
+- [x] Keep grounding or message metadata only through separately named helpers
       if repository use proves those channels are needed; do not restore a
-      generic state wrapper.
-- [ ] Retain persisted legacy decoding behind the builder projection.
-- [ ] Verify a new request atomically clears stale partial state and publishes
+      generic state wrapper. The repository has no public metadata consumer, so
+      A1 adds no metadata helper.
+- [x] Retain persisted legacy decoding behind the builder projection.
+- [x] Verify a new request atomically clears stale partial state and publishes
       pending on the result channel.
 
 **A1 exit:** streaming and non-streaming generation have the same direct result

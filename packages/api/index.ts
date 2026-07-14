@@ -2032,7 +2032,7 @@ export interface BuiltInLLMState {
   groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
 
-/** Advanced state for structured generation, including partial progress. */
+/** Persisted internal state for structured generation. */
 export interface BuiltInGenerateObjectStreamState<T> {
   pending: boolean;
   result: AsyncResult<T>;
@@ -2074,8 +2074,8 @@ export type BuiltInGenerateObjectParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * source URLs are available from `generateTextStream` / `llm` state;
-     * structured generation does not surface them.
+     * source URLs are available from the legacy `llm` state; direct generation
+     * does not currently expose them.
      */
     search?: boolean;
     /**
@@ -2101,8 +2101,8 @@ export type BuiltInGenerateObjectParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * source URLs are available from `generateTextStream` / `llm` state;
-     * structured generation does not surface them.
+     * source URLs are available from the legacy `llm` state; direct generation
+     * does not currently expose them.
      */
     search?: boolean;
     /**
@@ -2125,7 +2125,8 @@ export type BuiltInGenerateTextParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * source URLs are available from `generateTextStream` / `llm` state.
+     * source URLs are available from the legacy `llm` state; direct generation
+     * does not currently expose them.
      */
     search?: boolean;
     /**
@@ -2146,7 +2147,8 @@ export type BuiltInGenerateTextParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * source URLs are available from `generateTextStream` / `llm` state.
+     * source URLs are available from the legacy `llm` state; direct generation
+     * does not currently expose them.
      */
     search?: boolean;
     /**
@@ -2157,7 +2159,7 @@ export type BuiltInGenerateTextParams =
     queue?: string;
   };
 
-/** Advanced state for text generation, including partial and grounding data. */
+/** Persisted internal state for text generation. */
 export interface BuiltInGenerateTextStreamState {
   pending: boolean;
   result: AsyncResult<string>;

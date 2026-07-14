@@ -747,34 +747,44 @@ replace it with a fabricated empty list. Likewise, exhaustion of bounded
 linked-document loading becomes a terminal `error` for subsequent demand
 rather than leaving an unwakeable `syncing` value.
 
-### Auxiliary generation state
+### Streaming generation
 
-The advanced generation state objects also expose values which are not simple
-availability states, notably streaming `partial` text and grounding sources.
-Those capabilities must not be silently discarded by the direct-result
-cutover.
+`generateTextStream()` and `generateObjectStream<T>()` return their final
+`AsyncResult<T>` directly, like their non-streaming counterparts. The request
+also has an associated intermediate-text channel selected with
+`partialResultOf()`:
 
-The value-returning `generateText()` and `generateObject<T>()` APIs are the
-default APIs governed by this spec. Streaming or metadata-aware use gets an
-explicit advanced API: `generateTextStream()` and
-`generateObjectStream<T>()`, backed by the same internal operation state as
-their direct counterparts. The text state exposes `pending`,
-`result: AsyncResult<string>`, `error`, `partial`, and `groundingSources`. The
-object state exposes `pending`, `result: AsyncResult<T>`, `error`, `partial`,
-and `messages`. These are the auxiliary fields the runtime implements. Internal
-request hashes are omitted, and the object state does not expose the former
-declared-only `cancelGeneration` member because its result schema and
-implementation do not create that stream.
+```typescript
+// Shown for illustration only.
+const request = generateTextStream({ prompt });
+const finalText = resultOf(request);
+const partialText = resultOf(partialResultOf(request));
+```
+
+`partialResultOf()` is a zero-node reactive alias. Its channel is pending until
+the first provider text arrives, is cleared back to pending atomically with a
+replacement request, and carries the terminal unavailable marker on failure.
+Direct object generation may produce no intermediate text; in that case its
+partial channel remains pending while the final object becomes usable. The
+object API never casts incomplete provider text to `Partial<T>`.
+
+The persisted operation state still contains pending, result, error, partial,
+messages, grounding sources, and request hashes as applicable. Those fields are
+runtime implementation detail rather than a public state wrapper. Repository
+use does not currently justify public metadata projections; a future metadata
+use should add a narrowly named zero-node helper instead of restoring `.result`
+and sibling state fields.
 
 `llmDialog` remains stateful and is outside this direct-result migration. Its
 implemented cancellation stream is unchanged.
 
 Legacy persisted generation state may contain `{ pending: false, error }`
-without a `result` field. Advanced state schemas continue to materialize that
-shape until reconciliation; new producers always write an explicit result or
-availability marker. A child generation used by `llmDialog` waits only for
-transient pending/syncing states and fails the tool call immediately for error
-or schema mismatch instead of consuming the full tool timeout.
+without explicit result or partial markers. Internal state schemas continue to
+materialize that shape until reconciliation; the runtime upgrades both channels
+without retrying the provider. New producers always write explicit availability
+markers. A child generation used by `llmDialog` waits only for transient
+pending/syncing states and fails the tool call immediately for error or schema
+mismatch instead of consuming the full tool timeout.
 
 ## `latestComplete()` Snapshot Helper
 

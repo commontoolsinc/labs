@@ -93,17 +93,27 @@ narrow the request to the corresponding state. A computation that only uses
 `resultOf(request)` does not need guards: unavailability propagates until the
 result exists.
 
-## Partial and metadata state
+## Partial streaming output
 
 Use `generateTextStream` or `generateObjectStream<T>` when a pattern needs
-partial output or generation metadata. These advanced forms return a state
-object whose `result` field is itself an `AsyncResult<T>`; the ordinary
-`generateText` and `generateObject` calls remain the concise default.
+intermediate provider text. The stream call returns the final request directly;
+`partialResultOf()` selects its associated partial request:
 
-Persisted advanced state from before the direct-result migration may contain a
-terminal `{ pending: false, error }` without a `result` field. The runtime still
-materializes that legacy state; newly produced state always writes the explicit
-availability marker in `result`.
+```typescript
+// Shown for illustration only.
+const request = generateTextStream({ prompt });
+const finalText = resultOf(request);
+const partialText = resultOf(partialResultOf(request));
+```
+
+Both values use the ordinary availability guards. Before the first chunk,
+`partialResultOf(request)` is pending. A replacement request resets both final
+and partial channels atomically, and a terminal failure is visible on both.
+The current direct object-generation provider may emit no intermediate text;
+its partial channel then remains pending while the final object resolves.
+
+The runtime retains legacy persisted generation state internally, but the
+public streaming API does not expose its sibling state fields or metadata.
 
 As with fetch, `resultOf(request) ?? previousValue` is not a
 fallback-while-loading mechanism: an unavailable marker remains present at
