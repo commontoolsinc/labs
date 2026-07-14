@@ -1,4 +1,9 @@
-import { env, Page, waitFor } from "@commonfabric/integration";
+import {
+  env,
+  Page,
+  type ProbeApi,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -9,6 +14,8 @@ import {
   PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
+import { waitForText } from "./cfc-browser-helpers.ts";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -20,6 +27,21 @@ describe("cf-render integration test", () => {
   let cc: PiecesController;
   let piece: PieceController;
   let pieceSinkCancel: (() => void) | undefined;
+  // The piece's committed result value, tracked by the result-cell sink below,
+  // and a one-shot waiter the sink resolves when the value reaches a target.
+  let latestResultValue: number | undefined;
+  let resultWaiter: { target: number; deferred: Deferred } | undefined;
+
+  // Resolve once the piece's committed result value equals `target`. The sink
+  // fires with the current value on registration and on every committed change,
+  // so a value already at the target resolves immediately; otherwise the sink
+  // resolves the waiter when the target lands.
+  const awaitResultValue = (target: number): Promise<void> => {
+    if (latestResultValue === target) return Promise.resolve();
+    const deferred = defer();
+    resultWaiter = { target, deferred };
+    return deferred.promise;
+  };
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -41,9 +63,18 @@ describe("cf-render integration test", () => {
       { start: true },
     );
 
-    // In pull mode, create a sink to keep the piece reactive when inputs change.
+    // In pull mode, create a sink to keep the piece reactive when inputs
+    // change. The sink also drives awaitResultValue: it records the latest
+    // committed value and resolves a pending waiter when its target is
+    // reached.
     const resultCell = cc.manager().getResult(piece.getCell());
-    pieceSinkCancel = resultCell.sink(() => {});
+    pieceSinkCancel = resultCell.sink((value) => {
+      latestResultValue = (value as { value?: number } | undefined)?.value;
+      if (resultWaiter && latestResultValue === resultWaiter.target) {
+        resultWaiter.deferred.resolve();
+        resultWaiter = undefined;
+      }
+    });
   });
 
   afterAll(async () => {
@@ -62,37 +93,20 @@ describe("cf-render integration test", () => {
       identity,
     });
 
-    // Use try/catch because element may become stale between waitForSelector and evaluate
-    await waitFor(async () => {
-      try {
-        const counterResult = await page.waitForSelector("#counter-result", {
-          strategy: "pierce",
-          timeout: 500,
-        });
-        const initialText = await counterResult.evaluate((el: HTMLElement) =>
-          el.textContent
-        );
-        return initialText?.trim() === "Counter is the 0th number";
-      } catch (_) {
-        return false;
-      }
-    });
+    await waitForText(page, "#counter-result", "Counter is the 0th number");
 
     // Verify via direct operations that the cf-render structure works
-    const value = await piece.result.get(["value"]);
-    assertEquals(value, 0);
+    assertEquals(await piece.result.get(["value"]), 0);
   });
 
   it("should click the increment button and update the counter", async () => {
     const page = shell.page();
 
     // Click increment button (second button - first is decrement)
-    // Use retry logic to handle unstable box model during page settling
     await clickNthButton(page, "[data-cf-button]", 1);
 
-    await waitFor(async () => {
-      return (await piece.result.get(["value"])) === 1;
-    });
+    // Wait for the piece result to reflect the increment.
+    await awaitResultValue(1);
     assertEquals(await piece.result.get(["value"]), 1);
   });
 
@@ -118,67 +132,21 @@ describe("cf-render integration test", () => {
       identity,
     });
 
-    // Use try/catch because element may become stale between waitForSelector and evaluate
-    await waitFor(async () => {
-      try {
-        const counterResult = await page.waitForSelector("#counter-result", {
-          strategy: "pierce",
-          timeout: 500,
-        });
-        const textAfterUpdate = await counterResult.evaluate((
-          el: HTMLElement,
-        ) => el.textContent);
-        return textAfterUpdate?.trim() === "Counter is the 5th number";
-      } catch (_) {
-        return false;
-      }
-    });
+    await waitForText(page, "#counter-result", "Counter is the 5th number");
   });
 
   it("should verify exactly THREE counters display", async () => {
     const page = shell.page();
 
-    await waitFor(async () => {
-      // Find all counter result elements (should be 1 for cf-render and two others)
-      const counterResults = await page.$$("#counter-result", {
-        strategy: "pierce",
-      });
-      return counterResults.length === 3;
-    });
-    const counterResults = await page.$$("#counter-result", {
-      strategy: "pierce",
-    });
-
-    // Verify it shows the correct value
-    const counter = counterResults[0];
-    const text = await counter.evaluate((el: HTMLElement) => el.textContent);
-    assertEquals(
-      text?.trim(),
-      "Counter is the 5th number",
-      "Single counter should show correct value",
-    );
+    // The piece renders one counter through cf-render and two others; all
+    // three must be present, and the first must show the updated value.
+    await waitForCondition(page, (probe: ProbeApi, expected: string) => {
+      const results = probe.collect("#counter-result");
+      return results.length === 3 &&
+        probe.deepText(results[0]).trim() === expected;
+    }, { args: ["Counter is the 5th number"] });
   });
 });
-
-// Clicks the nth button matching selector, retrying if the element lacks a stable box model.
-// This handles timing issues where the element is found but the page
-// is still settling (re-renders, layout shifts, hydration).
-function clickNthButton(
-  page: Page,
-  selector: string,
-  index: number,
-): Promise<void> {
-  return waitFor(async () => {
-    const buttons = await page.$$(selector, { strategy: "pierce" });
-    if (buttons.length <= index) return false;
-    try {
-      await buttons[index].click();
-      return true;
-    } catch (_) {
-      return false;
-    }
-  });
-}
 
 /**
  * Tests for cf-render subpath behavior.
@@ -237,35 +205,15 @@ describe("cf-render subpath handling", () => {
     });
 
     // The main UI should render despite sidebarUI being undefined
-    // Use try/catch because waitForSelector throws on timeout, and waitFor doesn't catch exceptions
-    await waitFor(async () => {
-      try {
-        const mainUI = await page.waitForSelector("#main-ui", {
-          strategy: "pierce",
-          timeout: 500,
-        });
-        const text = await mainUI.evaluate((el: HTMLElement) => el.textContent);
-        return text?.includes("This is the main UI") ?? false;
-      } catch (_) {
-        return false;
-      }
-    }, { timeout: 10000 });
+    await waitForText(page, "#main-ui", "This is the main UI");
 
-    // Verify the title is rendered (check it contains expected text)
-    const title = await page.$("h1", { strategy: "pierce" });
-    const titleText = await title?.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    assertEquals(
-      titleText?.includes("Test Pattern"),
-      true,
-      `Title should contain 'Test Pattern', got: ${titleText}`,
-    );
+    // Verify the title is rendered
+    await waitForText(page, "h1", "Test Pattern");
   });
 
-  it("should verify [TILE_UI] exists in the pattern", () => {
+  it("should verify [TILE_UI] exists in the pattern", async () => {
     // Verify the tile variant exists (a valid subpath property)
-    const tileUI = piece.result.get(["$TILE_UI"]);
+    const tileUI = await piece.result.get(["$TILE_UI"]);
     assertEquals(
       typeof tileUI,
       "object",
@@ -290,28 +238,68 @@ describe("cf-render subpath handling", () => {
     });
 
     // The main UI should be visible - this proves rendering wasn't blocked
-    // Use try/catch because waitForSelector throws on timeout, and waitFor doesn't catch exceptions
-    await waitFor(async () => {
-      try {
-        const mainUI = await page.waitForSelector("#main-ui", {
-          strategy: "pierce",
-          timeout: 500,
-        });
-        return mainUI !== null;
-      } catch (_) {
-        return false;
-      }
-    }, { timeout: 10000 });
+    await waitForText(page, "#main-ui", "This is the main UI");
 
     // Verify the paragraph is visible
-    const paragraph = await page.$("p", { strategy: "pierce" });
-    const paragraphText = await paragraph?.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    assertEquals(
-      paragraphText?.includes("sidebarUI is intentionally undefined"),
-      true,
-      "Paragraph should mention sidebarUI",
-    );
+    await waitForText(page, "p", "sidebarUI is intentionally undefined");
   });
 });
+
+// Clicks the nth button matching selector: wait until that button is present
+// and interactive (scrolled into view with a stable box model), then dispatch a
+// single trusted click on it. The wait re-checks on each DOM mutation while the
+// page settles (re-renders, layout shifts, hydration) rather than re-clicking.
+const NTH_BUTTON_CLICK_TARGET_ATTR = "data-cfc-nth-button-target";
+
+async function clickNthButton(
+  page: Page,
+  selector: string,
+  index: number,
+): Promise<void> {
+  const token = `cfc-nth-button-${crypto.randomUUID()}`;
+  try {
+    await waitForCondition(page, async (
+      probe: ProbeApi,
+      sel: string,
+      idx: number,
+      tok: string,
+      attr: string,
+    ) => {
+      const target = probe.collect(sel)[idx];
+      if (!target) return false;
+      target.scrollIntoView({ block: "center", inline: "center" });
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      );
+      if (!probe.isVisible(target)) return false;
+      target.setAttribute(attr, tok);
+      return true;
+    }, { args: [selector, index, token, NTH_BUTTON_CLICK_TARGET_ATTR] });
+  } catch (cause) {
+    throw new Error(
+      `Unable to find button #${index} matching "${selector}"`,
+      { cause },
+    );
+  }
+  try {
+    const clickTarget = await page.waitForSelector(
+      `[${NTH_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
+      { strategy: "pierce" },
+    );
+    await clickTarget.click();
+  } finally {
+    await page.evaluate((targetToken, targetAttr) => {
+      function collect(root: Document | ShadowRoot, result: Element[]): void {
+        for (const element of root.querySelectorAll("*")) {
+          if (element.getAttribute(targetAttr) === targetToken) {
+            result.push(element);
+          }
+          if (element.shadowRoot) collect(element.shadowRoot, result);
+        }
+      }
+      const matches: Element[] = [];
+      collect(document, matches);
+      for (const element of matches) element.removeAttribute(targetAttr);
+    }, { args: [token, NTH_BUTTON_CLICK_TARGET_ATTR] }).catch(() => {});
+  }
+}
