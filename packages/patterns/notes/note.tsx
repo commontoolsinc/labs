@@ -171,7 +171,9 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // Notebooks and "All Notes" from wish scope (must be before actions that reference them)
     const notebooks = notebookWish.candidates;
-    const allNotesPiece = resultOf(allNotesWish.result);
+    const allNotesPiece = hasError(allNotesWish.result)
+      ? undefined
+      : resultOf(allNotesWish.result);
 
     // Still need allPieces for write operations (push new notes, push backlinks)
     const defaultWish = wish<{ allPieces: Writable<MinimalPiece[]> }>(
@@ -181,11 +183,15 @@ const Note = pattern<NoteInput, NoteOutput>(
     const mentionableWish = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
     );
-    const mentionable = resultOf(mentionableWish.result);
+    const mentionable = hasError(mentionableWish.result)
+      ? []
+      : resultOf(mentionableWish.result);
     const recentWish = wish<MinimalPiece[]>(
       { query: "#recent", headless: true },
     );
-    const _recentPieces = resultOf(recentWish.result);
+    const _recentPieces = hasError(recentWish.result)
+      ? []
+      : resultOf(recentWish.result);
     const mentioned = new Writable<MentionablePiece[]>([]);
 
     // UI state
