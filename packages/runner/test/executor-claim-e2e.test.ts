@@ -1047,7 +1047,7 @@ async function exercisePoolAuthorityTransition(
       > =>
         event.type === "session.execution.claim.set" &&
         event.claim.actionId === claim.actionId &&
-        event.claim.claimGeneration > claim.claimGeneration,
+        event.claim.leaseGeneration === leaseGenerationBeforeReenable + 1,
       "pool transition replacement claim",
     );
     const reclaimed = reclaimEvent.claim;
@@ -1057,6 +1057,8 @@ async function exercisePoolAuthorityTransition(
         { type: "session.execution.settlement" }
       > =>
         event.type === "session.execution.settlement" &&
+        event.settlement.claim.leaseGeneration ===
+          reclaimed.leaseGeneration &&
         event.settlement.claim.claimGeneration ===
           reclaimed.claimGeneration &&
         event.settlement.inputBasisSeq >= reclaimSeq,
@@ -1847,13 +1849,14 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     const rolloutLease = await server.acquireExecutionLease(space, "");
     assertExists(rolloutLease);
     const reclaimed = Promise.withResolvers<void>();
-    let reclaimedGeneration = 0;
+    let reclaimedClaim: ExecutionClaim | undefined;
     const unsubscribeReclaim = observer.subscribeExecutionControl((event) => {
       if (
         event.type === "session.execution.claim.set" &&
-        event.claim.actionId === actionId
+        event.claim.actionId === actionId &&
+        event.claim.leaseGeneration === rolloutLease.leaseGeneration
       ) {
-        reclaimedGeneration = event.claim.claimGeneration;
+        reclaimedClaim = event.claim;
         reclaimed.resolve();
       }
     });
@@ -1876,10 +1879,9 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
     } finally {
       unsubscribeReclaim();
     }
-    assertEquals(
-      reclaimedGeneration > clientSettlement.claim.claimGeneration,
-      true,
-    );
+    assertExists(reclaimedClaim);
+    assertEquals(reclaimedClaim.leaseGeneration, rolloutLease.leaseGeneration);
+    assertEquals(reclaimedClaim.claimGeneration, 1);
     for (const runtime of clientRuntimes) {
       await runtime.storageManager.synced();
     }
