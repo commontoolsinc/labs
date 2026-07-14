@@ -4,18 +4,18 @@ import {
   type Default,
   fetchText,
   handler,
+  hasError,
   ifElse,
+  isPending,
   llmDialog,
   NAME,
   pattern,
   patternTool,
   resultOf,
   type Stream,
-  toSchema,
   UI,
   type VNode,
   wish,
-  type WishState,
   Writable,
 } from "commonfabric";
 import {
@@ -37,15 +37,23 @@ type SuggestionResult = {
 
 type SuggestionResultCell = Writable<SuggestionResult>;
 
+// Internal sidecar state. The outer wish runtime translates this legacy
+// optional selection into WishState.result availability before exposing it.
+type SuggestionPatternState = {
+  result: SuggestionResultCell | undefined;
+  candidates: SuggestionResultCell[];
+  [UI]: VNode;
+};
+
 const triggerGeneration = handler<
   unknown,
   {
     addMessage: Stream<BuiltInLLMMessage>;
     situation: string;
-    result: any | null;
+    shouldGenerate: boolean;
   }
->((_, { addMessage, situation, result }) => {
-  if (!result) {
+>((_, { addMessage, situation, shouldGenerate }) => {
+  if (shouldGenerate) {
     addMessage.send({
       role: "user",
       content: [{ type: "text" as const, text: situation }],
@@ -96,7 +104,7 @@ export default pattern<
     context: { [id: string]: any };
     initialResults: SuggestionResultCell[] | Default<[]>;
   },
-  WishState<SuggestionResultCell> & { [UI]: VNode }
+  SuggestionPatternState
 >(({ situation, context, initialResults }) => {
   // --- Picker state (used when initialResults is non-empty) ---
   const selectedIndex = new Writable(0);
@@ -186,11 +194,7 @@ Use the user context above to personalize your suggestions when relevant.`;
   >(null);
   const hasPendingQuestion = computed(() => pendingQuestion.get() != null);
 
-  const {
-    addMessage,
-    pending,
-    result: suggestionResult,
-  } = llmDialog({
+  const dialog = llmDialog<{ cell: SuggestionResultCell }>({
     system: systemPrompt,
     messages,
     tools: {
@@ -210,11 +214,17 @@ Use the user context above to personalize your suggestions when relevant.`;
     },
     model: "anthropic:claude-sonnet-4-5",
     context,
-    resultSchema: toSchema<{ cell: SuggestionResultCell }>(),
     queue: "suggestions",
   });
-
-  const llmResult = computed(() => suggestionResult?.cell);
+  const { addMessage, pending } = dialog;
+  const shouldGenerate = computed(() =>
+    isPending(dialog.result) || hasError(dialog.result)
+  );
+  const llmResult = computed(() =>
+    isPending(dialog.result) || hasError(dialog.result)
+      ? undefined
+      : resultOf(dialog.result).cell
+  );
 
   // Reactively select between picker and LLM result. This must be a named
   // computed variable — the CTS transformer leaves named Cells as-is in the
@@ -233,7 +243,7 @@ Use the user context above to personalize your suggestions when relevant.`;
         onstart={triggerGeneration({
           addMessage,
           situation,
-          result: llmResult,
+          shouldGenerate,
         })}
       />
       <cf-cell-link
@@ -243,7 +253,7 @@ Use the user context above to personalize your suggestions when relevant.`;
       <cf-cell-context $cell={llmResult}>
         {ifElse(
           computed(() => !!llmResult),
-          computed(() => llmResult),
+          <cf-render $cell={llmResult} />,
           undefined,
         )}
       </cf-cell-context>

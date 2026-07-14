@@ -2,13 +2,14 @@ import {
   type BuiltInLLMMessage,
   computed,
   handler,
+  hasError,
+  isPending,
   llmDialog,
   NAME,
   pattern,
   patternTool,
   resultOf,
   type Stream,
-  toSchema,
   UI,
   type VNode,
   wish,
@@ -119,11 +120,14 @@ Be concise and insightful. Focus on patterns and connections, not just listing t
     tools: llmTools,
     model: "anthropic:claude-haiku-4-5" as const,
     builtinTools: false,
-    resultSchema: toSchema<SpaceOverviewResult>(),
   };
-  const { addMessage, pending, result } = llmDialog(dialogParams);
-
-  const overview = computed(() => result as SpaceOverviewResult | undefined);
+  const dialog = llmDialog<SpaceOverviewResult>(dialogParams);
+  const { addMessage, pending } = dialog;
+  const overview = computed(() =>
+    isPending(dialog.result) || hasError(dialog.result)
+      ? undefined
+      : resultOf(dialog.result)
+  );
 
   const hasResult = computed(() => !!overview);
   const summary = computed(() => overview?.headline ?? "Space Overview");

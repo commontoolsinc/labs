@@ -4,7 +4,9 @@ import {
   computed,
   type Default,
   handler,
+  hasError,
   ifElse,
+  isPending,
   llmDialog,
   NAME,
   navigateTo,
@@ -12,7 +14,6 @@ import {
   resultOf,
   safeDateNow,
   Stream,
-  toSchema,
   UI,
   type VNode,
   wish,
@@ -303,16 +304,17 @@ ${notesXml}
       tools: {},
       model: "anthropic:claude-haiku-4-5" as const,
       builtinTools: false,
-      resultSchema: toSchema<WeeklyRollup>(),
     };
+    const rollupDialog = llmDialog<WeeklyRollup>(rollupParams);
     const {
       addMessage: rollupAddMessage,
       pending: rollupPending,
-      result: rollupResult,
-    } = llmDialog(rollupParams);
+    } = rollupDialog;
 
     const weeklyRollup = computed(() =>
-      rollupResult as WeeklyRollup | undefined
+      isPending(rollupDialog.result) || hasError(rollupDialog.result)
+        ? undefined
+        : resultOf(rollupDialog.result)
     );
     const hasRollup = computed(() => !!weeklyRollup);
 

@@ -4,13 +4,14 @@ import {
   type Default,
   equals,
   handler,
+  hasError,
+  isPending,
   llmDialog,
   NAME,
   pattern,
   patternTool,
   resultOf,
   Stream,
-  toSchema,
   UI,
   wish,
   Writable,
@@ -252,7 +253,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
 
   const allEdgesFromBase = baseEdges;
 
-  // LLM dialog with resultSchema — agent produces structured annotations
+  // Typed LLM dialog — the transformer injects the presentResult schema.
   const dialogOptions = {
     system: agentSystemPrompt,
     messages,
@@ -264,10 +265,13 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
     },
     model: "anthropic:claude-sonnet-4-5" as const,
     builtinTools: false,
-    resultSchema: toSchema<GraphAnnotations>(),
   };
-  const { addMessage, pending, result: annotations } = llmDialog(
-    dialogOptions,
+  const dialog = llmDialog<GraphAnnotations>(dialogOptions);
+  const { addMessage, pending } = dialog;
+  const annotations = computed(() =>
+    isPending(dialog.result) || hasError(dialog.result)
+      ? undefined
+      : resultOf(dialog.result)
   );
 
   // Resolve annotations into actual GraphEdges by looking up piece refs by name
