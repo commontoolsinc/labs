@@ -336,7 +336,7 @@ async function waitForAuthorshipState(
           isWithinContainer(element, targetContainerSelector)
         );
         return elements.some((element) => {
-          const typedElement = element as unknown as {
+          const typedElement = element as Element & {
             authorshipState?: string;
             textIntegrityState?: string;
           };
@@ -435,7 +435,7 @@ async function waitForInvalidAuthorshipState(
           isWithinContainer(element, targetContainerSelector)
         );
         return elements.some((element) => {
-          const typedElement = element as unknown as {
+          const typedElement = element as Element & {
             authorshipState?: string;
           };
           const state = typedElement.authorshipState;

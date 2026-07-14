@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/integration/cfc-group-chat-demo.test.ts": [
-    "339:39:10fdpmm",
-    "438:39:o5t82i",
-  ],
   "packages/patterns/integration/multi-runtime-worker.ts": [
     "171:4:1c7c61y",
     "174:13:1i0su4d",
