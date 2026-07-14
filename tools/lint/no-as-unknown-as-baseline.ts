@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/piece/test/pattern-source-provenance.test.ts": [
-    "59:6:1ud0esm",
-  ],
   "packages/runner/src/builtins/filter.ts": [
     "193:16:1029mof",
   ],

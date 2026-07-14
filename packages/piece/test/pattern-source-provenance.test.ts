@@ -54,9 +54,9 @@ function installFetchStub(
 
 describe("deriveSystemPatternUrl", () => {
   it("returns home.tsx for the home space, default-app.tsx otherwise", () => {
-    const runtime = {
-      userIdentityDID: "did:key:home",
-    } as unknown as Runtime;
+    const runtime: Pick<Runtime, "userIdentityDID"> = {
+      userIdentityDID: "did:key:home" as Runtime["userIdentityDID"],
+    };
     expect(deriveSystemPatternUrl("did:key:home" as never, runtime)).toBe(
       HOME_PATTERN_URL,
     );

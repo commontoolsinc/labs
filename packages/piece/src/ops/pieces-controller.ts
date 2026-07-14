@@ -48,7 +48,7 @@ export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
  */
 export function deriveSystemPatternUrl(
   space: MemorySpace,
-  runtime: Runtime,
+  runtime: Pick<Runtime, "userIdentityDID">,
 ): string {
   return space === runtime.userIdentityDID
     ? HOME_PATTERN_URL
