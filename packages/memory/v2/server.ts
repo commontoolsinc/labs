@@ -3409,8 +3409,20 @@ export class Server {
       throw new Error("execution claim requires the current owned lease");
     }
     const key = actionClaimMapKey(claimInput);
-    const now = this.#executionNowMs();
     const engine = await this.openEngine(claimInput.space);
+    // Engine setup is an authority boundary: the lease may expire or host
+    // lifecycle may begin draining/replacing this slot while the open awaits.
+    // Re-sample and re-read every host/durable authority input afterwards.
+    const claimNow = this.#executionNowMs();
+    if (
+      this.#executionLeaseAuthorities.get(lease) !== authority ||
+      this.#ownedExecutionLeases.get(
+          executionLeaseKey(claimInput.space, claimInput.branch),
+        ) !== authority ||
+      authority.drainRequested
+    ) {
+      throw new Error("execution claim requires the current owned lease");
+    }
     if (!this.#reconcileExecutionPolicy(engine, claimInput.space)) {
       this.executionStats.policyInactiveClaimAttempts += 1;
       return null;
@@ -3418,7 +3430,7 @@ export class Server {
     const current = Engine.currentExecutionLease(engine, {
       space: claimInput.space,
       branch: claimInput.branch,
-      nowMs: now,
+      nowMs: claimNow,
     });
     const sponsor = this.#sessions.get(
       claimInput.space,
@@ -3439,7 +3451,18 @@ export class Server {
     ) {
       throw new Error("execution lease is not active and authorized");
     }
-    this.expireExecutionClaims(now);
+    this.expireExecutionClaims(claimNow);
+    // Expiry publication can synchronously notify lifecycle listeners. Fence a
+    // drain requested by that notification before installing new authority.
+    if (
+      this.#executionLeaseAuthorities.get(lease) !== authority ||
+      this.#ownedExecutionLeases.get(
+          executionLeaseKey(claimInput.space, claimInput.branch),
+        ) !== authority ||
+      authority.drainRequested
+    ) {
+      throw new Error("execution claim requires the current owned lease");
+    }
     const existing = this.#executionClaims.get(key);
     if (existing !== undefined) {
       throw new Error("execution claim is already live");
@@ -3454,7 +3477,7 @@ export class Server {
       ...canonicalActionClaimKey(claimInput),
       leaseGeneration: current.leaseGeneration,
       claimGeneration,
-      expiresAt: Math.min(now + ttlMs, current.expiresAt),
+      expiresAt: Math.min(claimNow + ttlMs, current.expiresAt),
     });
     this.#executionClaims.set(key, claim);
     this.executionStats.claimsIssued += 1;
@@ -3508,6 +3531,16 @@ export class Server {
       live.leaseGeneration !== claim.leaseGeneration ||
       live.claimGeneration !== claim.claimGeneration
     ) {
+      return null;
+    }
+    if (
+      this.#executionLeaseAuthorities.get(lease) !== authority ||
+      this.#ownedExecutionLeases.get(
+          executionLeaseKey(claim.space, claim.branch),
+        ) !== authority ||
+      authority.drainRequested
+    ) {
+      this.revokeExecutionClaim(live);
       return null;
     }
     if (!this.#reconcileExecutionPolicy(engine, claim.space)) {

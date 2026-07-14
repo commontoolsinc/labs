@@ -120,6 +120,9 @@ type ExecutionServer = Server & {
     branch: string,
     options?: { preferredOriginSessionId?: string },
   ): Promise<ExecutionLeaseHandle | null>;
+  beginExecutionLeaseDrain(
+    lease: ExecutionLeaseHandle,
+  ): Promise<ExecutionLeaseHandle | null>;
   setExecutionClaim(
     lease: ExecutionLeaseHandle,
     claim: ActionClaimKey,
@@ -181,7 +184,11 @@ const createControlServer = (
   name: string,
   options: {
     subscriptionRefreshDelayMs?: number;
-    executionControl?: { claimTtlMs?: number; nowMs?: () => number };
+    executionControl?: {
+      claimTtlMs?: number;
+      leaseTtlMs?: number;
+      nowMs?: () => number;
+    };
   } = {},
 ): ExecutionServer =>
   new Server(
@@ -1166,6 +1173,142 @@ Deno.test("live executors renew an exact claim without changing its incarnation"
     await server.close();
   }
 });
+
+Deno.test("claim issuance rejects a lease deadline crossed while opening the engine", async () => {
+  let nowMs = 1_000;
+  const server = createControlServer(
+    "memory-v2-execution-claim-set-expired-await",
+    {
+      executionControl: {
+        claimTtlMs: 10_000,
+        leaseTtlMs: 10_000,
+        nowMs: () => nowMs,
+      },
+    },
+  );
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const mutableServer = server as unknown as {
+    openEngine: (space: string) => Promise<Engine.Engine>;
+  };
+  const originalOpenEngine = mutableServer.openEngine.bind(server);
+  const openStarted = Promise.withResolvers<void>();
+  const releaseOpen = Promise.withResolvers<void>();
+  try {
+    await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
+    let pauseNextOpen = true;
+    mutableServer.openEngine = async (space) => {
+      if (pauseNextOpen) {
+        pauseNextOpen = false;
+        openStarted.resolve();
+        await releaseOpen.promise;
+      }
+      return await originalOpenEngine(space);
+    };
+
+    nowMs = lease.expiresAt - 1;
+    const issuance = server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, ""),
+    );
+    await openStarted.promise;
+    nowMs = lease.expiresAt;
+    releaseOpen.resolve();
+
+    await assertRejects(
+      () => issuance,
+      Error,
+      "execution lease is not active and authorized",
+    );
+    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+  } finally {
+    releaseOpen.resolve();
+    mutableServer.openEngine = originalOpenEngine;
+    await client.close();
+    await server.close();
+  }
+});
+
+for (const operation of ["issuance", "renewal"] as const) {
+  Deno.test(`claim ${operation} rejects authority drained while opening the engine`, async () => {
+    let nowMs = 1_000;
+    const server = createControlServer(
+      `memory-v2-execution-claim-${operation}-drain-await`,
+      {
+        executionControl: {
+          claimTtlMs: 100_000,
+          leaseTtlMs: 100_000,
+          nowMs: () => nowMs,
+        },
+      },
+    );
+    const client = await connectControlClient(server);
+    const session = await mount(client) as ExecutionSession;
+    const mutableServer = server as unknown as {
+      openEngine: (space: string) => Promise<Engine.Engine>;
+    };
+    const originalOpenEngine = mutableServer.openEngine.bind(server);
+    const actionOpenStarted = Promise.withResolvers<void>();
+    const releaseActionOpen = Promise.withResolvers<void>();
+    const drainOpenStarted = Promise.withResolvers<void>();
+    const releaseDrainOpen = Promise.withResolvers<void>();
+    try {
+      await setPolicy(session, true);
+      const lease = await demandAndAcquireLease(server, session);
+      const existing = operation === "renewal"
+        ? await server.setExecutionClaim(
+          lease,
+          claimKey(POLICY_SPACE, ""),
+        )
+        : undefined;
+      let openCount = 0;
+      mutableServer.openEngine = async (space) => {
+        openCount += 1;
+        if (openCount === 1) {
+          actionOpenStarted.resolve();
+          await releaseActionOpen.promise;
+        } else if (openCount === 2) {
+          drainOpenStarted.resolve();
+          await releaseDrainOpen.promise;
+        }
+        return await originalOpenEngine(space);
+      };
+
+      nowMs = 1_001;
+      const action = operation === "issuance"
+        ? server.setExecutionClaim(
+          lease,
+          claimKey(POLICY_SPACE, ""),
+        )
+        : server.renewExecutionClaim(lease, existing!);
+      await actionOpenStarted.promise;
+      const drain = server.beginExecutionLeaseDrain(lease);
+      await drainOpenStarted.promise;
+      releaseActionOpen.resolve();
+
+      if (operation === "issuance") {
+        await assertRejects(
+          () => action,
+          Error,
+          "execution claim requires the current owned lease",
+        );
+      } else {
+        assertEquals(await action, null);
+      }
+      assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+
+      releaseDrainOpen.resolve();
+      assertExists(await drain);
+    } finally {
+      releaseActionOpen.resolve();
+      releaseDrainOpen.resolve();
+      mutableServer.openEngine = originalOpenEngine;
+      await client.close();
+      await server.close();
+    }
+  });
+}
 
 Deno.test("claim renewal rejects a deadline crossed while opening the engine", async () => {
   let nowMs = 1_000;
