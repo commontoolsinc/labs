@@ -200,6 +200,66 @@ describe("plain-schema array traversal", () => {
     });
   });
 
+  it("batches ordinary linked item scheduling reads", async () => {
+    await seed("batched-plain-schema-rows", [{
+      data: { id: "one", label: "First" },
+      label: "First",
+      aliases: ["one"],
+    }, {
+      data: { id: "two", label: "Second" },
+      label: "Second",
+      aliases: ["two"],
+    }]);
+
+    const cell = runtime.getCell<Row[]>(
+      space,
+      "batched-plain-schema-rows",
+      ROWS_SCHEMA,
+      tx,
+    );
+    const sourceId = cell.getAsNormalizedFullLink().id;
+    const nativeTrackReadPaths = tx.trackReadPaths!.bind(tx);
+    const sourceBatches: boolean[] = [];
+    tx.trackReadPaths = (address, paths, options) => {
+      if (address.id === sourceId && paths.length === 2) {
+        sourceBatches.push(options?.nonRecursive === true);
+      }
+      return nativeTrackReadPaths(address, paths, options);
+    };
+
+    expect(cell.get().map(({ label }) => label)).toEqual(["First", "Second"]);
+    expect(sourceBatches).toEqual([true, false]);
+
+    const fallbackTx = runtime.edit();
+    const fallbackCell = runtime.getCell<Row[]>(
+      space,
+      "batched-plain-schema-rows",
+      ROWS_SCHEMA,
+      new TransactionWrapper(fallbackTx),
+    );
+    expect(fallbackCell.get().map(({ label }) => label)).toEqual([
+      "First",
+      "Second",
+    ]);
+    const batchedLog = tx.getReactivityLog!();
+    const fallbackLog = fallbackTx.getReactivityLog!();
+    const byAddress = (a: { id: string; path: readonly string[] }, b: {
+      id: string;
+      path: readonly string[];
+    }) =>
+      `${a.id}\0${a.path.join("\0")}`.localeCompare(
+        `${b.id}\0${b.path.join("\0")}`,
+      );
+    expect([...batchedLog.reads].sort(byAddress)).toEqual(
+      [...fallbackLog.reads].sort(byAddress),
+    );
+    expect([...batchedLog.shallowReads].sort(byAddress)).toEqual(
+      [...fallbackLog.shallowReads].sort(byAddress),
+    );
+    expect(batchedLog.writes).toEqual(fallbackLog.writes);
+    fallbackTx.abort();
+  });
+
   it("falls back to general traversal for schema defaults", async () => {
     await seed("schema-array-default", [{}]);
     const schema = {

@@ -3566,10 +3566,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
    * cell.set(arrayOfObjects). Complex paths, scopes, link schemas, redirects,
    * missing targets, and query traversal retain followPointer().
    */
-  private followPlainArrayItemLink(
+  private plainArrayItemLinkTarget(
     doc: IMemorySpaceValueAttestation,
     selector: SchemaPathSelector,
-  ): [IMemorySpaceValueAttestation, SchemaPathSelector] | undefined {
+  ): IMemorySpaceValueAddress | undefined {
     if (
       this.traverseCells || selector.schema === undefined ||
       preparePlainSchemaPlan(selector.schema) === undefined ||
@@ -3577,30 +3577,92 @@ export class SchemaObjectTraverser<V extends FabricValue>
     ) {
       return undefined;
     }
-    const link = parseLink(doc.value, doc.address);
-    const sourceScope = doc.address.scope ?? "space";
+    return this.ordinaryArrayItemLinkTarget(doc.value, doc.address);
+  }
+
+  private ordinaryArrayItemLinkTarget(
+    value: Immutable<FabricValue>,
+    source: IMemorySpaceValueAddress,
+  ): IMemorySpaceValueAddress | undefined {
+    const link = parseLink(value, source);
+    const sourceScope = source.scope ?? "space";
     if (
       link === undefined || link.schema !== undefined ||
-      link.path.length !== 0 || link.space !== doc.address.space ||
+      link.path.length !== 0 || link.space !== source.space ||
       link.scope !== sourceScope
     ) {
       return undefined;
     }
 
-    const target: IMemorySpaceValueAddress = {
+    return {
       space: link.space,
       id: link.id,
       scope: link.scope,
       type: "application/json",
       path: ["value"],
     };
-    const targetSelector = {
-      path: target.path,
-      schema: selector.schema,
-    };
+  }
+
+  private followPlainArrayItemLink(
+    doc: IMemorySpaceValueAttestation,
+    selector: SchemaPathSelector,
+  ): [IMemorySpaceValueAttestation, SchemaPathSelector] | undefined {
+    const target = this.plainArrayItemLinkTarget(doc, selector);
+    if (target === undefined) return undefined;
     const { ok, error } = this.tx.read(target, READ_NON_RECURSIVE);
     if (error !== undefined || ok.value === undefined) return undefined;
-    return [{ address: target, value: ok.value }, targetSelector];
+    return [{ address: target, value: ok.value }, {
+      path: target.path,
+      schema: selector.schema,
+    }];
+  }
+
+  /**
+   * Pre-resolve a homogeneous run of ordinary array-item links. This lets the
+   * traversal record both source-index dependency passes in document-sized
+   * batches. Target value reads deliberately remain in the element loop: each
+   * one is immediately followed by that target's scheduling and schema reads,
+   * preserving V2's last-document locality.
+   */
+  private preparePlainArrayItemLinks(
+    doc: IMemorySpaceValueAttestation,
+    docArray: readonly Immutable<FabricValue>[],
+    itemSchema: JSONSchema | undefined,
+  ):
+    | {
+      sourceAddresses: readonly IMemorySpaceValueAddress[];
+      targets: readonly IMemorySpaceValueAddress[];
+    }
+    | undefined {
+    const itemPlan = itemSchema === undefined
+      ? undefined
+      : preparePlainSchemaPlan(itemSchema);
+    if (
+      itemSchema === undefined || this.traverseCells ||
+      this.tx.trackReadPaths === undefined || docArray.length < 2 ||
+      itemPlan?.kind !== "object" || itemPlan.properties.size === 0
+    ) {
+      return undefined;
+    }
+
+    const sourceAddresses: IMemorySpaceValueAddress[] = [];
+    const targets: IMemorySpaceValueAddress[] = [];
+    for (let index = 0; index < docArray.length; index++) {
+      if (!(index in docArray)) continue;
+      const item = docArray[index];
+      if (!isSigilLink(item) || isWriteRedirectLink(item)) return undefined;
+      const sourceAddress: IMemorySpaceValueAddress = {
+        ...doc.address,
+        path: appendToPath(doc.address.path, index.toString()),
+      };
+      const target = this.ordinaryArrayItemLinkTarget(item, sourceAddress);
+      if (target === undefined) return undefined;
+      sourceAddresses.push(sourceAddress);
+      targets.push(target);
+    }
+    if (targets.length < 2) return undefined;
+
+    return { sourceAddresses, targets };
   }
 
   /**
@@ -3631,6 +3693,24 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // upstream computations in pull mode.
     this.tx.read(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
 
+    const preparedPlainLinks = this.preparePlainArrayItemLinks(
+      doc,
+      docArray,
+      directItems,
+    );
+    if (preparedPlainLinks !== undefined) {
+      const { path: _path, ...source } = doc.address;
+      const sourcePaths = preparedPlainLinks.sourceAddresses.map(({ path }) =>
+        path
+      );
+      // The old loop interleaved these two reads per index. No writes or other
+      // observable work occurs between them, so recording each dependency kind
+      // as one ordered run preserves the same reactivity multiset.
+      this.tx.trackReadPaths!(source, sourcePaths, { nonRecursive: true });
+      this.tx.trackReadPaths!(source, sourcePaths);
+    }
+    let preparedPlainLinkIndex = 0;
+
     // Evaluate EVERY element even after one fails: a failing element voids
     // the whole array below, but each element's traversal is also what kicks
     // async loads for absent link targets (fresh-replica read asymmetry).
@@ -3644,8 +3724,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     docArray.forEach((item, index) => {
       const itemSchema = directItems ??
         schemaAtPathCanonical(this.cfc, schema, [index.toString()]);
+      const batchIndex = preparedPlainLinkIndex++;
+      const preparedSourceAddress = preparedPlainLinks
+        ?.sourceAddresses[batchIndex];
       let curDoc: IMemorySpaceValueAttestation = {
-        address: {
+        address: preparedSourceAddress ?? {
           ...doc.address,
           path: appendToPath(doc.address.path, index.toString()),
         },
@@ -3655,7 +3738,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         path: curDoc.address.path,
         schema: itemSchema,
       };
-      this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+      if (preparedPlainLinks === undefined) {
+        this.tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
+      }
       // We follow the first link in array elements so we don't have
       // strangeness with setting item at 0 to item at 1. If the element on
       // the array is a link, we follow that link so the returned object is
@@ -3711,12 +3796,28 @@ export class SchemaObjectTraverser<V extends FabricValue>
           // ordinary link after promoting the source read, and nextLink then
           // promotes that same read again. Do the equivalent single link hop
           // directly for the overwhelmingly common cell.set(array) shape.
-          this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
-          [linkDoc, linkSelector] = this.followPlainArrayItemLink(
-            curDoc,
-            curSelector,
-          ) ??
-            followPointer(
+          if (preparedPlainLinks === undefined) {
+            this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
+          }
+          const preparedTarget = preparedPlainLinks?.targets[batchIndex];
+          const preparedResult = preparedTarget === undefined
+            ? undefined
+            : this.tx.read(preparedTarget, READ_NON_RECURSIVE);
+          if (
+            preparedTarget !== undefined &&
+            preparedResult?.ok !== undefined &&
+            preparedResult.ok.value !== undefined
+          ) {
+            linkDoc = {
+              address: preparedTarget,
+              value: preparedResult.ok.value,
+            };
+            linkSelector = {
+              path: preparedTarget.path,
+              schema: curSelector.schema,
+            };
+          } else if (preparedTarget !== undefined) {
+            [linkDoc, linkSelector] = followPointer(
               this.tx,
               curDoc,
               [],
@@ -3724,6 +3825,20 @@ export class SchemaObjectTraverser<V extends FabricValue>
               curSelector,
               "top",
             );
+          } else {
+            [linkDoc, linkSelector] = this.followPlainArrayItemLink(
+              curDoc,
+              curSelector,
+            ) ??
+              followPointer(
+                this.tx,
+                curDoc,
+                [],
+                this.context,
+                curSelector,
+                "top",
+              );
+          }
         }
         curDoc = linkDoc;
         curSelector = linkSelector!;

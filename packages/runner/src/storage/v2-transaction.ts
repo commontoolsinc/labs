@@ -1380,16 +1380,29 @@ export class V2StorageTransaction implements IStorageTransaction {
       ? { ...readMeta, ...ignoreReadForCommit }
       : readMeta;
     const scope = normalizeCellScope(address.scope);
-    for (const path of paths) {
-      this.#readActivities.push({
-        space: address.space,
-        scope,
-        id: address.id,
-        path,
-        meta: activityMeta,
-        ...(options?.nonRecursive === true ? { nonRecursive: true } : {}),
-        journalIndex: this.#activityClock++,
-      });
+    if (options?.nonRecursive === true) {
+      for (let index = 0; index < paths.length; index++) {
+        this.#readActivities.push({
+          space: address.space,
+          scope,
+          id: address.id,
+          path: paths[index],
+          meta: activityMeta,
+          nonRecursive: true,
+          journalIndex: this.#activityClock++,
+        });
+      }
+    } else {
+      for (let index = 0; index < paths.length; index++) {
+        this.#readActivities.push({
+          space: address.space,
+          scope,
+          id: address.id,
+          path: paths[index],
+          meta: activityMeta,
+          journalIndex: this.#activityClock++,
+        });
+      }
     }
     if (!skipCommitPrecondition) doc.validated = true;
     this.invalidateReactivityLog();
