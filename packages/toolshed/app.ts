@@ -14,6 +14,7 @@ import plaidOAuth from "@/routes/integrations/plaid-oauth/plaid-oauth.index.ts";
 import { buildProviderRouters } from "@/routes/integrations/provider-registry.ts";
 import memory from "@/routes/storage/memory/memory.index.ts";
 import memoryDump from "@/routes/storage/memory/memory-dump.index.ts";
+import memoryWireAccounting from "@/routes/storage/memory/memory-wire-accounting.index.ts";
 import blobs from "@/routes/blobs/blobs.index.ts";
 import whoami from "@/routes/whoami/whoami.index.ts";
 import meta from "@/routes/meta/meta.index.ts";
@@ -43,6 +44,7 @@ const routes = [
   plaidOAuth,
   memory,
   memoryDump,
+  memoryWireAccounting,
   blobs,
   whoami,
   meta,
