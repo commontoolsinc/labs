@@ -174,8 +174,9 @@ list — is the authoritative source. As of this writing it recognizes:
   `llm`, `llmDialog`, `fetchBinary`, `fetchText`, `fetchJson`,
   `fetchJsonUnchecked`, `fetchProgram`, `streamData`, `compileAndRun`,
   `navigateTo`, `inspectConfLabel`, and the SQLite builtins `sqliteDatabase` /
-  `sqliteQuery` (`fetchJson<T>` and `sqliteQuery<Row>` additionally get
-  dedicated type-argument schema injection)
+  `sqliteQuery` (`fetchJson<T>`, `streamData<T>`, and `sqliteQuery<Row>`
+  additionally get dedicated type-argument schema injection; typed
+  `llmDialog<T>` receives its presented-result schema)
 - `patternTool` — recognized, but explicitly **not** a reactive origin
   (`reactiveOrigin: false`)
 

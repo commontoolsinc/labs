@@ -79,6 +79,7 @@ on the Common Fabric runtime.
 
 - [capabilities/llm.md](capabilities/llm.md) — `generateText` / `generateObject`; `AsyncResult<T>`, `resultOf`, and availability guards
 - [capabilities/fetch.md](capabilities/fetch.md) — `fetchJson` / `fetchText` / `fetchJsonUnchecked` / `fetchBinary` / `fetchProgram`; direct reactive results and availability guards
+- [capabilities/stream-data.md](capabilities/stream-data.md) — `streamData`; live partial events, clean-close results, and terminal availability
 
 ### workflows/ — CLI and testing mechanics
 

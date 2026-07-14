@@ -3,8 +3,8 @@
 ## Status
 
 Implemented, including the separately specified `latestComplete()` snapshot
-helper and pending renderer continuity. Migration of the remaining
-asynchronous APIs is tracked in the
+helper, pending renderer continuity, and the public asynchronous result APIs.
+Cleanup of the deprecated `llm()` API is tracked in the
 [`async API availability plan`](../plans/async-api-availability-migration.md).
 
 ## Summary
@@ -67,10 +67,8 @@ originating request or an honest availability union.
 - Flattening stateful, multi-channel APIs such as `wish` and `llmDialog` into a
   single result. Their state objects remain, while each data-bearing result
   channel migrates to `AsyncResult<T>` in its own stage.
-- Converting `streamData` in the first migration. It is a long-lived,
-  multi-result subscription rather than a single-result asynchronous operation;
-  replacing its state object requires a separate contract for initial pending,
-  successive usable values, end-of-stream, reconnect, and terminal failure.
+- Automatically reconnecting `streamData`. A connection or decoding failure is
+  terminal for the current request; changing a request input starts a new one.
 - Defining a general JSON Schema vocabulary for every FabricType. This design
   uses a narrower, path-scoped runner policy for control signals.
 - Adding implicit last-value continuity to asynchronous results. Continuity is
@@ -84,9 +82,10 @@ The design spans four behaviors.
 1. The data model has an explicit FabricType protocol. `FabricInstance`
    subclasses own a class-level codec and can be stored and transported as
    `FabricValue`s.
-2. Default fetch, generation, streaming generation, and compilation built-ins
-   return availability-aware results. Streaming intermediate output is exposed
-   through a zero-node projection rather than a public state wrapper.
+2. Default fetch, generation, streaming generation, external data streaming,
+   and compilation built-ins return availability-aware results. Streaming
+   intermediate output is exposed through a zero-node projection rather than a
+   public state wrapper.
 3. A JavaScript action whose input does not match its `argumentSchema` is not
    invoked; its output becomes `DataUnavailable("schema-mismatch")`.
 4. `computed()` is lowered to a lift with generated argument and result
@@ -777,6 +776,44 @@ use does not currently justify public metadata projections; a future metadata
 use should add a narrowly named zero-node helper instead of restoring `.result`
 and sibling state fields.
 
+### Streaming external data
+
+`streamData<T>()` uses the same direct-final-plus-partial shape as streaming
+generation. `T` is the complete decoded server-sent event shape, and the
+transformer injects its schema into the request:
+
+```typescript
+// Shown for illustration only.
+type Event = {
+  id: string;
+  event: string;
+  data: { progress: number };
+};
+
+const request = streamData<Event>({ url });
+const closedEvent = resultOf(request);
+const currentEvent = resultOf(partialResultOf(request));
+```
+
+Both channels begin pending. Each decoded event updates only the partial
+channel while the direct request remains pending. A clean close publishes the
+last decoded event as the direct final result; a clean close before any event is
+an error. A stream intended never to close consumes only the partial channel.
+
+HTTP, connection, malformed-event, and JSON decode failures publish the same
+terminal `error` marker to both channels. An event which does not match the
+schema inferred from `T` publishes `schema-mismatch` to both. There is no
+implicit reconnect. Changing the URL, request options, or inferred schema
+atomically resets both channels to pending, aborts the old request, and starts a
+new one. Stale reads from the replaced request cannot publish. Callers which
+need the last usable partial event across pending or failure explicitly use
+`latestComplete(partialResultOf(request))`.
+
+Newly compiled graphs use a versioned direct-result module reference. The
+legacy `streamData` module reference and raw `{ pending, result, error }` shape
+remain readable for persisted graphs; the public API exposes neither that state
+object nor implicit continuity.
+
 `llmDialog` remains a multi-channel state object. A typed
 `llmDialog<T>()` adds `result: AsyncResult<T>` and an inferred `presentResult`
 tool schema. That result is pending before the first presentation and becomes
@@ -1010,6 +1047,8 @@ runtime/compiler version gate before patterns emit the new type or policy.
 - Fetch and generation built-ins write direct values or unavailable
   markers.
 - Explicit advanced generation APIs cover streaming and metadata use.
+- External data streams expose a direct clean-close result plus an associated
+  partial result without a public state wrapper.
 - Dynamic compilation and SQLite queries expose direct availability-aware
   results while preserving their legacy raw state for old compiled graphs.
 - `AsyncResult<T>` and the transparent zero-node `resultOf()` helper are public.
@@ -1075,6 +1114,10 @@ runtime/compiler version gate before patterns emit the new type or policy.
 - Legacy persisted generation errors without a result remain materializable.
 - Direct APIs and advanced streaming APIs share one operation rather than
   issuing duplicate requests.
+- `streamData` covers initial pending, successive partial events, final decoder
+  flush, clean close, empty close, terminal error, schema mismatch, request
+  replacement, cancellation, no implicit reconnect, legacy outbox ordering,
+  and stale-run suppression.
 - End-to-end patterns demonstrate a default `resultOf()` projection, a
   pending/error/success expression using both state and usable aliases, and a
   computation which observes only errors while other reasons still propagate.

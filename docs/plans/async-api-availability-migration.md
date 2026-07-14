@@ -6,7 +6,8 @@ renderer continuity behavior and the staged migration of the remaining
 asynchronous APIs. The renderer portion, `latestComplete()`, direct streaming
 generation results, direct compilation results, structured SQLite queries,
 availability-aware Wish results, and typed dialog results are implemented; the
-later API stages remain.
+`streamData` migration is also implemented. Only the legacy `llm()` cleanup
+stage remains.
 
 The complementary `latestComplete()` helper is now implemented and specified in
 the [DataUnavailable spec](../specs/data-unavailability.md#latestcomplete-snapshot-helper).
@@ -16,7 +17,7 @@ unavailability; `latestComplete()` retains a coherent prior value.
 ## Status
 
 - Pending renderer continuity: implemented and tested.
-- Remaining asynchronous API migration: A1-A5 complete; A6 is next.
+- Remaining asynchronous API migration: A1-A6 complete; A7 is next.
 
 Keep this file live while any API stage remains. When all stages are complete,
 update the DataUnavailable spec and archive this plan under
@@ -366,21 +367,26 @@ const partialRequest = partialResultOf(request);
 const currentState = resultOf(partialRequest);
 ```
 
-- [ ] Specify initial connect, first event, successive events, clean end,
+There is no implicit reconnect. A connection, HTTP, decode, or schema failure
+is terminal for that request. Changing the URL, options, or inferred event
+schema starts a replacement request; an unchanged failed request remains
+failed.
+
+- [x] Specify initial connect, first event, successive events, clean end,
       reconnect, request replacement, cancellation, and terminal failure.
-- [ ] Keep the direct request pending while the stream is open; publish the last
+- [x] Keep the direct request pending while the stream is open; publish the last
       event as its final result on clean close. Infinite subscriptions therefore
       use `partialResultOf()` for their event channel.
-- [ ] Publish each decoded event through `partialResultOf(request)`; before the
+- [x] Publish each decoded event through `partialResultOf(request)`; before the
       first event that partial channel is pending.
-- [ ] A connection or decode failure makes the direct result an error. The
+- [x] A connection or decode failure makes the direct result an error. The
       partial channel may retain its last event only through an explicit
       `latestComplete(partialResultOf(request))`, not an implicit state wrapper.
-- [ ] Decide and test reconnect policy before implementation; reconnect keeps
-      the final request pending until a later clean close or terminal failure.
-- [ ] Add response-status validation, parser/schema mismatch handling, abort
+- [x] Do not reconnect implicitly. A terminal failure remains stable until URL,
+      options, or schema changes and starts a replacement request.
+- [x] Add response-status validation, parser/schema mismatch handling, abort
       cleanup, and a defined final decoder flush.
-- [ ] Preserve sink outbox ordering, frozen request snapshots, idempotency keys,
+- [x] Preserve sink outbox ordering, frozen request snapshots, idempotency keys,
       scope, and stale-run guards.
 
 **A6 exit:** stream consumers use one direct final result and one explicit
