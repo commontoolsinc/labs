@@ -94,6 +94,17 @@ function canonicalizingMapPosition(
   };
 }
 
+type SourceLocationHarness = NonNullable<
+  Parameters<typeof canonicalizingMapPosition>[0]
+>;
+
+type SourceLocationFrame = {
+  sourceLocationContext?: Frame["sourceLocationContext"];
+  runtime?: {
+    harness?: SourceLocationHarness;
+  };
+};
+
 const INTERNAL_SOURCE_LOCATION_FRAME_PATTERNS = [
   /\bgetExternalSourceLocation\b/,
   /\bannotateFunctionDebugMetadata\b/,
@@ -672,7 +683,7 @@ function prepareInspectableImplementation<
 
 export function resolveLocationFromFunctionSource(
   fn: (...args: any[]) => unknown,
-  frame: Frame | undefined = getTopFrame(),
+  frame: SourceLocationFrame | undefined = getTopFrame(),
 ): string | null {
   const context = frame?.sourceLocationContext;
   const harness = frame?.runtime?.harness;

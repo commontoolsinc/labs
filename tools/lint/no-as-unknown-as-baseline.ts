@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/module.test.ts": [
-    "453:24:1wics4p",
-    "699:9:f27qce",
-    "766:8:qd3wgc",
-  ],
   "packages/runner/test/navigate-handler.test.ts": [
     "24:33:78m8ay",
   ],

@@ -450,10 +450,14 @@ describe("module", () => {
       // through eager-on tests — keep it exercised.
       setEagerSourceAnnotation(true);
       const dbl = lift((n: number) => n * 2);
-      const impl = (dbl as unknown as Module).implementation as {
-        src?: string;
-      };
-      expect(impl.src).toMatch(/module\.test\.ts:\d+:\d+$/);
+      const impl = expectModule(dbl).implementation;
+      expect(typeof impl).toBe("function");
+      if (typeof impl !== "function") {
+        throw new Error("Expected function implementation");
+      }
+      expect((impl as SourceTrackedImplementation).src).toMatch(
+        /module\.test\.ts:\d+:\d+$/,
+      );
     });
 
     it("propagates an explicit option to the ambient flag; undefined leaves it alone", async () => {
@@ -688,15 +692,14 @@ describe("module", () => {
     // resolveLocationFromFunctionSource is the `indexOf`-into-script path,
     // the eager annotation's fallback when the stack capture yields nothing
     // (in-worker, SES-censored stacks make it the MAIN path).
-    const makeFrame = (script: string, nextSearchOffset = 0) =>
-      ({
-        sourceLocationContext: {
-          filename: "/probe.tsx",
-          script,
-          nextSearchOffset,
-        },
-        runtime: { harness: { mapPosition: () => null } },
-      }) as unknown as Frame;
+    const makeFrame = (script: string, nextSearchOffset = 0) => ({
+      sourceLocationContext: {
+        filename: "/probe.tsx",
+        script,
+        nextSearchOffset,
+      },
+      runtime: { harness: { mapPosition: () => null } },
+    });
 
     it("resolves file:line:col by locating the fn source in the script", () => {
       const fn = (n: number) => n * 2;
@@ -759,11 +762,10 @@ describe("module", () => {
               source: "/authored.tsx",
               line: 7,
               column: 3,
-              name: null,
             }),
           },
         },
-      } as unknown as Frame;
+      };
       const result = resolveLocationFromFunctionSource(fn, frame);
       expect(result).toBe("/authored.tsx:7:3");
     });
