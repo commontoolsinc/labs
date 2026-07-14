@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/navigate-handler.test.ts": [
-    "24:33:78m8ay",
-  ],
   "packages/runner/test/oncommit-race.test.ts": [
     "115:35:wvkj30",
   ],

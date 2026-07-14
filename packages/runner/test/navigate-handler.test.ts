@@ -17,15 +17,37 @@ type TransactResponse = {
   ok?: unknown;
   error?: { name: string; message: string };
 };
+type TestMemoryServer = {
+  transact(message: TransactMessage): Promise<TransactResponse>;
+};
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isTestMemoryServer(value: unknown): value is TestMemoryServer {
+  return isRecord(value) && typeof value.transact === "function";
+}
+
+function emulatedServer(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+): TestMemoryServer {
+  const serverMethod = Reflect.get(storageManager, "server");
+  if (typeof serverMethod !== "function") {
+    throw new TypeError("Expected emulated storage manager server method");
+  }
+
+  const server = serverMethod.call(storageManager);
+  if (!isTestMemoryServer(server)) {
+    throw new TypeError("Expected emulated memory server");
+  }
+  return server;
+}
 
 function delayNextServerTransact(
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) {
-  const server = (storageManager as unknown as {
-    server(): {
-      transact(message: TransactMessage): Promise<TransactResponse>;
-    };
-  }).server();
+  const server = emulatedServer(storageManager);
   const original = server.transact.bind(server);
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
