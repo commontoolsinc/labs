@@ -684,19 +684,27 @@ marker to the corresponding result position.
 Renderer reads do not pass through a value-producing computation, so the HTML
 renderers recognize concrete `DataUnavailable` values directly. An unavailable
 root or child contributes no visible content before its first usable value.
-After a usable value has rendered, an unavailable update preserves the last
-rendered subtree until another usable value arrives. It is never stringified as
-`{}` and is not reported as invalid VDOM.
+After a usable value has rendered, a `pending` update preserves the last
+rendered subtree until another usable value arrives. The retained element is
+marked `data-cf-pending`, made `inert`, exposed as `aria-busy`, and dimmed by a
+renderer-owned style in the active document or shadow root. A bare text node is
+retained but has no interactive surface or element on which to install the
+visual treatment. The marker is never stringified as `{}` and is not reported
+as invalid VDOM.
+
+`error`, `syncing`, and `schema-mismatch` do not retain prior content. They
+contribute no visible content unless the authored expression explicitly
+observes the reason and renders a corresponding branch.
 
 Authored `undefined` remains ordinary empty render content, not a suspense
 signal. It contributes no visible content initially, and a transition from a
 visible value to `undefined` removes that visible content instead of preserving
 it.
 
-This suspense behavior is the unguarded default, not a loading or error UI.
+This pending continuity behavior is the unguarded default, not a loading UI.
 Authors use the reason-specific guards when the interface should replace the
 prior subtree with explicit status content. Confidentiality and integrity
-render policy checks run before suspense preservation, so an unavailable update
+render policy checks run before pending preservation, so a pending update
 cannot retain content which has become disallowed.
 
 ## Asynchronous Built-in State Machines
@@ -976,8 +984,9 @@ runtime/compiler version gate before patterns emit the new type or policy.
 - Handler pending/syncing parking preserves FIFO and event identity while
   remaining quiescent for `idle()`; terminal reasons settle without blocking.
 - Opt-in handler preflight telemetry records unavailable reason and queue depth.
-- Renderer roots and children are blank initially and preserve their last
-  usable subtree across later markers.
+- Renderer roots and children are blank for an initial unavailable value.
+  Pending retains the last usable subtree as dimmed, inert, busy content;
+  terminal and syncing markers clear it.
 
 ### Built-ins
 

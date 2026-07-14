@@ -59,10 +59,11 @@ result, it waits whenever that capture is unavailable even when the branch it
 would have taken did not read the value.
 
 When an unavailable value reaches JSX without an explicit guard, rendering
-uses suspense semantics. Before the first usable value it contributes no
-visible content; after a usable value has rendered, that last subtree remains
-in place until another usable value arrives. Use guards when the UI should show
-loading or failure state instead of this default continuity behavior.
+starts blank. After a usable value has rendered, a pending replacement keeps
+that last subtree visible but dimmed and non-interactive until usable data
+returns. Error, syncing, and schema-mismatch values clear the prior content.
+Use guards when the UI should show an explicit loading or failure state
+instead.
 
 The public pattern type `AsyncResult<T>` is the availability union described
 here. An unrelated internal memory utility also uses the name `AsyncResult`
