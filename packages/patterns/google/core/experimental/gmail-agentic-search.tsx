@@ -29,11 +29,15 @@ import {
   generateObject,
   generateObjectStream,
   handler,
+  hasError,
+  hasSchemaMismatch,
   isPending,
+  isSyncing,
   type JSONSchema,
   NAME,
   navigateTo,
   nonPrivateRandom,
+  observeAvailability,
   pattern,
   resultOf,
   safeDateNow,
@@ -1419,10 +1423,21 @@ When you're done searching, STOP calling tools and produce your final structured
       }),
     });
     const agentResult = resultOf(agentRequest);
-    const agentPending = isPending(agentRequest);
-
-    // Detect when agent completes
-    const scanCompleted = isScanning && !agentPending && !!agentResult;
+    // This presenter must emit stable booleans and UI before a scan starts, so
+    // it explicitly observes every request state instead of waiting for T.
+    const observedAgentRequest = observeAvailability(agentRequest);
+    const agentAvailability = computed(() => {
+      const pending = isPending(observedAgentRequest) ||
+        isSyncing(observedAgentRequest);
+      const failed = hasError(observedAgentRequest) ||
+        hasSchemaMismatch(observedAgentRequest);
+      return {
+        pending: isScanning && pending,
+        completed: isScanning && !pending && !failed,
+      };
+    });
+    const agentPending = agentAvailability.pending;
+    const scanCompleted = agentAvailability.completed;
 
     // Detect auth errors from agent result or token validation
     const hasAuthError = computed(() => {
