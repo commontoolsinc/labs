@@ -6,6 +6,7 @@ import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks";
 import env from "@/env.ts";
 import { OpenInferenceBatchSpanProcessor } from "@arizeai/openinference-vercel";
 import { samplerFromEnv } from "@/lib/otel-sampler.ts";
+import { detachRuntimeOtelBridgeIfAttached } from "@/runtime-options.ts";
 
 // Ensure we only register once even during hot-reload
 let _providerRegistered = false;
@@ -59,6 +60,9 @@ export function getTracerProvider() {
  * deploy/restart.
  */
 export async function shutdownOpenTelemetry(): Promise<void> {
+  // End any in-flight runtime-bridge spans (e.g. an open storage.push) so
+  // they make the final flush instead of dying with the process.
+  detachRuntimeOtelBridgeIfAttached();
   if (!_provider) return;
   const p = _provider;
   _provider = undefined;

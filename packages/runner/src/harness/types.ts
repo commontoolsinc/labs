@@ -92,6 +92,8 @@ export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: PatternCoverageSpan[];
+  /** Compiler-issued policy manifests, transported separately from JS exports. */
+  policyManifests?: readonly unknown[];
 }
 
 /**

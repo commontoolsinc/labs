@@ -8,6 +8,7 @@ import type { CacheableModule } from "../harness/types.ts";
 import type { MemorySpace, Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { type Cell, isCell } from "../cell.ts";
+import { snapshotQueryResult } from "../query-result-proxy.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { readStoredCfcMetadata } from "../cfc/metadata.ts";
 import {
@@ -19,6 +20,7 @@ import {
   COMPILE_CACHE_RUNTIME_VERSION,
   SOURCE_COMPILE_CACHE_RUNTIME_VERSION,
 } from "./compile-cache-version.ts";
+import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("cell-cache");
 
@@ -86,6 +88,7 @@ export interface CompiledDoc extends ModuleDocBase {
   readonly exportNames?: readonly string[];
   readonly starTargetSpecs?: readonly string[];
   readonly importSpecs?: readonly string[];
+  readonly policyManifests?: readonly unknown[];
 }
 
 /**
@@ -449,6 +452,39 @@ export const SOURCE_DOC_SCHEMA = {
 } as const satisfies JSONSchema;
 
 /**
+ * One-hop selector for pre-syncing write-back targets (CT-1848). A stored
+ * source/compiled doc's `imports` array holds LIVE links to per-edge element
+ * docs (the cell layer hoists each `{specifier, link}` element into its own
+ * derived doc); the element doc's own `link` field is a *quoted* link — data,
+ * not a traversal edge — so this schema pulls exactly the doc plus its edge
+ * element docs and stops. A schema-less `sync()` normalizes to the rejecting
+ * selector and delivers only the root, leaving the element docs unknown to
+ * the replica — then the re-write touches them blind and the engine reveals
+ * the conflicts one per commit attempt (the CT-1824 loop; the write-back's
+ * retry budget converges it, one round per edge doc). With the element docs
+ * client-known up front, the re-write diffs against true state and commits
+ * on the first attempt. Recursion is deliberately omitted: the write-target
+ * pre-sync enumerates every module doc itself, so each doc only needs its
+ * own edges — nothing beyond the write set loads (the lazy-by-default
+ * posture for code docs is untouched).
+ */
+export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
+  type: "object",
+  properties: {
+    imports: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          specifier: { type: "string" },
+          link: true,
+        },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
+
+/**
  * Write every emitted module as a `pattern:<identity>` cell into `space`, each
  * import a sigil link to its dependency cell (the entry additionally linking any
  * otherwise-unreachable module). Idempotent (content-addressed keys). The caller
@@ -615,6 +651,10 @@ const compiledDocProperties = {
   exportNames: { type: "array", items: { type: "string" } },
   starTargetSpecs: { type: "array", items: { type: "string" } },
   importSpecs: { type: "array", items: { type: "string" } },
+  policyManifests: {
+    type: "array",
+    items: { type: "object", additionalProperties: true },
+  },
   imports: {
     type: "array",
     items: {
@@ -646,6 +686,10 @@ export const COMPILED_DOC_SCHEMA = {
         exportNames: { type: "array", items: { type: "string" } },
         starTargetSpecs: { type: "array", items: { type: "string" } },
         importSpecs: { type: "array", items: { type: "string" } },
+        policyManifests: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
         imports: {
           type: "array",
           items: {
@@ -683,6 +727,7 @@ interface StoredCompiledDoc {
   exportNames?: readonly string[];
   starTargetSpecs?: readonly string[];
   importSpecs?: readonly string[];
+  policyManifests?: readonly unknown[];
   imports: { specifier: string; link: unknown }[];
 }
 
@@ -745,6 +790,18 @@ export function writeCompiledDocs(
       // Fix B: derive the record surface from the compiled body once, here, so
       // the boot-time record build reads it instead of re-parsing per load.
       const derived = deriveModuleRecordFields(module.js);
+      const policyManifests = module.policyManifests?.map((input) => {
+        const artifact = validateCfcPolicyArtifactManifest(input);
+        if (artifact.manifest.moduleIdentity !== module.identity) {
+          throw new Error(
+            `policy manifest module identity mismatch for '${module.filename}'`,
+          );
+        }
+        return artifact;
+      });
+      if (policyManifests !== undefined) {
+        runtime.registerCfcPolicyManifests(undefined, policyManifests);
+      }
       cell.set({
         kind: "compiled",
         identity: module.identity,
@@ -756,6 +813,7 @@ export function writeCompiledDocs(
         ...(module.sourceMap !== undefined
           ? { sourceMap: module.sourceMap }
           : {}),
+        ...(policyManifests === undefined ? {} : { policyManifests }),
         imports: storedImportRefs(module, entryIdentity, extraRoots, {
           includeFabricEdges: true,
         }).map((ref) => ({
@@ -812,7 +870,22 @@ export async function loadCompiledClosure(
   ): StoredCompiledDoc | undefined => {
     if (!cellCarriesIntegrity(cell, atom, tx)) return undefined;
     const doc = cell.get() as StoredCompiledDoc | undefined;
-    return doc && typeof doc.identity === "string" ? doc : undefined;
+    if (!doc || typeof doc.identity !== "string") return undefined;
+    const policyManifests: unknown[] = [];
+    try {
+      for (const input of doc.policyManifests ?? []) {
+        const snapshot = snapshotQueryResult(input);
+        const artifact = validateCfcPolicyArtifactManifest(snapshot);
+        if (artifact.manifest.moduleIdentity !== doc.identity) return undefined;
+        policyManifests.push(artifact);
+      }
+    } catch {
+      return undefined;
+    }
+    return doc.policyManifests === undefined ? doc : (() => {
+      runtime.registerCfcPolicyManifests(undefined, policyManifests);
+      return { ...doc, policyManifests };
+    })();
   };
 
   const entryCell = runtime.getCell(
@@ -858,6 +931,9 @@ export async function loadCompiledClosure(
         : {}),
       ...(doc.importSpecs !== undefined
         ? { importSpecs: doc.importSpecs }
+        : {}),
+      ...(doc.policyManifests !== undefined
+        ? { policyManifests: doc.policyManifests }
         : {}),
       imports,
     });

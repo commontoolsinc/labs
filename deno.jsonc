@@ -56,6 +56,7 @@
     "dashboard": "deno run --allow-net --allow-run=deno --allow-read --allow-write --allow-env packages/dashboard/server.ts",
     "dashboard-watch": "deno run --watch --allow-net --allow-run=deno --allow-read --allow-write --allow-env packages/dashboard/server.ts",
     "dashboard-test": "deno test --allow-env packages/dashboard/",
+    "demo": "./tasks/demo.ts",
     "profile": "./scripts/restart-local-dev.sh --inspect-brk",
     "cf-profile": "ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && deno run -A \"$ROOT/packages/cli/support/profiling/cf-profile.ts\"",
     "cf-inspect-brk": "bash -lc 'ROOT=\"$(pwd)\" && cd \"$INIT_CWD\" && CF_CLI_NAME=cf deno run --inspect-brk --allow-net --allow-ffi --allow-read --allow-write --allow-env --allow-run \"$ROOT/packages/cli/mod.ts\" \"$@\"' --",
@@ -81,7 +82,7 @@
     "**/build/",
     "**/.cache/",
     "**/coverage/",
-    "./tutorials/",
+    "./docs/history/",
     "**/.doccheck*"
   ],
   "lint": {
@@ -132,7 +133,7 @@
       "packages/ui/src/v2/components/cf-checkbox/cf-checkbox.ts",
       "packages/ui/src/v2/components/cf-select/cf-select.ts",
       "packages/vendor-astral",
-      "tutorials/"
+      "docs/history/"
     ]
   },
   "imports": {

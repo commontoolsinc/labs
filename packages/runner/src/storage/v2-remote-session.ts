@@ -5,6 +5,10 @@ import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
 
 export interface SessionFactory {
+  /** Opt in to StorageManager's ACL genesis handshake. Scripted factories used
+   *  by lower-level replica tests omit this because they intentionally model
+   *  only the messages under test. */
+  readonly supportsAclBootstrap?: boolean;
   create(space: MemorySpace, signer?: Signer): Promise<{
     client: MemoryClient.Client;
     session: MemoryClient.SpaceSession;
@@ -83,7 +87,7 @@ export const createStorageAddressResolver = (
   };
 };
 
-class WebSocketTransport implements MemoryClient.Transport {
+export class WebSocketTransport implements MemoryClient.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #socket: WebSocket | null = null;
@@ -178,6 +182,8 @@ class WebSocketTransport implements MemoryClient.Transport {
 }
 
 export class RemoteSessionFactory implements SessionFactory {
+  readonly supportsAclBootstrap = true;
+
   constructor(
     private readonly resolveAddress: (space: MemorySpace) => URL,
     private readonly defaultSigner: Signer,

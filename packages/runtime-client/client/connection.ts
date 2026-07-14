@@ -23,6 +23,7 @@ import {
   isVDomBatchNotification,
   isVersionSkewNotification,
   NavigateRequestNotification,
+  NotificationType,
   PendingWritesNotification,
   RequestType,
   TelemetryNotification,
@@ -551,7 +552,19 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
           message.error,
         );
       }
-      pending.deferred.reject(new Error(message.error));
+      const error = new Error(message.error) as Error & { code?: string };
+      if (message.code) {
+        error.code = message.code;
+        // A coded request failure is also a host-level lifecycle signal. The
+        // caller still receives the rejected request, while RuntimeInternals
+        // can replace a worker whose module map cannot recover in place.
+        this.emit("error", {
+          type: NotificationType.ErrorReport,
+          message: message.error,
+          code: message.code,
+        });
+      }
+      pending.deferred.reject(error);
     } else {
       const data = "data" in message ? message.data : undefined;
       if (DEBUG_IPC) {

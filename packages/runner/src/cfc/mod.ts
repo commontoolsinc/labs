@@ -2,8 +2,27 @@ export type { CfcLabelView, CfcLabelViewEntry } from "./label-view.ts";
 export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
+  redactSigilCfcLabelViewsForDisplay,
   setLinkCfcLabelView,
+  stripSigilCfcLabelViews,
 } from "./link-label-view.ts";
+export {
+  CLASSIFIED_KIND_FAMILIES,
+  classifyAtomField,
+  classifyLabelField,
+  LABEL_FIELD_CLASSIFICATION,
+  type LabelAtomFamily,
+  type LabelFieldClassificationEntry,
+  type LabelFieldRepresentationClass,
+} from "./label-field-classification.ts";
+export {
+  type CfcFieldCommitment,
+  commitCfcFieldValue,
+  commitmentAwareEquals,
+  containsCfcFieldCommitment,
+  isCfcFieldCommitment,
+  transformCfcLabelForCrossSpacePersist,
+} from "./label-representation.ts";
 export {
   cfcLabelViewForCell,
   cfcLabelViewForDereference,
@@ -18,9 +37,13 @@ export {
 export type {
   AttemptedWrite,
   CfcAddress,
+  CfcDeclaredMonotonicityMode,
+  CfcDeclaredWideningExemption,
   CfcDereferenceTrace,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcLabelMetadataObservation,
+  CfcLabelMetadataProtectionMode,
   CfcMetadata,
   CfcPolicyEvaluationMode,
   CfcPrepareState,
@@ -35,6 +58,8 @@ export type {
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
+  ConsultedGrant,
+  ConsultedPolicyManifest,
   ConsumedRead,
   EntityDocumentWithCfc,
   IFCLabel,
@@ -46,11 +71,31 @@ export type {
   WritePolicyInput,
 } from "./types.ts";
 export {
+  cfcCanonicalClauseDigest,
+  collectDeclaredMonotonicityViolations,
+} from "./declared-monotonicity.ts";
+export {
+  CONF_LABEL_NOT_AVAILABLE,
+  evaluateConfLabelQuery,
+  inspectStoredConfLabel,
+  parseConfLabelTargetPath,
+} from "./label-introspection.ts";
+export type {
+  ConfLabelQuery,
+  ConfLabelQueryEvaluation,
+  InspectConfLabelResult,
+  LabelAtomProjection,
+} from "./label-introspection.ts";
+export { LABEL_METADATA_OBSERVATION } from "./observation-classes.ts";
+export type { LabelMetadataObservationClass } from "./observation-classes.ts";
+export {
   CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
   cfcEnforcementStrictness,
+  DEFAULT_CFC_DECLARED_MONOTONICITY_MODE,
   DEFAULT_CFC_ENFORCEMENT_MODE,
   DEFAULT_CFC_FLOW_LABELS_MODE,
+  DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE,
   DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
@@ -67,6 +112,10 @@ export {
   preparedDigestFor,
 } from "./canonical.ts";
 export type { CfcConfClause, CfcOrClause } from "./clause.ts";
+export {
+  type CfcModulePolicyLoader,
+  createTxCfcModulePolicyResolver,
+} from "./policy-resolver.ts";
 export {
   clauseAlternatives,
   clausesEqual,
@@ -111,6 +160,9 @@ export {
   MAX_TRUST_CLOSURE_DEPTH,
 } from "./trust.ts";
 export type {
+  CfcGrantConsumptionContext,
+  CfcGrantResolver,
+  CfcGrantResolverQuery,
   ExchangeEvalContext,
   ExchangeEvalResult,
   RuleFiring,
@@ -119,6 +171,25 @@ export {
   DEFAULT_EXCHANGE_FUEL,
   evaluateExchangeRules,
 } from "./exchange-eval.ts";
+export type {
+  CfcGrant,
+  CfcGrantConsumptionReceipt,
+  CfcGrantIdentity,
+  CfcGrantWriteInput,
+} from "./grants.ts";
+export {
+  CFC_GRANT_ABSENT_DIGEST,
+  CFC_GRANT_ID_PREFIX,
+  cfcGrantConsumedReceiptId,
+  cfcGrantDocId,
+  cfcGrantIsLive,
+  createTxCfcGrantResolver,
+  disallowedGrantAudienceEntryReason,
+  expandCfcGrantFacts,
+  flushCfcGrantConsumptionClaims,
+  prepareCfcGrantWrite,
+  verifyCfcGrantDocument,
+} from "./grants.ts";
 export type {
   RenderConfidentialityResolver,
   RenderConfidentialityResolverConfig,

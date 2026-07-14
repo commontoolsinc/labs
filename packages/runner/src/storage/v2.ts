@@ -5,6 +5,7 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
+import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import {
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -196,6 +197,7 @@ const CONFLICT_READ_REPAIR_TIMEOUT_MS = 30_000;
 //     data its own later syncs have already superseded.
 //
 // Default off. Do NOT enable without re-measuring on the target workload.
+// Catalogued in docs/development/EXPERIMENTAL_OPTIONS.md (conflictAdmissionMode).
 type ConflictAdmissionMode = "off" | "preempt" | "hold";
 let conflictAdmissionModeOverride: ConflictAdmissionMode | undefined;
 export function setConflictAdmissionMode(
@@ -227,6 +229,15 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
 const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
+
+const activeCommitPreconditions = (
+  preconditions: readonly CommitPrecondition[] | undefined,
+): readonly CommitPrecondition[] =>
+  getCommitPreconditionsConfig()
+    ? (preconditions ?? [])
+    : (preconditions ?? []).filter((precondition) =>
+      precondition.kind === "entity-value-hash"
+    );
 
 const toExplicitDocument = (value: FabricValue): EntityDocument => {
   if (!isObject(value)) {
@@ -553,6 +564,8 @@ export interface Options {
   spaceHostMap?: Record<string, string>;
   id?: string;
   settings?: IRemoteStorageProviderSettings;
+  /** Space authority used only for fresh named-space ACL genesis. The durable
+   *  replica session still authenticates as `as`. */
   spaceIdentity?: Signer;
 }
 
@@ -705,6 +718,13 @@ export class StorageManager implements IStorageManager {
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+  // Docs already offered a link-target pull via shouldPullDoc. One entry per
+  // (space, scope, id) for the manager's lifetime: the first pull registers a
+  // server-side watch that keeps the doc flowing afterwards, so a second kick
+  // is never needed — and never re-kicking is what keeps reads of genuinely
+  // absent targets (dangling links, deleted docs) from churning the
+  // cross-space convergence loop on every read.
+  #docPullKicks = new Set<string>();
   // In-flight commits, registered synchronously by the transaction layer at
   // commit() entry (see IStorageManager.trackPendingCommit). This is the
   // write-durability barrier: distinct from #crossSpacePromises, which also
@@ -713,11 +733,23 @@ export class StorageManager implements IStorageManager {
   #pendingCommits = new Set<Promise<unknown>>();
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
-  #spaceIdentity?: Signer;
+  #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
   /** Late-bound host hints; see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
+  /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
+  #telemetry?: TelemetrySink;
+
+  /**
+   * Attach the runtime's telemetry bus so replicas can emit the
+   * `storage.push/pull.*` markers. Late-bound and optional: the manager is
+   * constructed before (and independently of) the Runtime, and providers read
+   * it through a getter so spaces opened earlier still pick it up.
+   */
+  setTelemetry(telemetry: TelemetrySink): void {
+    this.#telemetry = telemetry;
+  }
 
   static open(options: Options) {
     const dynamicHosts = new Map<string, string>();
@@ -744,7 +776,9 @@ export class StorageManager implements IStorageManager {
     this.as = options.as;
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
-    this.#spaceIdentity = options.spaceIdentity;
+    if (options.spaceIdentity) {
+      this.registerSpaceIdentity(options.spaceIdentity);
+    }
     // Snapshot + freeze: the resolver snapshotted its own copy at
     // open(), so refusal logic must see the same fixed facts — a
     // caller mutating their map object must not desynchronize them.
@@ -787,6 +821,15 @@ export class StorageManager implements IStorageManager {
     return true;
   }
 
+  /**
+   * Retain a derived space key solely as the authority for that space's first
+   * ACL commit. Providers continue to authenticate all ordinary replica work
+   * as `this.as`.
+   */
+  registerSpaceIdentity(identity: Signer): void {
+    this.#spaceIdentities.set(identity.did() as MemorySpace, identity);
+  }
+
   open(space: MemorySpace): IStorageProviderWithReplica {
     let provider = this.#providers.get(space);
     if (!provider) {
@@ -799,11 +842,113 @@ export class StorageManager implements IStorageManager {
         space,
         settings: this.#settings,
         subscription: this.#subscription,
-        createSession: () => this.#sessionFactory.create(space, signer),
+        createSession: this.#sessionFactory.supportsAclBootstrap === true
+          ? () => this.#createInitializedSession(space, signer)
+          : () => this.#sessionFactory.create(space, signer),
+        getTelemetry: () => this.#telemetry,
       });
       this.#providers.set(space, provider);
     }
     return provider;
+  }
+
+  /**
+   * Mount the normal user session, but serialize fresh-space ACL genesis ahead
+   * of any replica work when this manager holds the space key. The temporary
+   * bootstrap session authenticates as the space identity; the returned
+   * durable session always authenticates as `signer`, preserving user/session
+   * scope partitioning.
+   *
+   * Named-space keys only initialize a truly fresh space, with the active user
+   * as OWNER and wildcard WRITE as the rollout default. Populated ACL-less
+   * spaces are the temporary public-compatibility case and stay public. The
+   * home identity (`signer.did() === space`) is the explicit private exception:
+   * it claims a never-created owner-only ACL even when legacy data already
+   * exists. A retracted ACL remains a tombstone and must not be recreated.
+   */
+  async #createInitializedSession(
+    space: MemorySpace,
+    signer: Signer,
+  ): Promise<{
+    client: MemoryV2Client.Client;
+    session: MemoryV2Client.SpaceSession;
+  }> {
+    const normal = await this.#sessionFactory.create(space, signer);
+    if (this.#sessionFactory.supportsAclBootstrap !== true) return normal;
+    const isHomeSpace = signer.did() === space;
+    const spaceIdentity = isHomeSpace
+      ? signer
+      : this.#spaceIdentities.get(space);
+    if (spaceIdentity === undefined) return normal;
+
+    const openedServerSeq = normal.session.serverSeq;
+    const aclId = `of:${space}`;
+    const aclResult = await normal.session.queryGraph({
+      roots: [{ id: aclId, selector: { path: [], schema: false } }],
+    });
+    const aclSnapshot = aclResult.entities.find((entity) =>
+      entity.id === aclId && (entity.scope ?? "space") === "space"
+    );
+    const aclNeverCreated = aclSnapshot?.seq === 0 &&
+      aclSnapshot.document === null;
+    if (!aclNeverCreated || (!isHomeSpace && openedServerSeq !== 0)) {
+      return normal;
+    }
+
+    // Do not reuse the bootstrap session for replica work: both it and the
+    // replica allocate localSeq from 1, and named spaces must switch back from
+    // the space signer to the active user before any user-scoped operation.
+    await normal.client.close();
+    const bootstrap = await this.#sessionFactory.create(space, spaceIdentity);
+    try {
+      const current = await bootstrap.session.queryGraph({
+        roots: [{ id: aclId, selector: { path: [], schema: false } }],
+      });
+      const snapshot = current.entities.find((entity) =>
+        entity.id === aclId && (entity.scope ?? "space") === "space"
+      );
+      // Recheck emptiness in the authority session. In `off` mode an unrelated
+      // writer can still populate the space between the first inspection and
+      // bootstrap; that turns it into the named legacy-public case and must
+      // not be claimed. Home remains the explicit exception.
+      const aclStillNeverCreated = snapshot?.seq === 0 &&
+        snapshot.document === null;
+      if (aclStillNeverCreated && (isHomeSpace || current.serverSeq === 0)) {
+        try {
+          const bootstrapAcl = isHomeSpace
+            ? { [signer.did()]: "OWNER" }
+            : { [signer.did()]: "OWNER", "*": "WRITE" };
+          await bootstrap.session.transact({
+            localSeq: 1,
+            reads: {
+              confirmed: [{
+                id: aclId,
+                path: toDocumentPath([]),
+                seq: snapshot?.seq ?? 0,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "set",
+              id: aclId,
+              value: { value: bootstrapAcl },
+            }],
+          });
+        } catch (error) {
+          // A concurrent space-authorized initializer may win between the
+          // point read and commit. Reopening as the user below is the
+          // authoritative outcome: it succeeds only if the winning ACL grants
+          // access. Other failures are real bootstrap errors.
+          if (!(error instanceof Error) || error.name !== "ConflictError") {
+            throw error;
+          }
+        }
+      }
+    } finally {
+      await bootstrap.client.close();
+    }
+
+    return await this.#sessionFactory.create(space, signer);
   }
 
   async close(): Promise<void> {
@@ -881,6 +1026,30 @@ export class StorageManager implements IStorageManager {
         console.error("pending-commits subscriber threw:", error);
       }
     }
+  }
+
+  shouldPullDoc(space: MemorySpace, id: URI, scope?: CellScope): boolean {
+    if (id.startsWith("data:")) {
+      return false;
+    }
+    const key = `${space}\0${docKey(id, scope)}`;
+    if (this.#docPullKicks.has(key)) {
+      return false;
+    }
+    this.#docPullKicks.add(key);
+    // State the local replica can already serve needs no pull. getState is
+    // undefined both for never-pulled docs and for docs known to hold no
+    // value (deleted / genuinely absent) — the second kind gets one harmless
+    // kick and is then held off by the kick set above.
+    return this.open(space).replica.get({
+      id,
+      type: DOCUMENT_MIME as MIME,
+      scope,
+    }) === undefined;
+  }
+
+  retractDocPullKick(space: MemorySpace, id: URI, scope?: CellScope): void {
+    this.#docPullKicks.delete(`${space}\0${docKey(id, scope)}`);
   }
 
   addCrossSpacePromise(promise: Promise<void>): void {
@@ -1122,7 +1291,16 @@ type ProviderOptions = {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }>;
+  /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
+  getTelemetry?: () => TelemetrySink | undefined;
 };
+
+/**
+ * Minimal marker sink — structurally the Runtime's `RuntimeTelemetry`.
+ * Kept structural (type-only import) so the storage layer takes no runtime
+ * dependency on the telemetry module.
+ */
+type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
 class Provider implements IStorageProviderWithReplica {
   readonly replica: SpaceReplica;
@@ -1293,6 +1471,7 @@ class SpaceReplica implements ISpaceReplica {
   #watchedIds = new Set<string>();
   #nextLocalSeq = 1;
   #closed = false;
+  #getTelemetry: () => TelemetrySink | undefined;
   #caughtUpLocalSeq = 0;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
@@ -1309,6 +1488,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#space = options.space;
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
+    this.#getTelemetry = options.getTelemetry ?? (() => undefined);
   }
 
   did(): MemorySpace {
@@ -1710,9 +1890,7 @@ class SpaceReplica implements ISpaceReplica {
     const schedulerObservation = getPersistentSchedulerStateConfig()
       ? transaction.schedulerObservation
       : undefined;
-    const preconditions = getCommitPreconditionsConfig()
-      ? transaction.preconditions
-      : undefined;
+    const preconditions = activeCommitPreconditions(transaction.preconditions);
     const operations = withCommitTiming(
       ["commitNative", "normalize"],
       () =>
@@ -2006,10 +2184,7 @@ class SpaceReplica implements ISpaceReplica {
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    const emitCommitPreconditions = getCommitPreconditionsConfig();
-    const activePreconditions = emitCommitPreconditions
-      ? (preconditions ?? [])
-      : [];
+    const activePreconditions = activeCommitPreconditions(preconditions);
     if (
       operations.length === 0 && sqliteOps.length === 0 &&
       activePreconditions.length === 0
@@ -2184,6 +2359,18 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
     }
+    // The push marker window covers observation flush + (re)dial + send +
+    // confirm: the full client-side cost of durably landing this commit.
+    // (space.did, commit.local_seq) joins to the server's memory.transact span.
+    const telemetry = this.#getTelemetry();
+    const pushOpId = `push:${this.#space}:${localSeq}`;
+    telemetry?.submit({
+      type: "storage.push.start",
+      id: pushOpId,
+      operation: "transact",
+      localSeq,
+      spaceDid: this.#space,
+    });
     try {
       if (
         operations.length > 0 &&
@@ -2201,9 +2388,19 @@ class SpaceReplica implements ISpaceReplica {
       const { session } = await this.sessionHandle();
       const applied = await session.transact(commit);
       this.confirmPending(localSeq, operations, applied);
+      telemetry?.submit({
+        type: "storage.push.complete",
+        id: pushOpId,
+        sessionId: session.sessionId,
+      });
       return { ok: {} };
     } catch (error) {
       const rejection = toRejectedError(error, commit, this.#space);
+      telemetry?.submit({
+        type: "storage.push.error",
+        id: pushOpId,
+        error: rejection.name ?? "TransactionError",
+      });
       this.attachProviderReadyToRetry(rejection, localSeq);
       if (admissionMode !== "off" && rejection.name === "ConflictError") {
         this.recordStaleFloor(commit, localSeq);

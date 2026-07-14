@@ -4,6 +4,10 @@ import {
   cfcLabelViewForCell,
   cfcLabelViewFromMetadata,
 } from "../src/cfc/label-view.ts";
+import {
+  redactSigilCfcLabelViewsForDisplay,
+  stripSigilCfcLabelViews,
+} from "../src/cfc/link-label-view.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -1372,5 +1376,103 @@ describe("CFC label view helpers", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+});
+
+// Inv-12 Stage 0: the display redaction that already covers the top-level
+// cfcLabel at the IPC response sites, extended to the cfcLabelView copies
+// riding sigil links inside response values.
+describe("redactSigilCfcLabelViewsForDisplay", () => {
+  const caveat = {
+    type: "https://commonfabric.org/cfc/atom/Caveat",
+    kind: "derived-from",
+    source: "did:key:alice",
+  };
+  const linkWithView = (id: string) => ({
+    "/": {
+      [LINK_V1_TAG]: {
+        id,
+        space: "did:key:test",
+        path: [],
+        cfcLabelView: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: { confidentiality: [caveat] },
+          }],
+        },
+      },
+    },
+  });
+
+  it("redacts Caveat.source on views nested anywhere in the value", () => {
+    const value = {
+      items: [linkWithView("of:a"), { deep: linkWithView("of:b") }],
+      plain: "text",
+    };
+    const redacted = redactSigilCfcLabelViewsForDisplay(value) as typeof value;
+    for (
+      const payload of [
+        redacted.items[0] as ReturnType<typeof linkWithView>,
+        (redacted.items[1] as { deep: ReturnType<typeof linkWithView> }).deep,
+      ]
+    ) {
+      const atom = payload["/"][LINK_V1_TAG].cfcLabelView
+        .entries[0].label.confidentiality[0] as Record<string, unknown>;
+      expect(atom.type).toBe(caveat.type);
+      expect(atom.kind).toBe("derived-from");
+      expect("source" in atom).toBe(false);
+    }
+    // Non-view content is untouched.
+    expect(redacted.plain).toBe("text");
+    // The input is not mutated (frozen response values).
+    const original = (value.items[0] as ReturnType<typeof linkWithView>)["/"][
+      LINK_V1_TAG
+    ].cfcLabelView.entries[0].label.confidentiality[0] as Record<
+      string,
+      unknown
+    >;
+    expect(original.source).toBe("did:key:alice");
+  });
+
+  it("returns unchanged subtrees by reference (copy-on-write)", () => {
+    const viewless = {
+      nested: { list: [1, 2, 3] },
+      link: {
+        "/": { [LINK_V1_TAG]: { id: "of:c", space: "did:key:test", path: [] } },
+      },
+    };
+    expect(redactSigilCfcLabelViewsForDisplay(viewless)).toBe(viewless);
+
+    const mixed = { untouched: viewless.nested, tagged: linkWithView("of:d") };
+    const redacted = redactSigilCfcLabelViewsForDisplay(mixed) as typeof mixed;
+    expect(redacted).not.toBe(mixed);
+    expect(redacted.untouched).toBe(viewless.nested);
+    expect(redacted.tagged).not.toBe(mixed.tagged);
+  });
+
+  // The inbound sibling: rather than redacting the view, ingress strips it
+  // entirely (main-thread views must not become worker label state).
+  it("stripSigilCfcLabelViews removes views and keeps addressing intact", () => {
+    const value = {
+      items: [linkWithView("of:strip-a")],
+      plain: 7,
+    };
+    const stripped = stripSigilCfcLabelViews(value) as {
+      items: Array<{ "/": Record<string, Record<string, unknown>> }>;
+      plain: number;
+    };
+    const payload = stripped.items[0]["/"][LINK_V1_TAG];
+    expect(payload.id).toBe("of:strip-a");
+    expect("cfcLabelView" in payload).toBe(false);
+    expect(stripped.plain).toBe(7);
+    // Copy-on-write here too: a viewless tree passes through by reference,
+    // and the input is not mutated.
+    const viewless = { link: { "/": { [LINK_V1_TAG]: { id: "of:e" } } } };
+    expect(stripSigilCfcLabelViews(viewless)).toBe(viewless);
+    expect(
+      (value.items[0] as ReturnType<typeof linkWithView>)["/"][LINK_V1_TAG]
+        .cfcLabelView,
+    ).toBeDefined();
   });
 });

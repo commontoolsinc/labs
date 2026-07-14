@@ -1,6 +1,6 @@
 /**
  * Dogfood toggle for the CFC render confidentiality ceiling (Epic H3a,
- * docs/plans/cfc-future-work-implementation.md §7). When enabled, the shell
+ * docs/history/plans/cfc-future-work-implementation.md §7). When enabled, the shell
  * creates its runtime with the §8.10.6 default display ceiling populated:
  * display sinks admit only the acting user's own identity atom plus
  * allow-listed influence-class caveat kinds, everything else fails closed,
@@ -12,6 +12,8 @@
  * which is fixed for a runtime's lifetime: unlike worker-console forwarding
  * there is no live apply — flipping the flag takes effect on the next
  * runtime (reload or re-login).
+ *
+ * Catalogued in docs/development/EXPERIMENTAL_OPTIONS.md (cfcRenderCeiling).
  */
 
 const STORAGE_KEY = "cfcRenderCeiling";

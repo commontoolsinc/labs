@@ -4,7 +4,9 @@ import {
   env,
   Page,
   pipeConsole,
+  type PresentationParticipant,
 } from "@commonfabric/integration";
+import { getPresentationSession } from "./presentation/session.ts";
 import {
   Identity,
   InsecureCryptoKeyPair,
@@ -129,6 +131,8 @@ export interface ShellIntegrationConfig {
    * ```
    */
   allowedConsoleErrors?: (string | RegExp)[];
+  /** Optional participant metadata used only by `deno task demo`. */
+  presentation?: PresentationParticipant;
 }
 
 export class ShellIntegration {
@@ -136,7 +140,8 @@ export class ShellIntegration {
   #page?: Page;
   #exceptions: Array<string> = [];
   #errorLogs: Array<string> = [];
-  #config: Required<ShellIntegrationConfig>;
+  #config: Required<Omit<ShellIntegrationConfig, "presentation">>;
+  #presentation: PresentationParticipant;
 
   constructor(config: ShellIntegrationConfig = {}) {
     this.#config = {
@@ -144,6 +149,7 @@ export class ShellIntegration {
       failOnConsoleError: config.failOnConsoleError ?? true,
       allowedConsoleErrors: config.allowedConsoleErrors ?? [],
     };
+    this.#presentation = config.presentation ?? {};
   }
 
   bindLifecycle() {
@@ -256,12 +262,14 @@ export class ShellIntegration {
       await this.login(identity);
       await this.waitForState({ identity, view });
     }
+    await getPresentationSession()?.start(page);
   }
 
   #beforeAll = async () => {
     this.#browser = await Browser.launch({ headless: env.HEADLESS });
     this.#page = await this.#browser.newPage();
     this.#attachPage(this.#page);
+    await getPresentationSession()?.register(this.#page, this.#presentation);
   };
 
   #beforeEach = () => {
@@ -302,6 +310,9 @@ export class ShellIntegration {
   };
 
   #afterAll = async () => {
+    if (this.#page) {
+      await getPresentationSession()?.close(this.#page);
+    }
     await this.#disposePageRuntime();
     await this.#page?.close();
     await this.#browser?.close();

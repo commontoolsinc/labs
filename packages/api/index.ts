@@ -358,7 +358,12 @@ export type MetaLinkField =
  * The `schema` field stores the schema for a result cell
  * The `result` field lets a result cell link to its parent result cell,
  * and also lets the argument and derived internal cells link back to the result cell.
- * The cfc code accesses the `cfc` field directly, but I include it here too.
+ *
+ * `cfc` is deliberately NOT a MetaField: the `["cfc"]` document field holds
+ * raw label metadata (Caveat.source and other principal identities), which
+ * must not ride the raw meta seam (inv-12 Stage 0 / SC-14 / SC-25). The cfc
+ * code reads the field directly through its own verifier seams; display
+ * consumers get the redacted view via getCfcLabel.
  */
 export type MetaField =
   | MetaLinkField
@@ -367,8 +372,7 @@ export type MetaField =
   // toolshed pattern path, or later a `cf:` fabric ref)
   | "internal"
   | "schema"
-  | "slug"
-  | "cfc";
+  | "slug";
 
 export interface IMetaCell {
   getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;
@@ -1658,8 +1662,13 @@ export type JSONSchemaObj = {
         };
       };
     readonly exactCopyOf?: readonly string[];
-    readonly projection?: readonly string[];
-    readonly collection?: readonly string[];
+    // §8.3 projection claim (the lowered form of `Projection` /
+    // `ProjectionOf` / `ProjectionPath`): this value is the field at JSON
+    // pointer `path` inside the structured value at logical path `from`.
+    readonly projection?: {
+      readonly from: string;
+      readonly path: string;
+    };
     // Observation class of the declared label (Epic C, C5): which read
     // observations consume it. Absent or invalid = covering (consumed by
     // every content read class — over-taint, fail-safe).
@@ -2594,6 +2603,74 @@ export interface WishFunction {
   ): Reactive<WishState<T> & UIRenderable>;
 }
 
+/**
+ * The bounded label-introspection query (CFC spec §4.6.4.1, inv-12 Stage 2):
+ * equality tests only, over atom `type`, caveat `kind`, `source`, and the
+ * resource/policy/origin fields. The family-qualified predicates test their
+ * own atom family only — `resourceClass` reads `Resource.class`,
+ * `policyName` reads the `Policy`/`Context` ref `name`, `originUri` reads
+ * `Origin.uri`, and `caveatKind` reads the `kind` discriminator of `Caveat`
+ * atoms and the type-less kind-shaped claim atoms — so an unrelated atom
+ * that merely has a same-named field is not a match. An absent field (or a
+ * family miss) on a candidate atom is no match. All six fields are supported
+ * even where the runtime currently mints no atoms carrying them.
+ */
+export type ConfLabelQuery = {
+  atomType?: string;
+  caveatKind?: string;
+  source?: unknown;
+  resourceClass?: string;
+  policyName?: string;
+  originUri?: string;
+};
+
+/**
+ * One projected confidentiality atom, addressed by its position in the label
+ * STORED at the target path: `clauseIndex` across the per-component clause
+ * lists in stored order, `alternativeIndex` inside an `anyOf` clause (0 for a
+ * bare atom), `atomIndex` within the alternative (always 0 in this runtime —
+ * an alternative is one atom; the field keeps the §4.6.4.1 profile shape).
+ * `atom` is the stored form verbatim — a committed `{digestOf: ...}` field
+ * stays committed.
+ */
+export type LabelAtomProjection = {
+  targetPath: string;
+  clauseIndex: number;
+  alternativeIndex: number;
+  atomIndex: number;
+  atom: unknown;
+};
+
+/**
+ * Introspection outcome (spec §4.6.4.1). `notAvailable` is one normalized
+ * constant covering unobservable targets, missing metadata,
+ * matching-but-unreadable atoms, and results whose consumed metadata labels
+ * cannot ride the transaction (flow labels not persisting) — callers cannot
+ * distinguish the arms. `ok` with empty `atoms` means the miss was
+ * established from metadata the caller was authorized to observe.
+ */
+export type InspectConfLabelResult =
+  | { status: "ok"; atoms: LabelAtomProjection[] }
+  | { status: "notAvailable" };
+
+/**
+ * `inspectConfLabel(target, targetPath, query)` — bounded first-layer
+ * introspection of the confidentiality label stored at `target`'s payload
+ * path (inv-12 Stage 2; CFC spec §4.6.4.1). `targetPath` is the
+ * application-facing payload pointer (`"/body"` addresses the label stored
+ * at the `/value/body` envelope entry; `""` is the payload root). The result
+ * is a runtime-labeled value: the metadata observations consumed to answer
+ * the query join the result's label through the normal flow derivation, so
+ * protected results require the deployment to persist flow labels
+ * (`cfcFlowLabels: "persist"`) — otherwise they degrade to `notAvailable`
+ * (fail closed; never an unlabeled copy of protected label metadata).
+ */
+export type InspectConfLabelFunction = (
+  target: Reactive<any>,
+  targetPath: FactoryInput<string>,
+  query: FactoryInput<ConfLabelQuery>,
+) => Reactive<InspectConfLabelResult>;
+
 export type CreateNodeFactoryFunction = <T = any, R = any>(
   moduleSpec: Module,
 ) => ModuleFactory<T, R>;
@@ -2881,6 +2958,7 @@ export declare const table: SqliteTableFunction;
 export declare const cfLink: SqliteCfLinkFunction;
 export declare const cfSqlite: CfSqliteHelpers;
 export declare const navigateTo: NavigateToFunction;
+export declare const inspectConfLabel: InspectConfLabelFunction;
 export declare const wish: WishFunction;
 /**
  * Tag a multi-user test descriptor for `cf test` (identity at runtime; a

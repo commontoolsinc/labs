@@ -1,7 +1,7 @@
 {
   "name": "@commonfabric/integration",
   "tasks": {
-    "test": "echo 'No tests to run.'"
+    "test": "deno test -A"
   },
   "exports": {
     ".": "./index.ts",

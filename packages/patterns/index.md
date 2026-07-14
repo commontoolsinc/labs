@@ -53,7 +53,9 @@ note under legacy).
 
 Capability and app demos (root files): `annotation.tsx`,
 `annotation-manager.tsx`, `aside.tsx`, `bookmarks.tsx`, `chatbot.tsx`,
-`cheeseboard.tsx`, `compiler.tsx`, `deep-research.tsx`, `dice.tsx` (+
+`cheeseboard.tsx`, `compiler.tsx` (known issue: the December 2025 survey in
+`docs/history/packages/patterns/PREEXISTING_BUGS.md` found its "Navigate To
+Piece" button broken; unverified since), `deep-research.tsx`, `dice.tsx` (+
 `dice-handlers.ts`), `group-chat-lobby.tsx`, `group-chat-room.tsx`, `image.tsx`,
 `image-analysis.tsx`, `link-preview.tsx`, `map-demo.tsx`, `mobile-app-demo.tsx`,
 `pattern-index.tsx`, `profile-roster-live-demo.tsx` (demo: live multi-user
@@ -72,9 +74,9 @@ legacy), `habit-tracker/`, `lunch-poll/`, `profile-group-chat/`,
 
 CFC spec demos (intentionally verbose wiring): `cfc/`,
 `cfc-agent-prompt-injection-demo/`, `cfc-authorized-save/`,
-`cfc-authorship-chat/`, `cfc-group-chat-demo/`, `cfc-render-policy-demo/`,
-`cfc-row-label-mailbox/`, `cfc-row-label-records/`, `cfc-spec-gallery/`,
-`cfc-staged-publish/`, `cfc-trusted-component-examples/`,
+`cfc-exchange-rules/`, `cfc-authorship-chat/`, `cfc-group-chat-demo/`,
+`cfc-render-policy-demo/`, `cfc-row-label-mailbox/`, `cfc-row-label-records/`,
+`cfc-spec-gallery/`, `cfc-staged-publish/`, `cfc-trusted-component-examples/`,
 `cfc-trusted-surfaces/`.
 
 System patterns: `system/` — live, load-bearing product patterns (home,
@@ -120,8 +122,10 @@ intended as style references.
 `google/core/`.
 
 Support files with no tier (not patterns): `deno.jsonc`, `mod.ts`, `index.md`,
-`README.md`, `DEPRECATED_IDIOMS.md`, `PREEXISTING_BUGS.md`,
-`test-ui-helpers.ts`, `tools/` (codegen tooling).
+`README.md`, `DEPRECATED_IDIOMS.md`, `test-ui-helpers.ts`, `tools/` (codegen
+tooling). The December 2025 bug survey formerly kept here as
+`PREEXISTING_BUGS.md` is archived at
+`docs/history/packages/patterns/PREEXISTING_BUGS.md`.
 
 ---
 
@@ -182,6 +186,51 @@ const ann = Annotation({
 });
 addPiece.send({ piece: ann });
 ```
+
+---
+
+## `topics/main.tsx`
+
+**Topics — a multi-user tracker over #topic pieces** (durable units of shared
+attention; CT-1878): title, living body document, flat chronological comment
+thread, typed links out. Deliberately minimal — no statuses, labels, or
+assignees. Demonstrates: reading-list-style piece-in-list composition, `PerUser`
+display-name on a shared piece, mergeable comment appends, session-scoped
+drafts, `multiUserTest` coverage.
+
+**Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
+PerUser, mergeable
+
+### Input Schema
+
+```ts
+interface TopicsInput {
+  topics?: Writable<TopicPiece[] | Default<[]>>;
+  myName?: PerUser<Writable<string | Default<"">>>;
+}
+```
+
+### Output Schema
+
+```ts
+interface TopicsOutput {
+  topics: TopicPiece[];
+  mentionable: TopicPiece[];
+  topicCount: number;
+  myName: string;
+  addTopic: Stream<{ title: string }>;
+  setMyName: Stream<{ name: string }>;
+}
+```
+
+## `topics/topic.tsx`
+
+A single #topic piece: the durable object the tracker's list holds. Body edits
+go through an explicit Edit→Save toggle (one whole-value `set` per save keeps
+the concurrent-edit window small); comments and links are mergeable appends. Use
+from `topics/main.tsx` via `navigateTo()`, or standalone.
+
+**Keywords:** topic, detail, thread, comment, links, body, navigateTo
 
 ---
 

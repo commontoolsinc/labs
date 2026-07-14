@@ -92,6 +92,7 @@ import {
 } from "./verified-provenance.ts";
 import { FabricAwareResolver } from "./fabric-resolver.ts";
 import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
+import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("engine");
 
@@ -355,6 +356,7 @@ export class Engine extends EventTarget implements Harness {
       // Carry per-module source maps so the ESM loader can compose a per-load
       // bundle map (CFC verified-source / fn.src coordinate resolution).
       const precompiledSourceMaps = new Map<string, SourceMap>();
+      const precompiledPolicyManifests = new Map<string, readonly unknown[]>();
 
       if (fullHit) {
         logger.info("compile-cache-hit", () => ["compileToRecordGraph", id]);
@@ -365,6 +367,12 @@ export class Engine extends EventTarget implements Harness {
             precompiledSourceMaps.set(
               file.name,
               artifact.sourceMap as SourceMap,
+            );
+          }
+          if (artifact.policyManifests !== undefined) {
+            precompiledPolicyManifests.set(
+              file.name,
+              artifact.policyManifests,
             );
           }
           if (options.patternCoverage !== undefined) {
@@ -399,10 +407,12 @@ export class Engine extends EventTarget implements Harness {
             const pipeline = new (compilerStack()
               .CommonFabricTransformerPipeline)({
               patternCoverage,
+              moduleIdentities: identityByPath,
             });
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
+              getPolicyManifests: () => pipeline.getPolicyManifests(),
             };
           },
         };
@@ -425,6 +435,9 @@ export class Engine extends EventTarget implements Harness {
         for (const [name, out] of modules) {
           precompiledBodies.set(name, out.js);
           if (out.sourceMap) precompiledSourceMaps.set(name, out.sourceMap);
+          if (out.policyManifests) {
+            precompiledPolicyManifests.set(name, out.policyManifests);
+          }
         }
       }
       const { runtimeExports } = await this.getRuntimeInternals();
@@ -546,6 +559,10 @@ export class Engine extends EventTarget implements Harness {
           identityByPath,
           specifierAliases,
         );
+        const policyManifests = validatePolicyManifestsForModule(
+          identity,
+          precompiledPolicyManifests.get(file.name),
+        );
         return {
           identity,
           filename: storedFilenameFor(file.name, id, mounts),
@@ -555,9 +572,16 @@ export class Engine extends EventTarget implements Harness {
           ...(patternCoverageSpans === undefined
             ? {}
             : { patternCoverageSpans }),
+          ...(policyManifests === undefined ? {} : { policyManifests }),
           imports,
         };
       });
+      for (const module of modules) {
+        this.ctRuntime.registerCfcPolicyManifests(
+          undefined,
+          module.policyManifests ?? [],
+        );
+      }
 
       return {
         id,
@@ -631,8 +655,11 @@ export class Engine extends EventTarget implements Harness {
         runtimeModules: Engine.runtimeModuleNames(),
         beforeTransformers: runTransform
           ? (program) => {
+            const moduleIdentities = new Map(
+              [...unioned.keys()].map((name) => [name, `check:${name}`]),
+            );
             const pipeline = new (compilerStack()
-              .CommonFabricTransformerPipeline)();
+              .CommonFabricTransformerPipeline)({ moduleIdentities });
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
@@ -755,10 +782,13 @@ export class Engine extends EventTarget implements Harness {
       specifierAliases,
       beforeTransformers: (program) => {
         const pipeline = new (compilerStack()
-          .CommonFabricTransformerPipeline)();
+          .CommonFabricTransformerPipeline)({
+          moduleIdentities: identityByPath,
+        });
         return {
           factories: pipeline.toFactories(program),
           getDiagnostics: () => pipeline.getDiagnostics(),
+          getPolicyManifests: () => pipeline.getPolicyManifests(),
         };
       },
     });
@@ -776,21 +806,33 @@ export class Engine extends EventTarget implements Harness {
     });
     const modules: CacheableModule[] = pristineModuleFiles.map((file) => {
       const out = emitted.get(file.name)!;
+      const identity = identityByPath.get(file.name)!;
       const imports = cacheableImportsFor(
         file.name,
         importEdges,
         identityByPath,
         specifierAliases,
       );
+      const policyManifests = validatePolicyManifestsForModule(
+        identity,
+        out.policyManifests,
+      );
       return {
-        identity: identityByPath.get(file.name)!,
+        identity,
         filename: storedFilenameFor(file.name, undefined, mounts),
         source: file.contents,
         js: out.js,
         ...(out.sourceMap === undefined ? {} : { sourceMap: out.sourceMap }),
+        ...(policyManifests === undefined ? {} : { policyManifests }),
         imports,
       };
     });
+    for (const module of modules) {
+      this.ctRuntime.registerCfcPolicyManifests(
+        undefined,
+        module.policyManifests ?? [],
+      );
+    }
     const entryIdentity = identityByPath.get(entryFilename)!;
     return { modules, entryIdentity };
   }
@@ -931,23 +973,52 @@ export class Engine extends EventTarget implements Harness {
       // re-labels the bundle frame with the canonical source name, so the
       // EXISTING verified-binding check passes for legitimately compiled modules
       // without weakening it.
-      const bundleSourceMap = composeBundleSourceMap(
-        [...graph.compiledBodies].map(([specifier, body]) => {
-          const source = sourceNameBySpecifier.get(specifier);
-          return {
-            body,
-            map: graph.moduleSourceMaps.get(specifier) ??
-              (source !== undefined
-                ? identitySourceMap(body, source)
-                : undefined),
-            source,
-          };
-        }),
-        `${evalId}.js`,
-      );
-      if (bundleSourceMap) {
-        this.getSESRuntime().loadSourceMap(`${evalId}.js`, bundleSourceMap);
+      // Composition + registration are DEFERRED (CT-1819): composing these
+      // maps is a per-segment VLQ transcode over every module (~16-22ms per
+      // cold boot post-#4455/#4460), while their only consumers are
+      // on-demand \u2014 error mapping (`parseStack`/`mapThrownError`) and debug
+      // `fn.src` resolution (`mapPosition`; eager only when
+      // EXPERIMENTAL_EAGER_SOURCE_ANNOTATION is on, i.e. dev shells, which
+      // then materialize these providers during boot and keep today's
+      // behavior). Identity no longer needs the maps at boot: scheduler and
+      // CFC verified-source are provenance-rooted (#4436/#4458). The
+      // CT-1754 fail-closed notes below explain why the REGISTRATION must
+      // exist at all \u2014 they are satisfied by lazy materialization, since the
+      // fail-closed check only runs when `fn.src` is resolved, which is
+      // itself what materializes the map. Providers capture per-module LINE
+      // COUNTS and raw maps, never compiled bodies, so the closures retain
+      // KBs, not the bundle text; each is one-shot and dropped after first
+      // use.
+      const lineCountBySpecifier = new Map<string, number>();
+      for (const [specifier, body] of graph.compiledBodies) {
+        lineCountBySpecifier.set(
+          specifier,
+          (body.match(/\n/g)?.length ?? 0) + 1,
+        );
       }
+      const moduleSourceMaps = graph.moduleSourceMaps;
+      const bundleEntries = [...graph.compiledBodies.keys()].map(
+        (specifier) => {
+          const source = sourceNameBySpecifier.get(specifier);
+          const bodyLineCount = lineCountBySpecifier.get(specifier)!;
+          return { specifier, source, bodyLineCount };
+        },
+      );
+      this.getSESRuntime().loadSourceMapLazy(
+        `${evalId}.js`,
+        () =>
+          composeBundleSourceMap(
+            bundleEntries.map(({ specifier, source, bodyLineCount }) => ({
+              bodyLineCount,
+              map: moduleSourceMaps.get(specifier) ??
+                (source !== undefined
+                  ? identitySourceMap(bodyLineCount, source)
+                  : undefined),
+              source,
+            })),
+            `${evalId}.js`,
+          ),
+      );
       // ALSO register each module's map under its eval `//# sourceURL` (its
       // sanitized source name). The browser surfaces the per-module eval frame
       // in `new Error().stack`, and `annotateFunctionDebugMetadata` resolves
@@ -970,15 +1041,17 @@ export class Engine extends EventTarget implements Harness {
       // name, so the EXISTING verified-binding check passes for legitimately
       // compiled modules without weakening it.
       for (const [name, specifier] of graph.specifierByPath) {
-        const map = graph.moduleSourceMaps.get(specifier) ??
-          identitySourceMap(graph.compiledBodies.get(specifier) ?? "", name);
         const sourceUrl = name.replace(/[\r\n\u2028\u2029]/g, "_");
-        const moduleMap = composeBundleSourceMap(
-          [{ body: "", map, source: name }],
-          sourceUrl,
-          1, // the `(function (exports, require, module) {` wrapper line
-        );
-        if (moduleMap) this.getSESRuntime().loadSourceMap(sourceUrl, moduleMap);
+        const bodyLineCount = lineCountBySpecifier.get(specifier) ?? 1;
+        this.getSESRuntime().loadSourceMapLazy(sourceUrl, () => {
+          const map = moduleSourceMaps.get(specifier) ??
+            identitySourceMap(bodyLineCount, name);
+          return composeBundleSourceMap(
+            [{ bodyLineCount: 1, map, source: name }],
+            sourceUrl,
+            1, // the `(function (exports, require, module) {` wrapper line
+          );
+        });
       }
 
       const frame = pushFrame({
@@ -1423,6 +1496,21 @@ export class Engine extends EventTarget implements Harness {
     }
     return this.sesRuntime;
   }
+}
+
+function validatePolicyManifestsForModule(
+  moduleIdentity: string,
+  inputs: readonly unknown[] | undefined,
+): readonly unknown[] | undefined {
+  return inputs?.map((input) => {
+    const artifact = validateCfcPolicyArtifactManifest(input);
+    if (artifact.manifest.moduleIdentity !== moduleIdentity) {
+      throw new Error(
+        `policy manifest module identity mismatch for '${moduleIdentity}'`,
+      );
+    }
+    return artifact;
+  });
 }
 
 function computeId(program: Program): string {

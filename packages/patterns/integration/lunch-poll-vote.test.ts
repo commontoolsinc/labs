@@ -75,8 +75,12 @@ const voteSwatchVoters = (page: Page): Promise<string[]> =>
   });
 
 describe("lunch poll: two users vote on a shared option", () => {
-  const hostShell = new ShellIntegration();
-  const guestShell = new ShellIntegration();
+  const hostShell = new ShellIntegration({
+    presentation: { id: "alice", label: "Alice", color: "#7c3aed" },
+  });
+  const guestShell = new ShellIntegration({
+    presentation: { id: "bob", label: "Bob", color: "#0891b2" },
+  });
   hostShell.bindLifecycle();
   guestShell.bindLifecycle();
 

@@ -71,8 +71,10 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
   buildCfcTrustConfig,
+  type CfcDeclaredMonotonicityMode,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
+  type CfcLabelMetadataProtectionMode,
   type CfcLabelView,
   type CfcPolicyEvaluationMode,
   type CfcPolicyRecordInput,
@@ -90,6 +92,14 @@ import {
   type SinkMaxConfidentiality,
   type TrustSnapshot,
 } from "./cfc/mod.ts";
+import {
+  cfcPolicyManifestDocId,
+  type PolicyArtifactManifestV1,
+  validateCfcPolicyArtifactManifest,
+} from "./cfc/policy.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
+import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
@@ -193,6 +203,11 @@ export type VersionSkewHandler = (info: VersionSkewInfo) => void;
  * propagated to the memory layer as ambient config.
  *
  * See the formal spec at `docs/specs/space-model-formal-spec/`.
+ *
+ * Every experimental flag in the repository — these options, the CFC
+ * enforcement dials below, and the storage, memory-protocol, and shell flags —
+ * is catalogued in `docs/development/EXPERIMENTAL_OPTIONS.md`. Update that
+ * registry when adding, changing, or removing a flag.
  */
 export interface ExperimentalOptions {
   /** Enable the modern "cell representation" classes. */
@@ -332,6 +347,29 @@ export interface RuntimeOptions {
    * rewritten label and fails closed on fuel exhaustion.
    */
   cfcPolicyEvaluation?: CfcPolicyEvaluationMode;
+  /**
+   * Cross-space label-metadata representation dial (inv-12 Stage 1 / SC-25,
+   * spec §4.6.4.1; docs/specs/cfc-label-metadata-confidentiality.md §2/§5).
+   * Defaults to `off` (persisted label bytes identical to before the dial).
+   * `observe` computes the classification-governed transformed form for
+   * cross-space entries and emits a structured divergence diagnostic while
+   * persisting verbatim; `enforce` persists the transformed form (commitment
+   * fields as `{digestOf: <hash>}` markers). Representation only — never
+   * rejects a commit by itself.
+   */
+  cfcLabelMetadataProtection?: CfcLabelMetadataProtectionMode;
+  /**
+   * Declared-component monotonicity gate dial (WP5, spec §8.12.1/§8.12.8;
+   * docs/specs/cfc-persisted-declassification.md §4 item 3). Defaults to
+   * `off` (the declared re-mint persists exactly what it does today).
+   * `observe` compares each re-minted declared labelMap entry against the
+   * stored declared entry at the same path and emits a structured diagnostic
+   * on a non-monotone re-mint while persisting today's bytes; `enforce`
+   * records a fail-closed prepare reason (rejecting the commit under the
+   * enforcing enforcement modes). Governs ONLY the `declared` component —
+   * derived/link/structure components keep their §8.12.8 disciplines.
+   */
+  cfcDeclaredMonotonicity?: CfcDeclaredMonotonicityMode;
   /**
    * Per-prepare D4 write-prefix precision counters (value-level provenance
    * Stage 0 — docs/specs/cfc-value-level-provenance.md §6, SC-24). Defaults
@@ -488,6 +526,11 @@ export const spaceCellSchema = internSchema(
   },
 );
 
+const CFC_POLICY_MANIFEST_DOC_SCHEMA = {
+  type: "object",
+  additionalProperties: true,
+} as const satisfies JSONSchema;
+
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
 }
@@ -531,6 +574,8 @@ export class Runtime {
   readonly cfcWriteFloor: CfcWriteFloorMode;
   readonly cfcTriggerReadGating: CfcTriggerReadGating;
   readonly cfcPolicyEvaluation: CfcPolicyEvaluationMode;
+  readonly cfcLabelMetadataProtection: CfcLabelMetadataProtectionMode;
+  readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
   readonly cfcPrefixProvenanceStats: boolean;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
@@ -567,6 +612,206 @@ export class Runtime {
   private queues = new Map<string, AsyncSemaphoreQueue>();
   private writeDebugContext = new WriteDebugContextStorage<string>();
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
+  readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
+  readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
+
+  registerCfcPolicyManifests(
+    space: MemorySpace | undefined,
+    inputs: readonly unknown[],
+  ): void {
+    for (const input of inputs) {
+      const artifact = validateCfcPolicyArtifactManifest(input);
+      const existing = this.#policyManifests.get(artifact.policyDigest);
+      // Reaching this branch requires a collision in the canonical SHA-256
+      // digest: validation recomputes the digest for both artifacts.
+      if (existing !== undefined && !deepEqual(existing, artifact)) {
+        throw new Error(
+          `cfcPolicyManifest: immutable digest collision for ${artifact.policyDigest}`,
+        );
+      }
+      this.#policyManifests.set(artifact.policyDigest, artifact);
+      let spaces = this.#policyManifestSpaces.get(artifact.policyDigest);
+      if (spaces === undefined) {
+        spaces = new Set();
+        this.#policyManifestSpaces.set(artifact.policyDigest, spaces);
+      }
+      if (space !== undefined) spaces.add(space);
+    }
+  }
+
+  resolveCfcPolicyManifest(
+    reference: unknown,
+    tx?: IExtendedStorageTransaction,
+    destinationSpace?: MemorySpace,
+    bindCommit = true,
+  ): PolicyArtifactManifestV1 | undefined {
+    if (tx === undefined) return this.#registeredCfcPolicyManifest(reference);
+    if (destinationSpace !== undefined) {
+      return this.#readCfcPolicyManifest(
+        destinationSpace,
+        reference,
+        tx,
+        bindCommit,
+      );
+    }
+    let artifact: PolicyArtifactManifestV1 | undefined;
+    const spaces = new Set<MemorySpace>();
+    const log = tx.getReactivityLog?.();
+    for (const address of [...(log?.writes ?? []), ...(log?.reads ?? [])]) {
+      spaces.add(address.space);
+    }
+    for (const space of spaces) {
+      artifact = this.#readCfcPolicyManifest(space, reference, tx);
+      if (artifact !== undefined) {
+        if (bindCommit) {
+          artifact = this.#readCfcPolicyManifest(space, reference, tx, true);
+        }
+        break;
+      }
+    }
+    return artifact;
+  }
+
+  #registeredCfcPolicyManifest(
+    reference: unknown,
+  ): PolicyArtifactManifestV1 | undefined {
+    if (
+      !reference || typeof reference !== "object" || Array.isArray(reference)
+    ) {
+      return undefined;
+    }
+    const candidate = reference as Record<string, unknown>;
+    if (typeof candidate.policyDigest !== "string") return undefined;
+    const artifact = this.#policyManifests.get(candidate.policyDigest);
+    return artifact !== undefined &&
+        artifact.manifest.moduleIdentity === candidate.moduleIdentity &&
+        artifact.manifest.symbol === candidate.symbol
+      ? artifact
+      : undefined;
+  }
+
+  hasCfcPolicyManifest(
+    space: MemorySpace,
+    reference: unknown,
+    tx?: IExtendedStorageTransaction,
+  ): boolean {
+    const artifact = tx === undefined
+      ? this.#registeredCfcPolicyManifest(reference)
+      : this.#readCfcPolicyManifest(space, reference, tx);
+    return artifact !== undefined &&
+      this.#policyManifestSpaces.get(artifact.policyDigest)?.has(space) ===
+        true;
+  }
+
+  installCfcPolicyManifest(
+    space: MemorySpace,
+    reference: unknown,
+    tx?: IExtendedStorageTransaction,
+  ): boolean {
+    const artifact = this.#registeredCfcPolicyManifest(reference) ??
+      (tx === undefined
+        ? undefined
+        : this.#readCfcPolicyManifest(space, reference, tx));
+    if (artifact === undefined) return false;
+    if (tx !== undefined) {
+      const cell = this.getCellFromEntityId(
+        space,
+        cfcPolicyManifestDocId(artifact.policyDigest),
+        [],
+        CFC_POLICY_MANIFEST_DOC_SCHEMA,
+        tx,
+      );
+      const existing = snapshotQueryResult(cell.get());
+      if (existing === undefined) {
+        cell.set(artifact);
+        tx.markCreateOnly?.(cell.getAsNormalizedFullLink());
+      } else {
+        let verified: PolicyArtifactManifestV1;
+        try {
+          verified = validateCfcPolicyArtifactManifest(existing);
+        } catch (error) {
+          throw new Error(
+            `cfcPolicyManifest: invalid destination artifact for ${artifact.policyDigest}`,
+            { cause: error },
+          );
+        }
+        if (!deepEqual(verified, artifact)) {
+          throw new Error(
+            `cfcPolicyManifest: immutable destination collision for ${artifact.policyDigest}`,
+          );
+        }
+      }
+    }
+    // Both registered and durable-loaded artifacts pass through
+    // registerCfcPolicyManifests(), which creates this companion set.
+    const spaces = this.#policyManifestSpaces.get(artifact.policyDigest)!;
+    spaces.add(space);
+    return true;
+  }
+
+  #readCfcPolicyManifest(
+    space: MemorySpace,
+    reference: unknown,
+    tx: IExtendedStorageTransaction,
+    bindCommit = false,
+  ): PolicyArtifactManifestV1 | undefined {
+    if (
+      !reference || typeof reference !== "object" || Array.isArray(reference)
+    ) return undefined;
+    const candidate = reference as Record<string, unknown>;
+    if (typeof candidate.policyDigest !== "string") return undefined;
+    const cell = this.getCellFromEntityId(
+      space,
+      cfcPolicyManifestDocId(candidate.policyDigest),
+      [],
+      CFC_POLICY_MANIFEST_DOC_SCHEMA,
+      tx,
+    );
+    const stored = snapshotQueryResult(cell.get());
+    if (bindCommit) {
+      const link = cell.getAsNormalizedFullLink();
+      const rawStored = tx.readOrThrow({
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+        type: "application/json",
+        path: ["value"],
+      });
+      const alreadyWritten = tx.getReactivityLog?.().writes.some((address) =>
+        address.space === link.space && address.id === link.id &&
+        address.scope === link.scope
+      ) ?? false;
+      if (!alreadyWritten) {
+        if (!tx.addCommitPrecondition) {
+          throw new Error(
+            "cfcPolicyManifest: storage cannot bind manifest consultation",
+          );
+        }
+        tx.addCommitPrecondition(space, {
+          kind: "entity-value-hash",
+          id: link.id,
+          scope: link.scope,
+          valueHash: rawStored === undefined
+            ? null
+            : commitPreconditionValueHash(rawStored),
+        });
+      }
+    }
+    if (stored === undefined) return undefined;
+    let artifact: PolicyArtifactManifestV1;
+    try {
+      artifact = validateCfcPolicyArtifactManifest(stored);
+    } catch {
+      return undefined;
+    }
+    if (
+      artifact.policyDigest !== candidate.policyDigest ||
+      artifact.manifest.moduleIdentity !== candidate.moduleIdentity ||
+      artifact.manifest.symbol !== candidate.symbol
+    ) return undefined;
+    this.registerCfcPolicyManifests(space, [artifact]);
+    return artifact;
+  }
 
   constructor(options: RuntimeOptions) {
     this.experimental = {
@@ -656,6 +901,12 @@ export class Runtime {
     });
 
     this.storageManager = options.storageManager;
+    // Hand the storage layer the telemetry bus so it can emit the
+    // storage.push/pull markers (duck-typed: only the v2 StorageManager
+    // implements it; emulated/test managers simply don't have the method).
+    (this.storageManager as {
+      setTelemetry?: (telemetry: RuntimeTelemetry) => void;
+    }).setTelemetry?.(this.telemetry);
     this.moduleByteCache = options.moduleByteCache;
     // Validated + digested + frozen before the trust-snapshot provider
     // default below, whose `revision` covers the config digest (a trust
@@ -682,6 +933,9 @@ export class Runtime {
     this.cfcWriteFloor = options.cfcWriteFloor ?? "off";
     this.cfcTriggerReadGating = options.cfcTriggerReadGating ?? false;
     this.cfcPolicyEvaluation = options.cfcPolicyEvaluation ?? "off";
+    this.cfcLabelMetadataProtection = options.cfcLabelMetadataProtection ??
+      "off";
+    this.cfcDeclaredMonotonicity = options.cfcDeclaredMonotonicity ?? "off";
     this.cfcPrefixProvenanceStats = options.cfcPrefixProvenanceStats ?? false;
     // Deep-freeze: the ceiling is CFC enforcement config, so a caller must not
     // be able to mutate it (per-sink array or the map) after construction to
@@ -915,6 +1169,22 @@ export class Runtime {
       (tx as { debugActionId?: string }).debugActionId = debugActionId;
     }
     const wrapped = new ExtendedStorageTransaction(tx, {
+      resolvePolicyManifest: (
+        reference,
+        tx,
+        destinationSpace,
+        bindCommit,
+      ) =>
+        this.resolveCfcPolicyManifest(
+          reference,
+          tx,
+          destinationSpace,
+          bindCommit,
+        ),
+      hasPolicyManifest: (space, reference, tx) =>
+        this.hasCfcPolicyManifest(space, reference, tx),
+      installPolicyManifest: (space, reference, tx) =>
+        this.installCfcPolicyManifest(space, reference, tx),
       onRelevantTx: () => {
         this.cfcStats.cfcRelevantTx += 1;
       },
@@ -962,6 +1232,8 @@ export class Runtime {
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
     wrapped.setCfcTriggerReadGating(this.cfcTriggerReadGating);
     wrapped.setCfcPolicyEvaluationMode(this.cfcPolicyEvaluation);
+    wrapped.setCfcLabelMetadataProtectionMode(this.cfcLabelMetadataProtection);
+    wrapped.setCfcDeclaredMonotonicityMode(this.cfcDeclaredMonotonicity);
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
@@ -969,29 +1241,51 @@ export class Runtime {
     return wrapped;
   }
 
-  // (space, id) pairs for which a missing-link-target load has been kicked
-  // this session. The kicked sync establishes a live per-doc subscription, so
-  // a later creation of the doc still arrives — one kick per doc suffices.
+  // (space, scope, id) triples for which a missing-link-target load has been
+  // kicked this session. The kicked sync establishes a live per-doc
+  // subscription, so a later creation of the doc still arrives — one kick per
+  // doc suffices. Scope is part of the key: scoped instances (user/session)
+  // are distinct docs, and a kick for one scope must not suppress another's.
   private missingDocLoadKicks = new Set<string>();
 
   /**
-   * Asynchronously load a cross-space link target that a read found absent
-   * from the local replica (CT-1667): per-space server queries cannot follow
-   * links across space boundaries, so the client must fetch such targets
-   * itself. Fire-and-forget, but registered as a cross-space promise so
+   * Asynchronously load a link target that a read found absent from the
+   * local replica. Cross-space targets (CT-1667): per-space server queries
+   * cannot follow links across space boundaries, so the client must fetch
+   * such targets itself. Same-space targets (fresh-replica read asymmetry):
+   * a rejecting-selector sync delivers only the root doc, so a link can
+   * point at a doc no selector ever walked — those are fetched only when
+   * the local replica has never seen the doc (`shouldPullDoc`), so reads of
+   * genuinely absent optional values do not become repeated server queries.
+   * Fire-and-forget, but registered as a cross-space promise so
    * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
    * it; the absent doc is a tracked read, so the reader re-runs on arrival.
    * Deduped per (space, id): the kicked sync leaves a live subscription
    * behind, so repeat kicks add nothing.
    */
-  ensureLinkedDocLoaded(link: NormalizedFullLink): void {
-    const key = `${link.space}\0${link.id}`;
+  ensureLinkedDocLoaded(
+    link: NormalizedFullLink,
+    sourceSpace?: MemorySpace,
+  ): void {
+    const { space, id, scope } = link;
+    const key = `${space}\0${normalizeCellScope(scope)}\0${id}`;
     if (this.missingDocLoadKicks.has(key)) return;
+    // A same-space target the replica already has state for (or a manager
+    // without lazy replication) needs no fetch.
+    const sameSpace = sourceSpace === space;
+    const mgr = this.storageManager;
+    const reserved = sameSpace &&
+      mgr.shouldPullDoc?.(space, id, scope) === true;
+    if (sameSpace && !reserved) return;
     this.missingDocLoadKicks.add(key);
-    this.storageManager.trackUntilSettled(
+    mgr.trackUntilSettled(
       this.getCellFromLink(link).sync().catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect).
+        // Allow a retry on failure (e.g. transient disconnect): clear this
+        // dedup set, and hand back the storage manager's reservation when
+        // THIS kick took it — a cross-space kick never reserved, and must
+        // not clear a reservation a concurrent same-space read holds.
         this.missingDocLoadKicks.delete(key);
+        if (reserved) mgr.retractDocPullKick?.(space, id, scope);
       }),
     );
   }
@@ -1463,12 +1757,13 @@ export class Runtime {
       identity: this.storageManager.as as unknown as Identity,
       spaceName: name,
     });
-    // SECURITY INVARIANT: consume ONLY the resolved space DID. `createSession`
-    // may also derive a per-name space identity (private key); we must never
-    // adopt it as a signer here. Writes to the resolved space stay authorized
-    // as the active user (`storageManager.as`) and are gated per-space by the
-    // memory server's ACL, so resolving a name can never grant write access the
-    // caller does not already hold.
+    // Register the derived identity only as fresh-space ACL bootstrap
+    // authority. Storage continues to authenticate ordinary reads and writes
+    // as the active user (`storageManager.as`), so resolving a name does not
+    // grant an existing space's key to the caller.
+    if (session.spaceIdentity) {
+      this.storageManager.registerSpaceIdentity?.(session.spaceIdentity);
+    }
     const did = session.space as MemorySpace;
     this.spaceNameToDid.set(name, did);
     return did;

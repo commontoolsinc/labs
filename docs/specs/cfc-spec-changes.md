@@ -52,7 +52,12 @@ Until the `shape`/`value`/`iterate` observation classes are implemented, one
 label covers all observation kinds at a path; replacing a derived label on
 overwrite then also shrinks the _existence_ label, leaving "this path was once
 written" as a public bit. Document as a known residual of the phase profile,
-fixed by PathLabelTemplate observation classes.
+fixed by PathLabelTemplate observation classes. (Closed in two steps: the C2/C3
+persist split gave existence its own frozen `observes:"shape"` entry, and
+template-population Stage A closed the per-child half — a `*`-path `shape`
+template on declared list-coordinator containers makes a per-child existence
+probe consume the membership `J`; see
+[`cfc-template-population.md`](./cfc-template-population.md) §6.)
 
 **SC-5 [normative] Bless the prepare/digest factoring — §8.10.1.** The runner
 implements the per-attempt verify loop as verify-at-prepare + a canonical-digest
@@ -73,7 +78,17 @@ evaluation as a no-op. Also specify the read-exclusion mirror: runtime-internal
 reads (verifier reads, label metadata at `["cfc"]`, program/source text,
 content-addressed schema docs) do not enter the consumed set or PC — and note
 this is a profile decision that must be revisited when label-metadata
-confidentiality (invariant 12) is implemented.
+confidentiality (invariant 12) is implemented. (Revisit discharged 2026-07-09
+by inv-12 Stage 2: label metadata now has exactly one APPLICATION read
+surface — the `inspectConfLabel` introspection builtin — and that surface
+CONSUMES: its metadata observations enter the consumed set and the flow
+derivation as an explicit `labelMetadata` observation class carrying §4.6.4.2
+population-rule labels (runner `cfc/label-introspection.ts`,
+`recordCfcLabelMetadataObservation`). Runtime-internal verifier reads —
+including the raw `["cfc"]` reads the introspection evaluator itself issues
+underneath — stay excluded from the consumed set and PC exactly as this entry
+specifies; the exclusion is now a statement about VERIFIER reads only, no
+longer about label metadata as such.)
 
 **SC-7 [clarify] Pointwise precision by transaction decomposition — §8.9.1 and
 §8.5.** §8.9.1's flow-precision claims assume one boundary observes the whole
@@ -96,7 +111,11 @@ carry the writing tx's J as exact-path shape labels — joined by reads at the
 container path and by recursive ancestor reads, never by reads strictly below —
 so the §8.5.6.1 membership/length channel is labeled while per-slot pointer
 handling stays clean. Pointer identity at a slot, i.e. WHICH element sits
-there observed without dereferencing, remains an SC-4/SC-8 residual.)
+there observed without dereferencing, was an SC-4/SC-8 residual until
+template-population Stage A: a standalone slot observation now consumes the
+assignment `J` through the `*`-path `followRef` template — on declared
+list-coordinator containers since Stage A, and on ALL pure-link containers
+since the machinery-read marker landed (#4674; see the SC-8 note below).)
 
 **SC-8 [normative] Read-API → observation-class mapping — §4.6.3.** The
 primitive read profile defines `shape`/`value`/`enumerate`/`count`/ `followRef`,
@@ -112,16 +131,40 @@ container-anchored structure stamp is an undefined compaction with a known
 under-taint — a static per-child existence probe ("is `/items/3` present?")
 is a `shape` read at the child (§8.10.1.1) and does not consume the
 exact-path container stamp. The spec-conforming fix is per-slot shape
-entries, at the per-row entry-count cost (#3998); recorded here until an
-implementation decides to pay it. Existence-entry update discipline settled
-as freeze-at-creation — spec §8.12.8 amendment on branch
-`cfc/existence-freeze-at-creation`.)
+entries, at the per-row entry-count cost (#3998). **Closed by
+template-population Stage A** (declared list-coordinator containers — the
+actual §8.5.6.1 membership subjects) **and completed for ALL pure-link
+containers by the machinery-read marker (#4674)**: runtime-minted `*`-path
+per-class entries — O(1) per container where per-slot entries were O(n) —
+make the per-child probe, the raw slot materialization, and the standalone
+slot-pointer observation consume the membership/assignment `J`
+([`cfc-template-population.md`](./cfc-template-population.md) §6 Stage A,
+including the frozen-vs-membership join rule and the machinery boundaries).
+The formerly remaining slice — generic pure-link value writes
+(non-declared containers) kept the container-anchored compaction because
+the runner's op-instantiation scaffolding read plumbing containers' child
+paths with no distinguishing journal shape (measured re-smear on the
+phase-B pointwise suite) — closed in #4674: those wiring reads now carry
+the `machineryRead` marker (`reactivity-log.ts`, the
+`schedulerDependencyRead` family) and skip `*`-template consumption in the
+flow join only (every other consumption kept — byte-identical to their
+pre-template behavior; the egress/observation-gate screens stay
+over-inclusive), and the generic route mints the same three `*`-child
+templates as the declared route. Existence-entry update discipline settled
+as freeze-at-creation — spec §8.12.8, normative since the 2026-07-10 spec
+landing (amended on branch `cfc/existence-freeze-at-creation`, mechanized
+in `formal/Cfc/StoreExistence.lean`); the runner conforms including the
+delete/re-create arm — re-creation REPLACES the frozen entry at the
+re-creating attempt's join (`prepare.ts` re-mint-on-recreation; deletion
+alone still leaves the entry as a fail-safe over-taint).)
 
 (Design settled 2026-07-02, C0 #4476 + follow-up patches:
 `docs/specs/cfc-observation-classes.md` — the §4 read-API → class table, the
 §5 SC-4 grow-vs-replace split, the §3 `origin:"link"` ⇒ implicit
 `observes:"followRef"` covering-rule carve-out, and `count` folding into
-`enumerate`. The spec PR to `commontoolsinc/specs` for §4.6.3 is now owed;
+`enumerate`. The §4.6.3 spec table LANDED 2026-07-10 (specs 31220671: the
+six-row normative mapping + count-folds MAY + the link-carve-out refinements;
+75d97ec9 added the template-population conformance note + §8.12.8 rewrite);
 file it once C1 validates the mapping in code.)
 
 **SC-9 [normative] Staged conformance for the default transition — §8.9.3 or
@@ -157,7 +200,12 @@ has enforcement modes (`disabled|observe|enforce-explicit|strict`, audit item
 what each combination means, which combinations are conforming deployment
 states, and the rollout ordering constraint (propagation-observe before
 propagation-persist; persist before any enforcement that consumes derived
-labels).
+labels). `applied` — specs 9e0ecd9c (2026-07-10): new §18.6.3.1 with the
+dial semantics as profile knobs, five ordering constraints (incl. the
+one-hop laundering counterexample), the `enforce-strict` delta with the
+SC-18b/c writer-fit reject + stable-reason contract, and the informative
+progression table; §18.6.3's ladder bullets corrected (missing-policy is
+pinned at explicit, not strict-only) and §18.6.4's checklist extended.
 
 **SC-14 [clarify] Cross-space derived labels — §4.6.4.1 or §17.** Deriving J
 from space-A reads and persisting it into a space-B document's envelope
@@ -360,7 +408,10 @@ the D3 write floor's check (§8.12.4.1) under its staged dial — an
 unconditional read-side rejection would duplicate it under `enforce` and
 break the pinned dial-off/observe byte-compat. If the spec wants the read
 gate itself to reject empty-input floored writes independent of the floor
-dial, that needs its own normative text + rollout dial.
+dial, that needs its own normative text + rollout dial. _Spec home landed:
+specs#14 added §8.9.1.1 (journal-order structural precision — the prefix,
+its bounds, trigger reads, digest binding), discharging the owed home; the
+interpretation recorded here is now normative text._
 
 **SC-24 [normative] Journal-order precision blessed; span-attributed
 provenance profiled — §8.9.1.** SC-23's interpretation still has no spec home:
@@ -384,7 +435,12 @@ opaque handlers stay at the prefix; the §8.9.1 `flow-taint-precision` gate
 remains only for semantic claims beyond runtime structure. States that the
 egress ceiling / flow join / floor credit MAY upgrade from transaction-global
 where the profile is enforced (upgrades SC-23's boundaries (a)/(b) from
-deliberate to staged). `open`.
+deliberate to staged). `applied` — specs#14 (2026-07-09): part (1) as
+§8.9.1.1, part (2) as the §8.9.1.2 span-attributed provenance profile
+(executor classes incl. the instance rule, late-error framing, digest
+discipline, predictions-never-narrow). Runner-side stage 0 (precision
+counters) shipped as labs#4623; span machinery remains behind the
+entry criteria in `cfc-value-level-provenance.md`.
 
 **SC-25 [normative] Cross-space label-metadata representation classes —
 §4.6.4.1/§4.6.4.2 (inv-12; supersedes SC-14's posture).** §4.6.4.1's
@@ -405,7 +461,25 @@ effective confidentiality — sound because the §8.9.2 conservative join
 contains each influencing source's confidentiality; else fail closed —
 computable without new persisted metadata), and SC-6's "revisit when
 invariant 12 is implemented" note is discharged by the introspection-surface
-observation channel. `open`.
+observation channel. `applied` — specs#14 (2026-07-09): the §4.6.4.1
+known-exposure paragraph upgraded to the normative representation rule
+(public/commitment/reference, same-form matching, `notAvailable` collapse)
+and §4.6.4.2 gained the derived-component interim fallback. Runner-side:
+stage 0 shipped as labs#4624 (seam close, persist re-derivation, sigil
+redaction, classification table), stage 1 as labs#4638
+(`cfcLabelMetadataProtection` dial, `{digestOf}` commitment transform,
+commitment-aware matching), stage 2 as labs#4657
+(`inspectConfLabel` builtin + §4.6.4.2 interim population rule +
+`labelMetadata` observation channel — the SC-6 revisit discharged)
+completed by template-population Stage B (labs#4660): the full per-field
+§4.6.4.2 profile persists as multi-`*` templates under `/cfc/labels/...`
+(`origin:"label-metadata"`, `observes:"labelMetadata"` — no payload read
+class consumes them), minted at the persist seam from each source-bearing
+derived-containment payload entry, resolved by `inspectConfLabel` at
+concrete clause/alternative metadata paths with the interim rule staying
+the label source and the in-hand computation the fallback on template-less
+envelopes ([`cfc-template-population.md`](./cfc-template-population.md)
+§5/§6 Stage B note); stage 3 remains per the design doc.
 
 **SC-26 [reconcile] §8.12.7 route 2 conflates grant records with the rewrite
 event — §8.12.7/§13.4.3.** Route 2's cited shape (§13.4.3) persists a
@@ -424,7 +498,85 @@ causal to the consumed intent's id — the shipped `commitPreconditions`
 receipt discipline — with canonical clause-digest identity, outside the
 churn-free envelope). Guidance refines to:
 2a when revocable or policy-derived; 2b only when the widening must survive
-without evaluation (export/publish). Unconflate the §13 table row. `open`.
+without evaluation (export/publish). Unconflate the §13 table row.
+`applied` — specs#14 (2026-07-09): §8.12.7 route 2 split into 2a/2b with the
+2b contract (including the create-only intent-causal record shape) and the
+§13 summary-table row unconflated. Runner-side: grants build-order items 1–3
+shipped as labs#4627 (`policyState` guards, owner-space `grant:cfc:` records,
+consulted-grant digest binding); the rewrite event is **superseded** per
+`cfc-persisted-declassification.md` §5 (owner decision 2026-07-10: in-fabric
+federation trust comes from remote attestation, so trust-free release buys
+nothing; out-of-fabric irrevocability is served by egress records, SC-27).
+
+**SC-27 [normative] Egress records at send sinks — §8.10.5.2 follow-up.**
+Out-of-fabric egress is irrevocable; modeling it with the same revocable
+artifact as internal sharing invites the un-sending confusion (revoking the
+record of a send is not un-sending). Proposed edit
+([`cfc-persisted-declassification.md`](./cfc-persisted-declassification.md)
+§6): the permanent **sent** record is minted by the successful post-commit
+send path (the transaction commits before the outbox flush, and the release
+can still be refused during the flush — a commit-time record would assert
+disclosures that never happened): a create-only record causal to the outbox
+idempotency key — `{valueDigest, destination, boundaryContext,
+releasedAudienceEvidence, at, intentId}`, destination per the §8.10.5.2
+destination/audience binding (discharging the audit's open
+"destination-binding follow-up"), written record-then-clear against the
+outbox entry so the record can understate but never overstate; an optional
+commit-time attempt marker MUST NOT display as sent. Spec this together
+with the audit's open "post-commit outbox + sink-release re-verification
+contract" item (§8.10 is entirely pre-commit today).
+The record is permanent (create-only, never deleted, no revocation surface)
+and has **no enforcement role**: it never feeds a future release decision —
+labels keep governing what the fabric serves; the record exists for honesty,
+audit, and deriving "who could have this" (current grants ∪ past egress).
+State the shared-vs-sent vocabulary distinction normatively so UIs cannot
+present an egress as revocable. `applied` — specs b020ea87 (2026-07-10):
+new §8.10.7 with the post-commit re-verification contract (discharging the
+audit-3.11 queue item), sent-record-on-successful-send, record-then-clear,
+attempt-markers-never-sent, no-enforcement-role, and the normative
+shared-vs-sent vocabulary; §8.10.5.2 links the record as durable
+destination-binding evidence. Runner build remains open (the SC-27 build
+item).
+
+**SC-28 [normative] Attested deployment config is a federation-sound policy
+store; space-hosted policy documents descoped — §4.4.1/§4.4.5/§5.7.2.** The
+archived B2b plan (`docs/history/plans/cfc-future-work-implementation.md`
+§3, decision 2) treated `RuntimeOptions.cfcPolicyRecords` as an interim
+source because two federated instances with different deployment config
+would silently fire different exchange rules, and scheduled space-hosted
+policy docs as the federation-correct form — restated as recently as the
+SC-14 Stage-3 federation constraint ("B2a's deployment-config policy source
+is federation-hostile"). Revised owner decision (2026-07-10, extending the
+same day's federation resolution — SC-26's superseded note, SC-27): remote
+attestation covers deployment config for security-sensitive inputs like
+`cfcPolicyRecords` — the §5.7.2 runtime-environment claims extend to the
+enforcement configuration the runtime boots with (measured image identity
+covers it) — so attested federated peers provably evaluate the same record
+set, and space-hosted policy documents are not needed for federation
+soundness (the Stage-3 note's conclusion is superseded in place; its
+*evidence replicates, evaluation is local* rule stands — config rides the
+attested evaluator, not the data). Proposed edit:
+§4.4.1's storage-location list gains the attested deployment/system policy
+root as a sanctioned primary store (space-hosted discovery stays optional,
+never required for federation); §4.4.5 adds the CT-1874/SP-1 constraint —
+rules a label-carried `Policy(...)`/`Context(...)` principal brings into
+scope may rewrite ONLY that principal's home clause(s), the mechanical form
+of §5.3.3's clause-local declassification authority (§4.4.5's informative
+pseudocode selects target clauses purely by pattern match and would
+otherwise let a policy referenced in clause k widen sibling clause j: a
+cross-principal implicit release, invariant 11/§3.1.8(3)). Runner-side,
+labs#4652: the surviving non-storage half of B2b
+shipped against the deployment snapshot — `PolicyRecord.selection:
+"ambient" | "referenced"` (`policy.ts`, digest projection v3), hash-bound
+fail-closed ref matching per §4.4.2/§4.4.3, the home-clause gate with
+per-batch recomputation (`exchange-eval.ts`), and inv-12 representation
+rows for the ref atom's fields (name/hash public, subject commitment);
+grants (labs#4627) remain the one space-hosted policy state. `applied` —
+specs a788e3aa (2026-07-10): §4.4.1 attested deployment/system policy root,
+§4.4.5 home-clause locality for label-carried refs (CT-1874/SP-1), §5.7.2
+attestation-measures-config conformance sentence. Also landed same day:
+§4.3.5 grant records + policyState guards + single-use semantics (9f334163,
+0b970117) and the §6.8 grantConsumed row.
 
 ## Queue (from the audit; statuses re-checked by the 2026-06-12 sweep where
 ## noted)
@@ -456,9 +608,11 @@ this file is the single tracking place:
 - Schema-merge per-key direction table (audit 3.10). **Verified silent**
   2026-06-12: §4.2.2.1 covers schema evolution, not per-key conflict
   resolution between composed schemas' IFC annotations — confirmed open.
-- Post-commit outbox + sink-release re-verification contract (audit 3.11).
-  **Verified silent** 2026-06-12: §8.10 is entirely pre-commit — confirmed
-  open.
+- ~~Post-commit outbox + sink-release re-verification contract (audit
+  3.11)~~ — **discharged 2026-07-10** by the new §8.10.7 (specs b020ea87):
+  the flush re-verifies the release decision's bindings before sending
+  (the §8.10.1 conformance shape shifted post-commit); egress records ride
+  the same section (SC-27).
 - Schema-sanitization / contamination scoping promotion from ch. 14 to
   normative (audit 3.12). Not re-verified.
 - ~~`/value` envelope-prefix wire-format decision (audit Wave 4 #28)~~ —
@@ -480,4 +634,139 @@ this file is the single tracking place:
 - §8.12.8 already documents the observation-class residuals (existence
   channel; pointer-identity-at-a-slot) as profile residuals with
   `PathLabelTemplate` named as the fix; the open part of that build is the
-  envelope persistence/population design, tracked with SC-4/SC-8.
+  envelope persistence/population design, tracked with SC-4/SC-8 — **design
+  settled 2026-07-10 in
+  [`cfc-template-population.md`](./cfc-template-population.md)**:
+  runtime-minted `*`-path per-class entries (the existing declared-`*`
+  entry form; no new wire shape), closing both SC-8 under-taints in Stage
+  A and carrying Stage-2 full metadata population in Stage B. **Stage A
+  landed** (declared list-coordinator containers), and the generic
+  pure-link-write slice **closed in #4674** via the machinery-read marker
+  — see the SC-8 note and the design's §6 implementation note.
+
+## From the exchange-rules pattern-authoring design (2026-07-11)
+
+Companion design: [`cfc-exchange-rules-authoring.md`](./cfc-exchange-rules-authoring.md).
+Critical review and dependency-ordered implementation work:
+[`cfc-exchange-rule-authoring.md`](../plans/cfc-exchange-rule-authoring.md).
+All `open`; Stage 0 of that plan records corrections required before these
+items become implementation contracts.
+
+**SC-29 [normative] Module-identity-addressed policy references — §4.4.2 +
+§15.3.** Policy principals today are `{name, subject, hash}` with a
+name→hash discovery step (§4.4.1). For rule sets declared in authored modules,
+the reference should carry the SC-22 identity pair —
+`{module identity, symbol}` (content-addressed module identity + exported name)
+— plus a canonical `policyDigest` and concrete `subject`. The pair names the
+defining source export. The digest is canonical `hashStringOf` over `{ domain:
+"cfc/policy-manifest/v1", manifest: {formatVersion, moduleIdentity, symbol,
+template} }`; an envelope may repeat the digest but excludes
+it from its own hash projection.
+The subject is bound relative to each invoking piece. A trusted compiler or
+verifier must attest the source-closure→export→manifest lowering; checking the
+digest alone proves byte integrity, not that derivation. No space may commit a
+persisted reference unless it already has, or atomically creates, a verified
+local manifest copy, so later evaluation is no less durable than that space and
+does not require retaining the defining source closure. Source-closure changes
+create a new pair and, because the pair is in the manifest body, a new digest
+for future labels; existing labels keep their old tuple until explicit §4.4.4
+migration. The subject-independent digest plus the label subject is a new
+module-policy binding form that §4.4.2/§4.4.3 must define explicitly. Proposed
+edit: add it to §4.4.2 and the §15.3 table alongside the name-addressed form,
+define trusted derivation, local verification/retention, and commitment-aware
+subject instantiation, and state that home-clause locality (§4.4.5) and
+clause-local authority (§5.3.3) apply identically.
+
+**SC-30 [normative] Concept-scoped owner policy records (user defaults) —
+§4.3/§4.4.1 + new §13 worked example.** Define the indirect-raise mechanism:
+a **concept id** (well-known URI per §4.8.1/§5.7.1, or `{identity, symbol}`
+per SC-29) crossed with an **owner subject** selects the owner's policy record
+for that concept — the home of user default policies. Normative content
+needed: (a) atom shape — extend `Context` with a `concept` field (or a
+sibling atom; decide), keyed `(concept, subject)`; (b) the
+**stable-kernel-plus-grants** profile: the record is a hash-stable kernel of
+generic grant-guarded rules; user defaults are §4.3.5 grant records (reserved
+kind `ConceptGrant {concept, owner, audience, requiredIntent, expires?,
+singleUse?}`) so default edits are grant CRUD (no label migration), revocation
+is grant deletion, one-shot release rides single-use grants; (c) bootstrap —
+raising to an unconfigured concept resolves the substrate-shipped kernel
+(covered by attested deployment configuration, SC-28) with zero grants:
+owner-only until granted. This discharges the open questions recorded in
+`notes/WORKING_GOVERNANCE_EXAMPLES.md` (how "Alice's medical policy at the
+time" is represented; what changes automatically for future vs existing data).
+Runtime prerequisites already shipped: grant records with `policyState`
+guards, reserved-path storage and single-use commit-precondition receipts
+(`packages/runner/src/cfc/grants.ts`, #4627/#4649), and label-carried
+`referenced` record selection with home-clause locality (CT-1874, #4652) —
+SC-30 is the spec-side profile plus the reserved grant kind.
+
+**SC-31 [registry] `ConsumerIntent` integrity atom — §15.** Runtime-minted
+evidence that a consuming pattern's module statically declares an intent for
+what flows in (`{intent, surface, pattern}`); matched by concept-kernel grant
+rules' `requiredIntent`. Evidence, not authorable in schemas — same posture
+as `UserSurfaceInput`/`LlmDerived`. Needs a registry row and a minting rule.
+
+**SC-32 [clarify] Concept identity coordination — §4.8.1 + §5.7.1.** State
+that concept ids have exactly two forms — well-known URIs (ecosystem
+coordination) and module-relative `{identity, symbol}` (no registration;
+globally referencable once deployed, resolvable via `cf:` imports per the
+labs pattern-imports design) — and that bare string names are not a
+coordination form. Note the same concept id may appear in confidentiality
+position (context principal selecting an owner's record, SC-30), in integrity
+guards (trust-closure satisfaction, §4.8.9), and in caveat kinds; position
+selects the machinery. §5.7.1's "public concept directory" should say who
+mints well-known URIs or point to the process.
+
+**SC-33 [normative] Adoption paths for third-party-authored rules — new §13
+worked example.** Publishing a pattern that declares exchange rules is not
+adoption. Enumerate the three adoption paths and their evidence: (a)
+**instantiation** — owner instantiates the pattern; its rules govern only
+clauses the pattern itself raises (authoring authority bound; conjunctive-join
+rule); (b) **grant** — owner accepts a standing concept default via the
+trusted review surface: state-scoped intent → trusted policy writer → grant
+record (§13.4.3 + §4.3.5 write gate); (c) **verifier trust statement**
+(§4.8.2) for concept-guard satisfaction. Add the parameter-integrity rule:
+the policy writer MUST source grant parameters (audience, requiredIntent,
+expiry) from endorsed intent evidence minted at the review surface, never
+from the proposing pattern's data — this is §3.8.4 applied to adoption, and
+it is what makes "propose" safe as a pure out-of-code workflow.
+
+**SC-34 [normative] Bulk migration for concept kernels — §4.4.4.** §4.4.4
+defines per-label migration only. Grants make kernel changes rare, not never
+(kernel bugs, new guard families). Define the owner-initiated sweep: re-pin
+every value carrying `(concept, owner)` from kernel hash A to B, as an
+intent-gated batch declassification event with an auditable record (the
+§8.12.7 route-2b shape, batched).
+
+**SC-35 [clarify] Grant-set recombination — §14.3.2 pointer from SC-30.**
+Multiple grants on one concept are multiple declassification paths; the
+§14.3.2 recombination attack applies directly to user defaults. No mechanism
+proposed; require that owner-facing surfaces can enumerate a concept's active
+grants (the precondition for any future budget mechanism) and cross-reference
+§14.3.2 from the SC-30 text.
+
+**SC-36 [normative] Pattern-requested execution-policy envelopes — §5.5.2.**
+§5.5.2 says patterns don't request certification — it's a consequence of the
+execution environment — but never says how a pattern comes to execute under
+policy P in the first place. Add the request surface: a pattern MAY declare an
+execution-policy envelope (by policy reference, SC-29 pair form); the runtime
+either enforces P for that pattern's execution (outputs then gain
+`PolicyCertified(P)` exactly as §5.5.2 already specifies) or refuses to run
+the pattern — never runs it unenforced. State the monotonicity: a
+pattern-requested envelope can only constrain its own execution; it adds no
+authority, and the attestation remains runtime-minted (§5.5.7's trust model
+unchanged). Authoring sketch:
+`cfc-exchange-rules-authoring-extensions.md` §5.
+
+**SC-37 [registry] Reserved `ConsentEvidence` integrity family — §5.3.4 +
+§15.** §5.3.4 requires consent evidence to "bind scope, audience, and purpose
+strongly enough that the shared-result rewrite is clause-local and
+reviewable," while deliberately not privileging a payload. Reserve the family
+shape so profiles interoperate: `ConsentEvidence {participant, scope,
+audience, purpose, expires?}`, minted only by trusted consent surfaces (the
+§13.4.3 state-scoped-intent shape per participant), matched per participant
+clause by ordinary rules (each participant's evidence rewrites only that
+participant's clause; the multi-party conjunction dissolves exactly when all
+are present — §5.3.3 stated operationally). Registry row + a note in §5.3.4
+pointing at the reserved shape. Authoring sketch:
+`cfc-exchange-rules-authoring-extensions.md` §4.

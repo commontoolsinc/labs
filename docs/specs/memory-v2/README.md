@@ -250,6 +250,11 @@ Current implementation note:
 - plain `/memory/transact` commits leave `invocationRef` /
   `authorizationRef` unset
 - `session.open` remains the authenticated edge in this pass
+- ACL genesis is an explicit transaction authorized by the space identity (or
+  a configured service DID), not a side effect of `session.open`
+- a never-ACL'd populated space is temporarily authenticated-public READ/WRITE;
+  a fresh space is READ-only until genesis, and malformed/ownerless/retracted
+  ACL state fails closed
 - signed per-commit invocation / authorization metadata remains deferred until
   transport-level verification lands
 

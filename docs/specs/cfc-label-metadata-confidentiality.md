@@ -26,10 +26,13 @@ persists into a space-B document:
 | `cfc.schemaHash` + replicated schema doc (`ensureSchemaDocument`) | policy structure, field names | schema-driven enforcement |
 
 Two corrections to the audit item's inherited wording: `Origin` URIs have **no
-mint site** in the runner (nothing persists them), and **policy names are never
-persisted** (B2a policy ids reach the prepared digest only; label-carried
-`Policy(...)` is B2b, unbuilt). The live leak set is the DID-bearing rows
-above.
+mint site** in the runner (nothing persists them), and policy names were never
+persisted **until label-carried `Policy(...)`/`Context(...)` refs shipped**
+(B2b label-carried selection, 2026-07-09): a ref atom persists `name` + `hash`
+(public by design — they identify a deployment policy profile and must stay
+dereferenceable against the destination's snapshot) and a DID `subject`
+(commitment, same posture as `User.subject`). The live leak set is the
+DID-bearing rows above.
 
 Three structural facts shape everything below:
 
@@ -91,6 +94,8 @@ Default assignments (initial table, revisable per family):
 | `Caveat.source`, nested caveat sources | commitment | consumed by equality-shaped evidence binding; the audit's named leak |
 | `User.subject` / `PersonalSpace.owner` in confidentiality clauses | commitment | gating is pure equality against the acting reader |
 | `Space.id` in clauses | **public** (initially) | §4.9.3 must dereference it for the ACL point query; a commitment breaks membership-based release. Space DIDs identify a *container*, not a person; revisit under `reference` when cross-space resolution ships |
+| `Policy`/`Context` ref `.name`/`.hash` | **public** | B2b label-carried selection must dereference them against the destination's deployment snapshot (the `Space.id` argument); they identify a policy profile, not a person, and `hash` is already a content digest |
+| `Policy`/`Context` ref `.subject` | commitment | a DID, equality-shaped at selection (well-formedness only — selection keys on name+hash and accepts the commitment marker); rules binding variables from it fail closed at the destination, the narrow direction |
 | `LinkReference.source/target` | commitment (paths), public (space? no — commitment) | display/provenance only; nothing dereferences the persisted copy |
 | `TransformedBy.identity.sourceFile/bindingPath` | commitment | human-readable code layout is the leak; trust statements should bind the content-addressed `moduleIdentity` (public) instead |
 | `authored-by` / `represents-principal` `.subject` | public | product-displayed attribution, minted under the acting principal's own authority |
@@ -140,7 +145,15 @@ revisited when invariant 12 is implemented." This is that revisit:
    confidentiality; declared/authored entries carry no such containment
    guarantee and stay fail-closed), else fail closed. Computable from the
    entry in hand, no cross-space resolution. `type`/`kind`/presence stay
-   public per the default profile.
+   public per the default profile. _Note (2026-07-10): the full profile now
+   ships — template-population Stage B persists it as multi-`*` templates
+   under `/cfc/labels/...` at the same seam that writes the payload entries
+   (`cfc-template-population.md` §5/§6). The interim rule remains the label
+   SOURCE; the templates are its CARRIER (the labels minted into them), the
+   introspection surface resolves them at concrete metadata paths and falls
+   back to computing the rule in hand on template-less envelopes, and the
+   fail-closed arm is unchanged — declared/authored fields mint nothing and
+   a sibling template never re-opens them._
 4. **Runtime enforcement reads stay outside the consumed set** (verifier
    reads are not observations — §8.10.1), unchanged. What changes is that
    *application-visible* projections of label metadata always pass through
@@ -190,7 +203,12 @@ consumes inbound views, redacting the outbound copies is safe.
   (the §3 prerequisite — a hardening on its own); then extend display
   redaction to sigil `cfcLabelView` in IPC value payloads; add the
   classification table as data (no transform yet). Each is small and
-  independently shippable, in that order.
+  independently shippable, in that order. _Implementation note (2026-07-09):
+  shipped — `MetaField` drops `"cfc"` (fail-closed at `handleCellGet`), the
+  persist loop re-derives the source's stored label map per link write while
+  the IPC ingress stops consuming inbound views, all main-thread-facing view
+  copies redact `Caveat.source`, and the §2 table lives at
+  `runner/src/cfc/label-field-classification.ts`._
 - **Stage 1 (representation):** the cross-space persist transform
   (commitment/public per §2's table) behind a dial
   (`cfcLabelMetadataProtection: off | observe | enforce` — observe computes
@@ -198,13 +216,87 @@ consumes inbound views, redacting the outbound copies is safe.
   established rollout idiom). Migration: transformed and verbatim envelopes
   coexist (entries are self-describing; a commitment field carries a marker
   wrapper `{digestOf: <hash>}` so consumers dispatch on shape, and SC-11
-  equality is computed post-transform).
+  equality is computed post-transform). _Implementation note (2026-07-09):
+  shipped — the transform lives in `runner/src/cfc/label-representation.ts`
+  and runs in `prepareBoundaryCommit`'s persist loop for cross-space-eligible
+  entries (link-origin entries when the link source's space differs from the
+  target's — covering the re-derived view AND the carried in-value sigil
+  `cfcLabelView`; flow-derived stamps when `deriveFlowJoin` consumed a
+  labeled foreign observation; ambiguity fails toward protection). Same-form
+  matching landed in `atomEntails` (read gating digests the candidate) and
+  `matchAtomPattern` (concrete patterns digest-match; variables refuse fresh
+  bindings from committed fields — variable-needing rules fail closed at the
+  destination; bound-variable unification digest-compares across forms).
+  Declared entries persist verbatim (the schema doc replicates to the
+  destination regardless — the §4 boundary), as do carried-forward existing
+  entries (no envelope rewrite on migration) and the local external-ingest
+  mark._
 - **Stage 2 (observation):** `inspectConfLabel` + interim population rule +
-  the label-metadata observation channel (SC-6 revisit).
+  the label-metadata observation channel (SC-6 revisit). _Implementation note
+  (2026-07-09): shipped (initially in reduced form — §3 items 2–4; the full
+  per-field `PathLabelTemplate` profile co-built with SC-4/SC-8, designed in
+  [`cfc-template-population.md`](./cfc-template-population.md) — its Stage B
+  landed 2026-07-10, upgrading this stage's computed-in-hand labels to
+  persisted `/cfc/labels/...` templates resolved at concrete metadata paths,
+  with the in-hand rule as fallback on template-less envelopes). The
+  §4.6.4.1 evaluator + §4.6.4.2 interim population rule live in
+  `runner/src/cfc/label-introspection.ts`: equality predicates over the six
+  query fields; first-layer only (a `/cfc/...` target path refuses — payload
+  fields literally named `cfc` fail closed on the collision); ONE normalized
+  `notAvailable` constant across the unobservable / missing /
+  matching-but-unreadable arms; Stage 1 commitment-aware matching with
+  verbatim committed projections (a miss over committed fields still
+  consumes the per-field labels); population = atom presence/`type`/`kind`
+  public, §2-table-`public` fields public, every other present field
+  source-protected — the source identity's confidentiality when known (no
+  carrier exists yet), else the derived-component (`derived`/`structure`)
+  entry's own effective confidentiality, else fail closed. The
+  pattern-facing surface is the `inspectConfLabel` BUILTIN
+  (`runner/src/builtins/inspect-conf-label.ts`, exposed as
+  `commonfabric.inspectConfLabel`): builtins are the one channel pattern
+  code has into runtime capability and the node runs inside the observing
+  transaction; the target rides `asCell`, so inspecting a label never reads
+  the labeled payload; the display path (`getCfcLabel`) is untouched.
+  Consumption is a `labelMetadata` observation class beside
+  value/shape/followRef, recorded explicitly
+  (`recordCfcLabelMetadataObservation`) with the population-rule label and
+  folded into `deriveFlowJoin` (confidentiality-only, like followRef), the
+  egress consumed set (`collectConsumedLabel`), the per-write input gate
+  (`verifyInputRequirements`, at -Infinity like trigger reads), and the
+  prepared digest (absent-when-empty); runtime-internal verifier reads stay
+  excluded exactly as before. No new dial: the API is additive and
+  fail-closed by construction — a result whose evaluation consumed
+  protected metadata observations is returned only when
+  `cfcFlowLabels: "persist"` under a non-disabled enforcement mode can carry
+  the joined label onto the result doc through the normal flow derivation;
+  under every other configuration it degrades to the same `notAvailable`
+  (never an unlabeled copy of protected label metadata, and the degraded
+  arm stays indistinguishable from the hidden ones)._
 - **Stage 3 (strong form):** `reference`-form carried labels + per-reader
   materialization; entry criteria: a concrete deployment whose threat model
   includes targeted DID probing, and cross-space resolution latency measured
-  acceptable on the shared-profile / group-chat flows.
+  acceptable on the shared-profile / group-chat flows. **Federation
+  constraint (owner decision 2026-07-10):** the federation design rule is
+  *evidence replicates with the data; evaluation is local* (attested
+  runtimes enforce locally — reads must never phone the origin to be
+  authorized). The `reference` form is origin-coupled by construction —
+  label readability rides the source's read authority — so in a federated
+  deployment the default stays `commitment`; `reference` is admissible only
+  with per-reader materialization proven on realistic flows, and only for
+  the highest-sensitivity fields. Grants and `commitment`-form labels
+  satisfy the rule as-is. The deployment-config policy source
+  (`cfcPolicyRecords`) satisfies it through the ATTESTATION channel rather
+  than replication (revised owner decision 2026-07-10, superseding this
+  note's earlier "federation-hostile" conclusion; SC-28 in
+  [`cfc-spec-changes.md`](./cfc-spec-changes.md)): remote attestation
+  covers deployment config for security-sensitive inputs, so attested
+  federated peers provably run the same record set — a config difference is
+  an attestation difference, never a silent rule divergence. The
+  space-hosted policy docs originally scheduled as B2b are descoped; the
+  label-carried `Policy(...)`/`Context(...)` selection half of B2b shipped
+  against the deployment snapshot (its ref fields classified in the §2
+  table: name/hash public so refs stay dereferenceable at the destination,
+  subject commitment).
 
 Dependencies: none on Epics B/D/E remainder; Stage 2's full population
 profile co-builds with the SC-4/SC-8 envelope design. The D4 value-level

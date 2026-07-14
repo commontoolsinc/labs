@@ -1,8 +1,9 @@
 import ts from "typescript";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 import { StaticCacheFS } from "@commonfabric/static";
 import {
   CommonFabricTransformerPipeline,
+  CrossStageState,
   TransformationDiagnostic,
   transformCfDirective,
 } from "../src/mod.ts";
@@ -22,6 +23,9 @@ export interface TransformOptions {
   precomputedDiagnostics?: ts.Diagnostic[];
   /** If provided, pipeline diagnostics will be pushed into this array after transformation. */
   pipelineDiagnostics?: TransformationDiagnostic[];
+  moduleIdentities?: ReadonlyMap<string, string>;
+  policyManifests?: unknown[];
+  state?: CrossStageState;
 }
 
 export interface BatchTypeCheckResult {
@@ -162,12 +166,19 @@ export async function batchTypeCheckFixtures(
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => "\n",
     getDefaultLibFileName: () => "lib.d.ts",
-    resolveModuleNames: (moduleNames) => {
+    resolveModuleNames: (moduleNames, containingFile) => {
       return moduleNames.map((name) => {
         if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
             resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (name === "commonfabric/cfc" && types["cfc.ts"]) {
+          return {
+            resolvedFileName: "cfc.ts",
+            extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
         }
@@ -193,6 +204,18 @@ export async function batchTypeCheckFixtures(
             extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
+        }
+        if (name.startsWith(".")) {
+          const resolvedFileName = join(dirname(containingFile), name);
+          if (transformedFiles[resolvedFileName] !== undefined) {
+            return {
+              resolvedFileName,
+              extension: resolvedFileName.endsWith(".tsx")
+                ? ts.Extension.Tsx
+                : ts.Extension.Ts,
+              isExternalLibraryImport: false,
+            };
+          }
         }
         return undefined;
       });
@@ -393,12 +416,19 @@ export async function transformFiles(
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => "\n",
     getDefaultLibFileName: () => "lib.d.ts",
-    resolveModuleNames: (moduleNames) => {
+    resolveModuleNames: (moduleNames, containingFile) => {
       return moduleNames.map((name) => {
         if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
             resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (name === "commonfabric/cfc" && types["cfc.ts"]) {
+          return {
+            resolvedFileName: "cfc.ts",
+            extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
         }
@@ -424,6 +454,18 @@ export async function transformFiles(
             extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
+        }
+        if (name.startsWith(".")) {
+          const resolvedFileName = join(dirname(containingFile), name);
+          if (files[resolvedFileName] !== undefined) {
+            return {
+              resolvedFileName,
+              extension: resolvedFileName.endsWith(".tsx")
+                ? ts.Extension.Tsx
+                : ts.Extension.Ts,
+              isExternalLibraryImport: false,
+            };
+          }
         }
         return undefined;
       });
@@ -536,6 +578,8 @@ export async function transformFiles(
   const pipeline = new CommonFabricTransformerPipeline({
     mode,
     logger,
+    moduleIdentities: options.moduleIdentities,
+    state: options.state,
   });
 
   const out: Record<string, string> = {};
@@ -568,6 +612,11 @@ export async function transformFiles(
   }
   if (options.pipelineDiagnostics) {
     options.pipelineDiagnostics.push(...pipeline.getDiagnostics());
+  }
+  if (options.policyManifests) {
+    for (const manifests of pipeline.getPolicyManifests().values()) {
+      options.policyManifests.push(...manifests);
+    }
   }
   return out;
 }
@@ -734,12 +783,19 @@ export async function validateFiles(
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => "\n",
     getDefaultLibFileName: () => "lib.d.ts",
-    resolveModuleNames: (moduleNames) => {
+    resolveModuleNames: (moduleNames, containingFile) => {
       return moduleNames.map((name) => {
         if (name === "commonfabric" && types["commonfabric.d.ts"]) {
           return {
             resolvedFileName: "commonfabric.d.ts",
             extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        if (name === "commonfabric/cfc" && types["cfc.ts"]) {
+          return {
+            resolvedFileName: "cfc.ts",
+            extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
         }
@@ -756,6 +812,18 @@ export async function validateFiles(
             extension: ts.Extension.Ts,
             isExternalLibraryImport: false,
           };
+        }
+        if (name.startsWith(".")) {
+          const resolvedFileName = join(dirname(containingFile), name);
+          if (files[resolvedFileName] !== undefined) {
+            return {
+              resolvedFileName,
+              extension: resolvedFileName.endsWith(".tsx")
+                ? ts.Extension.Tsx
+                : ts.Extension.Ts,
+              isExternalLibraryImport: false,
+            };
+          }
         }
         return undefined;
       });
@@ -786,6 +854,8 @@ export async function validateFiles(
   const pipeline = new CommonFabricTransformerPipeline({
     mode,
     logger,
+    moduleIdentities: options.moduleIdentities,
+    state: options.state,
   });
 
   const outputs: Record<string, string> = {};

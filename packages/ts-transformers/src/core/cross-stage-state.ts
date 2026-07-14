@@ -6,6 +6,7 @@ import type {
   SyntheticReactiveCollectionRegistry,
   TypeRegistry,
 } from "./transformers.ts";
+import type { CfcPolicyCompilerManifestV1 } from "./runtime-contract.ts";
 
 /**
  * Per-node side table, mirroring the TypeScript compiler's internal `NodeLinks`
@@ -64,6 +65,24 @@ export interface NodeTypeLinks {
  *     `mark*` methods here do not invalidate — the context wrapper does.)
  */
 export class CrossStageState {
+  readonly #policyManifests = new Map<
+    string,
+    readonly CfcPolicyCompilerManifestV1[]
+  >();
+
+  recordPolicyManifests(
+    fileName: string,
+    manifests: readonly CfcPolicyCompilerManifestV1[],
+  ): void {
+    this.#policyManifests.set(fileName, manifests);
+  }
+
+  getPolicyManifests(): ReadonlyMap<
+    string,
+    readonly CfcPolicyCompilerManifestV1[]
+  > {
+    return this.#policyManifests;
+  }
   /**
    * Bare cross-package channels (the published boundary contract). Read
    * directly by the schema-generator package as plain WeakMaps; they must NOT

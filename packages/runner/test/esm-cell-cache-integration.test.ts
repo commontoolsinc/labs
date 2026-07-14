@@ -113,6 +113,41 @@ describe("ESM compile via content-addressed cell cache", () => {
     expect(await run(warm, 5)).toEqual({ result: 10 });
   });
 
+  it("restores compiler-verified policy manifests on a warm hit", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: `
+          import { pattern } from "commonfabric";
+          import {
+            cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+          } from "commonfabric/cfc";
+          export const release = exchangeRule({
+            appliesTo: THIS_POLICY,
+            pre: {
+              integrity: [cfcPattern.hasRole(
+                v("user"), THIS_POLICY.subject, "reader"
+              )],
+            },
+            post: { addAlternatives: [cfcPattern.user(v("user"))] },
+          });
+          export const rules = exchangeRules([release]);
+          export default pattern(() => ({ ok: true }));
+        `,
+      }],
+    };
+    const pm = runtime.patternManager;
+    await pm.compilePattern(program, { space, tx });
+    await pm.flushCompileCacheWrites();
+    await pm.compilePattern(program, { space, tx });
+    expect(pm.getCompileCacheStats()).toEqual({
+      hits: 1,
+      misses: 1,
+      byIdentityHits: 0,
+    });
+  });
+
   it("warm load BY IDENTITY skips resolve+compile entirely", async () => {
     const pm = runtime.patternManager;
     // Cold compile to populate the cache + learn the entry identity.

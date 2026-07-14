@@ -85,3 +85,18 @@ Deno.test("extended transaction refuses preconditions the storage cannot enforce
     "does not support",
   );
 });
+
+Deno.test("extended transaction refuses create-only marks the storage cannot enforce", () => {
+  // Same fail-closed posture as addCommitPrecondition above: a create-only
+  // mark is a commit gate — the exactly-once witness for event receipts and
+  // single-use grant consumption — so a wrapper that swallowed it over an
+  // inner transaction without markCreateOnly would let a duplicate commit
+  // through unguarded (cubic P1 on #4649).
+  const innerWithoutSupport = {} as IStorageTransaction;
+  const tx = new ExtendedStorageTransaction(innerWithoutSupport);
+  assertThrows(
+    () => tx.markCreateOnly({ space, id: "of:receipt-probe" }),
+    Error,
+    "does not support",
+  );
+});

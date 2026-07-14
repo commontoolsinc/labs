@@ -38,6 +38,18 @@ Deno.test("DISABLE_LOG_REQ_RES / PLAID_SYNC_ALL_TRANSACTIONS parse strictly", ()
   }
 });
 
+Deno.test("MEMORY_ACL_MODE defaults to enforce and accepts rollout overrides", () => {
+  const aclMode = (value: string | undefined) =>
+    EnvSchema.parse(
+      value === undefined ? {} : { MEMORY_ACL_MODE: value },
+    ).MEMORY_ACL_MODE;
+
+  assertEquals(aclMode(undefined), "enforce");
+  assertEquals(aclMode("off"), "off");
+  assertEquals(aclMode("observe"), "observe");
+  assertEquals(aclMode("enforce"), "enforce");
+});
+
 // The EXPERIMENTAL_* → ExperimentalOptions mapping (including its tri-state
 // unset/true/false fidelity) now lives in the runner's canonical
 // `experimentalOptionsFromEnv` / `EXPERIMENTAL_ENV_VARS` (CT-1814), shared by

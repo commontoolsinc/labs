@@ -907,6 +907,40 @@ Deno.test("memory v2 client coalesces watch ack bursts", async () => {
   }
 });
 
+Deno.test("memory v2 client reschedules an ack after a failed send while still connected", async () => {
+  const transport = new FailFirstAckTransport();
+  const client = await connect({ transport });
+  const session = await client.mount("did:key:z6Mk-memory-v2-ack-retry");
+
+  try {
+    // A watch result acks the observed server seq. The first ack send fails
+    // with an error response (the connection stays up), so the ack flush's
+    // finally reschedules a retry.
+    await session.watchAdd([{
+      id: "root:1",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:doc:1",
+          selector: {
+            path: [],
+            schema: false,
+          },
+        }],
+      },
+    }]);
+
+    // Wait for the rescheduled retry to be accepted — event-driven, no sleep.
+    await transport.ackSucceeded;
+    // One failed attempt, then the rescheduled attempt that succeeded.
+    assertEquals(transport.ackAttempts, 2);
+    // A failed ack while connected must not drop the connection.
+    assertEquals(client.isConnected(), true);
+  } finally {
+    await client.close();
+  }
+});
+
 Deno.test("memory v2 watch view keeps emitted snapshots incrementally ordered", async () => {
   const view = WatchView.fromSync({
     type: "sync",
@@ -1644,6 +1678,100 @@ class AckCountingTransport implements Transport {
             serverSeq: this.#watchSeq,
           },
         });
+        return Promise.resolve();
+      default:
+        throw new Error(`Unhandled message ${message.type}`);
+    }
+  }
+
+  close(): Promise<void> {
+    this.#closeReceiver();
+    return Promise.resolve();
+  }
+
+  #respond(message: FabricValue): void {
+    this.#receiver(encodeMemoryBoundary(message));
+  }
+}
+
+// Rejects the FIRST session.ack with an error response but stays connected, so
+// the ack flush throws and its finally reschedules a retry (client scheduleAck).
+// The second ack is accepted.
+class FailFirstAckTransport implements Transport {
+  ackAttempts = 0;
+  #watchSeq = 0;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+  #ackSucceeded = defer<void>();
+
+  /** Resolves when a session.ack is accepted (the retry after the first fails). */
+  get ackSucceeded(): Promise<void> {
+    return this.#ackSucceeded.promise;
+  }
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as {
+      type: string;
+      requestId?: string;
+    };
+
+    switch (message.type) {
+      case "hello":
+        this.#respond(HELLO_OK);
+        return Promise.resolve();
+      case "session.open":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: "session:fail-first-ack",
+            serverSeq: 0,
+            sessionOpen: sessionOpenFor(message.requestId!),
+          },
+        });
+        return Promise.resolve();
+      case "session.watch.add":
+        this.#watchSeq += 1;
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            serverSeq: this.#watchSeq,
+            sync: {
+              type: "sync",
+              fromSeq: this.#watchSeq - 1,
+              toSeq: this.#watchSeq,
+              upserts: [],
+              removes: [],
+            },
+          },
+        });
+        return Promise.resolve();
+      case "session.ack":
+        this.ackAttempts += 1;
+        if (this.ackAttempts === 1) {
+          // Reject the ack, but leave the connection open.
+          this.#respond({
+            type: "response",
+            requestId: message.requestId!,
+            error: { name: "AckRejected", message: "ack rejected once" },
+          });
+        } else {
+          this.#respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: { serverSeq: this.#watchSeq },
+          });
+          this.#ackSucceeded.resolve();
+        }
         return Promise.resolve();
       default:
         throw new Error(`Unhandled message ${message.type}`);
@@ -2741,24 +2869,70 @@ Deno.test("memory v2 client close interrupts long reconnect backoff", async () =
     await time.runMicrotasks();
     assertEquals(transport.helloCount, 3);
 
-    let closed = false;
-    const closePromise = client.close().then(() => {
-      closed = true;
-    });
-    await time.runMicrotasks();
-
-    await time.tickAsync(24);
-    assertEquals(closed, false);
-
-    await time.tickAsync(1);
-    await time.runMicrotasks();
-    assertEquals(closed, true);
-
-    await closePromise;
+    // The client is now parked in a 50ms reconnect backoff. Closing cancels
+    // that wait at once, so the close settles through microtasks with the
+    // clock held still. Were the backoff required to elapse, awaiting the
+    // close under fake time would hang, since nothing ticks its timer.
+    await client.close();
+    assertEquals(transport.helloCount, 3);
   } finally {
     Math.random = originalRandom;
     time.restore();
   }
+});
+
+// Answers the first `hello` and leaves every later one hanging: no reply and no
+// close event. A reconnect triggered by `disconnect()` then parks the loop
+// inside the handshake rather than in a backoff wait.
+class HandshakeHangReconnectTransport implements Transport {
+  helloCount = 0;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  disconnect(): void {
+    this.#closeReceiver(new Error("disconnect"));
+  }
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as { type: string };
+    if (message.type === "hello") {
+      this.helloCount += 1;
+      if (this.helloCount === 1) {
+        this.#receiver(encodeMemoryBoundary(HELLO_OK));
+      }
+      return Promise.resolve();
+    }
+    throw new Error(`Unhandled handshake-hang message: ${message.type}`);
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+Deno.test("memory v2 client close ends a reconnect parked in the handshake", async () => {
+  const transport = new HandshakeHangReconnectTransport();
+  const client = await connect({ transport });
+
+  // Drop the connection. The reconnect loop sends a fresh `hello` that gets no
+  // reply, so it is parked awaiting the handshake, with no backoff timer armed.
+  transport.disconnect();
+  await Promise.resolve();
+  assertEquals(transport.helloCount, 2);
+
+  // Closing rejects the in-flight handshake. The loop then reaches the backoff
+  // step with the client already closed, which returns without arming a timer,
+  // so the close settles through microtasks.
+  await client.close();
+  assertEquals(client.isConnected(), false);
 });
 
 Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {

@@ -18,7 +18,7 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-policy-boundary");
 
-// Epic B5 (docs/plans/cfc-future-work-implementation.md §3): exchange-rule
+// Epic B5 (docs/history/plans/cfc-future-work-implementation.md §3): exchange-rule
 // evaluation wired into the boundary gates behind the cfcPolicyEvaluation
 // dial. `off` is byte-identical to the pre-dial gates; `observe` evaluates
 // and diagnoses but decides on the raw label; `enforce` decides on the
@@ -288,6 +288,33 @@ describe("CFC policy evaluation at boundaries (B5)", () => {
           ),
         ).toBe(true);
       });
+    });
+
+    it("observe: diagnoses an unresolved module policy by digest", async () => {
+      await withRuntime(
+        { policyEvaluation: "observe", policyRecords: [] },
+        async (runtime) => {
+          const unresolved = cfcAtom.modulePolicyRef(
+            "sha256:missing-module",
+            "rules",
+            "sha256:missing-manifest",
+            signer.did(),
+          );
+          await seedSpaceLabeledCell(runtime, "policy-observe-missing", {
+            confidentiality: [unresolved],
+          });
+          const { diagnostics } = readThenSink(
+            runtime,
+            "policy-observe-missing",
+          );
+          expect(
+            diagnostics.some((note) =>
+              note.includes("module policy missing-manifest") &&
+              note.includes("sha256:missing-manifest")
+            ),
+          ).toBe(true);
+        },
+      );
     });
 
     it("enforce: fuel exhaustion fails closed", async () => {

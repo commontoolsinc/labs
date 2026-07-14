@@ -40,8 +40,10 @@ import {
   createRenderConfidentialityResolver,
   createRuntimeSpaceMembershipProvider,
   redactCaveatSourcesForDisplay,
+  redactSigilCfcLabelViewsForDisplay,
   type RenderConfidentialityResolver,
   type SpaceMembershipProvider,
+  stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "../../runner/src/storage/cache.ts";
@@ -101,6 +103,7 @@ import {
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
   RequestType,
+  type ResolveSpaceNameRequest,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
@@ -112,6 +115,7 @@ import {
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
   type SlugResponse,
+  type SpaceResponse,
   type TriggerTraceResponse,
   type UploadBlobRequest,
   type UploadBlobResponse,
@@ -148,6 +152,10 @@ import {
 } from "@commonfabric/html/worker";
 import type { VDomOp } from "../protocol/types.ts";
 import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
+import {
+  postContextualRuntimeError,
+  postRuntimeError,
+} from "./runtime-error.ts";
 
 const MAX_SERIALIZATION_DEPTH = 5;
 const blobUploadEncoding = new JsonEncodingContext();
@@ -611,19 +619,7 @@ export class RuntimeProcessor {
         });
       },
 
-      errorHandlers: [
-        (error) => {
-          self.postMessage({
-            type: NotificationType.ErrorReport,
-            message: error.message,
-            pageId: error.pieceId,
-            space: error.space,
-            patternId: error.patternId,
-            spellId: error.spellId,
-            stackTrace: error.stack,
-          });
-        },
-      ],
+      errorHandlers: [postContextualRuntimeError],
       onVersionSkew: postVersionSkew,
     }));
 
@@ -845,6 +841,18 @@ export class RuntimeProcessor {
   handleCellGet(
     request: CellGetRequest,
   ): CellGetResponse {
+    // Fail closed on the retired raw label-metadata seam (inv-12 Stage 0 /
+    // SC-14 / SC-25): `meta: "cfc"` used to return the raw `["cfc"]` envelope
+    // (unredacted Caveat.source and other principal identities) via
+    // getMetaRaw. "cfc" is no longer a MetaField, but the wire is untyped
+    // JSON — reject the request rather than serve raw metadata. Display
+    // label views are served redacted via `includeCfcLabel` / CellGetCfcLabel.
+    if ((request.meta as string | undefined) === "cfc") {
+      throw new Error(
+        'cell/get meta "cfc" is not served over IPC (inv-12); ' +
+          "use getCfcLabel for the redacted display view",
+      );
+    }
     let cell = getCell(this.runtime, request.cell);
     if (request.meta !== undefined) {
       const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
@@ -868,12 +876,19 @@ export class RuntimeProcessor {
       }
     }
     const value = cell.get();
-    const converted = convertCellsToLinks(value, {
-      includeSchema: true,
-      keepAsCell: KeepAsCell.All,
-      doNotConvertCellResults: true,
-      includeCfcLabelView: true,
-    });
+    // The sigil links inside the response carry cfcLabelView copies; redact
+    // Caveat.source in those too (inv-12 Stage 0, same display redaction as
+    // the top-level cfcLabel below). Display-only: the worker neither
+    // persists nor re-imports inbound views, so the redacted copies cannot
+    // round-trip into under-labeled state.
+    const converted = redactSigilCfcLabelViewsForDisplay(
+      convertCellsToLinks(value, {
+        includeSchema: true,
+        keepAsCell: KeepAsCell.All,
+        doNotConvertCellResults: true,
+        includeCfcLabelView: true,
+      }),
+    ) as JSONValue | undefined;
     if (!request.includeCfcLabel) {
       return { value: converted };
     }
@@ -974,12 +989,16 @@ export class RuntimeProcessor {
             `  schema: ${JSON.stringify(request.cell.schema)}`,
         );
       }
-      const converted = convertCellsToLinks(value, {
-        includeSchema: true,
-        keepAsCell: KeepAsCell.All,
-        doNotConvertCellResults: true,
-        includeCfcLabelView: true,
-      });
+      // As in handleCellGet: redact Caveat.source in the cfcLabelView copies
+      // riding sigil links inside the update value (inv-12 Stage 0).
+      const converted = redactSigilCfcLabelViewsForDisplay(
+        convertCellsToLinks(value, {
+          includeSchema: true,
+          keepAsCell: KeepAsCell.All,
+          doNotConvertCellResults: true,
+          includeCfcLabelView: true,
+        }),
+      );
       // The sink read the raw label on its tracked tx (so cfc writes re-fire
       // it); redact Caveat.source here before it crosses to the main thread.
       const redactedLabel = request.includeCfcLabel
@@ -1299,6 +1318,12 @@ export class RuntimeProcessor {
     };
   }
 
+  async handleResolveSpaceName(
+    request: ResolveSpaceNameRequest,
+  ): Promise<SpaceResponse> {
+    return { space: await this.runtime.resolveSpaceName(request.name) };
+  }
+
   /** Convergence across every opened space — no space named, none implied. */
   async handleRuntimeSynced(): Promise<void> {
     await Promise.all(
@@ -1594,6 +1619,8 @@ export class RuntimeProcessor {
         return await this.handlePageSynced(request);
       case RequestType.RuntimeSynced:
         return await this.handleRuntimeSynced();
+      case RequestType.ResolveSpaceName:
+        return await this.handleResolveSpaceName(request);
       case RequestType.RegisterSpaceHost:
         return this.handleRegisterSpaceHost(request);
       case RequestType.GetGraphSnapshot:
@@ -1676,9 +1703,13 @@ export class RuntimeProcessor {
       return;
     }
 
+    // CustomEvent.detail was JSON.stringify'd on the main thread (invoking
+    // CellHandle.toJSON), so sigil links in it bypass getCell /
+    // cellRefToSigilLink — strip any main-thread cfcLabelView copies before
+    // a handler can write them (inv-12 Stage 0; codex/cubic review).
     const dispatched = mount.reconciler.dispatchEvent(
       request.handlerId,
-      request.event,
+      stripSigilCfcLabelViews(request.event) as typeof request.event,
     );
     if (!dispatched) {
       console.warn(
@@ -1721,13 +1752,7 @@ export class RuntimeProcessor {
         });
         return batchId;
       },
-      onError: (error: Error) => {
-        self.postMessage({
-          type: NotificationType.ErrorReport,
-          message: error.message,
-          stackTrace: error.stack,
-        });
-      },
+      onError: postRuntimeError,
     });
 
     // Mount the cell - the reconciler will subscribe and emit initial ops

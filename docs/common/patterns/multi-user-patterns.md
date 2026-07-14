@@ -247,6 +247,108 @@ visibility. Let `PerUser<T>` and `PerSession<T>` select the right storage
 instance. When comparing object or cell identity, use `equals()` instead of
 custom `id` fields.
 
+## Presenting Identity
+
+Choosing scopes decides *where* state lives; this section decides *who* a piece of
+state belongs to and how to show them. Do not reinvent identity with dead name
+strings — resolve the real viewer and render people with the identity components
+([COMPONENTS → Identity components](../components/COMPONENTS.md#identity-components)).
+
+### Resolve the current viewer
+
+A pattern cannot ask "what is my DID" directly. Resolve the viewer's profile with
+`wish` (it reads the active user's home space):
+
+```tsx
+// Shown inside a pattern body.
+const profileWish = wish({ query: "#profile" });            // the viewer's profile CELL
+const profileNameWish = wish<string>({ query: "#profileName" });
+const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+const myName = computed(() => (profileNameWish.result ?? "").trim());
+const myAvatar = computed(() => (profileAvatarWish.result ?? "").trim());
+const hasProfile = computed(() => (profileNameWish.result ?? "").trim() !== "");
+```
+
+**Never** add a "type your name" field and treat that string as the current user.
+The viewer is whoever the runtime says they are; `#profile` is how you read it.
+
+### Show every participant with `cf-profile-badge`
+
+```tsx
+// Shown for illustration only.
+// the viewer — badge bound to their own profile CELL
+<cf-profile-badge $profile={profileWish.result} size="sm" />
+
+// everyone else — badge bound to the profile CELL they contributed on join
+{roster.items.map((p) => <cf-profile-badge $profile={p.profile} size="xs" />)}
+```
+
+`cf-profile-badge` renders **any** participant, not just the viewer: bind the live
+profile cell you stored for them on join. Cross-space profile reads resolve for
+every authorized viewer (CT-1667/1687), so each badge stays current and carries the
+verified seal. Fall back to `<cf-avatar src={p.avatar} name={p.name} />` only when
+you deliberately hold just a snapshot — a self-contained piece, or a participant
+whose remote profile space is offline.
+
+> ⚠️ **`$profile` must be at a STATIC `[UI]` position** — like every `$`-binding
+> (`$value` / `$checked`). Bind it where the JSX is built once; **never inside a
+> `{computed(() => …)}` subtree**. There the cell is auto-unwrapped to a plain value
+> and the renderer throws *"Bidirectionally bound property $profile is not
+> reactive"*, blanking the whole pattern. Build each view as static JSX and switch
+> with `ifElse(cond, staticA, staticB)` as a child of a static wrapper; gate only
+> *siblings* reactively. Repro: `packages/patterns/scope-bug-computed-vnode-blank/`.
+
+### Build the roster by join
+
+There is no "list everyone's profiles" primitive. Each viewer contributes their
+own identity on join: push their live `#profile` **cell** into the shared
+`PerSpace` roster (plus a `{ displayName, avatar }` snapshot for the offline
+fallback), and keep a `PerUser` pointer that is a **cell reference** to their own
+entry (see [Shared Directories And "Me"](#shared-directories-and-me)). Decide "is
+this me?" with `equals()` on the stored profile cell (or the entry reference) —
+never by comparing the mutable, non-unique display name. The live demo
+`packages/patterns/profile-roster-live-demo.tsx` is the reference implementation.
+
+### Ownership and authorship
+
+"Who created this / who wrote this" is identity too. For display, snapshot the
+actor's `{ displayName, avatar }`. For an *attested* claim the user cannot forge,
+use the CFC wrappers `AuthoredByCurrentUser<T>` / `RepresentsCurrentUser<T>` and
+render with `cf-cfc-authorship`. Read-only display works today; note that
+owner-protected profile *writes* are currently constrained (see CT-1665).
+
+### Anti-patterns (do not ship these)
+
+- A "your name" text field used as the current user's identity → resolve `#profile`.
+- Deduping a roster by normalized display name → key by cell reference / `equals()`.
+- "Is this me?" via `name === myName` → compare the `me` cell reference.
+- A person rendered as `{name}` text or a raw `<img>` → `cf-avatar`/`cf-profile-badge`.
+
+### Constraints to design within (today)
+
+- No user-space "who am I" API — identity is implicit via scope + `#profile`.
+- No list-all-profiles — build rosters by join (each viewer contributes their own cell).
+- Cross-space profile reads resolve (CT-1667/1687) — badge every participant from
+  the profile cell they contributed on join. Snapshot + `cf-avatar` is the
+  fallback for self-contained pieces or an offline remote profile space.
+- Owner-protected profile *writes* (avatar/elements) are blocked (CT-1665) — a
+  pattern that only *displays* identity is unaffected.
+
+### What a spec should capture about identity
+
+Any multi-user spec or design should answer these before build — include them as
+an **Identity & Presentation** section in the spec:
+
+1. **Who is the current viewer**, and is it resolved via `#profile` (not typed in)?
+2. **How is each person displayed** — `cf-profile-badge` for every participant,
+   bound to the profile cell they contributed on join (`cf-avatar` + snapshot only
+   as an explicit offline fallback)?
+3. **What is shared vs per-user** (`PerSpace` roster/records, `PerUser` "me"
+   pointer, `PerSession` form state)?
+4. **How is a person identified** for dedup / "is this me" — by cell reference and
+   `equals()`, not by display name?
+5. **Is any record's ownership/authorship attested** (CFC) or just snapshotted?
+
 ## UI State
 
 Default UI-local state to `PerSession<T>`:
@@ -439,6 +541,14 @@ See:
   player identity.
 - `packages/patterns/cfc-group-chat-demo/`: multi-user chat with CFC-backed
   authorship and admin-protected room creation.
+- `packages/patterns/profile-roster-live-demo.tsx`: the canonical identity
+  presentation — `#profile` viewer resolution, join stores each participant's live
+  profile cell, and **every** member renders with
+  `<cf-profile-badge $profile={p.profile}>`. `packages/patterns/scrabble/scrabble.tsx`
+  is the worked multi-user example (object-wrapped roster, per-player live badges).
+- `packages/patterns/fair-share/`: the snapshot-fallback style — a
+  `cf-profile-badge` "You" card with `cf-avatar` for other members (use only when a
+  live profile cell is not stored).
 
 ## Checklist
 
@@ -451,6 +561,11 @@ See:
 - Concurrently-edited shared collections and counters use the mergeable writes
   (`push` / `addUnique` / `increment` / `removeByValue` / `elementById`), not
   read-modify-write `set`, so simultaneous edits merge instead of clobbering.
+- Every participant is rendered with `cf-profile-badge` bound to their profile cell
+  (`cf-avatar` + snapshot only as an offline fallback), never a bare name string.
+- The current viewer is resolved via `#profile`, not a self-typed name field.
+- Rosters are built by join (each viewer contributes their live profile cell); "me"
+  is a cell reference, not a name.
 - Authorization is modeled with CFC/IFC policy, not scopes.
 - `PerAny<T>` is reserved for truly scope-polymorphic inner values.
 - Multi-user tests verify the active identity for each browser or CLI session.

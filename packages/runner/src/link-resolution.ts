@@ -317,14 +317,31 @@ export function resolveLink(
       } else {
         link = nextLink;
       }
-      // If we're crossing spaces, force fetching data from server, as the
-      // original server will not have pushed the data to the client yet.
-      if (crossSpace) {
+      // Force fetching data from the server when the local replica cannot
+      // serve the hop target: crossing spaces (the origin server never pushes
+      // other-space docs), or a same-space doc this replica has never pulled.
+      // The second arm is the fresh-replica read-asymmetry fix: selector
+      // driven syncs only deliver what a schema covered, so a link can point
+      // at a same-space doc no selector ever walked — without this kick such
+      // reads mask as `undefined`, indistinguishable from absence. The kick
+      // is async; one-shot reads still return the masked value, but
+      // `Cell.pull()`'s convergence loop awaits the tracked sync and re-reads.
+      const mgr = runtime.storageManager;
+      const { space, id, scope } = link;
+      const reserved = !crossSpace &&
+        mgr.shouldPullDoc?.(space, id, scope) === true;
+      if (crossSpace || reserved) {
         // Swallow sync failures: this kick is best-effort (the read still
         // resolves from the local replica) and an unhandled rejection here
-        // would otherwise escape the resolution path.
-        runtime.storageManager.trackUntilSettled(
-          runtime.getCellFromLink(link).sync().catch(() => {}),
+        // would otherwise escape the resolution path. On failure, retract
+        // the shouldPullDoc reservation so a later read may retry — but only
+        // when THIS kick took it: a failed cross-space kick never reserved,
+        // and must not clear a reservation a concurrent same-space read
+        // holds for the same target (that would permit duplicate syncs).
+        mgr.trackUntilSettled(
+          runtime.getCellFromLink(link).sync().catch(() => {
+            if (reserved) mgr.retractDocPullKick?.(space, id, scope);
+          }),
         );
       }
     } else {

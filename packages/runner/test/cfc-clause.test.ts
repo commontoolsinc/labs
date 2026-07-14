@@ -18,7 +18,7 @@ import type {
   WritePolicyInput,
 } from "../src/cfc/types.ts";
 
-// Epic A1 (docs/plans/cfc-future-work-implementation.md): the CNF clause
+// Epic A1 (docs/history/plans/cfc-future-work-implementation.md): the CNF clause
 // kernel. Pure helpers — no runtime behavior change; A2 wires subsumption
 // into the ceiling checks.
 

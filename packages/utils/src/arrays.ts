@@ -87,6 +87,6 @@ export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
   // index-only exactly when it has no keys or its last key is an index. (This
   // relies on ordinary-array key ordering; the input is always a real array,
   // never a `Proxy` with a reordering `ownKeys` trap.)
-  return keys.length === 0 ||
-    isArrayIndexPropertyName(keys[keys.length - 1]);
+  const lastKey = keys.at(-1);
+  return lastKey === undefined || isArrayIndexPropertyName(lastKey);
 }

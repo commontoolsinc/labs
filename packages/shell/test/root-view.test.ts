@@ -1,5 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import {
+  type ErrorNotification,
+  NotificationType,
+  RuntimeErrorCode,
+} from "@commonfabric/runtime-client";
 
 // XRootView is a Lit element; load and exercise it under a minimal browser
 // shim, mirroring login-view.test.ts. Constructing it runs its field
@@ -123,6 +129,96 @@ describe("XRootView", () => {
       expect(templateStrings(banner)).toContain("Reload");
     } finally {
       console.warn = origWarn;
+      restore();
+    }
+  });
+
+  it("replaces the current worker after a compiler chunk load failure", async () => {
+    const restore = installBrowserGlobals();
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const runs: unknown[] = [];
+      const internals = view as unknown as {
+        _rt: { run(args: unknown): void };
+        _runtimeGeneration: number;
+      };
+      internals._rt = { run: (args) => runs.push(args) };
+      const failedGeneration = internals._runtimeGeneration;
+      const event: ErrorNotification = {
+        type: NotificationType.ErrorReport,
+        message: "Failed to load the compiler stack",
+        code: RuntimeErrorCode.CompilerStackLoadFailed,
+      };
+
+      view._handleRuntimeError(event, failedGeneration);
+      expect(runs).toEqual([[view.app]]);
+
+      // A second signal from the worker being replaced is stale and ignored.
+      view._handleRuntimeError(event, failedGeneration);
+      expect(runs).toHaveLength(1);
+
+      // Ordinary runtime errors remain diagnostics, not lifecycle events.
+      view._handleRuntimeError({
+        type: NotificationType.ErrorReport,
+        message: "ordinary runtime error",
+      });
+      expect(runs).toHaveLength(1);
+    } finally {
+      console.error = originalError;
+      restore();
+    }
+  });
+
+  it("passes a generation-bound error callback to RuntimeInternals", async () => {
+    const restore = installBrowserGlobals();
+    const originalError = console.error;
+    const errors: unknown[][] = [];
+    console.error = (...args: unknown[]) => errors.push(args);
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const originalCreate = RuntimeInternals.create;
+    let capturedOnError: ((event: ErrorNotification) => void) | undefined;
+    const fakeRuntime = {};
+    RuntimeInternals.create = ((options) => {
+      capturedOnError = options.onError;
+      return Promise.resolve({
+        runtime: () => fakeRuntime,
+        dispose: () => Promise.resolve(),
+      } as unknown as Awaited<ReturnType<typeof RuntimeInternals.create>>);
+    }) as typeof RuntimeInternals.create;
+
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      view.app = {
+        ...view.app,
+        identity: await Identity.fromPassphrase(
+          "root-view-runtime-error-callback-test",
+        ),
+      };
+      const task = (view as unknown as {
+        _rt: {
+          run(args: [typeof view.app]): void;
+          taskComplete: Promise<unknown>;
+        };
+      })._rt;
+
+      task.run([view.app]);
+      await task.taskComplete;
+      expect(capturedOnError).toBeDefined();
+
+      const event: ErrorNotification = {
+        type: NotificationType.ErrorReport,
+        message: "ordinary runtime error",
+      };
+      capturedOnError!(event);
+      expect(errors).toContainEqual(["[RuntimeClient Error]", event]);
+    } finally {
+      RuntimeInternals.create = originalCreate;
+      console.error = originalError;
+      delete (globalThis as { commonfabric?: unknown }).commonfabric;
       restore();
     }
   });

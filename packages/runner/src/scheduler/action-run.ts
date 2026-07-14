@@ -422,6 +422,15 @@ function finalizeSchedulerAction(
   // Record action execution time for cycle-aware scheduling
   const elapsed = performance.now() - args.actionStartTime;
   recordActionTime(state.actionTimingState, args.action, elapsed);
+  state.runtime.telemetry.submit({
+    type: "scheduler.run.complete",
+    actionId: args.actionId,
+    actionInfo: state.getActionTelemetryInfo(args.action),
+    durationMs: elapsed,
+    ...(args.error !== undefined
+      ? { error: args.error instanceof Error ? args.error.message : "error" }
+      : {}),
+  });
   state.maybeAutoDebounce(args.action);
   state.markActionHasRun(args.action);
   state.markNodeHasRun(args.action);

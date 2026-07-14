@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import createApp from "@/lib/create-app.ts";
 import router from "./blobs.index.ts";
@@ -10,6 +10,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import type { URI } from "@commonfabric/memory/interface";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type FabricValue } from "@commonfabric/data-model/fabric-value";
@@ -28,12 +29,45 @@ const encodeBlobPayload = (payload: { type: string; body: FabricBytes }) =>
 const blobUploadEncoding = new JsonEncodingContext();
 
 describe("Blob Routes", () => {
+  let server: Deno.HttpServer;
+  let base: URL;
+
+  beforeAll(() => {
+    server = Deno.serve({ port: 0, onListen: () => {} }, app.fetch);
+    const address = server.addr as Deno.NetAddr;
+    base = new URL(`http://${address.hostname}:${address.port}`);
+  });
+
   afterEach(async () => {
     await memoryServer.flushSessions();
   });
 
+  afterAll(async () => {
+    // The toolshed `memoryServer` is a module-level singleton constructed when
+    // memory.ts is imported. Deno isolates each test file's module graph, so
+    // this instance is owned by this file alone. Closing it releases its SQLite
+    // handles, engine map, and refresh timer.
+    await server.shutdown();
+    await memoryServer.close();
+  });
+
+  const bootstrapHomeSpace = async (identity: Identity) => {
+    const storageManager = StorageManager.open({
+      as: identity,
+      memoryHost: base,
+    });
+    try {
+      const aclId = `of:${identity.did()}` as URI;
+      const sync = await storageManager.open(identity.did()).sync(aclId);
+      expect(sync).toEqual({ ok: {} });
+    } finally {
+      await storageManager.close();
+    }
+  };
+
   it("stores and serves a FabricBytes blob by content id", async () => {
     const identity = await Identity.fromPassphrase("toolshed-blob-route");
+    await bootstrapHomeSpace(identity);
     const bytes = new Uint8Array([71, 73, 70, 56, 57, 97]);
     const contents = {
       type: "image/gif",
@@ -63,6 +97,7 @@ describe("Blob Routes", () => {
     const identity = await Identity.fromPassphrase(
       "toolshed-blob-route-explicit-codec",
     );
+    await bootstrapHomeSpace(identity);
     const bytes = new Uint8Array([71, 73, 70, 56, 57, 97]);
     const contents = {
       type: "image/gif",
@@ -89,6 +124,7 @@ describe("Blob Routes", () => {
 
   it("stores blob contents as a cell document value", async () => {
     const identity = await Identity.fromPassphrase("toolshed-blob-cell");
+    await bootstrapHomeSpace(identity);
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const contents = {
       type: "image/png",
@@ -111,10 +147,6 @@ describe("Blob Routes", () => {
     );
     expect(document?.value).toEqual(contents);
 
-    const server = Deno.serve({ port: 0 }, app.fetch);
-    const base = new URL(
-      `http://${server.addr.hostname}:${server.addr.port}`,
-    );
     const runtime = new Runtime({
       apiUrl: base,
       storageManager: StorageManager.open({
@@ -149,7 +181,6 @@ describe("Blob Routes", () => {
       expect((await post.json()).url).toBe(`blobs/${hash}.png`);
     } finally {
       await runtime.dispose();
-      await server.shutdown();
     }
   });
 
@@ -171,6 +202,7 @@ describe("Blob Routes", () => {
     const identity = await Identity.fromPassphrase(
       "toolshed-blob-route-suffix",
     );
+    await bootstrapHomeSpace(identity);
     const contents = {
       type: "image/png",
       body: new FabricBytes(new Uint8Array([1, 2, 3])),
@@ -212,6 +244,7 @@ describe("Blob Routes", () => {
     const identity = await Identity.fromPassphrase(
       "toolshed-blob-route-unsafe-mime",
     );
+    await bootstrapHomeSpace(identity);
     const bytes = new TextEncoder().encode("<script>alert(1)</script>");
     const contents = {
       type: "text/html",

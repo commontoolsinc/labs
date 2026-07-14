@@ -1,16 +1,20 @@
 import {
   assertAlmostEquals,
   assertEquals,
+  assertExists,
   assertFalse,
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
 import {
+  aggregateCacheStates,
   applyBaselineOverrides,
   type Artifact,
-  benchmarksRunsPath,
   buildCoverageDebtSuggestionComment,
   buildCoverageResolvedComment,
+  compileCacheFamilyForMetric,
+  type CompileCacheState,
+  type CompileCacheStates,
   computeBaseline,
   computeCiWallTimeRevisitSignals,
   COVERAGE_BASELINE_RESET_MARKER,
@@ -18,6 +22,7 @@ import {
   coverageGroupsForChangedFiles,
   coverageMetricGroupName,
   downloadAndExtractArtifact,
+  dropColdSamples,
   extractMetrics,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
@@ -27,11 +32,14 @@ import {
   formatOverrideSuggestion,
   githubGet,
   type Job,
+  latestNonColdSample,
   newestArtifactsByName,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
+  parseCacheStateFiles,
   parsePerfMetricsBackfillFile,
   parsePerfMetricsFile,
+  parsePerfMetricsFileDetailed,
   serializePerfMetrics,
   serializePerfMetricsBackfill,
   shouldGateCoverageDebtMetric,
@@ -403,16 +411,6 @@ Deno.test("extractMetrics aggregates runner test matrix shards", () => {
   assertEquals(metrics.get("step: runner tests")?.durationSeconds, 80);
 });
 
-Deno.test("benchmarksRunsPath matches successful main runs of any trigger", () => {
-  const path = benchmarksRunsPath();
-  assertStringIncludes(path, "/actions/workflows/benchmarks.yml/runs");
-  assertStringIncludes(path, "branch=main");
-  assertStringIncludes(path, "status=success");
-  // The Benchmarks workflow runs on a schedule and via manual dispatch, so
-  // the query must not restrict runs to a trigger event.
-  assertFalse(path.includes("event="));
-});
-
 Deno.test("extractMetrics aggregates workspace test matrix shards", () => {
   const metrics = extractMetrics(makeRun(), [
     makeJob(
@@ -535,6 +533,255 @@ Deno.test("perf metrics backfill files round-trip run-keyed samples", () => {
     parsePerfMetricsBackfillFile(JSON.stringify(serialized)),
     runMetrics,
   );
+});
+
+Deno.test("perf metrics files round-trip compile cache states", () => {
+  const metrics = new Map<string, TimingSample>([
+    [
+      "job: Check",
+      {
+        runId: 123,
+        runUrl: "https://example.test/run/123",
+        sha: "abc123",
+        createdAt: "2026-01-01T00:00:00Z",
+        durationSeconds: 60,
+      },
+    ],
+  ]);
+  const states: CompileCacheStates = {
+    "generated-patterns": "cold",
+    "pattern-unit": "warm",
+  };
+
+  const serialized = JSON.stringify(serializePerfMetrics(metrics, states));
+
+  const detailed = parsePerfMetricsFileDetailed(serialized);
+  assertEquals(detailed.metrics, metrics);
+  assertEquals(detailed.compileCacheStates, states);
+
+  // The tagged file stays version 1, so the legacy parser still accepts it.
+  assertEquals(parsePerfMetricsFile(serialized), metrics);
+});
+
+Deno.test("parsePerfMetricsFileDetailed treats legacy files as untagged", () => {
+  const legacy = JSON.stringify(serializePerfMetrics(new Map()));
+  assertFalse(legacy.includes("compileCacheStates"));
+
+  const detailed = parsePerfMetricsFileDetailed(legacy);
+  assertEquals(detailed.compileCacheStates, null);
+  assertEquals(detailed.metrics.size, 0);
+
+  // Empty states are omitted too, so an all-unknown run stays untagged.
+  assertFalse(
+    JSON.stringify(serializePerfMetrics(new Map(), {}))
+      .includes("compileCacheStates"),
+  );
+});
+
+Deno.test("parsePerfMetricsFileDetailed drops invalid compile cache states", () => {
+  const file = JSON.stringify({
+    version: 1,
+    generatedAt: "2026-01-01T00:00:00Z",
+    metrics: [],
+    compileCacheStates: {
+      "generated-patterns": "lukewarm",
+      "runner": "cold",
+      "pattern-unit": "warm",
+    },
+  });
+
+  assertEquals(parsePerfMetricsFileDetailed(file).compileCacheStates, {
+    "pattern-unit": "warm",
+  });
+});
+
+Deno.test("compileCacheFamilyForMetric maps job, step, and test metrics to families", () => {
+  // Aggregate and per-shard job metrics.
+  assertEquals(
+    compileCacheFamilyForMetric("job: Generated Patterns Integration Tests"),
+    "generated-patterns",
+  );
+  assertEquals(
+    compileCacheFamilyForMetric(
+      "job: Generated Patterns Integration Tests (2/4)",
+    ),
+    "generated-patterns",
+  );
+  assertEquals(
+    compileCacheFamilyForMetric("job: Pattern Integration Tests"),
+    "pattern-integration",
+  );
+  assertEquals(
+    compileCacheFamilyForMetric("job: Pattern Integration Tests (3/4)"),
+    "pattern-integration",
+  );
+  assertEquals(
+    compileCacheFamilyForMetric("job: Pattern Unit Tests (3/5)"),
+    "pattern-unit",
+  );
+
+  // Step metrics.
+  assertEquals(
+    compileCacheFamilyForMetric("step: generated patterns integration"),
+    "generated-patterns",
+  );
+  assertEquals(
+    compileCacheFamilyForMetric("step: patterns integration"),
+    "pattern-integration",
+  );
+  assertEquals(
+    compileCacheFamilyForMetric("step: pattern unit tests"),
+    "pattern-unit",
+  );
+
+  // Per-test and per-subtest metrics keyed by timing-artifact label.
+  assertEquals(
+    compileCacheFamilyForMetric(
+      "test: generated-patterns/packages/patterns/foo.test.tsx",
+    ),
+    "generated-patterns",
+  );
+  assertEquals(
+    compileCacheFamilyForMetric(
+      "subtest: pattern-integration/packages/patterns/foo.test.tsx > case",
+    ),
+    "pattern-integration",
+  );
+  assertEquals(
+    compileCacheFamilyForMetric(
+      "test: pattern-unit-3/packages/patterns/foo.test.tsx",
+    ),
+    "pattern-unit",
+  );
+});
+
+Deno.test("compileCacheFamilyForMetric returns null for metrics without a compile cache", () => {
+  for (
+    const metric of [
+      "job: Runner Tests",
+      "job: Pattern Reload Integration Tests",
+      "step: runner tests",
+      "test: pattern-reload-integration/packages/patterns/foo.test.tsx",
+      "test: package-integration/packages/runner/foo.test.ts",
+      "subtest: pattern-unit/packages/patterns/foo.test.tsx > case",
+      "coverage-debt: workspace uncovered lines",
+    ]
+  ) {
+    assertEquals(compileCacheFamilyForMetric(metric), null, metric);
+  }
+});
+
+Deno.test("cache state aggregation treats any restore hit as warm", () => {
+  const records = parseCacheStateFiles([
+    '{"family":"generated-patterns","shard":"1","matchedKey":"compile-abc-1","exactHit":true}',
+    // A restore-key hit (exactHit false) still implies an unchanged compiler
+    // fingerprint, so the family is warm.
+    '{"family":"generated-patterns","shard":"2","matchedKey":"compile-abc","exactHit":false}',
+    '{"family":"pattern-integration","shard":"1","matchedKey":"compile-abc-1","exactHit":true}',
+  ]);
+  assertExists(records);
+
+  // pattern-unit has no records, so its state stays absent (unknown).
+  assertEquals(aggregateCacheStates(records), {
+    "generated-patterns": "warm",
+    "pattern-integration": "warm",
+  });
+});
+
+Deno.test("cache state aggregation marks a family cold on any full miss", () => {
+  const records = parseCacheStateFiles([
+    '{"family":"pattern-unit","shard":"1","matchedKey":"compile-abc-1","exactHit":true}',
+    '{"family":"pattern-unit","shard":"2","matchedKey":"","exactHit":false}',
+    // A warm shard after the miss must not flip the family back to warm.
+    '{"family":"pattern-unit","shard":"3","matchedKey":"compile-abc-3","exactHit":true}',
+  ]);
+  assertExists(records);
+
+  assertEquals(aggregateCacheStates(records), { "pattern-unit": "cold" });
+});
+
+Deno.test("cache state parsing poisons the collection on any bad record", () => {
+  // A record that fails to parse could be the cold shard; surviving records
+  // must not tag its family warm, so the whole parse degrades to null
+  // (unknown) — same policy as an artifact download failure.
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
+  try {
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.join(" "));
+    };
+
+    const records = parseCacheStateFiles([
+      "not json {",
+      '{"family":"pattern-integration","shard":"1"}',
+      '{"family":"pattern-integration","shard":"2","matchedKey":"compile-abc","exactHit":false}',
+    ]);
+
+    assertEquals(records, null);
+    assertEquals(warnings.length, 2);
+    assertStringIncludes(warnings[0], "malformed cache-state file");
+    assertStringIncludes(warnings[1], "invalid cache-state record");
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+Deno.test("cache state parsing keeps valid unknown-family records inert", () => {
+  // An unknown family name is forward-compatible data, not corruption: it
+  // parses cleanly and aggregation simply never assigns it a state.
+  const records = parseCacheStateFiles([
+    '{"family":"runner","shard":"1","matchedKey":"","exactHit":false}',
+    '{"family":"pattern-integration","shard":"2","matchedKey":"compile-abc","exactHit":false}',
+  ]);
+  assertExists(records);
+  assertEquals(records.length, 2);
+
+  assertEquals(aggregateCacheStates(records), {
+    "pattern-integration": "warm",
+  });
+});
+
+Deno.test("dropColdSamples removes known-cold runs and keeps unknown ones", () => {
+  const sample = (runId: number): TimingSample => ({
+    runId,
+    runUrl: `https://example.test/run/${runId}`,
+    sha: `sha${runId}`,
+    createdAt: `2026-01-0${runId}T00:00:00Z`,
+    durationSeconds: runId,
+  });
+  const states = new Map<number, CompileCacheState>([
+    [1, "warm"],
+    [2, "cold"],
+    // Run 3 has no recorded state: unknown runs are kept.
+  ]);
+
+  const kept = dropColdSamples(
+    [sample(1), sample(2), sample(3)],
+    (runId) => states.get(runId),
+  );
+
+  assertEquals(kept.map((s) => s.runId), [1, 3]);
+});
+
+Deno.test("latestNonColdSample skips trailing cold runs and falls back when all are cold", () => {
+  const sample = (runId: number): TimingSample => ({
+    runId,
+    runUrl: `https://example.test/run/${runId}`,
+    sha: `sha${runId}`,
+    createdAt: `2026-01-0${runId}T00:00:00Z`,
+    durationSeconds: runId,
+  });
+  const samples = [sample(1), sample(2), sample(3)];
+  const coldRuns = new Set([2, 3]);
+
+  assertEquals(
+    latestNonColdSample(samples, (runId) => coldRuns.has(runId))?.runId,
+    1,
+  );
+  // All-cold: fall back to the last sample so override-truncation resets
+  // still take effect.
+  assertEquals(latestNonColdSample(samples, () => true)?.runId, 3);
+  assertEquals(latestNonColdSample([], () => false), undefined);
 });
 
 Deno.test("computeCiWallTimeRevisitSignals stays quiet for balanced CI", () => {

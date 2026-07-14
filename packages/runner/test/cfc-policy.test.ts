@@ -12,7 +12,7 @@ import {
 
 const signer = await Identity.fromPassphrase("runner-cfc-policy");
 
-// Epic B2a (docs/plans/cfc-future-work-implementation.md §3): deployment
+// Epic B2a (docs/history/plans/cfc-future-work-implementation.md §3): deployment
 // policy records — validation, content digests, freeze discipline, and the
 // Runtime → tx snapshot injection. The evaluator that consumes these lands
 // in B4/B5.
@@ -121,6 +121,47 @@ describe("CFC policy records (B2a)", () => {
       expect(empty.records).toEqual([]);
       expect(typeof empty.digest).toBe("string");
       expect(empty.digest.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("selection scope (B2b: label-carried policy selection)", () => {
+    it("defaults to ambient and accepts an explicit selection", () => {
+      const defaulted = buildCfcPolicySnapshot([record()])!;
+      expect(defaulted.records[0].selection).toBe("ambient");
+      const referenced = buildCfcPolicySnapshot([
+        record({ selection: "referenced" }),
+      ])!;
+      expect(referenced.records[0].selection).toBe("referenced");
+    });
+
+    it("digests explicit ambient identically to the default", () => {
+      const a = buildCfcPolicySnapshot([record()])!;
+      const b = buildCfcPolicySnapshot([record({ selection: "ambient" })])!;
+      expect(a.records[0].digest).toBe(b.records[0].digest);
+      expect(a.digest).toBe(b.digest);
+    });
+
+    it("treats the selection mode as record content (digest binding)", () => {
+      // A selection flip re-scopes every rule in the record, so it must
+      // invalidate prepared digests through the snapshot digest the same way
+      // a rule edit does (PreparedDigestInput.policySnapshot, Epic B5).
+      const a = buildCfcPolicySnapshot([record()])!;
+      const b = buildCfcPolicySnapshot([record({ selection: "referenced" })])!;
+      expect(a.records[0].digest).not.toBe(b.records[0].digest);
+      expect(a.digest).not.toBe(b.digest);
+    });
+
+    it("rejects unknown selection values", () => {
+      expect(() =>
+        buildCfcPolicySnapshot([
+          record({ selection: "label" as never }),
+        ])
+      ).toThrow(/selection must be "ambient" or "referenced"/);
+      expect(() =>
+        buildCfcPolicySnapshot([
+          record({ selection: 7 as never }),
+        ])
+      ).toThrow(/selection must be "ambient" or "referenced"/);
     });
   });
 

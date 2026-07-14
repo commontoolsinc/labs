@@ -1,10 +1,17 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import ts from "typescript";
 import { transformCfDirective } from "../src/mod.ts";
-import { transformSource, validateSource } from "./utils.ts";
+import {
+  transformFiles,
+  transformSource,
+  validateFiles,
+  validateSource,
+} from "./utils.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { CFC_CANONICAL_ALIAS_NAMES } from "../src/cfc-authoring.ts";
 import { CrossStageState, SchemaInjectionTransformer } from "../src/mod.ts";
+import type { CfcPolicyCompilerManifestV1 } from "../src/mod.ts";
+import { compileCfcPolicyManifestsForSource } from "../src/transformers/cfc-policy-authoring.ts";
 
 function normalizePrintedNode(
   node: ts.Node,
@@ -92,6 +99,24 @@ function extractPatternSchemaPairs(output: string): string[][] {
 
   visit(sourceFile);
   return pairs;
+}
+
+function compilePolicySource(
+  source: string,
+): readonly CfcPolicyCompilerManifestV1[] {
+  const sourceFile = ts.createSourceFile(
+    "/policy.ts",
+    `
+      import {
+        cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+      } from "commonfabric/cfc";
+      ${source}
+    `,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  return compileCfcPolicyManifestsForSource(sourceFile, "sha256:policy");
 }
 
 function transformWithSchemaInjection(source: string): string {
@@ -186,7 +211,8 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "AuthoredByCurrentUser",
     "RequiresIntegrity",
     "MaxConfidentiality",
-    "OpaqueInput",
+    "AnyOf",
+    "PolicyOf",
     "WriteAuthorizedBy",
     "TrustedActionWriteWithIntegrity",
     "TrustedActionWrite",
@@ -195,11 +221,690 @@ Deno.test("ts-transformers re-exports the canonical CFC alias set", () => {
     "ProjectionPath",
     "ProjectionOf",
     "Projection",
-    "LengthPreservedFrom",
-    "FilteredFrom",
-    "SubsetOf",
-    "PermutationOf",
   ]);
+});
+
+Deno.test("static exchange-rule declarations emit a deterministic side-channel manifest", async () => {
+  const source = `/// <cts-enable />
+    import {
+      cfcPattern,
+      exchangeRule,
+      exchangeRules,
+      THIS_POLICY,
+      v,
+    } from "commonfabric/cfc";
+
+    export const releaseToReviewer = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: {
+        integrity: [cfcPattern.hasRole(
+          v("reviewer"),
+          THIS_POLICY.subject,
+          "reader",
+        )],
+      },
+      post: {
+        addAlternatives: [cfcPattern.user(v("reviewer"))],
+      },
+    });
+
+    export const releaseRules = exchangeRules([releaseToReviewer]);
+  `;
+  const manifests: unknown[] = [];
+  const output = await transformSource(source, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+    policyManifests: manifests,
+  });
+  const artifact = manifests[0] as CfcPolicyCompilerManifestV1;
+
+  assertEquals(manifests.length, 1);
+  assertEquals(artifact.manifest, {
+    formatVersion: 1,
+    moduleIdentity: "sha256:module",
+    symbol: "releaseRules",
+    template: {
+      templateVersion: 1,
+      exchangeRules: [{
+        name: "releaseToReviewer",
+        preCondition: {
+          confidentiality: [{ thisPolicy: true }],
+          integrity: [{
+            type: "https://commonfabric.org/cfc/atom/HasRole",
+            principal: { var: "reviewer" },
+            space: { thisPolicyField: "subject" },
+            role: "reader",
+          }],
+        },
+        postCondition: {
+          confidentiality: [{
+            type: "https://commonfabric.org/cfc/atom/User",
+            subject: { var: "reviewer" },
+          }],
+          integrity: [],
+        },
+      }],
+      dependencies: { authorityOnly: [], dataBearing: [] },
+      integrityRequirements: {},
+    },
+  });
+  assertEquals(typeof artifact.policyDigest, "string");
+  assertEquals(output.includes("policyDigest"), false);
+
+  const repeated: unknown[] = [];
+  await transformSource(source, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+    policyManifests: repeated,
+  });
+  assertEquals(repeated, manifests);
+});
+
+Deno.test("exchange-rule authoring rejects dynamic and unguarded declarations", async () => {
+  const { diagnostics } = await validateSource(
+    `/// <cts-enable />
+    import { exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+    const dynamic = Math.random() > 0.5 ? [] : [];
+    export const release = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: { integrity: dynamic },
+      post: { dropClause: true },
+    });
+    export const rules = exchangeRules([release]);
+  `,
+    {
+      types: COMMONFABRIC_TYPES,
+      moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+    },
+  );
+
+  assertEquals(
+    diagnostics.some((diagnostic) =>
+      diagnostic.type === "cfc-policy-authoring" &&
+      diagnostic.message.includes("static")
+    ),
+    true,
+  );
+});
+
+Deno.test("exchange-rule declarations fail closed on invalid export and binding forms", async () => {
+  const cases = [
+    {
+      source: `
+        const release = exchangeRule({
+          appliesTo: THIS_POLICY,
+          pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+          post: { dropClause: true },
+        });
+        export const rules = exchangeRules([release]);
+      `,
+      message: "must be exported",
+    },
+    {
+      source: `
+        export const release = exchangeRule({
+          appliesTo: THIS_POLICY,
+          pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+          post: { dropClause: true },
+        });
+        export const first = exchangeRules([release]);
+        export const second = exchangeRules([release]);
+      `,
+      message: "cannot be reused",
+    },
+    {
+      source: `
+        export const release = exchangeRule({
+          ...BASE,
+          post: { addAlternatives: [cfcPattern.user(v("unbound"))] },
+        });
+        export const rules = exchangeRules([release]);
+      `,
+      message: "static",
+    },
+    {
+      source: `
+        export const release = exchangeRule({
+          appliesTo: THIS_POLICY,
+          pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+          post: { addAlternatives: [cfcPattern.user(v("unbound"))] },
+        });
+        export const rules = exchangeRules([release]);
+      `,
+      message: "not bound",
+    },
+    {
+      source: `
+        export const release = exchangeRule({ ...BASE, mystery: true });
+        export const rules = exchangeRules([release]);
+      `,
+      message: "static",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const { diagnostics } = await validateSource(
+      `/// <cts-enable />
+      import {
+        cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+      } from "commonfabric/cfc";
+      const BASE = {
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+        post: { dropClause: true },
+      };
+      ${testCase.source}
+    `,
+      {
+        types: COMMONFABRIC_TYPES,
+        moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+      },
+    );
+    assertEquals(
+      diagnostics.some((diagnostic) =>
+        diagnostic.type === "cfc-policy-authoring" &&
+        diagnostic.message.includes(testCase.message)
+      ),
+      true,
+      testCase.message,
+    );
+  }
+});
+
+Deno.test("order-independent policy extraction enforces the authoring invariants", () => {
+  const rule = `
+    export const release = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: { integrity: [] },
+      post: { dropClause: true },
+    });
+  `;
+  const cases = [
+    `${rule} export const rules = exchangeRules([release], []);`,
+    `${rule} export const rules = exchangeRules([release, release]);`,
+    `${rule}
+      export const first = exchangeRules([release]);
+      export const second = exchangeRules([release]);
+    `,
+  ];
+
+  for (const source of cases) {
+    const sourceFile = ts.createSourceFile(
+      "/policy.ts",
+      `
+        import { exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+        ${source}
+      `,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    assertThrows(() =>
+      compileCfcPolicyManifestsForSource(sourceFile, "sha256:policy")
+    );
+  }
+});
+
+Deno.test("order-independent policy extraction covers the full static authoring grammar", () => {
+  const [artifact] = compilePolicySource(`
+    export const release = exchangeRule(({
+      appliesTo: THIS_POLICY,
+      pre: {
+        confidentiality: [{
+          kind: \`classification\`,
+          rank: 2,
+          active: false,
+          note: null,
+        }],
+        integrity: [cfcPattern.hasRole(
+          v("reviewer"), THIS_POLICY.subject, "reader",
+        )],
+      },
+      preConfScope: "anywhere",
+      guard: { policyState: [{ kind: "approved", by: v("reviewer") }] },
+      post: { addAlternatives: [cfcPattern.user(v("reviewer"))] },
+    } as const));
+    export const rules = exchangeRules(([release] as const));
+  `);
+
+  const authoredRule = artifact.manifest.template.exchangeRules[0] as {
+    preConfScope?: unknown;
+    guard?: unknown;
+  };
+  assertEquals(authoredRule.preConfScope, "anywhere");
+  assertEquals(authoredRule.guard, {
+    policyState: [{ kind: "approved", by: { var: "reviewer" } }],
+  });
+
+  const rule = (fields: string) => `
+    export const release = exchangeRule({
+      ${/\bappliesTo\s*:/.test(fields) ? "" : "appliesTo: THIS_POLICY,"}
+      ${
+    /\bpre\s*:/.test(fields)
+      ? ""
+      : 'pre: { integrity: [{ kind: "evidence" }] },'
+  }
+      ${/\bpost\s*:/.test(fields) ? "" : "post: { dropClause: true },"}
+      ${fields}
+    });
+    export const rules = exchangeRules([release]);
+  `;
+  const invalidCases: Array<[string, string]> = [
+    [rule("mystery: true,"), "unknown rule field"],
+    [
+      `export const release = exchangeRule([]); export const rules = exchangeRules([release]);`,
+      "requires an object",
+    ],
+    [
+      rule("appliesTo: { thisPolicy: true, extra: true },"),
+      "apply to THIS_POLICY",
+    ],
+    [rule("pre: 1,"), "rule pre must be"],
+    [rule("pre: { integrity: true },"), "must be static arrays"],
+    [rule("pre: { integrity: [THIS_POLICY] },"), "only valid in the appliesTo"],
+    [rule("guard: 1,"), "rule guard must be"],
+    [rule("guard: { policyState: [], extra: true },"), "unknown guard field"],
+    [rule("guard: { policyState: [] },"), "non-empty static array"],
+    [rule("guard: { policyState: [1] },"), "concrete non-empty kind"],
+    [
+      rule('guard: { policyState: [{ kind: "" }] },'),
+      "concrete non-empty kind",
+    ],
+    [rule("pre: { integrity: [] },"), "integrity or policyState evidence"],
+    [rule('preConfScope: "invalid",'), "invalid preConfScope"],
+    [rule("post: 1,"), "rule post must be"],
+    [rule("post: { dropClause: true, extra: true },"), "unknown post field"],
+    [rule("post: {},"), "exactly one"],
+    [rule("post: { dropClause: true, addAlternatives: [] },"), "exactly one"],
+    [rule("post: { addAlternatives: true },"), "non-empty static array"],
+    [rule("post: { addAlternatives: [] },"), "non-empty static array"],
+    [
+      rule("post: { addAlternatives: [THIS_POLICY] },"),
+      "only valid in the appliesTo",
+    ],
+    [
+      rule('post: { addAlternatives: [cfcPattern.user(v("unbound"))] },'),
+      "not bound",
+    ],
+    [rule('pre: { integrity: [v("")] },'), "non-empty name"],
+    [rule("pre: { integrity: [v(1)] },"), "non-empty static string"],
+    [
+      rule("pre: { integrity: [cfcPattern.unknown()] },"),
+      "unsupported cfcPattern",
+    ],
+    [rule("pre: { integrity: [Math.random()] },"), "static literal content"],
+    [rule("pre: { integrity: [[...[]]] },"), "dense static arrays"],
+    [rule("pre: { integrity: [[,]] },"), "dense static arrays"],
+    [rule("pre: { integrity: [{ ...{} }] },"), "explicit static object fields"],
+    [rule('pre: { integrity: [{ ["kind"]: "x" }] },'), "computed"],
+    [
+      rule('pre: { integrity: [{ kind: "x", kind: "y" }] },'),
+      "duplicate field",
+    ],
+    [
+      `const release = exchangeRule({ appliesTo: THIS_POLICY, pre: { integrity: [{ kind: "x" }] }, post: { dropClause: true } }); export const rules = exchangeRules([release]);`,
+      "must be exported",
+    ],
+    [
+      `export const release = exchangeRule({ appliesTo: THIS_POLICY, pre: { integrity: [{ kind: "x" }] }, post: { dropClause: true } }); const rules = exchangeRules([release]);`,
+      "must be exported",
+    ],
+    [
+      `export const release = exchangeRule({ appliesTo: THIS_POLICY, pre: { integrity: [{ kind: "x" }] }, post: { dropClause: true } }); export const rules = exchangeRules([release, {}]);`,
+      "direct rule identifiers",
+    ],
+    [
+      `export const release = exchangeRule({ appliesTo: THIS_POLICY, pre: { integrity: [{ kind: "x" }] }, post: { dropClause: true } }); export const rules = exchangeRules([missing]);`,
+      "invalid rule",
+    ],
+    [
+      `export const release = exchangeRule({ appliesTo: THIS_POLICY, pre: { integrity: [{ kind: "x" }] }, post: { dropClause: true } });`,
+      "must belong to one",
+    ],
+  ];
+
+  for (const [source, message] of invalidCases) {
+    assertThrows(() => compilePolicySource(source), Error, message);
+  }
+});
+
+Deno.test("authoring transformer diagnoses every invalid module binding form", async () => {
+  const validRule = `exchangeRule({
+    appliesTo: THIS_POLICY,
+    pre: { integrity: [{ kind: "evidence" }] },
+    post: { dropClause: true },
+  })`;
+  const cases = [
+    `export const release = exchangeRule({}, {});`,
+    `const release = ${validRule}; export { release as renamed };`,
+    `export const release = ${validRule}; const rules = exchangeRules([release]); export { rules as renamed };`,
+    `export const release = ${validRule}; const rules = exchangeRules([release]);`,
+    `export const release = ${validRule}; export const rules = exchangeRules("dynamic");`,
+    `export const release = ${validRule}; export const rules = exchangeRules([release, {}]);`,
+    `export const release = ${validRule}; export const rules = exchangeRules([release, release]);`,
+    `export const release = ${validRule}; export const rules = exchangeRules([missing]);`,
+    `export function nested() { return exchangeRules([]); }`,
+  ];
+
+  for (const source of cases) {
+    const { diagnostics } = await validateSource(
+      `/// <cts-enable />
+        import { exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+        ${source}
+      `,
+      {
+        types: COMMONFABRIC_TYPES,
+        moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+      },
+    );
+    assertEquals(
+      diagnostics.some((diagnostic) =>
+        diagnostic.type === "cfc-policy-authoring"
+      ),
+      true,
+      source,
+    );
+  }
+
+  const { diagnostics } = await validateSource(
+    `/// <cts-enable />
+      import { exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+      export const release = ${validRule};
+      export const rules = exchangeRules([release]);
+    `,
+    { types: COMMONFABRIC_TYPES },
+  );
+  assertEquals(
+    diagnostics.some((diagnostic) =>
+      diagnostic.type === "cfc-policy-authoring" &&
+      diagnostic.message.includes("module identity")
+    ),
+    true,
+  );
+});
+
+Deno.test("PolicyOf lowers a local exported ruleset to an exact schema marker", async () => {
+  const manifests: unknown[] = [];
+  const output = await transformSource(
+    `/// <cts-enable />
+    import { Confidential, toSchema } from "commonfabric";
+    import type { PolicyOf } from "commonfabric/cfc";
+    import {
+      cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+    } from "commonfabric/cfc";
+    export const release = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+      post: { addAlternatives: [cfcPattern.user(v("user"))] },
+    });
+    export const rules = exchangeRules([release]);
+    export const schema = toSchema<
+      Confidential<string, [PolicyOf<typeof rules>]>
+    >();
+  `,
+    {
+      types: COMMONFABRIC_TYPES,
+      moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+      policyManifests: manifests,
+    },
+  );
+  const artifact = manifests[0] as CfcPolicyCompilerManifestV1;
+
+  assertEquals(output.includes('policyRefKind: "module"'), true);
+  assertEquals(output.includes('moduleIdentity: "sha256:module"'), true);
+  assertEquals(output.includes('symbol: "rules"'), true);
+  assertEquals(
+    output.includes(`policyDigest: "${artifact.policyDigest}"`),
+    true,
+  );
+  assertEquals(output.includes("__ctOwningSpace: true"), true);
+  assertEquals(output.includes("__ctPolicyIdentityOf"), false);
+});
+
+Deno.test("PolicyOf retains the defining identity of an imported ruleset", async () => {
+  const outputs = await transformFiles({
+    "/policy.ts": `/// <cts-enable />
+      import {
+        cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+      } from "commonfabric/cfc";
+      export const release = exchangeRule({
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+        post: { addAlternatives: [cfcPattern.user(v("user"))] },
+      });
+      export const rules = exchangeRules([release]);
+    `,
+    "/main.tsx": `/// <cts-enable />
+      import { Confidential, toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import { rules } from "./policy.ts";
+      export const schema = toSchema<
+        Confidential<string, [PolicyOf<typeof rules>]>
+      >();
+    `,
+  }, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([
+      ["/main.tsx", "sha256:importer"],
+      ["/policy.ts", "sha256:defining-policy"],
+    ]),
+  });
+
+  assertEquals(
+    outputs["/main.tsx"]?.includes(
+      'moduleIdentity: "sha256:defining-policy"',
+    ),
+    true,
+  );
+  assertEquals(
+    outputs["/main.tsx"]?.includes('moduleIdentity: "sha256:importer"'),
+    false,
+  );
+});
+
+Deno.test("PolicyOf validation receives defining module identities", async () => {
+  const { diagnostics } = await validateFiles({
+    "/policy.ts": `/// <cts-enable />
+      import { exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+      export const release = exchangeRule({
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [{ kind: "evidence" }] },
+        post: { dropClause: true },
+      });
+      export const rules = exchangeRules([release]);
+    `,
+    "/main.tsx": `/// <cts-enable />
+      import { Confidential, toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import { rules } from "./policy.ts";
+      export const schema = toSchema<
+        Confidential<string, [PolicyOf<typeof rules>]>
+      >();
+    `,
+  }, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([
+      ["/policy.ts", "sha256:defining-policy"],
+      ["/main.tsx", "sha256:importer"],
+    ]),
+  });
+
+  assertEquals(
+    diagnostics.some((diagnostic) => diagnostic.type === "cfc-policy-of"),
+    false,
+  );
+});
+
+Deno.test("PolicyOf fallback fails closed when the defining rules are invalid", async () => {
+  const { diagnostics } = await validateFiles({
+    "/main.tsx": `/// <cts-enable />
+      import { Confidential, toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import { rules } from "./policy.ts";
+      export const schema = toSchema<
+        Confidential<string, [PolicyOf<typeof rules>]>
+      >();
+    `,
+    "/policy.ts": `/// <cts-enable />
+      import { exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+      export const release = exchangeRule({
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [{ kind: "evidence" }] },
+        post: { dropClause: true },
+      });
+      export const rules = exchangeRules([release, release]);
+    `,
+  }, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([
+      ["/main.tsx", "sha256:importer"],
+      ["/policy.ts", "sha256:defining-policy"],
+    ]),
+  });
+
+  assertEquals(
+    diagnostics.some((diagnostic) => diagnostic.type === "cfc-policy-of"),
+    true,
+    JSON.stringify(diagnostics),
+  );
+});
+
+Deno.test("PolicyOf does not confuse defining files with the same normalized suffix", async () => {
+  const policySource = (role: string) =>
+    `/// <cts-enable />
+    import {
+      cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+    } from "commonfabric/cfc";
+    export const release = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "${role}")] },
+      post: { addAlternatives: [cfcPattern.user(v("user"))] },
+    });
+    export const rules = exchangeRules([release]);
+  `;
+  const outputs = await transformFiles({
+    "/a/policy.ts": policySource("reader-a"),
+    "/b/policy.ts": policySource("reader-b"),
+    "/main.tsx": `/// <cts-enable />
+      import { Confidential, toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import { rules } from "./b/policy.ts";
+      export const schema = toSchema<
+        Confidential<string, [PolicyOf<typeof rules>]>
+      >();
+    `,
+  }, {
+    types: COMMONFABRIC_TYPES,
+    moduleIdentities: new Map([
+      ["/a/policy.ts", "sha256:policy-a"],
+      ["/b/policy.ts", "sha256:policy-b"],
+      ["/main.tsx", "sha256:importer"],
+    ]),
+  });
+
+  assertEquals(
+    outputs["/main.tsx"]?.includes('moduleIdentity: "sha256:policy-b"'),
+    true,
+  );
+  assertEquals(
+    outputs["/main.tsx"]?.includes('moduleIdentity: "sha256:policy-a"'),
+    false,
+  );
+});
+
+Deno.test("exchangeRules rejects renamed export specifiers", async () => {
+  const { diagnostics } = await validateSource(
+    `/// <cts-enable />
+    import {
+      cfcPattern, exchangeRule, exchangeRules, THIS_POLICY, v,
+    } from "commonfabric/cfc";
+    const release = exchangeRule({
+      appliesTo: THIS_POLICY,
+      pre: { integrity: [cfcPattern.hasRole(v("user"), THIS_POLICY.subject, "reader")] },
+      post: { addAlternatives: [cfcPattern.user(v("user"))] },
+    });
+    const rules = exchangeRules([release]);
+    export { release, rules as publicRules };
+  `,
+    {
+      types: COMMONFABRIC_TYPES,
+      moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+    },
+  );
+
+  assertEquals(
+    diagnostics.some((diagnostic) =>
+      diagnostic.type === "cfc-policy-authoring" &&
+      diagnostic.message.includes("renamed export specifiers")
+    ),
+    true,
+  );
+});
+
+Deno.test("PolicyOf rejects non-ruleset and non-typeof bindings", async () => {
+  for (const binding of ["{ forged: true }", "typeof plain"]) {
+    const { diagnostics } = await validateSource(
+      `/// <cts-enable />
+      import { toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      const plain = { forged: true };
+      export const schema = toSchema<PolicyOf<${binding}>>();
+    `,
+      {
+        types: COMMONFABRIC_TYPES,
+        moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+      },
+    );
+    assertEquals(
+      diagnostics.some((diagnostic) => diagnostic.type === "cfc-policy-of"),
+      true,
+    );
+  }
+});
+
+Deno.test("PolicyOf validation ignores unrelated local aliases", async () => {
+  const { diagnostics } = await validateSource(
+    `/// <cts-enable />
+      import { toSchema } from "commonfabric";
+      type PolicyOf<T> = T;
+      export const schema = toSchema<PolicyOf<string>>();
+    `,
+    { types: COMMONFABRIC_TYPES },
+  );
+
+  assertEquals(
+    diagnostics.some((diagnostic) => diagnostic.type === "cfc-policy-of"),
+    false,
+  );
+});
+
+Deno.test("PolicyOf requires the rules binding to be exported", async () => {
+  const { diagnostics } = await validateSource(
+    `/// <cts-enable />
+      import { toSchema } from "commonfabric";
+      import type { PolicyOf } from "commonfabric/cfc";
+      import { exchangeRule, exchangeRules, THIS_POLICY } from "commonfabric/cfc";
+      export const release = exchangeRule({
+        appliesTo: THIS_POLICY,
+        pre: { integrity: [{ kind: "evidence" }] },
+        post: { dropClause: true },
+      });
+      const rules = (exchangeRules([release]) as ReturnType<typeof exchangeRules>);
+      export const schema = toSchema<PolicyOf<typeof rules>>();
+    `,
+    {
+      types: COMMONFABRIC_TYPES,
+      moduleIdentities: new Map([["/test.tsx", "sha256:module"]]),
+    },
+  );
+
+  assertEquals(
+    diagnostics.some((diagnostic) =>
+      diagnostic.type === "cfc-policy-of" &&
+      diagnostic.message.includes("must be exported")
+    ),
+    true,
+  );
 });
 
 Deno.test("WriteAuthorizedBy accepts a local function binding", async () => {

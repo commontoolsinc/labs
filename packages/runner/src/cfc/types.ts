@@ -1,11 +1,13 @@
 import type { CellScope, JSONSchema } from "../builder/types.ts";
 import type { FabricValue } from "@commonfabric/api";
+import type { CfcModulePolicyRefAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { Immutable } from "@commonfabric/utils/types";
 import type { Metadata } from "../storage/interface.ts";
 import type {
   CfcLabelView,
   IFCLabel,
+  LabelMetadataObservationClass,
   LabelObservationClass,
 } from "./label-view-core.ts";
 import type { PolicySnapshot } from "./policy.ts";
@@ -15,6 +17,7 @@ import type { CfcTrustConfig } from "./trust.ts";
 export type {
   CfcLabelView,
   IFCLabel,
+  LabelMetadataObservationClass,
   LabelObservationClass,
 } from "./label-view-core.ts";
 
@@ -161,19 +164,53 @@ export type CfcSandboxResult = {
  * - `structure`: flow label on a container's SHAPE (membership, key set,
  *   order, length — §8.5.6.1/SC-7) for written values made purely of
  *   references, where per-slot link entries already label each reference.
- *   Applies only to reads at exactly the entry's path (observing the
- *   container is observing its shape); reads strictly below it (slot
- *   pointer reads, dereferences) are pointer handling and stay clean —
- *   that asymmetry is what lets membership taint persist without smearing
- *   the pointwise per-element split. Update discipline matches `derived`.
- *   Readers that predate this component treat it as covering (over-taint,
- *   fail-safe).
+ *   A CONCRETE-path structure entry applies only to reads at exactly its
+ *   path (observing the container is observing its shape); reads strictly
+ *   below it are pointer handling and stay clean. On every structure
+ *   container — DECLARED list-coordinator containers (the S16
+ *   `recordCfcStructureContainer` hook — filter/flatMap results, where the
+ *   membership decision lives) and the container nodes of generic
+ *   pure-link-structure value writes — the runtime additionally mints
+ *   three `*`-child CLASS TEMPLATES at `[...container, "*"]` beside the
+ *   container-anchored `observes:"enumerate"` stamp — `shape`, `value`,
+ *   `followRef` — carrying the same per-tx J
+ *   (docs/specs/cfc-template-population.md §3): templates ARE consumed at
+ *   matching child paths, so a per-child existence probe or a slot-pointer
+ *   observation consumes the membership/assignment decision (the SC-4/SC-8
+ *   residual fixes) while `readConsumesEntry`'s class table keeps probes
+ *   clean of content taint — the pointer/content split moves onto the
+ *   class axis instead of hanging on path anchoring alone. Three machinery
+ *   boundaries keep scaffolding out (the first two measured on the phase-B
+ *   pointwise suite, the third what let the generic route mint — the SC-8
+ *   remainder): reads covered by a same-tx dereference trace are
+ *   resolution machinery and skip templates (the C0 §6.1 row-4 rule
+ *   extended to plain reads); a transaction re-deriving a container's
+ *   membership stamps does not consume the entries it replaces (§8.12.8
+ *   replace-from-criteria readback exclusion); and the op-instantiation/
+ *   wiring machinery's reads of plumbing containers carry the
+ *   `machineryRead` marker (reactivity-log.ts) and skip template
+ *   consumption while keeping every other consumption. Update discipline
+ *   matches `derived` (templates replace-from-criteria with the enumerate
+ *   stamp they accompany; concrete `observes:"shape"` existence entries
+ *   freeze at creation). Readers that predate this component treat its
+ *   entries as covering (over-taint, fail-safe).
  * - `external-ingest`: the `ExternalIngest` provenance mark a vouched ingest
  *   channel mints onto the value it durably appends. Builtin-authored from
  *   verified channel metadata only (the split-mint), so it bypasses the
  *   runtime-minted gate; anchored at the ingest target cell and re-minted
  *   (replacing the prior mark for that doc) on each ingest. Its update
  *   discipline is replace-per-doc, driven by the ingest stamp.
+ * - `label-metadata`: the §4.6.4.2 field-precise population profile
+ *   (template-population Stage B) — multi-`*` templates under the
+ *   `/cfc/labels/<target-envelope-path>/...` metadata subtree carrying the
+ *   observation labels of the payload label's source-bearing fields. Update
+ *   discipline: a pure function of the payload entries in the same envelope,
+ *   re-derived from the FINAL payload entry set at every persist (so they
+ *   replace on overwrite, clear with the entries they describe, and stay
+ *   SC-11 no-op on unchanged recomputes by construction; never carried
+ *   forward). Always paired with `observes:"labelMetadata"`: no payload read
+ *   class consumes them — the introspection surface (`inspectConfLabel`) is
+ *   their only consumer. See `label-metadata-population.ts`.
  * Entries without an origin are legacy (pre-component) entries and are
  * treated as one combined component with the historical update rules.
  * The effective label at a path is the join of all components.
@@ -183,7 +220,8 @@ export type LabelEntryOrigin =
   | "link"
   | "derived"
   | "structure"
-  | "external-ingest";
+  | "external-ingest"
+  | "label-metadata";
 
 /**
  * Consumption class of a persisted labelMap entry (Epic C,
@@ -214,7 +252,13 @@ export type LabelMapEntry = {
   path: readonly string[];
   label: IFCLabel;
   origin?: LabelEntryOrigin;
-  observes?: LabelObservationClass;
+  /**
+   * Payload consumption classes, or — on `origin:"label-metadata"`
+   * population templates only (Stage B) — the `labelMetadata` class, which
+   * no payload read consumes (`readConsumesEntry`): those entries are
+   * resolved exclusively by the introspection surface.
+   */
+  observes?: LabelObservationClass | LabelMetadataObservationClass;
 };
 
 export type CfcMetadata = {
@@ -291,6 +335,28 @@ export type CfcDereferenceTrace = Immutable<{
   kind: "value" | "write-redirect";
 }>;
 
+/**
+ * One label-METADATA observation (inv-12 Stage 2, spec §4.6.4.1-.2; the SC-6
+ * partial revisit): the introspection surface (`inspectConfLabel`) observed
+ * first-layer label metadata, and the observation enters the reading
+ * transaction's consumed set carrying its §4.6.4.2 population-rule label.
+ *
+ * `target.path` is the ENVELOPE metadata subtree address the observation is
+ * about — `["cfc","labels",...]`, never a payload path — so the record is
+ * self-describing and cannot be confused with a payload read. The raw
+ * `["cfc"]` journal read underneath stays a runtime-internal verifier read
+ * (excluded from flow/consumed derivations exactly as before, SC-6); THIS
+ * record is the application-observation channel. `confidentiality` is the
+ * joined population-rule label of the per-field observations the query
+ * consumed — non-empty by construction (public observations record nothing:
+ * an empty label adds nothing to any join, gate, or digest).
+ */
+export type CfcLabelMetadataObservation = Immutable<{
+  target: CfcAddress;
+  observes: LabelMetadataObservationClass;
+  confidentiality: unknown[];
+}>;
+
 export type ImplementationIdentity =
   | { kind: "builtin"; builtinId: string }
   | {
@@ -362,6 +428,36 @@ export type WritePolicyInput =
     readonly value: FabricValue;
   };
 
+/**
+ * One grant document a boundary evaluation consulted (§8.12.7 route 2a):
+ * its address plus the content digest of what the lookup resolved —
+ * `CFC_GRANT_ABSENT_DIGEST` when the point query found no document (binding
+ * "looked, found nothing" so a grant APPEARING between prepare and commit
+ * invalidates too). Recorded by the runner-side grant resolver
+ * (`createTxCfcGrantResolver`), folded into `PreparedDigestInput` below.
+ *
+ * Single-use CONSUMPTION RECEIPTS (design §2.2) ride the same entries: a
+ * consuming resolution of a `singleUse` grant records the receipt address
+ * with its present/absent state, so a receipt appearing between evaluations
+ * invalidates the prepared digest exactly like a changed grant — the
+ * digest-level complement to the create-only commit race.
+ */
+export type ConsultedGrant = {
+  readonly space: MemorySpace;
+  readonly id: string;
+  readonly digest: string;
+};
+
+/**
+ * One exact module-policy reference consulted by boundary evaluation. Both a
+ * present manifest and an absent lookup are decision inputs; recording the
+ * complete reference prevents pair/subject aliasing.
+ */
+export type ConsultedPolicyManifest = {
+  readonly reference: CfcModulePolicyRefAtom;
+  readonly state: "present" | "absent";
+};
+
 export type PreparedDigestInput = {
   readonly consumedReads: readonly ConsumedRead[];
   readonly attemptedWrites: readonly AttemptedWrite[];
@@ -386,6 +482,18 @@ export type PreparedDigestInput = {
   // digest, so a decision made under one rule set cannot be committed under
   // another (same discipline as trustSnapshot).
   readonly policySnapshot?: { readonly digest: string };
+  // Grant documents consulted by policyState-guarded evaluation (§8.12.7
+  // route 2a), each bound by content digest — the same invalidation
+  // discipline as policySnapshot: a decision that consumed one grant state
+  // cannot commit under another. Absent when no grants were consulted, so
+  // pre-existing digests are unchanged; canonicalized address-sorted.
+  readonly consultedGrants?: readonly ConsultedGrant[];
+  readonly consultedPolicyManifests?: readonly ConsultedPolicyManifest[];
+  // Label-metadata observations (inv-12 Stage 2): boundary-decision inputs —
+  // they change the flow join and the consumed set — bound under the same
+  // discipline as writePolicyInputs. Absent when none were recorded, so
+  // pre-Stage-2 digests are unchanged; canonicalized address-sorted.
+  readonly labelMetadataObservations?: readonly CfcLabelMetadataObservation[];
 };
 
 export type PostCommitSideEffect = {
@@ -454,6 +562,65 @@ export type CfcPolicyEvaluationMode = "off" | "observe" | "enforce";
 export const DEFAULT_CFC_POLICY_EVALUATION_MODE: CfcPolicyEvaluationMode =
   "off";
 
+/**
+ * Cross-space label-metadata representation dial (inv-12 Stage 1 / SC-25,
+ * docs/specs/cfc-label-metadata-confidentiality.md §2/§5; spec §4.6.4.1),
+ * orthogonal to the enforcement ladder: `off` = persisted label bytes are
+ * identical to before this dial existed; `observe` = compute the
+ * classification-governed transformed form for cross-space entries and emit a
+ * structured diagnostic when it differs from the verbatim form (the
+ * divergence count is the rollout metric), but persist VERBATIM; `enforce` =
+ * persist the transformed form (commitment-class atom fields replaced by
+ * their canonical digest markers `{digestOf: <hash>}`). The transform never
+ * rejects — representation only.
+ */
+export type CfcLabelMetadataProtectionMode = "off" | "observe" | "enforce";
+
+export const DEFAULT_CFC_LABEL_METADATA_PROTECTION_MODE:
+  CfcLabelMetadataProtectionMode = "off";
+
+/**
+ * Declared-component monotonicity gate dial (WP5; spec §8.12.1/§8.12.8;
+ * docs/specs/cfc-persisted-declassification.md §4 item 3), orthogonal to the
+ * enforcement ladder: the declared (store-policy) component of a persisted
+ * path evolves only through the schema-walk re-mint in prepare, and §8.12.1's
+ * `canUpdateStoreLabel` (confidentiality may only add clauses or remove
+ * alternatives; the declared integrity claim may only remove atoms) had no
+ * runtime check. `off` = nothing runs (bytes identical to before the dial);
+ * `observe` = compare each re-minted declared entry against the stored
+ * declared entry at the same path and emit a structured diagnostic on a
+ * non-monotone re-mint, persisting today's behavior; `enforce` = a
+ * non-monotone re-mint records a fail-closed prepare reason (rejecting the
+ * commit under the enforcing enforcement modes). The gate governs ONLY the
+ * `declared` component — derived/link-carried/structure components follow
+ * their own §8.12.8 disciplines and are never touched. The sanctioned
+ * exception (§8.12.7 route 2b, the future declassification-event writer) is
+ * the per-tx privileged widening exemption below.
+ */
+export type CfcDeclaredMonotonicityMode = "off" | "observe" | "enforce";
+
+export const DEFAULT_CFC_DECLARED_MONOTONICITY_MODE:
+  CfcDeclaredMonotonicityMode = "off";
+
+/**
+ * Per-transaction privileged marker exempting exactly ONE (doc, path,
+ * clauseDigest) triple from the declared-monotonicity gate (the seam for the
+ * §8.12.7 route 2b declassification event; docs/specs/
+ * cfc-persisted-declassification.md §4). `clauseDigest` is the canonical
+ * clause digest (`cfcCanonicalClauseDigest`) of the STORED clause whose
+ * dropping/widening the event sanctions — clause indices are
+ * evaluation-ephemeral, digests are not. Settable only under the same
+ * privileged discipline as `writeCfcGrant` (a trusted-builtin implementation
+ * identity); absent = the gate applies in full; integrity violations are
+ * never exemptable (the event widens a confidentiality clause).
+ */
+export type CfcDeclaredWideningExemption = {
+  readonly space: MemorySpace;
+  readonly id: string;
+  readonly path: readonly string[];
+  readonly clauseDigest: string;
+};
+
 export type CfcTxState = {
   relevant: boolean;
   enforcementMode: CfcEnforcementMode;
@@ -461,6 +628,13 @@ export type CfcTxState = {
   writeFloorMode: CfcWriteFloorMode;
   triggerReadGating: CfcTriggerReadGating;
   policyEvaluationMode: CfcPolicyEvaluationMode;
+  labelMetadataProtectionMode: CfcLabelMetadataProtectionMode;
+  declaredMonotonicityMode: CfcDeclaredMonotonicityMode;
+  // The one sanctioned per-tx exemption from the declared-monotonicity gate
+  // (§8.12.7 route 2b seam). Absent = gate applies. Set only through the
+  // privileged `setCfcDeclaredWideningExemption` (trusted-builtin identity),
+  // write-once, validated fail-closed — see the type's doc comment.
+  declaredWideningExemption?: CfcDeclaredWideningExemption;
   prepare: CfcPrepareState;
   dereferenceTraces: CfcDereferenceTrace[];
   // Result containers a list coordinator (filter/flatMap) declares each
@@ -528,6 +702,24 @@ export type CfcTxState = {
   // runtime's privileged persistence scope (audit S18). The runtime's own label
   // writes in prepareBoundaryCommit run privileged and never land here; anything
   // that does is forging metadata that drives derivation for other writes, so
-  // prepareBoundaryCommit turns each into a fail-closed reason.
+  // prepareBoundaryCommit turns each into a fail-closed reason. Writes to
+  // reserved `grant:cfc:` documents outside the trusted policy-writer path
+  // (`writeCfcGrant`) are recorded here too — same S18 class, same reasons.
   unprivilegedSystemWrites: string[];
+  // Grant documents consulted by policyState-guarded boundary evaluation in
+  // this transaction (§8.12.7 route 2a), recorded by the runner-side grant
+  // resolver, deduplicated by address. Folded into PreparedDigestInput.
+  consultedGrants: ConsultedGrant[];
+  // Exact module-policy manifest lookups (present and absent), deduplicated by
+  // reference and folded into PreparedDigestInput.
+  consultedPolicyManifests: ConsultedPolicyManifest[];
+  // Label-metadata observations recorded by the introspection surface
+  // (inv-12 Stage 2, `recordCfcLabelMetadataObservation`): application
+  // observations of first-layer label metadata, carrying their §4.6.4.2
+  // population-rule labels. Folded into the flow derivation
+  // (`deriveFlowJoin`), the egress consumed set (`collectConsumedLabel`),
+  // the per-write input gate (`verifyInputRequirements`), and
+  // PreparedDigestInput. Only labeled observations are recorded (empty =
+  // public = nothing to derive, gate, or bind).
+  labelMetadataObservations: CfcLabelMetadataObservation[];
 };

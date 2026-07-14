@@ -10,6 +10,7 @@ import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 export const MEMORY_PROTOCOL = "memory" as const;
 export const DEFAULT_BRANCH = "" as const;
@@ -189,6 +190,13 @@ export type CommitPrecondition =
     kind: "entity-absent";
     id: EntityId;
     scope?: CellScope;
+  }
+  | {
+    /** Security-critical exact value pin, including null for absent/deleted. */
+    kind: "entity-value-hash";
+    id: EntityId;
+    scope?: CellScope;
+    valueHash: string | null;
   };
 
 export interface ClientCommit {
@@ -637,6 +645,9 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
   "no cell reconstruction at the memory boundary",
 );
 
+// These ambient flags and the memory protocol flags below are catalogued, with
+// their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
+// Update that registry when adding or removing one.
 let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = false;
 let syncSchemaTableEnabled = true;
@@ -803,6 +814,9 @@ export const wireMemoryProtocolFlags = (
 
 export const encodeMemoryBoundary = (value: FabricValue): string =>
   jsonFromValue(value);
+
+export const commitPreconditionValueHash = (value: FabricValue): string =>
+  hashStringOf(encodeMemoryBoundary(value));
 
 export const decodeMemoryBoundary = <Value extends FabricValue = FabricValue>(
   source: string,

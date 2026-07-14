@@ -15,9 +15,11 @@ export {
   PATTERN_COVERAGE_GLOBAL,
   Pipeline,
   sourceDisablesCfTransform,
+  sourceHasIgnoredDisableDirective,
   transformCfDirective,
   Transformer,
 } from "./core/mod.ts";
+export type { CfcPolicyCompilerManifestV1 } from "./core/runtime-contract.ts";
 export {
   CFC_CANONICAL_ALIAS_NAMES,
   type CfcCanonicalAliasName,

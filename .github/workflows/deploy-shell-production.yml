@@ -27,7 +27,9 @@ jobs:
         run: deno task production
         env:
           API_URL: ${{ secrets.CLUSTERDUCK_SHELL_API_URL }}
-          COMMIT_SHA: ${{ github.sha }}
+          # Must match the immutable /builds/<sha>/ upload below, including
+          # manual deployments of an explicitly selected commit.
+          COMMIT_SHA: ${{ inputs.sha || github.sha }}
 
       - name: 🔑 Authenticate to Google Cloud
         uses: google-github-actions/auth@v1
@@ -41,7 +43,7 @@ jobs:
         run: |
           DEPLOY_SHA="${{ inputs.sha || github.sha }}"
 
-          # Upload to SHA-specific directory for versioning
+          # Retain the complete immutable module graph for long-lived pages.
           gsutil -m rsync -r packages/shell/dist gs://production-commontools-dev/builds/${DEPLOY_SHA}/
 
           # Upload to bucket root as "latest" (-d removes orphaned files)

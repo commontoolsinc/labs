@@ -326,6 +326,133 @@ describe("createRuntimeTelemetryOtelBridge", () => {
   });
 });
 
+describe("scheduler.run.complete / scheduler.settle / storage join keys", () => {
+  it("records action duration and emits a span only at/above the threshold", () => {
+    const m = makeRecordingMeter();
+    const t = makeRecordingTracer();
+    const bridge = createRuntimeTelemetryOtelBridge({
+      tracer: t.tracer,
+      meter: m.meter,
+    });
+
+    bridge.handleMarker(marker({
+      type: "scheduler.run.complete",
+      actionId: "hash:1",
+      actionInfo: { patternName: "lunch-poll", moduleName: "tally" },
+      durationMs: 2,
+    }));
+    expect(m.calls).toEqual([{
+      instrument: "ct.scheduler.action.duration_ms",
+      value: 2,
+      attributes: {
+        "ct.pattern": "lunch-poll",
+        "ct.module": "tally",
+        "ct.error": false,
+      },
+    }]);
+    expect(t.spans).toHaveLength(0);
+
+    bridge.handleMarker(marker({
+      type: "scheduler.run.complete",
+      actionId: "hash:2",
+      actionInfo: { patternName: "lunch-poll", moduleName: "tally" },
+      durationMs: 25,
+      error: "boom",
+    }));
+    expect(t.spans).toHaveLength(1);
+    expect(t.spans[0].name).toBe("scheduler.action.run");
+    expect(t.spans[0].attributes["ct.action_id"]).toBe("hash:2");
+    expect(t.spans[0].attributes["ct.duration_ms"]).toBe(25);
+    expect(t.spans[0].status?.message).toBe("boom");
+    expect(t.spans[0].ended).toBe(true);
+    // Retroactive: reconstructed window ≈ durationMs wide.
+    expect(
+      (t.spans[0].endTime ?? 0) - (t.spans[0].startTime ?? 0),
+    ).toBe(25);
+  });
+
+  it("honors a custom action-run span threshold", () => {
+    const m = makeRecordingMeter();
+    const t = makeRecordingTracer();
+    const bridge = createRuntimeTelemetryOtelBridge({
+      tracer: t.tracer,
+      meter: m.meter,
+      actionRunSpanThresholdMs: 100,
+    });
+    bridge.handleMarker(marker({
+      type: "scheduler.run.complete",
+      actionId: "hash:3",
+      durationMs: 50,
+    }));
+    expect(t.spans).toHaveLength(0);
+  });
+
+  it("records settle duration and iterations histograms", () => {
+    const m = makeRecordingMeter();
+    const t = makeRecordingTracer();
+    const bridge = createRuntimeTelemetryOtelBridge({
+      tracer: t.tracer,
+      meter: m.meter,
+    });
+    bridge.handleMarker(marker({
+      type: "scheduler.settle",
+      durationMs: 120,
+      iterations: 3,
+      settledEarly: false,
+      seedCount: 5,
+      workSetSize: 12,
+    }));
+    expect(m.calls).toEqual([
+      { instrument: "ct.scheduler.settle.duration_ms", value: 120 },
+      { instrument: "ct.scheduler.settle.iterations", value: 3 },
+    ].map((c) => ({ ...c, attributes: {} })));
+  });
+
+  it("stamps commit.local_seq and space.did on storage.push spans", () => {
+    const m = makeRecordingMeter();
+    const t = makeRecordingTracer();
+    const bridge = createRuntimeTelemetryOtelBridge({
+      tracer: t.tracer,
+      meter: m.meter,
+    });
+    bridge.handleMarker(marker({
+      id: "push:did:key:zX:7",
+      type: "storage.push.start",
+      operation: "transact",
+      localSeq: 7,
+      spaceDid: "did:key:zX",
+    }));
+    expect(t.spans[0].attributes["commit.local_seq"]).toBe(7);
+    expect(t.spans[0].attributes["space.did"]).toBe("did:key:zX");
+    bridge.handleMarker(marker({
+      id: "push:did:key:zX:7",
+      type: "storage.push.complete",
+      sessionId: "session-a",
+    }));
+    expect(t.spans[0].setAttributes["session.id"]).toBe("session-a");
+    expect(t.spans[0].ended).toBe(true);
+
+    // Error half: the rejected-commit span keeps the same join keys and
+    // carries the rejection name.
+    bridge.handleMarker(marker({
+      id: "push:did:key:zX:8",
+      type: "storage.push.start",
+      operation: "transact",
+      localSeq: 8,
+      spaceDid: "did:key:zX",
+    }));
+    bridge.handleMarker(marker({
+      id: "push:did:key:zX:8",
+      type: "storage.push.error",
+      sessionId: "session-a",
+      error: "ConflictError",
+    }));
+    expect(t.spans[1].setAttributes["session.id"]).toBe("session-a");
+    expect(t.spans[1].status?.message).toBe("ConflictError");
+    expect(t.spans[1].ended).toBe(true);
+  });
+});
+
 describe("attachRuntimeTelemetryOtelBridge", () => {
   it("feeds telemetry events through the bridge until detached", () => {
     const m = makeRecordingMeter();

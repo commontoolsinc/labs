@@ -6,6 +6,8 @@
  * and diagnostics in downstream packages.
  */
 
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+
 export type Cfc<T, Meta> = T & {
   readonly __ct_cfc__?: Meta;
 };
@@ -43,6 +45,10 @@ export const CFC_ATOM_TYPE = {
   // shape is satisfied via the acting principal's trust closure — never by a
   // literal Concept atom in carried integrity.
   Concept: "https://commonfabric.org/cfc/atom/Concept",
+  // Context principal (confidentiality; spec §4.1.2/§5.1): the CI-context
+  // form of a policy reference — same field shape and selection semantics as
+  // `Policy` (see there).
+  Context: "https://commonfabric.org/cfc/atom/Context",
   // Trusted evidence that a source-linked disclaimer was attached to content
   // emitted through a sink (spec §15.4). Trusted-minted.
   DisclaimerAttached: "https://commonfabric.org/cfc/atom/DisclaimerAttached",
@@ -74,10 +80,17 @@ export const CFC_ATOM_TYPE = {
   // transcript). Makes "untrusted model output" EXPLICIT provenance rather
   // than mere absence of integrity, so requiredIntegrity floors fail
   // positively on model-derived values (Epic D1,
-  // docs/specs/cfc-trusted-agent-tool-integrity.md piece B). Evidence — not
+  // docs/history/specs/cfc-trusted-agent-tool-integrity.md piece B). Evidence — not
   // authorable in schemas.
   LlmDerived: "https://commonfabric.org/cfc/atom/LlmDerived",
   Origin: "https://commonfabric.org/cfc/atom/Origin",
+  // Policy principal (confidentiality; spec §4.1.2 PolicyRefAtom, §4.4.2):
+  // references a policy record whose exchange rules may rewrite the clause
+  // the atom sits in — and ONLY that clause (CT-1874 clause-local scoping).
+  // Runtime labels must carry the record's content `hash`; selection fails
+  // closed on mismatch or absence (§4.4.3). Interpreted only by trusted
+  // evaluators at boundary points, never satisfiable as an access principal.
+  Policy: "https://commonfabric.org/cfc/atom/Policy",
   // Hereditary certification (spec §15.1.1 / §3.1.6.1): survives combination
   // via the class-aware meet — present on an output only when present on
   // every input.
@@ -206,6 +219,176 @@ export type CfcUserAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.User;
   readonly subject: string;
 };
+
+/**
+ * Existing hash-bound named policy reference (spec §4.1.2
+ * `PolicyRefAtom`): `name` selects
+ * the record, `subject` is the principal the policy speaks for, `hash` binds
+ * the exact record content (required in runtime labels, §4.4.2 — an unbound
+ * name selects nothing). `Policy` and `Context` share the shape.
+ */
+export type CfcNamedPolicyRefAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Policy | typeof CFC_ATOM_TYPE.Context;
+  readonly name: string;
+  readonly subject: string;
+  readonly hash: string;
+  readonly policyRefKind?: never;
+  readonly moduleIdentity?: never;
+  readonly symbol?: never;
+  readonly policyDigest?: never;
+};
+
+/** Commitment-form subject used after cross-space label representation. */
+export type CfcPolicySubjectCommitment = CfcAtomObject & {
+  readonly digestOf: string;
+};
+
+/**
+ * Exact reference to a compiler-verified, subject-independent module policy
+ * manifest (spec §4.3.6/§4.4.2). Structurally disjoint from the named form.
+ */
+export type CfcModulePolicyRefAtom = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.Policy;
+  readonly policyRefKind: "module";
+  readonly moduleIdentity: string;
+  readonly symbol: string;
+  readonly policyDigest: string;
+  readonly subject: string | CfcPolicySubjectCommitment;
+  readonly name?: never;
+  readonly hash?: never;
+};
+
+/** Both runtime label-time policy-reference families. */
+export type CfcPolicyRefAtom =
+  | CfcNamedPolicyRefAtom
+  | CfcModulePolicyRefAtom;
+
+export type CfcPatternVariable = CfcAtomObject & {
+  readonly var: string;
+};
+
+export type CfcThisPolicySubjectPattern = CfcAtomObject & {
+  readonly thisPolicyField: "subject";
+};
+
+export type CfcThisPolicyPattern = CfcAtomObject & {
+  readonly thisPolicy: true;
+  /** Non-enumerable authoring affordance; lowers to `thisPolicyField`. */
+  readonly subject: CfcThisPolicySubjectPattern;
+};
+
+export type CfcPatternString =
+  | string
+  | CfcPatternVariable
+  | CfcThisPolicySubjectPattern;
+
+export type CfcUserPattern = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.User;
+  readonly subject: CfcPatternString;
+};
+
+export type CfcHasRolePattern = CfcAtomObject & {
+  readonly type: typeof CFC_ATOM_TYPE.HasRole;
+  readonly principal: CfcPatternString;
+  readonly space: CfcPatternString;
+  readonly role: "owner" | "writer" | "reader" | CfcPatternVariable;
+};
+
+export type CfcPatternConstructors = {
+  readonly user: (subject: CfcPatternString) => CfcUserPattern;
+  readonly hasRole: (
+    principal: CfcPatternString,
+    space: CfcPatternString,
+    role: CfcHasRolePattern["role"],
+  ) => CfcHasRolePattern;
+};
+
+export type CfcExchangeRuleAuthoringInput = {
+  readonly appliesTo: CfcThisPolicyPattern;
+  readonly pre?: {
+    readonly confidentiality?: readonly CfcAtom[];
+    readonly integrity?: readonly CfcAtom[];
+  };
+  readonly preConfScope?: "targetClause" | "anywhere";
+  readonly guard?: {
+    readonly policyState: readonly CfcAtom[];
+  };
+  readonly post:
+    | { readonly addAlternatives: readonly CfcAtom[] }
+    | { readonly dropClause: true };
+};
+
+/** Inert declaration data; this is deliberately not a builder artifact. */
+export type CfcExchangeRuleDeclaration<
+  T extends CfcExchangeRuleAuthoringInput = CfcExchangeRuleAuthoringInput,
+> = Readonly<T> & { readonly __ct_cfc_exchange_rule__?: true };
+
+/** Inert exported rule-set declaration; the transformer assigns its identity. */
+export type CfcExchangeRulesDeclaration<
+  T extends readonly CfcExchangeRuleDeclaration[] =
+    readonly CfcExchangeRuleDeclaration[],
+> = Readonly<T> & { readonly __ct_cfc_exchange_rules__?: true };
+
+/** A statically analyzable pattern variable for authored exchange rules. */
+export function v(name: string): CfcPatternVariable {
+  if (name.length === 0) {
+    throw new TypeError("CFC pattern variable names must be non-empty");
+  }
+  return deepFreeze({ var: name });
+}
+
+const thisPolicySubject = deepFreeze(
+  {
+    thisPolicyField: "subject",
+  } as const,
+);
+const thisPolicyValue = { thisPolicy: true } as CfcThisPolicyPattern;
+Object.defineProperty(thisPolicyValue, "subject", {
+  value: thisPolicySubject,
+  enumerable: false,
+  configurable: false,
+  writable: false,
+});
+
+/** The policy selected by a module-policy reference at evaluation time. */
+export const THIS_POLICY: CfcThisPolicyPattern = deepFreeze(thisPolicyValue);
+
+/** Pattern-only atom constructors, deliberately distinct from concrete mints. */
+export const cfcPattern: CfcPatternConstructors = deepFreeze({
+  user(subject: CfcPatternString): CfcUserPattern {
+    return deepFreeze({
+      type: CFC_ATOM_TYPE.User,
+      subject,
+    });
+  },
+
+  hasRole(
+    principal: CfcPatternString,
+    space: CfcPatternString,
+    role: CfcHasRolePattern["role"],
+  ): CfcHasRolePattern {
+    return deepFreeze({
+      type: CFC_ATOM_TYPE.HasRole,
+      principal,
+      space,
+      role,
+    });
+  },
+});
+
+/** Marks deeply frozen declaration data for compile-time extraction. */
+export function exchangeRule<const T extends CfcExchangeRuleAuthoringInput>(
+  input: T,
+): CfcExchangeRuleDeclaration<T> {
+  return deepFreeze(input) as CfcExchangeRuleDeclaration<T>;
+}
+
+/** Groups exported declarations into a compiler-identified policy symbol. */
+export function exchangeRules<
+  const T extends readonly CfcExchangeRuleDeclaration[],
+>(rules: T): CfcExchangeRulesDeclaration<T> {
+  return deepFreeze([...rules]) as unknown as CfcExchangeRulesDeclaration<T>;
+}
 
 export type CfcSpaceAtom = CfcAtomObject & {
   readonly type: typeof CFC_ATOM_TYPE.Space;
@@ -442,6 +625,38 @@ export const cfcAtom = {
     return { type: CFC_ATOM_TYPE.User, subject };
   },
 
+  policyRef(
+    name: string,
+    subject: string,
+    hash: string,
+  ): CfcNamedPolicyRefAtom {
+    return { type: CFC_ATOM_TYPE.Policy, name, subject, hash };
+  },
+
+  contextRef(
+    name: string,
+    subject: string,
+    hash: string,
+  ): CfcNamedPolicyRefAtom {
+    return { type: CFC_ATOM_TYPE.Context, name, subject, hash };
+  },
+
+  modulePolicyRef(
+    moduleIdentity: string,
+    symbol: string,
+    policyDigest: string,
+    subject: string | CfcPolicySubjectCommitment,
+  ): CfcModulePolicyRefAtom {
+    return {
+      type: CFC_ATOM_TYPE.Policy,
+      policyRefKind: "module",
+      moduleIdentity,
+      symbol,
+      policyDigest,
+      subject,
+    };
+  },
+
   space(id: string): CfcSpaceAtom {
     return { type: CFC_ATOM_TYPE.Space, id };
   },
@@ -556,7 +771,8 @@ export const CFC_CANONICAL_ALIAS_NAMES = [
   "AuthoredByCurrentUser",
   "RequiresIntegrity",
   "MaxConfidentiality",
-  "OpaqueInput",
+  "AnyOf",
+  "PolicyOf",
   "WriteAuthorizedBy",
   "TrustedActionWriteWithIntegrity",
   "TrustedActionWrite",
@@ -565,10 +781,6 @@ export const CFC_CANONICAL_ALIAS_NAMES = [
   "ProjectionPath",
   "ProjectionOf",
   "Projection",
-  "LengthPreservedFrom",
-  "FilteredFrom",
-  "SubsetOf",
-  "PermutationOf",
 ] as const;
 
 export type CfcCanonicalAliasName = typeof CFC_CANONICAL_ALIAS_NAMES[number];
@@ -633,44 +845,26 @@ export type MaxConfidentiality<T, X extends readonly unknown[]> = Cfc<T, {
   maxConfidentiality: X;
 }>;
 
+/** Explicitly weakens one confidentiality clause to accept any alternative. */
+export type AnyOf<X extends readonly unknown[]> = {
+  readonly __ct_cfc_any_of__?: X;
+};
+
+/** Compile-time reference to one exported exchangeRules() declaration. */
+export type PolicyOf<Rules> = {
+  readonly __ct_cfc_policy_of__?: Rules;
+};
+
 export type ExactCopy<T, P extends readonly string[]> = Cfc<T, {
   exactCopyOf: P;
 }>;
 
-export type LengthPreservedFrom<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    sourceCollection: P;
-    lengthPreserved: true;
-  };
-}>;
-
-export type FilteredFrom<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    filteredFrom: P;
-  };
-}>;
-
-export type SubsetOf<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    subsetOf: P;
-  };
-}>;
-
-export type PermutationOf<T, P extends readonly string[]> = Cfc<T, {
-  collection: {
-    permutationOf: P;
-  };
-}>;
-
-export type OpaqueInput<
-  T,
-  Spec extends
-    | true
-    | {
-      schema?: unknown;
-      allowPassThrough?: boolean;
-    } = true,
-> = Cfc<T, { opaque: Spec }>;
+// NOTE: helper aliases for the spec's `collection` (§8.5) and `opaque`
+// (§8.13) claims (SubsetOf / FilteredFrom / LengthPreservedFrom /
+// PermutationOf / OpaqueInput) were removed: the runner does not implement
+// those transitions and rejects the lowered keys fail-closed, so the
+// authoring surface must not advertise them. Reintroduce the aliases
+// together with the runner enforcement when those chapters land.
 
 export type ProjectionPath<
   T,

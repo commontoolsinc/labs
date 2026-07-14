@@ -1,8 +1,13 @@
 import * as esbuild from "esbuild";
 import { denoPlugin } from "@deno/esbuild-plugin";
 import { debounce } from "@std/async/debounce";
-import { join as joinPath, resolve as resolvePath } from "@std/path";
-import { ResolvedConfig } from "./interface.ts";
+import {
+  isAbsolute as isAbsolutePath,
+  join as joinPath,
+  relative as relativePath,
+  resolve as resolvePath,
+} from "@std/path";
+import { ResolvedConfig, ResolvedEntryPoint } from "./interface.ts";
 import { blue, dim, green, red, yellow } from "@std/fmt/colors";
 
 function formatFileSize(bytes: number): string {
@@ -19,6 +24,8 @@ function formatFileSize(bytes: number): string {
 }
 
 export class Builder extends EventTarget {
+  private splitPassAuxiliaryOutputGenerations: Set<string>[] = [];
+
   constructor(public manifest: ResolvedConfig) {
     super();
   }
@@ -48,41 +55,41 @@ export class Builder extends EventTarget {
       }...`,
     );
 
+    // esbuild's `splitting` is a whole-build flag, so entries that opt in build
+    // in a pass of their own, separate from those that don't. Isolating the
+    // passes keeps a non-splitting entry's output independent of any sibling
+    // entry's `splitting`: it is bundled exactly as it would be with no
+    // splitting entry present.
+    const splitEntries = this.manifest.entries.filter((e) => e.splitting);
+    const plainEntries = this.manifest.entries.filter((e) => !e.splitting);
+
     try {
-      const config: Parameters<typeof build>[0] = {
-        define: resolveDefines(this.manifest),
-        sourcemap: this.manifest.esbuild.sourcemap,
-        minify: this.manifest.esbuild.minify,
-        entryPoints: this.manifest.entries,
-        outdir: this.manifest.outDir,
-        external: this.manifest.esbuild.external,
-        supported: this.manifest.esbuild.supported,
-        tsconfigRaw: this.manifest.esbuild.tsconfigRaw,
-        logOverride: this.manifest.esbuild.logOverride,
-      };
+      const passMetafiles: esbuild.Metafile[] = [];
+
+      // One esbuild service serves both passes; stop it once, after the last.
+      try {
+        if (plainEntries.length > 0) {
+          const metafile = await this.runPass(plainEntries, false);
+          if (metafile) passMetafiles.push(metafile);
+        }
+        if (splitEntries.length > 0) {
+          const metafile = await this.runPass(splitEntries, true);
+          if (metafile) {
+            await this.pruneStaleSplitOutputs(metafile, splitEntries);
+            passMetafiles.push(metafile);
+          }
+        }
+      } finally {
+        esbuild.stop();
+      }
 
       if (this.manifest.esbuild.metafile) {
-        config.metafile = true;
-      }
-
-      const result = await build(config);
-
-      for (const output of result.outputFiles ?? []) {
-        const fileInfo = await Deno.stat(output.path);
-        const fileSize = formatFileSize(fileInfo.size);
-
-        console.log(
-          `   ${green("✓")} ${dim("Built")} ${blue(output.path)} ${
-            dim(`(${fileSize})`)
-          }`,
-        );
-      }
-      if (this.manifest.esbuild.metafile && result.metafile) {
+        const metafile = mergeMetafiles(passMetafiles);
         await Deno.writeTextFile(
           this.manifest.esbuild.metafile,
-          JSON.stringify(result.metafile),
+          JSON.stringify(metafile),
         );
-        console.log(await esbuild.analyzeMetafile(result.metafile));
+        console.log(await esbuild.analyzeMetafile(metafile));
       }
 
       // Generate build manifest with content hashes of output files.
@@ -98,6 +105,119 @@ export class Builder extends EventTarget {
         `   ${red("✗")} ${red("Build failed")} ${dim(`after ${buildTime}ms`)}`,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Build one esbuild pass over `entries`. When `splitting` is true, esbuild
+   * code splitting is enabled for the pass: each entry's dynamically-imported
+   * subtree is emitted as a separate content-hashed chunk (named via
+   * `esbuild.chunkNames`) loaded on demand, rather than inlined into the entry.
+   *
+   * The shared esbuild service is kept alive (`stop: false`); {@link build}
+   * stops it once after the final pass.
+   */
+  private async runPass(
+    entries: ResolvedEntryPoint[],
+    splitting: boolean,
+  ): Promise<esbuild.Metafile | undefined> {
+    const config: Parameters<typeof build>[0] = {
+      define: resolveDefines(this.manifest),
+      sourcemap: this.manifest.esbuild.sourcemap,
+      minify: this.manifest.esbuild.minify,
+      // esbuild's `{ in, out }` entry points reject unknown keys, so map to
+      // just those two — `splitting` is a felt-only field consumed above.
+      entryPoints: entries.map(({ in: input, out }) => ({ in: input, out })),
+      outdir: this.manifest.outDir,
+      external: this.manifest.esbuild.external,
+      supported: this.manifest.esbuild.supported,
+      tsconfigRaw: this.manifest.esbuild.tsconfigRaw,
+      logOverride: this.manifest.esbuild.logOverride,
+    };
+
+    if (splitting) {
+      config.splitting = true;
+      if (this.manifest.esbuild.chunkNames) {
+        config.chunkNames = this.manifest.esbuild.chunkNames;
+      }
+    }
+
+    // Split passes always capture metadata so repeated builds can remove
+    // superseded content-hashed chunks. Plain passes need it only when the
+    // caller requested a combined metafile.
+    if (splitting || this.manifest.esbuild.metafile) {
+      config.metafile = true;
+    }
+
+    const result = await build(config, { stop: false });
+
+    for (const output of result.outputFiles ?? []) {
+      const fileInfo = await Deno.stat(output.path);
+      const fileSize = formatFileSize(fileInfo.size);
+
+      console.log(
+        `   ${green("✓")} ${dim("Built")} ${blue(output.path)} ${
+          dim(`(${fileSize})`)
+        }`,
+      );
+    }
+    return result.metafile;
+  }
+
+  /** Retain the current and previous split outputs, pruning anything older. */
+  private async pruneStaleSplitOutputs(
+    metafile: esbuild.Metafile,
+    entries: ResolvedEntryPoint[],
+  ): Promise<void> {
+    const configuredEntryInputs = new Set(
+      entries.map((entry) => resolvePath(entry.in)),
+    );
+    const nextOutputs = new Set(
+      Object.entries(metafile.outputs)
+        // Configured entry filenames are stable and overwritten in place.
+        // Dynamic-import chunks may also carry an `entryPoint`, so distinguish
+        // them by comparing against felt's actual configured entry inputs.
+        .filter(([, output]) =>
+          output.entryPoint === undefined ||
+          !configuredEntryInputs.has(resolvePath(output.entryPoint))
+        )
+        .map(([outputPath]) => resolvePath(outputPath)),
+    );
+
+    this.splitPassAuxiliaryOutputGenerations.push(nextOutputs);
+    if (
+      this.splitPassAuxiliaryOutputGenerations.length <=
+        RETAINED_SPLIT_OUTPUT_GENERATIONS
+    ) {
+      return;
+    }
+
+    const staleOutputs = this.splitPassAuxiliaryOutputGenerations.shift()!;
+    const retainedOutputs = new Set(
+      this.splitPassAuxiliaryOutputGenerations.flatMap((
+        generation,
+      ) => [...generation]),
+    );
+    for (const stalePath of staleOutputs) {
+      if (retainedOutputs.has(stalePath)) continue;
+
+      // Metafile paths originate from esbuild, but keep deletion explicitly
+      // confined to felt's output directory.
+      const relative = relativePath(this.manifest.outDir, stalePath);
+      if (
+        relative === ".." || relative.startsWith(`..${pathSeparator}`) ||
+        isAbsolutePath(relative)
+      ) {
+        throw new Error(
+          `Refusing to remove output outside outDir: ${stalePath}`,
+        );
+      }
+
+      try {
+        await Deno.remove(stalePath);
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      }
     }
   }
 
@@ -133,6 +253,21 @@ export class Builder extends EventTarget {
       JSON.stringify(manifest, null, 2) + "\n",
     );
   }
+}
+
+const pathSeparator = Deno.build.os === "windows" ? "\\" : "/";
+const RETAINED_SPLIT_OUTPUT_GENERATIONS = 2;
+
+function mergeMetafiles(metafiles: esbuild.Metafile[]): esbuild.Metafile {
+  const inputs: esbuild.Metafile["inputs"] = {};
+  const outputs: esbuild.Metafile["outputs"] = {};
+
+  for (const metafile of metafiles) {
+    Object.assign(inputs, metafile.inputs);
+    Object.assign(outputs, metafile.outputs);
+  }
+
+  return { inputs, outputs };
 }
 
 function resolveDefines(
@@ -196,8 +331,14 @@ function otelBrowserPlatformPlugin(): esbuild.Plugin {
 // Exposes `esbuild`'s build functionality, applying
 // default deno resolution plugins, browser platform,
 // and ESM bundling format.
+//
+// `stop` (default true) tears down the shared esbuild service after the build.
+// A caller running several builds back-to-back — e.g. felt's own multi-pass
+// Builder — passes `{ stop: false }` on all but the last and stops the service
+// itself once at the end, so it is not torn down and re-spawned per pass.
 export async function build(
   config: Parameters<typeof esbuild.build>[0],
+  { stop = true }: { stop?: boolean } = {},
 ): Promise<ReturnType<typeof esbuild.build>> {
   const fullConfig = Object.assign({}, config, {
     plugins: [
@@ -211,6 +352,6 @@ export async function build(
   });
 
   const result = await esbuild.build(fullConfig);
-  esbuild.stop();
+  if (stop) esbuild.stop();
   return result;
 }

@@ -20,6 +20,7 @@ export interface SerializedModuleBytes {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: CachedPatternCoverageSpan[];
+  policyManifests?: readonly unknown[];
 }
 
 export interface CachedPatternCoverageSpan {
@@ -36,6 +37,7 @@ export interface CompiledModuleArtifact {
   js: string;
   sourceMap?: unknown;
   patternCoverageSpans?: CachedPatternCoverageSpan[];
+  policyManifests?: readonly unknown[];
 }
 
 export interface ModuleByteCache {
@@ -85,6 +87,9 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     }
     if (artifact.patternCoverageSpans !== undefined) {
       size += JSON.stringify(artifact.patternCoverageSpans).length;
+    }
+    if (artifact.policyManifests !== undefined) {
+      size += JSON.stringify(artifact.policyManifests).length;
     }
     return size;
   }
@@ -179,6 +184,9 @@ export class ProcessModuleByteCache implements ModuleByteCache {
           copyPatternCoverageSpan,
         );
       }
+      if (artifact.policyManifests !== undefined) {
+        serialized.policyManifests = artifact.policyManifests;
+      }
       out.push(serialized);
     }
     return out;
@@ -200,10 +208,17 @@ export class ProcessModuleByteCache implements ModuleByteCache {
         e.patternCoverageSpans !== undefined &&
         patternCoverageSpans === undefined
       ) continue;
+      if (
+        e.policyManifests !== undefined &&
+        !Array.isArray(e.policyManifests)
+      ) continue;
       const artifact: CompiledModuleArtifact = { js: e.js };
       if (e.sourceMap !== undefined) artifact.sourceMap = e.sourceMap;
       if (patternCoverageSpans !== undefined) {
         artifact.patternCoverageSpans = patternCoverageSpans;
+      }
+      if (e.policyManifests !== undefined) {
+        artifact.policyManifests = [...e.policyManifests];
       }
       this.insert(
         e.key,
@@ -232,6 +247,9 @@ function artifactFromModule(
     artifact.patternCoverageSpans = module.patternCoverageSpans.map(
       copyPatternCoverageSpan,
     );
+  }
+  if (module.policyManifests !== undefined) {
+    artifact.policyManifests = [...module.policyManifests];
   }
   return artifact;
 }

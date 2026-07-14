@@ -7,6 +7,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import "ses";
 import { createCallbackCompartmentGlobals } from "./compartment-globals.ts";
 import { hardenVerifiedFunction } from "./function-hardening.ts";
+import { sanitizeLocaleMethods } from "./locale-taming.ts";
 
 const logger = getLogger("ses-runtime");
 
@@ -49,6 +50,10 @@ class SESInternals {
 
   loadSourceMap(filename: string, sourceMap: SourceMap) {
     this.sourceMaps.load(filename, sourceMap);
+  }
+
+  loadSourceMapLazy(filename: string, provider: () => SourceMap | undefined) {
+    this.sourceMaps.loadLazy(filename, provider);
   }
 
   mapPosition(
@@ -234,6 +239,21 @@ export class SESRuntime extends EventTarget {
     this.internals.loadSourceMap(filename, sourceMap);
   }
 
+  /**
+   * Deferred variant of {@link loadSourceMap}: `provider` runs (once) on the
+   * first lookup that needs `filename`. The ESM boot path registers its
+   * composed bundle/per-module maps this way — composition is a per-segment
+   * VLQ transcode over every module, and its only consumers (error mapping,
+   * debug `fn.src` resolution) are on-demand, so boots that never look up a
+   * frame never pay it (CT-1819).
+   */
+  loadSourceMapLazy(
+    filename: string,
+    provider: () => SourceMap | undefined,
+  ): void {
+    this.internals.loadSourceMapLazy(filename, provider);
+  }
+
   parseStack(stack: string): string {
     return this.internals.parseStack(stack);
   }
@@ -303,6 +323,9 @@ function ensureSESInitialized(lockdownEnabled: boolean): void {
   if (typeof lockdownFn !== "function") {
     throw new Error("SES lockdown() is unavailable");
   }
+  // Vetted shim — must precede lockdown() (the prototypes freeze there).
+  // Pairs with `localeTaming: "unsafe"` below; see locale-taming.ts.
+  sanitizeLocaleMethods();
   lockdownFn(DEFAULT_LOCKDOWN_OPTIONS);
   globalState.lockdownInitialized = true;
   sesInitialized = true;
@@ -331,7 +354,12 @@ const DEFAULT_LOCKDOWN_OPTIONS: SESLockdownOptions = {
   reporting: "none",
   unhandledRejectionTrapping: "report",
   regExpTaming: "safe",
-  localeTaming: "safe",
+  // "unsafe" here does NOT mean ambient locale access: sanitizeLocaleMethods()
+  // (called just before lockdown) replaces every method "safe" would amputate
+  // with a pinned-default wrapper (locale "en-US", Date timeZone "UTC",
+  // explicit arguments honored). "safe" would clobber those wrappers with
+  // argument-ignoring non-locale aliases. See locale-taming.ts.
+  localeTaming: "unsafe",
   consoleTaming: "unsafe",
   overrideTaming: "severe",
   stackFiltering: "concise",
