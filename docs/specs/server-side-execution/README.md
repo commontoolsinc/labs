@@ -304,6 +304,18 @@ the named target/path lookup over the durable declared, current-known, and
 materializer rows written with scheduler observations. A live worker can also
 consult its registration-time static surface before the first run.
 
+The durable action id is a pre-instantiation locator, not an instruction to
+execute that exact historical action. Pattern updates keep the piece root and
+replace its `patternIdentity`; starting that root therefore loads the current
+pattern, cancels the old registrations, and registers the current action ids.
+Exact-id snapshot matching makes observations for the previous pattern inert,
+so new actions without matching snapshots start fresh. After instantiation,
+live or live+durable registrations supersede durable-only rows for that same
+piece. Durable-only rows for another piece remain eligible because a redirected
+target may legitimately be owned by that other piece. Thus an old writer row
+can still locate the stable piece that must be started, but cannot remain that
+piece's executable candidate once its current graph is available.
+
 If a demanded piece has no usable writer row yet, the client interest already
 identifies the piece. The executor instantiates that piece, validates its
 transformer-emitted root binding and declared surfaces, runs it under client

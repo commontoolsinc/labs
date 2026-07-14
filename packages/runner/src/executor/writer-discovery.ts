@@ -77,9 +77,22 @@ export async function prepareExecutorDemandPiece(options: {
   const before = await lookup();
   await options.instantiate();
   const after = await lookup();
+  // A durable-only row for this piece was sufficient to locate its stable
+  // root before startup, but it may name an action from an older
+  // patternIdentity. Once the current pattern is instantiated, only its live
+  // registrations (live or live+durable) can identify this piece's executable
+  // actions. Preserve durable-only candidates for other pieces: redirected
+  // targets can legitimately be owned elsewhere.
+  const currentWriters = after.filter((writer) =>
+    writer.pieceId !== options.pieceId || writer.source !== "durable"
+  );
   return {
     pieceId: options.pieceId,
     indexMiss: before.length === 0,
-    writers: (after.length > 0 ? after : before).map(writerIdentity),
+    // Never fall back to the pre-instantiation row here. An empty current view
+    // can mean that the updated pattern removed or redirected the writer; the
+    // old action identity is not executable merely because it located the
+    // stable piece root.
+    writers: currentWriters.map(writerIdentity),
   };
 }

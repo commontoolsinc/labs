@@ -328,6 +328,10 @@ surface; producer lookup uses declared, current-known, and materializer rows.
 4. Combine durable observation-backed rows with the live scheduler's
    registration-time static surface when a Worker is already present. Do not
    manufacture a clean durable observation merely to index a never-run action.
+   After instantiating a demanded piece, its live or live+durable registrations
+   supersede durable-only rows for that same piece: those rows may name actions
+   from a previous pattern identity. Preserve durable-only candidates owned by
+   other pieces so redirected targets still resolve to their real owner.
 5. Replace an action's dynamic write rows on re-observation; never accumulate
    stale targets.
 6. On an index miss, fail open to piece-root instantiation and discovery. Do
@@ -338,6 +342,9 @@ surface; producer lookup uses declared, current-known, and materializer rows.
 - [x] A direct result target returns its producing action from the durable row
       after observation and from the live static surface before first run.
 - [x] A side-write target and materializer target return the correct action.
+- [x] A pattern update retains the stable piece root, rotates action identity,
+      and excludes the previous pattern's durable-only action after the current
+      graph is instantiated.
 - [x] A pre-existing target redirected from a computation returns the current
       writer even though its creator is unrelated.
 - [x] Multiple candidate writers are all returned deterministically.
