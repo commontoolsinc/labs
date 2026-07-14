@@ -16,6 +16,7 @@ import {
 import { Module, Pattern } from "./builder/types.ts";
 import { readStoredCfcMetadata } from "./cfc/metadata.ts";
 import type { CfcMetadata } from "./cfc/types.ts";
+import { ColdLoadNegativeMemo } from "./cold-load-negative-memo.ts";
 import {
   buildSourceDocs,
   COMPILED_INTEGRITY_ATOM,
@@ -36,6 +37,10 @@ import {
 } from "./compilation-cache/cell-cache.ts";
 import { createRef } from "./create-ref.ts";
 import { interleaveCompileYield } from "./harness/compile-interleave.ts";
+import {
+  isDeterministicCompileFailure,
+  markDeterministicCompileFailure,
+} from "./harness/compile-failure.ts";
 import { compilerStack } from "./harness/deferred-compiler-stack.ts";
 import type {
   CacheableModule,
@@ -269,6 +274,12 @@ export class PatternManager {
     string,
     Promise<Pattern | undefined>
   >();
+  // Session-local negative memo for compile failures that are deterministic
+  // over a fully loaded, Merkle-verified source closure. Verification failure,
+  // absent/incomplete storage, resolution, and evaluation remain retryable.
+  // Keyed by `${space}\0${entryIdentity}` and runtimeVersion so a version bump
+  // re-opens the attempt. Bounded FIFO to cap memory.
+  #coldLoadNegativeMemo = new ColdLoadNegativeMemo();
   // Content-hash → { compiled pattern, the space its closure was first written
   // into }. The space is tracked so a cross-space cache hit can replicate the
   // source/compiled closure into the requested space (see compileOrGetPattern):
@@ -1195,8 +1206,17 @@ export class PatternManager {
       this.esmCacheStats.byIdentityHits++;
       return live;
     }
-    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
+    // Check before single-flight: follower retries re-enter from the top and
+    // should observe a deterministic failure recorded by the leader.
     const key = `${space}\0${entryIdentity}`;
+    const runtimeVersion = moduleByteCacheRuntimeVersion(
+      await getCompileCacheRuntimeVersion(),
+      { patternCoverage: this.patternCoverageFor() !== undefined },
+    );
+    if (this.#coldLoadNegativeMemo.suppresses(key, runtimeVersion)) {
+      return undefined;
+    }
+    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
     const pending = this.inProgressByIdentityLoads.get(key);
     if (pending === undefined) {
       const load = this.loadPatternByIdentityFromStorage(
@@ -1345,6 +1365,26 @@ export class PatternManager {
     }
   }
 
+  /** Record one deterministic compile failure for this session/version. */
+  private memoizeColdLoadFailure(
+    space: MemorySpace,
+    entryIdentity: string,
+    runtimeVersion: string | undefined,
+    reason: string,
+  ): void {
+    this.#coldLoadNegativeMemo.add(
+      `${space}\0${entryIdentity}`,
+      runtimeVersion,
+    );
+    logger.error("load-pattern-by-identity-negative-memo", () => [
+      `entry=${entryIdentity}`,
+      `space=${space}`,
+      `runtimeVersion=${runtimeVersion}`,
+      `reason=${reason}`,
+      "further loads are suppressed for this runtime session/version",
+    ]);
+  }
+
   /**
    * Runtime-version-bump recovery for a content-addressed pattern reference:
    * recompile from the verified source closure, letting fabric imports refetch
@@ -1402,8 +1442,10 @@ export class PatternManager {
         },
       );
       if (compiled.entryIdentity !== entryIdentity) {
-        throw new Error(
-          `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
+        throw markDeterministicCompileFailure(
+          new Error(
+            `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
+          ),
         );
       }
       const cachedModules: CachedCompiledModule[] = compiled.modules.map(
@@ -1460,6 +1502,23 @@ export class PatternManager {
         `symbol=${symbol}`,
         String(error),
       ]);
+      // Only engine/local failures explicitly classified after source-closure
+      // verification are memoized. Resolution and evaluation errors carry no
+      // marker and are retried on the next call.
+      // Coverage compilation calls into the runtime-supplied collector while
+      // the compiler is running. A collector failure is not a pure function of
+      // source bytes, so coverage-enabled attempts deliberately fail open.
+      if (
+        patternCoverage === undefined &&
+        isDeterministicCompileFailure(error)
+      ) {
+        this.memoizeColdLoadFailure(
+          space,
+          entryIdentity,
+          cacheOpts?.runtimeVersion,
+          String(error),
+        );
+      }
       return undefined;
     }
   }
