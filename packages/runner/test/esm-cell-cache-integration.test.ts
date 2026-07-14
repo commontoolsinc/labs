@@ -10,6 +10,7 @@ import type {
   CommitError,
   IExtendedStorageTransaction,
 } from "../src/storage/interface.ts";
+import type { Pattern } from "../src/builder/types.ts";
 import {
   getCompileCacheRuntimeVersion,
   loadCompiledClosure,
@@ -71,15 +72,14 @@ describe("ESM compile via content-addressed cell cache", () => {
     await storageManager?.close();
   });
 
-  const run = async (compiled: unknown, value: number): Promise<unknown> => {
+  const run = async (compiled: Pattern, value: number): Promise<unknown> => {
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       `cell-cache run ${value}`,
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const result = runtime.run(tx, compiled as any, { value }, resultCell);
+    const result = runtime.run(tx, compiled, { value }, resultCell);
     await tx.commit();
     tx = runtime.edit();
     await result.pull();
