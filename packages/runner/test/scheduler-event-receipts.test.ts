@@ -18,7 +18,11 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { resolveLink } from "../src/link-resolution.ts";
-import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
+import {
+  dispatchQueuedEvent,
+  type SchedulerEventExecutionState,
+} from "../src/scheduler/events.ts";
+import type { QueuedEvent } from "../src/scheduler/types.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
@@ -169,14 +173,37 @@ function resolvedStreamLink(streamCell: Cell<unknown>, runtime: Runtime) {
   );
 }
 
-async function processNextQueuedEvent(runtime: Runtime): Promise<void> {
-  const scheduler = runtime.scheduler as unknown as {
-    eventQueue: Array<Parameters<typeof dispatchQueuedEvent>[1]>;
-    eventExecutionState: Parameters<typeof dispatchQueuedEvent>[0];
+function schedulerEventInternals(
+  scheduler: Runtime["scheduler"],
+): {
+  eventQueue: QueuedEvent[];
+  eventExecutionState: SchedulerEventExecutionState;
+} {
+  const eventQueue = Reflect.get(scheduler, "eventQueue");
+  const eventExecutionState = Reflect.get(scheduler, "eventExecutionState");
+  if (!Array.isArray(eventQueue)) {
+    throw new TypeError("Scheduler internals invalid event queue");
+  }
+  if (
+    typeof eventExecutionState !== "object" ||
+    eventExecutionState === null ||
+    Reflect.get(eventExecutionState, "eventQueue") !== eventQueue
+  ) {
+    throw new TypeError("Scheduler internals invalid event execution state");
+  }
+  return {
+    eventQueue: eventQueue as QueuedEvent[],
+    eventExecutionState: eventExecutionState as SchedulerEventExecutionState,
   };
-  const queuedEvent = scheduler.eventQueue[0];
+}
+
+async function processNextQueuedEvent(runtime: Runtime): Promise<void> {
+  const { eventQueue, eventExecutionState } = schedulerEventInternals(
+    runtime.scheduler,
+  );
+  const queuedEvent = eventQueue[0];
   if (queuedEvent !== undefined) {
-    await dispatchQueuedEvent(scheduler.eventExecutionState, queuedEvent);
+    await dispatchQueuedEvent(eventExecutionState, queuedEvent);
   }
 }
 
