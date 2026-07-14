@@ -209,7 +209,7 @@ describe("CFC concept-level integrity floors (D5)", () => {
       // satisfaction. The canonical Concept atom is an OBJECT; a Concept-shaped
       // array is not the canonical shape and must fail closed to ordinary
       // matching (cubic review-run a177bba7).
-      const arrayGuard = [] as unknown as Record<string, unknown>;
+      const arrayGuard: unknown[] & { type?: unknown; uri?: unknown } = [];
       arrayGuard.type = concept(GPS_CONCEPT).type;
       arrayGuard.uri = GPS_CONCEPT;
       // Before the fix `conceptGuard` returned `{ uri }` here.
