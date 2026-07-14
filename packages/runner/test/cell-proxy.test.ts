@@ -449,24 +449,34 @@ describe("createProxy", () => {
     expect(c.withTx(tx).get()).toEqual([1, 2, undefined, undefined]);
   });
 
-  it.skip("should allow changing array by splicing", () => {
+  it("should allow changing array by splicing", async () => {
+    // Seed the cell in its own committed transaction so the transaction under
+    // test records only the writes done by splice().
+    const setupTx = runtime.edit();
     const c = runtime.getCell<number[]>(
       space,
       "should allow changing array by splicing",
+      undefined,
+      setupTx,
     );
     c.set([1, 2, 3]);
-    const proxy = c.getAsQueryResult();
+    await setupTx.commit();
+
+    const proxy = c.withTx(tx).getAsQueryResult([], tx, true);
     proxy.splice(1, 1, 4, 5);
-    expect(c.get()).toEqual([1, 4, 5, 3]);
+    expect(c.withTx(tx).get()).toEqual([1, 4, 5, 3]);
     const log = txToReactivityLog(tx);
     const cLink = c.getAsNormalizedFullLink();
-    expect(log.writes.length).toBe(3);
-    expect(log.writes[0].id).toBe(cLink.id);
-    expect(log.writes[0].path).toEqual(["1"]);
-    expect(log.writes[1].id).toBe(cLink.id);
-    expect(log.writes[1].path).toEqual(["2"]);
-    expect(log.writes[2].id).toBe(cLink.id);
-    expect(log.writes[2].path).toEqual(["3"]);
+    const cellWrites = log.writes
+      .filter((write) => write.id === cLink.id)
+      .map((write) => write.path);
+    expect(cellWrites).toContainEqual(["value", "1"]);
+    expect(cellWrites).toContainEqual(["value", "2"]);
+    expect(cellWrites).toContainEqual(["value", "3"]);
+    expect(cellWrites).toContainEqual(["value", "length"]);
+    // splice() returns the removed elements as a fresh array stored in its
+    // own document, so those writes land on a different document id.
+    expect(log.writes.some((write) => write.id !== cLink.id)).toBe(true);
   });
 });
 
