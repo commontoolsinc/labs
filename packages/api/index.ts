@@ -2406,7 +2406,10 @@ export type UnlessFunction = <T = any, U = any>(
   fallback: FactoryInput<U>,
 ) => Reactive<T | U>;
 
-/** @deprecated Use generateText() or generateObject() instead */
+/**
+ * @deprecated Use `generateTextStream()`, `generateObjectStream<T>()`, or
+ * `llmDialog<T>()`. Retained for source and persisted-graph compatibility.
+ */
 export type LLMFunction = (
   params: FactoryInput<BuiltInLLMParams>,
 ) => Reactive<BuiltInLLMState>;
@@ -3147,7 +3150,10 @@ export declare const ifElse: IfElseFunction;
 export declare const when: WhenFunction;
 export declare const unless: UnlessFunction;
 export declare const uiVariant: UIVariantFunction;
-/** @deprecated Use generateText() or generateObject() instead */
+/**
+ * @deprecated Use `generateTextStream()`, `generateObjectStream<T>()`, or
+ * `llmDialog<T>()`. Retained for source and persisted-graph compatibility.
+ */
 export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;

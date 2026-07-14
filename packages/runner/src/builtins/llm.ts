@@ -702,7 +702,9 @@ async function pullContextCells(
 }
 
 /**
- * Generate data via an LLM.
+ * Legacy stateful generation producer retained for persisted graph
+ * compatibility. New pattern code uses the direct generation APIs or
+ * `llmDialog<T>()`.
  *
  * Returns the complete result as `result` and the incremental result as
  * `partial`. `pending` is true while a request is pending.

@@ -128,6 +128,7 @@ export const compileAndRun = createNodeFactory({
   implementation: "compileAndRunResult",
 }) as CompileAndRunFunction;
 
+/** @internal Legacy public factory retained for persisted graph compatibility. */
 export const llm = createNodeFactory({
   type: "ref",
   implementation: "llm",
