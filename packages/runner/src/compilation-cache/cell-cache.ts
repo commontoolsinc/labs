@@ -352,12 +352,28 @@ export interface SourceDocVerification {
  * checking it equals the identity the document is keyed by. This is the
  * content-addressed analog of the structural graph verifier: because the
  * identity is a one-way Merkle hash over `(source, import identities)`, a
- * single document's content does not determine its key — the whole closure
- * must recompute consistently. Tampering with any source, or rewiring an
- * import link, makes the recomputed identity diverge from the key.
+ * single document's content does not determine its key — the reachable
+ * closure must recompute consistently. Tampering with any source, or rewiring
+ * an import link, makes the recomputed identity diverge from the key.
  *
- * Extra unrelated documents in the set are harmless: a module's identity
- * depends only on its own reachable closure, so siblings do not perturb it.
+ * Each document is verified against **its own view**: the documents reachable
+ * from it over authored-import edges (root links excluded — a
+ * {@link ROOT_LINK_SPECIFIER} edge is never part of any module's Merkle
+ * preimage). One closure may legally hold several generations of the same
+ * ambient filename (e.g. two seals' injected `cfc.ts`, each root-linked by a
+ * different entry): identities are entry-point independent, so a shared
+ * dependency document keeps whichever seal's root links wrote it last, and a
+ * link walk then reaches sibling generations. Hashing the whole closure as
+ * one program would collide those filenames and permanently fail one
+ * generation; per-view recomputation verifies each against the emission
+ * that produced it. Within a single view, filenames are unique by
+ * construction (one program emission cannot contain two files at one path) —
+ * a view that violates this cannot be attributed to any emission, and its
+ * root document is rejected.
+ *
+ * Extra unrelated documents in the set are harmless to their siblings: a
+ * module's identity depends only on its own reachable view. Every document in
+ * the set is still verified (in its own view).
  */
 export function verifySourceDocs(
   entryIdentity: string,
@@ -369,25 +385,66 @@ export function verifySourceDocs(
     return { ok: false, mismatches: [], missing: [entryIdentity] };
   }
 
-  const files = [...docsByIdentity.values()].map((doc) => ({
-    name: doc.filename,
-    contents: doc.code,
-  }));
-  const recomputed = computeModuleHashes(
-    { main: entry.filename, files },
-    { runtimeFingerprint },
-  );
-
-  const mismatches: string[] = [];
   const missing: string[] = [];
-  for (const [identity, doc] of docsByIdentity) {
-    if (recomputed.get(doc.filename) !== identity) {
-      mismatches.push(identity);
-    }
+  for (const doc of docsByIdentity.values()) {
     for (const imp of doc.imports) {
       if (!docsByIdentity.has(imp.identity)) missing.push(imp.identity);
     }
   }
+
+  // identity → whether its recomputed hash matches its key. A verdict reached
+  // inside one view holds in every view (entry-point independence), so each
+  // document is hashed at most once.
+  const verdicts = new Map<string, boolean>();
+  for (const [rootIdentity, rootDoc] of docsByIdentity) {
+    if (verdicts.has(rootIdentity)) continue;
+
+    // The root's view: BFS over authored-import edges only.
+    const viewIds: string[] = [];
+    const seen = new Set<string>();
+    const queue = [rootIdentity];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const doc = docsByIdentity.get(id);
+      if (doc === undefined) continue; // dangling edge — recorded in `missing`
+      viewIds.push(id);
+      for (const imp of doc.imports) {
+        if (imp.specifier.startsWith(ROOT_LINK_SPECIFIER)) continue;
+        queue.push(imp.identity);
+      }
+    }
+
+    const files = viewIds.map((id) => {
+      const doc = docsByIdentity.get(id)!;
+      return { name: doc.filename, contents: doc.code };
+    });
+    if (new Set(files.map((f) => f.name)).size !== files.length) {
+      // Duplicate filename within one view: not attributable to any emission.
+      // Only the root is condemned — an intact member still verifies in its
+      // own (necessarily smaller) view when the loop reaches it.
+      verdicts.set(rootIdentity, false);
+      continue;
+    }
+
+    const recomputed = computeModuleHashes(
+      { main: rootDoc.filename, files },
+      { runtimeFingerprint },
+    );
+    for (const id of viewIds) {
+      if (!verdicts.has(id)) {
+        verdicts.set(
+          id,
+          recomputed.get(docsByIdentity.get(id)!.filename) === id,
+        );
+      }
+    }
+  }
+
+  const mismatches = [...verdicts.entries()]
+    .filter(([, ok]) => !ok)
+    .map(([identity]) => identity);
 
   return {
     ok: mismatches.length === 0 && missing.length === 0,
@@ -619,10 +676,22 @@ export async function loadVerifiedSourceClosure(
     runtimeFingerprint,
   );
   if (!verification.ok) {
+    // Name the offenders (bounded): a bare count forces whoever hits this
+    // into probe archaeology to find which doc failed and why.
+    const describe = (identities: readonly string[]) =>
+      identities.slice(0, 4)
+        .map((id) => `${id}(${closure.get(id)?.filename ?? "absent"})`)
+        .join(",") + (identities.length > 4 ? ",…" : "");
     logger.warn("source-closure-verify-failed", () => [
       `entry=${entryIdentity}`,
-      `mismatches=${verification.mismatches.length}`,
-      `missing=${verification.missing.length}`,
+      `mismatches=${verification.mismatches.length}` +
+      (verification.mismatches.length > 0
+        ? ` [${describe(verification.mismatches)}]`
+        : ""),
+      `missing=${verification.missing.length}` +
+      (verification.missing.length > 0
+        ? ` [${describe(verification.missing)}]`
+        : ""),
     ]);
     return undefined;
   }

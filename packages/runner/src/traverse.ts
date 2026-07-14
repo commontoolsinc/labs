@@ -3984,10 +3984,18 @@ export class SchemaObjectTraverser<V extends FabricValue>
           } else if (this.isValidType(curSelector.schema!, "null")) {
             arrayObj[index] = null;
           } else {
-            // this array is invalid; one or more items do not match the schema
+            // This array is invalid; one or more items do not match the
+            // schema — the ENTIRE array reads as invalid for this caller.
+            // Name the failing index + doc so the mismatch is diagnosable
+            // without probe archaeology (2026-07-10 board outage: a blanked
+            // array with a bare mismatch log hid WHICH element was at fault).
             logger.info(
               "traverse",
-              () => ["Item doesn't match array schema", curDoc, curSelector],
+              () => [
+                "Array element does not match the item schema — voiding the whole array read",
+                `index=${index}`,
+                curDoc.address,
+              ],
             );
             valid = false;
           }
