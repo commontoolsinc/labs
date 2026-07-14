@@ -20,9 +20,15 @@ Deno.test("parsePresentationConfig stays disabled without an output directory", 
 });
 
 Deno.test("Page runs the navigation hook after goto and reload", async () => {
+  type WrappedAstralPage = ConstructorParameters<typeof Page>[0];
+  type NavigationPage = Pick<
+    WrappedAstralPage,
+    "goto" | "reload" | "timeout"
+  >;
+
   const navigations: string[] = [];
-  const astralPage = {
-    timeout: 0,
+  const astralPage: NavigationPage = {
+    timeout: 10000,
     goto: (url: string) => {
       navigations.push(url);
       return Promise.resolve();
@@ -33,7 +39,7 @@ Deno.test("Page runs the navigation hook after goto and reload", async () => {
     },
   };
   const page = new Page(
-    astralPage as unknown as ConstructorParameters<typeof Page>[0],
+    astralPage as WrappedAstralPage,
     { timeout: 10 },
   );
   let hookCalls = 0;
