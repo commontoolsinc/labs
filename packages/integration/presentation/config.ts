@@ -3,6 +3,7 @@ export type PresentationConfig =
   | {
     enabled: true;
     outputDir: string;
+    videoFileName: string;
     viewport: { width: number; height: number };
     typingDelayMs: number;
     cursorTravelMs: number;
@@ -39,6 +40,13 @@ export function parsePresentationConfig(
   const outputDir = env.CF_DEMO_OUTPUT_DIR;
   if (!outputDir) return { enabled: false };
 
+  const demoName = env.CF_DEMO_NAME ?? "demo";
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(demoName)) {
+    throw new Error(
+      `CF_DEMO_NAME must be a safe filename stem, got "${demoName}"`,
+    );
+  }
+
   const viewportRaw = env.CF_DEMO_VIEWPORT ?? "1280x720";
   const match = /^(\d+)x(\d+)$/.exec(viewportRaw);
   if (!match) {
@@ -60,6 +68,7 @@ export function parsePresentationConfig(
   return {
     enabled: true,
     outputDir,
+    videoFileName: `${demoName}.mp4`,
     viewport: { width, height },
     typingDelayMs: positiveInt(env, "CF_DEMO_TYPING_DELAY_MS", 55),
     cursorTravelMs: positiveInt(env, "CF_DEMO_CURSOR_TRAVEL_MS", 350),

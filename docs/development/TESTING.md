@@ -99,8 +99,9 @@ deno task demo patterns lunch-poll-vote --output=tmp/demos/lunch-poll.mp4
 
 The file filter must resolve to exactly one `*.test.ts` file. The command runs
 that complete file because its `it` blocks may share suite setup and browser
-state. It writes an MP4 and a versioned diagnostic manifest beneath
-`tmp/demos/`; `--output=PATH` copies the final MP4 to a chosen location.
+state. It writes a test-named MP4 (for example, `lunch-poll-vote.mp4`) and a
+versioned diagnostic manifest beneath `tmp/demos/`; `--output=PATH` copies the
+final MP4 to a chosen location.
 
 FFmpeg must be installed and available as `ffmpeg`, or its path must be set in
 `FFMPEG`. Normal integration tests do not require FFmpeg. Useful options are

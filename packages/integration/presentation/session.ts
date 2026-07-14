@@ -210,7 +210,10 @@ export class PresentationSession {
         participant.manifest.streamPath = streamPath;
         streams.push(streamPath);
       }
-      const outputPath = join(this.#config.outputDir, "video.mp4");
+      const outputPath = join(
+        this.#config.outputDir,
+        this.#config.videoFileName,
+      );
       await composeParticipants({ ffmpeg: command, streams, outputPath });
       this.#manifest.outputPath = outputPath;
       this.#manifest.status = this.#manifest.status === "capture-failed"

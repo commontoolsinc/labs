@@ -80,13 +80,14 @@ export async function runDemo(
   rootDir = Deno.cwd(),
 ): Promise<number> {
   const testFile = await resolveDemoTest(rootDir, options);
+  const testName = testFile.replace(/\.test\.ts$/, "");
   await findFfmpeg();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const runDir = resolve(
     rootDir,
     "tmp",
     "demos",
-    `${options.packageName}-${testFile.replace(/\.test\.ts$/, "")}-${stamp}`,
+    `${options.packageName}-${testName}-${stamp}`,
   );
   await Deno.mkdir(runDir, { recursive: true });
   const integrationArgs = ["task", "integration"];
@@ -98,6 +99,7 @@ export async function runDemo(
     ...Deno.env.toObject(),
     HEADLESS: "1",
     CF_DEMO_OUTPUT_DIR: runDir,
+    CF_DEMO_NAME: testName,
     ...(options.keepFrames ? { CF_DEMO_KEEP_FRAMES: "1" } : {}),
     ...(options.viewport ? { CF_DEMO_VIEWPORT: options.viewport } : {}),
   };
@@ -130,11 +132,13 @@ export async function runDemo(
     return status.code;
   }
 
-  const generatedVideo = join(runDir, "video.mp4");
+  const generatedVideo = join(runDir, `${testName}.mp4`);
   try {
     await Deno.stat(generatedVideo);
   } catch (cause) {
-    throw new Error("the test passed but did not produce video.mp4", { cause });
+    throw new Error(`the test passed but did not produce ${testName}.mp4`, {
+      cause,
+    });
   }
   let finalPath = generatedVideo;
   if (options.outputPath) {

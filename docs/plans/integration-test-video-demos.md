@@ -222,7 +222,7 @@ Default successful output:
 
 ```text
 tmp/demos/<package>-<test-file>-<timestamp>/
-  video.mp4
+  <test-file>.mp4
   manifest.json
 ```
 

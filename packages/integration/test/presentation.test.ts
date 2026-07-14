@@ -19,11 +19,30 @@ Deno.test("parsePresentationConfig supplies deterministic defaults", () => {
   assertEquals(config.enabled, true);
   if (!config.enabled) throw new Error("expected enabled config");
   assertEquals(config.outputDir, "/tmp/demo");
+  assertEquals(config.videoFileName, "demo.mp4");
   assertEquals(config.viewport, { width: 1280, height: 720 });
   assertEquals(config.typingDelayMs, 55);
   assertEquals(config.cursorTravelMs, 350);
   assertEquals(config.postResultHoldMs, 800);
   assertEquals(config.jpegQuality, 85);
+});
+
+Deno.test("parsePresentationConfig names and validates the output video", () => {
+  const config = parsePresentationConfig({
+    CF_DEMO_OUTPUT_DIR: "/tmp/demo",
+    CF_DEMO_NAME: "lunch-poll-vote",
+  });
+  if (!config.enabled) throw new Error("expected enabled config");
+  assertEquals(config.videoFileName, "lunch-poll-vote.mp4");
+  assertThrows(
+    () =>
+      parsePresentationConfig({
+        CF_DEMO_OUTPUT_DIR: "/tmp/demo",
+        CF_DEMO_NAME: "../escape",
+      }),
+    Error,
+    "safe filename stem",
+  );
 });
 
 Deno.test("parsePresentationConfig validates numeric overrides", () => {
