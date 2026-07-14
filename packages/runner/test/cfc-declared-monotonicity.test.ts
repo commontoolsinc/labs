@@ -99,6 +99,10 @@ type PersistedEntry = {
   };
 };
 
+type PersistedDocument = {
+  cfc?: { labelMap?: { entries: PersistedEntry[] } };
+};
+
 const makeRuntime = (opts: {
   storageManager: ReturnType<typeof StorageManager.emulate>;
   cfcEnforcementMode?: "disabled" | "observe" | "enforce-explicit";
@@ -119,14 +123,12 @@ const makeRuntime = (opts: {
 
 const persistedEntriesFor = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
-  id: string,
+  id: URI,
 ): PersistedEntry[] => {
-  const replica = storageManager.open(signer.did()).replica as unknown as {
-    getDocument(id: string): {
-      cfc?: { labelMap?: { entries: PersistedEntry[] } };
-    } | undefined;
-  };
-  return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  const document = storageManager.open(signer.did()).replica.getDocument(id) as
+    | PersistedDocument
+    | undefined;
+  return document?.cfc?.labelMap?.entries ?? [];
 };
 
 const declaredEntryAt = (
@@ -146,7 +148,7 @@ const commitWrite = async (
   schema: JSONSchema | undefined,
   value: unknown,
 ): Promise<
-  { error?: unknown; docId: string; diagnostics: string[] }
+  { error?: unknown; docId: URI; diagnostics: string[] }
 > => {
   const tx = runtime.edit();
   const cell = runtime.getCell(signer.did(), name, schema, tx);
@@ -175,13 +177,13 @@ const commitWrite = async (
  */
 const rewriteStoredEntries = async (
   seeder: Runtime,
-  docId: string,
+  docId: URI,
   mutate: (entries: PersistedEntry[]) => PersistedEntry[],
 ): Promise<void> => {
   const tx = seeder.edit();
   const document = tx.readOrThrow({
     space: signer.did(),
-    id: docId as URI,
+    id: docId,
     type: "application/json",
     path: [],
   }) as { value?: unknown; cfc?: { labelMap: { entries: PersistedEntry[] } } };
@@ -196,7 +198,7 @@ const rewriteStoredEntries = async (
   cloned.cfc.labelMap.entries = mutate(cloned.cfc.labelMap.entries);
   tx.writeOrThrow({
     space: signer.did(),
-    id: docId as URI,
+    id: docId,
     type: "application/json",
     path: [],
   }, cloned as never);

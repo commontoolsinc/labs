@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-declared-monotonicity.test.ts": [
-    "124:60:1y3k8n",
-  ],
   "packages/runner/test/cfc-declared-observes.test.ts": [
     "50:56:10q9jc",
     "258:8:1ki6ke3",
