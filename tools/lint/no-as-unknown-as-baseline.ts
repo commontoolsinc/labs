@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/scheduler-retries.test.ts": [
-    "98:30:lqf4o0",
-    "106:53:qxe6z9",
-  ],
   "packages/runner/test/scheduler-split-clock.test.ts": [
     "45:8:ryv8rw",
     "46:45:bxgs5p",

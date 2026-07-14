@@ -91,21 +91,59 @@ describe("reactive retries", () => {
   // (`watchReactiveActionCommit`): a whole-runtime commit injector would churn
   // every commit and re-trigger the action externally, confounding the retry
   // count, so drive the watcher with a resolved commit result instead.
+  type WatcherErrorName =
+    | "PreconditionFailedError"
+    | "RowLabelCommitError"
+    | "StorageTransactionAborted";
+
+  const watcherCommitResult = (
+    errorName: WatcherErrorName | undefined,
+  ): Awaited<ReturnType<IExtendedStorageTransaction["commit"]>> => {
+    if (errorName === undefined) return { ok: {} };
+    if (errorName === "PreconditionFailedError") {
+      return {
+        error: Object.assign(new Error(`injected ${errorName}`), {
+          name: errorName,
+          precondition: "origin-committed" as const,
+        }),
+      };
+    }
+    if (errorName === "RowLabelCommitError") {
+      return {
+        error: Object.assign(new Error(`injected ${errorName}`), {
+          name: errorName,
+          cause: Object.assign(new Error("test storage failure"), {
+            code: 1,
+          }),
+          transaction: {
+            iss: "did:key:test" as const,
+            cmd: "/memory/transact" as const,
+            sub: "did:key:test" as const,
+            args: { changes: {} },
+            prf: [],
+          },
+        }),
+      };
+    }
+    return {
+      error: {
+        name: errorName,
+        message: `injected ${errorName}`,
+        reason: errorName,
+      },
+    };
+  };
+
   const runWatcher = async (
-    errorName: string | undefined,
+    errorName: WatcherErrorName | undefined,
     initialRetries: number,
   ) => {
-    const action = (() => {}) as unknown as Action;
+    const action: Action = () => {};
     const retries = new WeakMap<Action, number>();
     if (initialRetries > 0) retries.set(action, initialRetries);
     let queued = 0;
     let resubscribed = 0;
-    const error = errorName === undefined
-      ? undefined
-      : { name: errorName, message: `injected ${errorName}` };
-    const commitPromise = Promise.resolve({ error }) as unknown as ReturnType<
-      IExtendedStorageTransaction["commit"]
-    >;
+    const commitPromise = Promise.resolve(watcherCommitResult(errorName));
     watchReactiveActionCommit({
       action,
       tx: {} as IExtendedStorageTransaction,
@@ -154,9 +192,9 @@ describe("reactive retries", () => {
   it(
     "retries a transient reactive rejection within the bounded budget",
     async () => {
-      // A generic transient error keeps the bounded retry path: it re-queues and
-      // charges the counter (proving terminal/permanent are the exceptions).
-      const r = await runWatcher("TransactionError", 0);
+      // A transient storage abort keeps the bounded retry path: it re-queues
+      // and charges the counter.
+      const r = await runWatcher("StorageTransactionAborted", 0);
       expect(r.queued).toBe(1);
       expect(r.retries.get(r.action)).toBe(1);
     },
