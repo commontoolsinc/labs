@@ -21,9 +21,20 @@ import {
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { SigilLink } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+const expectLinkedName = (value: unknown, expected: string) => {
+  expect(value).toEqual(expect.objectContaining({ name: expected }));
+};
+
+const expectDefined = <T>(value: T | undefined): T => {
+  expect(value).toBeDefined();
+  return value!;
+};
 
 describe("data-updating", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -177,7 +188,7 @@ describe("data-updating", () => {
     });
 
     it("should overwrite an object with an array", () => {
-      const testCell = runtime.getCell<{ a: any }>(
+      const testCell = runtime.getCell<{ a: unknown }>(
         space,
         "should overwrite an object with an array 1",
         undefined,
@@ -197,7 +208,7 @@ describe("data-updating", () => {
     });
 
     it("should overwrite an array with an object", () => {
-      const testCell = runtime.getCell<{ a: any }>(
+      const testCell = runtime.getCell<{ a: unknown }>(
         space,
         "should overwrite an array with an object 1",
         undefined,
@@ -428,7 +439,7 @@ describe("data-updating", () => {
 
     it("should no-op when writing the same write redirect alias twice", () => {
       const testCell = runtime.getCell<{
-        alias: any;
+        alias: unknown;
       }>(
         space,
         "normalizeAndDiff test duplicate same alias",
@@ -450,7 +461,7 @@ describe("data-updating", () => {
     it("should follow aliases", () => {
       const testCell = runtime.getCell<{
         value: number;
-        alias: any;
+        alias: unknown;
       }>(
         space,
         "normalizeAndDiff follow aliases",
@@ -479,7 +490,7 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{
         value: number;
         value2: number;
-        alias: any;
+        alias: unknown;
       }>(
         space,
         "normalizeAndDiff update aliases",
@@ -587,7 +598,7 @@ describe("data-updating", () => {
     });
 
     it("should handle ID-based entity objects", () => {
-      const testCell = runtime.getCell<{ items: any[] }>(
+      const testCell = runtime.getCell<{ items: unknown[] }>(
         space,
         "should handle ID-based entity objects",
         undefined,
@@ -618,7 +629,7 @@ describe("data-updating", () => {
     });
 
     it("should update the same document with ID-based entity objects", () => {
-      const testCell = runtime.getCell<any>(
+      const testCell = runtime.getCell<{ items: unknown[] }>(
         space,
         "should update the same document with ID-based entity objects",
         undefined,
@@ -636,7 +647,7 @@ describe("data-updating", () => {
         "should update the same document with ID-based entity objects",
       );
 
-      const newLink = testCell.getRaw().items[0];
+      const newLink = expectDefined(testCell.getRaw()).items[0];
 
       const newValue2 = {
         items: [
@@ -652,28 +663,23 @@ describe("data-updating", () => {
         "should update the same document with ID-based entity objects",
       );
 
-      expect(isPrimitiveCellLink(testCell.getRaw().items[0])).toBe(true);
-      expect(isPrimitiveCellLink(testCell.getRaw().items[1])).toBe(true);
-      expect(areLinksSame(testCell.getRaw().items[0], newLink)).toBe(false);
-      expect(
-        (tx.readValueOrThrow(
-          parseLink(testCell.getRaw().items[0], testCell)!,
-        ) as any)
-          .name,
-      )
-        .toEqual("Inserted before");
-      expect(areLinksSame(testCell.getRaw().items[1], newLink)).toBe(true);
-      expect(
-        (tx.readValueOrThrow(
-          parseLink(testCell.getRaw().items[1], testCell)!,
-        ) as any)
-          .name,
-      )
-        .toEqual("Second Value");
+      const raw = expectDefined(testCell.getRaw());
+      expect(isPrimitiveCellLink(raw.items[0])).toBe(true);
+      expect(isPrimitiveCellLink(raw.items[1])).toBe(true);
+      expect(areLinksSame(raw.items[0], newLink)).toBe(false);
+      expectLinkedName(
+        tx.readValueOrThrow(parseLink(raw.items[0], testCell)!),
+        "Inserted before",
+      );
+      expect(areLinksSame(raw.items[1], newLink)).toBe(true);
+      expectLinkedName(
+        tx.readValueOrThrow(parseLink(raw.items[1], testCell)!),
+        "Second Value",
+      );
     });
 
     it("should update the same document with numeric ID-based entity objects", () => {
-      const testCell = runtime.getCell<any>(
+      const testCell = runtime.getCell<{ items: unknown[] }>(
         space,
         "should update the same document with ID-based entity objects",
         undefined,
@@ -691,7 +697,7 @@ describe("data-updating", () => {
         "should update the same document with ID-based entity objects",
       );
 
-      const newLink = testCell.getRaw().items[0];
+      const newLink = expectDefined(testCell.getRaw()).items[0];
 
       const newValue2 = {
         items: [
@@ -707,26 +713,21 @@ describe("data-updating", () => {
         "should update the same document with ID-based entity objects",
       );
 
-      expect(areLinksSame(testCell.getRaw().items[0], newLink)).toBe(false);
-      expect(
-        (tx.readValueOrThrow(
-          parseLink(testCell.getRaw().items[0], testCell)!,
-        ) as any)
-          .name,
-      )
-        .toEqual("Inserted before");
-      expect(areLinksSame(testCell.getRaw().items[1], newLink)).toBe(true);
-      expect(
-        (tx.readValueOrThrow(
-          parseLink(testCell.getRaw().items[1], testCell)!,
-        ) as any)
-          .name,
-      )
-        .toEqual("Second Value");
+      const raw = expectDefined(testCell.getRaw());
+      expect(areLinksSame(raw.items[0], newLink)).toBe(false);
+      expectLinkedName(
+        tx.readValueOrThrow(parseLink(raw.items[0], testCell)!),
+        "Inserted before",
+      );
+      expect(areLinksSame(raw.items[1], newLink)).toBe(true);
+      expectLinkedName(
+        tx.readValueOrThrow(parseLink(raw.items[1], testCell)!),
+        "Second Value",
+      );
     });
 
     it("should handle ID_FIELD redirects and reuse existing documents", () => {
-      const testCell = runtime.getCell<any>(
+      const testCell = runtime.getCell<{ items: unknown[] }>(
         space,
         "should handle ID_FIELD redirects",
         undefined,
@@ -745,7 +746,7 @@ describe("data-updating", () => {
         "test ID_FIELD redirects",
       );
 
-      const initialLink = testCell.getRaw().items[0];
+      const initialLink = expectDefined(testCell.getRaw()).items[0];
 
       // Update with another item using ID_FIELD to point to the 'id' field
       const newValue = {
@@ -765,29 +766,24 @@ describe("data-updating", () => {
       );
 
       // Verify that the second item reused the existing document
-      expect(isPrimitiveCellLink(testCell.getRaw().items[0])).toBe(true);
-      expect(isPrimitiveCellLink(testCell.getRaw().items[1])).toBe(true);
-      expect(areLinksSame(testCell.getRaw().items[1], initialLink)).toBe(true);
-      expect(
-        (tx.readValueOrThrow(
-          parseLink(testCell.getRaw().items[1], testCell)!,
-        ) as any)
-          .name,
-      )
-        .toEqual(
-          "Updated Item",
-        );
-      expect(
-        (tx.readValueOrThrow(
-          parseLink(testCell.getRaw().items[0], testCell)!,
-        ) as any)
-          .name,
-      )
-        .toEqual("New Item");
+      const raw = expectDefined(testCell.getRaw());
+      expect(isPrimitiveCellLink(raw.items[0])).toBe(true);
+      expect(isPrimitiveCellLink(raw.items[1])).toBe(true);
+      expect(areLinksSame(raw.items[1], initialLink)).toBe(true);
+      expectLinkedName(
+        tx.readValueOrThrow(parseLink(raw.items[1], testCell)!),
+        "Updated Item",
+      );
+      expectLinkedName(
+        tx.readValueOrThrow(parseLink(raw.items[0], testCell)!),
+        "New Item",
+      );
     });
 
     it("should treat different properties as different ID namespaces", () => {
-      const testCell = runtime.getCell<any>(
+      const testCell = runtime.getCell<
+        { a?: unknown; b?: unknown } | undefined
+      >(
         space,
         "it should treat different properties as different ID namespaces",
         undefined,
@@ -808,21 +804,22 @@ describe("data-updating", () => {
         "it should treat different properties as different ID namespaces",
       );
 
-      expect(isPrimitiveCellLink(testCell.getRaw().a)).toBe(true);
-      expect(isPrimitiveCellLink(testCell.getRaw().b)).toBe(true);
-      expect(areLinksSame(testCell.getRaw().a, testCell.getRaw().b)).toBe(
-        false,
+      const raw = expectDefined(testCell.getRaw());
+      expect(isPrimitiveCellLink(raw.a)).toBe(true);
+      expect(isPrimitiveCellLink(raw.b)).toBe(true);
+      expect(areLinksSame(raw.a, raw.b)).toBe(false);
+      expectLinkedName(
+        tx.readValueOrThrow(
+          parseLink(raw.a, testCell.getAsNormalizedFullLink())!,
+        ),
+        "First Item",
       );
-      expect(
-        (tx.readValueOrThrow(parseLink(testCell.getRaw().a, testCell)!) as any)
-          .name,
-      )
-        .toEqual("First Item");
-      expect(
-        (tx.readValueOrThrow(parseLink(testCell.getRaw().b, testCell)!) as any)
-          .name,
-      )
-        .toEqual("Second Item");
+      expectLinkedName(
+        tx.readValueOrThrow(
+          parseLink(raw.b, testCell.getAsNormalizedFullLink())!,
+        ),
+        "Second Item",
+      );
     });
 
     it("should return empty array when no changes", () => {
@@ -906,7 +903,7 @@ describe("data-updating", () => {
       );
 
       // Create a target cell to write to
-      const targetCell = runtime.getCell<{ value: any }>(
+      const targetCell = runtime.getCell<{ value: unknown }>(
         space,
         "normalizeAndDiff data URI target",
         undefined,
@@ -964,7 +961,7 @@ describe("data-updating", () => {
       );
 
       // Create a target cell
-      const targetCell = runtime.getCell<{ result: any }>(
+      const targetCell = runtime.getCell<{ result: unknown }>(
         space,
         "normalizeAndDiff data URI nested target",
         undefined,
@@ -1016,7 +1013,7 @@ describe("data-updating", () => {
       );
 
       // Create a target cell
-      const targetCell = runtime.getCell<{ value: any }>(
+      const targetCell = runtime.getCell<{ value: unknown }>(
         space,
         "normalizeAndDiff data URI undefined target",
         undefined,
@@ -1056,7 +1053,7 @@ describe("data-updating", () => {
       // Create a data cell that contains a link to the referenced cell
       const dataCell = runtime.getImmutableCell<{
         title: string;
-        reference: any;
+        reference: SigilLink;
         metadata: { description: string };
       }>(
         space,
@@ -1070,7 +1067,7 @@ describe("data-updating", () => {
       );
 
       // Create a target cell to write to
-      const targetCell = runtime.getCell<{ result: any }>(
+      const targetCell = runtime.getCell<{ result: unknown }>(
         space,
         "normalizeAndDiff data URI nested link target",
         undefined,
@@ -1139,7 +1136,7 @@ describe("data-updating", () => {
     // Create a data cell that contains a link to the referenced cell
     const dataCell = runtime.getImmutableCell<{
       title: string;
-      reference: any;
+      reference: SigilLink;
       metadata: { description: string };
     }>(
       space,
@@ -1153,7 +1150,7 @@ describe("data-updating", () => {
     );
 
     // Create a target cell to write to
-    const targetCell = runtime.getCell<{ result: any }>(
+    const targetCell = runtime.getCell<{ result: unknown }>(
       space,
       "normalizeAndDiff data URI nested link target",
       undefined,
@@ -1200,7 +1197,7 @@ describe("data-updating", () => {
 
     // Create a data URI that contains a redirect pointing to sourceCell
     const redirectAlias = sourceCell.key("value").getAsWriteRedirectLink();
-    const dataCell = runtime.getImmutableCell<any>(
+    const dataCell = runtime.getImmutableCell<SigilLink>(
       space,
       redirectAlias,
       undefined,
@@ -1208,7 +1205,7 @@ describe("data-updating", () => {
     );
 
     // Create a target cell that currently has an alias to destinationCell
-    const targetCell = runtime.getCell<{ result: any }>(
+    const targetCell = runtime.getCell<{ result: unknown }>(
       space,
       "data URI redirect target cell",
       undefined,
@@ -1262,16 +1259,14 @@ describe("data-updating", () => {
         undefined,
         tx,
       );
-      // deno-lint-ignore no-explicit-any
-      const sparse: any[] = new Array(3);
+      const sparse = new Array<number>(3);
       sparse[0] = 1;
       sparse[2] = 3;
       testCell.set({ arr: sparse });
 
       const current = testCell.key("arr").getAsNormalizedFullLink();
       // Same sparse array as new value
-      // deno-lint-ignore no-explicit-any
-      const newSparse: any[] = new Array(3);
+      const newSparse = new Array<number>(3);
       newSparse[0] = 1;
       newSparse[2] = 3;
       const changes = normalizeAndDiff(runtime, tx, current, newSparse);
@@ -1290,8 +1285,7 @@ describe("data-updating", () => {
 
       const current = testCell.key("arr").getAsNormalizedFullLink();
       // New value has a hole at index 1
-      // deno-lint-ignore no-explicit-any
-      const newSparse: any[] = new Array(3);
+      const newSparse = new Array<number>(3);
       newSparse[0] = 1;
       newSparse[2] = 3;
       const changes = normalizeAndDiff(runtime, tx, current, newSparse);
@@ -1310,8 +1304,7 @@ describe("data-updating", () => {
         undefined,
         tx,
       );
-      // deno-lint-ignore no-explicit-any
-      const sparse: any[] = new Array(3);
+      const sparse = new Array<number>(3);
       sparse[0] = 1;
       sparse[2] = 3;
       testCell.set({ arr: sparse });
@@ -1332,7 +1325,7 @@ describe("data-updating", () => {
     it("should handle arrays", () => {
       const obj = { items: [{ id: "item1", name: "First Item" }] };
       addCommonIDfromObjectID(obj);
-      expect((obj.items[0] as any)[ID_FIELD]).toBe("id");
+      expect((obj.items[0] as { [ID_FIELD]?: string })[ID_FIELD]).toBe("id");
     });
 
     it("should reuse items", () => {
@@ -1344,7 +1337,7 @@ describe("data-updating", () => {
       );
       itemCell.set({ id: "item1", name: "Original Item" });
 
-      const testCell = runtime.getCell<{ items: any[] }>(
+      const testCell = runtime.getCell<{ items: unknown[] }>(
         space,
         "addCommonIDfromObjectID arrays",
         undefined,
@@ -1369,11 +1362,10 @@ describe("data-updating", () => {
       expect(isPrimitiveCellLink(result?.items[1])).toBe(true);
       expect(areLinksSame(result?.items[0], result?.items[1]))
         .toBe(true);
-      expect(
-        (tx.readValueOrThrow(parseLink(result?.items[1], testCell)!) as any)
-          .name,
-      )
-        .toBe("New Item");
+      expectLinkedName(
+        tx.readValueOrThrow(parseLink(result?.items[1], testCell)!),
+        "New Item",
+      );
     });
   });
 
@@ -1400,7 +1392,7 @@ describe("compactChangeSet", () => {
   // Helper to create a change at a specific path
   const makeChange = (
     path: string[],
-    value: unknown,
+    value: FabricValue,
     docId: `${string}:${string}` = "test:doc",
     docSpace: `did:${string}:${string}` = "did:test:space",
   ): ChangeSet[0] => ({
@@ -1410,7 +1402,7 @@ describe("compactChangeSet", () => {
       scope: "space",
       path,
     },
-    value: value as any,
+    value,
   });
 
   describe("basic cases", () => {
@@ -1631,8 +1623,7 @@ describe("compactChangeSet", () => {
   describe("sparse array hasPath", () => {
     it("should NOT subsume child at sparse hole index", () => {
       // Parent writes sparse array [1, <hole>, 3]
-      // deno-lint-ignore no-explicit-any
-      const sparse: any[] = new Array(3);
+      const sparse = new Array<number>(3);
       sparse[0] = 1;
       sparse[2] = 3;
       const changes: ChangeSet = [
@@ -1648,8 +1639,7 @@ describe("compactChangeSet", () => {
 
     it("should subsume child at populated sparse index", () => {
       // Parent writes sparse array [1, <hole>, 3]
-      // deno-lint-ignore no-explicit-any
-      const sparse: any[] = new Array(3);
+      const sparse = new Array<number>(3);
       sparse[0] = 1;
       sparse[2] = 3;
       const changes: ChangeSet = [
@@ -1666,7 +1656,7 @@ describe("compactChangeSet", () => {
   describe("batched applyChangeSet", () => {
     const makeBatchChange = (
       path: string[],
-      value: unknown,
+      value: FabricValue,
     ): ChangeSet[0] => ({
       location: {
         id: "test:batched-doc",
@@ -1674,7 +1664,7 @@ describe("compactChangeSet", () => {
         scope: "space",
         path,
       },
-      value: value as any,
+      value,
     });
 
     it("prefers the transaction batch hook when applying a change set", () => {
@@ -1858,7 +1848,7 @@ describe("scope-isolation write guard", () => {
       dest.key("profile").getAsNormalizedFullLink(),
     );
     expect(isSigilLink(stored)).toBe(true);
-    expect(parseLink(stored as any, dest.getAsNormalizedFullLink())?.scope)
+    expect(parseLink(stored, dest.getAsNormalizedFullLink())?.scope)
       .toBe("user");
   });
 
