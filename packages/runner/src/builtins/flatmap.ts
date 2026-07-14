@@ -45,7 +45,10 @@ import {
   machineryRead,
 } from "../storage/reactivity-log.ts";
 import { resolveLink } from "../link-resolution.ts";
-import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
+import {
+  listElementLink,
+  listElementPatternInput,
+} from "./list-element-link.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
@@ -189,17 +192,12 @@ export function flatMap(
     const listCell = sourceListCell.withTx(tx).resolveAsCell();
     const rawList = listCell.withTx(tx).getRaw() as unknown;
     const listBase = listCell.getAsNormalizedFullLink();
-    // A slot may carry its own schema, but the list container's schema is at
-    // the wrong coordinate for a link targeting one slot.
-    const slotBase = { ...listBase, schema: undefined };
     const list: Cell<any>[] | undefined = rawList === undefined
       ? undefined
       : !Array.isArray(rawList)
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
-        const slotLink: NormalizedFullLink = isPrimitiveCellLink(slot)
-          ? parseLink(slot, slotBase)
-          : { ...slotBase, path: [...slotBase.path, String(i)] };
+        const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
       });
@@ -264,7 +262,9 @@ export function flatMap(
         fn,
       );
     const createRunInput = (element: Cell<any>, index: number) => ({
-      ...(argumentUsage.usesElement ? { element } : {}),
+      ...(argumentUsage.usesElement
+        ? { element: listElementPatternInput(element) }
+        : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
       ...(argumentUsage.usesArray ? { array: inputsCell.key("list") } : {}),
       ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
