@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-flow-labels.test.ts": [
-    "483:51:hpsqtz",
-    "721:17:xbrtnq",
-  ],
   "packages/runner/test/cfc-flow-pointwise.test.ts": [
     "473:43:s0czi7",
     "545:43:s0czi7",

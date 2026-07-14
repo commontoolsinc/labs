@@ -479,10 +479,10 @@ describe("CFC flow labels (default transition)", () => {
       cfcFlowLabels: "persist",
     });
     try {
-      const getDocument = (id: string) =>
-        (storageManager.open(signer.did()).replica as unknown as {
-          getDocument(id: string): Record<string, unknown> | undefined;
-        }).getDocument(id);
+      const getDocument = (id: URI) =>
+        storageManager.open(signer.did()).replica.getDocument(id) as
+          | Record<string, unknown>
+          | undefined;
 
       const seed = runtime.edit();
       const sourceId = parseLink(
@@ -717,10 +717,8 @@ describe("CFC flow labels (default transition)", () => {
 
       // ...and the stored doc carries no envelope at all (no version bump
       // from label persistence — the doc has exactly its value).
-      const storedTarget = (storageManager.open(signer.did())
-        .replica as unknown as {
-          getDocument(id: string): { cfc?: unknown } | undefined;
-        }).getDocument(targetId);
+      const storedTarget = storageManager.open(signer.did()).replica
+        .getDocument(targetId) as StoredCfcDocument | undefined;
       expect(storedTarget).toBeDefined();
       expect(storedTarget!.cfc).toBeUndefined();
     } finally {
