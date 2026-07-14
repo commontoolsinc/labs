@@ -170,10 +170,8 @@ function makePattern(
 }
 
 type QueryState = {
-  pending?: boolean;
-  error?: unknown;
-  requestHash?: string;
-  result?: unknown[];
+  rows: unknown[];
+  withheld?: number;
 };
 
 /** Run the pattern and return schema-less cells for the handle and query docs. */
@@ -299,11 +297,9 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     const qA = await waitUntil<QueryState>(
       runtimeA,
       qCellA,
-      (v) => v?.pending === false && v?.error === undefined,
+      (v) => Array.isArray(v?.rows),
     );
-    expect(qA.error).toBeUndefined();
-    const hashA = qA.requestHash;
-    expect(typeof hashA).toBe("string");
+    expect(qA.rows).toEqual([]);
     await runtimeA.storageManager.synced();
 
     // Second runtime, separate heap, same server: HYDRATES the same piece
@@ -315,8 +311,8 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
         server,
       ),
     });
-    // Count B's server reads: with a stable request hash B must DEDUP against
-    // the settled shared result, never issue its own request. (The red failure
+    // Count B's server reads: B must DEDUP against the settled shared result,
+    // never issue its own request. (The red failure
     // mode: B's sqliteDatabase re-init rewrote the handle — dropping `rev`,
     // re-deriving `tables` — so BOTH runtimes saw "new inputs", each write
     // invalidating the other's hash on the ONE shared result cell.)
@@ -342,18 +338,16 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
     const qB = await waitUntil<QueryState>(
       runtimeB!,
       qCellB,
-      (v) => v?.pending === false && v?.requestHash === hashA,
+      (v) => Array.isArray(v?.rows),
     );
-    expect(qB.error).toBeUndefined();
+    expect(qB.rows).toEqual([]);
 
-    // Stability: B adopted the settled result (no re-issue), and A's hash
-    // survived B's hydration untouched.
+    // Stability: B adopted the settled result and A's value survived B's
+    // hydration untouched.
     await runtimeB!.settled();
     await runtimeA.settled();
     expect(issuesFromB).toBe(0);
     const settledA = qCellA.get() as QueryState;
-    expect(settledA.requestHash).toBe(hashA);
-    expect(settledA.pending).toBe(false);
-    expect(settledA.error).toBeUndefined();
+    expect(settledA.rows).toEqual([]);
   });
 });

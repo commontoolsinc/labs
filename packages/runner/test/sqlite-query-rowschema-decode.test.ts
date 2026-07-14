@@ -45,9 +45,8 @@ async function waitUntil<T>(
 }
 
 type QueryState = {
-  pending: boolean;
-  result?: Array<Record<string, unknown>>;
-  error?: unknown;
+  rows: Array<Record<string, unknown>>;
+  withheld?: number;
 };
 
 describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () => {
@@ -145,10 +144,9 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
     const v = await waitUntil<QueryState>(
       runtime,
       result,
-      (s) =>
-        s.pending === false && Array.isArray(s.result) && s.result.length === 1,
+      (s) => Array.isArray(s.rows) && s.rows.length === 1,
     );
-    expect(v.error).toBeUndefined();
+    expect(v.rows).toHaveLength(1);
 
     // Read the result under the consumer's <Row> schema (asCell on the link
     // column) — exactly what the transformer lowers a typed consumer read to.
@@ -156,13 +154,13 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
       type: "object",
       additionalProperties: true,
       properties: {
-        result: { type: "array", items: rowSchema },
+        rows: { type: "array", items: rowSchema },
       },
     } as unknown as JSONSchema;
     const tree = result.asSchema(wrapSchema).get() as {
-      result?: Array<{ author_cf_link?: unknown }>;
+      rows?: Array<{ author_cf_link?: unknown }>;
     };
-    const col = tree.result?.[0]?.author_cf_link;
+    const col = tree.rows?.[0]?.author_cf_link;
     expect(isCell(col)).toBe(true);
     expect((col as { get(): unknown }).get()).toEqual({ name: "Ada" });
   });
