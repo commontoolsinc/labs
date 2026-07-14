@@ -3,8 +3,9 @@
 This plan covers two follow-ups to the
 [`DataUnavailable` specification](../specs/data-unavailability.md): the pending
 renderer continuity behavior and the staged migration of the remaining
-asynchronous APIs. The renderer portion, `latestComplete()`, and direct
-streaming generation results are implemented; the later API stages remain.
+asynchronous APIs. The renderer portion, `latestComplete()`, direct streaming
+generation results, and direct compilation results are implemented; the later
+API stages remain.
 
 The complementary `latestComplete()` helper is now implemented and specified in
 the [DataUnavailable spec](../specs/data-unavailability.md#latestcomplete-snapshot-helper).
@@ -14,7 +15,7 @@ unavailability; `latestComplete()` retains a coherent prior value.
 ## Status
 
 - Pending renderer continuity: implemented and tested.
-- Remaining asynchronous API migration: A1 complete; A2 is next.
+- Remaining asynchronous API migration: A1-A2 complete; A3 is next.
 
 Keep this file live while any API stage remains. When all stages are complete,
 update the DataUnavailable spec and archive this plan under
@@ -206,20 +207,20 @@ const diagnostics = hasError(compileRequest)
   : [];
 ```
 
-- [ ] Return a direct `AsyncResult<Output>` and project the persisted internal
+- [x] Return a direct `AsyncResult<Output>` and project the persisted internal
       state without creating another node.
-- [ ] Define a serializable `CompileError extends Error` carrying structured
+- [x] Define a serializable `CompileError extends Error` carrying structured
       `diagnostics`; specialize the error arm so `hasError(compileRequest)`
       preserves that type.
-- [ ] Represent non-diagnostic compilation and execution failures with the same
+- [x] Represent non-diagnostic compilation and execution failures with the same
       error type and an empty or absent diagnostics array.
-- [ ] Define invalid program parameters precisely: schema-invalid input becomes
+- [x] Define invalid program parameters precisely: schema-invalid input becomes
       `schema-mismatch`; a valid request which cannot compile becomes `error`.
-- [ ] Propagate unavailable `files`, `main`, or `input` before invoking the
+- [x] Propagate unavailable `files`, `main`, or `input` before invoking the
       compiler.
-- [ ] Preserve the live compiled-pattern result link, scope, cancellation,
+- [x] Preserve the live compiled-pattern result link, scope, cancellation,
       request supersession, and structured diagnostic locations.
-- [ ] Migrate compiler UIs to the specialized error and result-only call sites
+- [x] Migrate compiler UIs to the specialized error and result-only call sites
       to the direct form.
 
 **A2 exit:** ordinary compilation reads like fetch/generation, while diagnostic

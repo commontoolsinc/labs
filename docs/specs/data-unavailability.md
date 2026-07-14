@@ -64,8 +64,8 @@ originating request or an honest availability union.
   by invoked code keep their existing error behavior.
 - Changing the meaning of authored `undefined`. It remains a first-class
   `FabricValue` and is valid whenever the declared schema admits it.
-- Converting remaining stateful or multi-channel APIs such as `compileAndRun`,
-  `sqliteQuery`, `llmDialog`, or `wish` in the first migration. They retain
+- Converting remaining stateful or multi-channel APIs such as `sqliteQuery`,
+  `llmDialog`, or `wish` in the first migration. They retain
   their existing result contracts until each API gets a separate state-machine
   decision; mixed idioms are expected during that staged migration.
 - Converting `streamData` in the first migration. It is a long-lived,
@@ -85,9 +85,9 @@ The design spans four behaviors.
 1. The data model has an explicit FabricType protocol. `FabricInstance`
    subclasses own a class-level codec and can be stored and transported as
    `FabricValue`s.
-2. Default fetch and generation built-ins return `AsyncResult<T>`. Explicit
-   advanced generation APIs retain state objects for partial and metadata
-   consumers.
+2. Default fetch, generation, streaming generation, and compilation built-ins
+   return availability-aware results. Streaming intermediate output is exposed
+   through a zero-node projection rather than a public state wrapper.
 3. A JavaScript action whose input does not match its `argumentSchema` is not
    invoked; its output becomes `DataUnavailable("schema-mismatch")`.
 4. `computed()` is lowered to a lift with generated argument and result
@@ -217,6 +217,9 @@ The final public signatures of single-result built-ins are:
 | `fetchProgram(...)` | `AsyncResult<FetchedProgram>` |
 | `generateText(...)` | `AsyncResult<string>` |
 | `generateObject<T>(...)` | `AsyncResult<T>` |
+| `generateTextStream(...)` | `AsyncResult<string>` |
+| `generateObjectStream<T>(...)` | `AsyncResult<T>` |
+| `compileAndRun<Input, Output>(...)` | `CompileResult<Output>` |
 
 TypeScript reduces `any | X` to `any` and `unknown | X` to `unknown`.
 Consequently, `fetchJsonUnchecked()` and unconstrained generic helpers cannot
@@ -785,6 +788,35 @@ without retrying the provider. New producers always write explicit availability
 markers. A child generation used by `llmDialog` waits only for transient
 pending/syncing states and fails the tool call immediately for error or schema
 mismatch instead of consuming the full tool timeout.
+
+### Dynamic compilation
+
+`compileAndRun<Input, Output>()` returns its live compiled-pattern result
+directly. Its `CompileResult<Output>` contract is an `AsyncResult<Output>` whose
+error arm carries a specialized `CompileError` with structured diagnostics:
+
+```typescript
+// Shown for illustration only.
+const compileRequest = compileAndRun<Input, Output>({ files, main, input });
+const output = resultOf(compileRequest);
+
+const diagnostics = hasError(compileRequest)
+  ? compileRequest.error.diagnostics
+  : [];
+```
+
+A valid program request becomes pending before compilation begins and the live
+result link replaces that marker once the compiled pattern starts. Invalid
+program parameters produce `schema-mismatch`; missing entrypoints, compiler
+diagnostics, and other compilation failures produce `error`. Every compile
+error has a diagnostics array, which is empty when no structured diagnostics
+exist. Unavailable `files`, `main`, or `input` values propagate unchanged and
+the compiler is not invoked.
+
+The persisted raw builtin state still contains `pending`, `result`, `error`,
+and `errors` for old compiled graphs. Newly transformed patterns use a
+versioned module ref which projects the same live result cell directly; no
+additional reactive node or duplicate state is created.
 
 ## `latestComplete()` Snapshot Helper
 

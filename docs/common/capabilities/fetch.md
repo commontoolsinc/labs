@@ -86,11 +86,12 @@ Fetch a Common Fabric program bundle for `compileAndRun`. The usable result is
 // Shown for illustration only.
 const programRequest = fetchProgram({ url: sourceUrl });
 const program = resultOf(programRequest);
-const compiled = compileAndRun({
+const compileRequest = compileAndRun({
   files: program.files,
   main: program.main,
   input,
 });
+const compiled = resultOf(compileRequest);
 ```
 
 ## POST and request options
