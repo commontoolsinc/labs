@@ -191,11 +191,9 @@ describe("resume pre-sync covers argument link targets", () => {
       // demanded during the settle reads it warm instead of committing a
       // seq-0 basis (the reload-churn conflict).
       const profileLink = profileCell.getAsNormalizedFullLink();
-      const replicaB = managerB.open(space) as unknown as {
-        get?: (uri: string, scope?: unknown) => unknown;
-      };
+      const replicaB = managerB.open(space).replica;
       expect(
-        replicaB.get?.(profileLink.id, profileLink.scope),
+        replicaB.getDocument(profileLink.id, profileLink.scope),
         "resume pre-sync must pull argument link targets before the settle",
       ).toBeDefined();
 

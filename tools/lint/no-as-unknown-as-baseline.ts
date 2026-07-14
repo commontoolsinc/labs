@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/resume-argument-link-target-presync.test.ts": [
-    "194:44:n5r017",
-  ],
   "packages/runner/test/runtime-presets.test.ts": [
     "38:2:1eyu8bq",
     "174:9:1cv42je",
