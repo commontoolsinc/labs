@@ -18,6 +18,9 @@
 //
 // The append is add-wins and commutes; it must not be dropped just because the
 // surrounding multi-space commit exhausted its retry budget on unrelated churn.
+// With event receipts enabled, the receipt must therefore ride the final home
+// commit: a child-space receipt written by the first partial attempt would make
+// the retry look like a competing redelivery and strand the home append.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -103,6 +106,37 @@ const itemLinkListSchema = {
   items: { type: "unknown", asCell: ["cell"] },
   // deno-lint-ignore no-explicit-any
 } as any;
+
+type EventCommitMarker = {
+  type: "scheduler.event.commit";
+  error?: string;
+  backoffMs?: number;
+  permanentRejection?: "origin-committed" | "receipt-exists";
+};
+
+function waitForEventCommit(
+  runtime: Runtime,
+  predicate: (marker: EventCommitMarker) => boolean,
+  message: string,
+): Promise<EventCommitMarker> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+      reject(new Error(message));
+    }, 5_000);
+    const listener = (event: Event) => {
+      const marker = (event as CustomEvent<{ marker: EventCommitMarker }>)
+        .detail.marker;
+      if (marker.type !== "scheduler.event.commit" || !predicate(marker)) {
+        return;
+      }
+      clearTimeout(timeout);
+      runtime.telemetry.removeEventListener("telemetry", listener);
+      resolve(marker);
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+  });
+}
 
 async function readDurableItemCount(
   server: MemoryV2Server.Server,
@@ -210,13 +244,20 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
     };
 
     // Fire the multi-space create. Its home append hits the injected storm.
+    // Synchronize on the successful event-commit outcome after all injected
+    // rejections, rather than guessing how many idle turns the backoff window
+    // needs on this machine.
+    const committed = waitForEventCommit(
+      rt,
+      (marker) => injectedRemaining === 0 && marker.error === undefined,
+      "multi-space append did not commit after the transient storm",
+    );
     const addTx = rt.edit();
     handle.withTx(addTx).key("addItem").send({ seed: "X" });
     await addTx.commit();
-    for (let i = 0; i < 30; i++) {
-      await rt.idle();
-      await manager.synced();
-    }
+    const commitMarker = await committed;
+    await rt.idle();
+    await manager.synced();
 
     // The append must survive: after the transient storm clears, the item is in
     // the durable list. Pre-fix the event handler exhausts its bounded-retry
@@ -224,6 +265,7 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
     // mergeable append even though it commutes and could never truly conflict.
     const count = await readDurableItemCount(server);
     expect(count).toBe(1);
+    expect(commitMarker.permanentRejection).toBeUndefined();
 
     // The handler rode out the whole storm (8 rejections, above the fixed
     // budget) rather than giving up partway through.
@@ -252,9 +294,9 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
 
     // Inject an AuthorizationError — a non-stale-basis rejection that re-running
     // cannot resolve. The mergeable op present in the commit must NOT widen this
-    // into the retry window; it keeps the fixed budget and gives up. The count
-    // (8) is above the budget, so if it were wrongly windowed the handler would
-    // ride past the injections and land the append.
+    // into the retry window; it fails fast. Eight injections make accidental
+    // windowing obvious: the wrong behavior would ride out the storm and land
+    // the append, while the correct behavior consumes only the first rejection.
     const replica = manager.open(space).replica as unknown as {
       commitNative: (...args: unknown[]) => Promise<unknown>;
     };
@@ -274,24 +316,28 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
     };
 
     let sawWindowedBackoff = false;
-    // deno-lint-ignore no-explicit-any
-    rt.telemetry.addEventListener("telemetry", (ev: any) => {
-      const m = ev.marker;
+    rt.telemetry.addEventListener("telemetry", (event) => {
+      const m = (event as CustomEvent<{ marker: EventCommitMarker }>)
+        .detail.marker;
       if (m?.type === "scheduler.event.commit" && m.backoffMs !== undefined) {
         sawWindowedBackoff = true;
       }
     });
 
+    const rejected = waitForEventCommit(
+      rt,
+      (marker) => marker.error === "injected non-stale-basis rejection",
+      "non-stale-basis rejection was not observed",
+    );
     const addTx = rt.edit();
     handle.withTx(addTx).key("addItem").send({ seed: "Y" });
     await addTx.commit();
-    for (let i = 0; i < 30; i++) {
-      await rt.idle();
-      await manager.synced();
-    }
+    await rejected;
+    await rt.idle();
+    await manager.synced();
 
-    // The handler gave up on the fixed budget before the injections cleared, so
-    // the append did not land and the window was never entered.
+    // The handler failed fast before the injections cleared, so the append did
+    // not land and the window was never entered.
     expect(await readDurableItemCount(server)).toBe(0);
     expect(sawWindowedBackoff).toBe(false);
     expect(injectedRemaining).toBeGreaterThan(0);

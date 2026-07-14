@@ -63,7 +63,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["summary"]
-} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: context-lift-result-property-projection
 // Verifies: a reactive builder preserves projected property schemas when the captured
 // input comes from a typed lift() result rather than falling back to unknown

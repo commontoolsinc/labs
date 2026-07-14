@@ -66,8 +66,8 @@ const activeItems = computed(() => items.filter(item => !item.done));
 ## Mapped List Churns or Times Out
 
 **Issue:** Rendering a list triggers `non-idempotent raw:map`,
-`Too many iterations: ... raw:map`, link-resolution churn, or a test action
-timeout.
+`Reactive graph did not settle ... Actions: raw:map`, link-resolution churn, or
+a test action timeout.
 
 **Check:** Look for render-time writes inside the `.map()` body. Event props
 must receive a handler to run later, not the result of calling a stream or

@@ -115,6 +115,7 @@ Deno.test("fetch results and claims survive a cold runtime reload", async () => 
     apiUrl: new URL(import.meta.url),
     storageManager: storageA,
   });
+  let runtimeADisposed = false;
   let runtimeB: Runtime | undefined;
   try {
     const compiled = await runtimeA.patternManager.compilePattern(PROGRAM, {
@@ -159,7 +160,8 @@ Deno.test("fetch results and claims survive a cold runtime reload", async () => 
     );
     await clearResultTx.commit();
     await storageA.synced();
-    runtimeA.scheduler.dispose();
+    await runtimeA.dispose();
+    runtimeADisposed = true;
 
     phase = "reload";
     runtimeB = new Runtime({
@@ -228,10 +230,9 @@ Deno.test("fetch results and claims survive a cold runtime reload", async () => 
     ).toBe(true);
   } finally {
     globalThis.fetch = originalFetch;
-    await runtimeB?.dispose();
-    await runtimeA.dispose();
-    await storageA.close();
-    await storageB.close();
+    if (runtimeB) await runtimeB.dispose();
+    else await storageB.close();
+    if (!runtimeADisposed) await runtimeA.dispose();
     await server.close();
   }
 });

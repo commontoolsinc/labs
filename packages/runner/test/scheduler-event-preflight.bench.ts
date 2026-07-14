@@ -195,13 +195,13 @@ Deno.bench(
 );
 
 Deno.bench(
-  "Scheduler event preflight - event waits on transitive stale writer",
+  "Scheduler event preflight - event waits on transitive invalid writer",
   benchOptions("scheduler-event-preflight"),
   async () => {
     await runWithSchedulerTiming(
-      "event preflight: waits on transitive stale writer",
+      "event preflight: waits on transitive invalid writer",
       async (resetMeasuredTiming) => {
-        const graph = await setupBroadGraph("preflight-stale", 1);
+        const graph = await setupBroadGraph("preflight-invalid", 1);
         addTargetReadingHandler(graph);
 
         const updateTx = graph.env.runtime.edit();

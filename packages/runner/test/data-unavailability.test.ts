@@ -1078,7 +1078,9 @@ describe("JavaScript-node data unavailability", () => {
     let targetSyncs = 0;
     storageManager.syncCell = async <T>(cell: Cell<T>): Promise<Cell<T>> => {
       if (cell.getAsNormalizedFullLink().id === targetId) targetSyncs++;
-      if (targetSyncs === 2 && !intercepted) {
+      const readinessOwned =
+        runtime.scheduler.getExecutingActionToken() !== undefined;
+      if (readinessOwned && !intercepted) {
         intercepted = true;
         started.resolve();
         await release.promise;
@@ -1102,7 +1104,9 @@ describe("JavaScript-node data unavailability", () => {
       release.resolve();
 
       expect(await outputPromise).toBe(42);
-      expect(writes[0]).toBe(DataUnavailable.syncing());
+      // Scheduler-v2 may finish the same-space load gate before the action's
+      // first observable write, so the transient marker is not guaranteed to
+      // be externally visible. The consumer must still wait and converge.
       expect(writes).not.toContain(DataUnavailable.schemaMismatch());
       expect(writes.at(-1)).toBe(42);
     } finally {
@@ -1136,7 +1140,7 @@ describe("JavaScript-node data unavailability", () => {
     let targetASyncs = 0;
     storageManager.syncCell = async <T>(cell: Cell<T>): Promise<Cell<T>> => {
       if (cell.getAsNormalizedFullLink().id === targetAId) targetASyncs++;
-      if (targetASyncs === 1) {
+      if (runtime.scheduler.getExecutingActionToken() !== undefined) {
         started.resolve();
         await release.promise;
       }
@@ -1173,7 +1177,6 @@ describe("JavaScript-node data unavailability", () => {
       expect(await outputPromise).toBe(7);
       await runtime.idle();
       expect(calls).toBe(1);
-      expect(writes[0]).toBe(DataUnavailable.syncing());
       expect(writes.at(-1)).toBe(7);
     } finally {
       release.resolve();
@@ -1189,12 +1192,17 @@ describe("JavaScript-node data unavailability", () => {
     const targetId = target.getAsNormalizedFullLink().id;
     const originalSyncCell = storageManager.syncCell.bind(storageManager);
     let attempts = 0;
+    let readinessAttempts = 0;
     storageManager.syncCell = async <T>(cell: Cell<T>): Promise<Cell<T>> => {
       if (cell.getAsNormalizedFullLink().id === targetId) {
         attempts++;
-        // Let runSynced's static input presync complete. Every readiness-owned
-        // attempt then fails as if the provider stayed offline.
-        if (attempts > 1) throw new Error("provider offline");
+        // Let runSynced's static input presync complete. Every attempt owned by
+        // the executing availability action then fails as if the provider
+        // stayed offline. This remains stable as presync adds coverage passes.
+        if (runtime.scheduler.getExecutingActionToken() !== undefined) {
+          readinessAttempts++;
+          throw new Error("provider offline");
+        }
       }
       return await originalSyncCell(cell);
     };
@@ -1215,7 +1223,7 @@ describe("JavaScript-node data unavailability", () => {
       });
       const output = await Promise.race([run, bounded]);
       expect(output).toBeInstanceOf(DataUnavailable);
-      expect((output as DataUnavailable).reason).toBe("syncing");
+      expect((output as DataUnavailable).reason).toBe("error");
 
       const probe = runtime.getCell(
         space,
@@ -1235,7 +1243,10 @@ describe("JavaScript-node data unavailability", () => {
         "provider offline",
       );
       await readTx.commit();
-      expect(attempts).toBe(4);
+      // Reference prefetch and value materialization use distinct full
+      // selectors; each independently exhausts the three-attempt bound.
+      expect(readinessAttempts).toBe(6);
+      expect(attempts).toBeGreaterThanOrEqual(readinessAttempts);
       expect(storageManager.pendingCrossSpacePromiseCount()).toBe(0);
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);

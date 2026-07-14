@@ -55,7 +55,10 @@ export function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
   mightWrite: WeakMap<Action, IMemorySpaceAddress[]>,
-  nodes?: Pick<NodeRegistry, "parentActionOf">,
+  nodes?: Pick<
+    NodeRegistry,
+    "get" | "parentActionOf" | "getRegistrationOrdinal"
+  >,
   dependents?: WeakMap<Action, Set<Action>>,
   getAdditionalWrites?: (
     action: Action,
@@ -84,6 +87,13 @@ export function topologicalSort(
         inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
       }
     }
+    addDeclaredReadOrderingEdges({
+      actions,
+      graph,
+      inDegree,
+      mightWrite,
+      nodes,
+    });
   } else {
     for (const actionA of actions) {
       const log = dependencies.get(actionA);
@@ -93,7 +103,7 @@ export function topologicalSort(
       for (const write of writes) {
         for (const actionB of actions) {
           if (actionA !== actionB && !graphA.has(actionB)) {
-            const logB = dependencies.get(actionB);
+            const logB = getOrderingReadLog(actionB, dependencies, nodes);
             if (!logB) continue;
             if (
               logB.reads.some(
@@ -122,6 +132,7 @@ export function topologicalSort(
       dependencies,
       graph,
       inDegree,
+      nodes,
       getAdditionalWrites,
     });
   }
@@ -143,7 +154,14 @@ export function topologicalSort(
     }
   }
 
-  // Perform topological sort with cycle handling
+  // Perform topological sort with cycle handling.
+  //
+  // Once data edges (§7.4 rule 1) and parent tie-breaks (rule 2) are applied,
+  // remaining ties fall back to REGISTRATION ORDER (rule 3) rather than
+  // work-set / arrival order, so the run order — and last-writer-wins on any
+  // shared address — is identical regardless of the order actions were
+  // invalidated or arrived over the network.
+  const byRegistrationOrder = makeTieBreakComparator(actions, nodes);
   const queue: Action[] = [];
   const result: Action[] = [];
   const visited = new Set<Action>();
@@ -154,6 +172,7 @@ export function topologicalSort(
       queue.push(action);
     }
   }
+  queue.sort(byRegistrationOrder);
 
   while (queue.length > 0 || visited.size < actions.size) {
     if (queue.length === 0) {
@@ -176,8 +195,10 @@ export function topologicalSort(
         if (aHasUnvisitedParent && !bHasUnvisitedParent) return 1; // b first
         if (!aHasUnvisitedParent && bHasUnvisitedParent) return -1; // a first
 
-        // Fall back to in-degree
-        return (inDegree.get(a) || 0) - (inDegree.get(b) || 0);
+        // Fall back to in-degree, then registration order (rule 3)
+        const byDegree = (inDegree.get(a) || 0) - (inDegree.get(b) || 0);
+        if (byDegree !== 0) return byDegree;
+        return byRegistrationOrder(a, b);
       });
 
       queue.push(unvisited[0]);
@@ -192,7 +213,7 @@ export function topologicalSort(
     for (const neighbor of graph.get(current) || []) {
       inDegree.set(neighbor, inDegree.get(neighbor)! - 1);
       if (inDegree.get(neighbor) === 0) {
-        queue.push(neighbor);
+        insertReadyAction(queue, neighbor, byRegistrationOrder);
       }
     }
   }
@@ -200,11 +221,30 @@ export function topologicalSort(
   return result;
 }
 
+function insertReadyAction(
+  queue: Action[],
+  action: Action,
+  compare: (a: Action, b: Action) => number,
+): void {
+  let low = 0;
+  let high = queue.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (compare(queue[mid], action) <= 0) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  queue.splice(low, 0, action);
+}
+
 function addAdditionalWriteEdges(state: {
   readonly actions: Set<Action>;
   readonly dependencies: WeakMap<Action, ReactivityLog>;
   readonly graph: Map<Action, Set<Action>>;
   readonly inDegree: Map<Action, number>;
+  readonly nodes?: Pick<NodeRegistry, "get">;
   readonly getAdditionalWrites: (
     action: Action,
   ) => readonly IMemorySpaceAddress[] | undefined;
@@ -216,7 +256,11 @@ function addAdditionalWriteEdges(state: {
     const graphA = state.graph.get(actionA)!;
     for (const actionB of state.actions) {
       if (actionA === actionB || graphA.has(actionB)) continue;
-      const logB = state.dependencies.get(actionB);
+      const logB = getOrderingReadLog(
+        actionB,
+        state.dependencies,
+        state.nodes,
+      );
       if (!logB) continue;
       if (
         logB.reads.some(
@@ -239,6 +283,92 @@ function addAdditionalWriteEdges(state: {
       }
     }
   }
+}
+
+function addDeclaredReadOrderingEdges(state: {
+  readonly actions: Set<Action>;
+  readonly graph: Map<Action, Set<Action>>;
+  readonly inDegree: Map<Action, number>;
+  readonly mightWrite: WeakMap<Action, IMemorySpaceAddress[]>;
+  readonly nodes?: Pick<NodeRegistry, "get">;
+}): void {
+  if (!state.nodes) return;
+
+  for (const actionA of state.actions) {
+    const writes = state.mightWrite.get(actionA) ?? [];
+    if (writes.length === 0) continue;
+
+    const graphA = state.graph.get(actionA)!;
+    for (const actionB of state.actions) {
+      if (actionA === actionB || graphA.has(actionB)) continue;
+      const recordB = state.nodes.get(actionB);
+      if (
+        recordB?.status !== "never-ran" ||
+        recordB.declaredReads.length === 0
+      ) {
+        continue;
+      }
+      if (
+        recordB.declaredReads.some((read) =>
+          writes.some((write) =>
+            addressesShareEntity(read, write) &&
+            arraysOverlap(write.path, read.path)
+          )
+        )
+      ) {
+        graphA.add(actionB);
+        state.inDegree.set(actionB, (state.inDegree.get(actionB) || 0) + 1);
+      }
+    }
+  }
+}
+
+function getOrderingReadLog(
+  action: Action,
+  dependencies: WeakMap<Action, ReactivityLog>,
+  nodes?: Pick<NodeRegistry, "get">,
+): Pick<ReactivityLog, "reads" | "shallowReads"> | undefined {
+  const record = nodes?.get(action);
+  if (record?.status === "never-ran" && record.declaredReads.length > 0) {
+    return {
+      reads: record.declaredReads,
+      shallowReads: [],
+    };
+  }
+  return dependencies.get(action);
+}
+
+/**
+ * Deterministic tie-break comparator for topological ordering (§7.4 rule 3).
+ *
+ * Primary key is the stable REGISTRATION ORDINAL from the node registry, so
+ * ties left by the read-edge DAG resolve to registration order rather than the
+ * order actions happened to enter the work set (which for remote commits is
+ * network-arrival order). Actions with no registration ordinal (e.g. bare
+ * materializers, or any call with `nodes` undefined) fall back to their
+ * work-set insertion index, preserving the pre-existing behavior for that case
+ * and keeping unregistered actions ordered after registered ones.
+ */
+function makeTieBreakComparator(
+  actions: Set<Action>,
+  nodes?: Pick<NodeRegistry, "getRegistrationOrdinal">,
+): (a: Action, b: Action) => number {
+  const fallbackIndex = new Map<Action, number>();
+  let index = 0;
+  for (const action of actions) fallbackIndex.set(action, index++);
+
+  const ordinalOf = (action: Action): number =>
+    nodes?.getRegistrationOrdinal(action) ?? Number.POSITIVE_INFINITY;
+
+  return (a, b) => {
+    const oa = ordinalOf(a);
+    const ob = ordinalOf(b);
+    // `!==` (not subtraction) so two unregistered actions (both +Infinity)
+    // compare equal and fall through to the stable insertion-order index
+    // instead of yielding NaN.
+    if (oa !== ob) return oa - ob;
+    return (fallbackIndex.get(a) ?? 0) - (fallbackIndex.get(b) ?? 0);
+  };
 }
 
 function addressesShareEntity(

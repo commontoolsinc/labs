@@ -70,17 +70,20 @@ The runtime's event loop is the scheduler
    the scheduler doesn't care), the index marks the affected actions dirty
    and queues them.
 
-Execution is **pull-based and lazy** (`scheduler/pull-execution.ts` and its
-sibling `pull-*` modules): only computations that something observable (a
-UI sink, an effect, an explicit `.pull()`) depends on get re-run, so an
+Execution is **demand-driven and lazy** (`scheduler/settle.ts`,
+`scheduler/dependency-graph.ts`, and `scheduler/work-oracle.ts`): only
+computations that something observable (a UI sink, an effect, an explicit
+`.pull()`, or an event preflight) depends on get re-run, so an
 unobserved derived value costs nothing. (An eager "push" mode existed
 historically; it was removed in the scheduler-v2 rebuild — pull is now the
 only strategy.)
 
-Cycles and pathologies are contained by bounded iteration — an action that
-keeps dirtying itself (e.g. a `computed` that writes upstream, gotcha #2)
-gets cut off with the "Too many iterations" error rather than hanging the
-runtime.
+Cycles and pathologies are contained by per-pass iteration and per-node run
+budgets. A non-converging subgraph is deferred behind an escalating backoff
+gate while unrelated work continues; it cannot spin the runtime indefinitely.
+The scheduler emits one `Reactive graph did not settle` warning per episode,
+including the deferred action names and a pointer to
+`commonfabric.detectNonIdempotent()`.
 
 The dirtying machinery is also why *remote* changes feel local: a synced
 update from another user lands in the replica as a write notification, hits

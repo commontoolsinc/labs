@@ -1778,3 +1778,363 @@ describe("compactChangeSet", () => {
     });
   });
 });
+
+// Scope-isolation write guard (docs/specs/scoped-cell-instances.md;
+// pitfall 6 in docs/development/debugging/gotchas/scoped-cell-pitfalls.md):
+// links do not carry a principal, so a narrower-scoped link stored in a
+// broader-scoped slot resolves to a DIFFERENT instance for every reader —
+// shared data written that way can never propagate (the B2 reader-blackout
+// investigation, #4457). The guard WARNS loudly at the write site unless the
+// slot's schema declares the scope (per-reader semantics opted into by the
+// author). It is a warn, not a throw, because the runtime's own machinery
+// legitimately writes scoped links into scope-silent slots today (.asScope()
+// result links, navigateTo result cells, updateArgument setup wiring); see
+// the enumeration on #4561 for the flip-to-throw checklist.
+describe("scope-isolation write guard", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  const warnCounts = (): number => {
+    const logger = (globalThis as {
+      commonfabric?: {
+        logger?: Record<string, { counts: { warn: number } }>;
+      };
+    }).commonfabric?.logger?.["normalizeAndDiff"];
+    expect(logger).toBeDefined();
+    return logger!.counts.warn;
+  };
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  function scopedLinkValue(
+    name: string,
+    scope: "user" | "session",
+  ): unknown {
+    const base = runtime.getCell<string>(
+      space,
+      name,
+      { type: "string" },
+      tx,
+    ).getAsNormalizedFullLink();
+    return createSigilLinkFromParsedLink({ ...base, scope });
+  }
+
+  it("warns on a user-scoped link written into a scope-silent space slot (write still lands)", () => {
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-silent-dest",
+      {
+        type: "object",
+        properties: { profile: { type: "object" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-user-target", "user"),
+    );
+    expect(warnCounts()).toBe(before + 1);
+    const stored = tx.readValueOrThrow(
+      dest.key("profile").getAsNormalizedFullLink(),
+    );
+    expect(isSigilLink(stored)).toBe(true);
+  });
+
+  it("does not warn when the slot's schema declares the scope", () => {
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-declared-dest",
+      {
+        type: "object",
+        properties: { profile: { type: "object", scope: "user" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-declared-target", "user"),
+    );
+    expect(warnCounts()).toBe(before);
+    const stored = tx.readValueOrThrow(
+      dest.key("profile").getAsNormalizedFullLink(),
+    );
+    expect(isSigilLink(stored)).toBe(true);
+    expect(parseLink(stored as any, dest.getAsNormalizedFullLink())?.scope)
+      .toBe("user");
+  });
+
+  it("warns on a session link even when the slot declares only user scope", () => {
+    const dest = runtime.getCell<{ draft?: unknown }>(
+      space,
+      "scope-guard-under-declared-dest",
+      {
+        type: "object",
+        properties: { draft: { type: "object", scope: "user" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("draft").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-session-target", "session"),
+    );
+    expect(warnCounts()).toBe(before + 1);
+  });
+
+  it("does not warn when the slot's schema tolerates undefined (ubik2's criterion)", () => {
+    // A slot that matches undefined degrades harmlessly for readers whose
+    // resolution comes up empty — per-reader links there are a legitimate
+    // pattern, not the blackout footgun.
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-undef-tolerant-dest",
+      {
+        type: "object",
+        properties: { profile: { type: ["object", "undefined"] } },
+      } as unknown as JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-undef-tolerant-target", "user"),
+    );
+    expect(warnCounts()).toBe(before);
+  });
+
+  it("does not warn when the slot's schema carries a default", () => {
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-default-dest",
+      {
+        type: "object",
+        properties: {
+          profile: { type: "object", default: {} },
+        },
+      } as unknown as JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-default-target", "user"),
+    );
+    expect(warnCounts()).toBe(before);
+  });
+
+  it("warns when the parent schema requires the slot (write through the parent)", () => {
+    const dest = runtime.getCell<{ author?: string; profile?: unknown }>(
+      space,
+      "scope-guard-parent-required-dest",
+      {
+        type: "object",
+        properties: {
+          author: { type: "string" },
+          profile: { type: "object" },
+        },
+        required: ["author", "profile"],
+      } as const satisfies JSONSchema,
+      tx,
+    );
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.getAsNormalizedFullLink(),
+      {
+        author: "alice",
+        profile: scopedLinkValue("scope-guard-parent-required-target", "user"),
+      },
+    );
+    expect(warnCounts()).toBe(before + 1);
+  });
+
+  it("does not warn for an optional slot, even when strictly typed (ubik2's criterion)", () => {
+    // The parent's `required` list is what makes a missing cell void the
+    // read; an optional property is simply dropped and the object survives —
+    // per-reader links there degrade harmlessly.
+    const dest = runtime.getCell<{ author?: string; profile?: unknown }>(
+      space,
+      "scope-guard-parent-optional-dest",
+      {
+        type: "object",
+        properties: {
+          author: { type: "string" },
+          profile: { type: "object" },
+        },
+        required: ["author"],
+      } as const satisfies JSONSchema,
+      tx,
+    );
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.getAsNormalizedFullLink(),
+      {
+        author: "alice",
+        profile: scopedLinkValue("scope-guard-parent-optional-target", "user"),
+      },
+    );
+    expect(warnCounts()).toBe(before);
+  });
+
+  it("resolves $defs/$ref slot schemas before judging tolerance (still warns on strict refs)", () => {
+    // CTS-emitted slot schemas routinely carry $defs + $ref (the original
+    // convergence-chat repro's stored link schema had exactly this shape);
+    // tolerance must be judged on the resolved schema, not the ref wrapper.
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-ref-dest",
+      {
+        type: "object",
+        properties: {
+          profile: {
+            $defs: { P: { type: "object" } },
+            $ref: "#/$defs/P",
+          },
+        },
+      } as unknown as JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-ref-target", "user"),
+    );
+    expect(warnCounts()).toBe(before + 1);
+  });
+
+  it("does not warn when re-serializing the identical stored link (no-op route)", () => {
+    // At-rest data must not start warning on unrelated rewrites: the same
+    // link written twice takes the no-op branch, which precedes the guard.
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-noop-dest",
+      {
+        type: "object",
+        properties: { profile: { type: "object" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+    const value = scopedLinkValue("scope-guard-noop-target", "user");
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      value,
+    );
+    expect(warnCounts()).toBe(before + 1);
+    // Second, identical write: no-op, no additional warn.
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      value,
+    );
+    expect(warnCounts()).toBe(before + 1);
+  });
+
+  it("warns despite a default of null (the read side skips null defaults)", () => {
+    // Read-side default application uses a loose `!= undefined` check, so
+    // `default: null` never fills the hole — the slot is NOT tolerant.
+    const dest = runtime.getCell<{ profile?: unknown }>(
+      space,
+      "scope-guard-null-default-dest",
+      {
+        type: "object",
+        properties: {
+          profile: { type: "object", default: null },
+        },
+      } as unknown as JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("profile").getAsNormalizedFullLink(),
+      scopedLinkValue("scope-guard-null-default-target", "user"),
+    );
+    expect(warnCounts()).toBe(before + 1);
+  });
+
+  it("does not warn for same-scope links (space into space)", () => {
+    const dest = runtime.getCell<{ item?: unknown }>(
+      space,
+      "scope-guard-same-scope-dest",
+      {
+        type: "object",
+        properties: { item: { type: "object" } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    dest.set({});
+
+    const base = runtime.getCell<string>(
+      space,
+      "scope-guard-space-target",
+      { type: "string" },
+      tx,
+    ).getAsNormalizedFullLink();
+    const before = warnCounts();
+    diffAndUpdate(
+      runtime,
+      tx,
+      dest.key("item").getAsNormalizedFullLink(),
+      createSigilLinkFromParsedLink(base),
+    );
+    expect(warnCounts()).toBe(before);
+    const stored = tx.readValueOrThrow(
+      dest.key("item").getAsNormalizedFullLink(),
+    );
+    expect(isSigilLink(stored)).toBe(true);
+  });
+});

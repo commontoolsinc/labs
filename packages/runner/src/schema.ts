@@ -1160,8 +1160,8 @@ export function validateAndTransformResult(
       undefined,
       undefined,
       // Absent linked targets establish selector coverage asynchronously.
-      (missing) => {
-        const loadStatus = runtime.ensureLinkedDocLoaded(missing);
+      (missing, sourceSpace) => {
+        const loadStatus = runtime.ensureLinkedDocLoaded(missing, sourceSpace);
         if (loadStatus === "error") {
           linkedDocUnavailable = {
             unavailableReason: "error",

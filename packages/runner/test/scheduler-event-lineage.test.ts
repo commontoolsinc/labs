@@ -16,6 +16,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { useCancelGroup, useDeferredCancelOwnership } from "../src/cancel.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 
 const secondSigner = await Identity.fromPassphrase(
@@ -42,13 +43,15 @@ function emulatedServer(
 
 function rejectNextServerTransact(
   storageManager: SchedulerTestStorageManager,
-): () => void {
+) {
   const server = emulatedServer(storageManager);
   const original = server.transact.bind(server);
+  const rejected = Promise.withResolvers<void>();
   let shouldReject = true;
   server.transact = async (message) => {
     if (shouldReject) {
       shouldReject = false;
+      rejected.resolve();
       return {
         type: "response",
         requestId: message.requestId,
@@ -61,8 +64,11 @@ function rejectNextServerTransact(
     return await original(message);
   };
 
-  return () => {
-    server.transact = original;
+  return {
+    rejected: rejected.promise,
+    restore: () => {
+      server.transact = original;
+    },
   };
 }
 
@@ -184,11 +190,10 @@ describe("scheduler event lineage", () => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
       {
-        experimental: { commitPreconditions: true },
         // These tests assert lineage gating (which events run vs. drop), not
-        // backoff timing. A short retry window keeps the cases that inject an
-        // unending conflict from backing off for the full production window
-        // before they reach their terminal outcome.
+        // production backoff timing. Keep the cases that inject an unending
+        // conflict from waiting for the full retry window before reaching
+        // their terminal outcome.
         commitBackpressure: {
           baseDelayMs: 1,
           maxDelayMs: 5,
@@ -235,7 +240,7 @@ describe("scheduler event lineage", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const restoreTransact = rejectNextServerTransact(storageManager);
+    const rejection = rejectNextServerTransact(storageManager);
     let originAttempts = 0;
     const handlerA: EventHandler = (handlerTx) => {
       originAttempts++;
@@ -274,7 +279,7 @@ describe("scheduler event lineage", () => {
       expect(originAttempts).toBe(2);
       expect(payloads.get().length).toBe(1);
     } finally {
-      restoreTransact();
+      rejection.restore();
     }
   });
 
@@ -356,22 +361,22 @@ describe("scheduler event lineage", () => {
     expect(payloads.get()).toEqual([]);
   });
 
-  it("does not dispatch a same-space descendant whose origin fails during presync", async () => {
+  it("drops a lineage event that is awaiting presync without dispatching it", async () => {
     const streamA = runtime.getCell<unknown>(
       space,
-      "lineage presync origin stream",
+      "lineage presync race stream a",
       undefined,
       tx,
     );
     const streamB = runtime.getCell<unknown>(
       space,
-      "lineage presync descendant stream",
+      "lineage presync race stream b",
       undefined,
       tx,
     );
     const originWrites = runtime.getCell<number>(
       space,
-      "lineage presync origin writes",
+      "lineage presync race origin",
       undefined,
       tx,
     );
@@ -383,20 +388,25 @@ describe("scheduler event lineage", () => {
 
     const presyncStarted = Promise.withResolvers<void>();
     const releasePresync = Promise.withResolvers<void>();
-    let descendantCalls = 0;
+    const descendantDropped = Promise.withResolvers<void>();
+    let handlerRuns = 0;
+    const finalStatuses: string[] = [];
     const handlerA: EventHandler = (handlerTx) => {
       originWrites.withTx(handlerTx).set(1);
       runtime.scheduler.queueEvent(
         streamB.getAsNormalizedFullLink(),
-        "descendant",
-        undefined,
-        undefined,
+        {},
+        false,
+        (eventTx) => {
+          finalStatuses.push(eventTx.status().status);
+          descendantDropped.resolve();
+        },
         false,
         { originTx: handlerTx },
       );
     };
     const handlerB: EventHandler = () => {
-      descendantCalls++;
+      handlerRuns++;
     };
     handlerB.presyncInputs = async () => {
       presyncStarted.resolve();
@@ -412,14 +422,11 @@ describe("scheduler event lineage", () => {
     );
 
     const gate = delayNextServerTransact(storageManager);
-    const originSettled = Promise.withResolvers<void>();
     try {
-      // Opt out of retry so the injected origin conflict is a final failure.
       runtime.scheduler.queueEvent(
         streamA.getAsNormalizedFullLink(),
         {},
         false,
-        () => originSettled.resolve(),
       );
       await waitForSignal(gate.started, "origin commit did not start");
       await waitForSignal(
@@ -428,12 +435,17 @@ describe("scheduler event lineage", () => {
       );
 
       gate.fail();
-      await originSettled.promise;
+      await waitForSignal(
+        descendantDropped.promise,
+        "lineage failure did not drop the presyncing descendant",
+      );
       releasePresync.resolve();
       await runtime.idle();
 
-      expect(descendantCalls).toBe(0);
+      expect(handlerRuns).toBe(0);
+      expect(finalStatuses).toEqual(["error"]);
     } finally {
+      gate.fail();
       releasePresync.resolve();
       gate.restore();
     }
@@ -818,13 +830,22 @@ describe("scheduler event lineage", () => {
       stream.getAsNormalizedFullLink(),
     );
 
-    stream.withTx(originTx).send("dropped origin payload");
+    let dropCallbacks = 0;
+    let dropStatus: string | undefined;
+    stream.withTx(originTx).send("dropped origin payload", (commitTx) => {
+      dropCallbacks++;
+      dropStatus = commitTx.status().status;
+    });
     await waitForSignal(
       runtime.idle(),
       "already-failed origin event did not reach idle",
     );
 
     expect(payloads.get()).toEqual([]);
+    expect(dropCallbacks).toBe(1);
+    expect(dropStatus).toBe("error");
+    await runtime.idle();
+    expect(dropCallbacks).toBe(1);
   });
 
   it("stops handler-result pieces when the handler commit never converges", async () => {
@@ -872,12 +893,10 @@ describe("scheduler event lineage", () => {
     const restoreTransact = rejectServerTransacts(storageManager);
     try {
       root.key("launch").send({});
-      // The launch commit conflicts forever; backpressure retries it until the
-      // retry window elapses, then surfaces a terminal CommitConvergenceError.
       await waitForSchedulerCondition(
         runtime,
         () => handlerAttempts >= 6,
-        "handler did not retry under sustained conflict",
+        "handler did not exhaust retries",
       );
       await runtime.idle();
 
@@ -885,5 +904,308 @@ describe("scheduler event lineage", () => {
     } finally {
       restoreTransact();
     }
+  });
+
+  it("does not install a commit-gated handler result after its parent stops", async () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { cell, handler, lift, pattern } = commonfabric;
+    let childRuns = 0;
+    const childPattern = pattern<{ source: number }>(({ source }) => {
+      const observed = lift((value: number) => {
+        childRuns++;
+        return value;
+      })(source);
+      return { observed };
+    });
+    let handlerAttempts = 0;
+    const launchChild = handler(
+      {},
+      {
+        type: "object",
+        properties: {
+          source: { type: "number", asCell: ["cell"] },
+        },
+        required: ["source"],
+      },
+      (_event, { source }) => {
+        handlerAttempts++;
+        const handlerTx = source.tx;
+        if (handlerTx === undefined) {
+          throw new Error("handler source must carry the dispatch transaction");
+        }
+        handlerTx.tx.immediate = true;
+        (handlerTx.tx as { deferRunnerStartUntilCommit?: boolean })
+          .deferRunnerStartUntilCommit = true;
+        return childPattern({ source });
+      },
+    );
+    const rootPattern = pattern(() => {
+      const source = cell(0);
+      return {
+        launch: launchChild({ source }),
+        source,
+      };
+    });
+    const rootCell = runtime.getCell<{ launch: unknown; source: number }>(
+      space,
+      "lineage deferred handler-result parent stop root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+    await runtime.scheduler.idleWithPendingCommits();
+
+    const runningBefore = runtime.runner.cancels.size;
+    const gate = delayNextServerTransact(storageManager);
+    try {
+      root.key("launch").send({});
+      await waitForSignal(gate.started, "handler commit did not start");
+      expect(handlerAttempts).toBe(1);
+      expect(runtime.runner.cancels.size).toBe(runningBefore);
+
+      // The handler result is set up, but its start is deferred until this
+      // commit succeeds. Stopping the parent must own and tombstone that
+      // pending start, not merely stop a child that does not exist yet.
+      runtime.runner.stop(rootCell);
+      expect(runtime.runner.cancels.size).toBe(0);
+
+      gate.confirm();
+      await runtime.scheduler.idleWithPendingCommits();
+      await runtime.idle();
+
+      expect(childRuns).toBe(0);
+      expect(runtime.runner.cancels.size).toBe(0);
+    } finally {
+      gate.confirm();
+      gate.restore();
+    }
+  });
+
+  it("does not let deferred ownership stop a replacement at the same key", () => {
+    type Cancel = () => void;
+    let originalStops = 0;
+    let replacementStops = 0;
+    const originalCancel = () => originalStops++;
+    const replacementCancel = () => replacementStops++;
+    let currentCancel: Cancel = originalCancel;
+    const ownership = useDeferredCancelOwnership((installedCancel) => {
+      if (currentCancel === installedCancel) installedCancel();
+    });
+    expect(ownership.markInstalled(originalCancel)).toBe(false);
+
+    // A stop/restart can replace the registration while the deferred start's
+    // own transaction is still settling. Its later failure compensation is
+    // stale and must not cancel by key into the replacement.
+    currentCancel = replacementCancel;
+    ownership.cancel();
+
+    expect(originalStops).toBe(0);
+    expect(replacementStops).toBe(0);
+    expect(currentCancel).toBe(replacementCancel);
+  });
+
+  it("cancels a deferred retry child added after its parent stops", async () => {
+    const local = createSchedulerTestRuntime(
+      `${import.meta.url}#cancelled-handler-backoff`,
+      {
+        commitBackpressure: {
+          baseDelayMs: 100,
+          maxDelayMs: 100,
+          jitter: 0,
+          retryWindowMs: 500,
+        },
+      },
+    );
+    let localTx = local.tx;
+    let restoreTransact = () => {};
+    try {
+      const { commonfabric } = createTrustedBuilder(local.runtime);
+      const { cell, handler, lift, pattern } = commonfabric;
+      let childRuns = 0;
+      const childPattern = pattern<{ source: number }>(({ source }) => {
+        const observed = lift((value: number) => {
+          childRuns++;
+          return value;
+        })(source);
+        return { observed };
+      });
+      let handlerAttempts = 0;
+      const launchChild = handler(
+        {},
+        {
+          type: "object",
+          properties: {
+            source: { type: "number", asCell: ["cell"] },
+          },
+          required: ["source"],
+        },
+        (_event, { source }) => {
+          handlerAttempts++;
+          const handlerTx = source.tx;
+          if (handlerTx === undefined) {
+            throw new Error(
+              "handler source must carry the dispatch transaction",
+            );
+          }
+          handlerTx.tx.immediate = true;
+          (handlerTx.tx as { deferRunnerStartUntilCommit?: boolean })
+            .deferRunnerStartUntilCommit = true;
+          source.set((source.get() ?? 0) + 1);
+          return childPattern({ source });
+        },
+      );
+      const rootPattern = pattern(() => {
+        const source = cell(0);
+        return {
+          launch: launchChild({ source }),
+          source,
+        };
+      });
+      const rootCell = local.runtime.getCell<{
+        launch: unknown;
+        source: number;
+      }>(
+        space,
+        "lineage cancelled handler backoff root",
+        undefined,
+        localTx,
+      );
+      const root = local.runtime.run(localTx, rootPattern, {}, rootCell);
+      await localTx.commit();
+      localTx = local.runtime.edit();
+      await root.pull();
+      await local.runtime.scheduler.idleWithPendingCommits();
+
+      const rejection = rejectNextServerTransact(local.storageManager);
+      restoreTransact = rejection.restore;
+      root.key("launch").send({});
+
+      await waitForSignal(
+        rejection.rejected,
+        "handler commit was not rejected before parent cancellation",
+      );
+      expect(handlerAttempts).toBe(1);
+
+      // The first failed attempt registered its cleanup before this stop. The
+      // retry registers a fresh deferred child after the group is cancelled;
+      // a latched group must cancel that late addition immediately.
+      local.runtime.runner.stop(rootCell);
+      expect(local.runtime.runner.cancels.size).toBe(0);
+
+      await local.runtime.idle();
+
+      expect(handlerAttempts).toBe(2);
+      expect(childRuns).toBe(0);
+      expect(local.runtime.runner.cancels.size).toBe(0);
+    } finally {
+      restoreTransact();
+      await disposeSchedulerTestRuntime({
+        storageManager: local.storageManager,
+        runtime: local.runtime,
+        tx: localTx,
+      });
+    }
+  });
+});
+
+describe("cancel group lifecycle", () => {
+  it("hands an installed cleanup through an already-cancelled owner once", () => {
+    let calls = 0;
+    const installedCancel = () => calls++;
+    const ownership = useDeferredCancelOwnership((installed) => installed());
+
+    ownership.cancel();
+    expect(ownership.isCancelled()).toBe(true);
+    expect(ownership.markInstalled(installedCancel)).toBe(true);
+    ownership.cancel();
+
+    expect(calls).toBe(1);
+  });
+
+  it("cancels each registered cleanup at most once", () => {
+    const [cancel, addCancel] = useCancelGroup();
+    let firstCalls = 0;
+    let secondCalls = 0;
+
+    addCancel(() => firstCalls++);
+    addCancel(() => secondCalls++);
+
+    cancel();
+    cancel();
+
+    expect(firstCalls).toBe(1);
+    expect(secondCalls).toBe(1);
+  });
+
+  it("immediately runs cleanups added after cancellation", () => {
+    const [cancel, addCancel] = useCancelGroup();
+    let calls = 0;
+
+    cancel();
+    addCancel(() => calls++);
+
+    expect(calls).toBe(1);
+  });
+
+  it("immediately runs cleanups added while cancellation is in progress", () => {
+    const [cancel, addCancel] = useCancelGroup();
+    const calls: string[] = [];
+
+    addCancel(() => {
+      calls.push("parent");
+      addCancel(() => calls.push("retry"));
+    });
+    addCancel(() => calls.push("sibling"));
+
+    cancel();
+
+    expect(calls).toEqual(["parent", "retry", "sibling"]);
+  });
+
+  it("runs sibling cleanups after one cleanup throws", () => {
+    const [cancel, addCancel] = useCancelGroup();
+    const calls: string[] = [];
+
+    addCancel(() => {
+      calls.push("throwing");
+      throw new Error("cleanup failed");
+    });
+    addCancel(() => calls.push("sibling"));
+
+    expect(cancel).toThrow("cleanup failed");
+    expect(calls).toEqual(["throwing", "sibling"]);
+
+    // Cancellation remains latched even when it reports a cleanup failure.
+    cancel();
+    expect(calls).toEqual(["throwing", "sibling"]);
+  });
+
+  it("aggregates multiple cleanup failures after running every cleanup", () => {
+    const [cancel, addCancel] = useCancelGroup();
+    const first = new Error("first cleanup failed");
+    const second = new Error("second cleanup failed");
+    const calls: string[] = [];
+    addCancel(() => {
+      calls.push("first");
+      throw first;
+    });
+    addCancel(() => {
+      calls.push("second");
+      throw second;
+    });
+
+    let thrown: unknown;
+    try {
+      cancel();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(calls).toEqual(["first", "second"]);
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as AggregateError).errors).toEqual([first, second]);
   });
 });

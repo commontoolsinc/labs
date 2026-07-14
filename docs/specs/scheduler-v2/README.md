@@ -1,14 +1,16 @@
 # Scheduler v2 — Demand-Driven Transactional Reactive Scheduling
 
-> **Status**: Proposal (design spec, not yet implemented)
-> **Replaces (once implemented)**: the behavior described in
-> `docs/specs/pull-based-scheduler/README.md`
-> **Companion docs**:
-> [`current-system-inventory.md`](./current-system-inventory.md) — every
-> mechanism in today's scheduler and what subsumes it here;
-> [`migration-plan.md`](./migration-plan.md) — phased path from v1 to v2;
-> [`implementation/`](./implementation/00-README.md) — step-by-step work
-> orders for the implementing agent (start at `00-README.md`).
+> **Status**: Implemented (shipped as the scheduler in PR #4288); this spec
+> governs the current behavior and is updated with it.
+> **Replaces**: the behavior described in
+> `docs/history/specs/pull-based-scheduler/README.md`
+> **Companion records** (archived point-in-time documents):
+> [`current-system-inventory.md`](../../history/specs/scheduler-v2/current-system-inventory.md)
+> — every mechanism in the v1 scheduler and what subsumes it here;
+> [`migration-plan.md`](../../history/specs/scheduler-v2/migration-plan.md) —
+> the executed v1→v2 phase plan;
+> [`implementation/`](../../history/specs/scheduler-v2/implementation/00-README.md)
+> — the executed work orders (start at `00-README.md`).
 > **Persistence**: builds on `docs/specs/persistent-scheduler-state.md`
 > (the observation/rehydration model carries over with a smaller payload).
 
@@ -114,12 +116,18 @@ document (its internal/result cell, per the per-internal-cell model of #3911 —
 the pattern builder structurally allows only one output redirect, so this
 needs no enforcement); statically-resolvable side-write targets (a passed-in
 cell bound to a fixed link — just additional output documents); and declared
-materializer envelopes for dynamic side-writes (§4.3). What disappears is not
-side-writing — it is *write-set discovery*: nothing about what a node can
-write is learned from runs, so current-known/historical write tracking
-disappears and the writer index is a static map. The price of side-writing is
-the idempotency contract (§4.2), which the idempotency validator enforces in
-tests.
+materializer envelopes for dynamic side-writes (§4.3). A registration-time
+immediate `ReactivityLog` is also a declaration channel: when action
+annotations do not supply a write surface, the log's writes seed the same
+static surface, and later run logs never broaden it. What disappears is not
+side-writing — it is *write-set discovery*: nothing about what a node can write
+is learned from runs, so historical write tracking disappears and the writer
+index is a static map. The implementation retains the field name
+`currentKnownWrites` for this fixed registered surface and persists it because
+annotation-less actions can receive their surface only through the registration
+log; that log does not survive restart. The field is static-surface
+serialization, not run-learned state. The price of side-writing is the
+idempotency contract (§4.2), which the idempotency validator enforces in tests.
 
 **P5 — Self-identification through the transaction.** Every run's transaction
 carries a reference to its originating node (object identity, not an id
@@ -151,8 +159,11 @@ eligibility. Policies adjust gate inputs; they do not own timers or queues.
 **P9 — Persistence-first lifecycle.** Node registration takes an explicit
 start mode (`fresh` vs `resume`). Resume restores the observation (read set,
 gate config, clean/invalid) and *does not run*; fresh starts invalid and runs
-when demanded. Waiting for storage sync is a piece-level precondition of
-`resume`, not a per-node racing timeout.
+when demanded. Snapshot discovery and synchronization are one piece-level
+precondition of persisted `resume`, never per-node asynchronous lookups. A
+node that falls back to fresh registration may still use a bounded per-action
+sync hold; that hold is a best-effort anti-churn optimization, not a correctness
+gate or snapshot-loading path.
 
 **P10 — Diagnostics observe, never participate.** Stats, traces, snapshots,
 idempotency checking and non-settling detection read scheduler state through a
@@ -285,10 +296,11 @@ writes X" is not answerable by the static output map, and they get three
 special rules, and only these:
 
 1. **Standing demand, idle priority.** A materializer is always live
-   (`liveRefs` includes a permanent self-reference): its consumers are
-   unknowable by construction, so invalidation must eventually cause a run.
-   But it runs at *idle priority* — after the primary work set of a pass is
-   empty — and its invalidations coalesce.
+   (it is an explicit standing demand root): its consumers are unknowable by
+   construction, so invalidation must eventually cause a run. `liveRefs`
+   remains the count of its reachable direct readers. But the materializer runs
+   at *idle priority* — after the primary work set of a pass is empty — and its
+   invalidations coalesce.
 2. **Promotion under demand.** If a pass's primary work (an effect or the
    head event's closure) reads inside a dirty materializer's envelope, the
    materializer is promoted into that pass and ordered before the reader.
@@ -298,9 +310,10 @@ special rules, and only these:
    change channel, P1/P2).
 
 This carries over v1's hard-won materializer semantics essentially unchanged;
-they were redesigned recently and are sound. What v2 removes is the parallel
-"current-known writes" generality for ordinary computations that materializers
-were entangled with.
+they were redesigned recently and are sound. What v2 removes is run-time
+write-surface discovery and historical expansion for ordinary computations;
+the persisted `currentKnownWrites` field is the fixed registered surface
+described by P4.
 
 ### 4.4 Registration and removal
 
@@ -308,7 +321,7 @@ were entangled with.
 // Shown as interface or class members.
 register(node: NodeSpec, opts: {
   mode: "fresh" | "resume";       // §9.2
-  gate?: { debounce?: ms; noAutoDebounce?: boolean; throttle?: ms };
+  gate?: { debounce?: ms; noDebounce?: boolean; throttle?: ms };
 }): Cancel
 ```
 
@@ -352,16 +365,23 @@ live(N) ⇔ N is an effect (registered, not cancelled)
 
 ### 5.2 Maintenance
 
-Liveness is maintained as a reference count (`liveRefs`), updated only when
-node edges change — which is rare (a run whose read set changed, node
-register/unregister) — not per data change. Edge updates propagate refcount
-deltas downstream-to-upstream; cycles are guarded by a visited set, and a
-refcount transition to/from zero is what propagates further (standard
-observer-count maintenance, like signal libraries' subscriber counts).
+Liveness is stored as a reference count (`liveRefs`) and recomputed only after
+an **actual edge or demand-root change** — a run whose read set changed,
+register/unregister, or provisional-root transition — never per data change.
+Updates in one registration/resubscribe operation are batched. If its edge set
+is unchanged, no rebuild occurs.
 
-This replaces v1's per-query graph walks (`isDemandedPullComputation` walks
-dependents transitively on every check, including once per candidate node per
-pass) with O(Δedges) bookkeeping.
+The rebuild starts at explicit roots (effects, materializers, and provisional
+demand), walks reader→writer edges to form the root-reachable set, then counts
+each reachable node's live direct readers. This is cycle-safe (a rootless cycle
+cannot keep itself live) and diamond-accurate (both arms count; removing one arm
+does not strand the shared writer). A single visited-set delta walk cannot
+provide both properties because path deduplication undercounts diamonds.
+
+This replaces v1's per-query graph walks (`isDemandedPullComputation` walked
+dependents transitively on every candidate check) with O(V+E) work per changed
+edge/root batch and O(1) liveness queries; ordinary value changes pay zero
+liveness-maintenance cost.
 
 ### 5.3 Provisional demand
 
@@ -476,7 +496,12 @@ pass():
 ```
 collectWorkSet():
   seeds = { N : N.status ∈ {invalid, never-ran} ∧ live(N) ∧ eligible(N) }
-  closure = seeds ∪ { live R reachable downstream from seeds via node edges }
+  // Bounded downstream closure: add each invalid node's direct live readers,
+  // but recurse past a reader only if it is itself invalid/never-ran.
+  closure = seeds
+  walk downstream from each seed via node edges:
+    add live reader R to closure
+    recurse past R only if R.status ∈ {invalid, never-ran}
   return closure
 ```
 
@@ -488,6 +513,23 @@ the output doesn't change, the effect is still clean at its turn and is
 skipped (§7.3). This recovers v1's "conditional effect" precision — *effects
 run iff their actual inputs changed value* — without the watermark history,
 because the run-gate is the node's own value-accurate `invalid` bit.
+
+The closure is **bounded to the active wavefront**: a clean live reader is
+added (tier 1 — so it can run *this* iteration if its now-invalid direct
+upstream changes it), but the recursion does **not** descend past it into the
+clean *tail* of the cone. A clean reader cannot become runnable until it
+actually runs, and when it runs and changes value P1 invalidates *its*
+readers, which the loop re-seeds the next iteration. So the per-pass closure is
+the invalid set plus one clean tier, not the whole transitive live cone — this
+restores the bound v1's (now-deleted) staleness pruning provided, **without**
+re-adding any per-data-change transitive marking. Tier 1 is kept rather than
+pruned because some clean readers must be scheduled in the same pass as the
+write that feeds them — notably materializer-output readers (a normal reader of
+a cell a materializer eagerly writes; see the cutover guard "should schedule
+normal output readers when a materializer input dirties"). Without staleness
+pruning the unbounded cone is `O(fan-out)` per pass; under a wide-fan-out hub
+(one tally many clean readers observe) the bound is what keeps the per-pass
+work-set near v1 size (decision 16).
 
 Node edges for the closure and the sort: writer→reader edges derived from the
 static output map plus reader index (maintained incrementally as read deltas
@@ -542,7 +584,9 @@ Topological sort over the work set with:
 ### 7.5 Events
 
 Events are dispatched per **ordering lane**. A lane is a FIFO queue with a
-per-event retry budget. There is exactly **one lane today** (lane =
+per-event retry policy (no retry count: a stale-basis commit failure retries
+within a bounded backoff window, everything else drops fast — see the
+rejection taxonomy in §7.6). There is exactly **one lane today** (lane =
 everything), so observable behavior is v1's global FIFO unchanged — but the
 spec states ordering, consistency gating, parking, and (future)
 confirmed-commit dispatch *per lane*, so that relaxing ordering later is a
@@ -562,7 +606,8 @@ event in telemetry.
 
 Per pass, for each lane's head event:
 
-1. **Preflight.** Compute the handler's read closure in a read-only,
+1. **Preflight.** Presync handler-only input documents, then compute the
+   handler's read closure in a read-only,
    commit-as-no-op transaction (CFC-inert, as today): declared writable-input
    links when present, else the `$event`-scoped schema closure — the one
    place a deep schema read survives in v2. **Default is
@@ -574,15 +619,51 @@ Per pass, for each lane's head event:
    cache is proven.
 2. **Consistency gate.** Treat the closure as a transient demand root: any
    invalid upstream nodes of the closure join the pass's work set (they are
-   demanded *by the event*, live or not). If any are ineligible (time-gated),
+   demanded *by the event*, live or not). The invalid-upstream set is computed
+   by **inverted reachability** from the maintained invalid-node set into the
+   closure — not an upstream walk of the closure's cone, which is O(graph)
+   against a hub (decision 15). This transient demand lasts for the whole pass,
+   so a node re-invalidated by another closure member continues settling and is
+   subject to the same iteration/run budgets and convergence backoff as a
+   standing demand root. If any are ineligible (time-gated),
    park the lane's head with `notBefore = min eligibleAt` and set the wake
-   gate; the lane stays FIFO.
-3. **Dispatch** once the closure is clean: presync handler inputs
-   (`presyncInputs`, unchanged), run the handler in an immediate transaction
+   gate; the lane stays FIFO. The gate also covers **replica staleness**
+   (CT-1795): addresses in the closure with in-flight replica loads park the
+   head, and load completion — a definitively absent document counts as
+   complete — is the wake source (same shape as the lineage park's
+   origin-commit callback). An explicit load or transport failure drops the
+   event; elapsed wall-clock time never dispatches against provisional state.
+   Computations need
+   no such gate (they self-heal through the one channel when the load
+   lands); handlers are at-most-once. Because preflight itself kicks
+   fire-and-forget pulls on cold reads, the scheduler snapshots in-flight
+   **load generations before preflight** and records the generations it has
+   settled. The same generation never re-parks the event. A changed generation
+   that was already in flight at the preflight snapshot re-parks; a generation
+   first kicked by that same preflight is history-suppressed, avoiding a
+   self-created park livelock.
+3. **Availability gate.** A plain captured value which currently carries a
+   transient `DataUnavailable` reason (`pending` or `syncing`) parks the same
+   FIFO head on a one-shot watcher over its preflight reads. A change wakes and
+   rechecks the original event; it is never reconstructed or reordered. This
+   input park is quiescent for `idle()` so a fetch or generation producer may
+   itself await idle before publishing the wakeup. It is deliberately distinct
+   from the replica-load park above, which must settle before at-most-once
+   dispatch.
+
+   Terminal `error` and `schema-mismatch` values do not park. Dispatch reaches
+   ordinary argument validation, which suppresses the invalid handler call and
+   settles the event as a no-op. `$event` is excluded because an immutable bad
+   payload cannot become valid while queued; `Writable<T>` and other Cell
+   capabilities are excluded because the handle itself is usable. Exact reason
+   and queue depth are included in opt-in preflight telemetry.
+4. **Dispatch** once the closure and availability gates are clear: run the
+   handler in an immediate transaction
    stamped with the handler's id, commit optimistically (changes propagate
-   through the one channel), retry by re-queueing at the lane head on
-   rejection, then run the internal `onCommit` callback (success or
-   exhausted failure; no external side effects — unchanged contract).
+   through the one channel), retry a stale-basis rejection by re-queueing at
+   the lane head (backoff-parked via `notBefore`), then run the internal
+   `onCommit` callback (success or final failure; no external side effects —
+   unchanged contract).
 
 ### 7.6 Event-initiated work and commit failure
 
@@ -594,38 +675,39 @@ semantics explicit.
 
 Requirements: invariant I10 (launched work survives only if the launching
 commit succeeds, and descendants of a failed attempt are never retried) and
-invariant I11 (events are handled at most once system-wide; the
-result-cell receipt is the witness — default-on, decision 14).
+invariant I11 (events are handled at most once system-wide; the result-cell
+receipt is the witness — default-on, decision 14). The canonical parent
+handling satisfies that requirement, but child-first cross-space
+materialization is a non-atomic phase with the current I11 gap described below.
 
-Current state, for the record (verified in code, June 2026):
+Implemented behavior:
 
-- *Sent events* are queued at send time (`Cell.set` on a stream calls
-  `scheduler.queueEvent` immediately, `cell.ts:1167`), ungated on the
-  sender's commit. A handler whose commit is rejected and retried queues its
-  follow-up event once per attempt (duplication), and a follow-up queued by
-  a permanently failed attempt still dispatches — possibly with a payload
-  computed from rolled-back state. The storage layer's dependent-speculation
-  rejection does **not** close this: it rejects a follow-up only when its
-  handler *read* the parent's unconfirmed writes; a handler that consumes
-  only the event payload (computed during the parent's run, embedded in the
-  event value) has no read edge to the parent and escapes. This violates
-  I10 today.
-- *Handler-result pieces* are instantiated inline in the handler's
-  transaction (data atomic — good), but their scheduler registrations are
-  eager. The on-commit-error cleanup (cancel + stop) exists only in the dead
-  push-mode branch (`runner.ts:2724-2729`); the pull path ties teardown only
-  to the handler node's lifetime (`runner.ts:2735`). Convergence after a
-  failed commit relies on retry + cause-derived deterministic ids
-  (`{ resultFor: cause }` + `startCore`'s already-running check); exhausted
-  retries leave a registered piece running against rolled-back data. The
-  commit-gated mechanism already exists (`startAfterSuccessfulCommit`) but
-  is used only for `navigateTo` results.
-- *Exactly-once handling* does not exist at all: a re-delivered event
-  (cross-runtime or ingress retry) is handled again wherever it lands.
+- Sent events reserve their position in the global FIFO immediately, even when
+  their handler's piece must load asynchronously. The event and any
+  handler-result pieces are recorded under the sending transaction's
+  speculation lineage.
+- A failed origin cancels every undispatched descendant through one terminal
+  drop path, settles its internal commit callback exactly once, and stops
+  locally started descendant pieces. Same-space descendants additionally carry
+  the origin-committed precondition; cross-space descendants park until the
+  origin confirms.
+- Every handling derives a create-only result-cell receipt from the durable
+  event id. Redelivery therefore collides on the receipt and becomes a
+  permanent, non-retried rejection rather than a second canonical parent
+  handling commit.
+- Navigation uses the success-only post-commit outbox and its async callback is
+  tracked by `runtime.settled()`; a rejected commit resets the navigation
+  attempt instead of releasing the effect.
 
 The design rests on two shared pieces of infrastructure — durable event
 identity (§7.5) and a **rejection taxonomy**: commit rejections split into
-*retryable* (ordinary optimistic conflicts — retry as today) and
+*stale-basis* (a server-side conflict or the local
+StorageTransactionInconsistent guard — re-running against fresher confirmed
+state can succeed, so it retries with capped exponential backoff within a
+bounded window, then surfaces a terminal CommitConvergenceError),
+*terminal* (a deterministic commit-rule refusal — never retried, surfaced),
+*non-retryable* (every other non-permanent rejection — deterministic with
+respect to confirmed state, drops on the first attempt), and
 *permanent* (a commit-time precondition failed — drop, never retry).
 
 **Speculation lineage.** Follow-up work dispatches immediately and
@@ -660,17 +742,28 @@ correctness comes from cancellation, not staging:
      (Future server-routed/cross-runtime event delivery would reopen this
      with an origin-attestation design; deferred until such a path
      exists.)
+   If the send observes that its origin transaction is already settled, it
+   does not create pending lineage: an already-committed origin is treated as
+   confirmed immediately, and an already-failed origin is treated as failed
+   immediately so descendants cancel or drop instead of waiting for a callback
+   that will never arrive.
 2. Client-side, the runtime keeps a lineage registry: origin tx →
    {queued events, started pieces}. When an origin's failure becomes known
    locally, undispatched descendant events (parked or queued) are cancelled
-   in place and descendant pieces are stopped (the compensating cancel+stop
-   that the pull path is missing today, now keyed off the same registry).
+   in place and descendant pieces are stopped, keyed off the same registry.
    This also improves the existing cross-space write protocol's accepted
    zombie: when the handler transaction fails *after* a successful
    child-space commit, the durable orphan data in the child space remains
    accepted, but the registry stops the locally registered piece so no
    running zombie sits on top of it. `navigateTo` results keep the fully
    commit-gated start (durability before navigation).
+   Ownership of a commit-gated start begins when the start is scheduled, not
+   when its post-commit callback installs it. Cancelling the parent or lineage
+   before that commit tombstones the pending start, so the callback must not
+   install it. After installation, cancellation may stop only the exact local
+   registration installed by that attempt; if another attempt has replaced or
+   won the same result key, its registration remains live. This prevents a
+   receipt-losing duplicate from stopping the winner.
 3. Descendants of a *failed attempt* are never retried (permanent
    rejection); when the parent itself retries and succeeds, the re-run
    emits fresh follow-ups under the new attempt's tx id. This is what
@@ -691,8 +784,10 @@ writes at least the receipt (default-on). The outbox remains the
 right tool for what it was built for: external side effects that *want*
 server confirmation.
 
-**Receipts (exactly-once handling).** Needed for CFC: certain events must
-be handled at most once system-wide, not once per runtime that sees them.
+**Receipts (exactly-once handling).** Needed for CFC: certain events must be
+handled at most once system-wide, not once per runtime that sees them. The
+receipt provides that guarantee for the canonical parent handling; the
+cross-space child-phase limitation is explicit below.
 
 The receipt is not a new document kind: **the receipt is the handling's
 result cell.** Every event handling conceptually owns one result document —
@@ -702,22 +797,39 @@ the receipt. This gives handlers the same shape as computations: one
 canonical output document per unit of work, whose creation doubles as the
 exactly-once witness.
 
+For an inline, non-navigation handler result, an `inSpace` child does not move
+that canonical handler-result wrapper into the child space. The result/receipt
+stays in the handler's originating space, while each child node materializes its
+own deterministic result in its target space. The multi-space transaction
+commits those child nodes first and the canonical handler result plus parent
+effects last. If a stale-basis rejection lands after a child commit, the
+accepted orphan child may remain (§7.6 speculation lineage), but the handler
+receipt did not commit, so retrying the event cannot collide with its own
+partial attempt. A result pattern containing `navigateTo` remains success-gated:
+its child work starts only after the handler's parent commit succeeds.
+
+An already-materialized local receipt short-circuits result-pattern
+materialization on an ordinary same-runtime redelivery, while the create-only
+precondition still makes the parent commit lose permanently. This is a local
+containment optimization, not a cross-space atomicity proof. If a stale retry
+partially committed a child before the parent receipt, or two runtimes race the
+same event, an attempt can write the deterministic child id before it loses the
+parent receipt race. The id prevents a second child identity, but it does not
+freeze the child's value or roll the child phase back. Strict exactly-once
+semantics for those child phases require a durable per-event/per-space phase
+protocol (open question 3).
+
 Each event is handled by **exactly one handler** (decided; multi-handler
 dispatch is a future opt-in feature — if it lands, the handler id joins the
-result-cell derivation). Today's `queueSchedulerEvent` silently queues one
-event per matching handler; registration is tightened to enforce one
-handler per stream link instead.
+result-cell derivation). Registration enforces one handler per stream link.
 
-1. The result cell's id is causally derived from the **event id**. Today's
-   handler-result cause is per-invocation but *random*
-   (`{ ...inputs, $event: crypto.randomUUID() }`, `runner.ts:2995-2998`);
-   substituting the durable event id (§7.5) for the random UUID is the
-   whole bridge. It also makes every id minted inside the handler frame
-   event-causal (the frame cause feeds id derivation for objects the
-   handler creates): per-gesture uniqueness is preserved because event ids
-   are unique per send, retries of the same event reuse the same ids
-   instead of minting fresh ones per attempt, and duplicate handlings
-   elsewhere derive the same ids — colliding exactly where intended.
+1. The result cell's id is causally derived from the **event id**. The handler
+   result cause uses the durable dispatched event id (§7.5), which also makes
+   every id minted inside the handler frame event-causal (the frame cause feeds
+   id derivation for objects the handler creates): per-gesture uniqueness is
+   preserved because event ids are unique per send, retries of the same event
+   reuse the same ids instead of minting fresh ones per attempt, and duplicate
+   handlings elsewhere derive the same ids — colliding exactly where intended.
 2. **Default-on for all events** (no class machinery for now): every
    handling transaction creates its result cell **unconditionally**, under
    a create-only commit precondition. If it already exists, the commit
@@ -729,16 +841,22 @@ handler per stream link instead.
    gesture-scale). Layering — per-class refinements, receipt retention,
    alignment with the CFC exactly-once scope — is deliberately deferred
    (open question 2).
-3. Retryable conflicts on other documents re-run the handler as usual; the
-   re-run derives the same result-cell id from the same event id, so a
-   handler's own retries never collide with themselves (the losing attempt
-   never committed).
+3. Retryable stale-basis failures on other documents re-run the handler as
+   usual; the re-run derives the same result-cell id from the same event id, so
+   a handler's own retries never collide with themselves. The losing attempt
+   never committed the canonical result/receipt. A child-first cross-space
+   attempt may have committed deterministic child data, but that is an accepted
+   orphan rather than the handler's terminal witness; a retry can reuse or
+   update that child phase before the parent handling succeeds.
 4. Receipts compose with non-durable event queues: delivery may be
    at-least-once (redelivery after restart, multi-runtime fanout); receipts
-   make *handling* exactly-once, including across process restarts, without
-   making queues durable. And because the receipt is the result cell, a
-   redelivered pattern-launching event cannot create a second piece — the
-   collision is on the very document the piece would live at.
+   make the *canonical parent handling commit* exactly-once, including across
+   process restarts, without making queues durable. And because the receipt is
+   the handler's result cell, a redelivery cannot create a second
+   handler-result piece. Cross-space child nodes use deterministic ids, so a
+   partial attempt and the winner address the same child identity; absent the
+   deferred phase protocol, this does not guarantee which attempted child value
+   wins before the parent receipt commits.
 
 Lineage and receipts are deliberately the same shape — commit-time
 precondition, permanent rejection, no-retry client behavior, ids derived
@@ -752,19 +870,27 @@ retry budget. (The exhausted-retry zombie is accepted as pre-existing; the
 implementation should leave a watch-this comment at the retry-exhaustion
 sites.)
 
-All of this is independent of the v2 cutover and can land against v1 (see
-migration plan, phase E).
+These semantics are part of the shipped v2 scheduler; the executed phase-E
+work order is archived with the migration records.
 
 ### 7.7 Convergence bounds
 
 - `MAX_ITERS` iterations per pass (default 10).
-- `PASS_RUN_BUDGET` runs per node per pass (small, default 5 — v1's 100 was a
-  backstop, not a design point; with value-gated re-runs a node that runs 5×
-  in one pass is cycling, not converging).
+- `PASS_RUN_BUDGET` runs per node per pass (`= MAX_ITERS`, currently 10 —
+  v1's 100 was a backstop, not a design point). A node runs at most once per
+  iteration, so its per-pass run count is bounded by `MAX_ITERS` by
+  construction; the budget is that bound's backstop against any
+  multi-run-per-iteration path, **not** a depth limit. A budget below
+  `MAX_ITERS` misclassifies a healthy deep first-run chain (which legitimately
+  re-runs each downstream node once per unrolled level) as cycling, which is
+  why it was raised from 5 to `MAX_ITERS`.
 - Exhaustion (iterations or budget): remaining runnable nodes keep
   `status = invalid` and receive an escalating backoff gate
   (`gate.backoffUntil`, ×2 per consecutive exhaustion, capped); one wake is
-  scheduled; `scheduler.non-settling` telemetry fires once per episode.
+  scheduled; `scheduler.non-settling` telemetry and one author-facing warning
+  fire per episode. The warning names the deferred actions, points to
+  `commonfabric.detectNonIdempotent()`, and does not turn the bounded retry into
+  an action error.
 
 No node is force-run or force-cleaned. A non-converging subgraph degrades to
 rate-limited convergence attempts while the rest of the system stays
@@ -789,9 +915,11 @@ eligible(N) = now ≥ eligibleAt(N)
 
 - **Manual debounce / throttle** — per node, via registration options or the
   control API; persisted as part of the observation (§9.3).
-- **Auto-debounce** — effects (never computations, never `cell.pull` roots)
-  averaging above a threshold after K runs get a default debounce unless
-  opted out. Pure policy: adjusts `gate.debounce`.
+- **Auto-debounce** — effects (never computations) averaging above a threshold
+  after K runs get a default debounce unless `noDebounce` is set.
+  `cell.pull()` sets `noDebounce: true` on its ephemeral effect, so pull roots
+  opt out explicitly rather than through a write-surface proxy. Pure policy:
+  adjusts `gate.debounce`.
 - **Cycle backoff** — replaces v1's cycle-aware debounce *and* cycle breaker
   with the §7.7 escalating gate.
 
@@ -809,7 +937,17 @@ parked head event) has a future `eligibleAt`, set a single timer for the
 minimum. `idle()` resolves when: no run in flight, no background piece-start
 task, no tick queued, no runnable work now, and no parked event — i.e.
 exactly v1's contract with the special cases collapsed into the gate
-primitive. Dormant invalid computations (not live) never hold `idle()` open.
+primitive. Dormant invalid computations (not live) never hold `idle()` open,
+and a shared timer belonging only to dormant work does not delay current idle
+waiters.
+
+Convergence backoff has one bounded exception. An idle waiter stays open for a
+small number of backoff passes while an idle-relevant live wave may still
+converge, avoiding a mid-wave observation just because the frontier reached the
+per-pass cap. The hold is counted per deferred node and per idle episode. When
+the bound is exhausted, `idle()` resolves while retry wakes continue at their
+rate-limited cadence; every actual idle boundary resets the episode counters so
+a later, unrelated demand wave receives its own full convergence allowance.
 
 ---
 
@@ -833,24 +971,36 @@ the fingerprint string is versioned so v1 observations are simply misses.
 - **`fresh`** (new piece, locally re-run after stop): nodes register
   `never-ran`; demand decides everything else.
 - **`resume`** (piece loaded from storage): the runner awaits the space's
-  sync **once per piece** before registering nodes (subsumes v1's per-action
-  `awaitSync` + shared-deadline machinery), then registers each node in
-  resume mode: look up the observation; on fingerprint match, install
-  `reads` (+ gate config) directly into the indexes, set `status = clean`,
-  or `invalid` if durable dirty markers say so; on miss/mismatch/timeout,
-  degrade that node to `fresh`.
+  sync and **one space-wide snapshot listing** before registering nodes
+  (subsumes v1's per-action `awaitSync` + shared-deadline machinery). The
+  listing is bucketed per piece doc, so the resume phase covers the whole
+  resumed piece **tree**: descendants — sub-pattern nodes and
+  map/filter/flatMap per-element runs, each persisted under its own
+  `pieceId` — register against their own bucket from the same listing
+  (`per-doc-rehydration.md`). Each node registers in resume mode: look up
+  the observation; on fingerprint match, install `reads` (+ gate config)
+  directly into the indexes, set `status = clean`, or `invalid` if durable
+  dirty markers say so; on miss/mismatch, degrade that node to `fresh`
+  behind a bounded synced-hold. The successful listing path has already synced,
+  so that hold releases immediately; after a flag-off or failed-listing fallback
+  it waits briefly for sync and then releases on timeout. It is an anti-churn
+  optimization, not a correctness precondition. Child-starting coordinators
+  (map/filter/flatMap reconciles) never rehydrate clean — they run on resume to
+  re-attach their children, which then rehydrate individually.
 
 Rehydrated-clean nodes cost index inserts only. The v1 race-guard apparatus
 (per-action rehydration tokens, superseded checks, per-action timeout sharing)
-collapses because resume is a piece-level phase that completes before the
-piece's nodes can be scheduled at all.
+collapses because resume stays a boot-level phase — one listing loaded before
+registration — rather than per-action async lookups.
 
 ### 9.3 Observation payload (slimmed)
 
-Per node: identity, kind, `reads` (+depth), gate config, status
-(`success`/`failed` + error fingerprint), watermark seq. Dropped relative to
-v1: `currentKnownWrites`, `declaredWrites`, write-set history (outputs are
-static — derivable from the piece's process graph), and the mode fingerprint.
+Per node: identity, kind, `reads` (+depth), the fixed registered write surface
+(`currentKnownWrites`), gate config, status (`success`/`failed` + error
+fingerprint), and watermark seq. Dropped relative to v1: `declaredWrites`,
+write-set history, and the mode fingerprint. `currentKnownWrites` is required:
+annotation-less actions may receive their static surface from the registration
+log, which is unavailable after restart.
 `sideWriteEnvelope` is declared metadata and also needs no observation copy,
 but keeping it inline is acceptable as a denormalization if graph-snapshot
 lookup at rehydration time is not yet available.
@@ -895,8 +1045,9 @@ unchanged output triggers no downstream runs.
 
 **I4 — Event ordering & consistency.** Handlers dispatch in enqueue order
 within their ordering lane (today: one global lane). Before dispatch, every
-invalid node upstream of the handler's read closure has been run (or the
-event is parked; it is never skipped or reordered within its lane).
+invalid node upstream of the handler's read closure has been run, and every
+in-flight replica load for an address the closure depends on has completed
+(or the event is parked; it is never skipped or reordered within its lane).
 
 **I5 — Self-stability.** A run's own committed changes never invalidate the
 node that produced them. A run that writes only its output with unchanged
@@ -905,7 +1056,9 @@ values causes no scheduling activity at all.
 **I6 — Bounded non-convergence.** A pass executes at most
 `MAX_ITERS × |workSet| ` runs and at most `PASS_RUN_BUDGET` runs of any single
 node; non-converging subgraphs continue only behind escalating time gates and
-never starve events, other subgraphs, or `idle()` (which excludes gated work).
+never starve events or other subgraphs. They may hold `idle()` only for the
+bounded convergence window in §8.4; after its escape valve opens, gated retries
+continue without holding idle waiters.
 
 **I7 — Restart equivalence.** Resuming a piece whose observations validate
 yields the same set of future runs as a process that had stayed alive
@@ -927,12 +1080,14 @@ are cancelled client-side or permanently rejected at commit, and are never
 retried. A retried parent emits fresh launches under its new attempt. See
 §7.6.
 
-**I11 — Events are handled at most once.** At most one handling
-transaction system-wide ever commits for a given event id: the create of
-the handling's result cell (whose id is causal to the event id) is the
-witness; receipts are on for all events. A receipt-exists rejection is
-permanent: the losing client does not retry. Each event has exactly one
-handler. See §7.6.
+**I11 — Events are handled at most once.** At most one handling transaction
+system-wide ever commits for a given event id: the create of the handling's
+result cell (whose id is causal to the event id) is the witness; receipts are on
+for all events. A receipt-exists rejection is permanent: the losing client does
+not retry. Each event has exactly one handler. **Current implementation gap:**
+child-first cross-space materialization can durably write before the parent
+receipt race is decided, so strict I11 for those child-phase values still needs
+the protocol in open question 3. See §7.6.
 
 ---
 
@@ -945,7 +1100,7 @@ field bag.)
 | Component | Owns | Key operations |
 | --- | --- | --- |
 | `registry` | Node records, identity, lifecycle | `register`, `remove`, `get` |
-| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `liveRefDelta` |
+| `graph` | Reader index (trigger semantics), static writer map, envelope index, node edges, liveness refcounts | `applyReadDelta`, `match(change)`, `edgesFor`, `recomputeLiveRefs` |
 | `invalidation` | Storage subscription → `markInvalid` + tick | `onNotification` |
 | `settle` | The pass: work set, toposort, run-gating, iteration/budget bounds | `pass()` |
 | `runner` | One-tx run, commit watch, retries, read-delta handoff, observation attach | `runNode` |
@@ -1004,12 +1159,12 @@ hook), `getMightWrite` (meaningless under P4; snapshot exposes outputs).
 ## 14. What v2 deletes, and why it is safe
 
 Summary table; the full per-mechanism walkthrough with file references is in
-[`current-system-inventory.md`](./current-system-inventory.md).
+[`current-system-inventory.md`](../../history/specs/scheduler-v2/current-system-inventory.md).
 
 | v1 mechanism | v2 disposition | Safety argument |
 | --- | --- | --- |
 | Push mode (5 modules, mode branches, APIs) | Deleted | Pull is the only production mode; push exists only as test toggles. |
-| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2: reachability never decides runs, so transitive marking has no decision left to make. |
+| `pending`/`dirty`/`stale` + upstream-stale counts | One `status` + liveness refcount; downstream closure per pass | P2 holds for the **run** decision (effects gate on their own value-accurate invalid bit). The one reachability query that survives — the event-preflight consistency gate (§7.5/I4) — is served without per-data-change transitive marking by **inverting** it over the maintained invalid-node set (decision 15); liveness rebuilds from explicit roots only when graph topology or demand roots change. |
 | `scheduleAffectedEffects` + `conditionallyScheduledEffects` + `changedWritesHistory` | Deleted | Effects run-gate on their own value-accurate invalid bit (§7.2/§7.3) — same observable filter, no watermarks. |
 | Post-run `recordChangedComputationWrites` / `markReadersDirtyForChangedWrites` | Deleted | Local commit notifications are synchronous + value-bearing (P1); the channel already delivers exactly this. |
 | `pullDemandedFirstRunComputations` / continuation set / `activePullDemandActions` | Provisional demand (§5.3) | Continuations are ordinary invalidation under P1; first-run demand is creation-context inheritance. |
@@ -1019,7 +1174,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | `SchedulerWriteIndex` current-known/historical/backfill/ancestor-pruning | Static write surface (outputs + envelopes) | P4: the builder already guarantees one primary redirect; static side-write targets and envelopes are fixed at registration (confirmed 2026-06-11). |
 | Cycle breaker + cycle-aware debounce + effect pre-clear cycle detection | Budgets + escalating backoff gate (§7.7, §8) | Bounded-rate convergence preserves liveness without bespoke surgery. |
 | 3 timer systems (debounce timers, computation trailing flush, event wake) | One gate + one wake timer (§8) | All were expressions of `eligibleAt`. |
-| Per-action rehydration tokens/timeouts/awaitSync race guards | Piece-level resume phase (§9.2) | Sync-before-register makes per-node racing impossible by construction. |
+| Per-action snapshot lookups/rehydration tokens/shared lookup deadlines | Piece-level resume phase (§9.2) | One sync + snapshot listing occurs before registration. The remaining bounded per-action sync hold applies only to conservative fresh fallback and loads no snapshot. |
 
 ---
 
@@ -1094,17 +1249,231 @@ Summary table; the full per-mechanism walkthrough with file references is in
 13. **The receipt is the handler's result cell.** Every handling owns one
     result document — the `{ resultFor: cause }` cell that hosts a
     launched pattern when there is one, and is just the receipt when there
-    was nothing to launch. Implementation bridge: replace the random
-    per-invocation `$event: crypto.randomUUID()` in the handler-result
-    cause (`runner.ts:2995-2998`) with the durable event id, making the
-    result cell and all handler-frame-minted ids event-causal (retries
-    reuse ids; duplicates collide; per-gesture uniqueness preserved since
-    event ids are unique per send).
+    was nothing to launch. For inline non-navigation results, an `inSpace`
+    child has its own target-space result, but the canonical handler
+    result/receipt stays in the originating space and commits with the parent
+    effects after the child. Navigation results remain success-gated and start
+    child work after that parent commit. The handler-result cause uses the
+    durable dispatched event id, making the result cell and all
+    handler-frame-minted ids event-causal (retries reuse ids; duplicates
+    collide; per-gesture uniqueness is preserved because event ids are unique
+    per send). Deterministic child identity does not make the preceding
+    cross-space child phase atomic with the parent receipt; closing that current
+    I11 gap is deferred to open question 3.
 14. **Receipts default-on for everything.** Every event handling creates
     its result cell under the create-only precondition — no class
     machinery for now. UI-local events cannot race (the precondition is
     inert for them; the cost is one small create per handling). Future
     layering stays open as open question 2.
+15. **Preflight upstream-invalid reachability.** The event-preflight
+    consistency gate (§7.5 step 2, I4) is the one surviving consumer of
+    transitive-staleness reachability — P2's "reachability never decides
+    runs" holds for the run decision but not for this gate. Deleting v1's
+    `upstreamStaleCount` turned the gate's query into an O(graph) upstream
+    walk (`collectInvalidUpstreamForLog`), O(N²) under rapid creation against
+    a hub (measured: rapid-notebook, 564 ms/create). Resolution: **invert the
+    walk** — reachability from the maintained invalid-node set (a
+    `Set<Action>` in `NodeRegistry` updated through `setStatus`) downstream
+    into the closure — cost bounded by invalid-set × observed downstream cone,
+    re-adding no per-data-change transitive marking (dormancy stays zero-cost,
+    D5/I2). Orthogonal to decision 3 (closure caching), which addresses
+    read-closure *discovery*, a different cost. **Escalation (spec'd, not
+    adopted):** if a read-side-fan-out workload (one invalid node feeding many
+    closure writers) makes the inverted walk O(graph), adopt an incremental
+    `hasInvalidUpstream` signal maintained the way §5.2 maintains liveness,
+    scoped to live nodes — feeding only this gate, never the run decision, so
+    push mode / conditional effects / watermarks stay deleted. Adopt only
+    behind the preflight benchmark.
+16. **Bounded settle work-set closure (2026-06-20).** The §7.2 downstream
+    closure originally added the *entire* live downstream cone of every invalid
+    seed, value-blind. With v1's staleness pruning deleted, that cone is
+    `O(fan-out)` per settle pass; under a wide-fan-out hub (e.g. a vote tally
+    that many clean readers observe, including a whole-state render sink) the
+    per-pass work-set grew 3–4× vs the staleness-pruned v1 set. *Executions did
+    not change* — value-gating (§7.3) already skips the clean members — but each
+    pass iterated and value-checked a much larger consideration set
+    (maintain-time → query-time cost shift, the dual of decision 15: there the
+    eager signal's deletion inflated a *query*; here it inflated the *closure*).
+    Resolution: **bound the closure to the active wavefront** — add each invalid
+    node's direct live readers (tier 1) but recurse past a reader only if it is
+    itself invalid/never-ran; the clean tail is re-seeded next iteration when
+    its upstream actually runs and P1 invalidates it (§7.2). This is the
+    walk-computed form of decision 15's `hasInvalidUpstream` signal — the
+    downstream walk *is* the gate, so no maintained refcount is needed unless
+    the walk itself becomes hot. Tier 1 is kept (not pruned) because
+    materializer-output readers need same-pass scheduling (cutover guard "should
+    schedule normal output readers when a materializer input dirties"); pruning
+    tier 1 too regresses that. Measured: lunch-poll concurrent-vote peak
+    per-pass work-set 62→43 / 61→49, single-runtime note-create @128 42→39 ms,
+    with action-execution count and settle-iteration count unchanged; full
+    runner suite green. Preserves lazy/non-transitive invalidation and the
+    decision-15 dormancy guarantee. Closing the remaining gap to v1 (the kept
+    tier-1 clean readers) would need value-awareness or the maintained refcount
+    and is not adopted.
+
+17. **Multi-user fan-out re-evaluation cost + push-pull completeness
+    (2026-06-24).** On a multi-runtime CFC workload
+    (`cfc-group-chat-demo/multi-user`) v2 runs ~2.2× the *scheduled-action
+    executions* of v1 (165 vs 74) — **reproduced on clean trees**, non-windowed
+    (two independent counters agree), wall **+12–16%**. Decomposed by whether the
+    action site is scheduled by *both* schedulers (re-validated 2026-06-24 on fresh
+    v2 @2bbc029ad vs main @d8085d3eb, per-runtime `actionStats` counts, NOT
+    cross-tree node-id normalization): ~**+13 (14%)** is a real apex render-effect
+    re-fire (36 vs 23 — the only *product* site that genuinely fires more on v2);
+    ~**+5 (6%)** is test-harness assertion re-pulls (`multi-user.test.tsx`); the
+    remaining ~**+73 (80%)** is a **scheduling-*granularity* shift, not
+    over-execution** — 29 product computeds (per-row CFC labels `trusted.tsx:955-986`,
+    the message `raw:map`, aggregates `main.tsx:309-386`) that v2 schedules and
+    counts as *discrete reactive nodes* but that main runs **folded inline inside
+    the apex pull's read-closure** (literal 0 scheduled-action runs in main's
+    `actionStats`, yet 12/12 passes — same work, finer accounting). The clincher:
+    counted actions are +123% but wall is only +12–16%, so the +73 folded work is
+    cheap, not duplicated. The honest claim is therefore *v2 schedules ~2.2× more
+    reactive nodes for the same work*, **not** *v2 re-runs computeds 2.2× more*.
+    v2's memoization is sound (verified: an in-place single-row edit re-runs only
+    that row's node; a clean producer's committed cell is the memo and is never
+    re-invoked by a re-running consumer — see the Push-pull completeness note
+    below). The finer granularity is a **tradeoff, not a strict loss**: an
+    incremental single-row edit re-runs one node where main re-evaluates the whole
+    apex closure.
+
+    *Efficiency-only and accepted.* Final results are identical and single-runtime
+    / static-graph workloads are neutral-to-faster (note-create @128 −22%,
+    unchanged-recompute −42%, targeted-dirty-rehydrate −50%). Accepted via
+    `NEW_PERF_BASELINE`.
+
+    *Corrected mechanism — single-runtime control (2026-06-28; SUPERSEDES the
+    "per-node hash/freeze + idle sync" wording below).* The decisive control: the
+    regression **vanishes single-runtime** (v2 ≈ main, +1–3%, even though v2 still
+    runs *more* nodes/commits there). So it is **not** raw per-node commit CPU
+    (cheap in isolation) and **not** blocking on sync round-trips — commits are
+    fire-and-forget (`run/commit` ends before awaiting the commit promise,
+    `run.ts:94-98`; `synced()` round-trip counts are identical v2 vs main, driven
+    by settle/step count, not commit count). It is the **multi-runtime
+    amplification of the committed-node *count* × an expensive per-commit cost**:
+    each discrete committed per-row map/render node is serialized into a
+    cross-runtime push that the *peer* worker pulls and re-processes, inflating
+    *both* runtimes' node/commit counts to 2.2× (165 vs 74); and each such commit
+    is a VNode/render subtree paying **`prepareCfc` CFC-label work + value
+    canonicalization** under `enforce-explicit` (~2.78ms vs ~0.74ms/commit), not a
+    cheap value-hash. So the body-eval-CPU profile below over-weighted the
+    commit-hash and mis-read the idle as blocking — it is genuinely
+    multi-runtime-only. *Lever (revised):* collapse the committed-node count —
+    coalesce per-row map/render computeds into the parent/apex transaction (the
+    §4.8 VNode-doc consolidation direction), which cuts *both* the per-commit
+    CFC/canonicalize CPU *and* the cross-runtime write fan-out; and skip re-paying
+    `prepareCfc`/canonicalize on unchanged VNode subtrees. NOT sync-layer
+    throttling (round-trips already batched, one `synced()` per settle).
+    *Magnitude (confirmed stable, 2026-06-29):* 7 alternating warm runs give v2
+    internal **5630ms** vs main **4854ms = +776ms / +16.0%** (wall +12.2%), with
+    the v2 and main ranges **fully non-overlapping** (v2 min 5551 > main max
+    5036) — deterministic every run, not noise. (An earlier `run-phase`-timer
+    sample read as noisy because it was boot/compile-contaminated; the cf-test
+    reported `(Xms)` is the stable signal.)
+
+    *Where the +12–16% wall actually goes (CPU profile, 2026-06-28).* Confirmed
+    at the function level (CDP V8 profiler inside each cf-test worker, clean
+    trees) — it is the **inherent flat per-node tax of finer scheduling
+    granularity**, not a hot function. v2 schedules ~73 more discrete reactive
+    nodes (87 `scheduler/run` cycles, 43 native commits vs main's ~0 — main folds
+    those computeds inline inside the apex pull), and **each extra node pays a full
+    per-commit pipeline**: value hashing (`op_node_hash_update`, the single biggest
+    frame, ~18–20% of the delta), deep-freeze, prepared-digest canonicalization,
+    read-set compaction. Two components: **+466–604ms active CPU** (~2.5× main's
+    compute = the sum of ~87 per-node commit cycles) and a *larger* **idle** chunk
+    (workers are ~65% idle on *both* trees, blocked on cross-runtime settle/sync;
+    v2's finer commits induce extra sync round-trips — the multi-user-specific
+    part, absent single-runtime, consistent with single-runtime being
+    neutral-to-faster). Every leaf primitive is equally efficient on both trees; no
+    non-leaf frame exceeds ~6% of the delta (the 27% hashing leaf is a *symptom* of
+    commit volume, not a target). **Lever:** only *coarsening* (fewer discrete
+    nodes/commits — fold per-row computeds) recovers the bulk, attacking both the
+    active-CPU tax and the idle round-trips — but it trades away v2's fine-grained
+    incrementality (a single-row edit re-runs one node vs main re-evaluating the
+    whole apex closure), so it is a tradeoff, not a free win. Runtime
+    micro-optimization (deep-freeze frozen-cache memo ~+60ms, canonical-path
+    interning ~+46ms) has a hard ceiling of ~150ms (~25% of active CPU, ~10% of
+    wall) and touches none of the idle.
+
+    *Root cause of the extra nodes (commit `1263d95e9`, "scheduler-v2 4.2: delete
+    dependency collection").* The builder graph and node-subscription path are
+    byte-identical on both trees (verified — `computed`/`lift`/`map` lower to the
+    same `type:"javascript"` nodes and both trees `scheduler.subscribe()` all ~29
+    sites; #3911 per-internal-cell storage is present in *both*, so storage is not
+    the differentiator). The divergence is **dependency discovery**. main learned
+    an action's reads by running a `populateDependencies` callback inside a
+    **throwaway transaction it then aborted** (`scheduler/dependency-collection.ts`);
+    when that resolution's `.get()` hit a nested per-row computed (a CFC label,
+    `isMine`, an aggregate), it **evaluated that computed inline inside the aborted
+    tx — value produced, but no commit, no separate `run()`, no counted run** — so
+    those sites report literal 0 in `actionStats` while still computing. v2 deleted
+    that whole run-to-observe path in favour of the transformer's *declared* reads
+    annotation + pure P3 demand-gating. With no collect pass there is no
+    inline-fold: when the live apex render propagates `liveRefs` up to the
+    computeds it reads, each becomes live → demanded → **run in its own transaction
+    and committed to its own internal/result cell** (#3911). So main's ~29
+    inline-folded computeds become ~73 discrete committed runs in v2 — each paying
+    the per-commit pipeline above. This is **deliberate and load-bearing**: the
+    separate committed node *is* the per-row memo (the CHECK-skippable population
+    probed 0 — v2 re-runs nothing main keeps clean, so it is real incrementality,
+    not waste), and it carries per-node CFC label provenance (`addCfcTriggerReads`
+    on the node's own tx) and per-node D8 rehydration state that main's inline-fold
+    does not produce discretely. Coarsening it back inline — the only lever for the
+    +73 — would forfeit exactly that per-row incremental-edit granularity, per-node
+    provenance, and rehydration. So the 2.2× is the genuine price of v2 making
+    every reactive value a persisted, independently-incremental, CFC-labelled,
+    rehydratable node, not extra re-execution (actions +123% but wall only +12–16%).
+
+    *Levers ruled out — do not re-try without new evidence.* The surplus is
+    cross-runtime write volume with **no writer node to gate against** (apex
+    read-set consults show `writers=0` for ~half its re-runs). Built and measured,
+    all refuted: forward run-gate (165→184), reverse read-set pull-gate on effects
+    (165→163) / +computations (165→181), effects-last (v2 already settles
+    per-handler, with *fewer* settles than v1 — 29/31 vs 34/34), pattern
+    read-granularity (0% — the count/membership closures genuinely depend on array
+    length, which changes on append), and a sync-path bug (refuted — a local
+    commit and a remote sync produce byte-identical invalidation). The only lever
+    that would move the number is **inbound sync-apply/commit batching at the
+    sync→settle boundary** — a deliberate latency/consistency tradeoff, out of
+    scope.
+
+    *Recoverable lever, kept as an option (not adopted): effect/wave-coalescing
+    for the apex re-fire.* The one real *product* surplus (per the clean-tree
+    re-validation) is the ~**+13** apex render-effect re-fire (the render effect
+    fires ~2× per single append). The writer-gated variants above cannot reach it —
+    the re-fires are direct cross-runtime cell writes (`writers=0`), so the reverse
+    read-set pull-gate is ~neutral (165→163). The viable shape is a **per-wave
+    render flush**: run a live, pure-render effect *once* at the settle-wave
+    boundary after its invalidations are absorbed (the standard "flush effects at
+    batch end"), collapsing the 2:1 over-fire. Parked prototype: `/tmp/effect-defer`
+    (`CF_EFFECT_COALESCE` — hold a pure read-only sink effect, gated on
+    `declaredWritesEmpty`, while a *runnable* upstream is still dirty this wave;
+    proven SAFE — convergence holds, `scheduler-pull:351` stays 2, byte-identical
+    tallies, no single-runtime bench regression). **Not adopted** — the win is
+    small (~+13) and the +73 granularity bulk is unaffected — but **kept as the one
+    viable lever** if multi-user render latency becomes a priority. *Re-entry gate:*
+    a variant that collapses the apex pull from 36 toward main's 23 **without**
+    regressing per-row incremental-edit granularity (a single-row edit must still
+    re-run only that row's node).
+
+    *Push-pull completeness (Track 1 — measured NO-GO).* v2 lacks the classic
+    3-color (clean/check/dirty) machinery — no CHECK color, no per-node output
+    cache/version (`NodeStatus = never-ran | clean | invalid`; `SchedulerNode`
+    carries no `cachedValue`). But it is **outcome-complete**: it performs the
+    value-check **eagerly at the write channel** (`determineTriggeredActions` / the
+    trigger-index emit a change-delta only for readers whose read value actually
+    changed) where classic signals do it **lazily at pull** via the CHECK color.
+    The storage cell *is* the cache; the write-gate *is* the check-resolution. A
+    probe measured the cached-reuse-**skippable** population (nodes v2 re-runs whose
+    direct upstreams' outputs are all unchanged) at **0** in every scenario
+    (reload-no-change demand-all, deep clean chain, sign-preserving input bump,
+    diamond). A node only becomes CHECK-skippable when an upstream is demanded
+    *without advancing* — which the eager write-gate guarantees never happens — so a
+    CHECK color would be **dead state**, and adding it + per-node output versions +
+    a transitive `markCheck` (re-introducing the decision-15 O(graph)-on-a-hub
+    walk) buys nothing. **Re-entry gate:** revisit only if a probe shows a
+    *non-zero* skippable count (e.g. non-`deepEqual`-comparable outputs where the
+    write-gate conservatively over-invalidates).
 
 ### Open
 
@@ -1121,3 +1490,10 @@ Summary table; the full per-mechanism walkthrough with file references is in
    weaker/stronger guarantees, retention/GC policy for receipt cells, and
    whether any class should ever opt out (high-frequency programmatic
    event streams being the plausible candidate).
+3. **Durable cross-space child phases.** Closing the current I11 gap for an
+   inline child that commits before the parent receipt needs a durable phase
+   guard keyed by event and child space, an intent-equality or first-writer rule
+   for competing values, and fenced ownership/cancellation (or true cross-space
+   atomicity). Deterministic ids and the local receipt fast path contain common
+   retries but cannot resolve simultaneous runtimes or roll back a partial child
+   commit. This is a separate protocol-sized change.

@@ -1,4 +1,4 @@
-import { processPullQueuedEventDuringExecute } from "../src/scheduler/pull-events.ts";
+import { processPullQueuedEventDuringExecute } from "../src/scheduler/events.ts";
 import type {
   Action,
   EventHandler,
@@ -159,18 +159,25 @@ describe("availability scheduler support", () => {
     };
     let clearCalls = 0;
     let releaseCalls = 0;
+    const eventQueue = [queuedEvent];
     const state = {
       runtime: {
         storageManager: {
           pendingCrossSpacePromiseCount: () => 0,
         },
       },
-      eventQueue: [queuedEvent],
+      eventQueue,
       lineageStatus: () => status,
       getOriginLocalSeq: () => 1,
+      isHeadEventLoadParked: () => false,
       isEventWaitingForInput: () => false,
       clearEventInputWait: () => {
         clearCalls++;
+      },
+      dropEvent: (event: QueuedEvent) => {
+        clearCalls++;
+        eventQueue.shift();
+        if (event.originTx) releaseCalls++;
       },
       releaseLineageEvent: () => {
         releaseCalls++;

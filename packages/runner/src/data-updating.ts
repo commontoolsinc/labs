@@ -15,6 +15,7 @@ import {
   ID_FIELD,
   type JSONSchema,
 } from "./builder/types.ts";
+import type { JSONSchemaObj } from "@commonfabric/api";
 import { ContextualFlowControl } from "./cfc.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
@@ -24,6 +25,7 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
+import { resolveSchemaRefsCanonical, schemaAcceptsType } from "./traverse.ts";
 import {
   areLinksSame,
   areMaybeLinkAndNormalizedLinkSame,
@@ -271,6 +273,49 @@ const stripCfcLabelViewFromPrimitiveLink = (value: unknown): unknown => {
 };
 
 /**
+ * Whether a slot's schema would TOLERATE the value reading as missing —
+ * i.e. it matches `undefined` or carries a `default` (ubik2's criterion on
+ * #4561). Used to restrict the scope-isolation warn to slots where an
+ * unresolvable link actually bites: a slot that accepts undefined (or
+ * defaults) degrades harmlessly per reader, so storing a narrower-scoped
+ * link there is a legitimate per-reader pattern rather than a footgun.
+ * Complemented by the parent-`required` threading (see normalizeAndDiff's
+ * `slotRequiredByParent`): the full criterion is "the read would actually
+ * reject the missing cell".
+ */
+const _toleratesMissingCache = new WeakMap<object, boolean>();
+function schemaToleratesMissing(schema: JSONSchema | undefined): boolean {
+  if (schema === undefined) return true;
+  if (!isRecord(schema)) return true;
+  // Schemas are identity-stable (interned / deep-frozen) on the paths that
+  // reach here, mirroring traverse's own ref cache — memoize the verdict so
+  // per-row write loops don't re-resolve refs (a CI-visible cost otherwise).
+  const cached = _toleratesMissingCache.get(schema);
+  if (cached !== undefined) return cached;
+  const verdict = computeToleratesMissing(schema);
+  _toleratesMissingCache.set(schema, verdict);
+  return verdict;
+}
+
+function computeToleratesMissing(schema: JSONSchema): boolean {
+  // Resolve a top-level $ref before the default check (via the MEMOIZED
+  // canonical resolver traverse uses), and apply the default with the same
+  // LOOSE comparison the read side uses when it applies defaults
+  // (`!= undefined`): a `default: null` is skipped by the read and therefore
+  // does not make the slot tolerant, while `default: 0/""/false` do. Judged
+  // on the resolved schema so a default carried by the $defs target counts.
+  let resolved: JSONSchema | undefined = schema;
+  if (isRecord(schema) && "$ref" in schema) {
+    resolved = resolveSchemaRefsCanonical(schema as JSONSchemaObj) ?? schema;
+  }
+  if (isRecord(resolved) && resolved.default != undefined) return true;
+  // Type tolerance judged with the read side's own matcher (schemaAcceptsType
+  // wraps the logic extracted from SchemaObjectTraverser.isValidType,
+  // including $ref resolution and allOf/anyOf/oneOf).
+  return schemaAcceptsType(schema, "undefined");
+}
+
+/**
  * The scope at which a slot's content is stored (the write target scope). It
  * shares its precedence with the read follow-cap (see
  * `ContextualFlowControl.getSchemaScopeCap`) so writes and reads agree on which
@@ -374,6 +419,12 @@ export function normalizeAndDiff(
   options?: IReadOptions,
   seen: Map<any, NormalizedFullLink> = new Map(),
   precomputedCurrent: unknown = NO_PRECOMPUTED,
+  // Whether the PARENT object's schema lists this slot in `required`
+  // (threaded one hop by the object branch below; undefined = unknown).
+  // Consumed by the scope-isolation warn: a missing cell only voids the
+  // read when the parent requires the property, so optional slots stay
+  // quiet (ubik2's criterion on #4561).
+  slotRequiredByParent?: boolean,
 ): ChangeSet {
   const changes: ChangeSet = [];
 
@@ -809,6 +860,71 @@ export function normalizeAndDiff(
       }
       return [];
     } else {
+      // Scope-isolation guard (spec: docs/specs/scoped-cell-instances.md,
+      // "the runtime must not read across effective scope keys"; pitfall #6 in
+      // docs/development/debugging/gotchas/scoped-cell-pitfalls.md): a link
+      // whose scope is NARROWER than the slot it's written into resolves to a
+      // DIFFERENT instance for every reader — links deliberately do not encode
+      // the principal, so e.g. a `user`-scoped link stored in `space`-scoped
+      // shared data hands every other participant a link to their own (empty)
+      // instance. When the write meant to SHARE data, it can never propagate;
+      // readers see a permanent hole (the B2 reader-blackout investigation,
+      // #4457/#4532). The slot's schema declaring the scope (the narrowing
+      // branch above and scoped asCell entries) is a scope CAP (seefeld):
+      // content may be AT MOST that narrow — a same-or-broader link is
+      // correct usage and silent; a narrower-than-cap link still warns. The
+      // undeclared case has no cap, so the warn there is a sharing-intent
+      // heuristic, not cap enforcement. The warn fires where the slot's shape says the
+      // author wanted SHARED data (ubik2's criterion): the slot's schema
+      // doesn't match undefined and carries no effective default
+      // (schemaToleratesMissing, judged with the read side's own matcher),
+      // AND the parent's schema lists the slot in `required`
+      // (slotRequiredByParent, threaded one hop by the object branch; direct
+      // slot writes — cell.key().set(), bound handler cells — have no parent
+      // in view and keep the warn). This approximates but is NOT identical to
+      // "the read would reject": the B2 element grace (and its
+      // generation-skew extension, #4668) means array-element reads degrade
+      // rather than void, and rejection is ultimately judged against each
+      // READER's combined schema — the warn is a write-site lint, not a
+      // proof. The degrades make this warn MORE load-bearing, not less: a
+      // reader cannot distinguish an unresolvable narrower-scoped link from
+      // an old-generation absent target (both resolve to undefined), so this
+      // write-site diagnostic is where a scope mistake self-identifies. Undefined-tolerant, defaulted, or optional slots
+      // degrade harmlessly per reader, which is a legitimate pattern and also
+      // what the runtime's own scoped-link writes (.asScope() results,
+      // navigateTo result cells, updateArgument setup wiring, cold-resume
+      // re-scope walks) flow through. This is a WARN, not a throw, pending
+      // review; see #4561. Authors: share the value, or a space-scoped cell
+      // with a PerUser pointer to "mine" (pitfall #6 shows the idiom).
+      if (scopeRank(parsedLink.scope) > scopeRank(link.scope)) {
+        const declared = declaredCellScope(link.schema);
+        if (
+          (declared === undefined ||
+            scopeRank(declared) < scopeRank(parsedLink.scope)) &&
+          !schemaToleratesMissing(link.schema) &&
+          // Optional slots (parent schema present, key not in `required`)
+          // degrade harmlessly when the cell is missing — only a required
+          // slot voids the read. Unknown parents (direct slot writes) keep
+          // the warn.
+          slotRequiredByParent !== false
+        ) {
+          diffLogger.warn(
+            "diff",
+            () => [
+              `Storing a ${parsedLink.scope}-scoped link in ` +
+              `${link.scope}-scoped data at path "${pathStr}": scoped links ` +
+              `do not carry a principal, so every reader resolves it to ` +
+              `their own ${parsedLink.scope} instance. If this write meant ` +
+              `to SHARE data, it cannot propagate — share the value itself, ` +
+              `or a space-scoped cell (keep a PerUser pointer to "mine"), ` +
+              `or declare the slot's schema with scope ` +
+              `"${parsedLink.scope}" if per-reader resolution is intended. ` +
+              `See docs/development/debugging/gotchas/` +
+              `scoped-cell-pitfalls.md (pitfall 6).`,
+            ],
+          );
+        }
+      }
       diffLogger.debug(
         "diff",
         () =>
@@ -1133,6 +1249,27 @@ export function normalizeAndDiff(
     // At this point currentValue is guaranteed to be a record
     const currentRecord = currentValue as Record<string, unknown>;
 
+    // Requiredness of each child slot, for the scope-isolation warn: only a
+    // parent-`required` property makes a missing cell void the read.
+    // A resolved object schema with no top-level `required` array is treated
+    // as requiring nothing (known `false` for every key); only an absent /
+    // unresolvable parent schema leaves requiredness unknown (undefined).
+    // KNOWN GAP (deliberate, false-negative direction): `required` carried
+    // inside a compound parent (`allOf` branches, all-branches-require
+    // `anyOf`) is not merged here — resolveSchema resolves only a top-level
+    // $ref — so such parents read as requiring nothing and the warn stays
+    // silent, even though the read side's required-intersection machinery may
+    // still reject. A missed warn is acceptable for a lint; asserting
+    // requiredness where there is none is not.
+    const resolvedParentSchema = resolveSchema(link.schema);
+    const requiredProps = isRecord(resolvedParentSchema)
+      ? new Set(
+        Array.isArray(resolvedParentSchema.required)
+          ? (resolvedParentSchema.required as readonly string[])
+          : [],
+      )
+      : undefined;
+
     for (const key in newValue) {
       diffLogger.debug("diff", () => {
         const childPath = [...link.path, key].join(".");
@@ -1162,6 +1299,7 @@ export function normalizeAndDiff(
         options,
         seen,
         currentRecord[key],
+        requiredProps === undefined ? undefined : requiredProps.has(key),
       );
       changes.push(...nestedChanges);
     }
@@ -1179,9 +1317,8 @@ export function normalizeAndDiff(
     // property values and diverges on circular values + recursive $ref
     // schemas; only the top-level property names are needed here.)
     const eagerScopedKeys = new Set<string>();
-    const resolvedSchema = resolveSchema(link.schema);
-    const schemaProperties = isRecord(resolvedSchema)
-      ? resolvedSchema.properties
+    const schemaProperties = isRecord(resolvedParentSchema)
+      ? resolvedParentSchema.properties
       : undefined;
     if (isRecord(schemaProperties)) {
       for (const key in schemaProperties) {

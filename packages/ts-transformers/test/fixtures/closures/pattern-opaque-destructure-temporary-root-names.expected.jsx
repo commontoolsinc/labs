@@ -26,7 +26,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["messages"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     request: any;
 }, any>(({ request }) => request?.title ?? "Untitled", {

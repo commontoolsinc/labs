@@ -1104,7 +1104,22 @@ const submitTurn = handler<
   }
 
   const turnScore = calculateTurnScore(tilesInWords, currentBoard);
-  board.set([...currentBoard, ...tilesInWords]);
+  // Snapshot the tiles as plain values: `placed.get()` elements keep their
+  // cell identity in the USER-scoped placed doc, so writing them into the
+  // shared board directly would store user-scoped links — which every other
+  // player resolves into their own (empty) placed instance, and which dangle
+  // even for the author once `placed.set([])` below clears the doc (scope
+  // pitfall 6; flagged by the runtime's scope-isolation write guard).
+  board.set([
+    ...currentBoard,
+    ...tilesInWords.map((tile) => ({
+      ...tile,
+      // Deep-copy: the nested Letter object also keeps its identity in the
+      // user-scoped doc; a shallow spread would still store a user-scoped
+      // link for the `letter` field.
+      letter: { ...tile.letter },
+    })),
+  ]);
   placed.set([]);
 
   const currentBag = bag.get();

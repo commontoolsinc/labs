@@ -374,12 +374,16 @@ export function lift<T, R>(
     ...(options?.unavailableInputPolicy
       ? { unavailableInputPolicy: options.unavailableInputPolicy }
       : {}),
+    ...(options?.completeSchedulerScopeSummary
+      ? { completeSchedulerScopeSummary: true as const }
+      : {}),
   });
 }
 
 interface DeriveSchedulerOptions {
   materializerWriteInputPaths?: readonly (readonly string[])[];
   readonly unavailableInputPolicy?: UnavailableInputPolicy;
+  completeSchedulerScopeSummary?: true;
 }
 
 export function byRef<T, R>(ref: string): ModuleFactory<T, R> {

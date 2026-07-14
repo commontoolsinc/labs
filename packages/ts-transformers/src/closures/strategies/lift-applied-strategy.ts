@@ -1,6 +1,7 @@
 import ts from "typescript";
 import type {
   CapabilityParamSummary,
+  FunctionCapabilitySummary,
   TransformationContext,
 } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
@@ -138,27 +139,60 @@ export function isLiftAppliedCall(
   return callKind?.kind === "lift-applied";
 }
 
-function getFirstParameterCapabilitySummary(
+function getCapabilityAnalysis(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
-): CapabilityParamSummary | undefined {
+): {
+  summary: FunctionCapabilitySummary;
+  firstParameter: CapabilityParamSummary | undefined;
+} {
   const summary = analyzeFunctionCapabilities(callback, {
     checker,
     typeRegistry,
     includeNestedCallbacks: true,
   });
   const parameter = callback.parameters[0];
-  if (!parameter) return undefined;
-  const parameterName = ts.isIdentifier(parameter.name)
+  const parameterName = parameter && ts.isIdentifier(parameter.name)
     ? parameter.name.text
     : "__param0";
-  return summary.params.find((param) => param.name === parameterName);
+  return {
+    summary,
+    firstParameter: summary.params.find((param) =>
+      param.name === parameterName
+    ),
+  };
+}
+
+/**
+ * The capability analysis is the existing conservative completeness seam for
+ * source-authored lifts.  A marker is emitted only when that analysis can
+ * account for every cell-bearing parameter use.  In particular, an empty
+ * summary is meaningful proof for a source-backed zero-input computation; it
+ * is not inferred later from an empty runtime observation.
+ */
+function hasCompleteSchedulerScopeSummary(
+  summary: FunctionCapabilitySummary,
+): boolean {
+  if (
+    summary.recursive ||
+    (summary.unreadableCellArguments?.length ?? 0) > 0
+  ) {
+    return false;
+  }
+  return summary.params.every((param) =>
+    !param.wildcard &&
+    !param.hasUnverifiedCellUse &&
+    !param.passthrough &&
+    param.capability !== "opaque" &&
+    (param.opaquePaths?.length ?? 0) === 0
+  );
 }
 
 function createDeriveSchedulerOptions(
   inputParamSummary: CapabilityParamSummary | undefined,
   availabilityEntries: readonly AvailabilityCaptureOverride[],
+  completeSchedulerScopeSummary: boolean,
   factory: ts.NodeFactory,
 ): ts.ObjectLiteralExpression | undefined {
   const writePaths = inputParamSummary?.writePaths ?? [];
@@ -176,6 +210,15 @@ function createDeriveSchedulerOptions(
           ),
           false,
         ),
+      ),
+    );
+  }
+
+  if (completeSchedulerScopeSummary) {
+    additionalProperties.push(
+      factory.createPropertyAssignment(
+        "completeSchedulerScopeSummary",
+        factory.createTrue(),
       ),
     );
   }
@@ -640,11 +683,12 @@ export function transformLiftAppliedCall(
     hadZeroParameters,
     availabilityOverridesByPath(availabilityTypeEntries),
   );
-  const inputParamSummary = getFirstParameterCapabilitySummary(
+  const capabilityAnalysis = getCapabilityAnalysis(
     newCallback,
     checker,
     options.state?.typeRegistry,
   );
+  const inputParamSummary = capabilityAnalysis.firstParameter;
   if (inputParamSummary && availabilityTypeEntries.length === 0) {
     // Availability policy is evaluated against the complete serialized module
     // argument. Capability shrinking can remove an unused-but-present
@@ -673,6 +717,7 @@ export function transformLiftAppliedCall(
   const schedulerOptions = createDeriveSchedulerOptions(
     inputParamSummary,
     availabilityPolicyEntries,
+    hasCompleteSchedulerScopeSummary(capabilityAnalysis.summary),
     factory,
   );
 

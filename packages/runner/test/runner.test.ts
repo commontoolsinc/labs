@@ -388,6 +388,92 @@ describe("runPattern", () => {
     );
   });
 
+  it("registers a dormant module without reading linked input data", async () => {
+    let runs = 0;
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {},
+      result: { output: { $alias: { partialCause: "output", path: [] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (input: number) => {
+              runs++;
+              return input * 2;
+            },
+          },
+          inputs: { $alias: { cell: "argument", path: ["input"] } },
+          outputs: { $alias: { partialCause: "output", path: [] } },
+        },
+      ],
+    };
+
+    const setupTx = runtime.edit();
+    const source = runtime.getCell<{ value: number }>(
+      space,
+      "dormant registration source",
+      {
+        type: "object",
+        properties: { value: { type: "number" } },
+      },
+      setupTx,
+    );
+    source.set({ value: 21 });
+    const sourceLink = source.getAsNormalizedFullLink();
+    const resultCell = runtime.getCell(
+      space,
+      "dormant registration result",
+      undefined,
+      setupTx,
+    );
+
+    runTrusted(
+      runtime,
+      setupTx,
+      pattern,
+      { input: source.key("value").getAsWriteRedirectLink() },
+      resultCell,
+    );
+    await setupTx.commit();
+
+    let sourceDataReads = 0;
+    const countSourceRead = (
+      address: { space?: unknown; id?: unknown },
+    ): void => {
+      if (address.space === sourceLink.space && address.id === sourceLink.id) {
+        sourceDataReads++;
+      }
+    };
+    const originalEdit = runtime.edit.bind(runtime) as Runtime["edit"];
+    runtime.edit = ((...args: Parameters<Runtime["edit"]>) => {
+      const actionTx = originalEdit(...args);
+      const originalRead = actionTx.read.bind(actionTx);
+      actionTx.read = ((address, options) => {
+        countSourceRead(address);
+        return originalRead(address, options);
+      }) as typeof actionTx.read;
+      const originalReadOrThrow = actionTx.readOrThrow.bind(actionTx);
+      actionTx.readOrThrow = ((address, options) => {
+        countSourceRead(address);
+        return originalReadOrThrow(address, options);
+      }) as typeof actionTx.readOrThrow;
+      return actionTx;
+    }) as Runtime["edit"];
+
+    try {
+      await runtime.idle();
+    } finally {
+      runtime.edit = originalEdit;
+    }
+
+    expect(runs).toBe(0);
+    expect(sourceDataReads).toBe(0);
+  });
+
   it("should run a simple module with no outputs", async () => {
     let ran = false;
 

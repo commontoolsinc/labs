@@ -474,10 +474,10 @@ Each trace entry contains:
 
 - the changed `space`, `entityId`, and `path`
 - compact `before` / `after` value summaries
-- the scheduling mode (`push` or `pull`)
+- the scheduling mode (`pull`; retained as an explicit field for trace schema
+  clarity)
 - the source writer action id when available
-- each directly triggered action, its scheduling decision, and any downstream
-  scheduled effects
+- each directly triggered action and its invalidation/suppression decision
 
 To find repeated actions quickly:
 
@@ -489,9 +489,6 @@ const counts = new Map()
 for (const entry of trace) {
   for (const action of entry.triggered) {
     counts.set(action.actionId, (counts.get(action.actionId) ?? 0) + 1)
-    for (const effect of action.scheduledEffects) {
-      counts.set(effect.actionId, (counts.get(effect.actionId) ?? 0) + 1)
-    }
   }
 }
 

@@ -309,7 +309,6 @@ export function resolveLink(
       }
       recordDereferenceHop(tx, nextHop);
       const nextLink = nextHop.link;
-      const crossSpace = nextLink.space !== link.space;
       if (nextLink.schema === undefined && link.schema !== undefined) {
         link = {
           ...nextLink,
@@ -318,13 +317,21 @@ export function resolveLink(
       } else {
         link = nextLink;
       }
-      // If we're crossing spaces, establish target coverage explicitly: the
-      // original space's server query cannot push another space's document.
-      // This resolves only reference topology, not target content, so do not
-      // subscribe the executing action to target-settlement wakeups. A later
-      // schema-aware target read registers that waiter if it needs one.
-      if (crossSpace && options.prefetch !== false) {
-        runtime.prefetchLinkedDoc(link);
+      // Force fetching data from the server when the local replica cannot
+      // serve the hop target: crossing spaces (the origin server never pushes
+      // other-space docs), or a same-space doc this replica has never pulled.
+      // The second arm is the fresh-replica read-asymmetry fix: selector
+      // driven syncs only deliver what a schema covered, so a link can point
+      // at a same-space doc no selector ever walked — without this kick such
+      // reads mask as `undefined`, indistinguishable from absence. The kick
+      // is async; one-shot reads still return the masked value, but
+      // `Cell.pull()`'s convergence loop awaits the tracked sync and re-reads.
+      // Reference-only resolution is reactive to the source link but does not
+      // consume the target value, so this prefetch must not subscribe the
+      // executing action to target-settlement wakeups. A later schema-aware
+      // read reuses the in-flight load and registers that waiter if needed.
+      if (options.prefetch !== false) {
+        runtime.prefetchLinkedDoc(link, nextHop.source.space);
       }
     } else {
       break;

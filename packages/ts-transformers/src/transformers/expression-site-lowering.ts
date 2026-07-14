@@ -72,7 +72,7 @@ function isReactiveHelperWrapperCall(
   return getReactiveHelperWrapperKind(expression, context) !== undefined;
 }
 
-function isSyntheticHelperWrapperInArrayMethodCallback(
+export function isSyntheticHelperWrapperInArrayMethodCallback(
   expression: ts.Expression,
   context: TransformationContext,
 ): boolean {

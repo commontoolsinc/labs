@@ -2478,10 +2478,25 @@ function prependSchemaArguments(
     // runtime semantics — keeps the no-arg application valid) and no outer
     // input. We deliberately omit the result schema, again matching computed.
     if (isSingleEmptyObjectInput(node.arguments)) {
+      const completeSchedulerScopeSummary = context.factory
+        .createObjectLiteralExpression([
+          context.factory.createPropertyAssignment(
+            "completeSchedulerScopeSummary",
+            context.factory.createTrue(),
+          ),
+        ], false);
       const rebuiltInner = context.factory.createCallExpression(
         innerLiftCall.expression,
         innerLiftCall.typeArguments,
-        [...calleeArgs, context.factory.createFalse(), ...trailingOptions],
+        [
+          ...calleeArgs,
+          context.factory.createFalse(),
+          // Keep the trusted scheduler options in lift's fourth parameter;
+          // the no-input form intentionally has no result schema.
+          context.factory.createIdentifier("undefined"),
+          completeSchedulerScopeSummary,
+          ...trailingInnerArgs,
+        ],
       );
       // The inner lift is fully schema-injected now; mark it so the re-descent
       // (which re-enters the rebuilt tree to reach the callback body) self-skips
@@ -2557,20 +2572,16 @@ function resolveLiftAppliedInputAndCallback(
     return undefined;
   }
 
-  // Lift-applied `lift(...)(input)`: callback is the last arg of the inner lift
-  // call; input is the first arg of the outer applied call. The outer call's
-  // callee is always the inner CallExpression — that is the only shape
-  // detectCallKind classifies as lift-applied (see getLiftAppliedInputAndCallback
-  // in src/ast/call-kind.ts).
+  // Lift-applied `lift(...)(input)` is function-first: the callback is inner
+  // argument zero even when schemas/options trail it; input is outer arg zero.
   const innerCall = getLiftAppliedInnerCall(call);
   if (!innerCall) {
     return undefined;
   }
-  const callback = innerCall.arguments
-    .map((argument) =>
-      resolveFunctionLikeExpression(argument, checker, sourceFile)
-    )
-    .find((candidate) => candidate !== undefined);
+  const callbackExpression = innerCall.arguments[0];
+  const callback = callbackExpression
+    ? resolveFunctionLikeExpression(callbackExpression, checker, sourceFile)
+    : undefined;
   if (!callback) {
     return undefined;
   }

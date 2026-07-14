@@ -129,23 +129,18 @@ Deno.test("reload: sibling-field computeds persist clean and do not re-run", asy
   runtimeA.scheduler.dispose();
   getLogger("scheduler").resetCounts();
 
-  // RELOAD (runtime B, same storage). The computeds rehydrate; none miss.
+  // RELOAD (runtime B, same storage). The existing piece resumes; the computeds
+  // rehydrate from the persisted snapshot batch and none miss.
   const runtimeB = newRuntime(storageManager);
   try {
-    const compiledB = await runtimeB.patternManager.compilePattern(PROGRAM);
-    const tx = runtimeB.edit();
+    await runtimeB.patternManager.compilePattern(PROGRAM);
     const resultCellB = runtimeB.getCell<any>(
       space,
       "so-result",
       undefined,
-      tx,
     );
-    const handleB = runtimeB.run(tx, compiledB, { value: 5 }, resultCellB);
-    await tx.commit();
-    for (let k = 0; k < 8; k++) {
-      await handleB.pull();
-      await runtimeB.idle();
-    }
+    await runtimeB.start(resultCellB);
+    await runtimeB.idle();
     expect(resultCellB.getAsQueryResult()).toEqual({
       doubled: 10,
       plusOne: 11,

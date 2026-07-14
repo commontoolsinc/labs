@@ -72,6 +72,27 @@ function liftSchemasFor(
   return { argSchema: schemas[0]!, resSchema: schemas[1]! };
 }
 
+function schedulerOptionsFor(
+  call: ts.CallExpression,
+): Record<string, unknown> | undefined {
+  for (const argument of [...call.arguments].reverse()) {
+    if (
+      !ts.isObjectLiteralExpression(argument) &&
+      !ts.isSatisfiesExpression(argument)
+    ) {
+      continue;
+    }
+    const value = literalToValue(argument) as Record<string, unknown>;
+    if (
+      "completeSchedulerScopeSummary" in value ||
+      "materializerWriteInputPaths" in value
+    ) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 /**
  * The input (argument) schema of the first hoisted lift emitted in `root` — the
  * lift a lone `computed()` capture lowers to.
@@ -348,6 +369,44 @@ const p = pattern<{ mentionable: MentionablePiece[] }, { [UI]: any }>((
         el.argumentExpression.text === "NAME"
       ),
       "Bare NAME identifier must not appear as an element access key",
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: scheduler options preserve helper-backed keys in lift callbacks",
+  async () => {
+    const source = await Deno.readTextFile(
+      new URL(
+        "./fixtures/jsx-expressions/reactive-cell-map.input.tsx",
+        import.meta.url,
+      ),
+    );
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+
+    assert(
+      callsNamed(root, "lift").some((call) =>
+        schedulerOptionsFor(call)?.completeSchedulerScopeSummary === true
+      ),
+      "expected the transformed lift to carry a completeness marker",
+    );
+    const pieceNameReads = collect(root, ts.isElementAccessExpression).filter(
+      (access) =>
+        ts.isIdentifier(access.expression) &&
+        access.expression.text === "piece",
+    );
+    assert(pieceNameReads.length > 0, "expected a piece name element read");
+    assert(
+      pieceNameReads.every((access) =>
+        ts.isPropertyAccessExpression(access.argumentExpression) &&
+        ts.isIdentifier(access.argumentExpression.expression) &&
+        access.argumentExpression.expression.text === "__cfHelpers" &&
+        access.argumentExpression.name.text === "NAME"
+      ),
+      "options-bearing lift callbacks must retain __cfHelpers.NAME",
     );
   },
 );
@@ -1647,6 +1706,131 @@ export default pattern<Input>(({ departments }) => {
     );
     const options = literalToValue(optionsArg) as Record<string, unknown>;
     assertEquals(options.materializerWriteInputPaths, [["departments"]]);
+  },
+);
+
+Deno.test(
+  "Pipeline regression: complete source lifts emit scheduler scope proof including proven-empty",
+  async () => {
+    const source = `import { computed, pattern } from "commonfabric";
+
+export default pattern<{ value: number }>(({ value }) => {
+  const incremented = computed(() => value + 1);
+  const constant = computed(() => 42);
+  return { incremented, constant };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+    assertEquals(
+      schedulerOptionsFor(liftCallFor(root, "incremented"))
+        ?.completeSchedulerScopeSummary,
+      true,
+    );
+    assertEquals(
+      schedulerOptionsFor(liftCallFor(root, "constant"))
+        ?.completeSchedulerScopeSummary,
+      true,
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: uncertain source lifts do not emit scheduler scope proof",
+  async () => {
+    const source = `import { computed, pattern } from "commonfabric";
+
+export default pattern<{ value: Record<string, string>; key: string }>(
+  ({ value, key }) => {
+    const dynamic = computed(() => value[key]);
+    return { dynamic };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+    assertEquals(
+      schedulerOptionsFor(liftCallFor(root, "dynamic"))
+        ?.completeSchedulerScopeSummary,
+      undefined,
+    );
+  },
+);
+
+Deno.test(
+  "Pipeline regression: uncertain writers keep materializer paths without scope proof",
+  async () => {
+    const source =
+      `import { computed, pattern, type Writable } from "commonfabric";
+
+interface Input {
+  departments: Writable<string[]>;
+  values: Record<string, string>;
+  key: string;
+}
+
+export default pattern<Input>(({ departments, values, key }) => {
+  const dynamicWriter = computed(() => {
+    departments.set(["Bakery"]);
+    return values[key];
+  });
+  return { dynamicWriter };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const options = schedulerOptionsFor(
+      liftCallFor(parseModule(output), "dynamicWriter"),
+    );
+    assertEquals(options?.materializerWriteInputPaths, [["departments"]]);
+    assertEquals(options?.completeSchedulerScopeSummary, undefined);
+  },
+);
+
+Deno.test(
+  "Pipeline regression: unreadable cell arguments do not emit scheduler scope proof",
+  async () => {
+    const source = `import { lift, pattern, type Writable } from "commonfabric";
+import { sendMixed, type Auth } from "ambiguous-clients";
+
+export default pattern<{ auth: Writable<Auth>; marker: boolean }>(
+  ({ auth, marker }) => {
+    const sent = lift((candidate: Writable<Auth>) => {
+      sendMixed(candidate);
+      return marker;
+    })(auth);
+    return { sent };
+  },
+);
+`;
+
+    const output = await transformSource(source, {
+      types: {
+        ...COMMONFABRIC_TYPES,
+        "ambiguous-clients.d.ts": `declare module "ambiguous-clients" {
+  import type { Writable } from "commonfabric";
+  export type Auth = { token: string };
+  export interface AuthCell {
+    get(): Auth | undefined;
+    update(values: { token?: string }): void;
+  }
+  export function sendMixed(auth: AuthCell | Writable<Auth>): void;
+}`,
+      },
+    });
+    assertEquals(
+      schedulerOptionsFor(liftCallFor(parseModule(output), "sent"))
+        ?.completeSchedulerScopeSummary,
+      undefined,
+    );
   },
 );
 

@@ -1072,31 +1072,34 @@ export class CellImpl<T extends FabricValue>
       (action as Action & { src?: string }).src = `pull:${this.sourceURI}`;
 
       // Subscribe as an effect so it runs in the next cycle.
-      const cancel = this.runtime.scheduler.subscribe(action, action, {
+      const cancel = this.runtime.scheduler.subscribe(action, {
         isEffect: true,
         noDebounce: true,
       });
 
       // Wait for the scheduler to process all pending work, then resolve.
-      // If the read kicked async loads of cross-space link targets, await
-      // them and re-idle — each arrival re-runs the read and can reveal the
-      // next hop — bounded. Pulls that kicked nothing take the
-      // zero-iteration path and keep their previous timing.
+      // If the read kicked async loads of absent link targets (cross-space,
+      // or same-space docs a fresh replica never pulled), await them and
+      // re-idle — each arrival re-runs the read and can reveal the next hop.
+      // Every kicked doc is deduped once-per-session, so the total number of
+      // rounds is bounded by the reachable-doc depth; the fixed cap is only
+      // a backstop against a pathological graph. Pulls that kicked nothing
+      // take the zero-iteration path and keep their previous timing.
       this.runtime.scheduler.idle().then(async () => {
         const storage = this.runtime.storageManager;
         // The pending pool is manager-global (same semantics as `synced()`):
         // this pull may also wait on loads kicked by concurrent readers.
         let round = 0;
-        for (; round < 10; round++) {
+        for (; round < 100; round++) {
           if ((storage.pendingCrossSpacePromiseCount?.() ?? 0) === 0) break;
           await (storage.crossSpaceSettled?.() ?? Promise.resolve());
           await this.runtime.scheduler.idle();
         }
         if (
-          round === 10 && (storage.pendingCrossSpacePromiseCount?.() ?? 0) > 0
+          round === 100 && (storage.pendingCrossSpacePromiseCount?.() ?? 0) > 0
         ) {
           logger.warn("pull", () => [
-            "pull() convergence bound exhausted with cross-space loads still",
+            "pull() convergence bound exhausted with link-target loads still",
             `pending: ${this.sourceURI}`,
           ]);
         }

@@ -66,6 +66,7 @@ import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
+  IMemorySpaceAddress,
   IMergedChanges,
   IPreconditionFailedError,
   IRemoteStorageProviderSettings,
@@ -714,10 +715,22 @@ export class StorageManager implements IStorageManager {
   readonly id: string;
   readonly as: Signer;
 
+  // One authenticated session identity is shared by every space opened during
+  // a manager lifecycle. close() invalidates those server sessions, so a later
+  // sequential Runtime reusing this manager must start a fresh identity rather
+  // than attempting to resurrect an invalidated token.
+  #sessionId: string;
   #settings: IRemoteStorageProviderSettings;
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
+  // Docs already offered a link-target pull via shouldPullDoc. One entry per
+  // (space, scope, id) for the manager's lifetime: the first pull registers a
+  // server-side watch that keeps the doc flowing afterwards, so a second kick
+  // is never needed — and never re-kicking is what keeps reads of genuinely
+  // absent targets (dangling links, deleted docs) from churning the
+  // cross-space convergence loop on every read.
+  #docPullKicks = new Set<string>();
   // In-flight commits, registered synchronously by the transaction layer at
   // commit() entry (see IStorageManager.trackPendingCommit). This is the
   // write-durability barrier: distinct from #crossSpacePromises, which also
@@ -766,6 +779,7 @@ export class StorageManager implements IStorageManager {
     sessionFactory: SessionFactory,
   ) {
     this.id = options.id ?? crypto.randomUUID();
+    this.#sessionId = this.id;
     this.as = options.as;
     this.#settings = options.settings ?? defaultSettings;
     this.#sessionFactory = sessionFactory;
@@ -837,7 +851,10 @@ export class StorageManager implements IStorageManager {
         subscription: this.#subscription,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
           ? () => this.#createInitializedSession(space, signer)
-          : () => this.#sessionFactory.create(space, signer),
+          : () =>
+            this.#sessionFactory.create(space, signer, {
+              sessionId: this.#sessionId,
+            }),
         getTelemetry: () => this.#telemetry,
       });
       this.#providers.set(space, provider);
@@ -866,7 +883,9 @@ export class StorageManager implements IStorageManager {
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }> {
-    const normal = await this.#sessionFactory.create(space, signer);
+    const normal = await this.#sessionFactory.create(space, signer, {
+      sessionId: this.#sessionId,
+    });
     if (this.#sessionFactory.supportsAclBootstrap !== true) return normal;
     const isHomeSpace = signer.did() === space;
     const spaceIdentity = isHomeSpace
@@ -891,8 +910,26 @@ export class StorageManager implements IStorageManager {
     // Do not reuse the bootstrap session for replica work: both it and the
     // replica allocate localSeq from 1, and named spaces must switch back from
     // the space signer to the active user before any user-scoped operation.
+    // Preserve the normal session token before detaching it so the final user
+    // mount resumes the construction-wide manager session instead of trying to
+    // replace that still-live id without its token.
+    const resumeNormal: MemoryV2Client.MountOptions = {
+      sessionId: normal.session.sessionId,
+      seenSeq: normal.session.serverSeq,
+      ...(normal.session.sessionToken !== undefined
+        ? { sessionToken: normal.session.sessionToken }
+        : {}),
+    };
     await normal.client.close();
-    const bootstrap = await this.#sessionFactory.create(space, spaceIdentity);
+    let bootstrapSessionId = crypto.randomUUID();
+    while (bootstrapSessionId === this.#sessionId) {
+      bootstrapSessionId = crypto.randomUUID();
+    }
+    const bootstrap = await this.#sessionFactory.create(
+      space,
+      spaceIdentity,
+      { sessionId: bootstrapSessionId },
+    );
     try {
       const current = await bootstrap.session.queryGraph({
         roots: [{ id: aclId, selector: { path: [], schema: false } }],
@@ -941,7 +978,7 @@ export class StorageManager implements IStorageManager {
       await bootstrap.client.close();
     }
 
-    return await this.#sessionFactory.create(space, signer);
+    return await this.#sessionFactory.create(space, signer, resumeNormal);
   }
 
   async close(): Promise<void> {
@@ -952,6 +989,7 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.destroy()),
     );
     this.#providers.clear();
+    this.#sessionId = crypto.randomUUID();
   }
 
   async closeNow(): Promise<void> {
@@ -962,6 +1000,7 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.destroyNow()),
     );
     this.#providers.clear();
+    this.#sessionId = crypto.randomUUID();
   }
 
   edit(): IStorageTransaction {
@@ -1021,12 +1060,109 @@ export class StorageManager implements IStorageManager {
     }
   }
 
+  shouldPullDoc(space: MemorySpace, id: URI, scope?: CellScope): boolean {
+    if (id.startsWith("data:")) {
+      return false;
+    }
+    const key = `${space}\0${docKey(id, scope)}`;
+    if (this.#docPullKicks.has(key)) {
+      return false;
+    }
+    this.#docPullKicks.add(key);
+    // State the local replica can already serve needs no pull. getState is
+    // undefined both for never-pulled docs and for docs known to hold no
+    // value (deleted / genuinely absent) — the second kind gets one harmless
+    // kick and is then held off by the kick set above.
+    return this.open(space).replica.get({
+      id,
+      type: DOCUMENT_MIME as MIME,
+      scope,
+    }) === undefined;
+  }
+
+  retractDocPullKick(space: MemorySpace, id: URI, scope?: CellScope): void {
+    this.#docPullKicks.delete(`${space}\0${docKey(id, scope)}`);
+  }
+
   addCrossSpacePromise(promise: Promise<void>): void {
     this.#crossSpacePromises.add(promise);
   }
 
   removeCrossSpacePromise(promise: Promise<void>): void {
     this.#crossSpacePromises.delete(promise);
+  }
+
+  // In-flight document loads keyed `space/scope/id` (the scheduler's
+  // entityKey format). Refcounted: concurrent syncCell calls for the same
+  // document share one entry. Waiters resolve when the count returns to zero
+  // — whether the load produced a value or found the document absent.
+  #pendingLoads = new Map<string, {
+    count: number;
+    generation: number;
+    address: { space: MemorySpace; scope: CellScope; id: URI };
+    failure: unknown;
+    waiters: Set<(failure: unknown) => void>;
+  }>();
+  #nextPendingLoadGeneration = 1;
+
+  private registerPendingLoad(
+    address: { space: MemorySpace; scope: CellScope; id: URI },
+  ): (failure?: unknown) => void {
+    const key = `${address.space}/${address.scope}/${address.id}`;
+    const entry = this.#pendingLoads.get(key) ??
+      {
+        count: 0,
+        generation: this.#nextPendingLoadGeneration++,
+        address,
+        failure: undefined,
+        waiters: new Set<(failure: unknown) => void>(),
+      };
+    entry.count++;
+    this.#pendingLoads.set(key, entry);
+    return (failure?: unknown) => {
+      entry.failure ??= failure;
+      entry.count--;
+      if (entry.count > 0) return;
+      this.#pendingLoads.delete(key);
+      for (const waiter of entry.waiters) waiter(entry.failure);
+      entry.waiters.clear();
+    };
+  }
+
+  pendingLoadAddresses(): readonly {
+    space: MemorySpace;
+    scope: CellScope;
+    id: URI;
+  }[] {
+    return [...this.#pendingLoads.values()].map((entry) => entry.address);
+  }
+
+  pendingLoadGeneration(key: string): number | undefined {
+    return this.#pendingLoads.get(key)?.generation;
+  }
+
+  loadsSettled(keys: readonly string[]): Promise<void> {
+    // Dedupe up front: `remaining` counts entries, but the shared onSettled is
+    // added once per entry's waiter Set and fires once. A duplicated key would
+    // inflate `remaining` without a matching callback, hanging the promise.
+    const pending = [...new Set(keys)].filter((key) =>
+      this.#pendingLoads.has(key)
+    );
+    if (pending.length === 0) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      let remaining = pending.length;
+      let firstFailure: unknown;
+      const onSettled = (failure: unknown) => {
+        firstFailure ??= failure;
+        remaining--;
+        if (remaining !== 0) return;
+        if (firstFailure !== undefined) reject(firstFailure);
+        else resolve();
+      };
+      for (const key of pending) {
+        this.#pendingLoads.get(key)!.waiters.add(onSettled);
+      }
+    });
   }
 
   trackUntilSettled(work: Promise<unknown>): void {
@@ -1065,32 +1201,72 @@ export class StorageManager implements IStorageManager {
     }
 
     const provider = this.open(space);
-    await provider.sync(id, {
-      path: cell.path.map((segment) => segment.toString()),
-      schema: schema ?? false,
-    }, scope);
-    await this.syncCfcSchemaDocument(
+    const releaseLoad = this.registerPendingLoad({
       space,
-      (provider as {
-        get?: (uri: URI, scope?: CellScope) => EntityDocument | undefined;
-      }).get?.(id, scope),
-    );
-    return cell;
+      scope: normalizeCellScope(scope),
+      id,
+    });
+    let loadFailure: unknown;
+    try {
+      const result = await provider.sync(id, {
+        path: cell.path.map((segment) => segment.toString()),
+        schema: schema ?? false,
+      }, scope);
+      loadFailure = result.error;
+      const schemaFailure = await this.syncCfcSchemaDocument(
+        space,
+        (provider as {
+          get?: (uri: URI, scope?: CellScope) => EntityDocument | undefined;
+        }).get?.(id, scope),
+      );
+      loadFailure ??= schemaFailure;
+      return cell;
+    } catch (error) {
+      loadFailure = error;
+      throw error;
+    } finally {
+      releaseLoad(loadFailure);
+    }
   }
 
   private async syncCfcSchemaDocument(
     space: MemorySpace,
     document: EntityDocument | undefined,
-  ): Promise<void> {
+  ): Promise<unknown> {
     const cfc = isRecord(document?.cfc) ? document.cfc : undefined;
     const schemaHash = cfc?.schemaHash;
     if (typeof schemaHash !== "string" || schemaHash.length === 0) {
-      return;
+      return undefined;
     }
-    await this.open(space).sync(`cid:${schemaHash}` as URI, {
+    const result = await this.open(space).sync(`cid:${schemaHash}` as URI, {
       path: [],
       schema: false,
     });
+    return result.error;
+  }
+
+  private trackPendingProviderSync(
+    address: { space: MemorySpace; scope: CellScope; id: URI },
+    start: () => Promise<Result<Unit, Error>>,
+  ): Promise<Result<Unit, Error>> {
+    const releaseLoad = this.registerPendingLoad(address);
+    let work: Promise<Result<Unit, Error>>;
+    try {
+      work = start();
+    } catch (error) {
+      releaseLoad(error);
+      throw error;
+    }
+    return work.then(
+      (result) => {
+        releaseLoad(result.error);
+        return result;
+      },
+      (error) => {
+        releaseLoad(error);
+        throw error;
+      },
+    );
   }
 
   private resolveCrossSpace(resolve: () => void): Promise<void> {
@@ -1199,11 +1375,19 @@ export class StorageManager implements IStorageManager {
     if (isPrimitiveCellLink(value)) {
       const link = parseLinkPrimitive(value, base);
       if (link.id && !link.id.startsWith("data:")) {
+        const space = link.space ?? base.space!;
+        const scope = normalizeCellScope(
+          link.scope as CellScope | undefined,
+        );
         promises.push(
-          this.open(link.space ?? base.space!).sync(link.id, {
-            path: link.path.map((segment) => segment.toString()),
-            schema: link.schema ?? schema ?? false,
-          }, normalizeCellScope(link.scope as CellScope | undefined)),
+          this.trackPendingProviderSync(
+            { space, scope, id: link.id },
+            () =>
+              this.open(space).sync(link.id!, {
+                path: link.path.map((segment) => segment.toString()),
+                schema: link.schema ?? schema ?? false,
+              }, scope),
+          ),
         );
       }
       return;
@@ -1308,6 +1492,19 @@ class Provider implements IStorageProviderWithReplica {
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
     return this.replica.listSchedulerActionSnapshots(query);
+  }
+
+  areSchedulerAddressesCurrentAtOrBelow(
+    addresses: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean {
+    return this.replica.areSchedulerAddressesCurrentAtOrBelow(addresses, seq);
+  }
+
+  schedulerHasPendingWriteOverlapping(
+    addresses: readonly IMemorySpaceAddress[],
+  ): boolean {
+    return this.replica.schedulerHasPendingWriteOverlapping(addresses);
   }
 
   sqliteQuery(
@@ -1558,8 +1755,46 @@ class SpaceReplica implements ISpaceReplica {
     if (!getPersistentSchedulerStateConfig()) {
       return { serverSeq: 0, snapshots: [] };
     }
-    const { session } = await this.sessionHandle();
+    const { client, session } = await this.sessionHandle();
+    // Optional capability, negotiated at hello: a server that did not
+    // advertise `persistentSchedulerState` keeps no scheduler rows (and an
+    // older build may not know the message at all) — treat as "no snapshots"
+    // so the resume path degrades to running fresh, instead of depending on
+    // a capability-specific RPC the server never offered.
+    if (client.serverFlags?.persistentSchedulerState !== true) {
+      return { serverSeq: 0, snapshots: [] };
+    }
     return await session.listSchedulerActionSnapshots(query);
+  }
+
+  areSchedulerAddressesCurrentAtOrBelow(
+    addresses: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean {
+    for (const address of addresses) {
+      if (address.space !== this.#space) return false;
+      const record = this.#docs.get(
+        docKey(address.id as URI, address.scope as CellScope | undefined),
+      );
+      // Missing/unconfirmed docs cannot prove either the observation's inputs
+      // or its committed output surface are present in this replica.
+      if (record === undefined || record.confirmed.seq === 0) return false;
+      if (record.confirmed.seq > seq) return false;
+    }
+    return true;
+  }
+
+  schedulerHasPendingWriteOverlapping(
+    addresses: readonly IMemorySpaceAddress[],
+  ): boolean {
+    for (const address of addresses) {
+      if (address.space !== this.#space) continue;
+      const record = this.#docs.get(
+        docKey(address.id as URI, address.scope as CellScope | undefined),
+      );
+      if (record !== undefined && record.pending.length > 0) return true;
+    }
+    return false;
   }
 
   getDocument(uri: URI, scope?: CellScope): EntityDocument | undefined {
@@ -2056,6 +2291,17 @@ class SpaceReplica implements ISpaceReplica {
     if (!getPersistentSchedulerStateConfig()) {
       return Promise.resolve({ ok: {} });
     }
+    // Known-unsupported server (hello already negotiated): drop the
+    // observation without batching. The flush-time gate below is the
+    // authoritative check; this just spares every action commit the
+    // batch/flush round once the session has established that scheduler
+    // payloads have nowhere to go.
+    if (
+      this.#sessionClient !== undefined &&
+      this.#sessionClient.serverFlags?.persistentSchedulerState !== true
+    ) {
+      return Promise.resolve({ ok: {} });
+    }
     const localSeq = this.#nextLocalSeq++;
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>
@@ -2121,7 +2367,27 @@ class SpaceReplica implements ISpaceReplica {
       operations: [],
       schedulerObservationBatch: entries.map((entry) => entry.commit),
     };
-    const promise = this.pushCommit(localSeq, [], commit, undefined)
+    const promise = (async (): Promise<
+      Result<Unit, StorageTransactionRejected>
+    > => {
+      // Persistent scheduler state is an OPTIONAL capability negotiated at
+      // hello (memory/v2.ts `compatibleMemoryProtocolFlags`): peers with
+      // different scheduler flags must still share memory data. A server that
+      // did not advertise it strips scheduler payloads at `transact`, so this
+      // observation-only commit would arrive as zero operations and be
+      // TERMINALLY rejected ("memory v2 commit requires at least one
+      // operation") — and the flush-before-semantic-commit ordering in
+      // pushCommit would then spread that rejection to every subsequent
+      // semantic commit (event handlers drop their writes without retry;
+      // the whole session's writes starve). Fail closed instead: drop the
+      // observations — the feature degrades to flag-off semantics (resumes
+      // re-run fresh) while semantic traffic proceeds untouched.
+      const { client } = await this.sessionHandle();
+      if (client.serverFlags?.persistentSchedulerState !== true) {
+        return { ok: {} };
+      }
+      return await this.pushCommit(localSeq, [], commit, undefined);
+    })()
       .then((result) => {
         for (const entry of entries) {
           entry.pending.resolve(result);
@@ -2614,7 +2880,15 @@ class SpaceReplica implements ISpaceReplica {
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
-    if (sync.upserts.length === 0 && sync.removes.length === 0) {
+    const hasAdoptionObservations = type === "integrate" &&
+      sync.observations !== undefined &&
+      sync.observations.length > 0 &&
+      getPersistentSchedulerStateConfig();
+    if (
+      sync.upserts.length === 0 &&
+      sync.removes.length === 0 &&
+      !hasAdoptionObservations
+    ) {
       this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
@@ -2675,6 +2949,22 @@ class SpaceReplica implements ISpaceReplica {
       }
     } else if (shouldNotifySinks) {
       this.notifySinksForIds(touched);
+    }
+    // Subscription-carried scheduler observations — other clients' committed
+    // action runs for this sync window. Handed to the scheduler AFTER the
+    // integrate invalidation above (same synchronous turn, before the
+    // deferred dispatch), so adoption clears exactly the dirt these writes
+    // caused. See incremental-observation-adoption.md §4.
+    if (hasAdoptionObservations) {
+      this.#subscription.next({
+        type: "scheduler-observations",
+        space: this.#space,
+        observations: sync.observations!,
+        seqCurrentAtOrBelow: (addresses, seq) =>
+          this.areSchedulerAddressesCurrentAtOrBelow(addresses, seq),
+        hasPendingWriteOverlapping: (addresses) =>
+          this.schedulerHasPendingWriteOverlapping(addresses),
+      } as StorageNotification);
     }
     this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
   }
@@ -3048,10 +3338,17 @@ class SpaceReplica implements ISpaceReplica {
     session: MemoryV2Client.SpaceSession;
   }> {
     if (this.#sessionHandle === undefined) {
-      const handle = this.#createSession().then((resolved) => {
-        this.#sessionClient = resolved.client;
-        return resolved;
-      }).catch((error) => {
+      // Defer the factory call until after #sessionHandle is installed. Session
+      // setup can synchronously re-enter provider work (notably home-space ACL
+      // bootstrap); calling the factory inline leaves a window where that work
+      // starts a second mount with the same explicit session id and revokes the
+      // first mount before it can commit.
+      const handle = Promise.resolve().then(() => this.#createSession()).then(
+        (resolved) => {
+          this.#sessionClient = resolved.client;
+          return resolved;
+        },
+      ).catch((error) => {
         if (this.#sessionHandle === handle) {
           this.#sessionHandle = undefined;
         }

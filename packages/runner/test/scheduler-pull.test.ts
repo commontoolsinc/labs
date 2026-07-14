@@ -1,6 +1,5 @@
 // Pull scheduler core behavior and stale dependency propagation tests.
 
-import { createDirtyDependencyTraceContext } from "../src/scheduler/diagnostics.ts";
 import {
   afterEach,
   beforeEach,
@@ -8,6 +7,7 @@ import {
   describe,
   disposeSchedulerTestRuntime,
   expect,
+  expectSemanticCommitNotifiesSynchronously,
   getStaleSchedulerInternals,
   it,
   Runtime,
@@ -146,7 +146,7 @@ describe("pull-based scheduling", () => {
     expect(computationRuns).toBe(1);
   });
 
-  it("should preserve writes when collecting dependencies from ReactivityLog", async () => {
+  it("should preserve writes from immediate ReactivityLog", async () => {
     const target = runtime.getCell<number>(
       space,
       "reactivity-log-writes-target",
@@ -175,19 +175,13 @@ describe("pull-based scheduling", () => {
 
     await runtime.scheduler.idle();
     expect(writerRuns).toBe(0);
-
-    // Force dependency collection to run against the stored ReactivityLog entry.
-    const schedulerInternal = runtime.scheduler as unknown as {
-      pendingDependencyCollection: Set<Action>;
-    };
-    schedulerInternal.pendingDependencyCollection.add(writer);
-    runtime.scheduler.queueExecution();
-    await runtime.scheduler.idle();
-
+    expect(runtime.scheduler.getMightWrite(writer)).toEqual([
+      toMemorySpaceAddress(target.getAsNormalizedFullLink()),
+    ]);
     expect(writerRuns).toBe(0);
   });
 
-  it("should not re-run an effect for unrelated pending dependency collection", async () => {
+  it("should not re-run an effect for an unrelated child subscription", async () => {
     const observed = runtime.getCell<number>(
       space,
       "pending-dep-unrelated-observed",
@@ -228,6 +222,7 @@ describe("pull-based scheduling", () => {
         (unrelatedSource.withTx(actionTx).get() ?? 0) + 1,
       );
     }) as Action & Partial<TelemetryAnnotations>;
+    unrelatedComputation.reads = [unrelatedSource.getAsNormalizedFullLink()];
     unrelatedComputation.writes = [unrelatedResult.getAsNormalizedFullLink()];
 
     const effect: Action = (actionTx) => {
@@ -239,9 +234,6 @@ describe("pull-based scheduling", () => {
       if (effectRuns === 1) {
         runtime.scheduler.subscribe(
           unrelatedComputation,
-          (depTx) => {
-            unrelatedSource.withTx(depTx).get();
-          },
           {},
         );
       }
@@ -267,7 +259,7 @@ describe("pull-based scheduling", () => {
     expect(unrelatedRuns).toBe(1);
   });
 
-  it("should re-run an effect for transitively related pending dependency collection", async () => {
+  it("should re-run an effect for a transitively related child subscription", async () => {
     const source = runtime.getCell<number>(
       space,
       "pending-dep-transitive-source",
@@ -309,6 +301,7 @@ describe("pull-based scheduling", () => {
         (source.withTx(actionTx).get() ?? 0) * 10,
       );
     }) as Action & Partial<TelemetryAnnotations>;
+    childComputation.reads = [source.getAsNormalizedFullLink()];
     childComputation.writes = [childResult.getAsNormalizedFullLink()];
 
     const parentComputation = ((actionTx: IExtendedStorageTransaction) => {
@@ -318,9 +311,6 @@ describe("pull-based scheduling", () => {
         childSubscribed = true;
         runtime.scheduler.subscribe(
           childComputation,
-          (depTx) => {
-            source.withTx(depTx).get();
-          },
           {},
         );
       }
@@ -329,6 +319,7 @@ describe("pull-based scheduling", () => {
         (childResult.withTx(actionTx).get() ?? 0) + 1,
       );
     }) as Action & Partial<TelemetryAnnotations>;
+    parentComputation.reads = [childResult.getAsNormalizedFullLink()];
     parentComputation.writes = [parentResult.getAsNormalizedFullLink()];
 
     const effect: Action = (actionTx) => {
@@ -340,9 +331,6 @@ describe("pull-based scheduling", () => {
 
     runtime.scheduler.subscribe(
       parentComputation,
-      (depTx) => {
-        childResult.withTx(depTx).get();
-      },
       {},
     );
 
@@ -451,27 +439,24 @@ describe("pull-based scheduling", () => {
     expect(effectResult.get()).toBe(0);
   });
 
-  it("should schedule effects when affected by dirty computations", async () => {
-    // This test verifies that scheduleAffectedEffects correctly finds and
-    // schedules effects that depend on a dirty computation.
-
+  it("should schedule effects when affected by invalid computations", async () => {
     const source = runtime.getCell<number>(
       space,
-      "schedule-effects-source",
+      "invalid-effects-source",
       undefined,
       tx,
     );
     source.set(1);
     const intermediate = runtime.getCell<number>(
       space,
-      "schedule-effects-intermediate",
+      "invalid-effects-intermediate",
       undefined,
       tx,
     );
     intermediate.set(0);
     const effectResult = runtime.getCell<number>(
       space,
-      "schedule-effects-result",
+      "invalid-effects-result",
       undefined,
       tx,
     );
@@ -525,13 +510,15 @@ describe("pull-based scheduling", () => {
     // Track initial effect runs
     const initialEffectRuns = effectRuns;
 
-    // Change source - computation should be marked dirty, effect should be scheduled
+    // Change source - computation should be invalidated, effect should run.
     source.withTx(tx).send(2);
-    await tx.commit();
+    await expectSemanticCommitNotifiesSynchronously(
+      storageManager,
+      () => tx.commit(),
+    );
     tx = runtime.edit();
     await effectResult.pull();
 
-    // Effect should have run (triggered via scheduleAffectedEffects)
     expect(effectRuns).toBeGreaterThan(initialEffectRuns);
   });
 
@@ -608,7 +595,7 @@ describe("pull-based scheduling", () => {
 
     const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     schedulerInternal.pending.delete(effect);
-    schedulerInternal.dirty.delete(effect);
+    schedulerInternal.clearInvalid(effect);
     schedulerInternal.markDirty(computation);
     runtime.scheduler.queueExecution();
 
@@ -834,52 +821,6 @@ describe("pull-based scheduling", () => {
     expect(childRuns).toBe(1);
   });
 
-  it("should clear provisional continuation demand when unsubscribing", async () => {
-    const source = runtime.getCell<number>(
-      space,
-      "pull-continuation-unsubscribe-source",
-      undefined,
-      tx,
-    );
-    source.set(2);
-    const result = runtime.getCell<number>(
-      space,
-      "pull-continuation-unsubscribe-result",
-      undefined,
-      tx,
-    );
-    result.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let runs = 0;
-    const action: Action = (actionTx) => {
-      runs++;
-      result.withTx(actionTx).send(source.withTx(actionTx).get() ?? 0);
-    };
-    const log = {
-      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
-      shallowReads: [],
-      writes: [toMemorySpaceAddress(result.getAsNormalizedFullLink())],
-    };
-
-    runtime.scheduler.subscribe(action, log);
-    await runtime.scheduler.idle();
-    expect(runs).toBe(0);
-
-    const schedulerInternals = runtime.scheduler as unknown as {
-      markPullDemandContinuation: (action: Action) => void;
-    };
-    schedulerInternals.markPullDemandContinuation(action);
-
-    runtime.scheduler.unsubscribe(action);
-    runtime.scheduler.subscribe(action, log);
-    await runtime.scheduler.idle();
-
-    expect(runs).toBe(0);
-    expect(result.get()).toBe(0);
-  });
-
   it("should first-run child computations created by demand-root effects", async () => {
     const source = runtime.getCell<number>(
       space,
@@ -940,7 +881,7 @@ describe("pull-based scheduling", () => {
     expect(childResult.get()).toBe(30);
   });
 
-  it("should collect shared dirty dependencies consistently across effect seeds", async () => {
+  it("should run shared invalid dependencies consistently across effect seeds", async () => {
     const source = runtime.getCell<number>(
       space,
       "pull-shared-seeds-source",
@@ -1043,60 +984,6 @@ describe("pull-based scheduling", () => {
     expect(computationRuns).toBe(2);
     expect(leftEffectRuns).toBe(2);
     expect(rightEffectRuns).toBe(2);
-
-    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
-
-    const collectWorkSet = (seeds: Action[]) => {
-      const workSet = new Set<Action>(seeds);
-      const memo = new Map<Action, boolean>();
-      for (const seed of seeds) {
-        schedulerInternal.collectDirtyDependencies(seed, workSet, memo);
-      }
-      return { workSet, memo };
-    };
-
-    schedulerInternal.markDirty(computation);
-    schedulerInternal.scheduleAffectedEffects(computation);
-
-    const forward = collectWorkSet([leftEffect, rightEffect]);
-    const reverse = collectWorkSet([rightEffect, leftEffect]);
-
-    expect(forward.workSet.has(computation)).toBe(true);
-    expect(reverse.workSet.has(computation)).toBe(true);
-    expect(forward.memo.get(computation)).toBe(true);
-    expect(reverse.memo.get(computation)).toBe(true);
-    expect(forward.memo.get(leftEffect)).toBe(true);
-    expect(forward.memo.get(rightEffect)).toBe(true);
-    expect(reverse.memo.get(leftEffect)).toBe(true);
-    expect(reverse.memo.get(rightEffect)).toBe(true);
-
-    // The trace-enabled memo-hit bookkeeping in dirty-dependencies.ts is
-    // otherwise reached only when a pull-event preflight trace happens to be
-    // active during a memo hit, which depends on event-batch interleaving and
-    // so varies run to run. Re-collect from the already-memoized dirty
-    // computation with a fresh work set and a trace attached so the counters
-    // are asserted deterministically.
-    const trace = createDirtyDependencyTraceContext();
-    const schedulerWithTrace = runtime.scheduler as unknown as {
-      dirtyDependencyTraceContext?: ReturnType<
-        typeof createDirtyDependencyTraceContext
-      >;
-    };
-    schedulerWithTrace.dirtyDependencyTraceContext = trace;
-    try {
-      const tracedWorkSet = new Set<Action>();
-      const result = schedulerInternal.collectDirtyDependencies(
-        computation,
-        tracedWorkSet,
-        forward.memo,
-      );
-      expect(result).toBe(true);
-      expect(tracedWorkSet.has(computation)).toBe(true);
-      expect(trace.memoHitCount).toBe(1);
-      expect(trace.workSetAddCount).toBe(1);
-    } finally {
-      schedulerWithTrace.dirtyDependencyTraceContext = undefined;
-    }
   });
 
   it("should recompute multi-hop chains before running effects in pull mode", async () => {
@@ -1352,31 +1239,31 @@ describe("pull-based scheduling", () => {
     expect(stats.effects).toBe(0);
   });
 
-  it("should track direct dirty and transitive stale separately", async () => {
+  it("should keep invalid status value-local instead of transitive", async () => {
     const source = runtime.getCell<number>(
       space,
-      "stale-state-source",
+      "invalid-state-source",
       undefined,
       tx,
     );
     source.set(1);
     const mid = runtime.getCell<number>(
       space,
-      "stale-state-mid",
+      "invalid-state-mid",
       undefined,
       tx,
     );
     mid.set(0);
     const output = runtime.getCell<number>(
       space,
-      "stale-state-output",
+      "invalid-state-output",
       undefined,
       tx,
     );
     output.set(0);
     const sink = runtime.getCell<number>(
       space,
-      "stale-state-sink",
+      "invalid-state-sink",
       undefined,
       tx,
     );
@@ -1430,13 +1317,12 @@ describe("pull-based scheduling", () => {
     const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     expect(runtime.scheduler.isDirty(actionA)).toBe(true);
     expect(runtime.scheduler.isDirty(actionB)).toBe(false);
-    expect(schedulerInternal.isStale(actionA)).toBe(true);
-    expect(schedulerInternal.isStale(actionB)).toBe(true);
-    expect(schedulerInternal.getUpstreamStaleCount(actionB)).toBe(1);
-    expect(schedulerInternal.isStale(effect)).toBe(true);
+    expect(schedulerInternal.isInvalid(actionA)).toBe(true);
+    expect(schedulerInternal.isInvalid(actionB)).toBe(false);
+    expect(schedulerInternal.isInvalid(effect)).toBe(false);
   });
 
-  it("should schedule a newly resubscribed shallow-read effect when its writer is stale", async () => {
+  it("should keep a resubscribed shallow-read effect clean until its writer changes value", async () => {
     const source = runtime.getCell<number>(
       space,
       "pull-shallow-resubscribe-source",
@@ -1501,7 +1387,10 @@ describe("pull-based scheduling", () => {
       { isEffect: true },
     );
 
-    expect(runtime.scheduler.isDirty(effect)).toBe(true);
+    // Resubscription records the effect's completed read set. An invalid
+    // upstream writer is reachability evidence, not a value-bearing change;
+    // the effect becomes invalid only if that writer's commit changes output.
+    expect(runtime.scheduler.isDirty(effect)).toBe(false);
     await runtime.scheduler.idle();
 
     expect(computationRuns).toBe(1);
@@ -1510,31 +1399,31 @@ describe("pull-based scheduling", () => {
     expect(runtime.scheduler.isDirty(effect)).toBe(false);
   });
 
-  it("should clear downstream stale state when upstream recomputes unchanged", async () => {
+  it("should keep downstream clean when upstream recomputes unchanged", async () => {
     const source = runtime.getCell<number>(
       space,
-      "stale-noop-source",
+      "invalid-noop-source",
       undefined,
       tx,
     );
     source.set(1);
     const stable = runtime.getCell<number>(
       space,
-      "stale-noop-stable",
+      "invalid-noop-stable",
       undefined,
       tx,
     );
     stable.set(0);
     const output = runtime.getCell<number>(
       space,
-      "stale-noop-output",
+      "invalid-noop-output",
       undefined,
       tx,
     );
     output.set(0);
     const sink = runtime.getCell<number>(
       space,
-      "stale-noop-sink",
+      "invalid-noop-sink",
       undefined,
       tx,
     );
@@ -1604,9 +1493,9 @@ describe("pull-based scheduling", () => {
     expect(sink.get()).toBe(2);
 
     const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
-    expect(schedulerInternal.isStale(stableAction)).toBe(false);
-    expect(schedulerInternal.isStale(downstreamAction)).toBe(false);
-    expect(schedulerInternal.isStale(effect)).toBe(false);
+    expect(schedulerInternal.isInvalid(stableAction)).toBe(false);
+    expect(schedulerInternal.isInvalid(downstreamAction)).toBe(false);
+    expect(schedulerInternal.isInvalid(effect)).toBe(false);
   });
 
   it("should run downstream demand when upstream recompute changes output", async () => {
@@ -1694,38 +1583,38 @@ describe("pull-based scheduling", () => {
     expect(runtime.scheduler.isDirty(downstreamAction)).toBe(false);
   });
 
-  it("should keep event handlers behind stale dependencies", async () => {
+  it("should keep event handlers behind invalid dependencies", async () => {
     const source = runtime.getCell<number>(
       space,
-      "stale-event-source",
+      "invalid-event-source",
       undefined,
       tx,
     );
     source.set(1);
     const mid = runtime.getCell<number>(
       space,
-      "stale-event-mid",
+      "invalid-event-mid",
       undefined,
       tx,
     );
     mid.set(0);
     const output = runtime.getCell<number>(
       space,
-      "stale-event-output",
+      "invalid-event-output",
       undefined,
       tx,
     );
     output.set(0);
     const eventStream = runtime.getCell<number>(
       space,
-      "stale-event-stream",
+      "invalid-event-stream",
       undefined,
       tx,
     );
     eventStream.set(0);
     const result = runtime.getCell<number>(
       space,
-      "stale-event-result",
+      "invalid-event-result",
       undefined,
       tx,
     );
@@ -1792,7 +1681,7 @@ describe("pull-based scheduling", () => {
     expect(result.get()).toBe(((4 + 1) * 2) + 5);
   });
 
-  it("should not recursively walk clean broad event preflight dependencies", async () => {
+  it("should dispatch clean broad event preflight dependencies", async () => {
     runtime.scheduler.setEventPreflightTelemetryEnabled(true);
 
     const preflights: EventPreflightMarker[] = [];
@@ -1808,35 +1697,35 @@ describe("pull-based scheduling", () => {
     try {
       const source = runtime.getCell<number>(
         space,
-        "stale-clean-preflight-source",
+        "invalid-clean-preflight-source",
         undefined,
         tx,
       );
       source.set(1);
       const shared = runtime.getCell<number>(
         space,
-        "stale-clean-preflight-shared",
+        "invalid-clean-preflight-shared",
         undefined,
         tx,
       );
       shared.set(0);
       const target = runtime.getCell<number>(
         space,
-        "stale-clean-preflight-target",
+        "invalid-clean-preflight-target",
         undefined,
         tx,
       );
       target.set(0);
       const eventStream = runtime.getCell<number>(
         space,
-        "stale-clean-preflight-event",
+        "invalid-clean-preflight-event",
         undefined,
         tx,
       );
       eventStream.set(0);
       const result = runtime.getCell<number>(
         space,
-        "stale-clean-preflight-result",
+        "invalid-clean-preflight-result",
         undefined,
         tx,
       );
@@ -1845,7 +1734,7 @@ describe("pull-based scheduling", () => {
       for (let i = 0; i < 32; i++) {
         const cell = runtime.getCell<number>(
           space,
-          `stale-clean-preflight-fan-${i}`,
+          `invalid-clean-preflight-fan-${i}`,
           undefined,
           tx,
         );
@@ -1922,44 +1811,270 @@ describe("pull-based scheduling", () => {
       expect(preflights.length).toBe(1);
       expect(preflights[0].skipped).toBe(false);
       expect(preflights[0].hasDirtyDependencies).toBe(false);
+      // Inverted preflight (decision 15): the walk seeds from the invalid-node
+      // set and walks down to the closure, so its cost is bounded by the
+      // (here near-empty) invalid set, NOT the 32-wide closure cone. The old
+      // upstream walk visited the whole cone (~33+); the inverted walk visits
+      // only a stray never-ran seed or two. This bound is the O(N^2)→O(N) fix
+      // for rapid creation against a hub.
       expect(preflights[0].stats.visitCount).toBeLessThan(10);
     } finally {
       runtime.telemetry.removeEventListener("telemetry", listener);
     }
   });
 
-  it("should update stale counts when dynamic dependencies change", async () => {
+  it("defers an event handler behind an invalid upstream materializer", async () => {
+    // Exercises the materializer arm of the inverted preflight walk: a
+    // materializer feeds a cell the handler reads, so it joins the handler's
+    // closure; when its source changes it is invalid and the event must not
+    // dispatch on the stale value until the materializer re-runs.
+    const source = runtime.getCell<number>(
+      space,
+      "mat-preflight-source",
+      undefined,
+      tx,
+    );
+    const materialized = runtime.getCell<number>(
+      space,
+      "mat-preflight-materialized",
+      undefined,
+      tx,
+    );
+    const eventStream = runtime.getCell<number>(
+      space,
+      "mat-preflight-event",
+      undefined,
+      tx,
+    );
+    const result = runtime.getCell<number>(
+      space,
+      "mat-preflight-result",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    materialized.set(0);
+    eventStream.set(0);
+    result.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let materializerRuns = 0;
+    const materializer = Object.assign(
+      (actionTx: IExtendedStorageTransaction) => {
+        materializerRuns++;
+        materialized.withTx(actionTx).send(
+          (source.withTx(actionTx).get() ?? 0) + 100,
+        );
+      },
+      {
+        materializerWriteEnvelopes: [materialized.getAsNormalizedFullLink()],
+      },
+    ) as Action & {
+      materializerWriteEnvelopes: ReturnType<
+        typeof materialized.getAsNormalizedFullLink
+      >[];
+    };
+    runtime.scheduler.subscribe(materializer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    });
+    await runtime.idle();
+    expect(materializerRuns).toBe(1);
+    expect(materialized.get()).toBe(101);
+
+    let handlerRuns = 0;
+    const handler: EventHandler = (handlerTx, event: number) => {
+      handlerRuns++;
+      result.withTx(handlerTx).send(
+        (materialized.withTx(handlerTx).get() ?? 0) + event,
+      );
+    };
+    runtime.scheduler.addEventHandler(
+      handler,
+      eventStream.getAsNormalizedFullLink(),
+      (depTx) => materialized.withTx(depTx).get(),
+    );
+
+    // Invalidate the materializer via its source; `materialized` is now stale.
+    const updateTx = runtime.edit();
+    source.withTx(updateTx).send(5);
+    await updateTx.commit();
+
+    runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 7);
+    await result.pull();
+
+    // The gate re-ran the materializer before dispatching, so the handler saw
+    // the fresh value (105), not the stale 101.
+    expect(materializerRuns).toBe(2);
+    expect(handlerRuns).toBe(1);
+    expect(result.get()).toBe(105 + 7);
+  });
+
+  it("bounds event preflight cost over a wide fan-in hub", async () => {
+    // The notebook regression shape (decision 15): N independent writers feed
+    // one aggregating hub that the handler reads. Invalidating ONE writer must
+    // cost O(1) preflight work — its downstream cone is just the hub — not an
+    // O(N) walk over the whole fan-in. The old upstream walk visited ~N; the
+    // inverted walk seeds from the (size-1) invalid set.
+    runtime.scheduler.setEventPreflightTelemetryEnabled(true);
+    const preflights: EventPreflightMarker[] = [];
+    const listener = (event: Event) => {
+      const marker = (event as CustomEvent<{ marker: RuntimeTelemetryMarker }>)
+        .detail.marker;
+      if (marker.type === "scheduler.event.preflight") {
+        preflights.push(marker);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+
+    try {
+      const N = 200;
+      const sources: Cell<number>[] = [];
+      const cells: Cell<number>[] = [];
+      for (let i = 0; i < N; i++) {
+        const s = runtime.getCell<number>(
+          space,
+          `fanin-source-${i}`,
+          undefined,
+          tx,
+        );
+        s.set(0);
+        sources.push(s);
+        const c = runtime.getCell<number>(
+          space,
+          `fanin-cell-${i}`,
+          undefined,
+          tx,
+        );
+        c.set(0);
+        cells.push(c);
+      }
+      const hub = runtime.getCell<number>(space, "fanin-hub", undefined, tx);
+      hub.set(0);
+      const eventStream = runtime.getCell<number>(
+        space,
+        "fanin-event",
+        undefined,
+        tx,
+      );
+      eventStream.set(0);
+      const result = runtime.getCell<number>(
+        space,
+        "fanin-result",
+        undefined,
+        tx,
+      );
+      result.set(0);
+      await tx.commit();
+      tx = runtime.edit();
+
+      for (let i = 0; i < N; i++) {
+        const idx = i;
+        const writer: Action = (actionTx) => {
+          cells[idx].withTx(actionTx).send(
+            (sources[idx].withTx(actionTx).get() ?? 0) + 1,
+          );
+        };
+        runtime.scheduler.subscribe(
+          writer,
+          {
+            reads: [
+              toMemorySpaceAddress(sources[idx].getAsNormalizedFullLink()),
+            ],
+            shallowReads: [],
+            writes: [
+              toMemorySpaceAddress(cells[idx].getAsNormalizedFullLink()),
+            ],
+          },
+          {},
+        );
+      }
+      const hubWriter: Action = (actionTx) => {
+        let sum = 0;
+        for (const c of cells) sum += c.withTx(actionTx).get() ?? 0;
+        hub.withTx(actionTx).send(sum);
+      };
+      runtime.scheduler.subscribe(
+        hubWriter,
+        {
+          reads: cells.map((c) =>
+            toMemorySpaceAddress(c.getAsNormalizedFullLink())
+          ),
+          shallowReads: [],
+          writes: [toMemorySpaceAddress(hub.getAsNormalizedFullLink())],
+        },
+        {},
+      );
+      await hub.pull();
+
+      const handler: EventHandler = (handlerTx, event: number) => {
+        result.withTx(handlerTx).send(
+          (hub.withTx(handlerTx).get() ?? 0) + event,
+        );
+      };
+      runtime.scheduler.addEventHandler(
+        handler,
+        eventStream.getAsNormalizedFullLink(),
+        (depTx) => hub.withTx(depTx).get(),
+      );
+
+      // Invalidate exactly one of the 200 upstream writers.
+      const updateTx = runtime.edit();
+      sources[0].withTx(updateTx).send(1);
+      await updateTx.commit();
+
+      runtime.scheduler.queueEvent(eventStream.getAsNormalizedFullLink(), 9);
+      await result.pull();
+
+      // Correctness: the handler waited for the invalidated writer + hub to
+      // re-settle before dispatching. All 200 cells start at 1 (source 0 + 1),
+      // so hub starts at 200; bumping source[0] to 1 makes cell[0] = 2, hub =
+      // 201. A stale dispatch would read 200 → 209; the fresh value is 210.
+      expect(result.get()).toBe(201 + 9);
+      // The fix: no preflight walked the 200-wide fan-in. The forward walk
+      // would have visited ~200 per dispatch; the inverted walk visits O(1).
+      expect(preflights.length).toBeGreaterThanOrEqual(1);
+      const maxVisit = Math.max(...preflights.map((p) => p.stats.visitCount));
+      expect(maxVisit).toBeLessThan(20);
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
+  });
+
+  it("should update invalid status when dynamic dependencies change", async () => {
     const selector = runtime.getCell<number>(
       space,
-      "stale-dynamic-selector",
+      "invalid-dynamic-selector",
       undefined,
       tx,
     );
     selector.set(0);
     const sourceA = runtime.getCell<number>(
       space,
-      "stale-dynamic-source-a",
+      "invalid-dynamic-source-a",
       undefined,
       tx,
     );
     sourceA.set(1);
     const sourceB = runtime.getCell<number>(
       space,
-      "stale-dynamic-source-b",
+      "invalid-dynamic-source-b",
       undefined,
       tx,
     );
     sourceB.set(10);
     const output = runtime.getCell<number>(
       space,
-      "stale-dynamic-output",
+      "invalid-dynamic-output",
       undefined,
       tx,
     );
     output.set(0);
     const sink = runtime.getCell<number>(
       space,
-      "stale-dynamic-sink",
+      "invalid-dynamic-sink",
       undefined,
       tx,
     );
@@ -2011,152 +2126,12 @@ describe("pull-based scheduling", () => {
 
     const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
     expect(runtime.scheduler.isDirty(action)).toBe(false);
-    expect(schedulerInternal.isStale(action)).toBe(false);
-    expect(schedulerInternal.getUpstreamStaleCount(action)).toBe(0);
+    expect(schedulerInternal.isInvalid(action)).toBe(false);
 
     const updateNewSourceTx = runtime.edit();
     sourceB.withTx(updateNewSourceTx).send(11);
     await updateNewSourceTx.commit();
     expect(runtime.scheduler.isDirty(action)).toBe(true);
-    expect(schedulerInternal.isStale(action)).toBe(true);
-  });
-
-  it("should clear stale counts when stale dependencies unsubscribe", async () => {
-    const source = runtime.getCell<number>(
-      space,
-      "stale-unsubscribe-source",
-      undefined,
-      tx,
-    );
-    source.set(1);
-    const mid = runtime.getCell<number>(
-      space,
-      "stale-unsubscribe-mid",
-      undefined,
-      tx,
-    );
-    mid.set(0);
-    const output = runtime.getCell<number>(
-      space,
-      "stale-unsubscribe-output",
-      undefined,
-      tx,
-    );
-    output.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    const upstreamAction: Action = (actionTx) => {
-      mid.withTx(actionTx).send((source.withTx(actionTx).get() ?? 0) + 1);
-    };
-    const downstreamAction: Action = (actionTx) => {
-      output.withTx(actionTx).send((mid.withTx(actionTx).get() ?? 0) + 1);
-    };
-
-    runtime.scheduler.subscribe(
-      upstreamAction,
-      {
-        reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
-        shallowReads: [],
-        writes: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
-      },
-      {},
-    );
-    runtime.scheduler.subscribe(
-      downstreamAction,
-      {
-        reads: [toMemorySpaceAddress(mid.getAsNormalizedFullLink())],
-        shallowReads: [],
-        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
-      },
-      {},
-    );
-    await output.pull();
-
-    const updateTx = runtime.edit();
-    source.withTx(updateTx).send(2);
-    await updateTx.commit();
-
-    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
-    expect(schedulerInternal.isStale(downstreamAction)).toBe(true);
-
-    runtime.scheduler.unsubscribe(upstreamAction);
-    expect(schedulerInternal.isStale(downstreamAction)).toBe(false);
-    expect(schedulerInternal.getUpstreamStaleCount(downstreamAction)).toBe(0);
-  });
-
-  it("should handle stale cycles conservatively without negative counts", async () => {
-    const source = runtime.getCell<number>(
-      space,
-      "stale-cycle-source",
-      undefined,
-      tx,
-    );
-    source.set(1);
-    const left = runtime.getCell<number>(
-      space,
-      "stale-cycle-left",
-      undefined,
-      tx,
-    );
-    left.set(0);
-    const right = runtime.getCell<number>(
-      space,
-      "stale-cycle-right",
-      undefined,
-      tx,
-    );
-    right.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    const actionA: Action = () => {};
-    const actionB: Action = () => {};
-
-    runtime.scheduler.subscribe(
-      actionA,
-      {
-        reads: [
-          toMemorySpaceAddress(source.getAsNormalizedFullLink()),
-          toMemorySpaceAddress(right.getAsNormalizedFullLink()),
-        ],
-        shallowReads: [],
-        writes: [toMemorySpaceAddress(left.getAsNormalizedFullLink())],
-      },
-      {},
-    );
-    runtime.scheduler.subscribe(
-      actionB,
-      {
-        reads: [toMemorySpaceAddress(left.getAsNormalizedFullLink())],
-        shallowReads: [],
-        writes: [toMemorySpaceAddress(right.getAsNormalizedFullLink())],
-      },
-      {},
-    );
-
-    const schedulerInternal = getStaleSchedulerInternals(runtime.scheduler);
-    const workSet = new Set<Action>();
-    expect(
-      schedulerInternal.collectDirtyDependencies(
-        actionA,
-        workSet,
-        new Map(),
-      ),
-    ).toBe(true);
-    expect(workSet.has(actionA)).toBe(true);
-    expect(workSet.has(actionB)).toBe(true);
-
-    schedulerInternal.clearDirectDirty(actionA);
-    schedulerInternal.clearDirectDirty(actionB);
-
-    expect(schedulerInternal.getUpstreamStaleCount(actionA))
-      .toBeGreaterThanOrEqual(
-        0,
-      );
-    expect(schedulerInternal.getUpstreamStaleCount(actionB))
-      .toBeGreaterThanOrEqual(
-        0,
-      );
+    expect(schedulerInternal.isInvalid(action)).toBe(true);
   });
 });
