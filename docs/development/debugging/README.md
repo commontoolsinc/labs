@@ -95,6 +95,21 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
   stderr — `packages/toolshed/local-dev-toolshed.log` under the local-dev scripts.
   See
   [`memwrite-trace.ts`](../../../packages/toolshed/routes/storage/memory/memwrite-trace.ts).
+- **Memory websocket wire accounting**: run
+  `deno task integration patterns lunch-poll-vote` to reproduce the Lunch Poll
+  schema-sync diagnostic. The root integration runner generates a secret bearer
+  token and passes it to both Toolshed and the test process; Toolshed's
+  `/api/storage/memory/wire-accounting/{start,stop}` endpoint is unavailable
+  without that token and is allowed only when `ENV` is `development` or `test`.
+  The test prints browser-only aggregate totals and per-direction,
+  per-classification rows. The measured unit is UTF-8 bytes of Memory websocket
+  text payloads produced by `encodeMemoryBoundary`; it excludes the HTTP
+  upgrade, websocket framing and masking, ping/pong/close frames,
+  permessage-deflate physical bytes, TLS, and TCP. Interpret the baseline as a
+  same-run counterfactual, not a second noisy run: outbound baseline bytes
+  encode the original uncompressed `ServerMessage`, outbound actual bytes encode
+  the negotiated `syncSchemaTableV2` message, and inbound baseline bytes equal
+  inbound actual bytes.
 - [VDOM Debug Helpers](vdom-debug.md) - `commonfabric.vdom.*` VDOM tree inspection
 - [Logger Internals](../logger-internals.md) - Creating loggers in runtime code (`getLogger`, timing, flags)
 

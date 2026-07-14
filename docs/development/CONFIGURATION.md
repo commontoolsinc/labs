@@ -170,6 +170,7 @@ The toolshed-embedded memory service has two modes:
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
+| `CF_MEMORY_WIRE_ACCOUNTING_TOKEN` | _(unset)_ | Enables the bearer-token-protected Memory websocket payload-accounting diagnostic only when `ENV` is `development` or `test`; all other environments fail closed. The root integration runner generates this token automatically for `deno task integration patterns lunch-poll-vote`. |
 
 With ACL policy active, a fresh space is read-only until its space identity or a
 configured service DID writes a valid ACL with a concrete OWNER. A populated
