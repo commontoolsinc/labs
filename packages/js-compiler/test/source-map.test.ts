@@ -826,12 +826,13 @@ export const tag = "util";
 describe("deferred composition inputs and lazy registration (CT-1819)", () => {
   const raw = (mappings: string, sources: string[] = ["a.ts"]): SourceMap =>
     ({
-      version: 3,
+      version: "3",
       file: "m.js",
+      sourceRoot: "",
       sources,
       names: [],
       mappings,
-    }) as unknown as SourceMap;
+    }) as SourceMap;
 
   it("bodyLineCount is byte-equivalent to body for composition", () => {
     const bodies = ["a\nbb\nccc", "one", "x\n", ""];

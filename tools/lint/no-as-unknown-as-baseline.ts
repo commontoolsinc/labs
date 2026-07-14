@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/js-compiler/test/source-map.test.ts": [
-    "834:7:oyjlu9",
-  ],
   "packages/lib-shell/test/runtime.test.ts": [
     "596:40:14bim9b",
   ],
