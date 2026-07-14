@@ -304,7 +304,9 @@ export const GenerateTextResultSchema = internSchema(
         ],
       },
       error: { type: "string" },
-      partial: { type: "string" },
+      // The partial channel is pending until the first streamed chunk and
+      // carries the terminal unavailable marker when generation fails.
+      partial: { anyOf: [{ type: "string" }, { type: "object" }] },
       requestHash: { type: "string" },
       groundingSources: {
         type: "array",
@@ -338,7 +340,9 @@ export const GenerateObjectResultSchema = internSchema(
       result: { type: "object" },
       messages: { type: "array", items: LLMMessageSchema },
       error: { type: "string" },
-      partial: { type: "string" },
+      // Direct object generation may never emit partial text; in that case the
+      // channel remains pending while the final result becomes usable.
+      partial: { anyOf: [{ type: "string" }, { type: "object" }] },
       requestHash: { type: "string" },
       // No `groundingSources` here — generateObject's JSON-mode path returns
       // only the object, not the grounded response. Use generateText for sources.

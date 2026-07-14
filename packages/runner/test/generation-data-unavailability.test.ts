@@ -609,6 +609,9 @@ describe("generation data unavailability", () => {
       const result = rawResult(rehydrated.state, tx) as DataUnavailable;
       expect(result.reason).toBe("error");
       expect(result.error?.message).toBe("persisted legacy text failure");
+      const partial = rawPartial(rehydrated.state, tx) as DataUnavailable;
+      expect(partial.reason).toBe("error");
+      expect(partial.error?.message).toBe("persisted legacy text failure");
       expect(rehydrated.state.key("pending").withTx(tx).get()).toBe(false);
       tx.prepareCfc();
       const commit = await tx.commit();
@@ -861,6 +864,9 @@ describe("generation data unavailability", () => {
       const result = rawResult(rehydrated.state, tx) as DataUnavailable;
       expect(result.reason).toBe("error");
       expect(result.error?.message).toBe("persisted legacy object failure");
+      const partial = rawPartial(rehydrated.state, tx) as DataUnavailable;
+      expect(partial.reason).toBe("error");
+      expect(partial.error?.message).toBe("persisted legacy object failure");
       expect(rehydrated.state.key("pending").withTx(tx).get()).toBe(false);
       tx.prepareCfc();
       const commit = await tx.commit();

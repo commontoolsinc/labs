@@ -96,6 +96,7 @@ function reconcileLegacyGenerationError(
   requestHash: string,
   currentRequestHash: string | undefined,
   result: Cell<unknown>,
+  partial: Cell<unknown>,
   pending: Cell<boolean>,
   legacyError: unknown,
 ): boolean {
@@ -106,7 +107,9 @@ function reconcileLegacyGenerationError(
     return false;
   }
 
-  result.withTx(tx).setRawUntyped(errorUnavailable(legacyError));
+  const unavailable = errorUnavailable(legacyError);
+  result.withTx(tx).setRawUntyped(unavailable);
+  partial.withTx(tx).setRawUntyped(unavailable);
   pending.withTx(tx).set(false);
   return true;
 }
@@ -566,11 +569,13 @@ async function handleLLMError<T, P>(
     pendingCell.withTx(tx).set(false);
     errorCell.withTx(tx).set(message);
     if (resultForError) {
-      resultCell.withTx(tx).setRawUntyped(resultForError(error) as any);
+      const unavailable = resultForError(error);
+      resultCell.withTx(tx).setRawUntyped(unavailable as any);
+      partialCell.withTx(tx).setRawUntyped(unavailable as any);
     } else {
       resultCell.withTx(tx).set(undefined as T);
+      partialCell.withTx(tx).set(undefined as P);
     }
-    partialCell.withTx(tx).set(undefined as P);
     requestHashCell.withTx(tx).set(requestHash);
   });
 
@@ -1090,7 +1095,7 @@ export function generateText(
       resultCell.key("error").withTx(tx).set(
         markerErrorMessage(unavailableInput),
       );
-      resultCell.key("partial").withTx(tx).set(undefined);
+      resultCell.key("partial").withTx(tx).setRawUntyped(unavailableInput);
       resultCell.key("requestHash").withTx(tx).set(undefined);
       resultCell.key("groundingSources").withTx(tx).set(undefined);
       return;
@@ -1145,9 +1150,10 @@ export function generateText(
     // If neither prompt nor messages is provided, don't make a request
     const hasPrompt = Array.isArray(prompt) ? prompt.length > 0 : !!prompt;
     if (!hasPrompt && !messages) {
-      resultWithLog.setRawUntyped(DataUnavailable.schemaMismatch());
+      const unavailable = DataUnavailable.schemaMismatch();
+      resultWithLog.setRawUntyped(unavailable);
       errorWithLog.set(undefined);
-      partialWithLog.set(undefined);
+      partialWithLog.setRawUntyped(unavailable);
       requestHashWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
@@ -1198,6 +1204,7 @@ export function generateText(
         hash,
         currentRequestHash,
         resultCell.key("result"),
+        resultCell.key("partial"),
         resultCell.key("pending"),
         currentError,
       )
@@ -1238,7 +1245,7 @@ export function generateText(
 
     resultWithLog.setRawUntyped(DataUnavailable.pending());
     errorWithLog.set(undefined);
-    partialWithLog.set(undefined);
+    partialWithLog.setRawUntyped(DataUnavailable.pending());
     pendingWithLog.set(true);
 
     // When queued, disable run cancellation — the queue manages lifecycle.
@@ -1431,7 +1438,7 @@ export function generateObject<T extends Record<string, unknown>>(
       resultCell.key("error").withTx(tx).set(
         markerErrorMessage(unavailableInput),
       );
-      resultCell.key("partial").withTx(tx).set(undefined);
+      resultCell.key("partial").withTx(tx).setRawUntyped(unavailableInput);
       resultCell.key("requestHash").withTx(tx).set(undefined);
       return;
     }
@@ -1499,10 +1506,11 @@ export function generateObject<T extends Record<string, unknown>>(
       (!hasPrompt && (!messages || messages.length === 0)) ||
       schema === undefined
     ) {
-      resultWithLog.setRawUntyped(DataUnavailable.schemaMismatch());
+      const unavailable = DataUnavailable.schemaMismatch();
+      resultWithLog.setRawUntyped(unavailable);
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
-      partialWithLog.set(undefined);
+      partialWithLog.setRawUntyped(unavailable);
       requestHashWithLog.set(undefined);
       pendingWithLog.set(false);
       return;
@@ -1652,6 +1660,7 @@ export function generateObject<T extends Record<string, unknown>>(
           hash,
           currentRequestHash,
           resultCell.key("result"),
+          resultCell.key("partial"),
           resultCell.key("pending"),
           currentError,
         )
@@ -1702,7 +1711,7 @@ export function generateObject<T extends Record<string, unknown>>(
       resultWithLog.setRawUntyped(DataUnavailable.pending());
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
-      partialWithLog.set(undefined);
+      partialWithLog.setRawUntyped(DataUnavailable.pending());
       // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
       // `.get()`-path today, but will in the not-too-distant future; at that
       // point this JSON round-trip silently loses any `FabricPrimitive`/
@@ -2027,6 +2036,7 @@ export function generateObject<T extends Record<string, unknown>>(
           hash,
           currentRequestHash,
           resultCell.key("result"),
+          resultCell.key("partial"),
           resultCell.key("pending"),
           currentError,
         )
@@ -2079,7 +2089,7 @@ export function generateObject<T extends Record<string, unknown>>(
       resultWithLog.setRawUntyped(DataUnavailable.pending());
       messagesWithLog.set(undefined);
       errorWithLog.set(undefined);
-      partialWithLog.set(undefined);
+      partialWithLog.setRawUntyped(DataUnavailable.pending());
       // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
       // `.get()`-path today, but will in the not-too-distant future; at that
       // point this JSON round-trip silently loses any `FabricPrimitive`/
