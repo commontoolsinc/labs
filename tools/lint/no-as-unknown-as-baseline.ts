@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/integration/multi-runtime-worker.ts": [
-    "171:4:1c7c61y",
-    "174:13:1i0su4d",
-  ],
   "packages/piece/test/pattern-source-provenance.test.ts": [
     "59:6:1ud0esm",
   ],

@@ -107,72 +107,68 @@ function sanitizeForTransfer(value: unknown): unknown {
 function installWsDelay(delayMs: number): void {
   if (delayMs <= 0) return;
   const Native = globalThis.WebSocket;
-  const Delayed = function (
-    this: WebSocket,
-    url: string | URL,
-    protocols?: string | string[],
-  ): WebSocket {
-    const ws = protocols !== undefined
-      ? new Native(url, protocols)
-      : new Native(url);
-    const listeners = new Set<EventListenerOrEventListenerObject>();
-    const nativeAdd = ws.addEventListener.bind(ws);
-    const nativeRemove = ws.removeEventListener.bind(ws);
-    ws.addEventListener = (
-      type: string,
-      listener: EventListenerOrEventListenerObject | null,
-      options?: boolean | AddEventListenerOptions,
-    ) => {
-      if (type === "message" && listener) listeners.add(listener);
-      else if (listener) nativeAdd(type, listener, options);
-    };
-    // Mirror removal for the diverted message listeners, preserving
-    // WebSocket semantics for callers that unsubscribe/re-subscribe.
-    ws.removeEventListener = (
-      type: string,
-      listener: EventListenerOrEventListenerObject | null,
-      options?: boolean | EventListenerOptions,
-    ) => {
-      if (type === "message" && listener) listeners.delete(listener);
-      else if (listener) nativeRemove(type, listener, options);
-    };
-    let onmessage: ((this: WebSocket, ev: MessageEvent) => unknown) | null =
-      null;
-    Object.defineProperty(ws, "onmessage", {
-      configurable: true,
-      get: () => onmessage,
-      set: (fn) => {
-        onmessage = fn;
-      },
-    });
-    nativeAdd("message", (ev: Event) => {
-      const deliver = () => {
-        onmessage?.call(ws, ev as MessageEvent);
-        for (const listener of listeners) {
-          const fn = typeof listener === "function"
-            ? listener
-            : listener.handleEvent.bind(listener);
-          fn.call(ws, ev);
-        }
+  const Delayed = new Proxy(Native, {
+    construct(target, args): WebSocket {
+      const url = args[0] as string | URL;
+      const protocols = args[1] as string | string[] | undefined;
+      const ws = protocols !== undefined
+        ? new target(url, protocols)
+        : new target(url);
+      const listeners = new Set<EventListenerOrEventListenerObject>();
+      const nativeAdd = ws.addEventListener.bind(ws);
+      const nativeRemove = ws.removeEventListener.bind(ws);
+      ws.addEventListener = (
+        type: string,
+        listener: EventListenerOrEventListenerObject | null,
+        options?: boolean | AddEventListenerOptions,
+      ) => {
+        if (type === "message" && listener) listeners.add(listener);
+        else if (listener) nativeAdd(type, listener, options);
       };
-      setTimeout(deliver, delayMs);
-    });
-    const nativeSend = ws.send.bind(ws);
-    ws.send = (data: Parameters<WebSocket["send"]>[0]) => {
-      setTimeout(() => {
-        try {
-          nativeSend(data);
-        } catch {
-          // Socket closed while the frame was in flight; same as a network drop.
-        }
-      }, delayMs);
-    };
-    return ws;
-  } as unknown as typeof WebSocket;
-  Delayed.prototype = Native.prototype;
-  for (const k of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"] as const) {
-    (Delayed as unknown as Record<string, unknown>)[k] = Native[k];
-  }
+      // Mirror removal for the diverted message listeners, preserving
+      // WebSocket semantics for callers that unsubscribe/re-subscribe.
+      ws.removeEventListener = (
+        type: string,
+        listener: EventListenerOrEventListenerObject | null,
+        options?: boolean | EventListenerOptions,
+      ) => {
+        if (type === "message" && listener) listeners.delete(listener);
+        else if (listener) nativeRemove(type, listener, options);
+      };
+      let onmessage: ((this: WebSocket, ev: MessageEvent) => unknown) | null =
+        null;
+      Object.defineProperty(ws, "onmessage", {
+        configurable: true,
+        get: () => onmessage,
+        set: (fn) => {
+          onmessage = fn;
+        },
+      });
+      nativeAdd("message", (ev: Event) => {
+        const deliver = () => {
+          onmessage?.call(ws, ev as MessageEvent);
+          for (const listener of listeners) {
+            const fn = typeof listener === "function"
+              ? listener
+              : listener.handleEvent.bind(listener);
+            fn.call(ws, ev);
+          }
+        };
+        setTimeout(deliver, delayMs);
+      });
+      const nativeSend = ws.send.bind(ws);
+      ws.send = (data: Parameters<WebSocket["send"]>[0]) => {
+        setTimeout(() => {
+          try {
+            nativeSend(data);
+          } catch {
+            // Socket closed while the frame was in flight; same as a network drop.
+          }
+        }, delayMs);
+      };
+      return ws;
+    },
+  });
   globalThis.WebSocket = Delayed;
 }
 
