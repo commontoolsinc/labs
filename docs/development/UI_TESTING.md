@@ -314,6 +314,10 @@ browser integration stack. It does not define `demo.click()` or `demo.type()`:
 the same `fillCfInput`, `clickCfButton`, trusted-action, and Astral element
 operations used by the test remain responsible for the interaction.
 
+The command accepts one or more test-file filters. Multiple files are recorded
+sequentially into isolated artifact subdirectories, with a top-level
+`index.html` gallery linking every completed, test-named MP4.
+
 In presentation mode, those paths may add human-readable typing delay, cursor
 travel, a click pulse, participant labels, and captions. With presentation mode
 off they retain their normal fast behavior. Direct interaction forms used by a

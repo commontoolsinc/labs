@@ -6,6 +6,7 @@ import {
   parseDemoArgs,
   resolveDemoTest,
   runDemo,
+  writeGallery,
 } from "./demo.ts";
 
 Deno.test("parseDemoArgs accepts deterministic demo options", () => {
@@ -20,7 +21,7 @@ Deno.test("parseDemoArgs accepts deterministic demo options", () => {
     ]),
     {
       packageName: "patterns",
-      filter: "lunch-poll-vote",
+      filters: ["lunch-poll-vote"],
       keepFrames: true,
       outputPath: "tmp/lunch.mp4",
       viewport: "960x720",
@@ -35,6 +36,17 @@ Deno.test("parseDemoArgs rejects non-browser packages", () => {
     Error,
     "unsupported browser-test package",
   );
+});
+
+Deno.test("parseDemoArgs accepts multiple test filters", () => {
+  assertEquals(parseDemoArgs(["patterns", "one-demo", "two-demo"]), {
+    packageName: "patterns",
+    filters: ["one-demo", "two-demo"],
+    keepFrames: false,
+    outputPath: undefined,
+    viewport: undefined,
+    portOffset: undefined,
+  });
 });
 
 Deno.test("parseDemoArgs rejects invalid and incomplete options", () => {
@@ -81,6 +93,7 @@ Deno.test("demo main handles help, errors, and an injected successful run", asyn
   assertEquals(
     await main(["shell", "worker-runtime"], (options) => {
       assertEquals(options.packageName, "shell");
+      assertEquals(options.filters, ["worker-runtime"]);
       return Promise.resolve(0);
     }),
     0,
@@ -114,14 +127,17 @@ Deno.test("resolveDemoTest requires exactly one file", async () => {
     await Deno.writeTextFile(`${dir}/one-demo.test.ts`, "");
     await Deno.writeTextFile(`${dir}/two-demo.test.ts`, "");
     const base = parseDemoArgs(["patterns", "one-demo"]);
-    assertEquals(await resolveDemoTest(root, base), "one-demo.test.ts");
+    assertEquals(
+      await resolveDemoTest(root, base.packageName, base.filters[0]),
+      "one-demo.test.ts",
+    );
     await assertRejects(
-      () => resolveDemoTest(root, { ...base, filter: "demo" }),
+      () => resolveDemoTest(root, base.packageName, "demo"),
       Error,
       "ambiguous",
     );
     await assertRejects(
-      () => resolveDemoTest(root, { ...base, filter: "missing" }),
+      () => resolveDemoTest(root, base.packageName, "missing"),
       Error,
       "no patterns integration test",
     );
@@ -160,7 +176,7 @@ Deno.test("runDemo names and copies a successful video", async () => {
     const result = await runDemo(
       {
         packageName: "patterns",
-        filter: "one-demo",
+        filters: ["one-demo"],
         keepFrames: true,
         outputPath: "copied/one-demo.mp4",
         viewport: "960x720",
@@ -184,7 +200,7 @@ Deno.test("runDemo preserves a failing integration status and manifest", async (
     const result = await runDemo(
       {
         packageName: "patterns",
-        filter: "one-demo",
+        filters: ["one-demo"],
         keepFrames: false,
       },
       root,
@@ -217,7 +233,7 @@ Deno.test("runDemo rejects a successful test without a video", async () => {
         runDemo(
           {
             packageName: "patterns",
-            filter: "one-demo",
+            filters: ["one-demo"],
             keepFrames: false,
           },
           root,
@@ -234,7 +250,7 @@ Deno.test("runDemo retains a named video in its artifact directory", async () =>
     const result = await runDemo(
       {
         packageName: "patterns",
-        filter: "one-demo",
+        filters: ["one-demo"],
         keepFrames: false,
       },
       root,
@@ -262,7 +278,7 @@ Deno.test("runDemo preserves a setup failure without a manifest", async () => {
       await runDemo(
         {
           packageName: "patterns",
-          filter: "one-demo",
+          filters: ["one-demo"],
           keepFrames: false,
         },
         root,
@@ -273,6 +289,96 @@ Deno.test("runDemo preserves a setup failure without a manifest", async () => {
       4,
     );
   });
+});
+
+Deno.test("runDemo records multiple tests and writes portable galleries", async () => {
+  await withDemoFixture(async (root) => {
+    const calls: string[] = [];
+    const result = await runDemo(
+      {
+        packageName: "patterns",
+        filters: ["one-demo", "two-demo"],
+        keepFrames: false,
+        outputPath: "copied-gallery",
+      },
+      root,
+      demoDependencies({
+        runIntegration: async (args, _cwd, env) => {
+          const name = env.CF_DEMO_NAME;
+          calls.push(name);
+          assertEquals(args.at(-1), name);
+          await Deno.writeTextFile(
+            `${env.CF_DEMO_OUTPUT_DIR}/${name}.mp4`,
+            `${name} video`,
+          );
+          return { success: true, code: 0 };
+        },
+      }),
+    );
+
+    assertEquals(result, 0);
+    assertEquals(calls, ["one-demo", "two-demo"]);
+    const gallery = await Deno.readTextFile(
+      `${demoGalleryDir(root)}/index.html`,
+    );
+    assertEquals(gallery.includes('src="one-demo/one-demo.mp4"'), true);
+    assertEquals(gallery.includes('src="two-demo/two-demo.mp4"'), true);
+    assertEquals(
+      await Deno.readTextFile(`${root}/copied-gallery/one-demo.mp4`),
+      "one-demo video",
+    );
+    const copiedGallery = await Deno.readTextFile(
+      `${root}/copied-gallery/index.html`,
+    );
+    assertEquals(copiedGallery.includes('src="one-demo.mp4"'), true);
+    assertEquals(copiedGallery.includes('src="two-demo.mp4"'), true);
+  }, true);
+});
+
+Deno.test("runDemo rejects duplicate tests and an MP4 batch output", async () => {
+  await withDemoFixture(async (root) => {
+    await assertRejects(
+      () =>
+        runDemo(
+          {
+            packageName: "patterns",
+            filters: ["one-demo", "one-demo.test"],
+            keepFrames: false,
+          },
+          root,
+          demoDependencies(),
+        ),
+      Error,
+      "distinct test files",
+    );
+    await assertRejects(
+      () =>
+        runDemo(
+          {
+            packageName: "patterns",
+            filters: ["one-demo", "two-demo"],
+            keepFrames: false,
+            outputPath: "all.mp4",
+          },
+          root,
+          demoDependencies(),
+        ),
+      Error,
+      "must be a directory",
+    );
+  }, true);
+});
+
+Deno.test("writeGallery escapes viewer-facing labels and paths", async () => {
+  const root = await Deno.makeTempDir();
+  try {
+    await writeGallery(root, [{ title: "one < two", src: 'demo&".mp4' }]);
+    const gallery = await Deno.readTextFile(`${root}/index.html`);
+    assertEquals(gallery.includes("one &lt; two"), true);
+    assertEquals(gallery.includes('src="demo&amp;&quot;.mp4"'), true);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
 });
 
 const FIXED_NOW = new Date("2026-07-14T00:00:00.000Z");
@@ -292,14 +398,22 @@ function demoRunDir(root: string): string {
   return `${root}/tmp/demos/patterns-one-demo-2026-07-14T00-00-00-000Z`;
 }
 
+function demoGalleryDir(root: string): string {
+  return `${root}/tmp/demos/patterns-gallery-2026-07-14T00-00-00-000Z`;
+}
+
 async function withDemoFixture(
   fn: (root: string) => Promise<void>,
+  includeSecond = false,
 ): Promise<void> {
   const root = await Deno.makeTempDir();
   try {
     const dir = `${root}/packages/patterns/integration`;
     await Deno.mkdir(dir, { recursive: true });
     await Deno.writeTextFile(`${dir}/one-demo.test.ts`, "");
+    if (includeSecond) {
+      await Deno.writeTextFile(`${dir}/two-demo.test.ts`, "");
+    }
     await fn(root);
   } finally {
     await Deno.remove(root, { recursive: true });

@@ -29,9 +29,10 @@ the final stage is complete, archive it under `docs/history/plans/` following
 
 The local, opt-in implementation is shipped in this changeset:
 
-- `deno task demo` selects exactly one pattern or shell integration-test file,
-  preflights FFmpeg, reuses the existing integration runner, and writes a video
-  plus a machine-readable manifest under `tmp/demos/`.
+- `deno task demo` selects one or more pattern or shell integration-test files,
+  preflights FFmpeg, reuses the existing integration runner, and writes named
+  videos, machine-readable manifests, and a portable HTML gallery under
+  `tmp/demos/`.
 - Presentation mode modifies the existing Astral click/type paths and CFC input
   helper. It adds slow real typing, a visible cursor, click pulses, captions,
   participant badges, CDP screencast capture, and bounded asynchronous frame
@@ -199,14 +200,15 @@ The intended command shape is:
 
 ```sh
 deno task demo patterns cfc-render-policy-demo
+deno task demo patterns cfc-render-policy-demo lunch-poll-vote
 deno task demo patterns lunch-poll-vote --output=tmp/demos/lunch-poll.mp4
 ```
 
 The command contract is:
 
-- [ ] Require a browser-test package and a file-name filter.
-- [ ] Resolve exactly one test file. Fail on zero or multiple matches rather
-  than recording an accidental suite.
+- [ ] Require a browser-test package and one or more file-name filters.
+- [ ] Resolve exactly one test file per filter. Fail on zero or multiple
+  matches rather than recording an accidental suite.
 - [ ] Initially run every `it` block in that file because some suites build a
   continuous scenario across tests. Add an optional Deno test-name filter only
   after defining how setup and cross-test state are preserved.
@@ -222,8 +224,22 @@ Default successful output:
 
 ```text
 tmp/demos/<package>-<test-file>-<timestamp>/
+  index.html
   <test-file>.mp4
   manifest.json
+```
+
+Multiple-file successful output:
+
+```text
+tmp/demos/<package>-gallery-<timestamp>/
+  index.html
+  <test-file-a>/
+    <test-file-a>.mp4
+    manifest.json
+  <test-file-b>/
+    <test-file-b>.mp4
+    manifest.json
 ```
 
 Retained failure/debug output:
