@@ -161,10 +161,25 @@ export class PieceController<T = unknown> {
   }
 
   async setPattern(program: RuntimeProgram): Promise<void> {
-    const previousPattern = await this.getPattern();
+    const previousRef = getPatternIdentityRef(this.#cell);
+    if (!previousRef) throw new Error("piece missing pattern identity");
+    const previousPattern = await this.#manager.runtime.patternManager
+      .loadPatternByIdentity(
+        previousRef.identity,
+        previousRef.symbol,
+        this.#manager.getSpace(),
+      );
+    if (!previousPattern) {
+      throw new Error(
+        `could not load pattern ${previousRef.identity}#${previousRef.symbol}`,
+      );
+    }
     const pattern = await compileProgram(this.#manager, program);
     assertPatternSchemasBackwardCompatible(previousPattern, pattern);
-    await execute(this.#manager, this.id, pattern);
+    await execute(this.#manager, this.id, pattern, undefined, {
+      start: true,
+      expectedPatternIdentity: previousRef,
+    });
     this.#cell = this.#cell.asSchema(pattern.resultSchema);
   }
 
@@ -188,7 +203,10 @@ async function execute(
   pieceId: string,
   pattern: Pattern,
   input?: object,
-  options?: { start?: boolean },
+  options?: {
+    start?: boolean;
+    expectedPatternIdentity?: { identity: string; symbol: string };
+  },
 ): Promise<void> {
   await manager.runWithPattern(pattern, pieceId, input, options);
 }

@@ -3,7 +3,12 @@ import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Module, NAME, type Pattern } from "../src/builder/types.ts";
+import {
+  type JSONSchema,
+  type Module,
+  NAME,
+  type Pattern,
+} from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import {
@@ -1825,6 +1830,28 @@ describe("runner utils", () => {
           street: "Main St",
           city: "New York",
         },
+      });
+    });
+
+    it("resolves defaults behind local refs without recursing forever", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          options: { $ref: "#/$defs/Options" },
+        },
+        $defs: {
+          Options: {
+            type: "object",
+            properties: {
+              attempts: { type: "number", default: 1 },
+              next: { $ref: "#/$defs/Options" },
+            },
+          },
+        },
+      };
+
+      expect(extractDefaultValues(schema)).toEqual({
+        options: { attempts: 1 },
       });
     });
   });

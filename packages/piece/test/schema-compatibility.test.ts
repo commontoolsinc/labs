@@ -439,6 +439,47 @@ describe("piece schema compatibility", () => {
     ).toThrow(/enum\/const became more restrictive/);
   });
 
+  it("intersects sibling const and enum constraints", () => {
+    const argumentPrevious = pattern(
+      {
+        type: "object",
+        properties: { value: { const: 1 } },
+      },
+      oldPattern.resultSchema,
+    );
+    const argumentImpossible = pattern(
+      {
+        type: "object",
+        properties: { value: { const: 1, enum: [2] } },
+      },
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        argumentPrevious,
+        argumentImpossible,
+      )
+    ).toThrow(/argument\.value/);
+
+    const resultPrevious = pattern(
+      oldPattern.argumentSchema,
+      {
+        type: "object",
+        properties: { value: { const: 1, enum: [2] } },
+      },
+    );
+    const resultCandidate = pattern(
+      oldPattern.argumentSchema,
+      {
+        type: "object",
+        properties: { value: { const: 1 } },
+      },
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(resultPrevious, resultCandidate)
+    ).toThrow(/result\.value/);
+  });
+
   it("checks semantic extensions and unsupported complex constraints", () => {
     const semanticChange = pattern(
       {
@@ -590,6 +631,50 @@ describe("piece schema compatibility", () => {
         pattern(schema(false), oldPattern.resultSchema),
         pattern(schema({ type: "number" }), oldPattern.resultSchema),
       )
+    ).not.toThrow();
+  });
+
+  it("checks new result fields against prior additionalProperties", () => {
+    const resultSchema = (
+      additionalProperties: JSONSchema,
+      addedProperty?: JSONSchema,
+    ): JSONSchema => ({
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        ...(addedProperty === undefined ? {} : { label: addedProperty }),
+      },
+      additionalProperties,
+    });
+    const previousClosed = pattern(
+      oldPattern.argumentSchema,
+      resultSchema(false),
+    );
+    const candidateClosed = pattern(
+      oldPattern.argumentSchema,
+      resultSchema(false, { type: "string" }),
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previousClosed, candidateClosed)
+    ).toThrow(/result\.label: new result field is rejected/);
+
+    const previousTyped = pattern(
+      oldPattern.argumentSchema,
+      resultSchema({ type: "number" }),
+    );
+    const incompatibleTyped = pattern(
+      oldPattern.argumentSchema,
+      resultSchema({ type: "number" }, { type: "string" }),
+    );
+    const compatibleTyped = pattern(
+      oldPattern.argumentSchema,
+      resultSchema({ type: "number" }, { type: "number" }),
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previousTyped, incompatibleTyped)
+    ).toThrow(/result\.label/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previousTyped, compatibleTyped)
     ).not.toThrow();
   });
 

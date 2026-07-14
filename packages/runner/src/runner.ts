@@ -2039,6 +2039,9 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs?: any,
+    options?: {
+      expectedPatternIdentity?: { identity: string; symbol: string };
+    },
   ) {
     await resultCell.sync();
 
@@ -2069,6 +2072,18 @@ export class Runner {
       );
     } else {
       const { error } = await this.runtime.editWithRetry((tx) => {
+        const expected = options?.expectedPatternIdentity;
+        if (expected) {
+          const current = getPatternIdentityRef(resultCell.withTx(tx));
+          if (
+            current === undefined ||
+            patternIdentityKey(current) !== patternIdentityKey(expected)
+          ) {
+            throw new Error(
+              "piece pattern changed while the source update was compiling",
+            );
+          }
+        }
         setupRes = this.setupInternal(
           tx,
           pattern,
@@ -2077,6 +2092,16 @@ export class Runner {
         );
       });
       if (error) {
+        if (options?.expectedPatternIdentity) {
+          if (
+            error.name === "StorageTransactionAborted" &&
+            error.message.startsWith("editWithRetry action threw:") &&
+            error.reason instanceof Error
+          ) {
+            throw error.reason;
+          }
+          throw error;
+        }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;
       }

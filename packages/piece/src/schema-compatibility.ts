@@ -245,6 +245,23 @@ function objectSubsetIssue(
         return `${path}.${property}: newly required result field has no default`;
       }
     }
+
+    const previousAdditional = target.additionalProperties ?? true;
+    for (const property of Object.keys(candidateProperties)) {
+      if (property in previousProperties || previousAdditional === true) {
+        continue;
+      }
+      if (previousAdditional === false) {
+        return `${path}.${property}: new result field is rejected by the previous additionalProperties contract`;
+      }
+      const issue = schemaSubsetIssue(
+        sourceProperties[property],
+        previousAdditional,
+        `${path}.${property}`,
+        context,
+      );
+      if (issue) return issue;
+    }
   }
 
   for (const property of Object.keys(previousProperties)) {
@@ -321,7 +338,12 @@ function literalSubsetIssue(
 function allowedLiteralValues(
   schema: SchemaObject,
 ): readonly unknown[] | undefined {
-  if (Object.hasOwn(schema, "const")) return [schema.const];
+  if (Object.hasOwn(schema, "const")) {
+    return schema.enum === undefined ||
+        schema.enum.some((value) => deepEqual(value, schema.const))
+      ? [schema.const]
+      : [];
+  }
   return schema.enum;
 }
 
@@ -473,7 +495,7 @@ function schemaProvidesValidDefault(
   fullSchema: JSONSchema,
 ): boolean {
   if (schema === undefined) return false;
-  const value = extractDefaultValues(schema);
+  const value = extractDefaultValues(schema, fullSchema);
   return value !== undefined &&
     validateAgainstSchema(schema, value, fullSchema) === undefined;
 }

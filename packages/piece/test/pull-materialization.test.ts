@@ -149,11 +149,12 @@ function compiledSchemaEvolutionProgram(version: 1 | 2 | 3): RuntimeProgram {
     : version === 2
     ? [
       "import { Default, pattern } from 'commonfabric';",
+      "interface Options { attempts: number | Default<1>; }",
       "interface Input {",
       "  value: number;",
       "  label?: string;",
       "  retries: number | Default<0>;",
-      "  options: { attempts: number | Default<1> };",
+      "  options: Options;",
       "  mode?: string | number;",
       "}",
       "interface Output { doubled: number; summary?: string; }",
@@ -173,6 +174,26 @@ function compiledSchemaEvolutionProgram(version: 1 | 2 | 3): RuntimeProgram {
   return {
     main: "/main.tsx",
     files: [{ name: "/main.tsx", contents: contents.join("\n") }],
+  };
+}
+
+function compiledResultNarrowingProgram(
+  resultType: "string | number" | "string" | "number",
+): RuntimeProgram {
+  const value = resultType === "string" ? "String(input)" : "input";
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        "interface Input { input: number; }",
+        `interface Output { value: ${resultType}; }`,
+        "export default pattern<Input, Output>(({ input }) => ({",
+        `  value: ${value},`,
+        "}));",
+      ].join("\n"),
+    }],
   };
 }
 
@@ -389,6 +410,62 @@ describe("piece pull materialization", () => {
     expect(getPatternIdentityRef(controller.getCell())).toEqual(previousRef);
     expect(await controller.input.get()).toEqual({ value: 4 });
     expect(await controller.result.get()).toEqual({ doubled: 4 });
+  });
+
+  it("rejects a source update whose validated pattern identity became stale", async () => {
+    const initialProgram = compiledResultNarrowingProgram("string | number");
+    const stringProgram = compiledResultNarrowingProgram("string");
+    const numberProgram = compiledResultNarrowingProgram("number");
+    const initialPattern = await runtime.patternManager.compilePattern(
+      initialProgram,
+      { space: manager.getSpace() },
+    );
+    const stringPattern = await runtime.patternManager.compilePattern(
+      stringProgram,
+      { space: manager.getSpace() },
+    );
+    const numberPattern = await runtime.patternManager.compilePattern(
+      numberProgram,
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      initialPattern,
+      { input: 4 },
+      "concurrent-schema-update-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const compileEntered = defer<void>();
+    const releaseCompile = defer<void>();
+    const originalCompile = runtime.patternManager.compilePattern.bind(
+      runtime.patternManager,
+    );
+    runtime.patternManager.compilePattern = (async (program, options) => {
+      if (program === stringProgram) {
+        compileEntered.resolve();
+        await releaseCompile.promise;
+        return stringPattern;
+      }
+      if (program === numberProgram) return numberPattern;
+      return await originalCompile(program, options);
+    }) as typeof runtime.patternManager.compilePattern;
+
+    try {
+      const staleUpdate = expect(controller.setPattern(stringProgram)).rejects
+        .toThrow(/pattern changed while the source update was compiling/);
+      await compileEntered.promise;
+      await controller.setPattern(numberProgram);
+      releaseCompile.resolve();
+      await staleUpdate;
+
+      expect(getPatternIdentityRef(piece)).toEqual(
+        runtime.patternManager.getArtifactEntryRef(numberPattern),
+      );
+      expect(await controller.result.get()).toEqual({ value: 4 });
+    } finally {
+      releaseCompile.resolve();
+      runtime.patternManager.compilePattern = originalCompile;
+    }
   });
 
   it("waits for setup to settle before setupPersistent syncs pattern metadata", async () => {

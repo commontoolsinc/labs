@@ -766,7 +766,10 @@ export class PieceManager {
     pattern: Pattern | Module,
     pieceId: string,
     inputs?: object,
-    options?: { start?: boolean },
+    options?: {
+      start?: boolean;
+      expectedPatternIdentity?: { identity: string; symbol: string };
+    },
   ): Promise<Cell<unknown>> {
     const piece = this.runtime.getCellFromEntityId(
       this.space,
@@ -775,8 +778,13 @@ export class PieceManager {
     await piece.sync();
     const start = options?.start ?? true;
     if (start) {
-      await this.runtime.runSynced(piece, pattern, inputs);
+      await this.runtime.runSynced(piece, pattern, inputs, {
+        expectedPatternIdentity: options?.expectedPatternIdentity,
+      });
     } else {
+      if (options?.expectedPatternIdentity) {
+        throw new Error("atomic pattern updates require starting the piece");
+      }
       await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
     await this.syncPattern(piece);

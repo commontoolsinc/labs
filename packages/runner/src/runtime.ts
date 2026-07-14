@@ -1828,8 +1828,11 @@ export class Runtime {
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs?: any,
+    options?: {
+      expectedPatternIdentity?: { identity: string; symbol: string };
+    },
   ) {
-    return this.runner.runSynced(resultCell, pattern, inputs);
+    return this.runner.runSynced(resultCell, pattern, inputs, options);
   }
 
   start<T = any>(resultCell: Cell<T>): Promise<boolean> {

@@ -3,6 +3,7 @@ import {
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   isModule,
@@ -13,6 +14,7 @@ import {
 } from "./builder/types.ts";
 import { isCellLink } from "./link-utils.ts";
 import { type SigilLink, type URI } from "./sigil-types.ts";
+import { resolveCfcSchemaRefs } from "./cfc/schema-refs.ts";
 
 export function setRunnableName<T extends object & { src?: string }>(
   target: T,
@@ -156,39 +158,69 @@ export function validateAndCheckReactives(
  */
 export function extractDefaultValues(
   schema: JSONSchema,
+  fullSchema: JSONSchema = schema,
+): FabricValue {
+  return extractDefaultValuesInternal(schema, fullSchema, new WeakSet());
+}
+
+function extractDefaultValuesInternal(
+  schema: JSONSchema,
+  fullSchema: JSONSchema,
+  activeSchemas: WeakSet<object>,
 ): FabricValue {
   if (typeof schema !== "object" || schema === null) return undefined;
 
-  if (
-    schema.type === "object" && schema.properties && isRecord(schema.properties)
-  ) {
-    // Mutable top-level copy of the schema default, so injecting top-level
-    // property defaults below doesn't mutate the schema's own default object.
-    // Only top-level keys are written here, and the result is normalized
-    // downstream by `fabricFromNativeValue` (which rebuilds a fresh tree), so a
-    // shallow copy would suffice for correctness; we deep-freeze the bound
-    // children as inexpensive defense-in-depth against accidental deeper
-    // mutation of the shared default.
-    const obj = shallowMutableClone(
-      (isRecord(schema.default) ? schema.default : {}) as FabricValue,
-    ) as Record<string, FabricValue>;
-    for (const [propKey, propSchema] of Object.entries(schema.properties)) {
-      const value = extractDefaultValues(propSchema);
-      if (value !== undefined) {
-        obj[propKey] = value;
+  const resolved = schema.$ref
+    ? resolveCfcSchemaRefs(schema, fullSchema)
+    : schema;
+  if (typeof resolved !== "object" || resolved === null) return undefined;
+
+  const canonical = internSchema(resolved);
+  if (typeof canonical !== "object" || canonical === null) return undefined;
+  if (activeSchemas.has(canonical)) return undefined;
+  activeSchemas.add(canonical);
+
+  try {
+    if (
+      canonical.type === "object" && canonical.properties &&
+      isRecord(canonical.properties)
+    ) {
+      // Mutable top-level copy of the schema default, so injecting top-level
+      // property defaults below doesn't mutate the schema's own default object.
+      // Only top-level keys are written here, and the result is normalized
+      // downstream by `fabricFromNativeValue` (which rebuilds a fresh tree), so a
+      // shallow copy would suffice for correctness; we deep-freeze the bound
+      // children as inexpensive defense-in-depth against accidental deeper
+      // mutation of the shared default.
+      const obj = shallowMutableClone(
+        (isRecord(canonical.default) ? canonical.default : {}) as FabricValue,
+      ) as Record<string, FabricValue>;
+      for (
+        const [propKey, propSchema] of Object.entries(canonical.properties)
+      ) {
+        const value = extractDefaultValuesInternal(
+          propSchema,
+          fullSchema,
+          activeSchemas,
+        );
+        if (value !== undefined) {
+          obj[propKey] = value;
+        }
       }
+
+      // Freeze the assembled defaults. Safe (consumers only read the result) and
+      // nearly free, and it feeds the system's deep-freeze discipline: this
+      // function is recursive, so the per-level freeze composes into a
+      // deep-frozen result wherever the schema's own defaults are already frozen
+      // -- which a downstream `cloneIfNecessary(_, { frozen: true })` can then
+      // reuse by identity instead of re-cloning.
+      return Object.keys(obj).length > 0 ? Object.freeze(obj) : undefined;
     }
 
-    // Freeze the assembled defaults. Safe (consumers only read the result) and
-    // nearly free, and it feeds the system's deep-freeze discipline: this
-    // function is recursive, so the per-level freeze composes into a
-    // deep-frozen result wherever the schema's own defaults are already frozen
-    // -- which a downstream `cloneIfNecessary(_, { frozen: true })` can then
-    // reuse by identity instead of re-cloning.
-    return Object.keys(obj).length > 0 ? Object.freeze(obj) : undefined;
+    return canonical.default;
+  } finally {
+    activeSchemas.delete(canonical);
   }
-
-  return schema.default;
 }
 
 /**
