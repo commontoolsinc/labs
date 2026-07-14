@@ -320,6 +320,20 @@ Deno.test("untyped llmDialog without presentResult does not inject a resultSchem
   assertEquals(output.includes("resultSchema:"), false);
 });
 
+Deno.test("streamData<T>({...}) injects an event schema", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { streamData } from "commonfabric";',
+    'const request = streamData<{ id: string; value: number }>({ url: "/events" });',
+  ].join("\n");
+  const output = await t(source);
+  const [schema] = emittedSchemas(parseModule(output));
+  const properties = schema.properties as Obj;
+  assertEquals(properties.id.type, "string");
+  assertEquals(properties.value.type, "number");
+  assertStringIncludes(output, "schema:");
+});
+
 // ---------------------------------------------------------------------------
 // generateObject — schema property injected into the options object
 // ---------------------------------------------------------------------------

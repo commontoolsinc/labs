@@ -31,6 +31,7 @@ import type {
   SqliteDb,
   SqliteQueryFunction,
   SqliteQueryResult,
+  StreamDataFunction,
   UnavailableInputPolicy,
   UnavailableInputPolicyEntry,
   WishState,
@@ -166,6 +167,7 @@ function directAsyncBuiltinTypecheck(
   generateObject: GenerateObjectFunction,
   generateTextStream: GenerateTextStreamFunction,
   generateObjectStream: GenerateObjectStreamFunction,
+  streamData: StreamDataFunction,
   partialResultOf: PartialResultOfFunction,
   resultOf: ResultOfFunction,
 ): void {
@@ -176,6 +178,7 @@ function directAsyncBuiltinTypecheck(
   const program = fetchProgram({ url: "/pattern.tsx" });
   const generatedText = generateText({ prompt: "hello" });
   const generatedObject = generateObject<Repo>({ prompt: "repo" });
+  const streamedData = streamData<Repo>({ url: "/events" });
 
   const binaryIsAsync: Equal<
     typeof binary,
@@ -199,6 +202,10 @@ function directAsyncBuiltinTypecheck(
     typeof generatedObject,
     AsyncResult<Repo>
   > = true;
+  const streamedDataIsAsync: Equal<
+    typeof streamedData,
+    AsyncResult<Repo>
+  > = true;
 
   const availableBinary = resultOf(binary);
   const availableText = resultOf(text);
@@ -206,6 +213,8 @@ function directAsyncBuiltinTypecheck(
   const availableProgram = resultOf(program);
   const availableGeneratedText = resultOf(generatedText);
   const availableGeneratedObject = resultOf(generatedObject);
+  const availableStreamedData = resultOf(streamedData);
+  const partialStreamedData = partialResultOf(streamedData);
 
   const binaryIsDirect: Equal<typeof availableBinary, FetchBinaryResult> = true;
   const textIsDirect: Equal<typeof availableText, string> = true;
@@ -221,6 +230,11 @@ function directAsyncBuiltinTypecheck(
   const generatedObjectIsDirect: Equal<
     typeof availableGeneratedObject,
     Repo
+  > = true;
+  const streamedDataIsDirect: Equal<typeof availableStreamedData, Repo> = true;
+  const streamedDataPartialIsExact: Equal<
+    typeof partialStreamedData,
+    AsyncResult<Repo>
   > = true;
 
   const availableAliasIsExact: Equal<
@@ -264,12 +278,15 @@ function directAsyncBuiltinTypecheck(
   void programIsAsync;
   void generatedTextIsAsync;
   void generatedObjectIsAsync;
+  void streamedDataIsAsync;
   void binaryIsDirect;
   void textIsDirect;
   void jsonIsDirect;
   void programIsDirect;
   void generatedTextIsDirect;
   void generatedObjectIsDirect;
+  void streamedDataIsDirect;
+  void streamedDataPartialIsExact;
   void availableAliasIsExact;
   void textStreamIsDirect;
   void objectStreamIsDirect;
