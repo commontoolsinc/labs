@@ -122,6 +122,7 @@ Deno.test("executor action router offers an unclaimed pure action once then rout
   const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
   const diagnostics: ExecutorCandidateDiagnostic[] = [];
   const started: Array<{ claim: ExecutionClaim; sourceAction: object }> = [];
+  const placements: Array<"shadow" | "authoritative"> = [];
   const claims = new WeakMap<object, ExecutionClaim>();
   const router = createExecutorActionTransactionRouter({
     servedSpace: SPACE,
@@ -132,6 +133,7 @@ Deno.test("executor action router offers an unclaimed pure action once then rout
     onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
     onAttemptStarted: (claim, sourceAction) =>
       started.push({ claim, sourceAction }),
+    onActionTransaction: (placement) => placements.push(placement),
   });
 
   const first = commit();
@@ -147,6 +149,7 @@ Deno.test("executor action router offers an unclaimed pure action once then rout
   if (firstRoute.kind === "executor-shadow") firstRoute.afterLocalApply?.();
   assertEquals(candidates, [{ claimKey: key, sourceAction: action }]);
   assertEquals(diagnostics, []);
+  assertEquals(placements, ["shadow"]);
   assertEquals(
     getLoggerCountsBreakdown()["execution.executor"]?.[
       "execution-server-shadow-action-run"
@@ -170,6 +173,7 @@ Deno.test("executor action router offers an unclaimed pure action once then rout
     stillUnclaimedRoute.afterLocalApply?.();
   }
   assertEquals(candidates, [{ claimKey: key, sourceAction: action }]);
+  assertEquals(placements, ["shadow", "shadow"]);
 
   const claim: ExecutionClaim = {
     ...key,
@@ -191,6 +195,7 @@ Deno.test("executor action router offers an unclaimed pure action once then rout
   assertEquals(started, []);
   claimedRoute.afterRouteSelected?.();
   assertEquals(started, [{ claim, sourceAction: action }]);
+  assertEquals(placements, ["shadow", "shadow", "authoritative"]);
   assertEquals(
     (claimed.schedulerObservation as Record<string, unknown>)
       .executionClaimAssertion,

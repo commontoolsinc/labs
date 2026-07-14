@@ -28,6 +28,11 @@ const poolMetrics = {
     backoff: 0,
   },
   demandSnapshots: 3,
+  executionPlacement: {
+    schedulerRuns: 7,
+    asyncRequests: 2,
+    actionTransactions: { shadow: 5, authoritative: 2 },
+  },
   workerStartAttempts: 1,
   workerStartAborts: 0,
   workerStartFailures: 0,

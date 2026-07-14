@@ -18,12 +18,17 @@ import {
   type ExperimentalOptions,
   Runtime,
   runtimePresets,
+  type RuntimeTelemetryEvent,
 } from "../index.ts";
 import {
   CellDataUnavailableError,
   type UnavailableCellAddress,
 } from "../cell-data-unavailable-error.ts";
-import { createExecutorActionTransactionRouter } from "./action-transaction-router.ts";
+import {
+  createExecutorActionTransactionRouter,
+  type ExecutorActionTransactionPlacement,
+} from "./action-transaction-router.ts";
+import type { ExecutorExecutionMetricsSnapshot } from "./shared-execution-pool.ts";
 import {
   type AcceptedCommitNotice,
   HostStorageManager,
@@ -98,8 +103,30 @@ let claimsByAction = new WeakMap<object, ExecutionClaim>();
 let demandGeneration = 0;
 let selectiveWake: SelectiveDemandWakeQueue | null = null;
 let detachOtelBridge: (() => void) | undefined;
+let detachExecutionMetrics: (() => void) | undefined;
 let work = Promise.resolve();
 let stopped = false;
+const executionMetrics = {
+  schedulerRuns: 0,
+  asyncRequests: 0,
+  actionTransactions: { shadow: 0, authoritative: 0 },
+};
+
+const executionMetricsSnapshot = (): ExecutorExecutionMetricsSnapshot => ({
+  schedulerRuns: executionMetrics.schedulerRuns,
+  asyncRequests: executionMetrics.asyncRequests,
+  actionTransactions: {
+    shadow: executionMetrics.actionTransactions.shadow,
+    authoritative: executionMetrics.actionTransactions.authoritative,
+  },
+});
+
+const publishExecutionMetrics = (): void => {
+  worker.postMessage({
+    type: "execution-metrics",
+    metrics: executionMetricsSnapshot(),
+  });
+};
 
 const denyExternalBuiltinFetch: typeof globalThis.fetch = () =>
   Promise.reject(
@@ -107,7 +134,16 @@ const denyExternalBuiltinFetch: typeof globalThis.fetch = () =>
   );
 
 const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
-  const next = work.then(operation, operation);
+  const measured = async (): Promise<T> => {
+    try {
+      return await operation();
+    } finally {
+      // One cumulative snapshot per serialized work item avoids per-action IPC
+      // while still publishing async accepted-commit work with no host request.
+      publishExecutionMetrics();
+    }
+  };
+  const next = work.then(measured, measured);
   work = next.then(() => undefined, () => undefined);
   return next;
 };
@@ -412,6 +448,11 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     onDiagnostic: (diagnostic) => {
       worker.postMessage({ type: "candidate-diagnostic", diagnostic });
     },
+    onActionTransaction: (
+      placement: ExecutorActionTransactionPlacement,
+    ) => {
+      executionMetrics.actionTransactions[placement] += 1;
+    },
     onUnserved: (claim, sourceAction, diagnosticCode) => {
       releaseClaimedAttempt(
         "unserved-claim",
@@ -501,6 +542,17 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
         ? "allow"
         : "suppress",
   }));
+  const onRuntimeTelemetry = (event: Event): void => {
+    if (
+      (event as RuntimeTelemetryEvent).marker.type === "scheduler.run.complete"
+    ) {
+      executionMetrics.schedulerRuns += 1;
+    }
+  };
+  runtime.telemetry.addEventListener("telemetry", onRuntimeTelemetry);
+  const metricsRuntime = runtime;
+  detachExecutionMetrics = () =>
+    metricsRuntime.telemetry.removeEventListener("telemetry", onRuntimeTelemetry);
   detachOtelBridge = await maybeAttachExecutorOtelBridge(runtime, {
     spanAttributes: {
       "space.did": space,
@@ -508,6 +560,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     },
   });
   runtime.installServerBuiltinFetch((builtinId, rawUrl, init) => {
+    executionMetrics.asyncRequests += 1;
     // Capture both object and exact claim before crossing an async broker
     // boundary. Broker IPC never receives a causal actor identity.
     const sourceAction = getTransactionSourceAction();
@@ -647,6 +700,8 @@ const stop = async (): Promise<void> => {
       shutdownError = error;
     }
   }
+  detachExecutionMetrics?.();
+  detachExecutionMetrics = undefined;
   builtinBroker?.dispose();
   builtinBroker = null;
   runtime = null;
@@ -708,6 +763,9 @@ const handle = async (request: WorkerRequest): Promise<void> => {
       break;
     case "settle": {
       const dataSeq = await settle();
+      // settle() can finish scheduler work outside an enqueue operation; send
+      // the final cumulative counters before acknowledging its barrier.
+      publishExecutionMetrics();
       worker.postMessage({
         type: "settled",
         requestId: request.requestId,
@@ -717,6 +775,7 @@ const handle = async (request: WorkerRequest): Promise<void> => {
     }
     case "stop":
       await stop();
+      publishExecutionMetrics();
       break;
     default:
       throw new Error("unknown executor Worker request");

@@ -46,6 +46,24 @@ export interface SpaceExecutor {
   settle(): Promise<number>;
   /** Tear down the isolated runtime, optionally without another settle pass. */
   stop(options?: { abrupt?: boolean }): Promise<void>;
+  /** Latest cumulative counters for this Worker generation. Older executor
+   * implementations may omit the diagnostic without affecting execution. */
+  executionMetrics?(): ExecutorExecutionMetricsSnapshot;
+}
+
+export interface ExecutorExecutionMetricsSnapshot {
+  /** Completed scheduler actions, including runs that produced no routeable
+   * action transaction. */
+  readonly schedulerRuns: number;
+  /** Server-role async builtin requests started by this executor generation. */
+  readonly asyncRequests: number;
+  /** Complete action transactions classified by the executor storage router.
+   * These are not settlement counts and must not be compared one-to-one with
+   * client overlays or coalesced server settlements. */
+  readonly actionTransactions: Readonly<{
+    shadow: number;
+    authoritative: number;
+  }>;
 }
 
 export interface SpaceExecutorStartOptions {
@@ -100,6 +118,8 @@ export interface ExecutionPoolMetricsSnapshot {
   readonly activeDemands: number;
   readonly states: Readonly<Record<SpaceExecutionSnapshot["state"], number>>;
   readonly demandSnapshots: number;
+  /** Lifetime placement totals, including active and retired generations. */
+  readonly executionPlacement: ExecutorExecutionMetricsSnapshot;
   /** Worker factory calls begun, including attempts still in flight. */
   readonly workerStartAttempts: number;
   /** Starts cancelled by pool lifecycle or a superseding demand snapshot. */
@@ -193,6 +213,12 @@ export class SharedExecutionPool {
   readonly #settleTimeoutMs: number;
   readonly #slots = new Map<string, Slot>();
   readonly #tasks = new Set<Promise<void>>();
+  readonly #retiredExecutionPlacement = {
+    schedulerRuns: 0,
+    asyncRequests: 0,
+    shadowActionTransactions: 0,
+    authoritativeActionTransactions: 0,
+  };
   readonly #metrics = {
     demandSnapshots: 0,
     workerStartAttempts: 0,
@@ -273,18 +299,69 @@ export class SharedExecutionPool {
     };
     let activeWorkers = 0;
     let activeDemands = 0;
+    let schedulerRuns = this.#retiredExecutionPlacement.schedulerRuns;
+    let asyncRequests = this.#retiredExecutionPlacement.asyncRequests;
+    let shadowActionTransactions = this.#retiredExecutionPlacement
+      .shadowActionTransactions;
+    let authoritativeActionTransactions = this.#retiredExecutionPlacement
+      .authoritativeActionTransactions;
     for (const slot of this.#slots.values()) {
       states[slot.state]++;
       activeDemands += slot.demands.length;
-      if (slot.executor !== null) activeWorkers++;
+      if (slot.executor !== null) {
+        activeWorkers++;
+        const placement = this.#readExecutionMetrics(slot.executor);
+        schedulerRuns += placement.schedulerRuns;
+        asyncRequests += placement.asyncRequests;
+        shadowActionTransactions += placement.actionTransactions.shadow;
+        authoritativeActionTransactions +=
+          placement.actionTransactions.authoritative;
+      }
     }
     return Object.freeze({
       activeLanes: this.#slots.size,
       activeWorkers,
       activeDemands,
       states: Object.freeze(states),
+      executionPlacement: Object.freeze({
+        schedulerRuns,
+        asyncRequests,
+        actionTransactions: Object.freeze({
+          shadow: shadowActionTransactions,
+          authoritative: authoritativeActionTransactions,
+        }),
+      }),
       ...this.#metrics,
     });
+  }
+
+  #readExecutionMetrics(
+    executor: SpaceExecutor,
+  ): ExecutorExecutionMetricsSnapshot {
+    try {
+      return executor.executionMetrics?.() ?? {
+        schedulerRuns: 0,
+        asyncRequests: 0,
+        actionTransactions: { shadow: 0, authoritative: 0 },
+      };
+    } catch (error) {
+      console.warn("executor Worker metrics snapshot failed", error);
+      return {
+        schedulerRuns: 0,
+        asyncRequests: 0,
+        actionTransactions: { shadow: 0, authoritative: 0 },
+      };
+    }
+  }
+
+  #retireExecutionMetrics(executor: SpaceExecutor): void {
+    const placement = this.#readExecutionMetrics(executor);
+    this.#retiredExecutionPlacement.schedulerRuns += placement.schedulerRuns;
+    this.#retiredExecutionPlacement.asyncRequests += placement.asyncRequests;
+    this.#retiredExecutionPlacement.shadowActionTransactions +=
+      placement.actionTransactions.shadow;
+    this.#retiredExecutionPlacement.authoritativeActionTransactions +=
+      placement.actionTransactions.authoritative;
   }
 
   async idle(): Promise<void> {
@@ -611,7 +688,11 @@ export class SharedExecutionPool {
         this.#closed
       ) {
         startOutcome = "aborted";
-        await executor.stop();
+        try {
+          await executor.stop();
+        } finally {
+          this.#retireExecutionMetrics(executor);
+        }
         return;
       }
       slot.executor = executor;
@@ -872,6 +953,7 @@ export class SharedExecutionPool {
         console.warn("executor Worker teardown failed", error);
         stopFailed = true;
       }
+      this.#retireExecutionMetrics(executor);
       this.#metrics.workersStopped++;
       if (abrupt) this.#metrics.abruptStops++;
     }

@@ -248,6 +248,11 @@ class FakeExecutor implements SpaceExecutor {
   stopOptions: ({ abrupt?: boolean } | undefined)[] = [];
   stopGate: Promise<void> | undefined;
   readonly stopStarted = Promise.withResolvers<void>();
+  executionPlacement = {
+    schedulerRuns: 0,
+    asyncRequests: 0,
+    actionTransactions: { shadow: 0, authoritative: 0 },
+  };
 
   constructor(events: string[] = []) {
     this.events = events;
@@ -261,6 +266,14 @@ class FakeExecutor implements SpaceExecutor {
   wake(): Promise<void> {
     this.wakes++;
     return Promise.resolve();
+  }
+
+  executionMetrics() {
+    return {
+      schedulerRuns: this.executionPlacement.schedulerRuns,
+      asyncRequests: this.executionPlacement.asyncRequests,
+      actionTransactions: { ...this.executionPlacement.actionTransactions },
+    };
   }
 
   async settle(): Promise<number> {
@@ -748,6 +761,11 @@ Deno.test("shared execution pool unions ten client references into one worker", 
         backoff: 0,
       },
       demandSnapshots: 1,
+      executionPlacement: {
+        schedulerRuns: 0,
+        asyncRequests: 0,
+        actionTransactions: { shadow: 0, authoritative: 0 },
+      },
       workerStartAttempts: 1,
       workerStartAborts: 0,
       workerStartFailures: 0,
@@ -790,6 +808,11 @@ Deno.test("shared execution pool unions ten client references into one worker", 
         backoff: 0,
       },
       demandSnapshots: 3,
+      executionPlacement: {
+        schedulerRuns: 0,
+        asyncRequests: 0,
+        actionTransactions: { shadow: 0, authoritative: 0 },
+      },
       workerStartAttempts: 1,
       workerStartAborts: 0,
       workerStartFailures: 0,
@@ -816,6 +839,49 @@ Deno.test("shared execution pool unions ten client references into one worker", 
         ?.count,
       liveStartBefore + 1,
     );
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool aggregates placement across Worker generations", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    factory.executors[0]!.executionPlacement = {
+      schedulerRuns: 4,
+      asyncRequests: 1,
+      actionTransactions: { shadow: 3, authoritative: 1 },
+    };
+    const first = {
+      schedulerRuns: 4,
+      asyncRequests: 1,
+      actionTransactions: { shadow: 3, authoritative: 1 },
+    };
+    assertEquals(pool.metrics().executionPlacement, first);
+    assertEquals(pool.metrics().executionPlacement, first);
+
+    await control.emit(2, []);
+    await pool.idle();
+    assertEquals(pool.metrics().executionPlacement, first);
+
+    await control.emit(3, [demand(2, ["piece:b"])]);
+    await pool.idle();
+    factory.executors[1]!.executionPlacement = {
+      schedulerRuns: 5,
+      asyncRequests: 2,
+      actionTransactions: { shadow: 2, authoritative: 3 },
+    };
+    assertEquals(pool.metrics().executionPlacement, {
+      schedulerRuns: 9,
+      asyncRequests: 3,
+      actionTransactions: { shadow: 5, authoritative: 4 },
+    });
   } finally {
     await pool.close();
   }

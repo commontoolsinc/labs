@@ -1060,6 +1060,7 @@ for (const product of PRODUCT_CASES) {
       }
       executorCommits.length = 0;
       const settlementStart = controlEvents.length;
+      const placementBefore = pool.metrics().executionPlacement;
       const measuredSource = await writeSource(product.measuredValue);
       const measurementsPromise = Promise.all(
         clients.map((client) => client.request("measure", claim)),
@@ -1078,6 +1079,21 @@ for (const product of PRODUCT_CASES) {
       await liveExecutor.settle();
       await pool.idle();
       const measurements = await measurementsPromise;
+      const placementAfter = pool.metrics().executionPlacement;
+      assert(
+        placementAfter.schedulerRuns > placementBefore.schedulerRuns,
+        "the executor must report completed scheduler work",
+      );
+      assert(
+        placementAfter.actionTransactions.authoritative >
+          placementBefore.actionTransactions.authoritative,
+        "the executor must report its authoritative action transaction",
+      );
+      assertEquals(
+        placementAfter.asyncRequests,
+        placementBefore.asyncRequests,
+        "the pure computation must not report server async builtin work",
+      );
 
       const exactSettlements = controlEvents.slice(settlementStart).filter(
         (event): event is Extract<

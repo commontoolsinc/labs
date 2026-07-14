@@ -14,6 +14,7 @@ import {
 } from "../storage/v2-host-provider.ts";
 import type { ExperimentalOptions } from "../runtime.ts";
 import type {
+  ExecutorExecutionMetricsSnapshot,
   SpaceExecutor,
   SpaceExecutorFactory,
   SpaceExecutorStartOptions,
@@ -97,6 +98,7 @@ type WorkerResponse = {
     | "candidate-claim"
     | "candidate-diagnostic"
     | "invalidated-claim"
+    | "execution-metrics"
     | "writer-discovery"
     | "unserved-claim";
   requestId?: number;
@@ -107,6 +109,7 @@ type WorkerResponse = {
   claim?: ExecutionClaim;
   diagnosticCode?: string;
   dataSeq?: number;
+  metrics?: ExecutorExecutionMetricsSnapshot;
 };
 
 const isWorkerResponse = (value: unknown): value is WorkerResponse => {
@@ -118,6 +121,7 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
     message.type === "candidate-claim" ||
     message.type === "candidate-diagnostic" ||
     message.type === "invalidated-claim" ||
+    message.type === "execution-metrics" ||
     message.type === "writer-discovery" ||
     message.type === "unserved-claim") &&
     (message.requestId === undefined ||
@@ -130,6 +134,8 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
       isCandidateClaim(message.candidate)) &&
     (message.type !== "candidate-diagnostic" ||
       isCandidateClaimDiagnostic(message.diagnostic)) &&
+    (message.type !== "execution-metrics" ||
+      isExecutorExecutionMetricsSnapshot(message.metrics)) &&
     (message.type !== "writer-discovery" ||
       isExecutorWriterDiscovery(message.discovery)) &&
     ((message.type !== "unserved-claim" &&
@@ -137,6 +143,27 @@ const isWorkerResponse = (value: unknown): value is WorkerResponse => {
       (isExecutionClaim(message.claim) &&
         typeof message.diagnosticCode === "string" &&
         message.diagnosticCode.length > 0));
+};
+
+const isExecutorExecutionMetricsSnapshot = (
+  value: unknown,
+): value is ExecutorExecutionMetricsSnapshot => {
+  if (typeof value !== "object" || value === null) return false;
+  const snapshot = value as Record<string, unknown>;
+  const transactions = snapshot.actionTransactions;
+  return Number.isSafeInteger(snapshot.schedulerRuns) &&
+    Number(snapshot.schedulerRuns) >= 0 &&
+    Number.isSafeInteger(snapshot.asyncRequests) &&
+    Number(snapshot.asyncRequests) >= 0 &&
+    typeof transactions === "object" && transactions !== null &&
+    Number.isSafeInteger(
+      (transactions as Record<string, unknown>).shadow,
+    ) &&
+    Number((transactions as Record<string, unknown>).shadow) >= 0 &&
+    Number.isSafeInteger(
+      (transactions as Record<string, unknown>).authoritative,
+    ) &&
+    Number((transactions as Record<string, unknown>).authoritative) >= 0;
 };
 
 const isExecutorWriterDiscovery = (
@@ -255,6 +282,11 @@ class DenoSpaceExecutor implements SpaceExecutor {
   #claimControl = Promise.resolve();
   #requestId = 0;
   #demandGeneration = 0;
+  #executionMetrics: ExecutorExecutionMetricsSnapshot = Object.freeze({
+    schedulerRuns: 0,
+    asyncRequests: 0,
+    actionTransactions: Object.freeze({ shadow: 0, authoritative: 0 }),
+  });
   #stopped = false;
   #failed = false;
 
@@ -393,6 +425,10 @@ class DenoSpaceExecutor implements SpaceExecutor {
     for (const piece of next) this.#demandedPieces.add(piece);
   }
 
+  executionMetrics(): ExecutorExecutionMetricsSnapshot {
+    return this.#executionMetrics;
+  }
+
   async wake(): Promise<void> {
     await this.#request("wake");
   }
@@ -476,6 +512,31 @@ class DenoSpaceExecutor implements SpaceExecutor {
     }
     if (message.type === "candidate-diagnostic") {
       this.#onCandidateDiagnostic?.(message.diagnostic!);
+      return;
+    }
+    if (message.type === "execution-metrics") {
+      const next = message.metrics!;
+      const current = this.#executionMetrics;
+      if (
+        next.schedulerRuns < current.schedulerRuns ||
+        next.asyncRequests < current.asyncRequests ||
+        next.actionTransactions.shadow < current.actionTransactions.shadow ||
+        next.actionTransactions.authoritative <
+          current.actionTransactions.authoritative
+      ) {
+        this.#fail(
+          new Error("executor Worker execution metrics moved backwards"),
+        );
+        return;
+      }
+      this.#executionMetrics = Object.freeze({
+        schedulerRuns: next.schedulerRuns,
+        asyncRequests: next.asyncRequests,
+        actionTransactions: Object.freeze({
+          shadow: next.actionTransactions.shadow,
+          authoritative: next.actionTransactions.authoritative,
+        }),
+      });
       return;
     }
     if (message.type === "writer-discovery") {

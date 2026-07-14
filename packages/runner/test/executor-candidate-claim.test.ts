@@ -77,6 +77,15 @@ interface WriterDiscovery {
   }[];
 }
 
+interface ExecutionMetrics {
+  schedulerRuns: number;
+  asyncRequests: number;
+  actionTransactions: {
+    shadow: number;
+    authoritative: number;
+  };
+}
+
 type CandidateAwareFactoryOptions = DenoSpaceExecutorFactoryOptions & {
   /** Host-local diagnostic only. This callback never publishes authority. */
   onCandidateClaim?: (candidate: CandidateClaim) => void;
@@ -164,6 +173,14 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
     this.dispatchEvent(
       new MessageEvent("message", {
         data: { type: "writer-discovery", discovery },
+      }),
+    );
+  }
+
+  executionMetrics(metrics: ExecutionMetrics): void {
+    this.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "execution-metrics", metrics },
       }),
     );
   }
@@ -353,6 +370,42 @@ Deno.test("shadow executors report CandidateClaim diagnostics without publishing
       ),
       false,
     );
+    assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("executor host retains the latest cumulative execution placement snapshot", async () => {
+  const { worker, crashes, executor } = await startExecutor({ routing: false });
+  try {
+    assertEquals(executor.executionMetrics?.(), {
+      schedulerRuns: 0,
+      asyncRequests: 0,
+      actionTransactions: { shadow: 0, authoritative: 0 },
+    });
+
+    worker.executionMetrics({
+      schedulerRuns: 3,
+      asyncRequests: 1,
+      actionTransactions: { shadow: 2, authoritative: 1 },
+    });
+    assertEquals(executor.executionMetrics?.(), {
+      schedulerRuns: 3,
+      asyncRequests: 1,
+      actionTransactions: { shadow: 2, authoritative: 1 },
+    });
+
+    worker.executionMetrics({
+      schedulerRuns: 5,
+      asyncRequests: 2,
+      actionTransactions: { shadow: 3, authoritative: 2 },
+    });
+    assertEquals(executor.executionMetrics?.(), {
+      schedulerRuns: 5,
+      asyncRequests: 2,
+      actionTransactions: { shadow: 3, authoritative: 2 },
+    });
     assertEquals(crashes, []);
   } finally {
     await executor.stop();

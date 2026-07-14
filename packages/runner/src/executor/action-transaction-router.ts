@@ -42,6 +42,10 @@ export interface ExecutorCandidateDiagnostic {
   readonly claimKey?: ActionClaimKey;
 }
 
+export type ExecutorActionTransactionPlacement =
+  | "shadow"
+  | "authoritative";
+
 export interface ExecutorActionTransactionRouterOptions {
   readonly servedSpace: MemorySpace;
   readonly branch: string;
@@ -60,6 +64,11 @@ export interface ExecutorActionTransactionRouterOptions {
     sourceAction: object,
   ) => void;
   readonly onDiagnostic?: (diagnostic: ExecutorCandidateDiagnostic) => void;
+  /** Bounded Worker-local accounting for complete action transactions whose
+   * route was classified as shadow or authoritative. */
+  readonly onActionTransaction?: (
+    placement: ExecutorActionTransactionPlacement,
+  ) => void;
   readonly onUnserved?: (
     claim: ExecutionClaim,
     sourceAction: object,
@@ -251,6 +260,7 @@ export function createExecutorActionTransactionRouter(
     }
     if (liveClaim === undefined) {
       if (routedObservation.transactionKind === "action-run") {
+        options.onActionTransaction?.("shadow");
         logger.debug("execution-server-shadow-action-run", () => [
           "Server shadow action run completed",
           { actionId: claimKey.actionId, actionKind: claimKey.actionKind },
@@ -272,6 +282,7 @@ export function createExecutorActionTransactionRouter(
 
     attachClaimAssertion(input.commit, routedObservation, liveClaim);
     if (routedObservation.transactionKind === "action-run") {
+      options.onActionTransaction?.("authoritative");
       logger.debug("execution-server-authoritative-action-run", () => [
         "Server authoritative action run completed",
         { actionId: liveClaim.actionId, actionKind: liveClaim.actionKind },

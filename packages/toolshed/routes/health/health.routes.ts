@@ -24,6 +24,14 @@ export const ServerExecutionPoolMetricsSchema = z.object({
     backoff: nonNegativeIntegerSchema,
   }).strict(),
   demandSnapshots: nonNegativeIntegerSchema,
+  executionPlacement: z.object({
+    schedulerRuns: nonNegativeIntegerSchema,
+    asyncRequests: nonNegativeIntegerSchema,
+    actionTransactions: z.object({
+      shadow: nonNegativeIntegerSchema,
+      authoritative: nonNegativeIntegerSchema,
+    }).strict(),
+  }).strict(),
   workerStartAttempts: nonNegativeIntegerSchema,
   workerStartAborts: nonNegativeIntegerSchema,
   workerStartFailures: nonNegativeIntegerSchema,
