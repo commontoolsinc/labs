@@ -37,7 +37,12 @@ const verifyOptions = (
 const buildOpen = async (
   extra: { aud?: string; challenge?: string; iat?: number; exp?: number } = {},
   identity = alice,
-  session: { sessionId?: string; seenSeq?: number; sessionToken?: string } = {},
+  session: {
+    sessionId?: string;
+    seenSeq?: number;
+    executionFeedSeq?: number;
+    sessionToken?: string;
+  } = {},
 ) => {
   const sub = space.did();
   const invocation: Record<string, unknown> = {
@@ -88,6 +93,34 @@ describe("verifySessionOpenAuthorization", () => {
       seenSeq: 7,
       sessionToken: "token:tampered",
     };
+    await assertRejects(
+      () => verifySessionOpenAuthorization(msg, verifyOptions()),
+      Error,
+      "authorization mismatch",
+    );
+  });
+
+  it("accepts an exact signed execution feed cursor", async () => {
+    const msg = await buildOpen(signedFields(), alice, {
+      sessionId: "session:execution-feed",
+      seenSeq: 7,
+      executionFeedSeq: 11,
+      sessionToken: "token:signed",
+    });
+    assertEquals(
+      await verifySessionOpenAuthorization(msg, verifyOptions()),
+      alice.did(),
+    );
+  });
+
+  it("rejects an execution feed cursor changed outside the signed invocation", async () => {
+    const msg = await buildOpen(signedFields(), alice, {
+      sessionId: "session:execution-feed",
+      seenSeq: 7,
+      executionFeedSeq: 11,
+      sessionToken: "token:signed",
+    });
+    msg.session.executionFeedSeq = 12;
     await assertRejects(
       () => verifySessionOpenAuthorization(msg, verifyOptions()),
       Error,

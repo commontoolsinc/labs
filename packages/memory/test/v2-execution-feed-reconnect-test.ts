@@ -1,4 +1,6 @@
 import { assertEquals, assertExists } from "@std/assert";
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   type ExecutionLeaseHandle,
   Server,
@@ -15,15 +17,19 @@ import {
   type SessionDescriptor,
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
+  type SessionOpenRequest,
   type SessionOpenResult,
   toInputBasisSeq,
 } from "../v2.ts";
+import { verifySessionOpenAuthorization } from "../v2/session-open-auth.ts";
 import {
   TEST_SESSION_OPEN_PRINCIPAL,
   testSessionOpenServerOptions,
 } from "./v2-auth-test-helpers.ts";
+import { alice } from "./principal.ts";
 
 const SPACE = "did:key:z6Mk-server-execution-feed-reconnect";
+const SIGNED_OPEN_NOW_SECONDS = 1_000_000;
 
 const serverFlags = {
   ...getMemoryProtocolFlags(),
@@ -78,6 +84,34 @@ const invocation = (auth: SessionOpenAuthMetadata) => ({
   aud: auth.audience,
   challenge: auth.challenge.value,
 });
+
+const signedOpenRequest = async (
+  auth: SessionOpenAuthMetadata,
+  requestId: string,
+  session: SessionDescriptor,
+): Promise<SessionOpenRequest> => {
+  const signedSession = { ...session };
+  const signedInvocation = {
+    iss: alice.did(),
+    aud: auth.audience,
+    cmd: "session.open",
+    sub: SPACE,
+    challenge: auth.challenge.value,
+    iat: SIGNED_OPEN_NOW_SECONDS,
+    exp: SIGNED_OPEN_NOW_SECONDS + 300,
+    args: { protocol: MEMORY_PROTOCOL, session: signedSession },
+  };
+  const signature = await alice.sign(hashOf(signedInvocation).bytes);
+  if (signature.error) throw signature.error;
+  return {
+    type: "session.open",
+    requestId,
+    space: SPACE,
+    session: { ...session },
+    invocation: signedInvocation,
+    authorization: { signature: new FabricBytes(signature.ok) },
+  };
+};
 
 const open = async (
   connection: ReturnType<Server["connect"]>,
@@ -260,6 +294,105 @@ Deno.test("resumed open suppresses live execution effects until its response ins
     }
   } finally {
     sponsor?.connection.close();
+    first.close();
+    await server.close();
+  }
+});
+
+Deno.test("unsigned execution feed cursors cannot acknowledge or filter registry events", async () => {
+  const sessions = new SessionRegistry({ maxExecutionEvents: 4 });
+  const server = new Server({
+    store: new URL("memory://execution-feed-signed-cursor"),
+    sessions,
+    authorizeSessionOpen: (message, context) =>
+      verifySessionOpenAuthorization(message, {
+        ...context,
+        nowSeconds: SIGNED_OPEN_NOW_SECONDS,
+        clockSkewSeconds: 0,
+      }),
+    sessionOpenAuth: {
+      audience: alice.did(),
+      nowSeconds: () => SIGNED_OPEN_NOW_SECONDS,
+    },
+    protocolFlags: serverFlags,
+    acl: { mode: "off", serviceDids: [alice.did()] },
+  });
+  const firstMessages: ServerMessage[] = [];
+  const first = server.connect((message) => firstMessages.push(message));
+  let resumed: ReturnType<Server["connect"]> | undefined;
+  try {
+    const firstAuth = await hello(first, firstMessages);
+    const firstOpen = await signedOpenRequest(firstAuth, "open-signed", {});
+    await first.receive(encodeMemoryBoundary(firstOpen));
+    const opened = shiftMessage(firstMessages) as ResponseMessage<
+      SessionOpenResult
+    >;
+    assertExists(opened.ok?.sync?.execution);
+    const signedCursor = opened.ok.sync.execution.toFeedSeq;
+    first.close();
+
+    const state = sessions.get(SPACE, opened.ok.sessionId);
+    assertExists(state);
+    sessions.appendExecutionEvent(state, {
+      type: "session.execution.claim.set",
+      claim: {
+        ...claimInput("action:retained", "computation"),
+        leaseGeneration: 1,
+        claimGeneration: 1,
+        expiresAt: Number.MAX_SAFE_INTEGER,
+      },
+    });
+    const feedSeqBefore = state.executionFeedSeq;
+    const ackBefore = state.executionFeedAckSeq;
+    const eventsBefore = state.executionEvents.map((entry) => entry.feedSeq);
+
+    const resumedMessages: ServerMessage[] = [];
+    resumed = server.connect((message) => resumedMessages.push(message));
+    const resumeAuth = await hello(resumed, resumedMessages);
+    const signedResume = await signedOpenRequest(
+      resumeAuth,
+      "resume-exact",
+      {
+        sessionId: opened.ok.sessionId,
+        sessionToken: opened.ok.sessionToken,
+        seenSeq: opened.ok.serverSeq,
+        executionFeedSeq: signedCursor,
+      },
+    );
+    await resumed.receive(encodeMemoryBoundary({
+      ...signedResume,
+      requestId: "resume-tampered",
+      session: {
+        ...signedResume.session,
+        executionFeedSeq: feedSeqBefore,
+      },
+    }));
+    const rejected = shiftMessage(resumedMessages) as ResponseMessage<
+      SessionOpenResult
+    >;
+    assertEquals(rejected.ok, undefined);
+    assertEquals(rejected.error?.name, "AuthorizationError");
+    const unchanged = sessions.get(SPACE, opened.ok.sessionId);
+    assertExists(unchanged);
+    assertEquals(unchanged.executionFeedSeq, feedSeqBefore);
+    assertEquals(unchanged.executionFeedAckSeq, ackBefore);
+    assertEquals(
+      unchanged.executionEvents.map((entry) => entry.feedSeq),
+      eventsBefore,
+    );
+
+    await resumed.receive(encodeMemoryBoundary(signedResume));
+    const accepted = shiftMessage(resumedMessages) as ResponseMessage<
+      SessionOpenResult
+    >;
+    assertExists(accepted.ok?.sync?.execution);
+    assertEquals(accepted.ok.sync.execution.fromFeedSeq, signedCursor);
+    assertEquals(
+      accepted.ok.sync.execution.events.map(eventActionId),
+      ["action:retained"],
+    );
+  } finally {
+    resumed?.close();
     first.close();
     await server.close();
   }
