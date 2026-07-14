@@ -18,10 +18,13 @@ import {
   Default,
   handler,
   hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   lift,
   navigateTo,
+  observeAvailability,
   pattern,
-  resultOf,
   safeDateNow,
   type Stream,
   UI,
@@ -351,17 +354,27 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
       query: wishTag,
       scope: [".", "~"],
     });
-    const authPiece = hasError(wishResult.result)
-      ? null
-      : resultOf(wishResult.result);
+    const authPiece = computed(() => {
+      const result = wishResult.result;
+      return isPending(result) || hasError(result) || isSyncing(result) ||
+          hasSchemaMismatch(result)
+        ? null
+        : result;
+    });
 
     const now = new Writable(safeDateNow());
     startReactiveClock(now);
 
-    // Normalize the wish-provided UI into a local render-node contract so
-    // consumers see a stable UI field even when the underlying wish result
-    // has not materialized content yet.
-    const pickerUI = <>{wishResult[UI]}</>;
+    // WishState[UI] is a legacy plain VNode boundary that can still carry
+    // propagated unavailability. Keep this rare compatibility cast local so
+    // the surrounding auth UI can continue rendering its loading state.
+    const observedPickerUI = observeAvailability(wishResult[UI]);
+    const pickerUI = computed(() =>
+      isPending(observedPickerUI) || hasError(observedPickerUI) ||
+        isSyncing(observedPickerUI) || hasSchemaMismatch(observedPickerUI)
+        ? <></>
+        : observedPickerUI
+    );
     const authState = deriveAuthState({
       descriptor,
       piece: authPiece,
