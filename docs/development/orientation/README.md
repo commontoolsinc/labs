@@ -33,11 +33,11 @@ Read the pages in roughly this order:
 A note on vocabulary before anything else: this repository was renamed from
 **"charm"** to **"piece."** That rename is now essentially complete in source —
 `background-charm-service` became `background-piece-service`, and a scan finds
-"charm" only inside a Scrabble word list. What survives is the on-the-wire
-`bgUpdater` stream name and a dated cause string in the background service (kept
-so existing spaces don't break), plus some test file names and git history.
-Treat the two words as the same concept. See the glossary at the bottom of this
-page.
+the word "charm" only in unrelated test data (a Scrabble word list and a
+Frankenstein excerpt used as a hashing fixture). What survives of the old name is
+the on-the-wire `bgUpdater` stream name and a dated cause string in the
+background service (kept so existing spaces don't break), plus git history. Treat
+the two words as the same concept. See the glossary at the bottom of this page.
 
 ---
 
@@ -140,11 +140,11 @@ graph LR
     classDef big fill:#c0392b,stroke:#7b241c,color:#fff
     classDef mid fill:#e67e22,stroke:#a04000,color:#fff
     classDef small fill:#27ae60,stroke:#1e8449,color:#fff
-    R["runner — 100k loc"]:::big
+    R["runner — 106k loc"]:::big
     U["ui — 53k loc"]:::big
-    T["ts-transformers — 40k loc"]:::mid
+    T["ts-transformers — 41k loc"]:::mid
     C["cli — 25k loc"]:::mid
-    M["memory — 16k loc"]:::mid
+    M["memory — 18k loc"]:::mid
     SH["shell — 15k loc"]:::mid
     TS["toolshed — 14k loc"]:::mid
     H["html — 13k loc"]:::mid

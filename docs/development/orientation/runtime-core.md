@@ -1,7 +1,7 @@
 # The runtime core: `runner`
 
 `runner` is the reactive engine. It is the package everything else is arranged
-around, it is the largest hand-written package (100k non-test lines), and it
+around, it is the largest hand-written package (106k non-test lines), and it
 holds four of the eleven biggest files in the repo. If you understand `runner`,
 the rest of the system is mostly plumbing around it.
 
@@ -22,7 +22,7 @@ large hub files at the top level.
 | `traverse.ts` | Schema-driven traversal of the value-and-link graph; resolves a (schema, path) query into concrete reads, following links. One of the largest files in the package. |
 | `schema.ts` | Schema resolution, validate-and-transform, default-value handling. |
 | `link-utils.ts`, `link-types.ts`, `sigil-types.ts` | The link system: the serialized `SigilLink`, the in-memory `NormalizedLink`, and the deprecated `LegacyAlias`. |
-| `scheduler/` + `scheduler.ts` | The reactive engine: dependency graph, trigger index, topological execution, and the pull-based settle loop. |
+| `scheduler/` (31 files) | The reactive engine (post `scheduler-v2` refactor; `scheduler.ts` is a one-line re-export of `scheduler/facade.ts`). `facade.ts` = the `Scheduler` class; `invalidation.ts` marks readers invalid on a commit; `trigger-index.ts` maps entities to the actions that read them; `dependency-graph.ts` holds the `dependents`/`reverseDependencies` edges and demand-reachability (`isLive`); `settle.ts` is the pull settle loop; `run.ts` runs one action (tx → run → commit → resubscribe); `topology.ts` orders the work set; `work-oracle.ts` answers "is there runnable pull work". |
 | `storage/` | Layered persistence and remote sync: the storage manager, per-space replica, journaled transactions, and the WebSocket session to the memory host. |
 | `builder/` | The authoring surface that turns pattern code into a serializable node graph (`pattern`, `lift`, `reactive`/`cell`, `createNodeFactory`). |
 | `builtins/` | Built-in modules patterns can call: `map`/`filter`/`ifElse`/`when`, `llm`/`generateText`/`generateObject`, the fetch builtins (`fetchJson`/`fetchText`/`fetchProgram`/`streamData`), `navigateTo`, `wish`, and SQLite builtins. |
@@ -100,46 +100,64 @@ the time it runs; the `Runner` rebuilds live `Cell` wiring from the node list.
 
 ## The reactive loop: how a write re-runs dependents
 
-This is the diagram to memorize. The scheduler is **pull-based**: effects (such
-as rendering) are the demand roots, and computations are lazy until something
-that is demanded needs them. A write does not eagerly recompute the world; it
-marks readers dirty and lets the next settle pass pull only what is needed.
+This is the diagram to memorize. The scheduler is **pull-based** (its only mode
+is `"pull"`, `scheduler/invalidation.ts`): effects (such as rendering) are the
+demand roots, and computations are lazy until something that is demanded needs
+them. The work splits into two decoupled phases. An **invalidation phase** turns
+a commit's changed addresses into invalid marks on the readers that actually
+observed a changed value; it does no recomputation, it just queues an execute.
+An **execute/settle phase** then drains the invalid-plus-demanded set to
+quiescence.
+
+Since the `scheduler-v2` refactor the engine lives in `runner/src/scheduler/`
+(31 files; `scheduler.ts` is now just a re-export of `scheduler/facade.ts`, which
+holds the `Scheduler` class). The steps below give the current file and function
+for each hop.
 
 ```mermaid
 sequenceDiagram
     participant Code as cell.set(v)
     participant Tx as V2StorageTransaction
     participant Replica as SpaceReplica
-    participant Sched as Scheduler
-    participant Trig as TriggerIndex
-    participant Loop as settle loop
+    participant Inval as invalidation.ts
+    participant Trig as trigger-index.ts
+    participant Loop as settle.ts loop
+    participant Run as run.ts
 
     Code->>Tx: write(address, v)
     Note over Tx: action finishes
     Tx->>Replica: commit()
-    Replica-->>Sched: "commit" notification (changed addresses)
-    Sched->>Trig: which actions read these addresses?
-    Trig-->>Sched: reader actions
-    Note over Sched: effects → pending,<br/>computations → marked dirty
-    Sched->>Loop: execute()
-    Loop->>Loop: collectDirtyDependencies (pull stale upstream in)
+    Replica-->>Inval: "commit" notification (changed addresses)
+    Inval->>Trig: collectTriggeredActionsForChange
+    Note over Trig: determineTriggeredActions (reactive-dependencies.ts)<br/>keeps only readers whose observed value actually changed
+    Trig-->>Inval: reader actions
+    Note over Inval: markInvalid(readers); queueExecution()
+    Inval->>Loop: execute() → runPullSchedulerSettleLoop
+    Loop->>Loop: buildPullIterationWorkSet (seeds + demanded closure)
     Loop->>Loop: topologicalSort (order by read→write edges)
-    Loop->>Loop: runSchedulerAction (new tx, run, commit)
-    Loop->>Loop: only value-changed writes re-dirty their readers
-    Note over Loop: repeat until quiescent<br/>(max 10 iterations, then cycle-break)
+    Loop->>Run: runSchedulerAction (new tx → run → commit → resubscribe)
+    Note over Run: the commit's changed writes re-enter as a new notification
+    Note over Loop: repeat up to MAX_ITERS (10); non-settling subgraphs<br/>get exponential backoff, not a hard cycle-break
     Loop-->>Code: idle / settled
 ```
 
 Three facts that trip people up:
 
-- A write that does not change the value does not re-run readers. The loop
-  compares written values and only propagates real changes
-  (`scheduler/write-propagation.ts`).
-- The loop is bounded. After ten iterations without settling, a cycle-breaker
-  steps in (`scheduler/pull-cycle-break.ts`). If you see that fire, you have a
-  reactive feedback loop.
-- "Idle" and "settled" are observable. `runtime.idle()` is how callers wait for
-  the graph to quiesce; tests and the background service rely on it.
+- **A write that does not change the value does not re-run readers.** The
+  value-equality gate lives at commit-notification time, in
+  `scheduler/reactive-dependencies.ts` (`determineTriggeredActions`, using
+  `valueEqual` for recursive reads and `shallowEqual` for non-recursive ones), so
+  an unchanged write yields no triggered readers and no invalidation. There is no
+  longer a separate "write-propagation" module.
+- **The loop is bounded but has no cycle-breaker.** The settle loop runs at most
+  `MAX_ITERS` (10, in `scheduler/constants.ts`), with a matching per-node
+  `PASS_RUN_BUDGET`. A subgraph that will not settle is not force-broken; it is
+  deferred with exponential backoff (`planBudgetBackoff`, 250 ms → 2 s), and
+  `idle()` is released after `CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES` (3) so a
+  reactive feedback loop degrades rather than hangs.
+- **"Idle" and "settled" are observable.** `runtime.idle()` waits for reactive
+  quiescence; `runtime.settled()` additionally drains pending commits and
+  storage sync. Tests and the background service rely on both.
 
 ---
 
@@ -183,10 +201,11 @@ fires a notification that re-enters the same scheduler loop shown above.
 
 - **`runner` is in three of the four import cycles** in the repo
   (`↔ html`, `↔ memory`, `↔ llm`). See the
-  [dependency page](dependency-graph.md). The `memory` cycle is one import
-  (`memory/v2/query.ts` needs `runner/traverse`); the `html` cycle is the
-  builder needing `h()`; the `llm` cycle is a prompt helper needing
-  `createJsonSchema`.
+  [dependency page](dependency-graph.md). The `memory` cycle forms on one
+  package edge (`memory/v2/query.ts` imports `runner/traverse`), though that same
+  file also reaches runner's CFC and storage internals through relative paths;
+  the `html` cycle is the builder needing `h()`; the `llm` cycle is a prompt
+  helper needing `createJsonSchema`.
 - **A layering violation lives in the builtins.** `builtins/wish.ts` imports a
   home-domain schema from `home-schemas`, so a foundation builtin is coupled to
   an end-user-program schema.

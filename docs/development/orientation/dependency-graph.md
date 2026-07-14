@@ -42,10 +42,10 @@ flowchart TD
     contenthash["content-hash"]
     leb128["leb128"]
 
-    runner -->|150| datamodel
-    runner -->|149| utils
+    runner -->|152| datamodel
+    runner -->|148| utils
     runner -->|72| memory
-    runner -->|62| api
+    runner -->|68| api
     runner -->|22| jsc["js-compiler"]
     datamodel -->|35| utils
     datamodel -->|12| api
@@ -61,11 +61,11 @@ flowchart TD
 
 Three things to take from this:
 
-- **`utils` is the universal floor.** It is imported by 302 files across the
+- **`utils` is the universal floor.** It is imported by 303 files across the
   repo. Its own `index.ts` deliberately throws, to force callers to import the
   specific subpath they need (for example `@commonfabric/utils/defer`).
-- **`runner` is the gravity well.** It pulls in `data-model` 150 times,
-  `utils` 149 times, and `memory` 72 times in production code alone. Any change
+- **`runner` is the gravity well.** It pulls in `data-model` 152 times,
+  `utils` 148 times, and `memory` 72 times in production code alone. Any change
   to `data-model` or `memory` ripples straight into the runtime.
 - **`api` is mostly types, and a pure leaf.** It sits at the very floor because
   it is the authoring surface — almost entirely TypeScript declarations that
@@ -190,19 +190,19 @@ counts are lines.
 
 | File | Lines | What it is |
 |---|---|---|
-| `runner/src/cfc/prepare.ts` | 5366 | The Contextual-Flow-Control write-policy gate |
-| `runner/src/runner.ts` | 4528 | Instantiates a pattern's nodes into scheduler actions |
-| `memory/v2/engine.ts` | 4406 | The transactional SQLite core |
-| `runner/src/traverse.ts` | 4350 | Schema-driven traversal of the value/link graph |
-| `ts-transformers/src/transformers/schema-injection.ts` | 4123 | Attaches schemas to reactive boundaries |
+| `runner/src/cfc/prepare.ts` | 6407 | The Contextual-Flow-Control write-policy gate |
+| `memory/v2/engine.ts` | 6254 | The transactional SQLite core |
+| `runner/src/runner.ts` | 5218 | Instantiates a pattern's nodes into scheduler actions |
+| `runner/src/traverse.ts` | 4896 | Schema-driven traversal of the value/link graph |
+| `ts-transformers/src/transformers/schema-injection.ts` | 4134 | Attaches schemas to reactive boundaries |
 | `html/src/worker/reconciler.ts` | 3862 | The worker-thread VDOM reconciler |
 | `runner/src/builtins/llm-dialog.ts` | 3804 | The LLM dialog builtin |
+| `runner/src/storage/v2.ts` | 3480 | The storage manager, provider, and space replica |
+| `runner/src/cell.ts` | 3452 | The Cell and Stream abstractions |
 | `ts-transformers/src/policy/capability-analysis.ts` | 3446 | CFC capability analysis for the transformer |
-| `runner/src/cell.ts` | 3432 | The Cell and Stream abstractions |
-| `runner/src/storage/v2.ts` | 3018 | The storage manager, provider, and space replica |
-| `runner/src/scheduler.ts` | 2638 | The reactive scheduler |
+| `runner/src/scheduler/facade.ts` | 2787 | The scheduler's public facade (after the scheduler-v2 refactor split `scheduler.ts` into `scheduler/`) |
 
-`runner` alone holds seven of the eleven, and its single largest file is now the
+`runner` alone holds seven of the eleven, and its single largest file is the
 CFC write-policy gate — Contextual Flow Control has grown into the biggest piece
 of the runtime. The complexity is real and concentrated. (A large generated JSX
 type-declaration file, `html/src/jsx.d.ts` at ~5.5k lines, is omitted here
@@ -264,9 +264,9 @@ llm               → api(1), runner(1), utils(1)
 memory            → api(7), data-model(18), identity(2), runner(1), utils(6)
 piece             → api(3), data-model(2), home-schemas(1), identity(2),
                     js-compiler(1), runner(11), utils(4)
-runner            → api(62), content-hash(1), data-model(150), home-schemas(1),
-                    html(3), identity(1), js-compiler(22), llm(2), memory(72),
-                    piece(comment only), static(2), ts-transformers(6), utils(149)
+runner            → api(68), content-hash(1), data-model(152), home-schemas(1),
+                    html(3), identity(2), js-compiler(22), llm(2), memory(72),
+                    piece(comment only), static(3), ts-transformers(7), utils(148)
 runtime-client    → api(1), data-model(6), home-schemas(2), html(1), identity(6),
                     js-compiler(4), llm(1), piece(2), runner(22), utils(13)
 schema-generator  → api(18), data-model(1), utils(9)

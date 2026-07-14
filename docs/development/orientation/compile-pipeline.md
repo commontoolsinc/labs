@@ -5,7 +5,7 @@ cannot run that directly: reactive expressions have to be lowered into explicit
 calls, closures have to be made explicit, and every reactive boundary has to
 carry a JSON Schema derived from the author's TypeScript types. This pipeline
 does that transformation. It is "System"-layer code, and it is large
-(`ts-transformers` alone is 40k lines).
+(`ts-transformers` alone is 41k lines).
 
 You can see its output for any file with:
 
