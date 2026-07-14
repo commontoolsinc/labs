@@ -49,6 +49,7 @@ export type AvailabilityValueProvenance =
   | { readonly kind: "result-projection"; readonly source: ts.Expression };
 
 const ASYNC_RUNTIME_EXPORTS = new Set([
+  "compileAndRun",
   "fetchBinary",
   "fetchText",
   "fetchJson",

@@ -166,6 +166,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
       import {
         AsyncResult,
         HasError,
+        compileAndRun,
         fetchJsonUnchecked,
         fetchText,
         generateObject,
@@ -176,12 +177,26 @@ Deno.test("availability provenance and observations cover retained and invalid f
         partialResultOf,
         resultOf,
       } from "commonfabric";
+      import * as cf from "commonfabric";
 
       type Repo = { name: string };
       declare function ordinary(value: unknown): unknown;
       const fetched = fetchText({ url: "/repo" });
       const fetchedAny = fetchJsonUnchecked({ url: "/repo" });
       const textGenerated = generateText({ prompt: "repo" });
+      const compiled = compileAndRun<unknown, Repo>({
+        files: [{ name: "/main.tsx", contents: "export default 1" }],
+        main: "/main.tsx",
+      });
+      const compileAlias = compileAndRun;
+      const aliasedCompiled = compileAlias<unknown, Repo>({
+        files: [{ name: "/main.tsx", contents: "export default 1" }],
+        main: "/main.tsx",
+      });
+      const namespaceCompiled = cf.compileAndRun<unknown, Repo>({
+        files: [{ name: "/main.tsx", contents: "export default 1" }],
+        main: "/main.tsx",
+      });
       const objectGenerated = generateObject<Repo>({ prompt: "repo" });
       const objectStream = generateObjectStream<Repo>({ prompt: "repo" });
       const objectStreamAlias = objectStream;
@@ -219,6 +234,15 @@ Deno.test("availability provenance and observations cover retained and invalid f
         )?.kind,
         "async-result",
       );
+      for (const name of ["compiled", "aliasedCompiled", "namespaceCompiled"]) {
+        assertEquals(
+          resolveAvailabilityValueProvenance(
+            initializer(sourceFile, name),
+            context,
+          )?.kind,
+          "async-result",
+        );
+      }
       assertEquals(
         resolveAvailabilityValueProvenance(
           initializer(sourceFile, "objectGenerated"),
