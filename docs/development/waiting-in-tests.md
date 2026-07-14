@@ -421,9 +421,8 @@ the counters, regenerating on read, and giving a reader something to notice.
 
 ### Disabled tests
 
-`cf-code-editor.test.disabled.ts`, `cf-render.test.disabled.ts`, and
-`cf-checkbox.test.disabled.ts` hold many `waitFor` calls but never run. Leave
-them until they are re-enabled.
+`cf-code-editor.test.disabled.ts` and `cf-render.test.disabled.ts` hold many
+`waitFor` calls but never run. Leave them until they are re-enabled.
 
 ## Production reconnect backoff
 
