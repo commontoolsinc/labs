@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/storage-subscription-refresh.bench.ts": [
-    "60:46:19gxezt",
-  ],
   "packages/runner/test/stored-pattern-rehydration.test.ts": [
     "89:52:4f6ebu",
     "143:8:lriet0",

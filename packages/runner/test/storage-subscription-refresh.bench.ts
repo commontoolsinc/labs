@@ -27,10 +27,9 @@ const SOURCE_LINK = entityRefFrom(
   hashOf({ causal: { bench: "subscription-refresh", source: true } }),
 );
 
-type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
-  open(space: string): infer T;
-} ? T
-  : never;
+type TestProvider = ReturnType<
+  ReturnType<typeof StorageManager.emulate>["open"]
+>;
 
 const buildPayload = (version: number) => ({
   meta: {
@@ -57,7 +56,7 @@ const setup = async (sourceBacked: boolean) => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider: TestProvider = storageManager.open(space);
   const uri = `of:subscription-refresh-${crypto.randomUUID()}` as const;
 
   await (provider as any).send([{
