@@ -342,7 +342,6 @@ describe("scheduler event receipts", () => {
       return { state, doubled };
     });
     let handlerInvocations = 0;
-    const secondInvocation = Promise.withResolvers<void>();
     const launchChild = handler<
       { value: number },
       { target: Cell<unknown> }
@@ -361,7 +360,6 @@ describe("scheduler event receipts", () => {
       },
       (_event, { target }) => {
         handlerInvocations++;
-        if (handlerInvocations === 2) secondInvocation.resolve();
         const handlerTx = target.tx;
         if (handlerTx === undefined) {
           throw new Error("handler target must carry the dispatch transaction");
@@ -420,10 +418,11 @@ describe("scheduler event receipts", () => {
         false,
         { eventId },
       );
-      await waitForSignal(
-        secondInvocation.promise,
-        "second deferred receipt start did not overlap the first commit",
-      );
+      // Scheduler idle excludes the intentionally blocked storage commit, but
+      // includes the queued second delivery. Waiting on that contract makes
+      // the overlap proof deterministic instead of imposing a wall-clock
+      // deadline that coverage instrumentation can exceed.
+      await runtime.idle();
       expect(handlerInvocations).toBe(2);
 
       // Let the second delivery commit first. Releasing the first transaction
