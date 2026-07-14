@@ -4,6 +4,10 @@ import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
 import { schemaHasIfc } from "../src/schema.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
+import {
+  findCfcSchemaRefs,
+  selectReferencedCfcSchemaDefs,
+} from "../src/cfc/schema-refs.ts";
 
 describe("ContextualFlowControl.schemaAtPath", () => {
   it("rejects leading-zero array index like '01'", () => {
@@ -295,6 +299,68 @@ describe("ContextualFlowControl atom joins", () => {
   });
 });
 
+describe("CFC schema reference discovery", () => {
+  it("visits every supported subschema keyword but not dormant definitions", () => {
+    const ref = (name: string): JSONSchema => ({ $ref: `urn:${name}` });
+    const names = [
+      "not",
+      "if",
+      "then",
+      "else",
+      "items",
+      "contains",
+      "additionalProperties",
+      "propertyNames",
+      "contentSchema",
+      "allOf",
+      "anyOf",
+      "oneOf",
+      "prefixItems",
+      "dependentSchemas",
+      "properties",
+      "patternProperties",
+    ];
+    const schema: JSONSchema = {
+      not: ref("not"),
+      if: ref("if"),
+      then: ref("then"),
+      else: ref("else"),
+      items: ref("items"),
+      contains: ref("contains"),
+      additionalProperties: ref("additionalProperties"),
+      propertyNames: ref("propertyNames"),
+      contentSchema: ref("contentSchema"),
+      allOf: [ref("allOf")],
+      anyOf: [ref("anyOf")],
+      oneOf: [ref("oneOf")],
+      prefixItems: [ref("prefixItems")],
+      dependentSchemas: { value: ref("dependentSchemas") },
+      properties: { value: ref("properties") },
+      patternProperties: { ".*": ref("patternProperties") },
+      $defs: { Dormant: ref("dormant") },
+    };
+    const refs = new Set<string>();
+
+    findCfcSchemaRefs(schema, refs);
+
+    expect([...refs].toSorted()).toEqual(
+      names.map((name) => `urn:${name}`).toSorted(),
+    );
+  });
+
+  it("selects no definitions for boolean schemas or unresolved local refs", () => {
+    const definitions = { Present: { type: "string" } } as const;
+
+    expect(selectReferencedCfcSchemaDefs(true, definitions)).toBeUndefined();
+    expect(
+      selectReferencedCfcSchemaDefs(
+        { $ref: "#/$defs/Missing" },
+        definitions,
+      ),
+    ).toBeUndefined();
+  });
+});
+
 describe("schemaHasIfc", () => {
   it("resolves nested $defs while scanning child schemas", () => {
     const schema: JSONSchema = {
@@ -388,6 +454,14 @@ describe("ContextualFlowControl.resolveSchemaRefsOrThrow", () => {
     const schema: JSONSchemaObj = {
       $defs: {},
       $ref: "#/$defs/Missing",
+    };
+    expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
+      .toThrow(/Failed to resolve \$ref/);
+  });
+
+  it("rejects anchor $refs", () => {
+    const schema: JSONSchemaObj = {
+      $ref: "#named-anchor",
     };
     expect(() => ContextualFlowControl.resolveSchemaRefsOrThrow(schema))
       .toThrow(/Failed to resolve \$ref/);
