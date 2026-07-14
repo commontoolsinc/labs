@@ -1,8 +1,5 @@
 import ts from "typescript";
-import {
-  isCommonFabricDeclaration,
-  isCommonFabricSymbol,
-} from "@commonfabric/schema-generator/common-fabric-symbols";
+import { isCommonFabricSymbol } from "@commonfabric/schema-generator/common-fabric-symbols";
 
 export {
   getImportTypeModuleName,
