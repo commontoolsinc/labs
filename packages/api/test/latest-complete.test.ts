@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import type {
   AsyncResult,
   Cell,
+  DataUnavailable,
   DataUnavailableVariant,
   LatestCompleteFunction,
   LatestCompleteValue,
@@ -44,11 +45,13 @@ function latestCompleteTypecheck(
     LatestCompleteValue<{
       values: Array<AsyncResult<Repo>>;
       choice: { repo: AsyncResult<Repo> } | { count: number };
+      baseUnavailable: DataUnavailable;
       unavailable: DataUnavailableVariant;
     }>,
     {
       values: Repo[];
       choice: { repo: Repo } | { count: number };
+      baseUnavailable: never;
       unavailable: never;
     }
   > = true;
