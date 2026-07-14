@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/pending-commit-durability.test.ts": [
-    "49:25:1y1onvv",
-  ],
   "packages/runner/test/reload-rehydration-safety.test.ts": [
     "202:41:1yi6hjr",
     "343:42:1xx5z04",
