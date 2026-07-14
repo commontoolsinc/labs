@@ -15,7 +15,7 @@ unavailability; `latestComplete()` retains a coherent prior value.
 ## Status
 
 - Pending renderer continuity: implemented and tested.
-- Remaining asynchronous API migration: A1-A2 complete; A3 is next.
+- Remaining asynchronous API migration: A1-A3 complete; A4 is next.
 
 Keep this file live while any API stage remains. When all stages are complete,
 update the DataUnavailable spec and archive this plan under
@@ -240,17 +240,17 @@ const queryRequest = db.query<Row>(sql, {
 const { rows, withheld } = resultOf(queryRequest);
 ```
 
-- [ ] Make `db.query` / `sqliteQuery` return
+- [x] Make `db.query` / `sqliteQuery` return
       `AsyncResult<{ rows: Row[]; withheld?: number }>` directly.
-- [ ] Publish `rows` and `withheld` atomically from the same provider response;
+- [x] Publish `rows` and `withheld` atomically from the same provider response;
       a new pending request or failure replaces that entire value.
-- [ ] Map SQL, provider, CFC ceiling, row-label, decode, and writeback failures to
+- [x] Map SQL, provider, CFC ceiling, row-label, decode, and writeback failures to
       `error`; map a typed row-result violation to `schema-mismatch`.
-- [ ] Preserve typed row-schema injection for both method and free-function
+- [x] Preserve typed row-schema injection for both method and free-function
       forms, including `Cell<T>` rehydration and confidentiality labels.
-- [ ] Prove read-clearance per-user scoping, request identity, stale-write
+- [x] Prove read-clearance per-user scoping, request identity, stale-write
       suppression, and post-commit execution remain unchanged.
-- [ ] Migrate call sites which currently use `result ?? []` to destructure the
+- [x] Migrate call sites which currently use `result ?? []` to destructure the
       structured `resultOf()` value.
 
 **A3 exit:** row consumers receive a structured usable value without optional

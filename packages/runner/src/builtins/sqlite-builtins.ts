@@ -6,8 +6,9 @@
 //
 // - sqliteDatabase yields a SqliteDb handle cell whose value is the SqliteDbRef
 //   ({ id, tables }); the id is the handle cell's own (causal, opaque) entity id.
-// - sqliteQuery issues a server read after commit and writes { pending, result,
-//   error } back; re-runs when its `reactOn`/inputs change (it is an effect).
+// - sqliteQuery issues a server read after commit and writes a direct
+//   availability-aware value plus legacy state fields for old compiled graphs;
+//   re-runs when its `reactOn`/inputs change (it is an effect).
 //
 // Writes are NOT here — they are the imperative `SqliteDb.exec` (cell.ts), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes), and
@@ -196,7 +197,7 @@ function staticConfidentialityOf(
 /**
  * Result columns to decode from a sigil-link STRING to a sigil-link OBJECT: the
  * keys the transformer-injected `rowSchema` marks `asCell`. A consumer reading
- * `q.result[i].<col>` under its own `<Row>` schema (Cell<T> -> asCell) then
+ * `resultOf(q).rows[i].<col>` under its own `<Row>` schema (Cell<T> -> asCell) then
  * rehydrates the object to a live Cell (link-resolution only recognizes link
  * OBJECTS, not JSON strings). Untyped queries inject no rowSchema -> no decode
  * (the column reads back as the raw sigil string; see sqlite-cf-link-decode.test).
@@ -464,7 +465,7 @@ export const growOnlyMergeDbTables = (
  * CFC read-labeling: from each result column's TRUE origin (table, column),
  * build a schema for the result-cell's `result` array whose per-field `ifc`
  * carries the origin column's declared confidentiality — so a consumer reading
- * `q.result[i].<col>` inherits it (re-establishing label propagation across the
+ * `resultOf(q).rows[i].<col>` inherits it (re-establishing label propagation across the
  * opaque SQLite boundary).
  *
  * A `null`-origin column (expression/literal/aggregate) does NOT refuse the
@@ -529,8 +530,9 @@ export function labelResultSchema(
     },
   };
   // `additionalProperties: true` at BOTH object levels so the write preserves
-  // every field it isn't labeling — the QueryState siblings (`pending`,
-  // `requestHash`, `error`) and every unlabeled result column — while the
+  // every field it isn't labeling — the legacy state siblings (`pending`,
+  // `requestHash`, `error`), the direct value channel, and every unlabeled
+  // result column — while the
   // declared columns carry their `ifc`. A partial schema would otherwise shape
   // those away.
   return {
@@ -873,7 +875,7 @@ export function sqliteQuery(
           // CFC read-labeling (per-column static `ifc`): when the db declares
           // `ifc`, the server returns each result column's TRUE origin; map it to
           // the column's confidentiality and write the rows under a schema that
-          // carries it, so a consumer reading `q.result[i].<col>` inherits the
+          // carries it, so a consumer reading `resultOf(q).rows[i].<col>` inherits the
           // label (re-establishing propagation across the opaque SQLite boundary).
           // Fail closed (refuse) on an unattributable column. The labeled write
           // is CFC-relevant; `editWithRetry` runs `prepareTxForCommit` before the
@@ -1005,7 +1007,7 @@ export function sqliteQuery(
                 const link = parseLink(raw);
                 if (!link?.id) {
                   // Fail closed: a labeled row MUST carry its label; aborting
-                  // the tx surfaces as wrote.error -> q.error below.
+                  // the tx surfaces as wrote.error -> the query error below.
                   throw new Error(
                     `sqlite: result row ${i} did not split into its own ` +
                       "entity doc — cannot attach its per-row label",
@@ -1030,7 +1032,7 @@ export function sqliteQuery(
               }
             }
           });
-          // Surface a write-back failure as `q.error` rather than leaving the
+          // Surface a write-back failure as query `error` rather than leaving the
           // query stuck `pending` (editWithRetry returns the error, not throws).
           if (wrote.error) {
             await failQuery(

@@ -115,7 +115,7 @@ Two cross-cutting rules make cell references first-class inside SQLite:
 
 ```tsx
 // Shown for illustration only.
-import { sqliteDatabase, table, cfLink, handler, derive, type Cell } from "commonfabric";
+import { sqliteDatabase, table, cfLink, handler, resultOf, type Cell } from "commonfabric";
 
 // A database tied to this pattern's own cell (default source). Tables (and the
 // _cf_link columns) are declared once, here; the runtime owns DDL/migration.
@@ -147,5 +147,5 @@ const post = handler<{ body: string }, { author: Cell<User> }>(
   },
 );
 
-return derive(recent.result, (rows) => rows ?? []);
+return resultOf(recent).rows;
 ```

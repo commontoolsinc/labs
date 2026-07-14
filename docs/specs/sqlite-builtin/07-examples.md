@@ -17,6 +17,7 @@ import {
   handler,
   lift,
   pattern,
+  resultOf,
   sqliteDatabase,
   table,
   UI,
@@ -64,15 +65,13 @@ export default pattern<{ me: Cell<User> }>(({ me }) => {
   );
 
   return {
-    [UI]: lift((rows: typeof recent.result) =>
-      (rows ?? []).map((m) => (
-        // m.author_cf_link is a live Cell<User>; reading it is independently reactive
-        <div>
-          <b>{lift((u: User | undefined) => u?.name)(m.author_cf_link)}</b>:{" "}
-          {m.body}
-        </div>
-      ))
-    )(recent.result),
+    [UI]: resultOf(recent).rows.map((m) => (
+      // m.author_cf_link is a live Cell<User>; reading it is independently reactive
+      <div>
+        <b>{lift((u: User | undefined) => u?.name)(m.author_cf_link)}</b>:{" "}
+        {m.body}
+      </div>
+    )),
     send: send.with({ author: me }),
   };
 });
@@ -99,31 +98,23 @@ column even when the alias drops the `_cf_link` suffix.
 
 ```tsx
 // Shown for illustration only.
+import { hasError, isPending, resultOf } from "commonfabric";
+
 const leaderboard = db.query<{ author: Cell<User>; n: number }>(
   `SELECT author_cf_link AS author, count(*) AS n
    FROM messages GROUP BY author_cf_link ORDER BY n DESC LIMIT 10`,
   { reactOn: db },
 );
 
-return lift((
-  { rows, pending, error }: {
-    rows?: Array<{ author: Cell<User>; n: number }>;
-    pending: boolean;
-    error?: unknown;
-  },
-) => {
-  if (pending) return "Loading…";
-  if (error) return `Query failed: ${String(error)}`;
+return isPending(leaderboard)
+  ? "Loading…"
+  : hasError(leaderboard)
+  ? `Query failed: ${leaderboard.error.message}`
   // `author` decoded back into Cell<User> despite the `AS author` alias.
-  return rows!.map((r) => ({
+  : resultOf(leaderboard).rows.map((r) => ({
     name: lift((u: User | undefined) => u?.name)(r.author),
     count: r.n,
   }));
-})({
-  rows: leaderboard.result,
-  pending: leaderboard.pending,
-  error: leaderboard.error,
-});
 ```
 
 The free-function form is equivalent if you prefer it:
@@ -191,6 +182,8 @@ one.
 
 ```tsx
 // Shown at module scope.
+import { hasError, isPending, resultOf } from "commonfabric";
+
 export default pattern<{ db: SqliteDb; key: string }>(({ db, key }) => {
   const lookup = db.query<{ value: string }>(
     "SELECT value FROM lookup WHERE key = ?",
@@ -199,21 +192,11 @@ export default pattern<{ db: SqliteDb; key: string }>(({ db, key }) => {
     // (reactivity for injected sources is deferred — Section 08, Q12).
   );
 
-  return lift((
-    { rows, pending, error }: {
-      rows?: Array<{ value: string }>;
-      pending: boolean;
-      error?: unknown;
-    },
-  ) => {
-    if (pending) return "Waiting for a database to be connected…"; // until cf wires it
-    if (error) return `Database error: ${String(error)}`;
-    return rows?.[0]?.value;
-  })({
-    rows: lookup.result,
-    pending: lookup.pending,
-    error: lookup.error,
-  });
+  return isPending(lookup)
+    ? "Waiting for a database to be connected…" // until cf wires it
+    : hasError(lookup)
+    ? `Database error: ${lookup.error.message}`
+    : resultOf(lookup).rows[0]?.value;
 });
 ```
 

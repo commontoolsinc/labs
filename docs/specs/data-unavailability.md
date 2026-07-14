@@ -64,8 +64,8 @@ originating request or an honest availability union.
   by invoked code keep their existing error behavior.
 - Changing the meaning of authored `undefined`. It remains a first-class
   `FabricValue` and is valid whenever the declared schema admits it.
-- Converting remaining stateful or multi-channel APIs such as `sqliteQuery`,
-  `llmDialog`, or `wish` in the first migration. They retain
+- Converting remaining stateful or multi-channel APIs such as `llmDialog` or
+  `wish` in the first migration. They retain
   their existing result contracts until each API gets a separate state-machine
   decision; mixed idioms are expected during that staged migration.
 - Converting `streamData` in the first migration. It is a long-lived,
@@ -818,6 +818,37 @@ and `errors` for old compiled graphs. Newly transformed patterns use a
 versioned module ref which projects the same live result cell directly; no
 additional reactive node or duplicate state is created.
 
+### SQLite queries
+
+`db.query<Row>()` and `sqliteQuery<Row>()` return one direct
+`AsyncResult<SqliteQueryResult<Row>>`. A successful value contains the rows and
+the clearance audit produced with them:
+
+```typescript
+// Shown for illustration only.
+const queryRequest = db.query<Row>(sql, {
+  reactOn: db,
+  readClearance: true,
+});
+const { rows, withheld } = resultOf(queryRequest);
+```
+
+`rows` and `withheld` are published atomically. A replacement request clears
+that entire value to pending; SQL, provider, CFC, row-label, decode, and
+writeback failures publish `error`. A provider row which violates the
+transformer-injected `Row` schema publishes `schema-mismatch`. Unavailable
+inputs propagate before a query is issued.
+
+The `Row` schema still drives typed `_cf_link` decoding and CFC field labels.
+An `asCell` column is validated as its decoded link transport object rather
+than as an embedded copy of the linked value; ordinary row fields remain
+validated against their declared schemas.
+
+Legacy compiled graphs continue to use the persisted `{ pending, result,
+error, withheld }` state and the original `sqliteQuery` module ref. Newly
+transformed graphs use a versioned module ref which projects the atomic value
+channel directly, without adding a second reactive node.
+
 ## `latestComplete()` Snapshot Helper
 
 `resultOf()` is stateless: whenever its source is unavailable, an ordinary
@@ -974,6 +1005,8 @@ runtime/compiler version gate before patterns emit the new type or policy.
 - Fetch and generation built-ins write direct values or unavailable
   markers.
 - Explicit advanced generation APIs cover streaming and metadata use.
+- Dynamic compilation and SQLite queries expose direct availability-aware
+  results while preserving their legacy raw state for old compiled graphs.
 - `AsyncResult<T>` and the transparent zero-node `resultOf()` helper are public.
 - Public signatures use `AsyncResult<T>`; repository patterns, tests, examples,
   prompts, and live documentation use the same contract.
