@@ -1181,11 +1181,11 @@ describe("children rendering", () => {
       children: ["Ready"],
     });
     let button = div.getElementsByTagName("button")[0]!;
-    assert.equal(button.textContent, "Ready");
+    assert.equal(button.innerHTML, "Ready");
 
     await child.set(DataUnavailable.pending());
     button = div.getElementsByTagName("button")[0]!;
-    assert.equal(button.textContent, "Ready");
+    assert.equal(button.innerHTML, "Ready");
     assert.equal(button.getAttribute("data-cf-pending"), "true");
     assert.equal(button.getAttribute("inert"), "");
     assert.equal(button.getAttribute("aria-busy"), "true");
@@ -1197,10 +1197,10 @@ describe("children rendering", () => {
       children: ["Updated"],
     });
     button = div.getElementsByTagName("button")[0]!;
-    assert.equal(button.textContent, "Updated");
-    assert.equal(button.getAttribute("data-cf-pending"), null);
-    assert.equal(button.getAttribute("inert"), null);
-    assert.equal(button.getAttribute("aria-busy"), null);
+    assert.equal(button.innerHTML, "Updated");
+    assert.equal(button.getAttribute("data-cf-pending"), undefined);
+    assert.equal(button.getAttribute("inert"), undefined);
+    assert.equal(button.getAttribute("aria-busy"), undefined);
 
     await child.set(DataUnavailable.error(new Error("failed")));
     assert.equal(div.innerHTML, "");

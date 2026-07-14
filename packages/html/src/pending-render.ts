@@ -25,7 +25,7 @@ interface AttributeElement extends Node {
 }
 
 function isAttributeElement(node: Node | null): node is AttributeElement {
-  return node?.nodeType === 1 &&
+  return node !== null &&
     typeof (node as Partial<AttributeElement>).setAttribute === "function" &&
     typeof (node as Partial<AttributeElement>).removeAttribute === "function";
 }

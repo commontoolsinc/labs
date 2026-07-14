@@ -29,6 +29,10 @@ import {
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { VDomRenderer } from "./main/renderer.ts";
+import {
+  ensurePendingRenderStyles,
+  setPendingRenderState,
+} from "./pending-render.ts";
 //import { animate } from "./debug-element.ts";
 
 /** Tracks an active rendering for debug inspection. */
@@ -82,6 +86,11 @@ export const render = (
   view: VNode | CellHandle<VNode>,
   options: RenderOptions = {},
 ): Cancel => {
+  ensurePendingRenderStyles(
+    parent,
+    options.document ?? globalThis.document,
+  );
+
   // Use worker-side rendering for CellHandle inputs (unless legacy mode requested)
   if (isCellHandle(view) && !options.useLegacyRenderer) {
     return renderViaWorker(parent, view as CellHandle<VNode>, options);
@@ -196,16 +205,36 @@ function renderLegacy(
   const optionsWithCell = rootCell ? { ...options, rootCell } : options;
 
   let cancelRendered: Cancel | undefined;
+  let renderedRoot: HTMLElement | null = null;
   const cancelEffect = effect(view as VNode, (value: VNode | undefined) => {
-    if (isDataUnavailable(value)) return;
+    if (isDataUnavailable(value)) {
+      if (value.reason === "pending") {
+        setPendingRenderState(renderedRoot, true);
+        return;
+      }
+      setPendingRenderState(renderedRoot, false);
+      cancelRendered?.();
+      cancelRendered = undefined;
+      renderedRoot = null;
+      return;
+    }
+    setPendingRenderState(renderedRoot, false);
     cancelRendered?.();
     cancelRendered = undefined;
+    renderedRoot = null;
     if (!value) return;
     const visited = new Set<object>();
     if (rootCell) {
       visited.add(rootCell);
     }
-    cancelRendered = renderImpl(parent, value, optionsWithCell, visited);
+    const rendered = renderImplWithRoot(
+      parent,
+      value,
+      optionsWithCell,
+      visited,
+    );
+    renderedRoot = rendered.root;
+    cancelRendered = rendered.cancel;
   });
 
   return () => {
@@ -218,23 +247,33 @@ function renderLegacy(
   };
 }
 
+const renderImplWithRoot = (
+  parent: HTMLElement,
+  view: VNode,
+  options: RenderOptions = {},
+  visited: Set<object> = new Set(),
+): { root: HTMLElement | null; cancel: Cancel } => {
+  const [root, cancel] = renderNode(view, options, visited);
+  if (!root) {
+    return { root, cancel };
+  }
+  parent.append(root);
+  //animate(root, "created");
+  return {
+    root,
+    cancel: () => {
+      root.remove();
+      cancel();
+    },
+  };
+};
+
 export const renderImpl = (
   parent: HTMLElement,
   view: VNode,
   options: RenderOptions = {},
   visited: Set<object> = new Set(),
-): Cancel => {
-  const [root, cancel] = renderNode(view, options, visited);
-  if (!root) {
-    return cancel;
-  }
-  parent.append(root);
-  //animate(root, "created");
-  return () => {
-    root.remove();
-    cancel();
-  };
-};
+): Cancel => renderImplWithRoot(parent, view, options, visited).cancel;
 
 export default render;
 
@@ -270,7 +309,18 @@ function renderNode(
     let cancelRendered: Cancel | undefined;
     addCancel(
       effect(node as CellHandle<VNode>, (resolvedNode) => {
-        if (isDataUnavailable(resolvedNode)) return;
+        if (isDataUnavailable(resolvedNode)) {
+          if (resolvedNode.reason === "pending") {
+            setPendingRenderState(wrapper, true);
+            return;
+          }
+          setPendingRenderState(wrapper, false);
+          cancelRendered?.();
+          cancelRendered = undefined;
+          wrapper.innerHTML = "";
+          return;
+        }
+        setPendingRenderState(wrapper, false);
         cancelRendered?.();
         cancelRendered = undefined;
         wrapper.innerHTML = "";
@@ -465,12 +515,24 @@ class VdomChildNode {
 
   onEffect = (childValue: RenderNode): Cancel | undefined => {
     if (isDataUnavailable(childValue)) {
-      // A child must always own a DOM position synchronously. The empty text
-      // node is invisible until the first usable value and remains the stable
-      // placeholder if availability changes before then.
-      this._element ??= this.document.createTextNode("") as ChildNode;
+      if (childValue.reason === "pending") {
+        // A child must always own a DOM position synchronously. The empty text
+        // node is invisible until the first usable value and remains the stable
+        // placeholder if availability changes before then.
+        this._element ??= this.document.createTextNode("") as ChildNode;
+        setPendingRenderState(this._element, true);
+        return;
+      }
+
+      setPendingRenderState(this._element, false);
+      this.renderedCancel?.();
+      this.renderedCancel = undefined;
+      const placeholder = this.document.createTextNode("") as ChildNode;
+      if (this._element) this._element.replaceWith(placeholder);
+      this._element = placeholder;
       return;
     }
+    setPendingRenderState(this._element, false);
     let element;
     let cancel;
     if (isCellHandle(childValue)) {
