@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/cfc/grants.ts": [
-    "320:17:2kwnq3",
-  ],
   "packages/runner/src/runtime.ts": [
     "1424:28:tj3xcy",
   ],

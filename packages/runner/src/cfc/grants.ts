@@ -306,7 +306,7 @@ export const flushCfcGrantConsumptionClaims = (
         space: claim.space as MemorySpace,
         id: claim.receiptId,
       });
-      const receipt: CfcGrantConsumptionReceipt = {
+      const receipt: CfcGrantConsumptionReceipt & FabricValue = {
         version: CFC_GRANT_VERSION,
         grantConsumed: { grantId: claim.grantId },
         space: claim.space,
@@ -317,7 +317,7 @@ export const flushCfcGrantConsumptionClaims = (
         id: claim.receiptId,
         type: "application/json",
         path: ["value"],
-      }, receipt as unknown as FabricValue);
+      }, receipt);
     } catch (error) {
       reasons.push(
         `cfc-grant: staging consumption receipt for single-use grant ` +
