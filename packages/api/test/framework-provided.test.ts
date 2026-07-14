@@ -8,11 +8,13 @@ import type { FrameworkProvided, PatternToolResult } from "commonfabric";
 Deno.test("FrameworkProvided is a compile-time brand, transparent at runtime", () => {
   // A `FrameworkProvided<T>` value carries no runtime brand — it is just a `T`,
   // so a tool body (e.g. the bash tool reading `sandboxId`) can use it as the
-  // bare value. The annotation below compiles only if the brand stays
-  // assignable to its base type.
+  // bare value. These assignments compile only if plain strings can enter the
+  // branded type and FrameworkProvided<string> values can flow back to string.
   const id = "sandbox-abc";
-  const branded = id as unknown as FrameworkProvided<string>;
-  const asString: string = branded;
+  const branded: FrameworkProvided<string> = id;
+  const readFrameworkValue = (value: FrameworkProvided<string>): string =>
+    value;
+  const asString = readFrameworkValue(branded);
   assertEquals(asString, id);
   assertEquals(typeof branded, "string");
 });

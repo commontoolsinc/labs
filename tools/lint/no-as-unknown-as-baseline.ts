@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/api/test/framework-provided.test.ts": [
-    "14:21:1nukukk",
-  ],
   "packages/integration/page.ts": [
     "127:21:olkkn4",
   ],
