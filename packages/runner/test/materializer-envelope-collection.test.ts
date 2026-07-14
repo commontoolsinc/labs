@@ -16,6 +16,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
+import type { SchedulerMaterializers } from "../src/scheduler/materializers.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -167,12 +168,7 @@ describe("materializer envelope branch selection", () => {
   });
 
   const materializerIndex = () =>
-    (runtime.scheduler as unknown as {
-      materializers: {
-        materializers: Set<unknown>;
-        materializersByEntity: Map<string, Set<unknown>>;
-      };
-    }).materializers;
+    Reflect.get(runtime.scheduler, "materializers") as SchedulerMaterializers;
 
   const runPattern = async (withWriteMetadata: boolean) => {
     const resultCell = runtime.getCell(
