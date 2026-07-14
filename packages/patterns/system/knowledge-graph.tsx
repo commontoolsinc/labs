@@ -8,6 +8,7 @@ import {
   NAME,
   pattern,
   patternTool,
+  resultOf,
   Stream,
   toSchema,
   UI,
@@ -173,9 +174,10 @@ const listPiecesPattern = pattern<
 // --- Main pattern ---
 
 const KnowledgeGraph = pattern<Input>(() => {
-  const mentionable = wish<Writable<MentionablePiece>[] | Default<[]>>({
+  const mentionableWish = wish<Writable<MentionablePiece>[] | Default<[]>>({
     query: "#mentionable",
-  }).result;
+  });
+  const mentionable = resultOf(mentionableWish.result);
 
   const baseEdges = computed(() => {
     const result: GraphEdge[] = [];
@@ -201,13 +203,14 @@ const KnowledgeGraph = pattern<Input>(() => {
   });
 
   // Wish for summary index data
-  const { entries: summaryEntries } = wish<
+  const summaryWish = wish<
     {
       entries: Array<
         { piece: Writable<MentionablePiece>; summary: string; name: string }
       >;
     }
-  >({ query: "#summaryIndex" }).result!;
+  >({ query: "#summaryIndex" });
+  const { entries: summaryEntries } = resultOf(summaryWish.result);
 
   // LLM agent state
   const messages = new Writable<BuiltInLLMMessage[]>([]);

@@ -422,10 +422,11 @@ export const listPatternIndex = pattern<ListPatternIndexInput>(
     const patternIndexUrl = wish<{ url: Writable<string> }>({
       query: "#patternIndex",
     });
+    const patternIndexLocation = resultOf(patternIndexUrl.result);
 
     const resolvedUrl = new Writable<string>("/api/patterns/index.md");
     computed(() => {
-      const urlRef = patternIndexUrl?.result?.url;
+      const urlRef = patternIndexLocation.url;
       const urlValue = typeof urlRef?.get === "function"
         ? urlRef.get()
         : (typeof urlRef === "string" ? urlRef : undefined);
@@ -457,14 +458,12 @@ export const updateProfile = pattern<
   { success: boolean; message: string }
 >(({ summary }) => {
   // Wish for the profile cell (which is the summary string cell)
-  const profileCell = wish<Writable<string>>({ query: "#learnedSummary" });
+  const profileWish = wish<Writable<string>>({ query: "#learnedSummary" });
+  const profileCell = resultOf(profileWish.result);
 
   const result = computed(() => {
-    const cell = profileCell.result;
-    if (!cell) return { success: false, message: "Profile not available" };
-
     // Set the new summary text
-    cell.set(summary);
+    profileCell.set(summary);
 
     return {
       success: true,

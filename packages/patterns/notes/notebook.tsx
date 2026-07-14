@@ -7,6 +7,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   SELF,
   Stream,
   UI,
@@ -521,9 +522,10 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const notebooks = notebookWish.candidates;
 
     // Still need allPieces for write operations (push new notes/notebooks)
-    const { allPieces } = wish<{ allPieces: Writable<NotePiece[]> }>(
+    const defaultWish = wish<{ allPieces: Writable<NotePiece[]> }>(
       { query: "#default", headless: true },
-    ).result!;
+    );
+    const { allPieces } = resultOf(defaultWish.result);
 
     // Use computed() for proper reactive tracking of notes.length
     const noteCount = computed(() => notes.get().length);

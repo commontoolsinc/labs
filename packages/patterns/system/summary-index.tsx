@@ -5,6 +5,7 @@ import {
   pattern,
   patternTool,
   type PatternToolResult,
+  resultOf,
   UI,
   wish,
   Writable,
@@ -66,9 +67,10 @@ export const searchPattern = pattern<
 });
 
 const SummaryIndex = pattern<Input, Output>(() => {
-  const mentionable = wish<Default<Writable<SummarizablePiece>[], []>>({
+  const mentionableWish = wish<Default<Writable<SummarizablePiece>[], []>>({
     query: "#mentionable",
-  }).result;
+  });
+  const mentionable = resultOf(mentionableWish.result);
 
   const query = new Writable("");
 

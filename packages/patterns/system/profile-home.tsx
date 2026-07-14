@@ -8,6 +8,7 @@ import {
   NAME,
   pattern,
   RepresentsCurrentUser,
+  resultOf,
   SELF,
   Stream,
   UI,
@@ -433,9 +434,9 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     // owner viewing one of their OWN non-default profiles reads as a visitor
     // here (safe false-negative — they just don't get the inline edit form).
     const viewerProfile = wish<{ name?: string }>({ query: "#profile" });
+    const viewer = resultOf(viewerProfile.result);
     const isOwner = computed(() => {
-      const viewer = viewerProfile.result;
-      return viewer !== undefined && equals(self, viewer) === true;
+      return equals(self, viewer) === true;
     });
     // `isEditing` is the raw view-toggle state (the user's intent), kept
     // independent of ownership so it stays a clean, testable signal. The edit
@@ -447,8 +448,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     // Ownership is re-derived inline rather than referencing `isOwner` so each
     // computed is self-contained (avoids nested-computed unwrap surprises).
     const showEditForm = computed(() => {
-      const viewer = viewerProfile.result;
-      const owner = viewer !== undefined && equals(self, viewer) === true;
+      const owner = equals(self, viewer) === true;
       return editing.get() === true && owner;
     });
     // Whether a non-empty bio has been authored — drives the presentation-mode

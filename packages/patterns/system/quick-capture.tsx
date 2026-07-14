@@ -6,6 +6,7 @@ import {
   NAME,
   pattern,
   patternTool,
+  resultOf,
   type Stream,
   UI,
   type VNode,
@@ -120,17 +121,20 @@ const createNotebookHandler = handler<
 export default pattern<QuickCaptureInput, QuickCaptureOutput>(
   ({ allPieces }) => {
     // Wishes for space data
-    const mentionable = wish<MentionablePiece[]>({
+    const mentionableWish = wish<MentionablePiece[]>({
       query: "#mentionable",
-    }).result;
-    const recentPieces = wish<MentionablePiece[]>({ query: "#recent" }).result;
-    const { entries: summaryEntries } = wish<{ entries: SummaryIndexEntry[] }>({
+    });
+    const mentionable = resultOf(mentionableWish.result);
+    const recentWish = wish<MentionablePiece[]>({ query: "#recent" });
+    const recentPieces = resultOf(recentWish.result);
+    const summaryWish = wish<{ entries: SummaryIndexEntry[] }>({
       query: "#summaryIndex",
-    }).result!;
+    });
+    const { entries: summaryEntries } = resultOf(summaryWish.result);
 
     // TODO(#1269): Add wish<{ text: string }>({ query: "#system" }) once #system wish resolution is stable.
     const profileWish = wish<string>({ query: "#learnedSummary" });
-    const profileText = computed(() => profileWish.result ?? "");
+    const profileText = resultOf(profileWish.result);
 
     const systemPrompt = computed(() => {
       const profile = profileText;

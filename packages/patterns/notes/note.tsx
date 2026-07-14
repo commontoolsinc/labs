@@ -171,18 +171,21 @@ const Note = pattern<NoteInput, NoteOutput>(
 
     // Notebooks and "All Notes" from wish scope (must be before actions that reference them)
     const notebooks = notebookWish.candidates;
-    const allNotesPiece = allNotesWish.result;
+    const allNotesPiece = resultOf(allNotesWish.result);
 
     // Still need allPieces for write operations (push new notes, push backlinks)
-    const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>(
+    const defaultWish = wish<{ allPieces: Writable<MinimalPiece[]> }>(
       { query: "#default", headless: true },
-    ).result!;
-    const mentionable = wish<MentionablePiece[] | Default<[]>>(
+    );
+    const { allPieces } = resultOf(defaultWish.result);
+    const mentionableWish = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
-    ).result;
-    const _recentPieces = wish<MinimalPiece[]>(
+    );
+    const mentionable = resultOf(mentionableWish.result);
+    const recentWish = wish<MinimalPiece[]>(
       { query: "#recent", headless: true },
-    ).result;
+    );
+    const _recentPieces = resultOf(recentWish.result);
     const mentioned = new Writable<MentionablePiece[]>([]);
 
     // UI state
@@ -375,12 +378,12 @@ const Note = pattern<NoteInput, NoteOutput>(
     const editorUI = (
       <cf-code-editor
         $value={content}
-        $mentionable={mentionable!}
+        $mentionable={mentionable}
         $mentioned={mentioned}
         $pattern={patternJson}
         onbacklink-click={handlePieceLinkClick}
         onbacklink-create={handleNewBacklink({
-          mentionable: mentionable!,
+          mentionable,
           allPieces,
         })}
         language="text/markdown"
