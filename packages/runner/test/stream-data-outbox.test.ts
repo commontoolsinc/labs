@@ -6,7 +6,10 @@ import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { setPatternEnvironment } from "../src/env.ts";
-import { streamData as rawStreamData } from "../src/builtins/stream-data.ts";
+import {
+  streamData as rawStreamData,
+  streamDataResult as rawStreamDataResult,
+} from "../src/builtins/stream-data.ts";
 import {
   ExtendedStorageTransaction,
   TransactionWrapper,
@@ -82,6 +85,72 @@ describe("stream-data outbox mechanism", () => {
     await runtime?.dispose();
     await storageManager?.close();
   });
+
+  async function makeAvailabilityAction(
+    inputs: {
+      url?: string;
+      schema?: JSONSchema;
+      options?: {
+        body?: any;
+        method?: string;
+        headers?: Record<string, string>;
+      };
+    },
+    name: string,
+  ) {
+    const setupTx = runtime.edit();
+    const parentCell = runtime.getCell(
+      space,
+      `${name}-parent`,
+      undefined,
+      setupTx,
+    );
+    const inputsCell = runtime.getCell<typeof inputs>(
+      space,
+      `${name}-inputs`,
+      undefined,
+      setupTx,
+    );
+    inputsCell.set(inputs);
+    await setupTx.commit();
+
+    let state:
+      | { pending: any; result: any; partial: any; error: any }
+      | undefined;
+    let cancel: (() => void) | undefined;
+    const action = rawStreamDataResult(
+      inputsCell,
+      (_tx, value) => state = value,
+      (value) => cancel = value,
+      [],
+      parentCell,
+      runtime,
+    );
+    return {
+      action,
+      inputsCell,
+      get state() {
+        if (!state) {
+          throw new Error("streamDataResult state was not initialized");
+        }
+        return state;
+      },
+      cancel() {
+        if (!cancel) {
+          throw new Error("streamDataResult cancel was not registered");
+        }
+        cancel();
+      },
+    };
+  }
+
+  async function invokeAvailabilityAction(
+    action: ReturnType<typeof rawStreamDataResult>,
+  ): Promise<void> {
+    const tx = runtime.edit();
+    action(tx);
+    await tx.commit();
+  }
 
   it("publishes live partial events and the last event on clean close", async () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -174,6 +243,248 @@ describe("stream-data outbox mechanism", () => {
       event: "message",
       data: { value: 2 },
     });
+  });
+
+  it("publishes terminal request errors without reconnecting", async () => {
+    globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url, init });
+      return Promise.resolve(
+        new Response("unavailable", {
+          status: 503,
+          statusText: "Service Unavailable",
+        }),
+      );
+    };
+
+    const fixture = await makeAvailabilityAction({
+      url: "http://mock-test-server.local/fails",
+      schema: {
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      },
+    }, "stream-direct-request-error");
+    await invokeAvailabilityAction(fixture.action);
+
+    await waitForRawResult(
+      fixture.state.result,
+      (value) => unavailableReason(value) === "error",
+    );
+    expect(unavailableReason(rawResult(fixture.state.partial))).toBe("error");
+    const unavailable = rawResult(fixture.state.result);
+    if (isDataUnavailable(unavailable) && unavailable.reason === "error") {
+      expect(unavailable.error.message).toContain("503 Service Unavailable");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(fetchCalls).toHaveLength(1);
+  });
+
+  it("publishes schema mismatch on both final and partial results", async () => {
+    const eventSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        event: { type: "string" },
+        data: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+      },
+      required: ["id", "event", "data"],
+    } as const satisfies JSONSchema;
+    globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url, init });
+      return Promise.resolve(
+        new Response(
+          'id:1\nevent:message\ndata:{"value":"wrong"}\n\n',
+          { status: 200 },
+        ),
+      );
+    };
+    const fixture = await makeAvailabilityAction({
+      url: "http://mock-test-server.local/schema-mismatch",
+      schema: eventSchema,
+    }, "stream-direct-schema-mismatch");
+    await invokeAvailabilityAction(fixture.action);
+
+    await waitForRawResult(
+      fixture.state.result,
+      (value) => unavailableReason(value) === "schema-mismatch",
+    );
+    expect(rawResult(fixture.state.result)).toBe(
+      DataUnavailable.schemaMismatch(),
+    );
+    expect(rawResult(fixture.state.partial)).toBe(
+      DataUnavailable.schemaMismatch(),
+    );
+  });
+
+  it("publishes an error when a stream closes without an event", async () => {
+    globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url, init });
+      return Promise.resolve(new Response("", { status: 200 }));
+    };
+    const fixture = await makeAvailabilityAction({
+      url: "http://mock-test-server.local/empty",
+      schema: {},
+    }, "stream-direct-empty");
+    await invokeAvailabilityAction(fixture.action);
+
+    await waitForRawResult(
+      fixture.state.result,
+      (value) => unavailableReason(value) === "error",
+    );
+    expect(unavailableReason(rawResult(fixture.state.partial))).toBe("error");
+  });
+
+  it("ignores a replaced stream and publishes only the current request", async () => {
+    const controllers = new Map<
+      string,
+      ReadableStreamDefaultController<Uint8Array>
+    >();
+    globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url, init });
+      return Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controllers.set(url, controller);
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    };
+
+    const eventSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        event: { type: "string" },
+        data: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+      },
+      required: ["id", "event", "data"],
+    } as const satisfies JSONSchema;
+    const fixture = await makeAvailabilityAction({
+      url: "http://mock-test-server.local/old",
+      schema: eventSchema,
+    }, "stream-direct-replacement");
+    await invokeAvailabilityAction(fixture.action);
+    await waitForFetchCount(fetchCalls, 1);
+
+    const replaceTx = runtime.edit();
+    fixture.inputsCell.withTx(replaceTx).set({
+      url: "http://mock-test-server.local/new",
+      schema: eventSchema,
+    });
+    fixture.action(replaceTx);
+    await replaceTx.commit();
+    await waitForFetchCount(fetchCalls, 2);
+    expect(rawResult(fixture.state.result)).toBe(DataUnavailable.pending());
+    expect(rawResult(fixture.state.partial)).toBe(DataUnavailable.pending());
+
+    const encoder = new TextEncoder();
+    controllers.get("http://mock-test-server.local/old")!.enqueue(
+      encoder.encode('id:old\nevent:message\ndata:{"value":1}\n\n'),
+    );
+    controllers.get("http://mock-test-server.local/old")!.close();
+    await runtime.idle();
+    expect(rawResult(fixture.state.result)).toBe(DataUnavailable.pending());
+    expect(rawResult(fixture.state.partial)).toBe(DataUnavailable.pending());
+
+    controllers.get("http://mock-test-server.local/new")!.enqueue(
+      encoder.encode('id:new\nevent:message\ndata:{"value":2}\n\n'),
+    );
+    controllers.get("http://mock-test-server.local/new")!.close();
+    await waitForRawResult(
+      fixture.state.result,
+      (value) =>
+        (value as { data?: { value?: number } } | undefined)?.data?.value === 2,
+    );
+  });
+
+  it("restarts when only the event schema changes", async () => {
+    const fixture = await makeAvailabilityAction({
+      url: "http://mock-test-server.local/schema-change",
+      schema: {
+        type: "object",
+        properties: { data: { type: "object" } },
+        required: ["data"],
+      },
+    }, "stream-direct-schema-change");
+    await invokeAvailabilityAction(fixture.action);
+    await waitForFetchCount(fetchCalls, 1);
+
+    const replaceTx = runtime.edit();
+    fixture.inputsCell.withTx(replaceTx).set({
+      url: "http://mock-test-server.local/schema-change",
+      schema: {
+        type: "object",
+        properties: {
+          data: {
+            type: "object",
+            properties: { value: { type: "boolean" } },
+            required: ["value"],
+          },
+        },
+        required: ["data"],
+      },
+    });
+    fixture.action(replaceTx);
+    await replaceTx.commit();
+
+    await waitForFetchCount(fetchCalls, 2);
+  });
+
+  it("aborts the active request when its graph stops", async () => {
+    globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url, init });
+      return Promise.resolve(
+        new Response(new ReadableStream({ start() {} }), { status: 200 }),
+      );
+    };
+    const fixture = await makeAvailabilityAction({
+      url: "http://mock-test-server.local/cancel",
+      schema: {},
+    }, "stream-direct-cancel");
+    await invokeAvailabilityAction(fixture.action);
+    await waitForFetchCount(fetchCalls, 1);
+
+    const signal = fetchCalls[0].init?.signal;
+    expect(signal?.aborted).toBe(false);
+    fixture.cancel();
+    expect(signal?.aborted).toBe(true);
   });
 
   it("starts streamData only after the transaction commits", async () => {
@@ -415,18 +726,32 @@ function waitForRawResult(
   cell: any,
   predicate: (value: unknown) => boolean,
 ): Promise<void> {
-  let cancel: () => void;
-  let timeout: ReturnType<typeof setTimeout>;
-  return new Promise<void>((resolve, reject) => {
-    timeout = setTimeout(
-      () => reject(new Error("Timed out waiting for streamData result")),
-      5000,
+  return poll();
+
+  async function poll(): Promise<void> {
+    for (let attempt = 0; attempt < 500; attempt++) {
+      if (predicate(rawResult(cell))) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(
+      `Timed out waiting for streamData result; last value was ${
+        String(rawResult(cell))
+      }`,
     );
-    cancel = cell.sink(() => {
-      if (predicate(rawResult(cell))) resolve();
-    });
-  }).finally(() => {
-    clearTimeout(timeout);
-    cancel();
-  });
+  }
+}
+
+function unavailableReason(value: unknown): string | undefined {
+  return isDataUnavailable(value) ? value.reason : undefined;
+}
+
+async function waitForFetchCount(
+  fetchCalls: Array<{ url: string; init?: RequestInit }>,
+  count: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt++) {
+    if (fetchCalls.length >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for ${count} streamData fetch calls`);
 }

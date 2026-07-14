@@ -9,6 +9,12 @@ import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
+import type { JSONSchema } from "@commonfabric/api";
+import {
+  schemaWithOpenObjects,
+  validateAgainstSchema,
+} from "../cfc/schema-sanitization.ts";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -22,16 +28,52 @@ import { scopedCell } from "./scope-policy.ts";
  * @returns { pending: boolean, result: any, error: any } - As individual docs, representing `pending` state, streamed `result`, and any `error`.
  */
 export function streamData(
-  inputsCell: Cell<{
-    url: string;
-    options?: { body?: any; method?: string; headers?: Record<string, string> };
-    result?: any;
-  }>,
+  inputsCell: Cell<StreamDataInputs>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
-  _addCancel: (cancel: () => void) => void,
+  addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
-  runtime: Runtime, // Runtime will be injected by the registration function
+  runtime: Runtime,
+): Action {
+  return createStreamDataAction(
+    "legacy",
+    inputsCell,
+    sendResult,
+    addCancel,
+    cause,
+    parentCell,
+    runtime,
+  );
+}
+
+/** Direct-final stream contract used by newly compiled graphs. */
+export function streamDataResult(
+  inputsCell: Cell<StreamDataInputs>,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
+  addCancel: (cancel: () => void) => void,
+  cause: Cell<any>[],
+  parentCell: Cell<any>,
+  runtime: Runtime,
+): Action {
+  return createStreamDataAction(
+    "availability",
+    inputsCell,
+    sendResult,
+    addCancel,
+    cause,
+    parentCell,
+    runtime,
+  );
+}
+
+function createStreamDataAction(
+  contract: "legacy" | "availability",
+  inputsCell: Cell<StreamDataInputs>,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
+  addCancel: (cancel: () => void) => void,
+  cause: Cell<any>[],
+  parentCell: Cell<any>,
+  runtime: Runtime,
 ): Action {
   const status = { run: 0, controller: undefined } as {
     run: number;
@@ -43,8 +85,15 @@ export function streamData(
   let cellsInitialized = false;
   let pending: Cell<boolean>;
   let result: Cell<any | undefined>;
+  let partial: Cell<any | undefined> | undefined;
   let error: Cell<any | undefined>;
   let cellScope: CellScope | undefined;
+
+  addCancel(() => {
+    ++status.run;
+    status.controller?.abort();
+    status.controller = undefined;
+  });
 
   return (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
@@ -55,9 +104,12 @@ export function streamData(
       if (cellsInitialized && cellScope !== outputScope) {
         previousCall = "";
       }
+      const namespace = contract === "legacy"
+        ? "streamData"
+        : "streamDataResult";
       const basePending = runtime.getCell<boolean>(
         parentCell.space,
-        { streamData: { pending: cause } },
+        { [namespace]: { pending: cause } },
         undefined,
         tx,
       );
@@ -66,19 +118,25 @@ export function streamData(
 
       const baseResult = runtime.getCell<any | undefined>(
         parentCell.space,
-        {
-          streamData: { result: cause },
-        },
+        { [namespace]: { result: cause } },
         undefined,
         tx,
       );
       result = scopedCell(runtime, tx, baseResult, outputScope);
 
+      if (contract === "availability") {
+        const basePartial = runtime.getCell<any | undefined>(
+          parentCell.space,
+          { [namespace]: { partial: cause } },
+          undefined,
+          tx,
+        );
+        partial = scopedCell(runtime, tx, basePartial, outputScope);
+      }
+
       const baseError = runtime.getCell<any | undefined>(
         parentCell.space,
-        {
-          streamData: { error: cause },
-        },
+        { [namespace]: { error: cause } },
         undefined,
         tx,
       );
@@ -87,27 +145,37 @@ export function streamData(
       // Link the new result cells to the parent result cell
       setResultCell(pending, parentCell);
       setResultCell(result, parentCell);
+      if (partial) setResultCell(partial, parentCell);
       setResultCell(error, parentCell);
       // Link the new result cells to the pattern cell too
       const patternCellPtr = parentCell.key("pattern");
       setPatternCell(pending, patternCellPtr);
       setPatternCell(result, patternCellPtr);
+      if (partial) setPatternCell(partial, patternCellPtr);
       setPatternCell(error, patternCellPtr);
 
       // Since we'll only write into the docs above, we only have to call this once
       // here, instead of in the action.
-      sendResult(tx, { pending, result, error });
+      sendResult(
+        tx,
+        contract === "availability"
+          ? { pending, result, partial, error }
+          : { pending, result, error },
+      );
       cellsInitialized = true;
       cellScope = outputScope;
     }
     const pendingWithLog = pending.withTx(tx);
     const resultWithLog = result.withTx(tx);
+    const partialWithLog = partial?.withTx(tx);
     const errorWithLog = error.withTx(tx);
 
-    const { url, options } = requestSnapshot;
+    const { url, options, schema } = requestSnapshot;
 
-    // Re-entrancy guard: Don't restart the stream if it's the same request.
-    const currentCall = `${url}${JSON.stringify(options)}`;
+    const requestId = hashOf(requestSnapshot).toString();
+    // Re-entrancy guard: Don't restart the stream if the entire canonical
+    // request, including its event schema, is unchanged.
+    const currentCall = requestId;
     if (currentCall === previousCall) return;
     const previousCallBeforeAttempt = previousCall;
     const thisAttempt = ++startAttempt;
@@ -129,25 +197,37 @@ export function streamData(
 
     if (url === undefined) {
       pendingWithLog.set(false);
-      resultWithLog.set(undefined);
+      if (contract === "availability") {
+        resultWithLog.setRaw(DataUnavailable.schemaMismatch());
+        partialWithLog!.setRaw(DataUnavailable.schemaMismatch());
+      } else {
+        resultWithLog.set(undefined);
+      }
       errorWithLog.set(undefined);
       ++status.run;
       return;
     }
 
     pendingWithLog.set(true);
-    resultWithLog.set(undefined);
+    if (contract === "availability") {
+      resultWithLog.setRaw(DataUnavailable.pending());
+      partialWithLog!.setRaw(DataUnavailable.pending());
+    } else {
+      resultWithLog.set(undefined);
+    }
     errorWithLog.set(undefined);
 
     const thisRun = ++status.run;
-    const requestId = hashOf(requestSnapshot).toString();
+    const effectNamespace = contract === "legacy"
+      ? "streamData"
+      : "streamDataResult";
 
     enqueueSinkRequestPostCommitEffect(
       tx,
-      "streamData",
-      `streamData:${requestId}`,
+      effectNamespace,
+      `${effectNamespace}:${requestId}`,
       requestSnapshot,
-      "streamData-start",
+      `${effectNamespace}-start`,
       () => {
         if (thisRun !== status.run) {
           return;
@@ -159,6 +239,11 @@ export function streamData(
 
         fetch(url, { ...options, signal })
           .then(async (response) => {
+            if (!response.ok) {
+              throw new Error(
+                `Stream request failed: ${response.status} ${response.statusText}`,
+              );
+            }
             const reader = response.body?.getReader();
             const utf8 = new TextDecoder();
 
@@ -166,10 +251,8 @@ export function streamData(
               throw new Error("Response body is not readable");
             }
 
-            let buffer = "";
-            let id: string | undefined = undefined;
-            let event: string | undefined = undefined;
-            let data: string | undefined = undefined;
+            const decoder = createSseEventDecoder();
+            let lastEvent: unknown;
 
             while (true) {
               if (thisRun !== status.run) {
@@ -178,40 +261,47 @@ export function streamData(
               }
 
               const { done, value } = await reader.read();
+              const text = value ? utf8.decode(value, { stream: !done }) : "";
+              const decoded = decoder.push(
+                done ? text + utf8.decode() : text,
+                done,
+              );
 
-              buffer += utf8.decode(value);
-              while (buffer.includes("\n")) {
-                const line = buffer.split("\n")[0];
-                buffer = buffer.slice(line.length + 1);
-
-                if (line.startsWith("id:")) {
-                  id = line.slice("id:".length);
-                } else if (line.startsWith("event:")) {
-                  event = line.slice("event:".length);
-                } else if (line.startsWith("data:")) {
-                  data = line.slice("data:".length);
+              for (const parsedData of decoded) {
+                if (schema !== undefined) {
+                  const failure = validateAgainstSchema(
+                    schemaWithOpenObjects(schema),
+                    parsedData,
+                  );
+                  if (failure) {
+                    throw new StreamDataSchemaMismatchError(failure);
+                  }
                 }
-              }
-
-              if (id && event && data) {
-                const parsedData = {
-                  id,
-                  event,
-                  data: JSON.parse(data),
-                };
-
+                lastEvent = parsedData;
                 await runtime.idle();
-
                 await runtime.editWithRetry((tx) => {
-                  result.withTx(tx).set(parsedData);
+                  if (thisRun !== status.run) return;
+                  if (contract === "availability") {
+                    partial!.withTx(tx).set(parsedData);
+                  } else {
+                    result.withTx(tx).set(parsedData);
+                  }
                 });
-
-                id = undefined;
-                event = undefined;
-                data = undefined;
               }
 
               if (done) {
+                if (contract === "availability") {
+                  if (lastEvent === undefined) {
+                    throw new Error("Stream closed before emitting an event");
+                  }
+                  await runtime.editWithRetry((tx) => {
+                    if (thisRun !== status.run) return;
+                    pending.withTx(tx).set(false);
+                    result.withTx(tx).set(lastEvent);
+                    error.withTx(tx).set(undefined);
+                  });
+                }
+                if (thisRun === status.run) status.controller = undefined;
                 break;
               }
             }
@@ -220,29 +310,101 @@ export function streamData(
             if (e instanceof DOMException && e.name === "AbortError") {
               return;
             }
-            // FIXME(ja): I don't think this is the right logic... if the stream
-            // disconnects, we should probably not erase the result.
-            // FIXME(ja): also pending should probably be more like "live"?
+            // The legacy contract clears its raw result. The availability
+            // contract publishes a terminal marker; callers that need visual
+            // continuity can retain its partial result with latestComplete().
             console.error(e);
 
             await runtime.idle();
 
             await runtime.editWithRetry((tx) => {
+              if (thisRun !== status.run) return;
               pending.withTx(tx).set(false);
-              result.withTx(tx).set(undefined);
+              if (contract === "availability") {
+                const unavailable = e instanceof StreamDataSchemaMismatchError
+                  ? DataUnavailable.schemaMismatch()
+                  : DataUnavailable.error(
+                    e instanceof Error ? e : new Error(String(e)),
+                  );
+                result.withTx(tx).setRaw(unavailable);
+                partial!.withTx(tx).setRaw(unavailable);
+              } else {
+                result.withTx(tx).set(undefined);
+              }
               error.withTx(tx).set(e);
             });
 
-            // Allow retrying the same request.
-            previousCall = "";
+            if (contract === "legacy") {
+              // Preserve the old raw state's retry behavior.
+              previousCall = "";
+            }
+            if (thisRun === status.run) status.controller = undefined;
           });
       },
     );
   };
 }
 
+class StreamDataSchemaMismatchError extends Error {}
+
+function createSseEventDecoder(): {
+  push(text: string, flush: boolean): unknown[];
+} {
+  let buffer = "";
+  let id: string | undefined;
+  let event: string | undefined;
+  let data: string[] = [];
+
+  const finishEvent = (): unknown | undefined => {
+    if (id === undefined && event === undefined && data.length === 0) {
+      return undefined;
+    }
+    if (id === undefined || event === undefined || data.length === 0) {
+      throw new Error("Incomplete server-sent event");
+    }
+    const value = { id, event, data: JSON.parse(data.join("\n")) };
+    id = undefined;
+    event = undefined;
+    data = [];
+    return value;
+  };
+
+  const consumeLine = (line: string): unknown | undefined => {
+    if (line === "") return finishEvent();
+    if (line.startsWith("id:")) id = line.slice(3).trimStart();
+    else if (line.startsWith("event:")) event = line.slice(6).trimStart();
+    else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+    return undefined;
+  };
+
+  return {
+    push(text: string, flush: boolean): unknown[] {
+      buffer += text;
+      const values: unknown[] = [];
+      let newline: number;
+      while ((newline = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newline).replace(/\r$/, "");
+        buffer = buffer.slice(newline + 1);
+        const value = consumeLine(line);
+        if (value !== undefined) values.push(value);
+      }
+      if (flush) {
+        if (buffer.length > 0) {
+          const value = consumeLine(buffer.replace(/\r$/, ""));
+          if (value !== undefined) values.push(value);
+          buffer = "";
+        }
+        const value = finishEvent();
+        if (value !== undefined) values.push(value);
+      }
+      return values;
+    },
+  };
+}
+
 type StreamDataInputs = {
   url?: string;
+  schema?: JSONSchema;
   options?: { body?: any; method?: string; headers?: Record<string, string> };
 };
 
@@ -251,6 +413,7 @@ const streamDataInputSchema = internSchema(
     type: "object",
     properties: {
       url: { type: "string" },
+      schema: true,
       options: {
         type: "object",
         properties: {
@@ -273,7 +436,10 @@ function snapshotStreamDataInputs(
     ({} as StreamDataInputs);
   const body = snapshot.options?.body;
   if (!snapshot.options) {
-    return createFrozenRequestSnapshot({ url: snapshot.url });
+    return createFrozenRequestSnapshot({
+      url: snapshot.url,
+      ...(snapshot.schema !== undefined && { schema: snapshot.schema }),
+    });
   }
   const options = {
     ...snapshot.options,
@@ -281,5 +447,9 @@ function snapshotStreamDataInputs(
       ? JSON.stringify(body)
       : body,
   };
-  return createFrozenRequestSnapshot({ url: snapshot.url, options });
+  return createFrozenRequestSnapshot({
+    url: snapshot.url,
+    ...(snapshot.schema !== undefined && { schema: snapshot.schema }),
+    options,
+  });
 }

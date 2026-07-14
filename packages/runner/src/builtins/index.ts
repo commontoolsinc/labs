@@ -9,7 +9,7 @@ import {
   fetchText,
 } from "./fetch.ts";
 import { fetchProgram } from "./fetch-program.ts";
-import { streamData } from "./stream-data.ts";
+import { streamData, streamDataResult } from "./stream-data.ts";
 import { generateObject, generateText, llm } from "./llm.ts";
 import { IF_ELSE_ARGUMENT_SCHEMA, ifElse } from "./if-else.ts";
 import { when } from "./when.ts";
@@ -54,7 +54,7 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
   moduleRegistry.addModuleByRef("latestComplete", raw(latestComplete));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
-  moduleRegistry.addModuleByRef("streamDataResult", raw(streamData));
+  moduleRegistry.addModuleByRef("streamDataResult", raw(streamDataResult));
   moduleRegistry.addModuleByRef("llm", raw(llm, { isEffect: true }));
   moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
   moduleRegistry.addModuleByRef(
