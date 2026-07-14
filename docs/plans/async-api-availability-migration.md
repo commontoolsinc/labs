@@ -14,8 +14,7 @@ unavailability; `latestComplete()` retains a coherent prior value.
 ## Status
 
 - Pending renderer continuity: implemented and tested.
-- Remaining asynchronous API migration: planned; implementation has not
-  started.
+- Remaining asynchronous API migration: A0 compatibility work in progress.
 
 Keep this file live while any API stage remains. When all stages are complete,
 update the DataUnavailable spec and archive this plan under
@@ -129,11 +128,35 @@ asynchronous data-result APIs and are outside this migration.
       `undefined` from every `DataUnavailable` reason.
 - [ ] Add rehydration fixtures for the currently persisted state object of each
       built-in before changing any producer.
-- [ ] Inventory and classify every repository call site as result-only,
+- [x] Inventory and classify every repository call site as result-only,
       status-aware, metadata-aware, or state-machine control.
-- [ ] Decide the compatibility window for old public fields. Keep legacy raw
+- [x] Decide the compatibility window for old public fields. Keep legacy raw
       fields readable until all repository consumers and rehydration fixtures
       have moved.
+
+### A0 audit findings
+
+The public cutover and persisted-graph compatibility are separate concerns.
+Existing compiled graphs retain their serialized output bindings, so raw module
+references and state shapes must remain readable even after newly compiled code
+receives the concise API.
+
+| API family | Repository consumers | Raw compatibility decision |
+|---|---|---|
+| streaming generation | three pattern consumers plus transformer/runtime tests | keep the existing generation state and module refs; project `result` and associate `partial` in the builder |
+| `compileAndRun` | four pattern consumers | keep `compileAndRun` as the legacy state ref; use a versioned direct-result ref for newly compiled graphs |
+| SQLite queries | three pattern consumers plus integration fixtures | keep `sqliteQuery` as the legacy state ref; use a versioned structured-result ref for newly compiled graphs |
+| `wish` | state/UI use across the pattern catalog | retain the state object and raw ref; upgrade only its nested result channel |
+| `llmDialog` | eight pattern consumers, with and without presented results | retain the state object and raw ref; typed overloads expose the existing nested result cell honestly |
+| `streamData` | no repository pattern consumers; runner outbox tests only | keep `streamData` as the legacy state ref; use a versioned direct-result ref for newly compiled graphs |
+| legacy `llm` | integration tests only | retain during the compatibility window; do not add a new surface |
+
+The current object-generation endpoint is non-streaming. In the tool-calling
+path, `partial` is accumulated model text, not a schema-valid partial object.
+Accordingly, `partialResultOf(generateObjectStream<T>(...))` returns
+`AsyncResult<string>`. A future provider endpoint may add a separately specified
+partial-object channel; this migration must not cast incomplete text to
+`Partial<T>`.
 
 **A0 exit:** every API below has an agreed transition table, a red contract test,
 and a proven old-state rehydration path.
@@ -154,8 +177,9 @@ const partialText = resultOf(partialRequest);
 
 - [ ] Make the stream call return its final `AsyncResult<T>` directly.
 - [ ] Add `partialResultOf(request)` as a zero-node associated projection. Text
-      streams expose partial text; object streams define and inject the exact
-      partial-object type instead of leaking the current raw JSON string.
+      and object streams expose the accumulated provider text they actually
+      receive. A true partial-object channel requires a future streaming object
+      provider contract.
 - [ ] Keep grounding or message metadata only through separately named helpers
       if repository use proves those channels are needed; do not restore a
       generic state wrapper.
