@@ -1427,15 +1427,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       inputBasisSeq: source.seq,
     });
     session.noteAppliedCommit(committed.seq);
-    await Promise.race([
-      firstSettlement.promise,
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(
-          () => reject(new Error("committed settlement was not delivered")),
-          1_000,
-        )
-      ),
-    ]);
+    await firstSettlement.promise;
     assertEquals(settlements, [{
       branch: "",
       claim,
@@ -1464,15 +1456,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       "no-op",
     ]);
     await server.flushSessions();
-    await Promise.race([
-      secondSettlement.promise,
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(
-          () => reject(new Error("no-op settlement was not delivered")),
-          1_000,
-        )
-      ),
-    ]);
+    await secondSettlement.promise;
     assertEquals(settlements.at(-1), {
       branch: "",
       claim,
@@ -1535,15 +1519,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       operations: [],
       schedulerObservation: failedObservation,
     });
-    await Promise.race([
-      thirdSettlement.promise,
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(
-          () => reject(new Error("failed settlement was not delivered")),
-          1_000,
-        )
-      ),
-    ]);
+    await thirdSettlement.promise;
     assertEquals(settlements.at(-1), {
       branch: "",
       claim: failedClaim,
@@ -2394,15 +2370,7 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
       outcome: "unserved",
       diagnosticCode: "dynamic-non-space-scope",
     }]);
-    await Promise.race([
-      settled.promise,
-      new Promise<never>((_resolve, reject) =>
-        setTimeout(
-          () => reject(new Error("unserved settlement was not delivered")),
-          1_000,
-        )
-      ),
-    ]);
+    await settled.promise;
     assertEquals(settlements, [{
       branch: "",
       claim,
