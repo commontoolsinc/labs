@@ -190,52 +190,6 @@ export function postVersionSkew(info: VersionSkewInfo): void {
 }
 
 /**
- * Best-effort, non-blocking system-pattern update check for a space open. The
- * check itself never throws (it is internally best-effort); this only logs a
- * non-current outcome and defends against an unexpected rejection. Exported for
- * testing.
- */
-export function checkUpdateInBackground(
-  cc: Pick<PiecesController, "checkAndUpdateDefaultPattern">,
-  space: string,
-): void {
-  cc.checkAndUpdateDefaultPattern()
-    .then((outcome) => {
-      if (outcome === "updated" || outcome === "skipped-skew") {
-        console.log(`[space-root] update check for ${space}: ${outcome}`);
-      }
-    })
-    .catch((error) => {
-      console.warn(`[space-root] update check for ${space} threw`, error);
-    });
-}
-
-/**
- * Best-effort update check for the HOME root, gated behind its own flag
- * (pending the stable-addressing audit). No-ops unless both auto-update flags
- * are on — so the hot home fast path pays nothing when disabled — otherwise
- * builds a home PiecesController and kicks a non-blocking check. Exported for
- * testing.
- */
-export function maybeCheckHomeUpdate(
-  identity: Identity,
-  runtime: Runtime,
-): void {
-  if (
-    !runtime.experimental?.systemPatternAutoUpdate ||
-    !runtime.experimental?.systemPatternAutoUpdateHome
-  ) {
-    return;
-  }
-  const homeSession: Session = {
-    as: identity,
-    space: runtime.userIdentityDID,
-  };
-  const homeCC = new PiecesController(new PieceManager(homeSession, runtime));
-  void checkUpdateInBackground(homeCC, runtime.userIdentityDID);
-}
-
-/**
  * Map host-decided `InitializationData` onto `runtimePresets.browserWorker`
  * params (CT-1814): the shared first-party posture (CFC pins,
  * patternEnvironment from apiUrl) lives in the preset; this function only
@@ -1106,22 +1060,29 @@ export class RuntimeProcessor {
       .resolveAsCell();
     await defaultPatternCell.sync();
 
-    // Fast path: pattern already exists
+    // Fast path: pattern already exists. When home auto-update is enabled,
+    // deliberately fall through to PiecesController.ensureDefaultPattern():
+    // it reconciles the persisted identity before starting the root. Starting
+    // here first would recreate the stale-root bootstrap dependency.
     // (Value is a Cell itself, and pattern metadata means it's instantiated)
     // We've followed all the links from "defaultPattern", so our cell should
     // be the result cell for the default pattern.
-    if (getMetaLink(defaultPatternCell, "pattern")) {
+    const reconcileHomeBeforeStart =
+      this.runtime.experimental?.systemPatternAutoUpdate === true &&
+      this.runtime.experimental?.systemPatternAutoUpdateHome === true;
+    if (
+      getMetaLink(defaultPatternCell, "pattern") &&
+      !reconcileHomeBeforeStart
+    ) {
       await this.runtime.start(defaultPatternCell);
       await this.runtime.idle();
-      // The home root is held behind its own flag (pending the stable-addressing
-      // audit); the helper no-ops on this hot fast path unless enabled.
-      maybeCheckHomeUpdate(this.identity, this.runtime);
       return {
         cell: createCellRef(defaultPatternCell),
       };
     }
 
-    // Pattern doesn't exist - create it via home space PieceController
+    // Pattern is absent, or update-enabled and must be reconciled before start:
+    // use the home-space PiecesController for the complete ensure sequence.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
@@ -1184,10 +1145,6 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const { cc } = this.getSpaceCtx(request.space);
     const piece = await cc.ensureDefaultPattern();
-    // Best-effort, non-blocking: roll the root forward if its toolshed serves a
-    // newer identity. The watcher re-instantiates in place; a failed check
-    // never breaks space open, and we never block the response on it.
-    void checkUpdateInBackground(cc, request.space);
     return {
       page: createPageRef(piece.getCell()),
     };

@@ -177,6 +177,43 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(idV2).not.toBe(idV1);
   });
 
+  it("reconciles an unloadable stale root before ensure starts it", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const rootLinkBefore = JSON.stringify(root.getAsLink());
+
+    // Simulate a root left behind by an older runtime whose stored pattern can
+    // no longer be loaded by this one. The identity is well-formed but its
+    // source closure was never persisted, so any attempt to start it fails.
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-stale-root"),
+    );
+    await manager.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+    const staleRoot = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(staleRoot)?.identity).toBe(staleIdentity);
+
+    // A newer system root is available from the matching toolshed build. The
+    // ensure path must install this identity before start() sees the stale one.
+    stub.setSource(SOURCE_V2);
+    runtime.clearPatternUpdateCaches();
+
+    const updated = await controller.ensureDefaultPattern();
+    await runtime.idle();
+
+    expect(JSON.stringify(updated.getCell().getAsLink())).toBe(rootLinkBefore);
+    expect(getPatternIdentityRef(updated.getCell())?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
+  });
+
   it("skips and reports version skew when builds differ", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
