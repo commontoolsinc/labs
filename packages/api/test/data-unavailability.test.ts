@@ -23,6 +23,7 @@ import type {
   IsSyncing,
   Module,
   ObserveAvailabilityFunction,
+  PartialResultOfFunction,
   ResultOfFunction,
   UnavailableInputPolicy,
   UnavailableInputPolicyEntry,
@@ -158,6 +159,7 @@ function directAsyncBuiltinTypecheck(
   generateObject: GenerateObjectFunction,
   generateTextStream: GenerateTextStreamFunction,
   generateObjectStream: GenerateObjectStreamFunction,
+  partialResultOf: PartialResultOfFunction,
   resultOf: ResultOfFunction,
 ): void {
   const binary = fetchBinary({ url: "/binary" });
@@ -219,18 +221,32 @@ function directAsyncBuiltinTypecheck(
     Repo
   > = true;
 
-  const textState = generateTextStream({ prompt: "hello" });
-  const objectState = generateObjectStream<Repo>({ prompt: "repo" });
-  const textStateResult: Equal<
-    typeof textState.result,
+  const textStream = generateTextStream({ prompt: "hello" });
+  const objectStream = generateObjectStream<Repo>({ prompt: "repo" });
+  const textStreamIsDirect: AsyncResult<string> = textStream;
+  const objectStreamIsDirect: AsyncResult<Repo> = objectStream;
+  const availableStreamText = resultOf(textStream);
+  const availableStreamObject = resultOf(objectStream);
+  const partialText = partialResultOf(textStream);
+  const partialObjectText = partialResultOf(objectStream);
+  const textStreamResultIsExact: Equal<
+    typeof availableStreamText,
+    string
+  > = true;
+  const objectStreamResultIsExact: Equal<
+    typeof availableStreamObject,
+    Repo
+  > = true;
+  const textPartialIsExact: Equal<
+    typeof partialText,
     AsyncResult<string>
   > = true;
-  const objectStateResult: Equal<
-    typeof objectState.result,
-    AsyncResult<Repo>
+  const objectPartialIsExact: Equal<
+    typeof partialObjectText,
+    AsyncResult<string>
   > = true;
-  const objectStateHasNoSyntheticCancel: Equal<
-    "cancelGeneration" extends keyof typeof objectState ? true : false,
+  const streamHasNoPublicStateWrapper: Equal<
+    "result" extends keyof typeof textStream ? true : false,
     false
   > = true;
 
@@ -248,9 +264,13 @@ function directAsyncBuiltinTypecheck(
   void generatedTextIsDirect;
   void generatedObjectIsDirect;
   void availableAliasIsExact;
-  void textStateResult;
-  void objectStateResult;
-  void objectStateHasNoSyntheticCancel;
+  void textStreamIsDirect;
+  void objectStreamIsDirect;
+  void textStreamResultIsExact;
+  void objectStreamResultIsExact;
+  void textPartialIsExact;
+  void objectPartialIsExact;
+  void streamHasNoPublicStateWrapper;
 }
 
 Deno.test("data-unavailability helper declarations preserve narrowing types", () => {
