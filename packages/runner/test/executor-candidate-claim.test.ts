@@ -178,9 +178,13 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
   }
 
   executionMetrics(metrics: ExecutionMetrics): void {
+    this.response({ type: "execution-metrics", metrics });
+  }
+
+  response(data: unknown): void {
     this.dispatchEvent(
       new MessageEvent("message", {
-        data: { type: "execution-metrics", metrics },
+        data,
       }),
     );
   }
@@ -407,6 +411,52 @@ Deno.test("executor host retains the latest cumulative execution placement snaps
       actionTransactions: { shadow: 3, authoritative: 2 },
     });
     assertEquals(crashes, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("executor host rejects malformed execution placement snapshots", async () => {
+  const { worker, crashes, executor } = await startExecutor({ routing: false });
+  try {
+    worker.response({
+      type: "execution-metrics",
+      metrics: {
+        schedulerRuns: 1,
+        asyncRequests: -1,
+        actionTransactions: { shadow: 0, authoritative: 0 },
+      },
+    });
+
+    assertEquals(
+      crashes.map((error) => error instanceof Error ? error.message : error),
+      ["invalid executor Worker response"],
+    );
+    assertEquals(worker.terminated, true);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("executor host rejects execution placement counters that move backwards", async () => {
+  const { worker, crashes, executor } = await startExecutor({ routing: false });
+  try {
+    worker.executionMetrics({
+      schedulerRuns: 3,
+      asyncRequests: 1,
+      actionTransactions: { shadow: 2, authoritative: 1 },
+    });
+    worker.executionMetrics({
+      schedulerRuns: 2,
+      asyncRequests: 1,
+      actionTransactions: { shadow: 2, authoritative: 1 },
+    });
+
+    assertEquals(
+      crashes.map((error) => error instanceof Error ? error.message : error),
+      ["executor Worker execution metrics moved backwards"],
+    );
+    assertEquals(worker.terminated, true);
   } finally {
     await executor.stop();
   }
