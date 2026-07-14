@@ -55,6 +55,7 @@ import {
   formatOverrideSuggestion,
   githubGet,
   isCoverageDebtMetric,
+  type Job,
   latestNonColdSample,
   mapConcurrent,
   type MetricTimeline,
@@ -613,6 +614,8 @@ export async function parsePerfMetricsFromArtifacts(
 
 export interface AddPerfMetricsResult {
   added: boolean;
+  metrics: Map<string, TimingSample>;
+  metricNames: Set<string>;
   /** Null when the run has no perf-metrics artifact or an untagged one. */
   compileCacheStates: CompileCacheStates | null;
 }
@@ -625,12 +628,113 @@ export async function addPerfMetricsFromArtifacts(
   ) => Promise<PerfMetricsDetailed | null> = parsePerfMetricsFromArtifacts,
 ): Promise<AddPerfMetricsResult> {
   const detailed = await parseMetrics(artifacts);
-  if (!detailed) return { added: false, compileCacheStates: null };
+  if (!detailed) {
+    return {
+      added: false,
+      metrics: new Map(),
+      metricNames: new Set(),
+      compileCacheStates: null,
+    };
+  }
 
   for (const [name, sample] of detailed.metrics) {
     addSample(timelines, name, sample);
   }
-  return { added: true, compileCacheStates: detailed.compileCacheStates };
+  return {
+    added: true,
+    metrics: detailed.metrics,
+    metricNames: new Set(detailed.metrics.keys()),
+    compileCacheStates: detailed.compileCacheStates,
+  };
+}
+
+const WORKSPACE_SHARD_STEP_METRIC_RE = /^step: workspace tests \(\d+\/\d+\)$/;
+
+export interface AddMissingMetricSamplesResult {
+  added: Map<string, TimingSample>;
+  fetchedJobs: boolean;
+}
+
+/**
+ * Backfill workspace shard step metrics that old perf-metrics artifacts do not
+ * contain. The aggregate step metric still comes from the artifact.
+ */
+export async function addMissingWorkspaceShardStepMetrics(
+  timelines: Map<string, MetricTimeline>,
+  run: WorkflowRun,
+  currentMetricNames: Iterable<string>,
+  presentMetricNames: ReadonlySet<string>,
+  backfilledMetrics?: Map<string, TimingSample>,
+  fetchJobs: (runId: number) => Promise<Job[]> = fetchJobsForRun,
+): Promise<AddMissingMetricSamplesResult> {
+  const missing = new Set<string>();
+  for (const name of currentMetricNames) {
+    if (
+      WORKSPACE_SHARD_STEP_METRIC_RE.test(name) &&
+      !presentMetricNames.has(name)
+    ) {
+      missing.add(name);
+    }
+  }
+
+  const added = new Map<string, TimingSample>();
+  const addIfPresent = (metrics: Map<string, TimingSample>) => {
+    for (const name of [...missing]) {
+      const sample = metrics.get(name);
+      if (!sample) continue;
+      addSample(timelines, name, sample);
+      added.set(name, sample);
+      missing.delete(name);
+    }
+  };
+
+  if (backfilledMetrics) {
+    addIfPresent(backfilledMetrics);
+  }
+
+  if (missing.size === 0) {
+    return { added, fetchedJobs: false };
+  }
+
+  const jobs = await fetchJobs(run.id);
+  addIfPresent(extractMetrics(run, jobs));
+  return { added, fetchedJobs: true };
+}
+
+export interface AddBackfilledMetricsResult {
+  metrics: Map<string, TimingSample>;
+  fetchedJobs: boolean;
+}
+
+/**
+ * Add fallback metrics, then fill current workspace shard step metrics that the
+ * fallback file does not contain.
+ */
+export async function addBackfilledMetricsWithMissingWorkspaceShardSteps(
+  timelines: Map<string, MetricTimeline>,
+  run: WorkflowRun,
+  currentMetricNames: Iterable<string>,
+  backfilledMetrics: Map<string, TimingSample>,
+  fetchJobs: (runId: number) => Promise<Job[]> = fetchJobsForRun,
+): Promise<AddBackfilledMetricsResult> {
+  const metrics = new Map(backfilledMetrics);
+  for (const [name, sample] of metrics) {
+    addSample(timelines, name, sample);
+  }
+
+  const missingResult = await addMissingWorkspaceShardStepMetrics(
+    timelines,
+    run,
+    currentMetricNames,
+    new Set(metrics.keys()),
+    undefined,
+    fetchJobs,
+  );
+  for (const [name, sample] of missingResult.added) {
+    metrics.set(name, sample);
+  }
+
+  return { metrics, fetchedJobs: missingResult.fetchedJobs };
 }
 
 /**
@@ -710,13 +814,16 @@ export async function collectCurrentCacheStates(
 }
 
 /**
- * Metrics to exclude from regression checks because their aggregate values
- * naturally grow as new tests are added.  Per-test timings from JUnit
- * artifacts are tracked instead.
+ * Metrics to show without failing the check. Pattern unit totals grow as tests
+ * are added, workspace job totals include checkout and setup overhead, and
+ * workspace shard numbers are noisy when the aggregate step is still healthy.
+ * The aggregate workspace step still gates workspace test execution time.
  */
 const EXCLUDED_METRIC_PATTERNS = [
   /^job: Pattern Unit Tests/,
   /^step: pattern unit tests$/,
+  /^job: Test(?: \(\d+\/\d+\))?$/,
+  /^step: workspace tests \(\d+\/\d+\)$/,
 ];
 
 const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
@@ -1653,13 +1760,38 @@ export async function main() {
           );
         }
         if (artifactResult.added) {
+          const backfilledMetrics = backfilledMetricsByRunId.get(run.id);
+          const missingResult = await addMissingWorkspaceShardStepMetrics(
+            timelines,
+            run,
+            currentMetrics.keys(),
+            artifactResult.metricNames,
+            backfilledMetrics,
+          );
+          if (missingResult.added.size > 0 && missingResult.fetchedJobs) {
+            const metrics = new Map(artifactResult.metrics);
+            for (const [name, sample] of missingResult.added) {
+              metrics.set(name, sample);
+            }
+            newBackfills.set(run.id, metrics);
+          }
           return;
         }
 
         const backfilledMetrics = backfilledMetricsByRunId.get(run.id);
         if (backfilledMetrics) {
-          for (const [name, sample] of backfilledMetrics) {
-            addSample(timelines, name, sample);
+          const backfillResult =
+            await addBackfilledMetricsWithMissingWorkspaceShardSteps(
+              timelines,
+              run,
+              currentMetrics.keys(),
+              backfilledMetrics,
+            );
+          if (
+            backfillResult.fetchedJobs &&
+            backfillResult.metrics.size > backfilledMetrics.size
+          ) {
+            newBackfills.set(run.id, backfillResult.metrics);
           }
           return;
         }

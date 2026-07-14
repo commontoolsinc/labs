@@ -27,7 +27,8 @@ export async function collectCoverageProfileFiles(
     for await (const entry of Deno.readDir(dir)) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory) {
-        files.push(...await collectCoverageProfileFiles(fullPath));
+        const nestedFiles = await collectCoverageProfileFiles(fullPath);
+        for (const file of nestedFiles) files.push(file);
       } else if (entry.name.endsWith(".json")) {
         files.push(fullPath);
       }

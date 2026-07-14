@@ -12,6 +12,8 @@ import {
   type WorkflowRun,
 } from "./perf-lib.ts";
 import {
+  addBackfilledMetricsWithMissingWorkspaceShardSteps,
+  addMissingWorkspaceShardStepMetrics,
   addPerfMetricsFromArtifacts,
   type BaselineRunContext,
   buildBaselineRunContexts,
@@ -1110,39 +1112,203 @@ Deno.test("addPerfMetricsFromArtifacts adds parsed samples to timelines", async 
   const sample = makeSample();
   const timelines = new Map();
 
-  assertEquals(
-    await addPerfMetricsFromArtifacts(timelines, artifacts, (requested) => {
+  const result = await addPerfMetricsFromArtifacts(
+    timelines,
+    artifacts,
+    (requested) => {
       assertEquals(requested, artifacts);
       return Promise.resolve({
         metrics: new Map([["job: Check", sample]]),
         compileCacheStates: { "generated-patterns": "cold" as const },
       });
-    }),
-    { added: true, compileCacheStates: { "generated-patterns": "cold" } },
+    },
   );
+  assertEquals(result.added, true);
+  assertEquals(result.metrics, new Map([["job: Check", sample]]));
+  assertEquals(result.metricNames, new Set(["job: Check"]));
+  assertEquals(result.compileCacheStates, { "generated-patterns": "cold" });
   assertEquals(timelines.get("job: Check")?.samples, [sample]);
 
   // An untagged (pre-rollout) artifact still adds samples, with null states.
-  assertEquals(
-    await addPerfMetricsFromArtifacts(
-      timelines,
-      artifacts,
-      () =>
-        Promise.resolve({
-          metrics: new Map([["job: Check", sample]]),
-          compileCacheStates: null,
-        }),
-    ),
-    { added: true, compileCacheStates: null },
+  const untaggedResult = await addPerfMetricsFromArtifacts(
+    timelines,
+    artifacts,
+    () =>
+      Promise.resolve({
+        metrics: new Map([["job: Check", sample]]),
+        compileCacheStates: null,
+      }),
+  );
+  assertEquals(untaggedResult.added, true);
+  assertEquals(untaggedResult.metrics, new Map([["job: Check", sample]]));
+  assertEquals(untaggedResult.metricNames, new Set(["job: Check"]));
+  assertEquals(untaggedResult.compileCacheStates, null);
+
+  const missingResult = await addPerfMetricsFromArtifacts(
+    timelines,
+    [],
+    () => Promise.resolve(null),
+  );
+  assertEquals(missingResult.added, false);
+  assertEquals(missingResult.metrics, new Map());
+  assertEquals(missingResult.metricNames, new Set());
+  assertEquals(missingResult.compileCacheStates, null);
+});
+
+Deno.test("addMissingWorkspaceShardStepMetrics backfills missing shard steps from jobs", async () => {
+  const run = makeRun(123);
+  const timelines = new Map<string, MetricTimeline>();
+  const result = await addMissingWorkspaceShardStepMetrics(
+    timelines,
+    run,
+    [
+      "job: Test (4/6)",
+      "step: workspace tests",
+      "step: workspace tests (4/6)",
+    ],
+    new Set(["job: Test (4/6)", "step: workspace tests"]),
+    undefined,
+    (runId) => {
+      assertEquals(runId, 123);
+      return Promise.resolve([
+        {
+          id: 4,
+          name: "Test (4/6)",
+          started_at: "2026-06-18T12:00:00Z",
+          completed_at: "2026-06-18T12:03:00Z",
+          steps: [
+            {
+              name: "🧪 Run parallel workspace tests",
+              started_at: "2026-06-18T12:00:20Z",
+              completed_at: "2026-06-18T12:02:20Z",
+            },
+          ],
+        },
+      ]);
+    },
   );
 
+  assertEquals(result.fetchedJobs, true);
   assertEquals(
-    await addPerfMetricsFromArtifacts(
-      timelines,
-      [],
-      () => Promise.resolve(null),
-    ),
-    { added: false, compileCacheStates: null },
+    result.added.get("step: workspace tests (4/6)")?.durationSeconds,
+    120,
+  );
+  assertEquals(
+    timelines.get("step: workspace tests (4/6)")?.samples[0].durationSeconds,
+    120,
+  );
+  assertEquals(timelines.has("job: Test (4/6)"), false);
+});
+
+Deno.test("addMissingWorkspaceShardStepMetrics prefers existing backfills", async () => {
+  const run = makeRun(123);
+  const timelines = new Map<string, MetricTimeline>();
+  const sample = timingSampleAt(123, 90);
+  const result = await addMissingWorkspaceShardStepMetrics(
+    timelines,
+    run,
+    ["step: workspace tests (4/6)"],
+    new Set(),
+    new Map([["step: workspace tests (4/6)", sample]]),
+    () => {
+      throw new Error("job fetch should not run when backfill has the metric");
+    },
+  );
+
+  assertEquals(result.fetchedJobs, false);
+  assertEquals(result.added.get("step: workspace tests (4/6)"), sample);
+  assertEquals(
+    timelines.get("step: workspace tests (4/6)")?.samples,
+    [sample],
+  );
+});
+
+Deno.test("addMissingWorkspaceShardStepMetrics ignores missing job metrics", async () => {
+  const run = makeRun(123);
+  const timelines = new Map<string, MetricTimeline>();
+  const result = await addMissingWorkspaceShardStepMetrics(
+    timelines,
+    run,
+    [
+      "step: workspace tests (4/6)",
+      "step: workspace tests (5/6)",
+    ],
+    new Set(),
+    undefined,
+    () =>
+      Promise.resolve([
+        {
+          id: 4,
+          name: "Test (4/6)",
+          started_at: "2026-06-18T12:00:00Z",
+          completed_at: "2026-06-18T12:03:00Z",
+          steps: [
+            {
+              name: "🧪 Run parallel workspace tests",
+              started_at: "2026-06-18T12:00:20Z",
+              completed_at: "2026-06-18T12:02:20Z",
+            },
+          ],
+        },
+      ]),
+  );
+
+  assertEquals(result.fetchedJobs, true);
+  assertEquals(
+    result.added.get("step: workspace tests (4/6)")?.durationSeconds,
+    120,
+  );
+  assertEquals(result.added.has("step: workspace tests (5/6)"), false);
+  assertEquals(timelines.has("step: workspace tests (5/6)"), false);
+});
+
+Deno.test("addBackfilledMetricsWithMissingWorkspaceShardSteps fills stale backfills from jobs", async () => {
+  const run = makeRun(123);
+  const timelines = new Map<string, MetricTimeline>();
+  const aggregateSample = timingSampleAt(123, 150);
+  const result = await addBackfilledMetricsWithMissingWorkspaceShardSteps(
+    timelines,
+    run,
+    [
+      "job: Test (4/6)",
+      "step: workspace tests",
+      "step: workspace tests (4/6)",
+    ],
+    new Map([["step: workspace tests", aggregateSample]]),
+    (runId) => {
+      assertEquals(runId, 123);
+      return Promise.resolve([
+        {
+          id: 4,
+          name: "Test (4/6)",
+          started_at: "2026-06-18T12:00:00Z",
+          completed_at: "2026-06-18T12:03:00Z",
+          steps: [
+            {
+              name: "🧪 Run parallel workspace tests",
+              started_at: "2026-06-18T12:00:20Z",
+              completed_at: "2026-06-18T12:02:20Z",
+            },
+          ],
+        },
+      ]);
+    },
+  );
+
+  assertEquals(result.fetchedJobs, true);
+  assertEquals(result.metrics.get("step: workspace tests"), aggregateSample);
+  assertEquals(
+    result.metrics.get("step: workspace tests (4/6)")?.durationSeconds,
+    120,
+  );
+  assertEquals(result.metrics.has("job: Test (4/6)"), false);
+  assertEquals(
+    timelines.get("step: workspace tests")?.samples,
+    [aggregateSample],
+  );
+  assertEquals(
+    timelines.get("step: workspace tests (4/6)")?.samples[0].durationSeconds,
+    120,
   );
 });
 
@@ -1359,6 +1525,51 @@ Deno.test("evaluateTimingMetric keeps excl precedence over COLD", () => {
 
   assertEquals(row.status, "excl");
   assertEquals(failure, false);
+});
+
+Deno.test("evaluateTimingMetric excludes workspace job and shard totals but gates aggregate workspace test steps", () => {
+  const samples = [1, 2, 3, 4, 5].map((runId) => timingSampleAt(runId, 10));
+  const jobResult = evaluateTimingMetric({
+    metric: "job: Test (4/6)",
+    current: 30,
+    timeline: timingTimeline("job: Test (4/6)", samples),
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: {},
+    stateOfRunForFamily: () => () => undefined,
+  });
+  const aggregateJobResult = evaluateTimingMetric({
+    metric: "job: Test",
+    current: 30,
+    timeline: timingTimeline("job: Test", samples),
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: {},
+    stateOfRunForFamily: () => () => undefined,
+  });
+  const stepResult = evaluateTimingMetric({
+    metric: "step: workspace tests",
+    current: 30,
+    timeline: timingTimeline("step: workspace tests", samples),
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: {},
+    stateOfRunForFamily: () => () => undefined,
+  });
+  const shardStepResult = evaluateTimingMetric({
+    metric: "step: workspace tests (4/6)",
+    current: 30,
+    timeline: timingTimeline("step: workspace tests (4/6)", samples),
+    prOverrides: NO_OVERRIDES,
+    currentCacheStates: {},
+    stateOfRunForFamily: () => () => undefined,
+  });
+
+  assertEquals(jobResult.row.status, "excl");
+  assertEquals(jobResult.failure, false);
+  assertEquals(aggregateJobResult.row.status, "excl");
+  assertEquals(aggregateJobResult.failure, false);
+  assertEquals(stepResult.row.status, "OVER");
+  assertEquals(stepResult.failure, true);
+  assertEquals(shardStepResult.row.status, "excl");
+  assertEquals(shardStepResult.failure, false);
 });
 
 Deno.test("evaluateTimingMetric excludes known-cold baseline samples for a warm run", () => {

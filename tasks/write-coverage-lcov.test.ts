@@ -1,6 +1,9 @@
 import { assertEquals } from "@std/assert";
 import * as path from "@std/path";
-import { removeUnusableCoverageProfiles } from "./write-coverage-lcov.ts";
+import {
+  collectCoverageProfileFiles,
+  removeUnusableCoverageProfiles,
+} from "./write-coverage-lcov.ts";
 
 function coverageProfileFor(url: string): string {
   return JSON.stringify({
@@ -27,6 +30,31 @@ async function pathExists(file: string): Promise<boolean> {
     throw error;
   }
 }
+
+Deno.test("collectCoverageProfileFiles finds nested profile files", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "write-coverage-lcov-" });
+  try {
+    const rootProfile = path.join(dir, "root.json");
+    const nestedProfile = path.join(dir, "nested", "profile.json");
+    const ignoredFile = path.join(dir, "nested", "profile.txt");
+
+    await Deno.mkdir(path.dirname(nestedProfile), { recursive: true });
+    await Deno.writeTextFile(rootProfile, "{}");
+    await Deno.writeTextFile(nestedProfile, "{}");
+    await Deno.writeTextFile(ignoredFile, "{}");
+
+    assertEquals(
+      (await collectCoverageProfileFiles(dir)).sort(),
+      [nestedProfile, rootProfile].sort(),
+    );
+    assertEquals(
+      await collectCoverageProfileFiles(path.join(dir, "absent")),
+      [],
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
 
 Deno.test("removeUnusableCoverageProfiles removes empty and invalid profile files", async () => {
   const dir = await Deno.makeTempDir({ prefix: "write-coverage-lcov-" });

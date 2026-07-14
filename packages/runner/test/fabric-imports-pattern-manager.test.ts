@@ -5,6 +5,7 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { isPattern } from "../src/builder/types.ts";
 import {
   getCompileCacheRuntimeVersion,
   loadCompiledClosure,
@@ -87,8 +88,10 @@ describe("PatternManager fabric imports", () => {
       result: number;
       child: { dep: number };
     }>(space, cause, undefined, tx);
-    // deno-lint-ignore no-explicit-any
-    const result = runtime.run(tx, pattern as any, { value }, resultCell);
+    if (!isPattern(pattern)) {
+      throw new Error("Expected loaded artifact to be a pattern");
+    }
+    const result = runtime.run(tx, pattern, { value }, resultCell);
     await tx.commit();
     await result.pull();
     return result.getAsQueryResult();

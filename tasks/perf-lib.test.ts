@@ -444,6 +444,14 @@ Deno.test("extractMetrics aggregates workspace test matrix shards", () => {
   assertEquals(metrics.get("job: Test (1/4)")?.durationSeconds, 200);
   assertEquals(metrics.get("job: Test (2/4)")?.durationSeconds, 150);
   assertEquals(metrics.get("job: Test")?.durationSeconds, 200);
+  assertEquals(
+    metrics.get("step: workspace tests (1/4)")?.durationSeconds,
+    180,
+  );
+  assertEquals(
+    metrics.get("step: workspace tests (2/4)")?.durationSeconds,
+    110,
+  );
   assertEquals(metrics.get("step: workspace tests")?.durationSeconds, 180);
 });
 

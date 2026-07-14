@@ -1155,6 +1155,14 @@ export function extractMetrics(
             generatedPatternsMatch || runnerTestMatch || cliCoreSplitMatch ||
             workspaceTestMatch
           ) {
+            if (workspaceTestMatch) {
+              metrics.set(
+                `${matcher.metricName} (${workspaceTestMatch[1]}/${
+                  workspaceTestMatch[2]
+                })`,
+                sample,
+              );
+            }
             setMaxMetric(matcher.metricName, sample);
           } else {
             metrics.set(matcher.metricName, sample);

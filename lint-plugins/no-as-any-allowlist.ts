@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/fabric-imports-pattern-manager.test.ts",
   "packages/runner/test/fabric-imports-snapshot.test.ts",
   "packages/runner/test/fetch-builtins.test.ts",
   "packages/runner/test/fetch-mutex-core.test.ts",
