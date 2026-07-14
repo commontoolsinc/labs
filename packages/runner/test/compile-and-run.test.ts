@@ -362,3 +362,55 @@ Deno.test("compileAndRunResult exposes the result cell and keeps both refs", asy
     await storageManager.close();
   }
 });
+
+Deno.test("compileAndRunResult preserves the live compiled result", async () => {
+  const identity = await Identity.fromPassphrase("live direct compiled result");
+  const storageManager = StorageManager.emulate({ as: identity });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const space = identity.did();
+  const tx = runtime.edit();
+
+  try {
+    const inputs = runtime.getCell<any>(space, "live-compile-inputs");
+    const parent = runtime.getCell(space, "live-compile-parent");
+    let result: any;
+    const action = compileAndRunResult(
+      inputs,
+      (_tx, value) => result = value,
+      () => {},
+      { test: "live-direct-result" },
+      parent,
+      runtime,
+    );
+
+    inputs.withTx(tx).set({
+      main: "/main.ts",
+      files: [{
+        name: "/main.ts",
+        contents: [
+          "import { pattern } from 'commonfabric';",
+          "export default pattern<{ value: number }>(({ value }) => ({ value }));",
+        ].join("\n"),
+      }],
+      input: { value: 7 },
+    });
+    action(tx);
+    assertStrictEquals(
+      result.withTx(tx).resolveAsCell().getRaw(),
+      DataUnavailable.pending(),
+    );
+    await tx.commit();
+
+    await waitFor(
+      () => result.key("value").get() === 7,
+      "live compiled result",
+    );
+    assertEquals(result.key("value").get(), 7);
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
