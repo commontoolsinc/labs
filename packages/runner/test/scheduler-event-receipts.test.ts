@@ -166,6 +166,13 @@ function resolvedStreamLink(streamCell: Cell<unknown>, runtime: Runtime) {
   );
 }
 
+async function processNextQueuedEvent(runtime: Runtime): Promise<void> {
+  const scheduler = runtime.scheduler as unknown as {
+    processExecuteEventPhase(): Promise<Set<unknown>>;
+  };
+  await scheduler.processExecuteEventPhase();
+}
+
 describe("scheduler event receipts", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
@@ -342,7 +349,6 @@ describe("scheduler event receipts", () => {
       return { state, doubled };
     });
     let handlerInvocations = 0;
-    const secondInvocation = Promise.withResolvers<void>();
     const launchChild = handler<
       { value: number },
       { target: Cell<unknown> }
@@ -361,7 +367,6 @@ describe("scheduler event receipts", () => {
       },
       (_event, { target }) => {
         handlerInvocations++;
-        if (handlerInvocations === 2) secondInvocation.resolve();
         const handlerTx = target.tx;
         if (handlerTx === undefined) {
           throw new Error("handler target must carry the dispatch transaction");
@@ -410,6 +415,7 @@ describe("scheduler event receipts", () => {
         gate.started,
         "first deferred receipt transaction did not start",
       );
+      await runtime.scheduler.runningPromise;
       expect(handlerInvocations).toBe(1);
 
       runtime.scheduler.queueEvent(
@@ -420,10 +426,11 @@ describe("scheduler event receipts", () => {
         false,
         { eventId },
       );
-      // Synchronize on the exact overlap this regression protects. A deadline
-      // here makes correctness depend on instrumentation and runner load; if
-      // the overlap disappears, Deno reports the unresolved test promise.
-      await secondInvocation.promise;
+      // Drive the second dispatch directly while the first storage commit is
+      // gated. Letting the scheduler's settle tick race this test made the
+      // overlap platform-dependent: a cold replica can park that tick behind
+      // the speculative first write even though event commits are detached.
+      await processNextQueuedEvent(runtime);
       expect(handlerInvocations).toBe(2);
 
       // Let the second delivery commit first. Releasing the first transaction
