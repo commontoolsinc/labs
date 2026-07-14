@@ -54,6 +54,12 @@ const PROFILE_HOME_SRC = Deno.readTextFileSync(
   new URL("../../patterns/system/profile-home.tsx", import.meta.url),
 );
 
+type EngineRegistryView = {
+  executableRegistry: {
+    verifiedImplementationsByEntryRef: Map<string, Map<string, unknown>>;
+  };
+};
+
 function programFor(src: string): RuntimeProgram {
   return { main: "/main.tsx", files: [{ name: "/main.tsx", contents: src }] };
 }
@@ -62,11 +68,9 @@ function recordedBindingPaths(rt: Runtime): string[][] {
   // The binding identity lives on each registered function's content-addressed
   // provenance (the former `verifiedBindingMetadata` map is gone — PR E2);
   // enumerate the engine's implementation index to reach the registered fns.
-  const reg = (rt.harness as any).executableRegistry;
-  const byRef = reg.verifiedImplementationsByEntryRef as Map<
-    string,
-    Map<string, unknown>
-  >;
+  const reg = (rt.harness as unknown as EngineRegistryView)
+    .executableRegistry;
+  const byRef = reg.verifiedImplementationsByEntryRef;
   const out: string[][] = [];
   for (const bucket of byRef.values()) {
     for (const fn of bucket.values()) {
@@ -99,7 +103,7 @@ async function bindingPathsResolvedDuring(
   };
   try {
     fn();
-    await (rt as any).idle?.();
+    await rt.idle();
   } finally {
     proto.setCfcImplementationIdentity = orig;
   }
