@@ -350,13 +350,15 @@ describe("createProxy", () => {
     expect(proxy.a).toEqual([1, 2]);
   });
 
-  it.skip("should correctly sort() with cell references", () => {
+  it("should correctly sort() with cell references", () => {
     const c = runtime.getCell<{ a: number[] }>(
       space,
       "should correctly sort() with cell references",
+      undefined,
+      tx,
     );
     c.set({ a: [] as number[] });
-    const proxy = c.getAsQueryResult();
+    const proxy = c.getAsQueryResult([], tx, true);
     proxy.a = [3, 1, 2];
     const result = proxy.a.sort();
     expect(result).toEqual([1, 2, 3]);
