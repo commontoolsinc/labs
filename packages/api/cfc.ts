@@ -387,7 +387,7 @@ export function exchangeRule<const T extends CfcExchangeRuleAuthoringInput>(
 export function exchangeRules<
   const T extends readonly CfcExchangeRuleDeclaration[],
 >(rules: T): CfcExchangeRulesDeclaration<T> {
-  return deepFreeze([...rules]) as unknown as CfcExchangeRulesDeclaration<T>;
+  return deepFreeze([...rules] as T);
 }
 
 export type CfcSpaceAtom = CfcAtomObject & {

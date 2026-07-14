@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/api/cfc.ts": [
-    "390:32:q9f7m8",
-  ],
   "packages/api/test/framework-provided.test.ts": [
     "14:21:1nukukk",
   ],
