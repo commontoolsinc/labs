@@ -12,6 +12,7 @@ import { FABRIC_MOUNT_ROOT } from "../src/sandbox/module-record-compiler.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
+import { isPattern } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("fabric imports engine test");
 const space = signer.did();
@@ -122,6 +123,9 @@ describe("Engine fabric imports", () => {
   }
 
   async function runPattern(pattern: unknown, value: number): Promise<unknown> {
+    if (!isPattern(pattern)) {
+      throw new Error("Expected evaluated default export to be a pattern");
+    }
     const tx = runtime.edit();
     const resultCell = runtime.getCell<{ result: number }>(
       space,
@@ -129,8 +133,7 @@ describe("Engine fabric imports", () => {
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const result = runtime.run(tx, pattern as any, { value }, resultCell);
+    const result = runtime.run(tx, pattern, { value }, resultCell);
     await tx.commit();
     await result.pull();
     return result.getAsQueryResult();
