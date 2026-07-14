@@ -7,6 +7,7 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("cross-space-value-read");
@@ -99,11 +100,14 @@ const PROGRAM: RuntimeProgram = {
 
 const RESULT_CAUSE = "cross-space value read parent";
 
+type ChildOutput = { name: string; greeting: string };
+type ChildRead = { name?: string; greeting?: string };
+type ChildCell = Cell<ChildOutput>;
+
 const linkListSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} as const satisfies JSONSchema;
 
 // The badge-style minimal read schema on the child.
 const nameSchema = {
@@ -112,8 +116,7 @@ const nameSchema = {
     name: { type: "string" },
     greeting: { type: "string" },
   },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} as const satisfies JSONSchema;
 
 describe("cross-space value reads (CT-1667)", () => {
   let server: MemoryV2Server.Server;
@@ -149,8 +152,7 @@ describe("cross-space value reads (CT-1667)", () => {
       undefined,
       tx1,
     );
-    // deno-lint-ignore no-explicit-any
-    const r1 = rt1.run(tx1, parent as any, {}, resultCell1);
+    const r1 = rt1.run(tx1, parent, {}, resultCell1);
     await tx1.commit();
     await r1.pull();
     r1.key("create").send({ name: "Ada" });
@@ -158,8 +160,7 @@ describe("cross-space value reads (CT-1667)", () => {
     await rt1.idle();
     // Sanity: the child materialized in P and reads fine in the creating
     // runtime (everything is in its own replicas).
-    // deno-lint-ignore no-explicit-any
-    const links = r1.key("items").asSchema(linkListSchema).get() as any[];
+    const links = r1.key("items").asSchema<ChildCell[]>(linkListSchema).get();
     expect(links.length).toBe(1);
     expect(links[0].getAsNormalizedFullLink().space).toBe(spaceP);
     await rt1.patternManager.flushCompileCacheWrites();
@@ -220,8 +221,7 @@ describe("cross-space value reads (CT-1667)", () => {
       // part of it. This is the "naive resolve" shape from the issue.
       const itemsCell = parentCell.key("items");
       await itemsCell.pull();
-      // deno-lint-ignore no-explicit-any
-      const items = itemsCell.get() as any[];
+      const items = itemsCell.get() as unknown as ChildOutput[];
       expect(Array.isArray(items)).toBe(true);
       expect(items.length).toBe(1);
       expect(items[0]?.name).toBe("Ada");
@@ -248,16 +248,13 @@ describe("cross-space value reads (CT-1667)", () => {
       // Resolve the child link to a cell (what cf-profile-badge does with
       // $profile) and subscribe with a minimal schema. NOTE: derived from the
       // parent's read — the handle inherits the parent's synced state.
-      // deno-lint-ignore no-explicit-any
       const links = parentCell.key("items").asSchema(linkListSchema)
-        // deno-lint-ignore no-explicit-any
-        .get() as any[];
+        .get() as unknown as ChildCell[];
       expect(links.length).toBe(1);
-      const childCell = links[0].asSchema(nameSchema);
+      const childCell = links[0].asSchema<ChildRead>(nameSchema);
 
-      // deno-lint-ignore no-explicit-any
-      const seen: any[] = [];
-      const cancel = childCell.sink((value: unknown) => {
+      const seen: Readonly<ChildRead>[] = [];
+      const cancel = childCell.sink((value) => {
         seen.push(value);
       });
       await rt2.idle();
