@@ -901,6 +901,12 @@ export class Runtime {
     });
 
     this.storageManager = options.storageManager;
+    // Hand the storage layer the telemetry bus so it can emit the
+    // storage.push/pull markers (duck-typed: only the v2 StorageManager
+    // implements it; emulated/test managers simply don't have the method).
+    (this.storageManager as {
+      setTelemetry?: (telemetry: RuntimeTelemetry) => void;
+    }).setTelemetry?.(this.telemetry);
     this.moduleByteCache = options.moduleByteCache;
     // Validated + digested + frozen before the trust-snapshot provider
     // default below, whose `revision` covers the config digest (a trust
@@ -1235,29 +1241,51 @@ export class Runtime {
     return wrapped;
   }
 
-  // (space, id) pairs for which a missing-link-target load has been kicked
-  // this session. The kicked sync establishes a live per-doc subscription, so
-  // a later creation of the doc still arrives — one kick per doc suffices.
+  // (space, scope, id) triples for which a missing-link-target load has been
+  // kicked this session. The kicked sync establishes a live per-doc
+  // subscription, so a later creation of the doc still arrives — one kick per
+  // doc suffices. Scope is part of the key: scoped instances (user/session)
+  // are distinct docs, and a kick for one scope must not suppress another's.
   private missingDocLoadKicks = new Set<string>();
 
   /**
-   * Asynchronously load a cross-space link target that a read found absent
-   * from the local replica (CT-1667): per-space server queries cannot follow
-   * links across space boundaries, so the client must fetch such targets
-   * itself. Fire-and-forget, but registered as a cross-space promise so
+   * Asynchronously load a link target that a read found absent from the
+   * local replica. Cross-space targets (CT-1667): per-space server queries
+   * cannot follow links across space boundaries, so the client must fetch
+   * such targets itself. Same-space targets (fresh-replica read asymmetry):
+   * a rejecting-selector sync delivers only the root doc, so a link can
+   * point at a doc no selector ever walked — those are fetched only when
+   * the local replica has never seen the doc (`shouldPullDoc`), so reads of
+   * genuinely absent optional values do not become repeated server queries.
+   * Fire-and-forget, but registered as a cross-space promise so
    * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
    * it; the absent doc is a tracked read, so the reader re-runs on arrival.
    * Deduped per (space, id): the kicked sync leaves a live subscription
    * behind, so repeat kicks add nothing.
    */
-  ensureLinkedDocLoaded(link: NormalizedFullLink): void {
-    const key = `${link.space}\0${link.id}`;
+  ensureLinkedDocLoaded(
+    link: NormalizedFullLink,
+    sourceSpace?: MemorySpace,
+  ): void {
+    const { space, id, scope } = link;
+    const key = `${space}\0${normalizeCellScope(scope)}\0${id}`;
     if (this.missingDocLoadKicks.has(key)) return;
+    // A same-space target the replica already has state for (or a manager
+    // without lazy replication) needs no fetch.
+    const sameSpace = sourceSpace === space;
+    const mgr = this.storageManager;
+    const reserved = sameSpace &&
+      mgr.shouldPullDoc?.(space, id, scope) === true;
+    if (sameSpace && !reserved) return;
     this.missingDocLoadKicks.add(key);
-    this.storageManager.trackUntilSettled(
+    mgr.trackUntilSettled(
       this.getCellFromLink(link).sync().catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect).
+        // Allow a retry on failure (e.g. transient disconnect): clear this
+        // dedup set, and hand back the storage manager's reservation when
+        // THIS kick took it — a cross-space kick never reserved, and must
+        // not clear a reservation a concurrent same-space read holds.
         this.missingDocLoadKicks.delete(key);
+        if (reserved) mgr.retractDocPullKick?.(space, id, scope);
       }),
     );
   }

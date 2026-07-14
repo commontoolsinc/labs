@@ -19,6 +19,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("read-repair-strand");
@@ -129,6 +130,19 @@ describe("read-repair: stale read after cross-replica conflict", () => {
       v: "v0",
     });
 
+    // The rejected commit must also surface through the telemetry markers:
+    // storage.push.error is the client half of the rejected-commit join
+    // (space.did + commit.local_seq — known before the response, unlike a
+    // confirmed seq).
+    const pushMarkers: { type: string; localSeq?: number; error?: string }[] =
+      [];
+    rtB.telemetry.addEventListener("telemetry", (event) => {
+      const marker = (event as RuntimeTelemetryEvent).marker;
+      if (marker.type.startsWith("storage.push.")) {
+        pushMarkers.push(marker as (typeof pushMarkers)[number]);
+      }
+    });
+
     // B commits its v0-based write — the server rejects it (stale read).
     const resB = await txB.commit();
     expect(resB.error, "B's commit should be rejected (conflict)")
@@ -136,6 +150,16 @@ describe("read-repair: stale read after cross-replica conflict", () => {
     expect(
       (resB.error as { name?: string })?.name,
       "cross-replica conflict is a ConflictError",
+    ).toBe("ConflictError");
+
+    const startMarker = pushMarkers.find((m) =>
+      m.type === "storage.push.start"
+    );
+    expect(startMarker?.localSeq, "push.start carries the join key")
+      .toBeDefined();
+    expect(
+      pushMarkers.find((m) => m.type === "storage.push.error")?.error,
+      "rejected commit emits storage.push.error with the rejection name",
     ).toBe("ConflictError");
 
     // INVARIANT under test: after the rejection, B's read must not be staler

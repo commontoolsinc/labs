@@ -152,6 +152,24 @@ export type RuntimeTelemetryMarker = {
   actionInfo?: SchedulerActionInfo;
   error?: string;
 } | {
+  // Emitted when an action run finishes, next to the ActionStats recording —
+  // the same wall-clock measurement, surfaced as a marker so consumers (OTel
+  // bridge, debugger) get per-run durations without polling getActionStats().
+  type: "scheduler.run.complete";
+  actionId: string;
+  actionInfo?: SchedulerActionInfo;
+  durationMs: number;
+  error?: string;
+} | {
+  // Emitted once per settle pass, unconditionally (unlike SettleStats, which
+  // is opt-in): the user-facing "event → stable graph" number.
+  type: "scheduler.settle";
+  durationMs: number;
+  iterations: number;
+  settledEarly: boolean;
+  seedCount: number;
+  workSetSize: number;
+} | {
   type: "cell.update";
   change: IMemoryChange;
   error?: string;
@@ -204,14 +222,22 @@ export type RuntimeTelemetryMarker = {
   type: "storage.push.start";
   id: string;
   operation: string;
+  // Client-side commit sequence + space: the join keys to the memory
+  // server's `memory.transact` span (commit.local_seq / space.did attrs).
+  localSeq?: number;
+  spaceDid?: string;
   error?: string;
 } | {
   type: "storage.push.complete";
   id: string;
+  // Session is only known once the connection is established, so the
+  // session-scoped join key rides the completion rather than the start.
+  sessionId?: string;
   error?: string;
 } | {
   type: "storage.push.error";
   id: string;
+  sessionId?: string;
   error: string;
 } | {
   type: "storage.pull.start";

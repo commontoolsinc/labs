@@ -836,13 +836,24 @@ describe("mounted callable resolution and execution", () => {
 
     await writeLiveMountState(stateDir, mountpoint);
 
+    const delays: number[] = [];
     await expect(
       resolveMountedCallableFile(filePath, {
         stateDir,
         loadManager: () => Promise.resolve(harness.manager),
         loadPiece: () => Promise.resolve(harness.piece),
+        delay: (ms) => {
+          delays.push(ms);
+          return Promise.resolve();
+        },
       }),
     ).rejects.toThrow(/mounted callable file not found/i);
+
+    // One bounded wait to outlast the directory listing cache, then failure.
+    // The macOS NFS client serves cached listings for up to ~3s, so the
+    // wait must exceed that for the recheck to reach the daemon.
+    expect(delays.length).toBe(1);
+    expect(delays[0]).toBeGreaterThan(3000);
   });
 
   it("tolerates transient mounted callable ENOENT during FUSE invalidation", async () => {
@@ -850,6 +861,7 @@ describe("mounted callable resolution and execution", () => {
     const pieceDir = join(mountpoint, "home/pieces/notes-2");
     const filePath = join(pieceDir, "result", "search.tool");
     await Deno.mkdir(join(pieceDir, "result"), { recursive: true });
+    await Deno.writeTextFile(filePath, "");
     await Deno.writeTextFile(
       join(pieceDir, "meta.json"),
       JSON.stringify({
@@ -880,16 +892,90 @@ describe("mounted callable resolution and execution", () => {
     });
     await writeLiveMountState(stateDir, mountpoint);
 
-    setTimeout(() => {
-      void Deno.writeTextFile(filePath, "");
-    }, 50);
-
+    // The file exists, but stat reports NotFound the way a stale FUSE-T
+    // kernel cache does while the bridge rebuilds the prop subtree. The
+    // resolver falls back to the parent directory listing, which names
+    // the file.
+    const statCalls: string[] = [];
     const resolved = await resolveMountedCallableFile(filePath, {
       stateDir,
       loadManager: () => Promise.resolve(harness.manager),
       loadPiece: () => Promise.resolve(harness.piece),
+      stat: (path) => {
+        statCalls.push(path);
+        return Promise.reject(
+          new Deno.errors.NotFound(`stat '${path}': invalidated`),
+        );
+      },
     });
 
+    expect(statCalls.length).toBe(1);
+    expect(statCalls[0].endsWith(join("result", "search.tool"))).toBe(true);
+    expect(resolved.absPath).toBe(filePath);
+    expect(resolved.pieceId).toBe("of:piece-123");
+  });
+
+  it("consults the parent listing again after a stale cached listing", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const pieceDir = join(mountpoint, "home/pieces/notes-2");
+    const filePath = join(pieceDir, "result", "search.tool");
+    await Deno.mkdir(join(pieceDir, "result"), { recursive: true });
+    await Deno.writeTextFile(filePath, "");
+    await Deno.writeTextFile(
+      join(pieceDir, "meta.json"),
+      JSON.stringify({
+        id: "of:piece-123",
+        entityId: "of:piece-123",
+        name: "Fixture Piece",
+      }),
+    );
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+        },
+        resultSchema: {
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+        },
+      },
+    });
+    await writeLiveMountState(stateDir, mountpoint);
+
+    // stat reports NotFound and the first parent listing is served from a
+    // cache that predates the file; only the listing taken after the cache
+    // validity window names it.
+    const readDirCalls: string[] = [];
+    const delays: number[] = [];
+    const resolved = await resolveMountedCallableFile(filePath, {
+      stateDir,
+      loadManager: () => Promise.resolve(harness.manager),
+      loadPiece: () => Promise.resolve(harness.piece),
+      stat: (path) =>
+        Promise.reject(new Deno.errors.NotFound(`stat '${path}': invalidated`)),
+      readDir: (path) => {
+        readDirCalls.push(path);
+        return readDirCalls.length === 1
+          ? (async function* (): AsyncIterable<Deno.DirEntry> {})()
+          : Deno.readDir(path);
+      },
+      delay: (ms) => {
+        delays.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    expect(readDirCalls.length).toBe(2);
+    expect(delays.length).toBe(1);
     expect(resolved.absPath).toBe(filePath);
     expect(resolved.pieceId).toBe("of:piece-123");
   });

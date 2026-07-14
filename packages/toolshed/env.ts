@@ -223,7 +223,7 @@ export const EnvSchema = z.object({
   // `observe` evaluates ordinary access and counts/logs would-denies; invalid
   // ACL state and fresh-space genesis violations still block. `enforce` also
   // denies access shortfalls. See packages/memory/v2/server.ts.
-  MEMORY_ACL_MODE: z.enum(["off", "observe", "enforce"]).default("off"),
+  MEMORY_ACL_MODE: z.enum(["off", "observe", "enforce"]).default("enforce"),
 
   // Comma-separated DIDs with implicit OWNER on every space (e.g. the
   // background service operator identity).

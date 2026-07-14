@@ -1,6 +1,8 @@
 import {
   awaitViewSettled,
+  getPresentationSession,
   Page,
+  presentationInteractions,
   type ProbeApi,
   waitForCondition,
 } from "@commonfabric/integration";
@@ -474,10 +476,15 @@ export async function fillCfInput(
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
-    await waitForCondition(page, fillAndVerify, {
-      timeout,
-      args: [selector, value],
-    });
+    const presentation = presentationInteractions(page);
+    if (presentation) {
+      await presentation.typeIntoCfInput(selector, value, timeout);
+    } else {
+      await waitForCondition(page, fillAndVerify, {
+        timeout,
+        args: [selector, value],
+      });
+    }
   } catch (cause) {
     const probe = await readCfInputProbe(page, selector).catch(() => undefined);
     throw new Error(
@@ -1128,7 +1135,8 @@ export class StepTimer {
   async run<T>(label: string, fn: () => Promise<T>): Promise<T> {
     const start = performance.now();
     try {
-      return await fn();
+      const presentation = getPresentationSession();
+      return presentation ? await presentation.step(label, fn) : await fn();
     } finally {
       this.#rows.push({ label, ms: Math.round(performance.now() - start) });
     }

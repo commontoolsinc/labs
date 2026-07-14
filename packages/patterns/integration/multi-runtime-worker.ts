@@ -172,6 +172,40 @@ function installWsDelay(delayMs: number): void {
   globalThis.WebSocket = Delayed;
 }
 
+// When the harness process runs under Deno's native OpenTelemetry
+// (`OTEL_DENO=true deno run --unstable-otel …` — the harness has no SDK setup
+// of its own), `@opentelemetry/api`'s globals resolve to Deno's providers, so
+// bridging the runtime's existing telemetry bus exports scheduler spans and
+// ct.* metrics with zero configuration. Inert otherwise: without a registered
+// provider the API hands the bridge no-op instruments. Also flips the
+// preflight-telemetry gate, which is what runtime-client's
+// setTelemetryEnabled(true) does for browser sessions — without it the
+// scheduler.event.preflight markers never fire.
+async function maybeAttachOtelBridge(identity: Identity): Promise<void> {
+  const env = (name: string): string | undefined =>
+    typeof Deno !== "undefined" ? Deno.env.get(name) : undefined;
+  const otelActive = env("OTEL_DENO") === "true" || env("OTEL_DENO") === "1" ||
+    env("OTEL_ENABLED") === "true";
+  if (!otelActive) return;
+  const [{ attachRuntimeTelemetryOtelBridge }, { metrics, trace }] =
+    await Promise.all([
+      import("@commonfabric/runner/telemetry-otel-bridge"),
+      import("@opentelemetry/api"),
+    ]);
+  const manager = controller().manager();
+  const runtime = manager.runtime;
+  attachRuntimeTelemetryOtelBridge(runtime.telemetry, {
+    tracer: trace.getTracer("ct-runner-bridge"),
+    meter: metrics.getMeter("ct-runner-bridge"),
+    attributes: {
+      "ct.runtime": "harness",
+      "space.did": manager.getSpace(),
+      "user.did": identity.did(),
+    },
+  });
+  runtime.scheduler.setEventPreflightTelemetryEnabled(true);
+}
+
 const handlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<unknown>
@@ -189,6 +223,7 @@ const handlers: Record<
       scheduler.enableSettleStats();
       scheduler.setActionRunTraceEnabled(true);
     }
+    await maybeAttachOtelBridge(identity);
     return { did: identity.did() };
   },
 

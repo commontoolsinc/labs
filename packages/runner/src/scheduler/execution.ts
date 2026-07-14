@@ -296,6 +296,10 @@ export type SchedulerSettleResult = {
   lastWorkSet: Set<Action>;
   earlyIterationComputations: Set<Action>;
   maxSettleIterations: number;
+  /** Iterations that actually ran work (excludes the final settled check). */
+  iterationsRun: number;
+  /** Wall-clock of the settle loop, measured unconditionally. */
+  settleDurationMs: number;
   settleStats?: SettleStats;
 };
 

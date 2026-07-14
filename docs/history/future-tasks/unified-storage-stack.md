@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2025-06-12
+archived: 2026-07-13
+reason: "Storage-unification plan written against the DocImpl-era stack (doc.sourceCell, storage.ts); the v2 storage/memory stack superseded both the described current state and much of the plan."
+---
+
 # Unifying the storage stack
 
 ## Current state

@@ -126,6 +126,24 @@ export interface PageEventMap {
   "pageerror": PageErrorEvent;
 }
 
+export interface InteractionObserver {
+  beforeClick?(
+    element: ElementHandle,
+    point: { x: number; y: number },
+  ): Promise<void> | void;
+  afterClick?(
+    element: ElementHandle,
+    point: { x: number; y: number },
+    error?: unknown,
+  ): Promise<void> | void;
+  beforeType?(element: ElementHandle, text: string): Promise<void> | void;
+  afterType?(
+    element: ElementHandle,
+    text: string,
+    error?: unknown,
+  ): Promise<void> | void;
+}
+
 /** The details for a console event */
 export interface ConsoleEventDetails {
   type: Runtime_consoleAPICalled["type"];
@@ -169,11 +187,43 @@ export class Page extends EventTarget implements AsyncDisposable {
   #browser: Browser;
   #url: string;
   #coverage?: boolean;
+  #interactionObserver?: InteractionObserver;
 
   readonly timeout = 10000;
   readonly mouse: Mouse;
   readonly keyboard: Keyboard;
   readonly touchscreen: Touchscreen;
+
+  setInteractionObserver(observer?: InteractionObserver): void {
+    this.#interactionObserver = observer;
+  }
+
+  async notifyBeforeClick(
+    element: ElementHandle,
+    point: { x: number; y: number },
+  ): Promise<void> {
+    await this.#interactionObserver?.beforeClick?.(element, point);
+  }
+
+  async notifyAfterClick(
+    element: ElementHandle,
+    point: { x: number; y: number },
+    error?: unknown,
+  ): Promise<void> {
+    await this.#interactionObserver?.afterClick?.(element, point, error);
+  }
+
+  async notifyBeforeType(element: ElementHandle, text: string): Promise<void> {
+    await this.#interactionObserver?.beforeType?.(element, text);
+  }
+
+  async notifyAfterType(
+    element: ElementHandle,
+    text: string,
+    error?: unknown,
+  ): Promise<void> {
+    await this.#interactionObserver?.afterType?.(element, text, error);
+  }
 
   constructor(
     id: string,

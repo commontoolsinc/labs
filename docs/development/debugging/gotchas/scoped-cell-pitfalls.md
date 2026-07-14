@@ -184,6 +184,32 @@ cell; use `PerUser` for the pointer, not the shared record. Fixed in
 multi-runtime test
 `packages/patterns/integration/cfc-group-chat-demo-multi-runtime.test.ts`.
 
+The runtime now **warns loudly at the write site** instead of leaving this a
+fully silent hole for other readers: storing a narrower-scoped link in a
+broader-scoped slot logs `Storing a <scope>-scoped link in <scope>-scoped
+data …` (`data-updating.ts`, scope-isolation write guard; unit pins in
+`packages/runner/test/data-updating.test.ts`). The warn fires where the
+slot's shape says the author wanted shared data: the slot's schema doesn't
+match `undefined` and has no effective `default`, **and** the parent schema
+lists the slot in `required` (approximating — not proving — that a read
+would reject the hole; rejection is ultimately judged against each reader's
+combined schema, and the element-level grace from the reader-blackout fix
+degrades rather than voids). Direct slot writes (`cell.key().set()`, bound
+handler cells) have no parent schema in view and keep the warn even for
+slots that are optional through the parent — declare the slot's scope or
+write through the parent object to silence those. Optional,
+undefined-tolerant, or defaulted slots written through their parent stay
+silent —
+per-reader resolution there degrades harmlessly, which is also how the
+runtime's own scoped-link writes (`.asScope()` result links, `navigateTo`
+result cells, argument setup wiring) stay quiet. If per-reader resolution is
+genuinely intended on a strict slot, declare the slot's schema scope (e.g.
+`PerUser<Cell<T>>` on the field type, or `scope: "user"` / a scoped `asCell`
+entry in the schema). A declared scope is a **cap**: content may be at most
+that narrow, so links at or broader than the cap are silent, while a
+narrower-than-cap link (e.g. a session link in a `PerUser` field) still
+warns.
+
 ## 7. `Math.random()` throws under SES
 
 **Symptom:** `TypeError: secure mode %SharedMath%.random() throws` when a
