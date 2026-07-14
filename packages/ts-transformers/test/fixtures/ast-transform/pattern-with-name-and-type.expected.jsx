@@ -34,7 +34,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["input"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: pattern-with-name-and-type
 // Verifies: pattern with inline typed parameter generates input and output schemas
 //   pattern((input: MyInput) => ...)   → pattern((input) => ..., inputSchema, outputSchema)

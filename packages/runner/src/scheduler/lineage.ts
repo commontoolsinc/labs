@@ -20,8 +20,8 @@ export class SpeculationLineage {
 
   constructor(
     private readonly hooks: {
-      /** Remove a not-yet-dispatched event from the queue. */
-      removeQueuedEvent: (event: QueuedEvent) => void;
+      /** Drop and settle a not-yet-dispatched event from the queue. */
+      dropQueuedEvent: (event: QueuedEvent, reason: string) => void;
       /** Wake the scheduler (parked cross-space events become ready). */
       queueExecution: () => void;
       onError: (error: unknown) => void;
@@ -57,7 +57,10 @@ export class SpeculationLineage {
         if (result.error) {
           for (const event of settled.events) {
             try {
-              this.hooks.removeQueuedEvent(event);
+              this.hooks.dropQueuedEvent(
+                event,
+                `Event dropped: speculative origin failed before ${event.id} dispatched`,
+              );
             } catch (error) {
               this.hooks.onError(error);
             }
@@ -79,6 +82,9 @@ export class SpeculationLineage {
           // release(). Clearing them here would let the first release()
           // delete the record and strand the rest.
           settled.pieceStops.length = 0;
+          if (settled.events.size === 0) {
+            this.byOrigin.delete(origin);
+          }
         }
         this.hooks.queueExecution();
       });

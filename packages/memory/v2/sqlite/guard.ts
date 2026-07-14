@@ -26,6 +26,7 @@ export const CORE_TABLE_NAMES: readonly string[] = [
   "scheduler_observation_replay",
   "scheduler_action_snapshot",
   "scheduler_action_state",
+  "scheduler_context_floor",
   "scheduler_read_index",
   "scheduler_write_index",
   "_cf_commit_watermark",

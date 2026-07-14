@@ -126,16 +126,30 @@ Deno.test("reload: resumed pattern rehydrates persisted observations", async () 
   // RELOAD (runtime B, same storage).
   const runtimeB = newRuntime(storageManager);
   try {
-    const compiledB = await runtimeB.patternManager.compilePattern(PROGRAM);
-    const tx = runtimeB.edit();
-    const resultCellB = runtimeB.getCell(space, "rg-result", undefined, tx);
-    const handleB = runtimeB.run(tx, compiledB, {}, resultCellB);
-    await tx.commit();
-    for (let k = 0; k < 6; k++) {
-      await handleB.pull();
-      await runtimeB.idle();
-    }
+    await runtimeB.patternManager.compilePattern(PROGRAM);
+    const resultCellB = runtimeB.getCell(space, "rg-result", undefined);
+    const provider = runtimeB.storageManager.open(space);
+    const listSnapshots = provider.listSchedulerActionSnapshots?.bind(
+      provider,
+    );
+    expect(listSnapshots).toBeDefined();
+    const snapshotQueries: unknown[] = [];
+    provider.listSchedulerActionSnapshots = (query) => {
+      snapshotQueries.push(query);
+      return listSnapshots!(query);
+    };
+
+    await runtimeB.start(resultCellB);
+    await runtimeB.idle();
+
     expect(resultCellB.key("count").getAsQueryResult()).toBe(COUNT);
+    // Per-doc rehydration: ONE space-wide listing per resumed boot (no
+    // pieceId filter — descendants consume their own buckets from the same
+    // listing). See docs/specs/scheduler-v2/per-doc-rehydration.md §3.1.
+    expect(snapshotQueries).toEqual([{
+      ownerSpace: space,
+      processGeneration: 0,
+    }]);
   } finally {
     await runtimeB.dispose();
   }
@@ -143,4 +157,48 @@ Deno.test("reload: resumed pattern rehydrates persisted observations", async () 
   const reload = rehydrationCounts();
   expect(reload.ok).toBeGreaterThan(0);
   expect(reload.missNoSnapshot).toBe(0);
+});
+
+// F6e: a transient snapshot-listing failure during resume must degrade to
+// "run fresh", not hard-fail start(). Pre-PR, rehydration failures were
+// swallowed; the resume chain now has no try/catch around the listing.
+Deno.test("reload: transient snapshot listing failure degrades to resume-fresh", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const COUNT = 5;
+
+  // CREATE (runtime A). Keep its storage open for B.
+  const runtimeA = newRuntime(storageManager);
+  const compiledA = await runtimeA.patternManager.compilePattern(PROGRAM);
+  const tx0 = runtimeA.edit();
+  setupMentionables(runtimeA, tx0, COUNT);
+  const resultCellA = runtimeA.getCell(space, "rg-result", undefined, tx0);
+  const handleA = runtimeA.run(tx0, compiledA, {}, resultCellA);
+  await tx0.commit();
+  for (let k = 0; k < 6; k++) {
+    await handleA.pull();
+    await runtimeA.idle();
+  }
+  await runtimeA.storageManager.synced();
+  expect(resultCellA.key("count").getAsQueryResult()).toBe(COUNT);
+  runtimeA.scheduler.dispose();
+
+  // RELOAD (runtime B, same storage) with a listing that throws.
+  const runtimeB = newRuntime(storageManager);
+  try {
+    await runtimeB.patternManager.compilePattern(PROGRAM);
+    const resultCellB = runtimeB.getCell(space, "rg-result", undefined);
+    const provider = runtimeB.storageManager.open(space);
+    provider.listSchedulerActionSnapshots = () => {
+      throw new Error("transient snapshot listing failure");
+    };
+
+    // start() must not reject on the transient listing failure — it resumes
+    // fresh and the piece still runs to the correct count.
+    await runtimeB.start(resultCellB);
+    await runtimeB.idle();
+
+    expect(resultCellB.key("count").getAsQueryResult()).toBe(COUNT);
+  } finally {
+    await runtimeB.dispose();
+  }
 });

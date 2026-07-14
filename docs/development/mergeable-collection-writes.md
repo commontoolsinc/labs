@@ -415,12 +415,23 @@ the storm clears. The mergeable append commutes, so retrying it is always safe.
 Windowing applies to every `StorageTransactionInconsistent`, whether or not the
 commit carries a mergeable op — an earlier version scoped it to mergeable-op
 commits, but a stale basis converges by re-running regardless, and the receipt
-machinery keeps the re-run from double-applying, so the gate was unnecessary. A
-non-stale-basis rejection — an authorization failure, a malformed store op, or a
-transport error — is not windowed: re-running cannot resolve it, so it drops on
-the first attempt rather than burning the window. A stale basis that cannot
-converge within the retry window surfaces a loud `CommitConvergenceError` instead
-of silently dropping the append. See `classifyCommitDisposition` in
+machinery keeps the re-run from double-applying, so the gate was unnecessary.
+For a child-first cross-space result, the canonical handler result/receipt stays
+in the final home commit while only the actual child node materializes in the
+child space. A partial child commit therefore cannot masquerade as the terminal
+receipt and strand the retry. A stale retry reuses the deterministic child
+identity and may update that orphan child phase, while the create-only handler
+result commits atomically with the home-space effects. This fixes the lost home
+append, but it is not cross-space atomicity: simultaneous runtimes can still
+stage competing child values before one wins the parent receipt. A durable
+per-event/per-child-space phase protocol remains the stronger follow-up recorded
+in the scheduler-v2 spec.
+
+A non-stale-basis rejection — an authorization failure, a malformed store op,
+or a transport error — is not windowed: re-running cannot resolve it, so it
+drops on the first attempt rather than burning the window. A stale basis that
+cannot converge within the retry window surfaces a loud `CommitConvergenceError`
+instead of silently dropping the append. See `classifyCommitDisposition` in
 `packages/runner/src/scheduler/events.ts`, and the regression test
 `packages/runner/test/mergeable-append-multispace-conflict.test.ts`, which injects
 a stale-basis inconsistency storm on the home-space commit of a multi-space

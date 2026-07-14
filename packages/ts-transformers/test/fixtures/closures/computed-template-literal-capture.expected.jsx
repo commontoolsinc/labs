@@ -23,7 +23,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["token"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     token: string;
 }, { headers: { Authorization: string; }; }>(({ token }) => ({
@@ -50,7 +50,7 @@ const __cfLift_2 = __cfHelpers.lift<{
         }
     },
     required: ["headers"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // CT-1334: computed() with template literal capturing pattern parameter.
 // The `token` from pattern destructuring must be captured as an explicit
 // input to the lift-applied call, so the callback receives the

@@ -4,20 +4,39 @@ import type { Action } from "./types.ts";
 export type NodeKind = "computation" | "effect";
 export type NodeStatus = "never-ran" | "clean" | "invalid";
 
+export interface SchedulerGateState {
+  debounceMs?: number;
+  noAutoDebounce?: boolean;
+  throttleMs?: number;
+  debounceReadyAt?: number;
+  throttleReadyAt?: number;
+  backoffUntil?: number;
+  backoffStreak: number;
+  /** Backoff passes charged to the current idle-wait episode. */
+  convergenceHoldPasses: number;
+}
+
 export interface SchedulerNode {
   readonly action: Action;
+  // Monotonic registration ordinal, assigned once when the record is first
+  // created and preserved across re-subscribe and re-registration (first
+  // registration wins). The deterministic tie-break in `topologicalSort`
+  // (spec §7.4 rule 3) falls back to this so run order does not depend on the
+  // order actions were invalidated / arrived over the network.
+  readonly ordinal: number;
   // Mutable for the one sanctioned transition: computation → effect
   // promotion on re-registration ("once an effect, stays an effect").
   kind: NodeKind;
   parentAction?: Action;
   children?: Set<Action>;
   status: NodeStatus;
+  declaredReads: IMemorySpaceAddress[];
   invalidCauses: IMemorySpaceAddress[];
   liveRefs: number;
   provisionalDemand: boolean;
   provisionalDemandPass?: number;
+  gate: SchedulerGateState;
   passRuns: number;
-  retries: number;
 }
 
 export class NodeRegistry {
@@ -26,6 +45,15 @@ export class NodeRegistry {
   private all = new Set<SchedulerNode>();
   private activeEffects = new Set<Action>();
   private activeComputations = new Set<Action>();
+  // Active nodes whose status is `invalid` or `never-ran` — i.e. the nodes
+  // `isInvalidOrNeverRan` would match. Maintained incrementally through
+  // setStatus/activate/remove so the event-preflight gate (decision 15) and
+  // the pull seed scans can iterate the (small) invalid set instead of every
+  // registered node. Membership tracks both status AND active membership:
+  // a removed node drops out even though its record persists in `records`.
+  private invalidNodes = new Set<Action>();
+  // Source of monotonic registration ordinals (see SchedulerNode.ordinal).
+  private nextOrdinal = 0;
 
   readonly effects: ReadonlySet<Action> = this.activeEffects;
   readonly computations: ReadonlySet<Action> = this.activeComputations;
@@ -55,13 +83,15 @@ export class NodeRegistry {
 
     const record: SchedulerNode = {
       action,
+      ordinal: this.nextOrdinal++,
       kind,
       status: "never-ran",
+      declaredReads: [],
       invalidCauses: [],
       liveRefs: 0,
       provisionalDemand: false,
+      gate: { backoffStreak: 0, convergenceHoldPasses: 0 },
       passRuns: 0,
-      retries: 0,
     };
     this.records.set(action, record);
     const children = this.childActionsByParent.get(action);
@@ -81,11 +111,55 @@ export class NodeRegistry {
     this.all.delete(record);
     this.activeEffects.delete(action);
     this.activeComputations.delete(action);
+    this.invalidNodes.delete(action);
     return record;
   }
 
   get(action: Action): SchedulerNode | undefined {
     return this.records.get(action);
+  }
+
+  /**
+   * The stable registration ordinal for `action`, or `undefined` if it was
+   * never registered. Assigned once at first registration and preserved
+   * across re-subscribe/re-registration (the record persists in `records`
+   * even after `remove`), so it is a stable, arrival-order-independent
+   * tie-break key for `topologicalSort` (spec §7.4 rule 3).
+   */
+  getRegistrationOrdinal(action: Action): number | undefined {
+    return this.records.get(action)?.ordinal;
+  }
+
+  /**
+   * The only sanctioned status mutator. Routing every status write here keeps
+   * the `invalidNodes` index in lockstep with `record.status` (the index is a
+   * derived view, never authoritative). Callers keep their own transition
+   * guards (e.g. clean→invalid only); this just assigns and re-indexes.
+   */
+  setStatus(action: Action, status: NodeStatus): void {
+    const record = this.records.get(action);
+    if (!record) return;
+    record.status = status;
+    this.syncInvalidIndex(record);
+  }
+
+  /**
+   * Active nodes whose status is `invalid` or `never-ran`. Seeds the inverted
+   * event-preflight walk (decision 15) and the pull scheduling scans.
+   */
+  getInvalidNodes(): ReadonlySet<Action> {
+    return this.invalidNodes;
+  }
+
+  private syncInvalidIndex(record: SchedulerNode): void {
+    if (
+      this.all.has(record) &&
+      (record.status === "invalid" || record.status === "never-ran")
+    ) {
+      this.invalidNodes.add(record.action);
+    } else {
+      this.invalidNodes.delete(record.action);
+    }
   }
 
   linkParent(
@@ -208,5 +282,8 @@ export class NodeRegistry {
       this.activeComputations.add(record.action);
       this.activeEffects.delete(record.action);
     }
+    // A freshly registered node is born `never-ran`; a reactivated record
+    // re-enters the index iff its (preserved) status still qualifies.
+    this.syncInvalidIndex(record);
   }
 }

@@ -1,5 +1,5 @@
-// Cycle-aware convergence tests: verifying that the scheduler correctly
-// detects and handles circular dependencies between reactive computations.
+// Bounded convergence tests: verifying that the scheduler handles circular
+// dependencies without unbounded reactive work.
 
 import {
   afterEach,
@@ -19,8 +19,12 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import {
+  CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+  PASS_RUN_BUDGET,
+} from "../src/scheduler/constants.ts";
 
-describe("cycle-aware convergence", () => {
+describe("bounded convergence", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -283,7 +287,7 @@ describe("cycle-aware convergence", () => {
     expect(doubled.get()).toBe(10);
   });
 
-  it("should enforce iteration limit for non-converging cycles", async () => {
+  it("should apply pass budget backoff for non-converging cycles", async () => {
     // Create a non-converging cycle (always increments)
     const cellA = runtime.getCell<number>(
       space,
@@ -364,26 +368,92 @@ describe("cycle-aware convergence", () => {
       { isEffect: true },
     );
 
-    // Let the cycle run - it should stop after hitting the limit
-    // Multiple idle() calls allow async storage notifications to trigger re-runs
-    for (let i = 0; i < 30; i++) {
+    try {
       await runtime.scheduler.idle();
-      // Small delay to let async storage notifications fire
-      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(runCountA).toBeLessThanOrEqual(
+        PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+      );
+      expect(runCountB).toBeLessThanOrEqual(
+        PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+      );
+      expect(runCountA + runCountB).toBeGreaterThan(0);
+    } finally {
+      // This cycle is intentionally permanent. Leaving it subscribed makes
+      // runtime disposal enter another capped backoff sequence after the
+      // assertion has already proven the behavior.
+      runtime.scheduler.unsubscribe(actionA);
+      runtime.scheduler.unsubscribe(actionB);
+      runtime.scheduler.unsubscribe(effect);
     }
-
-    // The cycle should have stopped due to iteration limit
-    // (either via MAX_ITERATIONS_PER_RUN or MAX_CYCLE_ITERATIONS)
-    // Total runs should be bounded, not infinite
-    expect(runCountA + runCountB).toBeLessThan(500);
-
-    // The cycle ran and should have been bounded
-    // Note: With implicit cycle detection, errors may or may not be thrown
-    // depending on timing. The key invariant is that runs are bounded.
-    expect(runCountA + runCountB).toBeGreaterThan(0);
   });
 
-  it("should snapshot dirty effects when breaking a pull-mode cycle", async () => {
+  it("materializes a discovered-dependency chain within idle()", async () => {
+    // A chain whose reads are discovered by first runs (raw builtins and VNode
+    // traversal have this shape) must still materialize all the way to its
+    // demanded effect before idle resolves.
+    const DEPTH = 8;
+    const cells = Array.from(
+      { length: DEPTH + 1 },
+      (_, i) =>
+        runtime.getCell<number>(space, `deep-chain-${i}`, undefined, tx),
+    );
+    cells[0].set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    // comp[i] reads cells[i-1] (DISCOVERED — not declared) and writes cells[i]
+    // (declared, so demand can flow upstream before any run).
+    const compRuns = new Array<number>(DEPTH + 1).fill(0);
+    for (let i = 1; i <= DEPTH; i++) {
+      const src = cells[i - 1];
+      const dst = cells[i];
+      const comp: Action = (actionTx) => {
+        compRuns[i]++;
+        const value = src.withTx(actionTx).get();
+        // A placeholder write on missing input mirrors incremental VNode
+        // materialization: every level's run changes what downstream reads,
+        // so the whole downstream re-runs each settle iteration.
+        dst.withTx(actionTx).send(value === undefined ? -i : value + 1);
+      };
+      runtime.scheduler.subscribe(
+        comp,
+        {
+          reads: [],
+          shallowReads: [],
+          writes: [toMemorySpaceAddress(dst.getAsNormalizedFullLink())],
+        },
+        {},
+      );
+    }
+
+    let observed: number | undefined;
+    const effect: Action = (actionTx) => {
+      observed = cells[DEPTH].withTx(actionTx).get();
+    };
+    runtime.scheduler.subscribe(
+      effect,
+      {
+        reads: [toMemorySpaceAddress(cells[DEPTH].getAsNormalizedFullLink())],
+        shallowReads: [],
+        writes: [],
+      },
+      { isEffect: true },
+    );
+
+    await runtime.idle();
+
+    // The whole chain must have materialized: every computation ran at least
+    // once and the effect observed the fully-propagated value.
+    for (let i = 1; i <= DEPTH; i++) {
+      expect(compRuns[i], `comp[${i}] never ran`).toBeGreaterThan(0);
+    }
+    expect(observed, "effect observed the fully-propagated value").toBe(
+      DEPTH + 1,
+    );
+  });
+
+  it("should preserve dirty effects after pass budget exhaustion", async () => {
     const schedulerInternal = runtime.scheduler as unknown as {
       execute: () => Promise<void>;
       pendingQueueTaskTimer: number | null;
@@ -398,7 +468,7 @@ describe("cycle-aware convergence", () => {
     const selfDirtyingEffect: Action = () => {
       effectRuns++;
       if (effectRuns <= reDirtyLimit) {
-        staleSchedulerInternal.markDirectDirty(selfDirtyingEffect);
+        staleSchedulerInternal.markDirty(selfDirtyingEffect);
       }
     };
 
@@ -421,14 +491,11 @@ describe("cycle-aware convergence", () => {
       schedulerInternal.scheduled = false;
     }
 
-    // The settle loop runs the dirty effect for each bounded iteration, then
-    // cycle-break gets one snapshot entry. A live Set iteration would revisit
-    // the effect as it re-subscribes and re-dirties itself.
-    expect(effectRuns).toBe(11);
+    expect(effectRuns).toBe(PASS_RUN_BUDGET);
     expect(runtime.scheduler.isDirty(selfDirtyingEffect)).toBe(true);
   });
 
-  it("should not create infinite loops in collectDirtyDependencies", async () => {
+  it("should not create infinite loops while resubscribing dependencies", async () => {
     // Create a simple dependency structure
     const source = runtime.getCell<number>(
       space,
@@ -489,7 +556,7 @@ describe("cycle-aware convergence", () => {
     expect(result.get()).toBe(18); // 9 * 2
   });
 
-  it("should handle cycles during dependency collection without infinite recursion", async () => {
+  it("should handle cycles during dependency collection without non-convergence", async () => {
     // Create cells that form a cycle
     const cellA = runtime.getCell<number>(
       space,
@@ -567,8 +634,7 @@ describe("cycle-aware convergence", () => {
     );
     await cellC.pull();
 
-    // The cycle should converge (value reaches 3)
-    // This tests that collectDirtyDependencies doesn't infinitely recurse
+    // The cycle should converge (value reaches 3).
     expect(cellC.get()).toBeLessThanOrEqual(3);
   });
 

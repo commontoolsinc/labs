@@ -46,7 +46,7 @@ describe("debug utils", () => {
         notificationType: "commit",
         changeIndex: 1,
         matchedActionCount: 2,
-        mode: "push",
+        mode: "pull",
         writerActionId: "writer:a",
         space: "did:key:space-a",
         entityId: "of:entity-a",
@@ -57,28 +57,22 @@ describe("debug utils", () => {
           {
             actionId: "action:a",
             actionType: "computation",
-            mode: "push",
-            decision: "schedule-push",
+            mode: "pull",
+            decision: "mark-invalid",
             pendingBefore: false,
             pendingAfter: true,
             dirtyBefore: false,
             dirtyAfter: false,
-            scheduledEffects: [{
-              actionId: "effect:a",
-              pendingBefore: false,
-              dirtyBefore: false,
-            }],
           },
           {
             actionId: "action:b",
             actionType: "computation",
-            mode: "push",
-            decision: "schedule-push",
+            mode: "pull",
+            decision: "mark-invalid",
             pendingBefore: false,
             pendingAfter: true,
             dirtyBefore: false,
             dirtyAfter: false,
-            scheduledEffects: [],
           },
         ],
       },
@@ -87,7 +81,7 @@ describe("debug utils", () => {
         notificationType: "commit",
         changeIndex: 2,
         matchedActionCount: 1,
-        mode: "push",
+        mode: "pull",
         writerActionId: "writer:a",
         space: "did:key:space-a",
         entityId: "of:entity-a",
@@ -97,13 +91,12 @@ describe("debug utils", () => {
         triggered: [{
           actionId: "action:a",
           actionType: "computation",
-          mode: "push",
-          decision: "schedule-push",
+          mode: "pull",
+          decision: "mark-invalid",
           pendingBefore: false,
           pendingAfter: true,
           dirtyBefore: false,
           dirtyAfter: false,
-          scheduledEffects: [],
         }],
       },
       {
@@ -111,7 +104,7 @@ describe("debug utils", () => {
         notificationType: "commit",
         changeIndex: 1,
         matchedActionCount: 1,
-        mode: "push",
+        mode: "pull",
         space: "did:key:space-a",
         entityId: "of:entity-b",
         path: ["internal", "count"],
@@ -120,13 +113,12 @@ describe("debug utils", () => {
         triggered: [{
           actionId: "action:c",
           actionType: "computation",
-          mode: "push",
-          decision: "schedule-push",
+          mode: "pull",
+          decision: "mark-invalid",
           pendingBefore: false,
           pendingAfter: true,
           dirtyBefore: false,
           dirtyAfter: false,
-          scheduledEffects: [],
         }],
       },
     ];
@@ -141,7 +133,6 @@ describe("debug utils", () => {
     );
     expect(summary.topChanges[0]?.entryCount).toBe(2);
     expect(summary.topChanges[0]?.directSchedules).toBe(3);
-    expect(summary.topChanges[0]?.downstreamSchedules).toBe(1);
     expect(summary.topChanges[0]?.writers).toEqual(["writer:a"]);
     expect(summary.topChanges[0]?.topDirectActions[0]).toEqual(["action:a", 2]);
 

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   findAllWriteRedirectCells,
+  opaqueArgumentKeys,
   sendValueToBinding,
   unwrapOneLevelAndBindtoDoc,
 } from "../src/pattern-binding.ts";
@@ -44,6 +45,10 @@ describe("pattern-binding", () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  it("finds no opaque argument keys when a schema has no property map", () => {
+    expect(opaqueArgumentKeys({ type: "array" })).toEqual(new Set());
   });
 
   describe("sendValueToBinding", () => {

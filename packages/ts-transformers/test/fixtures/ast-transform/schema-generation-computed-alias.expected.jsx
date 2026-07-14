@@ -20,7 +20,7 @@ type AliasResult = {
 declare const state: AliasInput;
 const __cfLift_1 = __cfHelpers.lift((): AliasResult => ({
     length: state.text.length,
-}), false);
+}), false, undefined, { completeSchedulerScopeSummary: true });
 // FIXTURE: schema-generation-computed-alias
 // Verifies: a reactive builder imported under an alias still gets schema injection
 //   computedAlias((): AliasResult => ...) → captures `state` and lowers to lift(inputSchema, outputSchema, ...)

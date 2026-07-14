@@ -1,6 +1,11 @@
 import { describe, expect, it } from "./scheduler-test-utils.ts";
-import { SchedulerTriggerIndex } from "../src/scheduler/trigger-index.ts";
-import type { Action } from "../src/scheduler/types.ts";
+import {
+  applyActionReadDelta,
+  ensureCancelForActionTriggers,
+  SchedulerTriggerIndex,
+  SchedulerTriggerSubscriptions,
+} from "../src/scheduler/trigger-index.ts";
+import type { Action, ReactivityLog } from "../src/scheduler/types.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 
 describe("SchedulerTriggerIndex", () => {
@@ -51,13 +56,10 @@ describe("SchedulerTriggerIndex", () => {
   });
 });
 
-describe("replaceActionTriggerPaths unchanged-reads skip", () => {
-  it("re-registers triggers when only the read scope changes", async () => {
-    const { replaceActionTriggerPaths, setCancelForTriggerEntities } =
-      await import("../src/scheduler/trigger-index.ts");
-    const { SchedulerTriggerSubscriptions } = await import(
-      "../src/scheduler/trigger-index.ts"
-    );
+describe("applyActionReadDelta", () => {
+  const emptyLog: ReactivityLog = { reads: [], shallowReads: [], writes: [] };
+
+  it("updates triggers when only the read scope changes", () => {
     const triggerIndex = new SchedulerTriggerIndex();
     const state = new SchedulerTriggerSubscriptions({
       triggerIndex,
@@ -72,18 +74,77 @@ describe("replaceActionTriggerPaths unchanged-reads skip", () => {
     } as const;
     const spaceRead = { ...base, scope: "space" } as IMemorySpaceAddress;
     const userRead = { ...base, scope: "user" } as IMemorySpaceAddress;
+    const firstLog: ReactivityLog = {
+      reads: [spaceRead],
+      shallowReads: [],
+      writes: [],
+    };
+    const secondLog: ReactivityLog = {
+      reads: [userRead],
+      shallowReads: [],
+      writes: [],
+    };
 
-    const first = replaceActionTriggerPaths(state, action, [spaceRead], []);
-    setCancelForTriggerEntities(state, action, first.entities);
+    applyActionReadDelta(state, action, emptyLog, firstLog);
+    ensureCancelForActionTriggers(state, action);
 
     // Same space/id/path, different scope: must NOT be treated as unchanged.
-    const second = replaceActionTriggerPaths(state, action, [userRead], []);
-    setCancelForTriggerEntities(state, action, second.entities);
+    applyActionReadDelta(state, action, firstLog, secondLog);
 
     expect(triggerIndex.collectReadersForWrite(userRead).has(action)).toBe(
       true,
     );
     expect(triggerIndex.collectReadersForWrite(spaceRead).has(action)).toBe(
+      false,
+    );
+  });
+
+  it("keeps one cancel that removes the latest trigger entities", () => {
+    const triggerIndex = new SchedulerTriggerIndex();
+    const cancels = new WeakMap<Action, () => void>();
+    const state = new SchedulerTriggerSubscriptions({
+      triggerIndex,
+      cancels,
+      getActionId: () => "test-action",
+    });
+    const action: Action = () => {};
+    const firstRead: IMemorySpaceAddress = {
+      space: "did:key:trigger-index-cancel-a",
+      scope: "space",
+      id: "of:cell",
+      path: ["value"],
+    };
+    const secondRead: IMemorySpaceAddress = {
+      space: "did:key:trigger-index-cancel-b",
+      scope: "space",
+      id: "of:cell",
+      path: ["value"],
+    };
+    const firstLog: ReactivityLog = {
+      reads: [firstRead],
+      shallowReads: [],
+      writes: [],
+    };
+    const secondLog: ReactivityLog = {
+      reads: [secondRead],
+      shallowReads: [],
+      writes: [],
+    };
+
+    applyActionReadDelta(state, action, emptyLog, firstLog);
+    ensureCancelForActionTriggers(state, action);
+    const firstCancel = cancels.get(action);
+    applyActionReadDelta(state, action, firstLog, secondLog);
+    ensureCancelForActionTriggers(state, action);
+
+    expect(cancels.get(action)).toBe(firstCancel);
+
+    cancels.get(action)?.();
+
+    expect(triggerIndex.collectReadersForWrite(firstRead).has(action)).toBe(
+      false,
+    );
+    expect(triggerIndex.collectReadersForWrite(secondRead).has(action)).toBe(
       false,
     );
   });

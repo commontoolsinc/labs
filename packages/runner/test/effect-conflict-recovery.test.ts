@@ -222,9 +222,17 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
     await exerciseEffectConflict("plain", {});
   });
 
-  it("recovers a debounced effect (the conditionallyScheduledEffects path)", async () => {
-    await exerciseEffectConflict("debounced", { debounce: 50 });
-  });
+  // scheduler-v2 cutover: the debounced variant of #4210's effect-conflict
+  // coverage was dropped here. It pinned the v1 `conditionallyScheduledEffects`
+  // path, which scheduler-v2 deletes (see
+  // docs/history/specs/scheduler-v2/current-system-inventory.md, "Conditional effects
+  // — Delete"). Under v2's pull-based settle a `debounce` effect defers its
+  // first run, so B's read-repair brings the source to the post-bump value
+  // before the effect runs: the first read is fresh (not the stale value the
+  // test asserts) and no conflict is produced at all — strictly better, but it
+  // no longer exercises the conflict-recovery path this test targets. The
+  // conflict guarantee (off-budget re-queue after catch-up, #4343) is covered
+  // by the plain variant above and the dataless-catch-up strand test below.
 
   // Deterministic regression for the #4210/#4343 strand: a reactive action whose
   // commit conflicts must re-evaluate even when the conflict's catch-up delivers
@@ -262,27 +270,33 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
     await resB.pull();
     expect(srcB.get(), "B converged to source=1").toBe(1);
 
-    // A advances source to 2; B is left stale at 1.
-    {
-      const tx = rtA.edit();
-      srcA.withTx(tx).set(2);
-      rtA.prepareTxForCommit(tx);
-      const res = await tx.commit();
-      expect(res.error, `bump: ${JSON.stringify(res.error)}`).toBeUndefined();
-      await storageA.synced();
-    }
-    expect(srcB.get(), "B provably stale (still 1)").toBe(1);
-
-    // From here the scheduler sees no reader-dirty: the catch-up is dataless, so
-    // recovery can come ONLY from the re-queue.
+    // From here the scheduler must see no reader-dirty for the bump: the
+    // catch-up is dataless, so recovery can come ONLY from the re-queue.
     storageB.suppressReaderDirty = true;
+
+    // scheduler-v2 adaptation: under the demand-driven scheduler the effect's
+    // first run races the bump's integration into B's replica (main ran it
+    // synchronously at subscribe, deterministically before the sync tick). Pin
+    // the stale basis explicitly instead: the effect reads source, then parks
+    // on a gate the test resolves only after A's bump is durable at the
+    // server. The running transaction's read basis is captured at the read, so
+    // its commit conflicts deterministically regardless of integration timing.
+    let releaseFirstRun!: () => void;
+    const firstRunGate = new Promise<void>((r) => (releaseFirstRun = r));
+    let firstReadDone!: () => void;
+    const firstRead = new Promise<void>((r) => (firstReadDone = r));
+    let gateOpen = false;
 
     const seen: number[] = [];
     let runs = 0;
-    const effect: Action = (actionTx) => {
+    const effect: Action = async (actionTx) => {
       runs++;
       const value = srcB.withTx(actionTx).get();
       seen.push(value);
+      if (!gateOpen) {
+        firstReadDone();
+        await firstRunGate;
+      }
       resB.withTx(actionTx).send(value * 10);
     };
     rtB.scheduler.subscribe(effect, {
@@ -291,8 +305,24 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
       writes: [toMemorySpaceAddress(resB.getAsNormalizedFullLink())],
     }, { isEffect: true });
 
-    await rtB.idle();
+    // The first run is now in flight, parked after reading the stale value.
+    await firstRead;
     expect(seen[0], "first run read the stale value").toBe(1);
+
+    // A advances source to 2 while B's first run holds its stale basis.
+    {
+      const tx = rtA.edit();
+      srcA.withTx(tx).set(2);
+      rtA.prepareTxForCommit(tx);
+      const res = await tx.commit();
+      expect(res.error, `bump: ${JSON.stringify(res.error)}`).toBeUndefined();
+      await storageA.synced();
+    }
+
+    // Release the parked run; its commit now carries the stale source basis.
+    gateOpen = true;
+    releaseFirstRun();
+    await rtB.idle();
 
     // On a no-requeue handler the action is stranded here (no reader-dirty, no
     // re-queue); with #4343's re-queue it re-runs against the caught-up state.

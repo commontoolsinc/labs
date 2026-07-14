@@ -12,9 +12,11 @@ import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import {
   collectSchedulerLoadSummary,
+  waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
 } from "../cfc-browser-helpers.ts";
+import { resolveSpaceDid } from "@commonfabric/lib-shell";
 
 const { FRONTEND_URL } = env;
 // Keep these as guardrails rather than exact budgets; CI reload runs vary
@@ -42,6 +44,10 @@ describe("default-app notebook reload integration test", () => {
   it("reloads every rapidly created notebook note in a separate shard", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const notebookSpaceName = globalThis.crypto.randomUUID();
+    const notebookSpaceDid = await resolveSpaceDid(
+      identity,
+      notebookSpaceName,
+    );
     const page = shell.page();
 
     await shell.goto({
@@ -50,8 +56,10 @@ describe("default-app notebook reload integration test", () => {
       identity,
     });
 
+    await waitForActiveSpaceRoot(page, notebookSpaceDid);
     await waitForRuntimeIdle(page);
     await clickButtonWithText(page, "Notes");
+    await awaitViewSettled(page);
     await clickButtonWithText(page, "New Notebook");
     await waitForCondition(page, async () => {
       const commonfabric = globalThis.commonfabric as
@@ -444,6 +452,7 @@ const markNoteButton = async (
   const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
     | HTMLElement
     | null) ?? target;
+  if (!clickTarget.isConnected || !isRendered(clickTarget)) return false;
   clickTarget.setAttribute(attr, token);
   return true;
 };
@@ -476,11 +485,15 @@ async function settleAndClickNoteButton(
   match: "includes" | "exact" | "title",
   needle: string,
 ): Promise<void> {
-  const token = `cfc-note-button-${crypto.randomUUID()}`;
-  try {
+  const markTarget = async (token: string) => {
     await waitForCondition(page, markNoteButton, {
       args: [selector, match, needle, token, NOTE_BUTTON_CLICK_TARGET_ATTR],
     });
+  };
+
+  let token = `cfc-note-button-${crypto.randomUUID()}`;
+  try {
+    await markTarget(token);
   } catch (cause) {
     throw new Error(
       `Unable to find a ${
@@ -489,15 +502,35 @@ async function settleAndClickNoteButton(
       { cause },
     );
   }
-  try {
-    const clickTarget = await page.waitForSelector(
-      `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
-      { strategy: "pierce" },
-    );
-    await clickTarget.click();
-  } finally {
-    await clearNoteButtonMark(page, token);
+
+  let lastCause: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const clickTarget = await page.waitForSelector(
+        `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
+        { strategy: "pierce" },
+      );
+      await clickTarget.click();
+      return;
+    } catch (cause) {
+      lastCause = cause;
+      const retryable = cause instanceof Error &&
+        cause.message.includes("stable box model");
+      if (!retryable || attempt === 2) break;
+    } finally {
+      await clearNoteButtonMark(page, token);
+    }
+
+    // A root-pattern hot swap can replace the marked button after discovery
+    // but before Astral resolves its box. Re-mark the current rendered node and
+    // retry the coordinate click; only the successful attempt dispatches.
+    token = `cfc-note-button-${crypto.randomUUID()}`;
+    await markTarget(token);
   }
+
+  throw new Error(`Unable to click the stable "${needle}" button`, {
+    cause: lastCause,
+  });
 }
 
 // The click helpers resolve `true` once the single click has landed (they throw

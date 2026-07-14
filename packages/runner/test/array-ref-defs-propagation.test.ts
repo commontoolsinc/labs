@@ -126,12 +126,16 @@ describe("$defs propagation in array item schema extraction", () => {
     const capturedSchemas: unknown[] = [];
     const collectLinkedCellSyncs =
       (V2StorageManager.prototype as any).collectLinkedCellSyncs;
+    const trackPendingProviderSync =
+      (V2StorageManager.prototype as any).trackPendingProviderSync;
     const fakeStorage = {
       collectLinkedCellSyncs,
+      trackPendingProviderSync,
+      registerPendingLoad: () => () => {},
       open: () => ({
         sync: (_id: string, selector: { schema: unknown }) => {
           capturedSchemas.push(selector.schema);
-          return Promise.resolve();
+          return Promise.resolve({ ok: {} });
         },
       }),
     };

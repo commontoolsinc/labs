@@ -11,8 +11,8 @@ import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import type {
   Action,
   ActionRunTraceAddress,
-  DirtyDependencyTraceContext,
   EventHandler,
+  EventPreflightTraceContext,
   TelemetryAnnotations,
   TriggerTraceEntry,
   TriggerTraceValueSummary,
@@ -116,24 +116,19 @@ export function recordTriggerTrace(
   }
 }
 
-export function createDirtyDependencyTraceContext(): DirtyDependencyTraceContext {
+export function createEventPreflightTraceContext(): EventPreflightTraceContext {
   return {
     visitCount: 0,
-    memoHitCount: 0,
-    cycleHitCount: 0,
     dirtyInputCount: 0,
     resultTrueCount: 0,
     workSetAddCount: 0,
     reverseDependencyActionCount: 0,
     reverseDependencyEdgeCount: 0,
-    logFallbackCount: 0,
     logReadCount: 0,
     logShallowReadCount: 0,
     writerCandidateCount: 0,
     writerOverlapCount: 0,
     directWriterCount: 0,
-    maxDepth: 0,
-    depth: 0,
     actionSummaries: new Map(),
     rootDirectWriterActions: new Set(),
   };

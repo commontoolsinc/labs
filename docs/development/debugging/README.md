@@ -28,7 +28,7 @@ Quick error reference and debugging workflows. For detailed explanations, see li
 | Browser UI stale after a handler write | The write usually worked — the cell, piece, or render path is what to check | Inspect actual cell state first via `readCell`; don't rewrite the mutation ([gotchas/browser-stale-ui](gotchas/browser-stale-ui.md)) |
 | "handler() should be defined at module scope" | handler() inside pattern body | Move handler() outside pattern ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | UI churning, high CPU, never settles | Non-idempotent computed or action cycle | Run `await commonfabric.detectNonIdempotent()` ([non-idempotent-detection](non-idempotent-detection.md)) |
-| `non-idempotent raw:map` or `Too many iterations: ... raw:map` | Mapped render body is doing work during render, often an event prop invoking `.send()` immediately | Inspect `.map()` JSX for `onClick={stream.send(...)}` or other render-time writes ([gotchas/immediate-event-invocation](gotchas/immediate-event-invocation.md)) |
+| `non-idempotent raw:map` or `Reactive graph did not settle ... Actions: raw:map` | Mapped render body is doing work during render, often an event prop invoking `.send()` immediately | Inspect `.map()` JSX for `onClick={stream.send(...)}` or other render-time writes ([gotchas/immediate-event-invocation](gotchas/immediate-event-invocation.md)) |
 | "Function creation is not allowed in pattern context" | Helper function inside pattern | Move function to module scope ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "Class creation is not allowed in pattern context" | Class declared/expressed inside pattern body | Move class to module scope; a method reading a captured reactive value sees a stale snapshot ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
 | "A method/getter/setter/function-valued property ... on an object literal in pattern or render context ..." (`pattern-context:object-member`) | A function-valued member on an object literal that becomes pattern result data | A getter or `toJSON()` freezes a snapshot when the result is stored; a method, setter, or function property is a value the reactive data model cannot store. Use a plain property or `computed(() => ...)` field for a value, or a module-scope `handler()`/`lift()` for behavior ([gotchas/handler-inside-pattern](gotchas/handler-inside-pattern.md)) |
@@ -103,6 +103,7 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
 - [Non-Idempotent Detection](non-idempotent-detection.md) - Detect non-settling computations, cycles, and non-idempotent actions
 - [Debugging Settle Waves](settle-wave-investigation.md) - Workflow for tracing worker fan-out: baselines, settle stats, trigger/action-run/write traces
   - Dated findings from the March 2026 investigation are archived in [settle-wave-2026-03-findings](../../history/development/debugging/settle-wave-2026-03-findings.md)
+- [Browser Integration Test Diagnostics](integration-test-diagnostics.md) - Integration-test failures are self-diagnosing: fill phase ledger, host bound-cell probe, pending-IPC table, worker request ledger, console tail — read the failure output before instrumenting
 
 ### Workflows
 

@@ -178,10 +178,6 @@ type BenchTimingSummary = {
   run?: TimingDelta;
   runAction?: TimingDelta;
   depCollect?: TimingDelta;
-  collectDirty?: TimingDelta;
-  dirtyScan?: TimingDelta;
-  writerLookup?: TimingDelta;
-  scheduleAffectedEffects?: TimingDelta;
 };
 
 const benchTimingSummaries = new Map<string, BenchTimingSummary>();
@@ -247,36 +243,14 @@ function recordSchedulerTimingSummary(
       after,
       "scheduler/execute/depCollect",
     ),
-    collectDirty: extractTimingDelta(
-      before,
-      after,
-      "scheduler/execute/collectDirtyDependencies",
-    ),
-    dirtyScan: extractTimingDelta(
-      before,
-      after,
-      "scheduler/execute/collectDirtyDependencies/dirtyScan",
-    ),
-    writerLookup: extractTimingDelta(
-      before,
-      after,
-      "scheduler/execute/collectDirtyDependencies/writerLookup",
-    ),
-    scheduleAffectedEffects: extractTimingDelta(
-      before,
-      after,
-      "scheduler/scheduleAffectedEffects",
-    ),
   } satisfies BenchTimingSummary;
 
   const currentWeight = (summary.execute?.totalTime ?? 0) +
-    (summary.run?.totalTime ?? 0) +
-    (summary.scheduleAffectedEffects?.totalTime ?? 0);
+    (summary.run?.totalTime ?? 0);
   const previous = benchTimingSummaries.get(benchmarkName);
   const previousWeight = previous
     ? (previous.execute?.totalTime ?? 0) +
-      (previous.run?.totalTime ?? 0) +
-      (previous.scheduleAffectedEffects?.totalTime ?? 0)
+      (previous.run?.totalTime ?? 0)
     : -1;
 
   if (currentWeight >= previousWeight) {
@@ -327,13 +301,6 @@ addEventListener("unload", () => {
     for (
       const line of [
         formatTimingDelta("depCollect", summary.depCollect),
-        formatTimingDelta("collectDirtyDependencies", summary.collectDirty),
-        formatTimingDelta("dirtyScan", summary.dirtyScan),
-        formatTimingDelta("writerLookup", summary.writerLookup),
-        formatTimingDelta(
-          "scheduleAffectedEffects",
-          summary.scheduleAffectedEffects,
-        ),
       ]
     ) {
       if (line) console.error(`  ${line}`);

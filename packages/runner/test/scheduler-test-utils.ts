@@ -16,13 +16,6 @@ import {
   txToReactivityLog,
 } from "../src/scheduler.ts";
 import { setSchedulerDependencies } from "../src/scheduler/dependency-updates.ts";
-import {
-  clearSchedulerDirectDirty,
-  getUpstreamStaleCount as getUpstreamStaleCountFromState,
-  isActionStale,
-  markDirectDirty as markDirectDirtyState,
-  markSchedulerDirty,
-} from "../src/scheduler/staleness.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import type {
@@ -32,7 +25,10 @@ import type {
   ReactivityLog,
   TelemetryAnnotations,
 } from "../src/scheduler.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  IStorageNotification,
+} from "../src/storage/interface.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -50,9 +46,9 @@ function createSchedulerTestRuntime(
   apiUrl: string | URL,
   options: {
     experimental?: ExperimentalOptions;
+    commitBackpressure?: RuntimeOptions["commitBackpressure"];
     cfcEnforcementMode?: RuntimeOptions["cfcEnforcementMode"];
     storageManager?: SchedulerTestStorageManager;
-    commitBackpressure?: RuntimeOptions["commitBackpressure"];
   } = {},
 ): SchedulerTestRuntime {
   const storageManager = options.storageManager ??
@@ -61,11 +57,11 @@ function createSchedulerTestRuntime(
     apiUrl: apiUrl instanceof URL ? apiUrl : new URL(apiUrl),
     storageManager,
     ...(options.experimental ? { experimental: options.experimental } : {}),
-    ...(options.cfcEnforcementMode
-      ? { cfcEnforcementMode: options.cfcEnforcementMode }
-      : {}),
     ...(options.commitBackpressure
       ? { commitBackpressure: options.commitBackpressure }
+      : {}),
+    ...(options.cfcEnforcementMode
+      ? { cfcEnforcementMode: options.cfcEnforcementMode }
       : {}),
   });
 
@@ -80,14 +76,38 @@ async function disposeSchedulerTestRuntime(
   await testRuntime.storageManager?.close();
 }
 
+async function expectSemanticCommitNotifiesSynchronously(
+  storageManager: SchedulerTestStorageManager,
+  commit: () => Promise<unknown> | unknown,
+): Promise<void> {
+  let synchronousSemanticCommitNotifications = 0;
+  const subscription: IStorageNotification = {
+    next(notification) {
+      if (notification.type === "commit") {
+        for (const _change of notification.changes) {
+          synchronousSemanticCommitNotifications++;
+          break;
+        }
+      }
+      return { done: false };
+    },
+  };
+
+  storageManager.subscribe(subscription);
+  try {
+    const result = commit();
+    expect(synchronousSemanticCommitNotifications).toBeGreaterThan(0);
+    await result;
+  } finally {
+    storageManager.unsubscribe?.(subscription);
+  }
+}
+
 type StaleSchedulerInternals = {
   pending: Set<Action>;
-  dirty: Set<Action>;
-  isStale: (action: Action) => boolean;
+  isInvalid: (action: Action) => boolean;
   isDemandedPullComputation: (action: Action) => boolean;
-  getUpstreamStaleCount: (action: Action) => number;
-  clearDirectDirty: (action: Action) => boolean;
-  markDirectDirty: (action: Action) => boolean;
+  clearInvalid: (action: Action) => void;
   markDirty: (action: Action) => void;
   registerEffect: (action: Action) => void;
   setDependencies: (
@@ -95,12 +115,6 @@ type StaleSchedulerInternals = {
     log: ReactivityLog,
   ) => ReturnType<typeof setSchedulerDependencies>;
   updateDependents: (action: Action, log: ReactivityLog) => void;
-  collectDirtyDependencies: (
-    action: Action,
-    workSet: Set<Action>,
-    memo?: Map<Action, boolean>,
-  ) => boolean;
-  scheduleAffectedEffects: (action: Action) => void;
 };
 
 function getStaleSchedulerInternals(
@@ -108,48 +122,46 @@ function getStaleSchedulerInternals(
 ): StaleSchedulerInternals {
   const internal = scheduler as unknown as {
     pending: Set<Action>;
-    staleness:
-      & Parameters<typeof isActionStale>[0]
-      & Parameters<typeof markDirectDirtyState>[0];
-    dirtySchedulingState: Parameters<typeof markSchedulerDirty>[0];
     dependencyUpdateState: Parameters<typeof setSchedulerDependencies>[0];
     nodes: {
       register: (action: Action, kind: "effect" | "computation") => unknown;
+      get: (
+        action: Action,
+      ) =>
+        | {
+          status: "never-ran" | "clean" | "invalid";
+          invalidCauses: unknown[];
+        }
+        | undefined;
     };
+    markAndScheduleInvalidAction: (action: Action) => void;
     isDemandedPullComputation: (action: Action) => boolean;
     updateDependents: StaleSchedulerInternals["updateDependents"];
-    collectDirtyDependencies: StaleSchedulerInternals[
-      "collectDirtyDependencies"
-    ];
-    scheduleAffectedEffects: StaleSchedulerInternals["scheduleAffectedEffects"];
   };
 
   return {
     pending: internal.pending,
-    dirty: internal.staleness.dirty,
-    isStale: (action) => isActionStale(internal.staleness, action),
+    isInvalid: (action) => {
+      const record = internal.nodes.get(action);
+      return record?.status === "invalid" || record?.status === "never-ran";
+    },
     isDemandedPullComputation: (action) =>
       internal.isDemandedPullComputation(action),
-    getUpstreamStaleCount: (action) =>
-      getUpstreamStaleCountFromState(internal.staleness, action),
-    clearDirectDirty: (action) =>
-      clearSchedulerDirectDirty(internal.dirtySchedulingState, action),
-    markDirectDirty: (action) =>
-      markDirectDirtyState(internal.staleness, action),
-    markDirty: (action) =>
-      markSchedulerDirty(internal.dirtySchedulingState, action),
+    clearInvalid: (action) => {
+      const record = internal.nodes.get(action);
+      if (!record) return;
+      if (record.status === "invalid") {
+        record.status = "clean";
+      }
+      record.invalidCauses = [];
+    },
+    markDirty: (action) => internal.markAndScheduleInvalidAction(action),
     registerEffect: (action) => {
       internal.nodes.register(action, "effect");
     },
     setDependencies: (action, log) =>
       setSchedulerDependencies(internal.dependencyUpdateState, action, log),
     updateDependents: (action, log) => internal.updateDependents(action, log),
-    collectDirtyDependencies: (action, workSet, memo) =>
-      internal.collectDirtyDependencies(action, workSet, memo),
-    scheduleAffectedEffects: (action) =>
-      internal.scheduleAffectedEffects(
-        action,
-      ),
   };
 }
 
@@ -167,6 +179,7 @@ export {
   describe,
   disposeSchedulerTestRuntime,
   expect,
+  expectSemanticCommitNotifiesSynchronously,
   getStaleSchedulerInternals,
   ignoreReadForScheduling,
   it,

@@ -1061,7 +1061,7 @@ export class CellImpl<T extends FabricValue>
       (action as Action & { src?: string }).src = `pull:${this.sourceURI}`;
 
       // Subscribe as an effect so it runs in the next cycle.
-      const cancel = this.runtime.scheduler.subscribe(action, action, {
+      const cancel = this.runtime.scheduler.subscribe(action, {
         isEffect: true,
         noDebounce: true,
       });

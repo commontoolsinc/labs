@@ -24,7 +24,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["show"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: safe-context-and-jsx
 // Verifies: && and || with JSX inside handler callbacks are transformed to when()/unless()
 //   computed(() => show) && <span> → when(computed(() => show), <span>)
@@ -140,7 +140,7 @@ const __cfLift_2 = __cfHelpers.lift<{
         }, {
             type: "null"
         }]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // Test: || with JSX inside handler callback should transform to unless()
 const MyHandler2 = handler({
     type: "object",

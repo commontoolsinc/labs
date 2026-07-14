@@ -65,7 +65,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["count", "total"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     stats: {
         count: number;
@@ -90,7 +90,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["stats"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-result-in-derive-captures
 // Verifies: computed() result properties captured in a subsequent lift-applied computation use .key() access
 //   computed(() => `${stats.count} of ${stats.total} done`) → lift(({ stats }) => ...)({ stats: { count: stats.key("count"), total: stats.key("total") } })

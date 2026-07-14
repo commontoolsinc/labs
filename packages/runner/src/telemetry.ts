@@ -59,7 +59,6 @@ export interface SchedulerGraphEdge {
 export interface SchedulerGraphSnapshot {
   nodes: SchedulerGraphNode[];
   edges: SchedulerGraphEdge[];
-  pullMode: boolean;
   timestamp: number;
 }
 
@@ -72,20 +71,16 @@ export interface SchedulerActionInfo {
 
 export interface SchedulerEventPreflightStats {
   visitCount: number;
-  memoHitCount: number;
-  cycleHitCount: number;
   dirtyInputCount: number;
   resultTrueCount: number;
   workSetAddCount: number;
   reverseDependencyActionCount: number;
   reverseDependencyEdgeCount: number;
-  logFallbackCount: number;
   logReadCount: number;
   logShallowReadCount: number;
   writerCandidateCount: number;
   writerOverlapCount: number;
   directWriterCount: number;
-  maxDepth: number;
   hotActions?: SchedulerEventPreflightActionSummary[];
   hotFanoutActions?: SchedulerEventPreflightActionSummary[];
   rootDirectWriters?: SchedulerEventPreflightActionSummary[];
@@ -95,7 +90,6 @@ export interface SchedulerEventPreflightActionSummary {
   actionId: string;
   actionType: "effect" | "computation" | "unknown";
   visitCount: number;
-  memoHitCount: number;
   dirtyInputCount: number;
   resultTrueCount: number;
   reverseDependencyEdgeCount: number;

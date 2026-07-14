@@ -48,7 +48,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => inner, {
@@ -67,7 +67,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     item: string;
 }, string>(({ item }) => item + "!", {
@@ -116,7 +116,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_5 = __cfHelpers.lift<{
     item: string;
 }, string>(({ item }) => item + "!", {
@@ -165,7 +165,7 @@ const __cfLift_6 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_7 = __cfHelpers.lift<{
     item: string;
 }, string>(({ item }) => item + "!", {
@@ -203,7 +203,7 @@ const __cfLift_8 = __cfHelpers.lift(() => {
         "default": []
     } as const satisfies __cfHelpers.JSONSchema).result!;
     return foo.mapWithPattern(__cfPattern_3, {});
-}, false);
+}, false, undefined, { completeSchedulerScopeSummary: true });
 const __cfLift_9 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => inner, {
@@ -222,7 +222,7 @@ const __cfLift_9 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_10 = __cfHelpers.lift<{
     item: {
         length: number;
@@ -309,7 +309,7 @@ const __cfLift_12 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_13 = __cfHelpers.lift<{
     inner: string[];
 }, string[]>(({ inner }) => inner, {
@@ -328,7 +328,7 @@ const __cfLift_13 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_14 = __cfHelpers.lift<{
     item: {
         length: number;
@@ -415,7 +415,7 @@ const __cfLift_16 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: map-regains-reactive-aliases
 // Verifies: compute-owned aliases that still resolve to reactive array roots
 // are rewritten back to mapWithPattern/filterWithPattern when used in pattern
