@@ -1,12 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/scheduler-event-load-park.test.ts": [
-    "42:39:onwbvu",
-    "71:39:oadvb8",
-    "162:47:1km8qk4",
-    "226:43:1jvhgk3",
-    "306:43:1jvhgk3",
-    "386:43:15cz5qh",
-  ],
   "packages/runner/test/scheduler-event-receipts.test.ts": [
     "173:38:1qe40nq",
   ],

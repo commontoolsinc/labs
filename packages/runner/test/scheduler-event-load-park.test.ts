@@ -1,7 +1,11 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import type { Action, EventHandler } from "../src/scheduler.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  IStorageManager,
+  IStorageProviderWithReplica,
+} from "../src/storage/interface.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   createSchedulerTestRuntime,
@@ -9,6 +13,41 @@ import {
   type SchedulerTestRuntime,
   space,
 } from "./scheduler-test-utils.ts";
+
+type LoadSettlementStorage =
+  & IStorageManager
+  & Required<
+    Pick<IStorageManager, "loadsSettled" | "pendingLoadAddresses">
+  >;
+
+function requireLoadSettlementStorage(
+  storage: IStorageManager,
+): LoadSettlementStorage {
+  if (
+    typeof storage.loadsSettled !== "function" ||
+    typeof storage.pendingLoadAddresses !== "function"
+  ) {
+    throw new TypeError("Storage manager missing load settlement helpers");
+  }
+  return storage as LoadSettlementStorage;
+}
+
+function getSchedulerExecute(
+  scheduler: SchedulerTestRuntime["runtime"]["scheduler"],
+): () => Promise<void> {
+  const execute = Reflect.get(scheduler, "execute");
+  if (typeof execute !== "function") {
+    throw new TypeError("Scheduler internals invalid execute");
+  }
+  return execute as () => Promise<void>;
+}
+
+function setSchedulerExecute(
+  scheduler: SchedulerTestRuntime["runtime"]["scheduler"],
+  execute: () => Promise<void>,
+): void {
+  Reflect.set(scheduler, "execute", execute);
+}
 
 // CT-1795: a handler must not dispatch against a provisional snapshot while a
 // replica load for an address in its read closure is still in flight.
@@ -39,38 +78,34 @@ describe("event dispatch parks on in-flight closure loads", () => {
   // window deterministically instead of racing a real network.
   function holdSyncFor(id: string): () => void {
     const { promise, resolve } = Promise.withResolvers<void>();
-    const manager = env.storageManager as unknown as {
-      open: (space: string) => {
-        sync: (...args: unknown[]) => Promise<unknown>;
-      };
-    };
+    const manager = env.storageManager;
     const originalOpen = manager.open.bind(manager);
-    manager.open = (openSpace: string) => {
+    const patchedOpen: typeof manager.open = (openSpace) => {
       const provider = originalOpen(openSpace);
       return new Proxy(provider, {
         get(target, prop, receiver) {
           if (prop === "sync") {
-            return async (syncId: unknown, ...rest: unknown[]) => {
+            const sync: IStorageProviderWithReplica["sync"] = async (
+              syncId,
+              ...rest
+            ) => {
               if (syncId === id) await promise;
-              return (target.sync as (...a: unknown[]) => Promise<unknown>)(
-                syncId,
-                ...rest,
-              );
+              return target.sync(syncId, ...rest);
             };
+            return sync;
           }
           const value = Reflect.get(target, prop, receiver);
           return typeof value === "function" ? value.bind(target) : value;
         },
       });
     };
+    manager.open = patchedOpen;
     releaseHeldSync = resolve;
     return resolve;
   }
 
   function observeNextLoadPark(): Promise<void> {
-    const manager = env.storageManager as unknown as {
-      loadsSettled(keys: readonly string[]): Promise<void>;
-    };
+    const manager = requireLoadSettlementStorage(env.storageManager);
     const original = manager.loadsSettled.bind(manager);
     const observed = Promise.withResolvers<void>();
     manager.loadsSettled = (keys) => {
@@ -159,23 +194,22 @@ describe("event dispatch parks on in-flight closure loads", () => {
     // An unrelated scheduler wake while the load is still pending must observe
     // the parked head rather than re-running its dependency preflight or
     // dispatching through it.
-    const schedulerHarness = runtime.scheduler as unknown as {
-      execute(): Promise<void>;
-    };
-    const originalExecute = schedulerHarness.execute.bind(runtime.scheduler);
+    const originalExecute = getSchedulerExecute(runtime.scheduler).bind(
+      runtime.scheduler,
+    );
     const rerunCompleted = Promise.withResolvers<void>();
-    schedulerHarness.execute = async () => {
+    setSchedulerExecute(runtime.scheduler, async () => {
       try {
         await originalExecute();
       } finally {
         rerunCompleted.resolve();
       }
-    };
+    });
     try {
       runtime.scheduler.queueExecution();
       await rerunCompleted.promise;
     } finally {
-      schedulerHarness.execute = originalExecute;
+      setSchedulerExecute(runtime.scheduler, originalExecute);
     }
     expect(handlerRuns, "a scheduler re-tick must keep the parked head blocked")
       .toBe(0);
@@ -223,15 +257,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
     const key = `${link.space}/${link.scope}/${link.id}`;
     const load = Promise.withResolvers<void>();
     const parkObserved = Promise.withResolvers<void>();
-    const manager = runtime.storageManager as unknown as {
-      pendingLoadAddresses(): readonly {
-        space: string;
-        scope: string;
-        id: string;
-      }[];
-      pendingLoadGeneration(key: string): number | undefined;
-      loadsSettled(keys: readonly string[]): Promise<void>;
-    };
+    const manager = runtime.storageManager;
     manager.pendingLoadAddresses = () => [{
       space: link.space,
       scope: link.scope,
@@ -303,15 +329,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
       Promise.withResolvers<void>(),
     ];
     let parkCount = 0;
-    const manager = runtime.storageManager as unknown as {
-      pendingLoadAddresses(): readonly {
-        space: string;
-        scope: string;
-        id: string;
-      }[];
-      pendingLoadGeneration(key: string): number | undefined;
-      loadsSettled(keys: readonly string[]): Promise<void>;
-    };
+    const manager = runtime.storageManager;
     manager.pendingLoadAddresses = () =>
       pending ? [{ space: link.space, scope: link.scope, id: link.id }] : [];
     manager.pendingLoadGeneration = (candidate) =>
@@ -383,14 +401,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
     await tx.commit();
     env.tx = runtime.edit();
 
-    const storage = runtime.storageManager as unknown as {
-      loadsSettled(keys: readonly string[]): Promise<void>;
-      pendingLoadAddresses(): readonly {
-        space: string;
-        scope: string;
-        id: string;
-      }[];
-    };
+    const storage = requireLoadSettlementStorage(runtime.storageManager);
 
     // Pin one in-flight load for the cold doc so a pending-load entry exists.
     const release = holdSyncFor(coldDoc.getAsNormalizedFullLink().id);
