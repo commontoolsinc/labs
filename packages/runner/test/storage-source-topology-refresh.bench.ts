@@ -38,10 +38,9 @@ const PATTERN_URI = `of:${
     .taggedHashString
 }`;
 
-type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
-  open(space: string): infer T;
-} ? T
-  : never;
+type TestProvider = ReturnType<
+  ReturnType<typeof StorageManager.emulate>["open"]
+>;
 
 const pieceUri = (index: number) =>
   `of:${idHash(`piece-${index}`).taggedHashString}`;
@@ -60,7 +59,7 @@ const setup = async (withPatternLink: boolean) => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider: TestProvider = storageManager.open(space);
 
   await (provider as any).send([
     {

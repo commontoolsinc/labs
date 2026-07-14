@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/storage-source-topology-refresh.bench.ts": [
-    "63:46:19gxezt",
-  ],
   "packages/runner/test/storage-subscription-filter.bench.ts": [
     "79:46:19gxezt",
     "126:46:19gxezt",
