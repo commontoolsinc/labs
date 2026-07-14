@@ -53,6 +53,7 @@ import type {
   NavigateToFunction,
   NonPrivateRandomFunction,
   ObserveAvailabilityFunction,
+  PartialResultOfFunction,
   Pattern,
   PatternToolFunction,
   Reactive,
@@ -354,6 +355,7 @@ export interface BuilderFunctionsAndConstants {
   hasSchemaMismatch: HasSchemaMismatchFunction;
   observeAvailability: ObserveAvailabilityFunction;
   resultOf: ResultOfFunction;
+  partialResultOf: PartialResultOfFunction;
   latestComplete: LatestCompleteFunction;
 
   // Built-in modules

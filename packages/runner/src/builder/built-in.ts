@@ -15,7 +15,9 @@ import type {
   BuiltInCompileAndRunParams,
   BuiltInCompileAndRunState,
   BuiltInGenerateObjectParams,
+  BuiltInGenerateObjectStreamState,
   BuiltInGenerateTextParams,
+  BuiltInGenerateTextStreamState,
   BuiltInLLMParams,
   BuiltInLLMState,
   ConfLabelQuery,
@@ -48,6 +50,7 @@ import { isCell } from "../cell.ts";
 import { sqliteQueryNodeFactory } from "../builtins/sqlite/query-node.ts";
 import { LLMDialogResultSchema } from "../builtins/llm-schemas.ts";
 import { wishStateSchemaForResult } from "../builtins/wish-schema.ts";
+import { associatePartialResult } from "./data-unavailable.ts";
 
 const WISH_ARGUMENT_SCHEMA = internSchema({
   type: "object",
@@ -133,23 +136,41 @@ export const llmDialog = createNodeFactory({
   params: FactoryInput<BuiltInLLMParams>,
 ) => Reactive<BuiltInLLMDialogState>;
 
-export const generateObjectStream = createNodeFactory({
+const generateObjectState = createNodeFactory({
   type: "ref",
   implementation: "generateObject",
-}) as GenerateObjectStreamFunction;
+}) as <T = any>(
+  params: FactoryInput<BuiltInGenerateObjectParams>,
+) => Reactive<BuiltInGenerateObjectStreamState<T>>;
 
 export const generateObject = ((
   params: FactoryInput<BuiltInGenerateObjectParams>,
-) => generateObjectStream(params).result) as GenerateObjectFunction;
+) => generateObjectState(params).result) as GenerateObjectFunction;
 
-export const generateTextStream = createNodeFactory({
+export const generateObjectStream = (<T = any>(
+  params: FactoryInput<BuiltInGenerateObjectParams>,
+) => {
+  const state = generateObjectState<T>(params);
+  return associatePartialResult<T, string>(state.result, state.partial);
+}) as GenerateObjectStreamFunction;
+
+const generateTextState = createNodeFactory({
   type: "ref",
   implementation: "generateText",
-}) as GenerateTextStreamFunction;
+}) as (
+  params: FactoryInput<BuiltInGenerateTextParams>,
+) => Reactive<BuiltInGenerateTextStreamState>;
 
 export const generateText = ((
   params: FactoryInput<BuiltInGenerateTextParams>,
-) => generateTextStream(params).result) as GenerateTextFunction;
+) => generateTextState(params).result) as GenerateTextFunction;
+
+export const generateTextStream = ((
+  params: FactoryInput<BuiltInGenerateTextParams>,
+) => {
+  const state = generateTextState(params);
+  return associatePartialResult<string, string>(state.result, state.partial);
+}) as GenerateTextStreamFunction;
 
 type FetchState<T> = {
   pending: boolean;

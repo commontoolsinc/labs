@@ -20,6 +20,7 @@ export type CommonFabricRuntimeExportSpec =
       | "pattern-tool"
       | "runtime-call"
       | "availability-result"
+      | "partial-result"
       | "availability-observer";
     reactiveOrigin: boolean;
   }
@@ -292,6 +293,12 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     exportName: "resultOf",
     category: "call",
     callKind: "availability-result",
+    reactiveOrigin: true,
+  },
+  {
+    exportName: "partialResultOf",
+    category: "call",
+    callKind: "partial-result",
     reactiveOrigin: true,
   },
   {

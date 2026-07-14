@@ -199,7 +199,7 @@ Deno.test("AsyncResult<any> retains guard policy from its async producer", async
   );
 });
 
-Deno.test("advanced generation state is plain while its any result retains async provenance", async () => {
+Deno.test("streaming generation results retain async provenance", async () => {
   const source = `
     import {
       computed,
@@ -211,18 +211,14 @@ Deno.test("advanced generation state is plain while its any result retains async
     import * as cf from "commonfabric";
 
     export default pattern(() => {
-      const textState = textStream({ prompt: "text" });
-      const aliasObjectState = objectStream<any>({ prompt: "alias object" });
-      const objectState = cf.generateObjectStream<any>({ prompt: "object" });
-      const badTextStateGuard = computed(() => hasError(textState));
-      const badObjectStateGuard = computed(() => hasError(objectState));
-      const textFailed = computed(() => hasError(textState.result));
-      const aliasObjectFailed = computed(() => hasError(aliasObjectState.result));
-      const objectFailed = computed(() => hasError(objectState.result));
+      const textRequest = textStream({ prompt: "text" });
+      const aliasObjectRequest = objectStream<any>({ prompt: "alias object" });
+      const objectRequest = cf.generateObjectStream<any>({ prompt: "object" });
+      const textFailed = computed(() => hasError(textRequest));
+      const aliasObjectFailed = computed(() => hasError(aliasObjectRequest));
+      const objectFailed = computed(() => hasError(objectRequest));
       return {
         aliasObjectFailed,
-        badObjectStateGuard,
-        badTextStateGuard,
         objectFailed,
         textFailed,
       };
@@ -234,7 +230,7 @@ Deno.test("advanced generation state is plain while its any result retains async
   const unobserved = diagnostics.filter((diagnostic) =>
     diagnostic.type === "availability:unobserved-compute-guard"
   );
-  assertEquals(unobserved.length, 2);
+  assertEquals(unobserved.length, 0);
 
   const output = await transformSource(source, {
     types: { "commonfabric.d.ts": commonfabricTypes },
@@ -242,31 +238,33 @@ Deno.test("advanced generation state is plain while its any result retains async
   });
   assertStringIncludes(
     output,
-    'path: ["textState", "result"], reasons: ["error"]',
+    'path: ["textRequest"], reasons: ["error"]',
   );
   assertStringIncludes(
     output,
-    'path: ["aliasObjectState", "result"], reasons: ["error"]',
+    'path: ["aliasObjectRequest"], reasons: ["error"]',
   );
   assertStringIncludes(
     output,
-    'path: ["objectState", "result"], reasons: ["error"]',
+    'path: ["objectRequest"], reasons: ["error"]',
   );
 });
 
-Deno.test("a destructured advanced generation result retains async provenance", async () => {
+Deno.test("a partial streaming result retains async provenance", async () => {
   const source = `
     import {
       computed,
       generateObjectStream,
       hasError,
+      partialResultOf,
       pattern,
     } from "commonfabric";
 
     export default pattern(() => {
-      const { result: request } = generateObjectStream<any>({
+      const stream = generateObjectStream<any>({
         prompt: "object",
       });
+      const request = partialResultOf(stream);
       const failed = computed(() => hasError(request));
       return { failed };
     });
@@ -307,7 +305,7 @@ Deno.test("availability guards are plain predicates inside an existing compute",
       const stream = generateTextStream({ prompt: "stream" });
       const status = computed(() => {
         const pending = isPending(request);
-        const failed = hasError(stream.result);
+        const failed = hasError(stream);
         if (pending || failed) return "waiting";
         return "ready";
       });
@@ -334,7 +332,7 @@ Deno.test("availability guards are plain predicates inside an existing compute",
   );
   assertStringIncludes(
     output,
-    'path: ["stream", "result"], reasons: ["error"]',
+    'path: ["stream"], reasons: ["error"]',
   );
 });
 

@@ -114,8 +114,24 @@ export type DataUnavailableVariant =
  */
 export type AsyncResult<T> = T | DataUnavailableVariant;
 
-/** Removes unavailable control variants from an asynchronous result type. */
-export type AvailableResult<R> = Exclude<R, DataUnavailableVariant>;
+/** Type-only association between a direct stream result and its partial view. */
+export declare const PARTIAL_RESULT: unique symbol;
+export interface PartialResultSource<Final, Partial> {
+  readonly [PARTIAL_RESULT]: {
+    readonly final: Final;
+    readonly partial: Partial;
+  };
+}
+
+/** A direct async result which has an associated intermediate-value channel. */
+export type AsyncStreamResult<Final, Partial> =
+  & AsyncResult<Final>
+  & PartialResultSource<Final, Partial>;
+
+/** Removes unavailable control variants and type-only stream metadata. */
+export type AvailableResult<R> = R extends PartialResultSource<infer Final, any>
+  ? Final
+  : Exclude<R, DataUnavailableVariant>;
 
 /** Selects unavailable variants by their reason discriminator. */
 export type DataUnavailableFor<K extends DataUnavailableReason> = Extract<
@@ -2382,7 +2398,7 @@ export type GenerateObjectFunction = <T = any>(
 /** Advanced structured-generation API with partial and message state. */
 export type GenerateObjectStreamFunction = <T = any>(
   params: FactoryInput<BuiltInGenerateObjectParams>,
-) => Reactive<BuiltInGenerateObjectStreamState<T>>;
+) => Reactive<AsyncStreamResult<T, string>>;
 
 export type GenerateTextFunction = (
   params: FactoryInput<BuiltInGenerateTextParams>,
@@ -2391,7 +2407,7 @@ export type GenerateTextFunction = (
 /** Advanced text-generation API with partial and grounding state. */
 export type GenerateTextStreamFunction = (
   params: FactoryInput<BuiltInGenerateTextParams>,
-) => Reactive<BuiltInGenerateTextStreamState>;
+) => Reactive<AsyncStreamResult<string, string>>;
 
 export type FetchOptions = {
   body?: JSONValue;
@@ -3030,6 +3046,11 @@ export type ResultOfFunction = <R>(
   result: R,
 ) => Reactive<AvailableResult<R>>;
 
+/** Returns the intermediate-value request associated with a streaming call. */
+export type PartialResultOfFunction = <Final, Partial>(
+  result: PartialResultSource<Final, Partial>,
+) => Reactive<AsyncResult<Partial>>;
+
 /**
  * Retains the last recursively complete snapshot of one value or value graph.
  * Before the first complete snapshot, the result is pending at runtime.
@@ -3135,6 +3156,7 @@ export declare const isSyncing: IsSyncingFunction;
 export declare const hasSchemaMismatch: HasSchemaMismatchFunction;
 export declare const observeAvailability: ObserveAvailabilityFunction;
 export declare const resultOf: ResultOfFunction;
+export declare const partialResultOf: PartialResultOfFunction;
 export declare const latestComplete: LatestCompleteFunction;
 export declare const toCompactDebugString: ToCompactDebugStringFunction;
 export declare const toIndentedDebugString: ToIndentedDebugStringFunction;

@@ -54,6 +54,7 @@ const ASYNC_RUNTIME_EXPORTS = new Set([
   "fetchJson",
   "fetchJsonUnchecked",
   "fetchProgram",
+  "generateTextStream",
 ]);
 
 function isAdvancedStreamProducer(
@@ -116,16 +117,14 @@ export function resolveAvailabilityValueProvenance(
         source: nested?.source ?? source,
       };
     }
+    if (callKind?.kind === "partial-result") {
+      return { kind: "async-result", source: target };
+    }
     if (callKind?.kind === "generate-text") {
       return { kind: "async-result", source: target };
     }
     if (callKind?.kind === "generate-object") {
-      // generateObjectStream shares the schema-injection call kind but returns
-      // a state object. Only the default generateObject call is itself an
-      // AsyncResult.
-      if (callKind.exportName !== "generateObjectStream") {
-        return { kind: "async-result", source: target };
-      }
+      return { kind: "async-result", source: target };
     }
     if (
       callKind?.kind === "runtime-call" &&
@@ -417,6 +416,15 @@ function isCommonFabricAvailabilityContainer(type: ts.Type): boolean {
   );
 }
 
+function isCommonFabricDataUnavailableBase(type: ts.Type): boolean {
+  const symbols = [type.aliasSymbol, type.getSymbol()].filter(
+    (symbol): symbol is ts.Symbol => !!symbol,
+  );
+  return symbols.some((symbol) =>
+    symbol.getName() === "DataUnavailable" && isCommonFabricSymbol(symbol)
+  );
+}
+
 export function typeContainsAvailabilityVariant(
   type: ts.Type,
   variant: ts.Type,
@@ -430,6 +438,13 @@ export function typeContainsAvailabilityVariant(
     return false;
   }
 
+  // Branded stream results distribute the type-only association across each
+  // concrete availability arm. Those arms are strict subtypes of the public
+  // guard variant, so one-way assignability is the membership test we want.
+  if (checker.isTypeAssignableTo(type, variant)) {
+    return true;
+  }
+
   if (isCommonFabricAvailabilityContainer(type)) {
     return true;
   }
@@ -440,11 +455,20 @@ export function typeContainsAvailabilityVariant(
       typeContainsAvailabilityVariant(constraint, variant, checker, seen);
   }
 
-  const members = type.isUnion() ? type.types : [type];
-  return members.some((member) =>
-    checker.isTypeAssignableTo(member, variant) &&
-    checker.isTypeAssignableTo(variant, member)
-  );
+  if (type.isUnion()) {
+    return type.types.some((member) =>
+      typeContainsAvailabilityVariant(member, variant, checker, seen)
+    );
+  }
+
+  if (type.isIntersection()) {
+    return type.types.some((member) =>
+      !isCommonFabricDataUnavailableBase(member) &&
+      typeContainsAvailabilityVariant(member, variant, checker, seen)
+    );
+  }
+
+  return false;
 }
 
 /**

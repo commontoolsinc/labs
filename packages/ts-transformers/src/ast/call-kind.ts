@@ -220,6 +220,7 @@ export type CallKind =
       | "HasSchemaMismatch";
   }
   | { kind: "availability-result"; symbol?: ts.Symbol }
+  | { kind: "partial-result"; symbol?: ts.Symbol }
   | { kind: "availability-observer"; symbol?: ts.Symbol }
   | {
     kind: "runtime-call";
@@ -926,6 +927,7 @@ function isReactiveOriginKind(callKind: CallKind): boolean {
       return callKind.reactiveOrigin;
     case "availability-guard":
     case "availability-result":
+    case "partial-result":
     case "availability-observer":
       return true;
     default:
@@ -2050,6 +2052,10 @@ function createNamedCallKind(
       return symbol
         ? { kind: "availability-result", symbol }
         : { kind: "availability-result" };
+    case "partial-result":
+      return symbol
+        ? { kind: "partial-result", symbol }
+        : { kind: "partial-result" };
     case "runtime-call":
       return symbol
         ? {

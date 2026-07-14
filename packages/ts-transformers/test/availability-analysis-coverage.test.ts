@@ -173,6 +173,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
         generateText,
         generateTextStream,
         observeAvailability,
+        partialResultOf,
         resultOf,
       } from "commonfabric";
 
@@ -184,8 +185,10 @@ Deno.test("availability provenance and observations cover retained and invalid f
       const objectGenerated = generateObject<Repo>({ prompt: "repo" });
       const objectStream = generateObjectStream<Repo>({ prompt: "repo" });
       const objectStreamAlias = objectStream;
-      const objectStreamResult = objectStreamAlias.result;
-      const textStreamResult = generateTextStream({ prompt: "repo" }).result;
+      const objectStreamResult = partialResultOf(objectStreamAlias);
+      const textStreamResult = partialResultOf(
+        generateTextStream({ prompt: "repo" }),
+      );
       const projected = resultOf(fetched);
       const nestedProjected = resultOf(projected);
       const emptyProjection = resultOf();
@@ -227,8 +230,8 @@ Deno.test("availability provenance and observations cover retained and invalid f
         resolveAvailabilityValueProvenance(
           initializer(sourceFile, "objectStream"),
           context,
-        ),
-        undefined,
+        )?.kind,
+        "async-result",
       );
       assertEquals(
         resolveAvailabilityValueProvenance(

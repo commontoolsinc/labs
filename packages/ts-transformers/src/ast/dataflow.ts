@@ -381,7 +381,8 @@ export function createDataFlowAnalyzer(
     // resultOf changes only the static usable view and attaches no policy.
     if (
       callKind?.kind === "availability-observer" ||
-      callKind?.kind === "availability-result"
+      callKind?.kind === "availability-result" ||
+      callKind?.kind === "partial-result"
     ) {
       return {
         ...merged,

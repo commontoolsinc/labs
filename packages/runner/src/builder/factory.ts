@@ -34,6 +34,7 @@ import {
   isPending,
   isSyncing,
   observeAvailability,
+  partialResultOf,
   resultOf,
 } from "./data-unavailable.ts";
 import {
@@ -187,6 +188,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     isSyncing,
     hasSchemaMismatch,
     observeAvailability,
+    partialResultOf,
     resultOf,
     latestComplete,
 

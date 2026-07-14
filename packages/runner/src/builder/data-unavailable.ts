@@ -4,6 +4,8 @@ import type {
   IsPendingFunction,
   IsSyncingFunction,
   ObserveAvailabilityFunction,
+  PartialResultOfFunction,
+  PartialResultSource,
   ResultOfFunction,
 } from "@commonfabric/api";
 import {
@@ -41,3 +43,37 @@ export const observeAvailability: ObserveAvailabilityFunction = ((
 export const resultOf: ResultOfFunction = ((
   value: unknown,
 ) => value) as ResultOfFunction;
+
+const partialResults = new WeakMap<object, unknown>();
+
+function partialResultKey(value: unknown): object {
+  if (
+    (typeof value !== "object" || value === null) &&
+    typeof value !== "function"
+  ) {
+    throw new TypeError(
+      "partialResultOf() requires a request returned by a streaming built-in",
+    );
+  }
+  return value;
+}
+
+/** Associate one direct streaming result with its zero-node partial alias. */
+export function associatePartialResult<Final, Partial>(
+  result: unknown,
+  partial: unknown,
+): PartialResultSource<Final, Partial> {
+  partialResults.set(partialResultKey(result), partial);
+  return result as PartialResultSource<Final, Partial>;
+}
+
+/** Return the partial alias associated by a streaming built-in wrapper. */
+export const partialResultOf: PartialResultOfFunction = ((value: unknown) => {
+  const key = partialResultKey(value);
+  if (!partialResults.has(key)) {
+    throw new TypeError(
+      "partialResultOf() requires a request returned by a streaming built-in",
+    );
+  }
+  return partialResults.get(key);
+}) as PartialResultOfFunction;

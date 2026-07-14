@@ -64,7 +64,7 @@ describe("data-unavailability builder helpers", () => {
           availableFetched,
           generated,
           availableGenerated,
-          partial: advanced.partial,
+          partial: commonfabric.partialResultOf(advanced),
         };
       });
 
