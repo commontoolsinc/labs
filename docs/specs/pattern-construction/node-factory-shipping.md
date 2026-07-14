@@ -1299,7 +1299,10 @@ is unavailable, invocation fails closed.
 The same rule applies when the call occurs in a materialized `lift` or handler
 callback: required paths come from trusted compiler/artifact metadata resolved
 for the base factory, never from `Factory@1`, authored event/context data, or a
-closure capture.
+closure capture. An authored `asFactory` schema therefore contributes no
+`frameworkProvidedPaths` contract at all: omission means "not an authority
+source," not an exact empty obligation set. Exact comparison is reserved for a
+compiler-owned dynamic-node contract that explicitly carries the field.
 
 Closure conversion rejects a capture that attempts to freeze a
 framework-provided field into `params`. Captured ordinary values remain graph

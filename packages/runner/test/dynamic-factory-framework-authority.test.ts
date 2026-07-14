@@ -236,15 +236,15 @@ describe("dynamic Factory@1 framework authority", () => {
     const authoredExpected = factoryContractFromSchema({
       asFactory: PRIVILEGED_CONTRACT,
     });
-    expect(authoredExpected).toHaveProperty("frameworkProvidedPaths", []);
+    expect(authoredExpected).not.toHaveProperty("frameworkProvidedPaths");
 
-    expect(() =>
+    expect(
       materializeFactory(privileged, {
         runtime,
         artifactSpace: space,
         expected: authoredExpected,
-      })
-    ).toThrow(/framework.*provided.*mismatch/i);
+      }),
+    ).toBe(privileged);
 
     expect(
       materializeFactory(privileged, {

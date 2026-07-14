@@ -11,7 +11,10 @@ import {
 } from "@commonfabric/data-model/fabric-factory";
 import { Identity } from "@commonfabric/identity";
 
-import { setDurableArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
+import {
+  setDurableArtifactEntryRef,
+  setFrameworkProvidedPaths,
+} from "../src/builder/pattern-metadata.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import {
   FactoryArtifactUnavailableError,
@@ -215,6 +218,7 @@ describe("typed Factory@1 Cell round trips", () => {
     const makeFixture = (kind: FactoryKind): FactoryFixture => {
       const live = liveFactories[kind] as unknown as LiveFactory;
       const ref = REFS[kind];
+      setFrameworkProvidedPaths(live, [["value"]]);
       setDurableArtifactEntryRef(live, ref);
       const state = sealFactoryState(live);
       warmArtifacts.set(`${ref.identity}#${ref.symbol}`, live);

@@ -8,7 +8,10 @@ import {
 import { Identity } from "@commonfabric/identity";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 
-import { setDurableArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
+import {
+  setDurableArtifactEntryRef,
+  setFrameworkProvidedPaths,
+} from "../src/builder/pattern-metadata.ts";
 import type { FabricValue, JSONSchema } from "../src/builder/types.ts";
 import type { FactoryContract } from "../src/factory-materialization.ts";
 import { materializeScheduledFactoryInputs } from "../src/factory-input-preparation.ts";
@@ -223,6 +226,12 @@ describe("scheduled Factory@1 input materialization", () => {
       );
     }
     const ref = REFS[kind];
+    // FrameworkProvided obligations are trusted artifact metadata, not part of
+    // Factory@1 or the authored asFactory schema. Every lifecycle case below
+    // therefore also guards that schema-driven materialization preserves the
+    // trusted base factory's obligations without treating authored omission as
+    // an exact empty authority contract.
+    setFrameworkProvidedPaths(live, [["value"]]);
     setDurableArtifactEntryRef(live, ref);
     availableClosures.add(spaceKey(ref.identity, sourceSpace));
     if (warm) warmArtifacts.set(key(ref.identity, ref.symbol), live);

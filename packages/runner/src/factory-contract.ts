@@ -2,7 +2,7 @@ import type { JSONSchema } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 
 type FrameworkProvidedContract = Readonly<{
-  /** Compiler-owned graph metadata; authored asFactory schemas always read []. */
+  /** Compiler-owned graph metadata; never derived from authored schemas. */
   frameworkProvidedPaths?: readonly (readonly string[])[];
 }>;
 
@@ -48,7 +48,6 @@ export function factoryContractFromSchema(
         kind: "pattern",
         argumentSchema: contract.argumentSchema as JSONSchema,
         resultSchema: contract.resultSchema as JSONSchema,
-        frameworkProvidedPaths: [],
       };
     case "module":
       return {
@@ -59,7 +58,6 @@ export function factoryContractFromSchema(
         ...(Object.hasOwn(contract, "resultSchema")
           ? { resultSchema: contract.resultSchema as JSONSchema }
           : {}),
-        frameworkProvidedPaths: [],
       };
     case "handler":
       return {
@@ -70,7 +68,6 @@ export function factoryContractFromSchema(
         ...(Object.hasOwn(contract, "eventSchema")
           ? { eventSchema: contract.eventSchema as JSONSchema }
           : {}),
-        frameworkProvidedPaths: [],
       };
     default:
       throw new TypeError("Invalid asFactory schema contract kind");
