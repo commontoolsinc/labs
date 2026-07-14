@@ -122,6 +122,9 @@ export interface CreateServerBuiltinEgressBrokerOptions {
 }
 
 const DEFAULT_LIMITS: ServerBuiltinEgressLimits = {
+  // External I/O has no guaranteed completion event. Bound it so a claimed
+  // builtin cannot hold its action/lease forever; timeout follows the normal
+  // transient-failure path rather than accepting a partial response.
   timeoutMs: 30_000,
   maxRedirects: 5,
   maxRequestBodyBytes: 1024 * 1024,

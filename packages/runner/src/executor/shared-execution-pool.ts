@@ -218,8 +218,13 @@ export class SharedExecutionPool {
     this.#clearTimer = options.clearTimer ??
       ((timer) =>
         clearTimeout(timer as unknown as ReturnType<typeof setTimeout>));
+    // A crashed Worker has no recovery event to await; bounded exponential
+    // backoff prevents a bad graph or host dependency from hot-spinning.
     this.#crashBackoffBaseMs = options.crashBackoffBaseMs ?? 1_000;
     this.#crashBackoffMaxMs = options.crashBackoffMaxMs ?? 30_000;
+    // Graceful drain may legitimately stop making progress. At this safety
+    // bound we fence the lease and recompute from durable state; the cost is
+    // redundant work, never acceptance under expired authority.
     this.#settleTimeoutMs = options.settleTimeoutMs ?? 60_000;
   }
 

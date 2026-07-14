@@ -836,6 +836,9 @@ export class DenoSpaceExecutorFactory implements SpaceExecutorFactory {
       clearTimer: this.options.clearTimer ??
         ((timer) =>
           clearTimeout(timer as unknown as ReturnType<typeof setTimeout>)),
+      // Bounds both initial Worker boot and a claimed-action activation. A
+      // silent Worker cannot retain an authority lane indefinitely; timeout
+      // tears it down and lets the pool's fenced replacement path recover.
       startupTimeoutMs: this.options.startupTimeoutMs ?? 30_000,
     });
     try {
