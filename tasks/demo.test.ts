@@ -57,9 +57,11 @@ Deno.test("parseDemoArgs rejects invalid and incomplete options", () => {
 
 Deno.test("default demo dependencies provide time, preflight, and subprocess", async () => {
   assertEquals(defaultDependencies.now() instanceof Date, true);
-  await defaultDependencies.preflight();
+  const previousFfmpeg = Deno.env.get("FFMPEG");
+  Deno.env.set("FFMPEG", Deno.execPath());
   const root = await Deno.makeTempDir();
   try {
+    await defaultDependencies.preflight();
     const status = await defaultDependencies.runIntegration(
       ["eval", "Deno.exit(0)"],
       root,
@@ -67,6 +69,8 @@ Deno.test("default demo dependencies provide time, preflight, and subprocess", a
     );
     assertEquals(status.success, true);
   } finally {
+    if (previousFfmpeg === undefined) Deno.env.delete("FFMPEG");
+    else Deno.env.set("FFMPEG", previousFfmpeg);
     await Deno.remove(root, { recursive: true });
   }
 });
@@ -75,9 +79,9 @@ Deno.test("demo main handles help, errors, and an injected successful run", asyn
   assertEquals(await main(["--help"]), 0);
   assertEquals(await main(["--unknown"]), 1);
   assertEquals(
-    await main(["shell", "worker-runtime"], async (options) => {
+    await main(["shell", "worker-runtime"], (options) => {
       assertEquals(options.packageName, "shell");
-      return 0;
+      return Promise.resolve(0);
     }),
     0,
   );
@@ -89,8 +93,8 @@ Deno.test("demo main handles help, errors, and an injected successful run", asyn
 
 Deno.test("demo CLI help exits successfully", async () => {
   const command = new Deno.Command(Deno.execPath(), {
-    args: ["run", "-A", "tasks/demo.ts", "--help"],
-    cwd: Deno.cwd(),
+    args: ["run", "-A", "demo.ts", "--help"],
+    cwd: import.meta.dirname,
     stdout: "piped",
     stderr: "piped",
   });
