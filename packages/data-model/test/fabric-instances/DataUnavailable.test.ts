@@ -110,6 +110,24 @@ describe("DataUnavailable", () => {
     );
   });
 
+  it("fails closed if native error conversion violates its contract", () => {
+    const originalFromNativeError = FabricError.fromNativeError;
+    let conversionAttempted = false;
+    FabricError.fromNativeError = () => {
+      conversionAttempted = true;
+      return "not a FabricError" as unknown as FabricError;
+    };
+
+    try {
+      expect(() => DataUnavailable.error(new Error("bad conversion"))).toThrow(
+        "DataUnavailable.error() requires an Error",
+      );
+      expect(conversionAttempted).toBe(true);
+    } finally {
+      FabricError.fromNativeError = originalFromNativeError;
+    }
+  });
+
   it("projects ergonomic boolean fields from reason", () => {
     expect(DataUnavailable.pending()).toMatchObject({
       reason: "pending",

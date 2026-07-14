@@ -54,3 +54,26 @@ Deno.test("pending render styles install once in the active shadow root", () => 
   assertEquals(styles[0].textContent, PENDING_RENDER_STYLES);
   assertStringIncludes(styles[0].textContent, "grayscale");
 });
+
+Deno.test("pending render styles tolerate a document without a style host", () => {
+  let created = false;
+  const root = {
+    nodeType: 9,
+    head: null,
+    documentElement: null,
+    querySelector: () => null,
+  };
+  const container = {
+    getRootNode: () => root,
+  } as unknown as HTMLElement;
+  const document = {
+    createElement: () => {
+      created = true;
+      return {};
+    },
+  } as unknown as Document;
+
+  ensurePendingRenderStyles(container, document);
+
+  assertEquals(created, false);
+});
