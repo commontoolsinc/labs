@@ -7,9 +7,39 @@ import {
   type RecordedFrame,
 } from "../presentation/mod.ts";
 import type { Page_screencastFrame } from "../../vendor-astral/bindings/celestial.ts";
+import { Page } from "../page.ts";
 
 Deno.test("parsePresentationConfig stays disabled without an output directory", () => {
   assertEquals(parsePresentationConfig({}), { enabled: false });
+});
+
+Deno.test("Page runs the navigation hook after goto and reload", async () => {
+  const navigations: string[] = [];
+  const astralPage = {
+    timeout: 0,
+    goto: (url: string) => {
+      navigations.push(url);
+      return Promise.resolve();
+    },
+    reload: () => {
+      navigations.push("reload");
+      return Promise.resolve();
+    },
+  };
+  const page = new Page(
+    astralPage as unknown as ConstructorParameters<typeof Page>[0],
+    { timeout: 10 },
+  );
+  let hookCalls = 0;
+  page.setAfterNavigationHook(() => {
+    hookCalls++;
+  });
+
+  await page.goto("https://example.test/");
+  await page.reload();
+
+  assertEquals(navigations, ["https://example.test/", "reload"]);
+  assertEquals(hookCalls, 2);
 });
 
 Deno.test("parsePresentationConfig supplies deterministic defaults", () => {

@@ -59,6 +59,7 @@ export async function dismissDialogs(e: DialogEvent) {
 export class Page extends EventTarget {
   private page: AstralPage | null;
   private timeout: number;
+  private afterNavigation?: () => Promise<void> | void;
 
   constructor(page: AstralPage, options: { timeout: number }) {
     super();
@@ -239,6 +240,10 @@ export class Page extends EventTarget {
     this.page!.keyboard.setDefaultTypeDelay(delay);
   }
 
+  setAfterNavigationHook(hook?: () => Promise<void> | void): void {
+    this.afterNavigation = hook;
+  }
+
   async setViewportSize(
     size: { width: number; height: number },
   ): Promise<void> {
@@ -296,12 +301,14 @@ export class Page extends EventTarget {
   async goto(url: string, options?: GoToOptions): Promise<void> {
     this.checkIsOk();
     await this.page!.goto(url, options);
+    await this.afterNavigation?.();
   }
 
   // Passthru of `@astral/astral`'s `Page#reload`
   async reload(options?: WaitForOptions): Promise<void> {
     this.checkIsOk();
     await this.page!.reload(options);
+    await this.afterNavigation?.();
   }
 
   // Passthru of `@astral/astral`'s `Page#waitForSelector`

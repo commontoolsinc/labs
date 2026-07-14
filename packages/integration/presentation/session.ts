@@ -76,6 +76,7 @@ export class PresentationSession {
     const participantDir = join(this.#config.outputDir, "participants", id);
     await page.setViewportSize(this.#config.viewport);
     installPresentationInteractions(page, this.#config, { label, color });
+    page.setAfterNavigationHook(() => this.start(page));
     const recorder = new FrameRecorder(page, {
       participantDir,
       id,
@@ -127,6 +128,7 @@ export class PresentationSession {
       this.#manifest.status = "capture-failed";
       this.#manifest.error ??= state.manifest.error;
     } finally {
+      page.setAfterNavigationHook(undefined);
       presentationInteractions(page)?.uninstall();
       this.#syncManifest();
     }

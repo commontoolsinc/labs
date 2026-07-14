@@ -1,8 +1,22 @@
 import type { ElementHandle, InteractionObserver } from "@astral/astral";
 import type { Page } from "../page.ts";
+import { type ProbeApi, waitForCondition } from "../utils.ts";
 import type { PresentationConfig } from "./config.ts";
 
 const controllers = new WeakMap<Page, PresentationInteractions>();
+
+const cfInputIsFillable = (
+  probe: ProbeApi,
+  selector: string,
+): boolean => {
+  const element = probe.collect(selector)[0];
+  if (!element) return false;
+  const input = element instanceof HTMLInputElement
+    ? element
+    : element.shadowRoot?.querySelector("input");
+  return input instanceof HTMLInputElement && probe.isVisible(input) &&
+    !input.disabled && !input.readOnly;
+};
 
 export class PresentationInteractions {
   readonly #page: Page;
@@ -69,6 +83,10 @@ export class PresentationInteractions {
     value: string,
     timeout: number,
   ): Promise<void> {
+    await waitForCondition(this.#page, cfInputIsFillable, {
+      timeout,
+      args: [selector],
+    });
     const host = await this.#page.waitForSelector(selector, {
       strategy: "pierce",
       timeout,
