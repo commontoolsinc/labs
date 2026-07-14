@@ -27,6 +27,7 @@ import type {
   BuiltInGenerateTextParams,
 } from "@commonfabric/api";
 import { llmDialog } from "./llm-dialog.ts";
+import { latestComplete } from "./latest-complete.ts";
 
 const WISH_DEBOUNCE_MS = 50;
 
@@ -47,6 +48,7 @@ export function registerBuiltins(runtime: Runtime) {
     raw(fetchJsonUnchecked),
   );
   moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
+  moduleRegistry.addModuleByRef("latestComplete", raw(latestComplete));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
   moduleRegistry.addModuleByRef("llm", raw(llm, { isEffect: true }));
   moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
