@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { CfcEnforcementMode } from "../src/cfc/mod.ts";
@@ -13,6 +14,16 @@ import {
 const signer = await Identity.fromPassphrase(
   "runner-cfc-authoring-observe-tests",
 );
+
+function expectObjectSchema(
+  schema: JSONSchema | undefined,
+  name: string,
+): JSONSchemaObj {
+  if (typeof schema !== "object" || schema === null) {
+    throw new Error(`${name} schema should be an object`);
+  }
+  return schema;
+}
 
 describe("CFC authoring surface trust-sensitive claims", () => {
   const createRuntime = (cfcEnforcementMode?: CfcEnforcementMode) => {
@@ -43,7 +54,11 @@ describe("CFC authoring surface trust-sensitive claims", () => {
       createSchemaTransformerV2().generateSchema(type, checker),
     );
 
-    expect((schema.properties?.value as any)?.ifc?.writeAuthorizedBy).toEqual({
+    const valueSchema = expectObjectSchema(
+      schema.properties?.value,
+      "value",
+    );
+    expect(valueSchema.ifc?.writeAuthorizedBy).toEqual({
       __ctWriterIdentityOf: {
         file: "test.ts",
         path: ["localFunction"],
@@ -57,7 +72,7 @@ describe("CFC authoring surface trust-sensitive claims", () => {
       const observeCell = runtime.getCell(
         signer.did(),
         "cfc-authoring-observe-write-authorized-by",
-        schema as any,
+        schema,
         observeTx,
       );
       observeCell.set({
@@ -78,7 +93,7 @@ describe("CFC authoring surface trust-sensitive claims", () => {
       const enforceCell = runtime.getCell(
         signer.did(),
         "cfc-authoring-enforce-write-authorized-by",
-        schema as any,
+        schema,
         enforceTx,
       );
       enforceCell.set({
