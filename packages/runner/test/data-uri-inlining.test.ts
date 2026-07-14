@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import {
+  entityRefToString,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -9,7 +12,7 @@ import {
   createDataCellURI,
   findAndInlineDataURILinks,
 } from "../src/link-utils.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { LINK_V1_TAG, type SigilLink } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -583,9 +586,9 @@ describe("data URI inlining", () => {
       });
 
       // Verify that the id is NOT a data: URI
-      const resultLink = result as any;
-      if (resultLink["/"] && resultLink["/"][LINK_V1_TAG]?.id) {
-        expect(resultLink["/"][LINK_V1_TAG].id).not.toMatch(/^data:/);
+      const resultLink = linkRefPayload(result as SigilLink);
+      if (resultLink.id) {
+        expect(resultLink.id).not.toMatch(/^data:/);
       }
     });
 

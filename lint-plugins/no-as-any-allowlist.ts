@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/data-uri-inlining.test.ts",
   "packages/runner/test/engine-verified-functions.test.ts",
   "packages/runner/test/esm-cell-cache-integration.test.ts",
   "packages/runner/test/fabric-imports-engine.test.ts",
