@@ -14,6 +14,11 @@ import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { provideElementSpace } from "./space-context.ts";
+import {
+  ensurePendingRenderStyles,
+  PENDING_RENDER_ATTRIBUTE,
+  setPendingRenderState,
+} from "../pending-render.ts";
 
 const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
 
@@ -209,6 +214,7 @@ export class DomApplicator {
    */
   setContainer(container: HTMLElement): void {
     this.nodes.set(CONTAINER_NODE_ID, container);
+    ensurePendingRenderStyles(container, this.document);
   }
 
   /**
@@ -321,6 +327,11 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!isElementNode(node)) return;
 
+    if (key === PENDING_RENDER_ATTRIBUTE) {
+      setPendingRenderState(node, value === true);
+      return;
+    }
+
     // Use the configured property setter (defaults to setPropDefault)
     this.setPropHandler(node, key, value);
   }
@@ -328,6 +339,11 @@ export class DomApplicator {
   private removeProp(nodeId: number, key: string): void {
     const node = this.nodes.get(nodeId);
     if (!isElementNode(node)) return;
+
+    if (key === PENDING_RENDER_ATTRIBUTE) {
+      setPendingRenderState(node, false);
+      return;
+    }
 
     if (key.startsWith("on") && key.length > 2) {
       this.removeEvent(nodeId, key.slice(2).toLowerCase());
