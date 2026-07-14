@@ -6,9 +6,10 @@ renderer continuity behavior and the staged migration of the remaining
 asynchronous APIs. The renderer portion is implemented in the current work;
 the API stages remain planned.
 
-The separate [`latestComplete()` plan](./latest-complete.md) is complementary,
-not a prerequisite. `resultOf()` exposes the current usable value and propagates
-current unavailability; `latestComplete()` will retain a coherent prior value.
+The complementary `latestComplete()` helper is now implemented and specified in
+the [DataUnavailable spec](../specs/data-unavailability.md#latestcomplete-snapshot-helper).
+`resultOf()` exposes the current usable value and propagates current
+unavailability; `latestComplete()` retains a coherent prior value.
 
 ## Status
 
@@ -25,30 +26,34 @@ update the DataUnavailable spec and archive this plan under
 1. A one-result operation has a default public API returning
    `AsyncResult<T>`. Code keeps the request for guards and calls
    `resultOf(request)` for its ordinary `T` view.
-2. A stream, dialog, picker, or metadata-bearing operation keeps a state object.
-   Each data-bearing result channel uses `AsyncResult<T>`; independent lifecycle,
-   control, selection, and audit fields remain explicit.
-3. `pending` and `error` fields must not duplicate the availability of the same
-   result channel. They remain only when they describe an independent state,
-   such as an active dialog turn while a prior presented result is still usable.
-4. The durable raw built-in may keep one internal state object. A concise default
-   API projects its `.result` field in the builder, as `generateText()` and
-   `generateObject()` do today. The projection creates no additional runtime
-   node.
-5. Existing raw implementation references and persisted state shapes are not
+2. Public APIs do not add a state object merely to hold `.result`. A stream
+   returns its final `AsyncResult<T>` directly and exposes intermediate values
+   through `partialResultOf(stream)`. Successful metadata which is produced
+   atomically with the value is part of `T`.
+3. State objects remain only for genuine multi-channel state machines such as
+   `wish` and `llmDialog`. Their data-bearing channels use `AsyncResult<T>`;
+   lifecycle, controls, selection, and other independent state remain explicit.
+4. `pending` and `error` fields must not duplicate the availability of the same
+   result channel. Failure-only metadata belongs on a specialized error value;
+   independent state such as an active dialog turn remains explicit.
+5. A durable raw built-in may keep an internal state object. Builder-time
+   projections expose the direct result and associate it with auxiliary
+   zero-node projections such as `partialResultOf()` or
+   `presentedResultOf()`; callers do not navigate the raw state.
+6. Existing raw implementation references and persisted state shapes are not
    changed in place without compatibility tests. Old compiled graphs must
    continue to rehydrate while newly compiled code receives the new public
    surface.
-6. Every new request replaces a stale result with pending in the same logical
+7. Every new request replaces a stale result with pending in the same logical
    transition unless the API's contract explicitly retains a prior value. Only
    `latestComplete()` and state machines whose contract says so provide
    last-value continuity.
-7. An input marker propagates unchanged. Locally invalid inputs become
+8. An input marker propagates unchanged. Locally invalid inputs become
    `schema-mismatch`; operational failures become `error`.
-8. Transformer-derived result schemas remain the runtime contract. A generic
+9. Transformer-derived result schemas remain the runtime contract. A generic
    result API must inject or forward its concrete TypeScript schema rather than
    adding an unvalidated cast.
-9. CFC scope, labels, stale-write guards, request hashes, and post-commit effect
+10. CFC scope, labels, stale-write guards, request hashes, and post-commit effect
    ordering are preserved across every migration.
 
 ## Completed Renderer Contract
@@ -101,12 +106,12 @@ resurrect content cleared by an error.
 |---|---|---|---|
 | `fetch*` | one result | `AsyncResult<T>` | implemented |
 | `generateText`, `generateObject` | one result | `AsyncResult<T>` | implemented |
-| `generateTextStream`, `generateObjectStream` | advanced generation | state with `result: AsyncResult<T>` | partials, messages, grounding |
-| `compileAndRun` | one result plus diagnostics | default `AsyncResult<T>`; advanced state variant | structured compiler diagnostics |
-| `db.query`, `sqliteQuery` | one result plus optional audit metadata | default `AsyncResult<Row[]>`; advanced state variant | `withheld` count |
+| `generateTextStream`, `generateObjectStream` | final result plus intermediate values | `AsyncResult<T>` | `partialResultOf(request)` |
+| `compileAndRun` | one result with failure diagnostics | specialized `AsyncResult<T>` | diagnostics on `CompileError` |
+| `db.query`, `sqliteQuery` | one result plus success audit metadata | `AsyncResult<{ rows: Row[]; withheld?: number }>` | none |
 | `wish` | discovery and selection state machine | `WishState<T>.result: AsyncResult<T>` | candidates and trusted `[UI]` |
-| `llmDialog` | multi-turn state machine | typed presented-result channel when requested | turn activity, controls, pins, tools |
-| `streamData` | long-lived multi-result subscription | state with `result: AsyncResult<T>` | connection lifecycle and last connection error |
+| `llmDialog` | multi-turn state machine | `presentedResultOf(dialog): AsyncResult<T>` when requested | turn activity, controls, pins, tools |
+| `streamData` | long-lived stream with a final value | `AsyncResult<T>` | `partialResultOf(request)` while open |
 | legacy `llm` | deprecated state API | no new surface | migrate callers, then remove |
 
 `navigateTo`, `sqliteDatabase`, SQLite writes, and CFC label inspection are not
@@ -114,8 +119,9 @@ asynchronous data-result APIs and are outside this migration.
 
 ## A0 — Compatibility And Contract Harness
 
-- [ ] Add compile-time fixtures for direct results, advanced state results,
-      guards, `resultOf()`, aliases, and namespace imports.
+- [ ] Add compile-time fixtures for direct results, auxiliary projections,
+      genuine state-machine channels, guards, `resultOf()`, aliases, and
+      namespace imports.
 - [ ] Add golden transformed-output fixtures for every generic API whose result
       schema is injected by the transformer.
 - [ ] Add raw built-in transition tests which distinguish stored authored
@@ -131,91 +137,96 @@ asynchronous data-result APIs and are outside this migration.
 **A0 exit:** every API below has an agreed transition table, a red contract test,
 and a proven old-state rehydration path.
 
-## A1 — Normalize Advanced Generation State
+## A1 — Direct Streaming Generation Results
 
-`generateTextStream()` and `generateObjectStream()` already publish
-`result: AsyncResult<T>`. Their public `pending` and `error` fields duplicate
-that channel.
+`generateTextStream()` and `generateObjectStream()` use the same direct final
+result contract as their non-streaming counterparts. The only public addition
+is access to intermediate output:
 
-- [ ] Migrate repository consumers to `isPending(state.result)`,
-      `hasError(state.result)`, and `resultOf(state.result)`.
-- [ ] Deprecate the duplicate public fields while retaining persisted legacy
-      decoding.
-- [ ] Keep `partial`, `messages`, and `groundingSources`; they are independent
-      channels, not availability aliases.
+```typescript
+// Shown for illustration only.
+const request = generateTextStream({ prompt });
+const text = resultOf(request);
+const partialRequest = partialResultOf(request);
+```
+
+- [ ] Make the stream call return its final `AsyncResult<T>` directly.
+- [ ] Add `partialResultOf(request)` as a zero-node associated projection. Text
+      streams expose partial text; object streams define and inject the exact
+      partial-object type instead of leaking the current raw JSON string.
+- [ ] Keep grounding or message metadata only through separately named helpers
+      if repository use proves those channels are needed; do not restore a
+      generic state wrapper.
+- [ ] Retain persisted legacy decoding behind the builder projection.
 - [ ] Verify a new request atomically clears stale partial state and publishes
       pending on the result channel.
 
-**A1 exit:** advanced generation has one authoritative availability channel and
-keeps only genuinely auxiliary state beside it.
+**A1 exit:** streaming and non-streaming generation have the same direct result
+shape; intermediate output is available without `.result`.
 
 ## A2 — `compileAndRun`
 
-Use one internal advanced state and expose two builder views (working advanced
-name: `compileAndRunState`):
+Compilation diagnostics are emitted only on failure today, so they belong on a
+specialized error rather than on a successful result or an advanced state:
 
 ```typescript
 // Shown for illustration only.
 const compileRequest = compileAndRun<Input, Output>({ files, main, input });
 const output = resultOf(compileRequest);
 
-const compileState = compileAndRunState<Input, Output>({ files, main, input });
-const detailedOutput = resultOf(compileState.result);
+const diagnostics = hasError(compileRequest)
+  ? compileRequest.error.diagnostics
+  : [];
 ```
 
-- [ ] Change the internal `result` channel to `AsyncResult<Output>`.
-- [ ] Make the default builder project `.result` without creating another node.
-- [ ] Preserve structured diagnostics on the advanced state. Represent the
-      primary failure on `result` with `DataUnavailable("error")`; do not keep a
-      second authoritative error channel.
+- [ ] Return a direct `AsyncResult<Output>` and project the persisted internal
+      state without creating another node.
+- [ ] Define a serializable `CompileError extends Error` carrying structured
+      `diagnostics`; specialize the error arm so `hasError(compileRequest)`
+      preserves that type.
+- [ ] Represent non-diagnostic compilation and execution failures with the same
+      error type and an empty or absent diagnostics array.
 - [ ] Define invalid program parameters precisely: schema-invalid input becomes
       `schema-mismatch`; a valid request which cannot compile becomes `error`.
 - [ ] Propagate unavailable `files`, `main`, or `input` before invoking the
       compiler.
 - [ ] Preserve the live compiled-pattern result link, scope, cancellation,
       request supersession, and structured diagnostic locations.
-- [ ] Migrate compiler UIs to the advanced form and result-only call sites to the
-      default form.
+- [ ] Migrate compiler UIs to the specialized error and result-only call sites
+      to the direct form.
 
 **A2 exit:** ordinary compilation reads like fetch/generation, while diagnostic
 surfaces retain their structured errors without parallel pending semantics.
 
 ## A3 — SQLite Queries
 
-Use the same raw query state for concise and metadata-aware views (working names:
-`db.queryState` and `sqliteQueryState`):
+Rows and `withheld` are delivered together, so they form one successful value;
+there is no state variant:
 
 ```typescript
 // Shown for illustration only.
-const rowsRequest = db.query<Row>(sql, { reactOn: db });
-const rows = resultOf(rowsRequest);
-
-const queryState = db.queryState<Row>(sql, {
+const queryRequest = db.query<Row>(sql, {
   reactOn: db,
   readClearance: true,
 });
-const visibleRows = resultOf(queryState.result);
-const withheld = queryState.withheld;
+const { rows, withheld } = resultOf(queryRequest);
 ```
 
-- [ ] Change the raw state's result channel to `AsyncResult<Row[]>` and make
-      `db.query` / `sqliteQuery` project it.
-- [ ] Add the metadata-aware method and free-function views without duplicating
-      the query node.
-- [ ] Keep `withheld` only as audit metadata for the exact successful result it
-      accompanies; clear it atomically when a new request becomes pending or
-      fails.
+- [ ] Make `db.query` / `sqliteQuery` return
+      `AsyncResult<{ rows: Row[]; withheld?: number }>` directly.
+- [ ] Publish `rows` and `withheld` atomically from the same provider response;
+      a new pending request or failure replaces that entire value.
 - [ ] Map SQL, provider, CFC ceiling, row-label, decode, and writeback failures to
       `error`; map a typed row-result violation to `schema-mismatch`.
 - [ ] Preserve typed row-schema injection for both method and free-function
       forms, including `Cell<T>` rehydration and confidentiality labels.
 - [ ] Prove read-clearance per-user scoping, request identity, stale-write
       suppression, and post-commit execution remain unchanged.
-- [ ] Migrate call sites which currently use `result ?? []`; ordinary consumers
-      use `resultOf`, while consumers of `withheld` use the advanced view.
+- [ ] Migrate call sites which currently use `result ?? []` to destructure the
+      structured `resultOf()` value.
 
-**A3 exit:** row consumers receive `Row[]` without optional fallbacks, and the
-clearance audit remains available through an explicit advanced surface.
+**A3 exit:** row consumers receive a structured usable value without optional
+fallbacks, and the clearance audit is attached to the exact rows it describes.
 
 ## A4 — `wish`
 
@@ -250,12 +261,40 @@ failure no longer collapse into `undefined`.
 ## A5 — `llmDialog`
 
 Dialog `pending` describes an active turn, not necessarily the availability of
-a previously presented structured result. It is therefore not automatically
-replaced by `isPending(result)`.
+a previously presented structured result. Keep the dialog control object, but
+remove its ambiguous untyped `.result` field from authored code.
 
-- [ ] Add a typed overload for dialogs with a presented-result schema, yielding
-      `result: AsyncResult<T>` and keeping the schema derived from or checked
-      against the TypeScript type.
+Current use:
+
+```typescript
+// Shown for illustration only.
+const { addMessage, pending, result: rawResult } = llmDialog({
+  messages,
+  resultSchema: toSchema<ResearchResult>(),
+});
+const result = computed(() => rawResult as ResearchResult | undefined);
+```
+
+Proposed use:
+
+```typescript
+// Shown for illustration only.
+const dialog = llmDialog<ResearchResult>({ messages });
+const resultRequest = presentedResultOf(dialog);
+const result = resultOf(resultRequest);
+
+return hasError(resultRequest)
+  ? <div>{resultRequest.error.message}</div>
+  : <ResearchView result={result} pendingTurn={dialog.pending} />;
+```
+
+`presentedResultOf()` is a zero-node associated projection, analogous to
+`partialResultOf()`. `dialog.pending` remains independent turn activity.
+
+- [ ] Add a typed dialog overload and transformer schema injection for its
+      presented result.
+- [ ] Add `presentedResultOf(dialog): AsyncResult<T>` without adding a second
+      dialog node.
 - [ ] Do not manufacture a perpetual pending result for dialogs which do not
       declare or use `presentResult`; their public state omits that channel.
 - [ ] Before the first presentation, expose pending while a turn can still
@@ -265,41 +304,42 @@ replaced by `isPending(result)`.
       explicit rather than overwriting usable presented data.
 - [ ] Preserve message append/cancel streams, pins, flattened tools, tool-call
       availability handling, queueing, and CFC attribution.
-- [ ] Migrate unsafe `as T | undefined` result casts to the typed channel.
+- [ ] Migrate unsafe `as T | undefined` result casts to
+      `presentedResultOf(dialog)`.
 
 **A5 exit:** structured dialog results are typed and availability-aware without
 conflating them with the dialog's multi-turn lifecycle.
 
 ## A6 — `streamData`
 
-First replace the current ambiguous `pending` flag with an explicit subscription
-contract. The planned state is conceptually:
+Use the same direct-final-plus-partial shape as LLM streams:
 
 ```typescript
 // Shown for illustration only.
-type StreamDataState<T> = {
-  result: AsyncResult<T>;
-  status: "connecting" | "open" | "closed" | "reconnecting" | "error";
-  lastError?: Error;
-};
+const request = streamData<Event>({ url });
+const finalEvent = resultOf(request);
+const currentEventRequest = partialResultOf(request);
 ```
 
 - [ ] Specify initial connect, first event, successive events, clean end,
       reconnect, request replacement, cancellation, and terminal failure.
-- [ ] Publish pending before the first event for a request and publish each event
-      as the latest usable `T`.
-- [ ] If connection failure occurs before any event, publish result error. If a
-      prior event exists, preserve it and report connection failure separately;
-      an operational status must not masquerade as loss of known data.
-- [ ] Decide and test whether clean end preserves the final event (expected) and
-      whether reconnect is automatic before implementing the new state.
+- [ ] Keep the direct request pending while the stream is open; publish the last
+      event as its final result on clean close. Infinite subscriptions therefore
+      use `partialResultOf()` for their event channel.
+- [ ] Publish each decoded event through `partialResultOf(request)`; before the
+      first event that partial channel is pending.
+- [ ] A connection or decode failure makes the direct result an error. The
+      partial channel may retain its last event only through an explicit
+      `latestComplete(partialResultOf(request))`, not an implicit state wrapper.
+- [ ] Decide and test reconnect policy before implementation; reconnect keeps
+      the final request pending until a later clean close or terminal failure.
 - [ ] Add response-status validation, parser/schema mismatch handling, abort
       cleanup, and a defined final decoder flush.
 - [ ] Preserve sink outbox ordering, frozen request snapshots, idempotency keys,
       scope, and stale-run guards.
 
-**A6 exit:** stream consumers can distinguish data availability from connection
-lifecycle, including failure after a usable event.
+**A6 exit:** stream consumers use one direct final result and one explicit
+intermediate projection, with no `.result` wrapper.
 
 ## A7 — Legacy `llm`, Cleanup, And Documentation
 

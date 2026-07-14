@@ -2,9 +2,9 @@
 
 ## Status
 
-Implemented. The separately specified `latestComplete()` snapshot helper
-remains planned work. Pending renderer continuity is implemented; migration of
-the remaining asynchronous APIs is tracked in the
+Implemented, including the separately specified `latestComplete()` snapshot
+helper and pending renderer continuity. Migration of the remaining
+asynchronous APIs is tracked in the
 [`async API availability plan`](../plans/async-api-availability-migration.md).
 
 ## Summary
@@ -74,9 +74,9 @@ originating request or an honest availability union.
   successive usable values, end-of-stream, reconnect, and terminal failure.
 - Defining a general JSON Schema vocabulary for every FabricType. This design
   uses a narrower, path-scoped runner policy for control signals.
-- Implementing the stateful `latestComplete()` snapshot helper in the first
-  asynchronous built-in cutover. Its intended contract is specified here so a
-  follow-up can share the same type, schema, and propagation model.
+- Adding implicit last-value continuity to asynchronous results. Continuity is
+  opt-in through `latestComplete()` so ordinary `resultOf()` dataflow continues
+  to propagate the current unavailable state.
 
 ## System Model
 
@@ -776,13 +776,13 @@ availability marker. A child generation used by `llmDialog` waits only for
 transient pending/syncing states and fails the tool call immediately for error
 or schema mismatch instead of consuming the full tool timeout.
 
-## Planned `latestComplete()` Snapshot Helper
+## `latestComplete()` Snapshot Helper
 
 `resultOf()` is stateless: whenever its source is unavailable, an ordinary
-consumer also becomes unavailable. A later `latestComplete()` built-in will
-provide the complementary continuity primitive. It publishes atomic snapshots
-only when its entire schema-declared input is usable, then retains the most
-recent complete snapshot while any current input is unavailable.
+consumer also becomes unavailable. The `latestComplete()` built-in provides
+the complementary continuity primitive. It publishes atomic snapshots only
+when its entire schema-declared input is usable, then retains the most recent
+complete snapshot while any current input is unavailable.
 
 ```typescript
 // Shown for illustration only.
@@ -836,21 +836,16 @@ schema-invalid input it performs no write once a snapshot exists. A valid
 authored `undefined` must remain distinguishable from a failed read when the
 stripped schema admits `undefined`.
 
-The output cell is the persisted snapshot; the implementation should not mint
-a duplicate hidden snapshot cell. Rehydration distinguishes an absent output
-from a stored valid `undefined` with the runtime's status-bearing presence
-read, or with the smallest explicit initialization sentinel if the storage
-boundary cannot expose that distinction.
-
-`latestComplete()` remains unimplemented. Its
-[separate live implementation plan](../plans/latest-complete.md) builds on the
-now-shipped `AsyncResult<T>`, `resultOf()`, status-bearing reads, and unavailable
-union schema handling.
+The node's result cell is the sole persisted snapshot. The output binding points
+to that cell; there is no second hidden cache. Rehydration distinguishes an
+absent snapshot from a stored valid `undefined` with a non-reactive,
+non-tainting presence read. The initial pending write makes a later complete
+`undefined` an explicit stored value rather than an unwritten output.
 
 It is the intended follow-up for the ecosystem's previous
-`request.result ?? priorValue` continuity idiom. Until it ships, authors who
-need continuity must keep an explicit persisted snapshot; `resultOf()` alone
-deliberately exposes current unavailability to downstream preflight.
+`request.result ?? priorValue` continuity idiom. `resultOf()` alone deliberately
+exposes current unavailability to downstream preflight; use `latestComplete()`
+only when retaining a coherent prior value is the desired behavior.
 
 ## Deferred Authoring Views
 
@@ -889,7 +884,7 @@ Fallback-while-loading code requires special review. Replacing
 `request.result ?? fallback` with `resultOf(request) ?? fallback` is incorrect:
 the runtime marker remains present and truthy even though TypeScript exposes the
 usable type. Use explicit guarded fallback UI, explicit persisted state for a
-last-successful value, or the planned `latestComplete()` snapshot. This is the
+last-successful value, or the `latestComplete()` snapshot. This is the
 headline migration hazard for out-of-repository patterns and a candidate for a
 future lint over falsy/defaulting operations on projected results.
 
@@ -1003,6 +998,9 @@ runtime/compiler version gate before patterns emit the new type or policy.
 - End-to-end patterns demonstrate a default `resultOf()` projection, a
   pending/error/success expression using both state and usable aliases, and a
   computation which observes only errors while other reasons still propagate.
+- `latestComplete()` recursively strips unavailable schema arms, publishes only
+  whole schema-materialized snapshots, preserves authored `undefined`, and
+  retains its durable snapshot through unavailable refreshes and cold resume.
 
 ## Advanced Generation API Decision
 

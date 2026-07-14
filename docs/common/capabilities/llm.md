@@ -108,7 +108,7 @@ availability marker in `result`.
 As with fetch, `resultOf(request) ?? previousValue` is not a
 fallback-while-loading mechanism: an unavailable marker remains present at
 runtime. Keep the request for explicit status UI, or retain a last successful
-snapshot in state until the planned `latestComplete()` helper is available.
+snapshot with `latestComplete(request)`.
 
 ### Valid Model Names
 

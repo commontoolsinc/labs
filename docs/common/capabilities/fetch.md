@@ -144,9 +144,9 @@ translate an old expression such as `request.result ?? previousValue` into
 `resultOf(request) ?? previousValue`: the runtime marker is intentionally
 preserved and is truthy, so the fallback does not provide continuity. Keep the
 request for explicit pending/error branches. If the requirement is to retain
-the last successful value across a new request, use explicit persisted state
-for now; the planned `latestComplete()` helper will provide that behavior
-without hand-written snapshot cells.
+the last successful value across a new request, use
+`latestComplete(request)`; it provides continuity without hand-written snapshot
+cells while leaving the original request available for guards.
 
 ## URLs
 

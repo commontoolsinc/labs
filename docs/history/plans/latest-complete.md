@@ -1,24 +1,31 @@
+---
+status: historical
+created: 2026-07-13
+archived: 2026-07-14
+reason: "Executed plan; latestComplete shipped with recursive schema lowering and durable atomic snapshots."
+superseded-by: docs/specs/data-unavailability.md
+---
+
 # `latestComplete()` Implementation Plan
 
 This is the follow-up implementation plan for the
-[`latestComplete()` contract](../specs/data-unavailability.md#planned-latestcomplete-snapshot-helper).
+[`latestComplete()` contract](../../specs/data-unavailability.md#latestcomplete-snapshot-helper).
 It is intentionally separate from the
-[`DataUnavailable` implementation plan](../history/plans/data-unavailability.md):
-the `AsyncResult<T>` and `resultOf()` migration is complete, while this
-stateful snapshot primitive remains follow-up work.
+[`DataUnavailable` implementation plan](./data-unavailability.md): the
+`AsyncResult<T>` and `resultOf()` migration was complete while this stateful
+snapshot primitive remained follow-up work.
 
 ## Status
 
-Planned; implementation has not started. Its prerequisite DataUnavailable
-cutover now exposes stable `AsyncResult<T>`, `resultOf()`, status-bearing schema
-reads, and direct marker propagation.
+Implemented 2026-07-14. The shipped helper exposes the recursively usable type,
+injects one complete-value schema, retains one scoped persisted snapshot, and
+preserves that snapshot across unavailable refreshes and cold resume.
 
 ## Fixed Decisions
 
 1. `latestComplete()` is one stateful built-in node, not an identity cast.
-2. Its one result cell is the persisted snapshot. Prefer the resolved output
-   binding directly; if scope policy requires a scoped result cell, that cell
-   becomes the sole output target rather than a second cache behind it.
+2. Its one scoped result cell is the persisted snapshot. The output binding
+   points to that cell; there is no second cache behind it.
 3. The transformer derives one recursively usable schema from the TypeScript
    input type by removing `DataUnavailable` and all concrete unavailable
    variants at every union path.
@@ -70,16 +77,16 @@ materializes both requests.
 
 ## L0 — Contract And Test Harness
 
-- [ ] Add focused compile-time examples for root, nested, array/tuple,
+- [x] Add focused compile-time examples for root, nested, array/tuple,
       optional, object-union, and authored-`undefined` inputs.
-- [ ] Confirm the raw built-in harness can distinguish an absent output from a
+- [x] Confirm the raw built-in harness can distinguish an absent output from a
       stored `undefined` after reload.
-- [ ] Confirm the schema-aware read returns an explicit success/failure status
+- [x] Confirm the schema-aware read returns an explicit success/failure status
       rather than using `undefined` as failure.
-- [ ] Fix the result-scope policy: either prove the declared result scope is
+- [x] Fix the result-scope policy: either prove the declared result scope is
       sufficient for a copied snapshot or require the narrowest resolved input
       scope and make its scoped cell the sole persisted result.
-- [ ] Require a concrete generated usable schema, or add a link-aware marker
+- [x] Require a concrete generated usable schema, or add a link-aware marker
       preflight for `any` / `unknown`; never let an unconstrained schema hide a
       nested marker.
 
@@ -233,5 +240,5 @@ deno task --cwd packages/runner test
 deno task check
 ```
 
-When L0 through L3 are complete, update the DataUnavailable spec to mark the
-follow-up implemented and archive this plan under `docs/history/plans/`.
+L0 through L3 completed together with the DataUnavailable spec update. This
+plan was then archived under `docs/history/plans/`.

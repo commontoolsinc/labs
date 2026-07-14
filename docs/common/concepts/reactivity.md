@@ -38,6 +38,20 @@ they test, so code can render an error while continuing to wait through other
 states. See [Fetching Data](../capabilities/fetch.md) and
 [LLM Generation](../capabilities/llm.md) for the complete APIs.
 
+Use `latestComplete()` when continuity is intentional. It waits for its entire
+input to become usable, then keeps the last complete snapshot during later
+pending, error, syncing, or schema-mismatch intervals:
+
+```tsx
+// Shown for illustration only.
+const snapshot = latestComplete({ repo: repoRequest, ticket: ticketRequest });
+```
+
+This is an atomic join: neither field advances until both current requests are
+usable. Inspect the original requests when the UI also needs the current error
+or loading reason. Unlike `resultOf()`, `latestComplete()` creates a stateful
+built-in node.
+
 Availability policy is attached at the exact stable reactive path captured by
 a computation. Hoist dynamic selection outside the computation so the
 transformer can name that path:
