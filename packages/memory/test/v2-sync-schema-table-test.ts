@@ -451,6 +451,63 @@ Deno.test("sync schema table expands unused tables and rejects bad refs", () => 
   );
 });
 
+Deno.test("sync schema table rejects refs without a populated table", () => {
+  const compressed = compressSessionSyncSchemas(
+    repeatedSchemaSync(1),
+  ) as SchemaTableSessionSync;
+  const { schemaTable: _schemaTable, ...withoutTable } = compressed;
+
+  assertThrows(
+    () => expandSessionSyncSchemas(withoutTable),
+    Error,
+    "Invalid sync schema table reference",
+  );
+  assertThrows(
+    () => expandSessionSyncSchemas({ ...withoutTable, schemaTable: {} }),
+    Error,
+    "Invalid sync schema table reference",
+  );
+});
+
+Deno.test("sync schema table validates dangling refs without recursive traversal", () => {
+  const danglingRef = "schema-ref@2:sha256:missing";
+  let deeplyNested: unknown = {
+    $alias: {
+      id: "of:deep-target",
+      path: [],
+      schema: danglingRef,
+    },
+  };
+  for (let index = 0; index < 20_000; index += 1) {
+    deeplyNested = { next: deeplyNested };
+  }
+
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:deep-dangling-ref",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          harmless: danglingRef,
+          nested: deeplyNested,
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  assertThrows(
+    () => expandSessionSyncSchemas(sync),
+    Error,
+    "Invalid sync schema table reference",
+  );
+});
+
 Deno.test("server schema table helpers ignore non-sync messages", () => {
   const hello = {
     type: "hello.ok",

@@ -8,8 +8,10 @@ import type {
   SessionSync,
 } from "../v2.ts";
 import { isPlainObject } from "@commonfabric/utils/types";
-
-const SCHEMA_REF_PREFIX = "schema-ref@2:";
+import {
+  findSyncSchemaRef,
+  SYNC_SCHEMA_REF_PREFIX,
+} from "./sync-schema-ref.ts";
 
 type SchemaTable = Record<string, JSONSchema>;
 
@@ -37,17 +39,20 @@ const schemaRefFor = (
   if (!state.schemas.has(hash)) {
     state.schemas.set(hash, schemaAndHash.schema);
   }
-  return `${SCHEMA_REF_PREFIX}${hash}`;
+  return `${SYNC_SCHEMA_REF_PREFIX}${hash}`;
 };
 
 const expandSchemaRef = (
   value: unknown,
   schemas: SchemaTable | undefined,
 ): JSONSchema | undefined => {
-  if (typeof value !== "string" || !value.startsWith(SCHEMA_REF_PREFIX)) {
+  if (
+    typeof value !== "string" ||
+    !value.startsWith(SYNC_SCHEMA_REF_PREFIX)
+  ) {
     return undefined;
   }
-  const hash = value.slice(SCHEMA_REF_PREFIX.length);
+  const hash = value.slice(SYNC_SCHEMA_REF_PREFIX.length);
   if (
     hash.length === 0 || schemas === undefined ||
     !Object.hasOwn(schemas, hash)
@@ -245,6 +250,12 @@ export const expandSessionSyncSchemas = (
 ): SessionSync => {
   const schemas = (sync as SchemaTableSessionSync).schemaTable;
   if (schemas === undefined || Object.keys(schemas).length === 0) {
+    for (const upsert of sync.upserts) {
+      const ref = findSyncSchemaRef(upsert.doc);
+      if (ref !== undefined) {
+        expandSchemaRef(ref, schemas);
+      }
+    }
     return sync;
   }
 
