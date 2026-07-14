@@ -4236,6 +4236,20 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           typeRegistry,
           () => checker.getTypeAtLocation(node),
         );
+        if (
+          isUnresolvedSchemaType(resolved.type) ||
+          isAnyOrUnknownType(resolved.type)
+        ) {
+          context.reportDiagnostic({
+            severity: "error",
+            type: "latest-complete:unresolved-type",
+            message:
+              "latestComplete requires a concrete complete-value type so " +
+              "the transformer can generate its snapshot schema.",
+            node,
+          });
+          return ts.visitEachChild(node, visit, transformation);
+        }
         const schemaCall = createRegisteredSchemaCallFromResolvedType(
           context,
           resolved,
