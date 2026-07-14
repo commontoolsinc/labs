@@ -88,6 +88,15 @@ export class CFMessageBeads extends BaseElement {
         border-radius: 12px;
         padding: 2px 6px;
       }
+      .bead-list {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 3px;
+        align-items: center;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
       @keyframes bead-in {
         from {
           opacity: 0;
@@ -99,10 +108,14 @@ export class CFMessageBeads extends BaseElement {
         }
       }
       .bead {
+        display: block;
         width: 6px;
         height: 6px;
+        margin: 0;
+        padding: 0;
+        border: 0;
         border-radius: 50%;
-        cursor: pointer;
+        cursor: help;
         flex-shrink: 0;
         transition: transform 100ms ease, box-shadow 100ms ease;
         animation: bead-in 250ms ease-out both;
@@ -303,16 +316,10 @@ export class CFMessageBeads extends BaseElement {
     });
   }
 
-  private _onBeadEnter = (e: MouseEvent, index: number) => {
+  private _onBeadEnter = (e: Event, index: number) => {
     const msgs = this._messagesValue;
     if (!msgs?.[index]) return;
     this.#showTooltip(msgs[index], e.currentTarget as HTMLElement);
-  };
-
-  private _onBeadClick = (_e: MouseEvent, index: number) => {
-    const msgs = this._messagesValue;
-    if (!msgs?.[index]) return;
-    // Future: show message detail on click
   };
 
   private _onBeadLeave = () => {
@@ -341,14 +348,15 @@ export class CFMessageBeads extends BaseElement {
     const beads = msgs.map((msg, i) => {
       const color = classifyMessage(msg);
       return html`
-        <div
+        <li
+          role="listitem"
           class="bead ${color}"
           style="animation-delay: ${i * 30}ms"
-          @mouseenter="${(e: MouseEvent) => this._onBeadEnter(e, i)}"
+          aria-label="${beadLabel(msg)}"
+          @mouseenter="${(e: Event) => this._onBeadEnter(e, i)}"
           @mouseleave="${this._onBeadLeave}"
-          @click="${(e: MouseEvent) => this._onBeadClick(e, i)}"
         >
-        </div>
+        </li>
       `;
     });
 
@@ -357,14 +365,24 @@ export class CFMessageBeads extends BaseElement {
         ? html`
           <span class="label">${this.label}</span>
         `
-        : nothing} ${beads} ${this.pending
+        : nothing}
+      <ul
+        class="bead-list"
+        role="list"
+        aria-label="${this.label || "Message history"}"
+      >
+        ${beads}
+      </ul>
+      ${this.pending
         ? html`
           <div class="spinner"></div>
         `
         : html`
           <button
+            type="button"
             class="refine-btn"
             title="Refine"
+            aria-label="Refine messages"
             @click="${this._onRefineClick}"
           >
             +

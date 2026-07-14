@@ -11,7 +11,9 @@ import { BaseElement } from "../../core/base-element.ts";
  * @attr {string} summary - Summary text to display
  * @attr {boolean} clickable - Whether the tile is clickable
  *
- * @fires cf-click - Fired when tile is clicked with detail: { item }
+ * @fires cf-click - Fired when the tile's primary action is activated with
+ * detail: { item }. Interacting with the nested summary/details does not fire
+ * the tile action.
  *
  * @example
  * <cf-tile .item="${page}" summary="Pages: 2, Lists: 1" @cf-click="${handleClick}"></cf-tile>
@@ -76,12 +78,36 @@ export class CFTile extends BaseElement {
       box-shadow: var(--tile-shadow);
     }
 
+    .tile:has(.tile-action:focus-visible) {
+      outline: 2px solid var(--ring);
+      outline-offset: 2px;
+      border-color: var(--accent);
+    }
+
     .tile-title {
       font-weight: bold;
       font-size: var(--cf-size-xl-font-size, 18px);
       color: var(--foreground);
       margin: 0 0 0.5rem 0;
       line-height: 1.25;
+    }
+
+    .tile-action {
+      appearance: none;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-weight: inherit;
+      line-height: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .tile-action:focus {
+      outline: none;
     }
 
     .tile-summary {
@@ -148,10 +174,21 @@ export class CFTile extends BaseElement {
         @click="${this.handleClick}"
       >
         <div class="tile-content">
-          <h3 class="tile-title">${this.item.title}</h3>
+          <h3 class="tile-title">
+            ${this.clickable
+              ? html`
+                <button type="button" class="tile-action">
+                  ${this.item.title}
+                </button>
+              `
+              : this.item.title}
+          </h3>
           ${this.summary
             ? html`
-              <details class="summary-details">
+              <details
+                class="summary-details"
+                @click="${(event: Event) => event.stopPropagation()}"
+              >
                 <summary>${this.summary}</summary>
               </details>
             `
