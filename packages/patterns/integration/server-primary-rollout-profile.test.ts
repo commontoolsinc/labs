@@ -87,6 +87,20 @@ type PhaseResult = {
   lazyActionRuns: number;
   clientDerivedSuppressed: number;
   clientDerivedUpstreamCommits: number;
+  serverExecution: {
+    schedulerRuns: number;
+    actionTransactions: {
+      shadow: number;
+      authoritative: number;
+    };
+    asyncRequests: number;
+    settlements: {
+      committed: number;
+      noOp: number;
+      failed: number;
+      unserved: number;
+    };
+  };
   routing: ExecutionRoutingDiagnostics;
   browserProcessCpu?: {
     before: BrowserProcessMetrics;
@@ -94,6 +108,124 @@ type PhaseResult = {
     rendererDelta: RendererProcessCpuDelta;
   };
 };
+
+type ServerExecutionCounters = PhaseResult["serverExecution"];
+
+async function readServerExecutionCounters(): Promise<ServerExecutionCounters> {
+  const response = await fetch(new URL("/api/health/stats", API_URL));
+  assert(response.ok, `execution health returned ${response.status}`);
+  const health = await response.json() as {
+    serverExecutionPool?: {
+      executionPlacement?: {
+        schedulerRuns?: number;
+        actionTransactions?: { shadow?: number; authoritative?: number };
+        asyncRequests?: number;
+      };
+    } | null;
+    serverExecutionControl?: {
+      settlementsCommitted?: number;
+      settlementsNoOp?: number;
+      settlementsFailed?: number;
+      settlementsUnserved?: number;
+    } | null;
+  };
+  const placement = health.serverExecutionPool?.executionPlacement;
+  const control = health.serverExecutionControl;
+  assert(placement !== undefined, "server execution placement is unavailable");
+  assert(
+    control !== undefined && control !== null,
+    "server execution control is unavailable",
+  );
+  const counter = (value: number | undefined, label: string): number => {
+    assert(
+      Number.isSafeInteger(value) && Number(value) >= 0,
+      `invalid ${label} counter`,
+    );
+    return Number(value);
+  };
+  return {
+    schedulerRuns: counter(placement.schedulerRuns, "server scheduler runs"),
+    actionTransactions: {
+      shadow: counter(
+        placement.actionTransactions?.shadow,
+        "server shadow action transactions",
+      ),
+      authoritative: counter(
+        placement.actionTransactions?.authoritative,
+        "server authoritative action transactions",
+      ),
+    },
+    asyncRequests: counter(
+      placement.asyncRequests,
+      "server async requests",
+    ),
+    settlements: {
+      committed: counter(
+        control.settlementsCommitted,
+        "committed settlements",
+      ),
+      noOp: counter(control.settlementsNoOp, "no-op settlements"),
+      failed: counter(control.settlementsFailed, "failed settlements"),
+      unserved: counter(control.settlementsUnserved, "unserved settlements"),
+    },
+  };
+}
+
+function serverExecutionDelta(
+  before: ServerExecutionCounters,
+  after: ServerExecutionCounters,
+): ServerExecutionCounters {
+  const delta = (next: number, previous: number, label: string): number => {
+    assert(next >= previous, `${label} counter moved backwards`);
+    return next - previous;
+  };
+  return {
+    schedulerRuns: delta(
+      after.schedulerRuns,
+      before.schedulerRuns,
+      "server scheduler runs",
+    ),
+    actionTransactions: {
+      shadow: delta(
+        after.actionTransactions.shadow,
+        before.actionTransactions.shadow,
+        "server shadow action transactions",
+      ),
+      authoritative: delta(
+        after.actionTransactions.authoritative,
+        before.actionTransactions.authoritative,
+        "server authoritative action transactions",
+      ),
+    },
+    asyncRequests: delta(
+      after.asyncRequests,
+      before.asyncRequests,
+      "server async requests",
+    ),
+    settlements: {
+      committed: delta(
+        after.settlements.committed,
+        before.settlements.committed,
+        "committed settlements",
+      ),
+      noOp: delta(
+        after.settlements.noOp,
+        before.settlements.noOp,
+        "no-op settlements",
+      ),
+      failed: delta(
+        after.settlements.failed,
+        before.settlements.failed,
+        "failed settlements",
+      ),
+      unserved: delta(
+        after.settlements.unserved,
+        before.settlements.unserved,
+        "unserved settlements",
+      ),
+    },
+  };
+}
 
 type BrowserRuntime = {
   allSynced(): Promise<void>;
@@ -896,6 +1028,7 @@ const assertRendererCountersContinue = (
         policyEnabled: boolean,
       ): Promise<PhaseResult> => {
         await preflightPolicy(policyEnabled);
+        const serverExecutionBefore = await readServerExecutionCounters();
         const lazyActionRunsBefore = await actionRunCounts(lazyPage);
         const loadBefore = await collectBrowserLoadSummary(
           actorPage,
@@ -1001,6 +1134,7 @@ const assertRendererCountersContinue = (
           actorPage,
           `${label}-after`,
         );
+        const serverExecutionAfter = await readServerExecutionCounters();
         return {
           label,
           policyEnabled,
@@ -1011,6 +1145,10 @@ const assertRendererCountersContinue = (
           clientDerivedUpstreamCommits:
             loadAfter.churn.clientDerivedUpstreamCommits -
             loadBefore.churn.clientDerivedUpstreamCommits,
+          serverExecution: serverExecutionDelta(
+            serverExecutionBefore,
+            serverExecutionAfter,
+          ),
           routing,
           ...(browserProcessCpu ? { browserProcessCpu } : {}),
         };
@@ -1021,6 +1159,23 @@ const assertRendererCountersContinue = (
         for (const phase of PHASES) {
           phases.push(await runPhase(phase.label, phase.policyEnabled));
         }
+        console.log(
+          `server-primary execution placement phases: ${
+            JSON.stringify(phases.map((phase) => ({
+              label: phase.label,
+              policyEnabled: phase.policyEnabled,
+              events: phase.events,
+              client: {
+                exactLazySchedulerRuns: phase.lazyActionRuns,
+                actionTransactions: {
+                  suppressed: phase.clientDerivedSuppressed,
+                  upstream: phase.clientDerivedUpstreamCommits,
+                },
+              },
+              server: phase.serverExecution,
+            })))
+          }`,
+        );
 
         let cpuAnalysis:
           | ReturnType<
@@ -1043,6 +1198,7 @@ const assertRendererCountersContinue = (
             lazyActionRuns: phase.lazyActionRuns,
             clientDerivedSuppressed: phase.clientDerivedSuppressed,
             clientDerivedUpstreamCommits: phase.clientDerivedUpstreamCommits,
+            serverExecution: phase.serverExecution,
           }));
           console.log(
             `authoritative lazy-browser CPU phases before gate: ${
