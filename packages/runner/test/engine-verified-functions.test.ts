@@ -4,8 +4,13 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
+import type { ExecutableRegistry } from "../src/harness/executable-registry.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
+
+type EngineInternals = {
+  executableRegistry: ExecutableRegistry;
+};
 
 // The engine's content-addressed implementation index — the single resolution
 // backing for serialized `$implRef`s (identity E5 deleted the legacy
@@ -29,9 +34,8 @@ describe("Engine verified implementation index", () => {
     await storageManager?.close();
   });
 
-  function getExecutableRegistry() {
-    // deno-lint-ignore no-explicit-any
-    return (engine as any).executableRegistry;
+  function getExecutableRegistry(): ExecutableRegistry {
+    return (engine as unknown as EngineInternals).executableRegistry;
   }
 
   it("admits registered implementations by { identity, symbol }", () => {

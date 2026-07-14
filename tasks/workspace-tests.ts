@@ -122,6 +122,8 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
 > = {
   // packages/cli/test/run-tests.ts reads CLI_TEST_SHARD.
   cli: { total: 3, envVar: "CLI_TEST_SHARD" },
+  // packages/utils/test/run-tests.ts reads UTILS_TEST_SHARD.
+  utils: { total: 2, envVar: "UTILS_TEST_SHARD" },
 };
 
 // Enabled workspace members are split across shards by round-robin over the

@@ -146,6 +146,27 @@ Deno.test("selectShardMembers expands the cli package into internal shards when 
   ]);
 });
 
+Deno.test("selectShardMembers expands the utils package into internal shards when sharded", () => {
+  const members = ["./packages/ui", "./packages/utils", "./packages/z"];
+
+  assertEquals(selectShardMembers(members, [], { index: 1, total: 2 }), [
+    { memberPath: "./packages/ui", packageName: "ui" },
+    {
+      memberPath: "./packages/utils",
+      packageName: "utils (2/2)",
+      env: { UTILS_TEST_SHARD: "2/2" },
+    },
+  ]);
+  assertEquals(selectShardMembers(members, [], { index: 2, total: 2 }), [
+    {
+      memberPath: "./packages/utils",
+      packageName: "utils (1/2)",
+      env: { UTILS_TEST_SHARD: "1/2" },
+    },
+    { memberPath: "./packages/z", packageName: "z" },
+  ]);
+});
+
 Deno.test("readWorkspaceMembers reads the workspace list from a JSONC manifest", async () => {
   const dir = await Deno.makeTempDir({ prefix: "ws-members-" });
   try {

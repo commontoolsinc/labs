@@ -2,7 +2,7 @@
   "name": "@commonfabric/utils",
   "tasks": {
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
-    "test": "deno test --no-check",
+    "test": "deno run --allow-read --allow-run --allow-env test/run-tests.ts",
     "bench": {
       "description": "Run benchmarks",
       "command": "deno bench"
