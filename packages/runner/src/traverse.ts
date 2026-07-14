@@ -3605,7 +3605,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (isSigilLink(doc.value)) return undefined;
 
     if (plan.kind === "primitive") {
-      return getJsonType(doc.value) === plan.type
+      return getPlainJsonType(doc.value) === plan.type
         ? { ok: doc.value }
         : fail(TRAVERSE_FAILURES.invalidType);
     }
@@ -3626,7 +3626,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       let valid = true;
       doc.value.forEach((item, index) => {
         reads.paths.push(appendToPath(doc.address.path, index.toString()));
-        if (getJsonType(item) === itemPlan.type) {
+        if (getPlainJsonType(item) === itemPlan.type) {
           newValue[index] = item;
         } else if (itemPlan.type === "undefined") {
           newValue[index] = undefined;
@@ -3659,7 +3659,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const propPath = appendToPath(doc.address.path, propKey);
       reads.paths.push(propPath);
       if (childPlan.kind === "primitive" && !isSigilLink(propValue)) {
-        if (getJsonType(propValue) === childPlan.type) {
+        if (getPlainJsonType(propValue) === childPlan.type) {
           newValue[propKey] = propValue;
         }
       } else {
@@ -4642,20 +4642,25 @@ export function canBranchMatch(
   return true;
 }
 
-/** Map JS typeof to JSON Schema type string, or null if unknown */
-function getJsonType(
+/** Map JS typeof to its broad JSON Schema type, or null if unknown. */
+function getPlainJsonType(
   value: unknown,
 ): JSONSchemaTypes | null {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
   if (isString(value)) return "string";
-  if (typeof value === "number" && isFiniteNumber(value)) {
-    return getJsonNumberType(value);
-  }
+  if (typeof value === "number" && isFiniteNumber(value)) return "number";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
   if (isObject(value)) return "object";
   return null;
+}
+
+/** Refine the broad JSON Schema type so integer values can be distinguished. */
+function getJsonType(value: unknown): JSONSchemaTypes | null {
+  return (typeof value === "number" && isFiniteNumber(value))
+    ? getJsonNumberType(value)
+    : getPlainJsonType(value);
 }
 
 /**
