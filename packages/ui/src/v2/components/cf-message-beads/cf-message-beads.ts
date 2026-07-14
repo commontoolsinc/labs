@@ -318,22 +318,10 @@ export class CFMessageBeads extends BaseElement {
     });
   }
 
-  private _showBeadTooltip(index: number, beadEl: HTMLElement): void {
+  private _onBeadEnter = (e: Event, index: number) => {
     const msgs = this._messagesValue;
     if (!msgs?.[index]) return;
-    this.#showTooltip(msgs[index], beadEl);
-  }
-
-  private _onBeadEnter = (e: MouseEvent, index: number) => {
-    this._showBeadTooltip(index, e.currentTarget as HTMLElement);
-  };
-
-  private _onBeadFocus = (e: FocusEvent, index: number) => {
-    this._showBeadTooltip(index, e.currentTarget as HTMLElement);
-  };
-
-  private _onBeadClick = (e: MouseEvent, index: number) => {
-    this._showBeadTooltip(index, e.currentTarget as HTMLElement);
+    this.#showTooltip(msgs[index], e.currentTarget as HTMLElement);
   };
 
   private _onBeadLeave = () => {
@@ -371,11 +359,11 @@ export class CFMessageBeads extends BaseElement {
           class="bead ${color}"
           style="animation-delay: ${i * 30}ms"
           aria-label="${beadLabel(msg)}"
-          @mouseenter="${(e: MouseEvent) => this._onBeadEnter(e, i)}"
+          @mouseenter="${(e: Event) => this._onBeadEnter(e, i)}"
           @mouseleave="${this._onBeadLeave}"
-          @focus="${(e: FocusEvent) => this._onBeadFocus(e, i)}"
+          @focus="${(e: Event) => this._onBeadEnter(e, i)}"
           @blur="${this._onBeadBlur}"
-          @click="${(e: MouseEvent) => this._onBeadClick(e, i)}"
+          @click="${(e: Event) => this._onBeadEnter(e, i)}"
         >
         </button>
       `;
