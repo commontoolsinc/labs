@@ -356,9 +356,9 @@ combineSchema(parentSchema, linkSchema):
   if linkSchema is true/{}:
     return parentSchema  (link accepts anything, use parent's constraint)
 
-  compare primitive parentSchema.type and linkSchema.type:
-    let unknown, structural types, or an absent type use legacy precedence
-    if their possible primitive types cannot overlap, return false
+  compare parentSchema.type and linkSchema.type:
+    treat unknown or an absent type as unconstrained
+    if their possible types cannot overlap, return false
 
   if both are type:"object":
     // A property required by either input remains required.
@@ -376,7 +376,15 @@ combineSchema(parentSchema, linkSchema):
     return { type: "object", properties: mergedProperties, ... }
 
   if both are type:"array":
-    return { type: "array", items: combineSchema(parent.items, link.items) }
+    items = parent.items is absent ? link.items
+      : link.items is absent ? parent.items
+      : combineSchema(parent.items, link.items)
+    return {
+      ...linkSchema,
+      ...parentSchema,  // parent metadata wins
+      type: "array",
+      items
+    }
 
   // Fallback: prefer parent schema with link's metadata flags
   return parentSchema

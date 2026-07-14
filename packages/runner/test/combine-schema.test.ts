@@ -19,6 +19,11 @@ describe("combineSchema type handling", () => {
       a: { type: ["string", "number"] },
       b: { type: "boolean" },
     },
+    {
+      name: "disjoint structural types",
+      a: { type: "object" },
+      b: { type: "array" },
+    },
   ];
   const directions = [
     { name: "a is the parent", combine: combineSchema },
@@ -60,11 +65,6 @@ describe("combineSchema type handling", () => {
       name: "a union containing unknown can overlap another type",
       a: { type: ["unknown", "string"] },
       b: { type: "boolean" },
-    },
-    {
-      name: "a structural type mismatch",
-      a: { type: "object" },
-      b: { type: "array" },
     },
   ];
 
@@ -163,6 +163,93 @@ describe("combineSchema required handling", () => {
         expect(merged.required).toEqual(expected);
       });
     }
+  }
+});
+
+describe("combineSchema array handling", () => {
+  const a = {
+    type: "array",
+    title: "a title",
+    description: "a description",
+    minItems: 1,
+    items: { type: "string" },
+    $defs: {
+      aOnly: { type: "string" },
+      shared: { const: "a" },
+    },
+  } as const satisfies JSONSchema;
+  const b = {
+    type: "array",
+    title: "b title",
+    description: "b description",
+    maxItems: 4,
+    items: { type: "string" },
+    $defs: {
+      bOnly: { type: "number" },
+      shared: { const: "b" },
+    },
+  } as const satisfies JSONSchema;
+
+  const directions = [
+    {
+      name: "a is the parent",
+      parent: a,
+      link: b,
+      parentTitle: "a title",
+      parentDescription: "a description",
+      parentSharedDef: { const: "a" },
+    },
+    {
+      name: "b is the parent",
+      parent: b,
+      link: a,
+      parentTitle: "b title",
+      parentDescription: "b description",
+      parentSharedDef: { const: "b" },
+    },
+  ] as const;
+
+  for (const direction of directions) {
+    it(`keeps parent metadata and merges definitions when ${direction.name}`, () => {
+      const merged = combineSchema(direction.parent, direction.link);
+      expect(merged).toMatchObject({
+        type: "array",
+        title: direction.parentTitle,
+        description: direction.parentDescription,
+        minItems: 1,
+        maxItems: 4,
+        items: { type: "string" },
+        $defs: {
+          aOnly: { type: "string" },
+          bOnly: { type: "number" },
+          shared: direction.parentSharedDef,
+        },
+      });
+    });
+  }
+
+  const withoutItems = {
+    type: "array",
+    title: "without items",
+  } as const satisfies JSONSchema;
+  const withItems = {
+    type: "array",
+    title: "with items",
+    items: { type: "number" },
+  } as const satisfies JSONSchema;
+
+  for (
+    const direction of [
+      { parent: withoutItems, link: withItems },
+      { parent: withItems, link: withoutItems },
+    ] as const
+  ) {
+    it(`uses the available items schema while ${direction.parent.title} is the parent`, () => {
+      expect(combineSchema(direction.parent, direction.link)).toMatchObject({
+        title: direction.parent.title,
+        items: { type: "number" },
+      });
+    });
   }
 });
 

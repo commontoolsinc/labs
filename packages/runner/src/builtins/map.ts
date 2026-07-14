@@ -181,16 +181,19 @@ export function map(
     // all.
     const rawList = listCell.withTx(tx).getRaw() as unknown;
     const listBase = listCell.getAsNormalizedFullLink();
+    // A slot may carry its own schema, but the list container's schema is at
+    // the wrong coordinate for a link targeting one slot.
+    const slotBase = { ...listBase, schema: undefined };
     const list: Cell<any>[] | undefined = rawList === undefined
       ? undefined
       : !Array.isArray(rawList)
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
         const slotLink: NormalizedFullLink = isPrimitiveCellLink(slot)
-          ? parseLink(slot, listBase)
+          ? parseLink(slot, slotBase)
           : {
-            ...listBase,
-            path: [...listBase.path, String(i)],
+            ...slotBase,
+            path: [...slotBase.path, String(i)],
           };
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);

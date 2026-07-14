@@ -38,7 +38,6 @@ import type {
   CellScope,
   JSONObject,
   JSONSchema,
-  JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
 import {
@@ -2406,8 +2405,7 @@ function _mergeSchemaFlagsUncached(
  *
  * This operation is not generally commutative: parent and link schemas have
  * distinct precedence rules. False schemas absorb the other constraint, and
- * schemas with provably disjoint primitive types combine to false in either
- * order.
+ * schemas with provably disjoint types combine to false in either order.
  *
  * We don't handle $refs in the schema, so it's quite possible to end up with
  * $ref links that can't be resolved.
@@ -2427,16 +2425,7 @@ export function combineSchema(
   return internSet(_combineSchemaCache, key, result);
 }
 
-const primitiveSchemaTypes = new Set<JSONSchemaTypes>([
-  "string",
-  "integer",
-  "number",
-  "boolean",
-  "null",
-  "undefined",
-]);
-
-function schemaPrimitiveTypesAreDisjoint(
+function schemaTypesAreDisjoint(
   parentType: JSONSchemaObj["type"],
   linkType: JSONSchemaObj["type"],
 ): boolean {
@@ -2444,10 +2433,7 @@ function schemaPrimitiveTypesAreDisjoint(
 
   const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
   const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
-  if (
-    !parentTypes.every((type) => primitiveSchemaTypes.has(type)) ||
-    !linkTypes.every((type) => primitiveSchemaTypes.has(type))
-  ) {
+  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
     return false;
   }
 
@@ -2474,7 +2460,7 @@ function _combineSchemaUncached(
     return mergeSchemaFlags(linkSchema, parentSchema);
   } else if (isRecord(linkSchema) && isRecord(parentSchema)) {
     if (
-      schemaPrimitiveTypesAreDisjoint(parentSchema.type, linkSchema.type)
+      schemaTypesAreDisjoint(parentSchema.type, linkSchema.type)
     ) return false;
     if (linkSchema.type === "object" && parentSchema.type === "object") {
       // A property required by either intersected schema remains required.
@@ -2603,23 +2589,19 @@ function _combineSchemaUncached(
       };
     } else if (linkSchema.type === "array" && parentSchema.type === "array") {
       // TODO(@ubik2): We should handle prefixItems
-      if (parentSchema.items === undefined) {
-        return linkSchema;
-      } else if (linkSchema.items === undefined) {
-        return parentSchema;
-      }
       const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
-      const mergedSchemaItems = combineSchema(
-        parentSchema.items,
-        linkSchema.items,
-      );
-      // this isn't great, but at least grab the flags from parent schema
-      return mergeSchemaFlags(parentSchema, {
+      const mergedSchemaItems = parentSchema.items === undefined
+        ? linkSchema.items
+        : linkSchema.items === undefined
+        ? parentSchema.items
+        : combineSchema(parentSchema.items, linkSchema.items);
+      return {
         ...linkSchema,
+        ...parentSchema,
         type: "array",
-        items: mergedSchemaItems,
+        ...(mergedSchemaItems !== undefined && { items: mergedSchemaItems }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
-      });
+      };
     } else {
       // this isn't great, but at least grab the flags from parent schema
       // Merge $defs from the two schema, with parent taking priority
