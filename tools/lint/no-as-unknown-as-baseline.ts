@@ -1,4 +1,17 @@
 export const noAsUnknownAsBaselineEntries = {
+  "packages/memory/test/v2-scheduler-state-test.ts": [
+    "383:37:1hnpzm7",
+    "2874:33:1rvmcia",
+    "2890:4:ytd6h1",
+    "2942:27:99ty7x",
+    "2992:7:h7otn2",
+  ],
+  "packages/memory/v2/engine.ts": [
+    "1020:15:1etu03n",
+  ],
+  "packages/patterns/integration/cfc-browser-helpers.ts": [
+    "81:32:13c6qjm",
+  ],
   "packages/runner/test/cfc-trust.test.ts": [
     "306:52:trmbk9",
     "311:10:30l9v3",
@@ -30,11 +43,27 @@ export const noAsUnknownAsBaselineEntries = {
     "699:9:f27qce",
     "766:8:qd3wgc",
   ],
+  "packages/runner/test/navigate-handler.test.ts": [
+    "24:33:78m8ay",
+  ],
   "packages/runner/test/oncommit-race.test.ts": [
     "115:35:wvkj30",
   ],
   "packages/runner/test/pending-commit-durability.test.ts": [
     "49:25:1y1onvv",
+  ],
+  "packages/runner/test/reload-rehydration-safety.test.ts": [
+    "202:41:1yi6hjr",
+    "343:42:1xx5z04",
+    "426:41:1vuqa5m",
+    "435:42:1xejbyc",
+    "506:42:1xx5z04",
+    "532:46:1mvm2a1",
+    "579:41:ipxkne",
+    "626:41:ipxkne",
+  ],
+  "packages/runner/test/resume-argument-link-target-presync.test.ts": [
+    "194:44:n5r017",
   ],
   "packages/runner/test/runtime-presets.test.ts": [
     "38:2:1eyu8bq",
@@ -50,6 +79,27 @@ export const noAsUnknownAsBaselineEntries = {
     "513:50:s052ks",
     "578:24:fbvuaw",
   ],
+  "packages/runner/test/scheduler-event-identity.test.ts": [
+    "106:55:1rwuvne",
+    "145:6:ueps3d",
+    "148:41:1f8i2jd",
+    "181:6:ueps3d",
+    "183:41:1f8i2jd",
+  ],
+  "packages/runner/test/scheduler-event-load-park.test.ts": [
+    "42:39:onwbvu",
+    "71:39:oadvb8",
+    "162:47:1km8qk4",
+    "226:43:1jvhgk3",
+    "306:43:1jvhgk3",
+    "386:43:15cz5qh",
+  ],
+  "packages/runner/test/scheduler-event-receipts.test.ts": [
+    "173:38:1qe40nq",
+  ],
+  "packages/runner/test/scheduler-observation-capability-skew.test.ts": [
+    "248:48:vabkme",
+  ],
   "packages/runner/test/scheduler-pull-handlers.test.ts": [
     "1187:43:g7982p",
   ],
@@ -59,6 +109,12 @@ export const noAsUnknownAsBaselineEntries = {
   "packages/runner/test/scheduler-retries.test.ts": [
     "98:30:lqf4o0",
     "106:53:qxe6z9",
+  ],
+  "packages/runner/test/scheduler-split-clock.test.ts": [
+    "45:8:ryv8rw",
+    "46:45:bxgs5p",
+    "163:6:1i68lu0",
+    "173:6:j8dtuc",
   ],
   "packages/runner/test/storage-sigil-topology-refresh.bench.ts": [
     "109:46:19gxezt",
