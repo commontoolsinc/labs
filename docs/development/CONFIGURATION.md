@@ -191,6 +191,13 @@ Used by `/routes/sandbox/exec` to execute untrusted pattern code.
 | `SANDBOX_SERVICE_URL` | `https://sandbox.stage.commontools.dev` | External sandbox executor. |
 | `SANDBOX_TOOLSHED_URL` | _(falls back to `API_URL`)_ | URL injected into sandboxes as `CF_API_URL` so they can call back to this toolshed. |
 
+The executor itself is not in this repo; the toolshed only forwards to
+`SANDBOX_SERVICE_URL`. The service is `commontoolsinc/common-cluster` (Go): its
+`node-agent` serves `/v1/sandboxes` and runs each sandbox as a gVisor container
+on a per-node ZFS dataset. The `runsc` runtime and `sandboxexec` library come
+from `commontoolsinc/gvisor` (branch `cfc_v2`), and the cluster is provisioned by
+`commontoolsinc/infra` (Terraform).
+
 ---
 
 ## OpenTelemetry
