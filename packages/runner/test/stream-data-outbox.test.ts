@@ -14,6 +14,11 @@ import {
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import { createCell } from "../src/cell.ts";
+import {
+  DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import type { JSONSchema } from "@commonfabric/api";
 
 const signer = await Identity.fromPassphrase("test stream-data outbox");
 const space = signer.did();
@@ -23,6 +28,12 @@ describe("stream-data outbox mechanism", () => {
   let runtime: Runtime;
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let byRef: ReturnType<typeof createBuilder>["commonfabric"]["byRef"];
+  let streamData: ReturnType<
+    typeof createBuilder
+  >["commonfabric"]["streamData"];
+  let partialResultOf: ReturnType<
+    typeof createBuilder
+  >["commonfabric"]["partialResultOf"];
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
 
@@ -34,8 +45,7 @@ describe("stream-data outbox mechanism", () => {
     });
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    pattern = commonfabric.pattern;
-    byRef = commonfabric.byRef;
+    ({ pattern, byRef, streamData, partialResultOf } = commonfabric);
 
     setPatternEnvironment({
       apiUrl: new URL("http://mock-test-server.local"),
@@ -71,6 +81,99 @@ describe("stream-data outbox mechanism", () => {
     globalThis.fetch = originalFetch;
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  it("publishes live partial events and the last event on clean close", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url, init });
+      return Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(value) {
+              controller = value;
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+      );
+    };
+
+    const eventSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        event: { type: "string" },
+        data: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+      },
+      required: ["id", "event", "data"],
+    } as const satisfies JSONSchema;
+    type Event = { id: string; event: string; data: { value: number } };
+    const outputSchema = {
+      type: "object",
+      properties: { final: {}, partial: {} },
+      required: ["final", "partial"],
+    } as const satisfies JSONSchema;
+    const testPattern = pattern(
+      () => {
+        const request = streamData<Event>({
+          url: "http://mock-test-server.local/live",
+          schema: eventSchema,
+        });
+        return { final: request, partial: partialResultOf(request) };
+      },
+      false,
+      outputSchema,
+    );
+    const tx = runtime.edit();
+    const result = runtime.run(
+      tx,
+      testPattern,
+      {},
+      runtime.getCell(space, "stream-direct-lifecycle", outputSchema, tx),
+    );
+    await tx.commit();
+    await result.pull();
+
+    expect(rawResult(result.key("final"))).toBe(DataUnavailable.pending());
+    expect(rawResult(result.key("partial"))).toBe(DataUnavailable.pending());
+
+    const encoder = new TextEncoder();
+    controller.enqueue(
+      encoder.encode('id:1\nevent:message\ndata:{"value":1}\n\n'),
+    );
+    await waitForRawResult(
+      result.key("partial"),
+      (value) => (value as Event | undefined)?.data?.value === 1,
+    );
+    expect(rawResult(result.key("final"))).toBe(DataUnavailable.pending());
+
+    controller.enqueue(
+      encoder.encode('id:2\nevent:message\ndata:{"value":2}'),
+    );
+    controller.close();
+
+    await waitForRawResult(
+      result.key("final"),
+      (value) => (value as Event | undefined)?.data?.value === 2,
+    );
+    expect(rawResult(result.key("partial"))).toEqual({
+      id: "2",
+      event: "message",
+      data: { value: 2 },
+    });
   });
 
   it("starts streamData only after the transaction commits", async () => {
@@ -303,3 +406,27 @@ describe("stream-data outbox mechanism", () => {
     expect(fetchCalls.length).toBe(2);
   });
 });
+
+function rawResult(cell: any): unknown {
+  return cell.resolveAsCell().getRaw();
+}
+
+function waitForRawResult(
+  cell: any,
+  predicate: (value: unknown) => boolean,
+): Promise<void> {
+  let cancel: () => void;
+  let timeout: ReturnType<typeof setTimeout>;
+  return new Promise<void>((resolve, reject) => {
+    timeout = setTimeout(
+      () => reject(new Error("Timed out waiting for streamData result")),
+      5000,
+    );
+    cancel = cell.sink(() => {
+      if (predicate(rawResult(cell))) resolve();
+    });
+  }).finally(() => {
+    clearTimeout(timeout);
+    cancel();
+  });
+}
