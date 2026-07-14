@@ -2703,6 +2703,53 @@ describe("link schema path narrowing", () => {
       expect(result).toEqual(testCase.expected);
     });
   }
+
+  it("voids a linked object missing a field required only by the link schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:link-schema-required-union-root" as URI;
+    const targetUri = "of:link-schema-required-union-target" as URI;
+    const linkSchema = {
+      type: "object",
+      properties: {
+        a: { type: "string" },
+        b: { type: "string" },
+      },
+      required: ["b"],
+    } as const satisfies JSONSchema;
+    const rootValue = {
+      item: makeLink(targetUri, [], linkSchema),
+    };
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, targetUri, { a: "present" });
+
+    const readerSchema = {
+      type: "object",
+      properties: {
+        item: {
+          type: "object",
+          properties: { a: { type: "string" } },
+          required: ["a"],
+        },
+      },
+      required: ["item"],
+    } as const satisfies JSONSchema;
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schema: readerSchema,
+    });
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(ok).toBeUndefined();
+    expect(error).toBeDefined();
+  });
 });
 
 describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {

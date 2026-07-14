@@ -25,6 +25,14 @@ describe("combineSchema type handling", () => {
       b: { type: "array" },
     },
     {
+      name: "undefined and object are disjoint",
+      a: { type: "undefined" },
+      b: {
+        type: "object",
+        properties: { value: { type: "string" } },
+      },
+    },
+    {
       name: "integer and string are disjoint",
       a: { type: "integer" },
       b: { type: "string" },
