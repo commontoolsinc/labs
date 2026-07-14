@@ -31,13 +31,16 @@ function schemaAsCell(schema: unknown): JSONSchema {
     }
     return result;
   }
-  return { asCell: ["cell"] };
+  return { type: "unknown", asCell: ["cell"] };
 }
 
 /** Schema of the state object emitted by `wish()` for a result schema. */
 export function wishStateSchemaForResult(
   schema: unknown,
 ): JSONSchema | undefined {
+  // Untyped wishes retain their legacy schemaless state. Fabric instances are
+  // self-describing there, while adding a generic `asCell` arm would change
+  // how existing untyped result links are traversed.
   if (schema === undefined) return undefined;
   // Materialize once and share the instance for both slots — internSchema
   // canonicalizes the wrapper, so the duplicate reference is fine.
@@ -53,6 +56,8 @@ export function wishStateSchemaForResult(
     properties: {
       result: {
         anyOf: [
+          // Persisted pre-AsyncResult failures stored undefined here. New
+          // states put every unavailable value behind the result link below.
           { type: "undefined" },
           resultSchema,
         ],

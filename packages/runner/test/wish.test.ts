@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import {
+  DataUnavailable,
+  type DataUnavailableReason,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -28,6 +32,14 @@ const space = signer.did();
 // directly; it's a real content-hash id so it stays well-formed.
 const allPiecesEntityId = entityIdFrom(hashOf("all-pieces"));
 const allPiecesId = allPiecesEntityId.taggedHashString;
+
+function expectUnavailableReason(
+  value: unknown,
+  reason: DataUnavailableReason,
+): void {
+  expect(isDataUnavailable(value)).toBe(true);
+  if (isDataUnavailable(value)) expect(value.reason).toBe(reason);
+}
 
 describe("wish built-in", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -423,19 +435,51 @@ describe("wish built-in", () => {
 
     await result.pull();
 
-    const missingResult = result.key("missing").get();
+    const missingResultCell = result.key("missing");
+    const missingResult = missingResultCell.get();
+    const unavailableResult = missingResultCell.key("result").resolveAsCell()
+      .getRaw();
     expect(
-      isDataUnavailable(missingResult?.result) &&
-        missingResult.result.reason === "error",
+      isDataUnavailable(unavailableResult) &&
+        unavailableResult.reason === "error",
     ).toBe(true);
     if (
-      isDataUnavailable(missingResult?.result) &&
-      missingResult.result.reason === "error"
+      isDataUnavailable(unavailableResult) &&
+      unavailableResult.reason === "error"
     ) {
-      expect(missingResult.result.error.message).toMatch(/no query/);
+      expect(unavailableResult.error.message).toMatch(/no query/);
     }
     // Retained only for old compiled graphs; absent from the public WishState.
     expect(missingResult?.error).toMatch(/no query/);
+  });
+
+  it("propagates an unavailable query input without resolving the wish", async () => {
+    const query = runtime.getCell<unknown>(
+      space,
+      "wish unavailable query input",
+      undefined,
+      tx,
+    );
+    query.setRaw(DataUnavailable.pending());
+    const wishPattern = pattern<{ query: string }>(({ query }) => ({
+      request: wish({ query }),
+    }));
+    const resultCell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "wish unavailable query result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, wishPattern, { query } as any, resultCell);
+    await tx.commit();
+    tx = runtime.edit();
+
+    await result.pull();
+
+    expect(result.key("request").key("result").resolveAsCell().getRaw()).toBe(
+      DataUnavailable.pending(),
+    );
+    expect(result.key("request").key("candidates").get()).toEqual([]);
   });
 
   describe("object-based wish syntax", () => {
@@ -2409,7 +2453,14 @@ describe("wish built-in", () => {
       await tx.commit();
       tx = runtime.edit();
       await result.pull();
-      return result.key("result").get();
+      const state = result.key("result").get() as
+        | { result?: unknown; error?: string }
+        | undefined;
+      return {
+        ...(state ?? {}),
+        unavailableResult: result.key("result").key("result")
+          .resolveAsCell().getRaw(),
+      };
     }
 
     it("matches a #favorites/<term> query by a structured discovery tag", async () => {
@@ -2462,7 +2513,7 @@ describe("wish built-in", () => {
         { tags: ["weather"], userTags: ["mine"] },
         "missing",
       );
-      expect(resolved?.result).toBeUndefined();
+      expectUnavailableReason(resolved?.unavailableResult, "error");
       expect(resolved?.error).toMatch(/No favorite found matching/);
     });
 
@@ -2736,7 +2787,10 @@ describe("wish built-in", () => {
 
       await result.pull();
 
-      expect(result.key("profileDefault").get()?.result).toBeUndefined();
+      expectUnavailableReason(
+        result.key("profileDefault").key("result").resolveAsCell().getRaw(),
+        "error",
+      );
       expect(String(result.key("profileDefault").get()?.error)).toContain(
         "#profiledefault",
       );
@@ -2834,7 +2888,10 @@ describe("wish built-in", () => {
 
       const state = result.key("profile").get();
       const ui = result.key("profile").key(UI).get() as any;
-      expect(state?.result).toBeUndefined();
+      expectUnavailableReason(
+        result.key("profile").key("result").resolveAsCell().getRaw(),
+        "error",
+      );
       expect(String(state?.error)).toContain("profile");
       expect(ui?.name).toBe("cf-render");
       expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
@@ -3129,7 +3186,10 @@ describe("wish built-in", () => {
       await result.pull();
 
       const state = result.key("missing").get();
-      expect(state?.result).toBeUndefined();
+      expectUnavailableReason(
+        result.key("missing").key("result").resolveAsCell().getRaw(),
+        "error",
+      );
       expect(String(state?.error)).toContain("profile");
       expect(String(state?.error)).not.toContain("did");
     });
@@ -3152,7 +3212,10 @@ describe("wish built-in", () => {
       await result.pull();
 
       const state = result.key("profileName").get();
-      expect(state?.result).toBeUndefined();
+      expectUnavailableReason(
+        result.key("profileName").key("result").resolveAsCell().getRaw(),
+        "error",
+      );
       expect(String(state?.error)).toContain("profile");
     });
 
@@ -3552,10 +3615,9 @@ describe("wish built-in", () => {
         ).toBe("Ada Lovelace");
       });
 
-      it("leaves #profileName result undefined at zero profiles (the result ?? fallback idiom)", async () => {
-        // No profile linked. A scalar target lands a WishError and `result`
-        // stays undefined, so every embedder consumer must use
-        // `wish.result ?? fallback` — this asserts the `undefined` half.
+      it("exposes an error result for #profileName at zero profiles", async () => {
+        // No profile linked. A scalar target lands a WishError on the result
+        // channel; callers that want to render it guard the original request.
         const homeSpaceCell = runtime.getHomeSpaceCell(tx);
         const homeDefaultCell = runtime.getCell(
           userIdentity.did(),
@@ -3583,13 +3645,13 @@ describe("wish built-in", () => {
         tx = runtime.edit();
         await result.pull();
 
-        const state = result.key("profileName").get();
-        expect(state?.result).toBeUndefined();
-        // The `?? fallback` idiom an embedder must use:
-        expect(state?.result ?? "Anonymous").toBe("Anonymous");
+        expectUnavailableReason(
+          result.key("profileName").key("result").resolveAsCell().getRaw(),
+          "error",
+        );
       });
 
-      it("renders the create surface (result undefined) for #profile at zero profiles", async () => {
+      it("renders the create surface with an error result for #profile at zero profiles", async () => {
         const homeSpaceCell = runtime.getHomeSpaceCell(tx);
         const homeDefaultCell = runtime.getCell(
           userIdentity.did(),
@@ -3619,7 +3681,10 @@ describe("wish built-in", () => {
 
         const state = result.key("profile").get();
         const ui = result.key("profile").key(UI).get() as any;
-        expect(state?.result).toBeUndefined();
+        expectUnavailableReason(
+          result.key("profile").key("result").resolveAsCell().getRaw(),
+          "error",
+        );
         expect(String(state?.error)).toContain("profile");
         expect(ui?.name).toBe("cf-render");
         expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
@@ -3743,7 +3808,7 @@ describe("wish built-in", () => {
         return { result, homeDefaultCell, profileCells };
       }
 
-      it("0 profiles → result undefined, error set, create-surface UI", async () => {
+      it("0 profiles → error result and create-surface UI", async () => {
         const homeSpaceCell = runtime.getHomeSpaceCell(tx);
         const homeDefaultCell = runtime.getCell(
           userIdentity.did(),
@@ -3772,7 +3837,10 @@ describe("wish built-in", () => {
 
         const state = result.key("profile").get();
         const ui = result.key("profile").key(UI).get() as any;
-        expect(state?.result).toBeUndefined();
+        expectUnavailableReason(
+          result.key("profile").key("result").resolveAsCell().getRaw(),
+          "error",
+        );
         expect(String(state?.error)).toContain("profile");
         expect(ui?.props?.["data-profile-create-ui"]).toBe("wish");
       });

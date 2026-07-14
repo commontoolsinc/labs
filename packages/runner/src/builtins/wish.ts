@@ -21,6 +21,11 @@ import {
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { extractHashtags } from "@commonfabric/data-model/schema-tags";
+import {
+  DataUnavailable,
+  type DataUnavailableVariant,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -32,6 +37,7 @@ import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { scopedCell } from "./scope-policy.ts";
 import { wishStateSchemaForResult } from "./wish-schema.ts";
+import { selectUnavailableInput } from "../data-unavailability.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
@@ -226,10 +232,15 @@ type BaseResolution = {
 };
 
 type SharedHashtagState = {
-  result?: Cell<unknown>;
+  result: Cell<unknown> | DataUnavailableVariant;
   candidates: Cell<unknown>[];
   error?: unknown;
   [UI]?: VNode;
+};
+
+type PersistedWishState<T> = WishState<T> & {
+  /** Compatibility field for graphs compiled before result became async. */
+  error?: unknown;
 };
 
 type SharedHashtagResolver = {
@@ -1094,8 +1105,15 @@ function createSharedHashtagResolver(
         scope: sharedScope,
       });
       if (baseResolutions.length === 0) {
+        const pending = DataUnavailable.pending();
         stateCell.set({
-          result: undefined,
+          result: dataUnavailableWishCell(
+            ctx.runtime,
+            ctx.parentCell.space,
+            { kind: "shared-hashtag", query },
+            pending,
+            tx,
+          ),
           candidates: [],
           [UI]: undefined,
         });
@@ -1139,8 +1157,15 @@ function createSharedHashtagResolver(
       const errorMessage = error instanceof Error
         ? error.message
         : String(error);
+      const unavailable = DataUnavailable.error(new Error(errorMessage));
       stateCell.set({
-        result: undefined,
+        result: dataUnavailableWishCell(
+          ctx.runtime,
+          ctx.parentCell.space,
+          { kind: "shared-hashtag", query },
+          unavailable,
+          tx,
+        ),
         candidates: [],
         error: errorMessage,
         [UI]: errorUI(errorMessage),
@@ -1343,6 +1368,27 @@ function projectWishCellValue(
   return cell.asSchema(schema as JSONSchema).getAsLink({ includeSchema: true });
 }
 
+function dataUnavailableWishCell(
+  runtime: Runtime,
+  space: Cell<unknown>["space"],
+  cause: unknown,
+  marker: DataUnavailableVariant,
+  tx: IExtendedStorageTransaction,
+  scope?: CellScope,
+): Cell<unknown> {
+  const base = runtime.getCell(
+    space,
+    { wish: { unavailable: cause } },
+    undefined,
+    tx,
+  );
+  const target = scope === undefined
+    ? base
+    : scopedCell(runtime, tx, base, scope);
+  target.setRaw(marker);
+  return target;
+}
+
 function createWishCandidatesCell(
   runtime: Runtime,
   space: Cell<unknown>["space"],
@@ -1512,6 +1558,25 @@ export function wish(
     outputScope: CellScope,
     schema: unknown,
   ): void {
+    if (
+      value !== null && typeof value === "object" && "result" in value &&
+      isDataUnavailable((value as { result?: unknown }).result)
+    ) {
+      value = {
+        ...value,
+        // Keep successful and unavailable results behind the same link shape.
+        // The linked root stores the FabricInstance raw, so availability is
+        // selected before the authored result schema is applied.
+        result: dataUnavailableWishCell(
+          runtime,
+          parentCell.space,
+          cause,
+          (value as { result: DataUnavailableVariant }).result,
+          tx,
+          outputScope,
+        ),
+      };
+    }
     const baseCell = runtime.getCell(
       parentCell.space,
       { wish: { state: cause } },
@@ -1848,11 +1913,35 @@ export function wish(
 
     try {
       tx.resetNarrowestReadScope();
+      const inputsWithTx = inputsCell.withTx(tx);
+      const rawTarget = inputsWithTx.getRaw();
+      const unavailableInput = selectUnavailableInput(rawTarget, {
+        runtime,
+        tx,
+        base: inputsCell,
+      });
+      if (unavailableInput !== undefined) {
+        const schema = rawTarget !== null &&
+            typeof rawTarget === "object" &&
+            !Array.isArray(rawTarget)
+          ? (rawTarget as { schema?: unknown }).schema
+          : undefined;
+        sendWishState(
+          tx,
+          {
+            result: unavailableInput,
+            candidates: [],
+            [UI]: undefined,
+          } satisfies WishState<any>,
+          wishOutputScope(schema, tx.getNarrowestReadScope(), false),
+          schema,
+        );
+        return;
+      }
       const targetValue = measureWishPhase(
         "input-get",
         undefined,
         () => {
-          const inputsWithTx = inputsCell.withTx(tx);
           return inputsWithTx.asSchema(TARGET_SCHEMA).get();
         },
       );
@@ -1881,11 +1970,11 @@ export function wish(
               sendWishState(
                 tx,
                 {
-                  result: undefined,
+                  result: DataUnavailable.error(new Error(errorMsg)),
                   candidates: [],
                   error: errorMsg,
                   [UI]: errorUI(errorMsg),
-                } satisfies WishState<any>,
+                } satisfies PersistedWishState<any>,
                 outputScope,
                 schema,
               ),
@@ -1954,7 +2043,7 @@ export function wish(
                   sendWishState(
                     tx,
                     {
-                      result: undefined,
+                      result: DataUnavailable.pending(),
                       candidates: [],
                       [UI]: undefined,
                     } satisfies WishState<any>,
@@ -2152,11 +2241,11 @@ export function wish(
                 sendWishState(
                   tx,
                   {
-                    result: undefined,
+                    result: DataUnavailable.error(new Error(errorMsg)),
                     candidates: [],
                     error: errorMsg,
                     [UI]: ui,
-                  } satisfies WishState<any>,
+                  } satisfies PersistedWishState<any>,
                   wishOutputScope(
                     schema,
                     inputScope,
@@ -2175,7 +2264,7 @@ export function wish(
               sendWishState(
                 tx,
                 {
-                  result: undefined,
+                  result: DataUnavailable.pending(),
                   candidates: [],
                   [UI]: undefined,
                 } satisfies WishState<any>,
@@ -2211,11 +2300,11 @@ export function wish(
             sendWishState(
               tx,
               {
-                result: undefined,
+                result: DataUnavailable.error(new Error(errorMsg)),
                 candidates: [],
                 error: errorMsg,
                 [UI]: errorUI(errorMsg),
-              } satisfies WishState<any>,
+              } satisfies PersistedWishState<any>,
               inputScope,
               undefined,
             ),
