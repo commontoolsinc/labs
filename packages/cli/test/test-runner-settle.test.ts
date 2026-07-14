@@ -34,13 +34,13 @@ describe(
       );
     });
 
-    it("rejects a step with no action/assertion/settle key", async () => {
+    it("rejects a step with no supported discriminant", async () => {
       const { results } = await runTests(
         fixture("invalid-step.test.tsx"),
         { root: FIXTURES },
       );
       expect(results[0].error ?? "").toContain(
-        "must have an 'action', 'assertion', or 'settle'",
+        "must have an 'action', 'assertion', 'render', or 'settle'",
       );
     });
   },
