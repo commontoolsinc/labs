@@ -546,6 +546,7 @@ type OwnedExecutionLease = {
   readonly sponsorSessionId: string;
   readonly sponsorSessionToken: SessionToken;
   readonly firstDemandOrder: number;
+  readonly claimGenerations: Map<string, number>;
   drainRequested: boolean;
 };
 
@@ -1260,7 +1261,6 @@ export class Server {
   #executionDemandListeners = new Set<ExecutionDemandListener>();
   #executionDemandOrder = 0;
   #executionClaims = new Map<string, ExecutionClaim>();
-  #executionClaimGeneration = new Map<string, number>();
   #boundExecutionSessions = new Map<string, BoundExecutionSession>();
   #ownedExecutionLeases = new Map<string, OwnedExecutionLease>();
   #executionInvalidationStartedAt = new Map<string, number>();
@@ -2202,6 +2202,7 @@ export class Server {
         sponsorSessionId: candidate.demand.sessionId,
         sponsorSessionToken: candidate.session.sessionToken,
         firstDemandOrder: candidate.firstDemandOrder,
+        claimGenerations: new Map(),
         drainRequested: false,
       };
       this.#ownedExecutionLeases.set(slot, authority);
@@ -2372,6 +2373,7 @@ export class Server {
     }
     this.#replaceOwnedExecutionLease(authority, revoked);
     this.#revokeExecutionClaimsForLease(revoked);
+    authority.claimGenerations.clear();
     this.#scheduleExecutionLeaseExpiry();
   }
 
@@ -2385,6 +2387,7 @@ export class Server {
     }
     authority.drainRequested = true;
     this.#revokeExecutionClaimsForLease(lease);
+    authority.claimGenerations.clear();
     this.#scheduleExecutionLeaseExpiry();
   }
 
@@ -3437,8 +3440,8 @@ export class Server {
     if (existing !== undefined) {
       throw new Error("execution claim is already live");
     }
-    const claimGeneration = (this.#executionClaimGeneration.get(key) ?? 0) + 1;
-    this.#executionClaimGeneration.set(key, claimGeneration);
+    const claimGeneration = (authority.claimGenerations.get(key) ?? 0) + 1;
+    authority.claimGenerations.set(key, claimGeneration);
     const ttlMs = this.options.executionControl?.claimTtlMs ?? 30_000;
     if (!isPositiveSafeInteger(ttlMs)) {
       throw new TypeError("execution claim ttl must be a positive integer");
@@ -3732,7 +3735,6 @@ export class Server {
     this.#executionDemandSessionTokens.clear();
     this.#executionDemandListeners.clear();
     this.#executionClaims.clear();
-    this.#executionClaimGeneration.clear();
     this.#boundExecutionSessions.clear();
     this.#ownedExecutionLeases.clear();
     this.#executionInvalidationStartedAt.clear();

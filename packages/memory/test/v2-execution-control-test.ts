@@ -2880,7 +2880,10 @@ Deno.test("reconnect restores demand before a replacement sponsor claim", async 
       secondLease,
       claimKey(POLICY_SPACE, ""),
     );
-    assertEquals(second.claimGeneration, 2);
+    assertEquals(second.claimGeneration, 1);
+    assertEquals(server.hasLiveExecutionClaim(first), false);
+    assertEquals(server.revokeExecutionClaim(first), false);
+    assertEquals(server.hasLiveExecutionClaim(second), true);
     assertEquals(
       server.publishActionSettlement({
         branch: "",
@@ -2892,7 +2895,7 @@ Deno.test("reconnect restores demand before a replacement sponsor claim", async 
     );
     assertEquals(session.executionClaims, [second]);
     assertEquals(settlements.length, 1);
-    assertEquals(settlements[0].claim.claimGeneration, 2);
+    assertEquals(settlements[0].claim.claimGeneration, 1);
     assertEquals(
       server.listExecutionDemands(POLICY_SPACE, "").length,
       1,
