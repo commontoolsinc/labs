@@ -134,6 +134,10 @@ describe("generation data unavailability", () => {
     return state.key("result").withTx(tx).resolveAsCell().getRaw();
   }
 
+  function rawPartial(state: Cell<any>, tx?: IExtendedStorageTransaction) {
+    return state.key("partial").withTx(tx).resolveAsCell().getRaw();
+  }
+
   async function waitForPendingToBecomeFalse(state: Cell<any>): Promise<void> {
     for (let attempt = 0; attempt < 500; attempt++) {
       await runtime.idle();
@@ -258,6 +262,9 @@ describe("generation data unavailability", () => {
       expect(rawResult(generation.state, firstTx)).toBe(
         DataUnavailable.pending(),
       );
+      expect(rawPartial(generation.state, firstTx)).toBe(
+        DataUnavailable.pending(),
+      );
       expect(generation.state.key("pending").withTx(firstTx).get()).toBe(true);
       await firstTx.commit();
       await waitForPendingToBecomeFalse(generation.state);
@@ -272,8 +279,8 @@ describe("generation data unavailability", () => {
       expect(rawResult(generation.state, secondTx)).toBe(
         DataUnavailable.pending(),
       );
-      expect(generation.state.key("partial").withTx(secondTx).get()).toBe(
-        undefined,
+      expect(rawPartial(generation.state, secondTx)).toBe(
+        DataUnavailable.pending(),
       );
       secondTx.prepareCfc();
       const secondCommit = await secondTx.commit();
@@ -503,6 +510,7 @@ describe("generation data unavailability", () => {
       expect(generation.state.key("error").withTx(tx).get()).toBe(
         "upstream prompt failed",
       );
+      expect(rawPartial(generation.state, tx)).toBe(marker);
 
       await tx.commit();
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -536,12 +544,11 @@ describe("generation data unavailability", () => {
         testPattern.resultSchema,
         tx,
       );
-      const state = runtime.run(tx, testPattern, {}, resultCell);
+      const result = runtime.run(tx, testPattern, {}, resultCell);
       await tx.commit();
       await runtime.settled();
 
-      expect(rawResult(state)).toBe(marker);
-      expect(state.key("pending").get()).toBe(true);
+      expect(result.resolveAsCell().getRaw()).toBe(marker);
       expect(calls).toBe(0);
     } finally {
       LLMClient.prototype.sendRequest = originalSendRequest;
@@ -562,6 +569,9 @@ describe("generation data unavailability", () => {
     expect(generation.state.key("error").get()).toContain(
       "no matching mock response",
     );
+    const partial = rawPartial(generation.state) as DataUnavailable;
+    expect(partial.reason).toBe("error");
+    expect(partial.error?.message).toContain("no matching mock response");
   });
 
   it("upgrades a persisted legacy text error without retrying the provider", async () => {
@@ -688,6 +698,7 @@ describe("generation data unavailability", () => {
         (value as { title?: unknown }).title === "usable",
     );
     expect(rawResult(generation.state)).toEqual({ title: "usable" });
+    expect(rawPartial(generation.state)).toBe(DataUnavailable.pending());
   });
 
   it("does not publish a stale queued object completion", async () => {
@@ -799,6 +810,7 @@ describe("generation data unavailability", () => {
 
     const result = rawResult(generation.state) as DataUnavailable;
     expect(result.reason).toBe("schema-mismatch");
+    expect(rawPartial(generation.state)).toBe(result);
     expect(generation.state.key("error").get()).toContain(
       "failed schema validation",
     );
@@ -877,6 +889,7 @@ describe("generation data unavailability", () => {
       const tx = invoke(generation.action);
 
       expect(rawResult(generation.state, tx)).toBe(marker);
+      expect(rawPartial(generation.state, tx)).toBe(marker);
       expect(generation.state.key("pending").withTx(tx).get()).toBe(true);
       expect(generation.state.key("messages").withTx(tx).get()).toBeUndefined();
 
@@ -917,14 +930,13 @@ describe("generation data unavailability", () => {
         testPattern.resultSchema,
         tx,
       );
-      const state = runtime.run(tx, testPattern, {}, resultCell);
+      const output = runtime.run(tx, testPattern, {}, resultCell);
       await tx.commit();
       await runtime.settled();
 
-      const result = rawResult(state) as DataUnavailable;
+      const result = output.resolveAsCell().getRaw() as DataUnavailable;
       expect(result.reason).toBe("error");
       expect(result.error?.message).toBe("linked prompt failed");
-      expect(state.key("pending").get()).toBe(false);
       expect(calls).toBe(0);
     } finally {
       LLMClient.prototype.generateObject = originalGenerateObject;
@@ -958,14 +970,14 @@ describe("generation data unavailability", () => {
             const response = generateTextStream({
               prompt: "guarded resultOf terminal failure",
             });
-            const result = resultOf(response.result);
+            const result = resultOf(response);
             const isGenerating = new Writable(true);
 
             computed(() => {
               const generating = isGenerating.get();
-              const pending = isPending(response.result);
+              const pending = isPending(response);
               const value = result;
-              if (hasError(response.result)) {
+              if (hasError(response)) {
                 if (generating) isGenerating.set(false);
                 return;
               }
