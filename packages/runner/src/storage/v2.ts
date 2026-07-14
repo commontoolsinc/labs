@@ -3459,11 +3459,11 @@ const toRejectedError = (
   // refused write, so the doomed re-runs would only starve sibling commits.
   if (name === "RowLabelCommitError") {
     return {
-      name,
+      name: "RowLabelCommitError",
       message,
       cause: { name: "SystemError", message, code: 500 },
       transaction: commit as Transaction,
-    } as unknown as TransactionError;
+    };
   }
 
   return {

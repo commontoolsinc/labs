@@ -1492,6 +1492,12 @@ export interface IPreconditionFailedError extends Error {
   precondition: "origin-committed" | "receipt-exists";
 }
 
+export interface ITerminalCommitRejection extends Error {
+  name: "RowLabelCommitError";
+  cause: TransactionError["cause"];
+  transaction: TransactionError["transaction"];
+}
+
 /**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
@@ -1509,6 +1515,7 @@ export type StorageTransactionRejected =
   | IConflictError
   | IPreconditionFailedError
   | IStoreError
+  | ITerminalCommitRejection
   | TransactionError
   | IConnectionError
   | IAuthorizationError;
@@ -1671,6 +1678,7 @@ export type PushError =
   | IConnectionError
   | IConflictError
   | IPreconditionFailedError
+  | ITerminalCommitRejection
   | TransactionError
   | IAuthorizationError;
 

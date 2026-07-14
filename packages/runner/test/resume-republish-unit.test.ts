@@ -102,7 +102,6 @@ function makeRuntime(options: FakeEditOptions = {}): {
   tracked: Promise<unknown>[];
 } {
   const tracked: Promise<unknown>[] = [];
-  const tx = {} as IExtendedStorageTransaction;
   const runtime: ResumeRepublishRuntime = {
     editWithRetry<T>(fn: (tx: IExtendedStorageTransaction) => T) {
       if (options.failCommit) {
