@@ -8,6 +8,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { Cell } from "../src/cell.ts";
+import type { RuntimeProgram } from "../src/harness/types.ts";
+import { toMemorySpaceAddress } from "../src/link-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -17,6 +19,10 @@ const space = signer.did();
 
 const numberSchema = {
   type: "number",
+} as const satisfies JSONSchema;
+
+const optionalNumberSchema = {
+  anyOf: [{ type: "number" }, { type: "undefined" }],
 } as const satisfies JSONSchema;
 
 const joinedSchema = {
@@ -199,5 +205,145 @@ describe("latestComplete", () => {
       ticket: { title: "next" },
       variable: 3,
     });
+  });
+
+  it("distinguishes a complete undefined snapshot from no snapshot", async () => {
+    const source = runtime.getCell<number | DataUnavailable | undefined>(
+      space,
+      "latest optional source",
+      undefined,
+      tx,
+    );
+    source.set(DataUnavailable.schemaMismatch());
+
+    const Root = pattern<{ source: unknown }>(({ source }) => ({
+      snapshot: latestComplete({ value: source, schema: optionalNumberSchema }),
+    }));
+    const result = runtime.run(
+      tx,
+      Root,
+      { source: source.getAsLink() },
+      runtime.getCell(space, "latest optional result", undefined, tx),
+    );
+
+    await commitAndPull(result);
+    expect(raw(result.key("snapshot"))).toBe(DataUnavailable.pending());
+
+    await writeAndSettle(source, undefined, result);
+    const snapshot = result.key("snapshot").resolveAsCell();
+    const stored = tx.read(
+      toMemorySpaceAddress(snapshot.getAsNormalizedFullLink()),
+    );
+    expect(stored.ok).toBeDefined();
+    expect(stored.ok?.value).toBeUndefined();
+
+    await writeAndSettle(source, DataUnavailable.pending(), result);
+    const retained = tx.read(
+      toMemorySpaceAddress(snapshot.getAsNormalizedFullLink()),
+    );
+    expect(retained.ok).toBeDefined();
+    expect(retained.ok?.value).toBeUndefined();
+
+    await writeAndSettle(source, 4, result);
+    expect(result.key("snapshot").get()).toBe(4);
+  });
+});
+
+describe("latestComplete cold resume", () => {
+  const resultCause = "latest complete cold resume result";
+  const program: RuntimeProgram = {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        'import { AsyncResult, latestComplete, pattern } from "commonfabric";',
+        "export default pattern<{ request: AsyncResult<number> }>(",
+        "  ({ request }) => ({ snapshot: latestComplete(request) }),",
+        ");",
+      ].join("\n"),
+    }],
+  };
+
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+  });
+
+  afterEach(async () => {
+    await storageManager?.close();
+  });
+
+  it("keeps the durable snapshot when resumed with a pending source", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+
+    try {
+      const tx1 = rt1.edit();
+      const source = rt1.getCell<number | DataUnavailable>(
+        space,
+        "latest complete cold resume source",
+        undefined,
+        tx1,
+      );
+      source.set(7);
+      const compiled = await rt1.patternManager.compilePattern(program, {
+        space,
+        tx: tx1,
+      });
+      const result1 = rt1.getCell<{ snapshot: number }>(
+        space,
+        resultCause,
+        compiled.resultSchema,
+        tx1,
+      );
+      const run1 = rt1.run(
+        tx1,
+        compiled,
+        { request: source.getAsLink() },
+        result1,
+      );
+      await tx1.commit();
+      await run1.pull();
+      await rt1.idle();
+      expect(run1.key("snapshot").get()).toBe(7);
+
+      const pendingTx = rt1.edit();
+      source.withTx(pendingTx).set(DataUnavailable.pending());
+      await pendingTx.commit();
+      await run1.pull();
+      await rt1.idle();
+      expect(run1.key("snapshot").get()).toBe(7);
+
+      await rt1.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+      rt1.scheduler.dispose();
+
+      const tx2 = rt2.edit();
+      const result2 = rt2.getCell<{ snapshot: number }>(
+        space,
+        resultCause,
+        compiled.resultSchema,
+        tx2,
+      );
+      await tx2.commit();
+      await result2.sync();
+      expect(await rt2.start(result2)).toBe(true);
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await result2.pull();
+        await rt2.idle();
+      }
+      expect(result2.key("snapshot").get()).toBe(7);
+    } finally {
+      await rt2.dispose();
+      await rt1.dispose();
+    }
   });
 });
