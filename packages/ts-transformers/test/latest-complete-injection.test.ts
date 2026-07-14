@@ -98,3 +98,16 @@ Deno.test("latestComplete diagnoses an unresolved complete-value type", async ()
     true,
   );
 });
+
+Deno.test("latestComplete without a value remains unchanged", async () => {
+  const output = await transformSource(
+    `
+      import { latestComplete } from "commonfabric";
+      const snapshot = latestComplete();
+    `,
+    { types: { "commonfabric.d.ts": commonfabricTypes } },
+  );
+
+  assertStringIncludes(output, "latestComplete()");
+  assertEquals(output.includes("schema:"), false);
+});

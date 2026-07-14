@@ -214,6 +214,11 @@ Deno.test("availability provenance and observations cover retained and invalid f
       const objectGenerated = generateObject<Repo>({ prompt: "repo" });
       const objectStream = generateObjectStream<Repo>({ prompt: "repo" });
       const objectStreamAlias = objectStream;
+      const objectStreamState = objectStream.result;
+      const aliasedObjectStreamState = objectStreamAlias.result;
+      const textStream = generateTextStream({ prompt: "repo" });
+      const textStreamAlias = textStream;
+      const textStreamState = textStreamAlias.result;
       const objectStreamResult = partialResultOf(objectStreamAlias);
       const textStreamResult = partialResultOf(
         generateTextStream({ prompt: "repo" }),
@@ -222,6 +227,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
       const nestedProjected = resultOf(projected);
       const emptyProjection = resultOf();
       const ordinaryCall = ordinary(fetched);
+      const ordinaryResultProperty = ordinary(fetched).result;
       const allObserved = observeAvailability(fetched);
       const selective = observeAvailability(fetched, "error", "error", "pending");
       const invalid = observeAvailability(fetched, "not-a-reason");
@@ -294,6 +300,21 @@ Deno.test("availability provenance and observations cover retained and invalid f
         )?.kind,
         "async-result",
       );
+      for (
+        const name of [
+          "objectStreamState",
+          "aliasedObjectStreamState",
+          "textStreamState",
+        ]
+      ) {
+        assertEquals(
+          resolveAvailabilityValueProvenance(
+            initializer(sourceFile, name),
+            context,
+          )?.kind,
+          "async-result",
+        );
+      }
       assertEquals(
         resolveAvailabilityValueProvenance(
           initializer(sourceFile, "textStreamResult"),
@@ -318,6 +339,13 @@ Deno.test("availability provenance and observations cover retained and invalid f
       assertEquals(
         resolveAvailabilityValueProvenance(
           initializer(sourceFile, "ordinaryCall"),
+          context,
+        ),
+        undefined,
+      );
+      assertEquals(
+        resolveAvailabilityValueProvenance(
+          initializer(sourceFile, "ordinaryResultProperty"),
           context,
         ),
         undefined,
