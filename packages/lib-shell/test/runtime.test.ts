@@ -593,8 +593,8 @@ describe("RuntimeInternals", () => {
       }
 
       const OriginalWorker = globalThis.Worker;
-      const locationGlobal = globalThis as unknown as {
-        location: URL | undefined;
+      const locationGlobal = globalThis as {
+        location: typeof globalThis.location | URL | undefined;
       };
       const originalLocation = locationGlobal.location;
       (globalThis as { Worker: unknown }).Worker = StubWorker;

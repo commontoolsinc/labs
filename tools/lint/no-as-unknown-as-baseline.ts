@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/lib-shell/test/runtime.test.ts": [
-    "596:40:14bim9b",
-  ],
   "packages/memory/test/v2-server-acl-test.ts": [
     "645:31:1q4tduj",
   ],
