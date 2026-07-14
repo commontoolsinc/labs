@@ -229,7 +229,7 @@ for (const N of SIZES) {
         b.start();
         const cells = makeList(N).map((item, i) =>
           Writable.for<IndexItem>(`bench-flat-index-item-${N}-${i}`)
-            .set(item) as unknown as Cell<IndexItem>
+            .set(item)
         );
         parent.set(cells);
         await tx.commit();

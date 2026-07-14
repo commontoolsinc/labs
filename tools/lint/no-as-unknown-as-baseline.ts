@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cell-set-flat-index-list.bench.ts": [
-    "231:23:8qn009",
-  ],
   "packages/runner/test/cfc-array-shrink-slot-labels.test.ts": [
     "66:56:10q9jc",
   ],
