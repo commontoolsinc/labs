@@ -3475,14 +3475,13 @@ export class Server {
     lease: ExecutionLeaseHandle,
     claim: ExecutionClaim,
   ): Promise<ExecutionClaim | null> {
-    const now = this.#executionNowMs();
-    this.expireExecutionClaims(now);
     const key = actionClaimMapKey(claim);
-    const live = this.#executionClaims.get(key);
+    this.expireExecutionClaims();
+    const selected = this.#executionClaims.get(key);
     if (
-      live === undefined ||
-      live.leaseGeneration !== claim.leaseGeneration ||
-      live.claimGeneration !== claim.claimGeneration
+      selected === undefined ||
+      selected.leaseGeneration !== claim.leaseGeneration ||
+      selected.claimGeneration !== claim.claimGeneration
     ) {
       return null;
     }
@@ -3494,10 +3493,23 @@ export class Server {
       authority === undefined || authority !== owned ||
       authority.drainRequested
     ) {
-      this.revokeExecutionClaim(live);
+      this.revokeExecutionClaim(selected);
       return null;
     }
     const engine = await this.openEngine(claim.space);
+    // Opening a first-use space can await filesystem and SQLite setup. Never
+    // renew from the timestamp or claim object selected before that await: the
+    // exact incarnation may have expired, been removed, or been replaced.
+    const renewalNow = this.#executionNowMs();
+    this.expireExecutionClaims(renewalNow);
+    const live = this.#executionClaims.get(key);
+    if (
+      live === undefined ||
+      live.leaseGeneration !== claim.leaseGeneration ||
+      live.claimGeneration !== claim.claimGeneration
+    ) {
+      return null;
+    }
     if (!this.#reconcileExecutionPolicy(engine, claim.space)) {
       this.revokeExecutionClaim(live);
       return null;
@@ -3505,7 +3517,7 @@ export class Server {
     const current = Engine.currentExecutionLease(engine, {
       space: claim.space,
       branch: claim.branch,
-      nowMs: now,
+      nowMs: renewalNow,
     });
     const sponsor = this.#sessions.get(
       claim.space,
@@ -3533,9 +3545,9 @@ export class Server {
     }
     const renewed: ExecutionClaim = Object.freeze({
       ...live,
-      expiresAt: Math.min(now + ttlMs, current.expiresAt),
+      expiresAt: Math.min(renewalNow + ttlMs, current.expiresAt),
     });
-    if (renewed.expiresAt <= now) {
+    if (renewed.expiresAt <= renewalNow) {
       this.revokeExecutionClaim(live);
       return null;
     }

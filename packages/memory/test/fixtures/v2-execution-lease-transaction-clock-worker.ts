@@ -1,8 +1,9 @@
 import * as MemoryClient from "../../v2/client.ts";
 import * as Engine from "../../v2/engine.ts";
 import { type ExecutionLeaseHandle, Server } from "../../v2/server.ts";
+import type { ExecutionClaim } from "../../v2.ts";
 
-type Operation = "renew" | "commit";
+type Operation = "renew" | "commit" | "claimed-commit";
 
 type WorkerCommand =
   | {
@@ -16,6 +17,7 @@ type WorkerCommand =
     space: string;
     clock: SharedArrayBuffer;
     leaseTtlMs: number;
+    claimTtlMs: number;
   }
   | { type: "hold-lock" }
   | { type: Operation }
@@ -35,9 +37,11 @@ let sponsorClient: MemoryClient.Client | undefined;
 let executorClient: MemoryClient.Client | undefined;
 let executorSession: MemoryClient.SpaceSession | undefined;
 let lease: ExecutionLeaseHandle | undefined;
+let claim: ExecutionClaim | undefined;
 let clock: Int32Array | undefined;
 let sampledOperation: Operation | undefined;
 let samplePublished = false;
+let claimedCommitClockSamples = 0;
 
 const principalFromAuthorization = (
   message: { authorization?: unknown },
@@ -65,6 +69,22 @@ let principalSpace = "";
 const sampleClock = (): number => {
   if (clock === undefined) throw new Error("executor clock is not initialized");
   const nowMs = Atomics.load(clock, 0);
+  if (sampledOperation === "claimed-commit") {
+    claimedCommitClockSamples += 1;
+    if (claimedCommitClockSamples === 2) {
+      // expireExecutionClaims samples once, then its timer reconciliation
+      // samples again before the exact live claim is selected from the map.
+      self.postMessage({ type: "claim-selected", nowMs });
+    } else if (claimedCommitClockSamples > 2 && !samplePublished) {
+      samplePublished = true;
+      self.postMessage({
+        type: "clock-sampled",
+        operation: sampledOperation,
+        nowMs,
+      });
+    }
+    return nowMs;
+  }
   if (sampledOperation !== undefined && !samplePublished) {
     samplePublished = true;
     self.postMessage({
@@ -91,6 +111,7 @@ const initializeExecutor = async (
     executionControl: {
       hostId: "host:transaction-clock",
       leaseTtlMs: command.leaseTtlMs,
+      claimTtlMs: command.claimTtlMs,
       nowMs: sampleClock,
     },
   });
@@ -116,11 +137,25 @@ const initializeExecutor = async (
   await sponsor.setExecutionDemand("", ["space:of:piece"]);
   lease = await server.acquireExecutionLease(command.space, "") ?? undefined;
   if (lease === undefined) throw new Error("executor lease was not acquired");
+  claim = await server.setExecutionClaim(lease, {
+    branch: "",
+    space: command.space,
+    contextKey: "space",
+    pieceId: "space:of:piece",
+    actionId: "action:transaction-clock",
+    actionKind: "computation",
+    implementationFingerprint: "impl:v1",
+    runtimeFingerprint: "runtime:v1",
+  });
 
   executorClient = await connect();
   executorSession = await executorClient.mount(command.space, {}, sessionAuth);
   server.bindExecutionSession(command.space, executorSession.sessionId, lease);
-  self.postMessage({ type: "executor-ready", expiresAt: lease.expiresAt });
+  self.postMessage({
+    type: "executor-ready",
+    expiresAt: lease.expiresAt,
+    claimExpiresAt: claim.expiresAt,
+  });
 };
 
 const runRenewal = async (): Promise<void> => {
@@ -135,26 +170,103 @@ const runRenewal = async (): Promise<void> => {
   self.postMessage({ type: "renew-result", lease: renewed });
 };
 
-const runCommit = async (): Promise<void> => {
+const claimedObservation = (liveClaim: ExecutionClaim, outputId: string) => ({
+  version: 2 as const,
+  ownerSpace: liveClaim.space,
+  branch: liveClaim.branch,
+  pieceId: liveClaim.pieceId,
+  processGeneration: 1,
+  actionId: liveClaim.actionId,
+  actionKind: liveClaim.actionKind,
+  implementationFingerprint: liveClaim.implementationFingerprint,
+  runtimeFingerprint: liveClaim.runtimeFingerprint,
+  executionClaimAssertion: {
+    contextKey: liveClaim.contextKey,
+    leaseGeneration: liveClaim.leaseGeneration,
+    claimGeneration: liveClaim.claimGeneration,
+  },
+  completeActionScopeSummary: {
+    version: 1 as const,
+    complete: true as const,
+    implementationFingerprint: liveClaim.implementationFingerprint,
+    runtimeFingerprint: liveClaim.runtimeFingerprint,
+    piece: {
+      space: liveClaim.space,
+      scope: "space" as const,
+      id: liveClaim.pieceId.slice("space:".length),
+      path: [],
+    },
+    reads: [],
+    writes: [{
+      space: liveClaim.space,
+      scope: "space" as const,
+      id: outputId,
+      path: ["value"],
+    }],
+    materializerWriteEnvelopes: [],
+    directOutputs: [{
+      space: liveClaim.space,
+      scope: "space" as const,
+      id: outputId,
+      path: ["value"],
+    }],
+  },
+  observedAtSeq: 0,
+  transactionKind: "action-run" as const,
+  reads: [],
+  shallowReads: [],
+  actualChangedWrites: [{
+    space: liveClaim.space,
+    scope: "space" as const,
+    id: outputId,
+    path: ["value"],
+  }],
+  currentKnownWrites: [{
+    space: liveClaim.space,
+    scope: "space" as const,
+    id: outputId,
+    path: ["value"],
+  }],
+  declaredWrites: [{
+    space: liveClaim.space,
+    scope: "space" as const,
+    id: outputId,
+    path: ["value"],
+  }],
+  materializerWriteEnvelopes: [],
+  status: "success" as const,
+});
+
+const runCommit = async (claimed: boolean): Promise<void> => {
   if (server === undefined || executorSession === undefined) {
     throw new Error("executor is not initialized");
   }
-  sampledOperation = "commit";
+  if (claimed && claim === undefined) {
+    throw new Error("executor claim is not initialized");
+  }
+  sampledOperation = claimed ? "claimed-commit" : "commit";
   samplePublished = false;
+  claimedCommitClockSamples = 0;
   self.postMessage({ type: "commit-starting" });
   let accepted = false;
   let seq: number | undefined;
   let errorName: string | undefined;
   let errorMessage: string | undefined;
   try {
+    const outputId = claimed
+      ? "of:transaction-clock-claimed-output"
+      : "of:transaction-clock-output";
     const result = await executorSession.transact({
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
-        id: "of:transaction-clock-output",
+        id: outputId,
         value: { value: { accepted: true } },
       }],
+      ...(claimed
+        ? { schedulerObservation: claimedObservation(claim!, outputId) }
+        : {}),
     });
     accepted = true;
     seq = result.seq;
@@ -166,7 +278,9 @@ const runCommit = async (): Promise<void> => {
   }
   const document = await server.readDocument(
     principalSpace,
-    "of:transaction-clock-output",
+    claimed
+      ? "of:transaction-clock-claimed-output"
+      : "of:transaction-clock-output",
   );
   self.postMessage({
     type: "commit-result",
@@ -220,7 +334,10 @@ self.onmessage = async (event: MessageEvent<WorkerCommand>) => {
         await runRenewal();
         break;
       case "commit":
-        await runCommit();
+        await runCommit(false);
+        break;
+      case "claimed-commit":
+        await runCommit(true);
         break;
       case "close":
         await closeWorker();

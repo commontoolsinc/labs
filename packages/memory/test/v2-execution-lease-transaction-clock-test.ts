@@ -7,16 +7,22 @@ import type { ExecutionLease } from "../v2.ts";
 const SPACE = "did:key:z6Mk-execution-lease-transaction-clock";
 const INITIAL_NOW_MS = 1_000;
 const LEASE_TTL_MS = 100_000;
+const CLAIM_TTL_MS = 10_000;
 
 type WorkerReply =
   | { type: "booted" }
   | { type: "holder-ready" }
-  | { type: "executor-ready"; expiresAt: number }
+  | { type: "executor-ready"; expiresAt: number; claimExpiresAt: number }
   | { type: "locked" }
   | { type: "released" }
   | { type: "renew-starting" }
   | { type: "commit-starting" }
-  | { type: "clock-sampled"; operation: "renew" | "commit"; nowMs: number }
+  | {
+    type: "clock-sampled";
+    operation: "renew" | "commit" | "claimed-commit";
+    nowMs: number;
+  }
+  | { type: "claim-selected"; nowMs: number }
   | { type: "renew-result"; lease: ExecutionLease | null }
   | {
     type: "commit-result";
@@ -62,6 +68,7 @@ type Harness = {
   clock: Int32Array;
   gate: Int32Array;
   expiresAt: number;
+  claimExpiresAt: number;
 };
 
 const withHarness = async (
@@ -107,6 +114,7 @@ const withHarness = async (
       space: SPACE,
       clock: clock.buffer,
       leaseTtlMs: LEASE_TTL_MS,
+      claimTtlMs: CLAIM_TTL_MS,
     });
     const ready = await executorReady;
     executorInitialized = true;
@@ -120,7 +128,14 @@ const withHarness = async (
     await holderReady;
     holderInitialized = true;
 
-    await run({ executor, holder, clock, gate, expiresAt: ready.expiresAt });
+    await run({
+      executor,
+      holder,
+      clock,
+      gate,
+      expiresAt: ready.expiresAt,
+      claimExpiresAt: ready.claimExpiresAt,
+    });
   } finally {
     Atomics.store(gate, 0, 1);
     Atomics.notify(gate, 0);
@@ -216,6 +231,38 @@ Deno.test("leased commits sample the configured clock after BEGIN IMMEDIATE", as
     );
     assertEquals(commit.errorName, "ExecutionLeaseFenceError");
     assertEquals(commit.errorMessage?.includes("execution lease"), true);
+    assertEquals(commit.document, null);
+  });
+});
+
+Deno.test("claimed commits reject a claim that expires after selection but before transaction apply", async () => {
+  await withHarness(async (harness) => {
+    Atomics.store(harness.clock, 0, harness.claimExpiresAt - 1);
+    await holdWriteLock(harness);
+
+    const starting = nextWorkerReply(harness.executor, "commit-starting");
+    const selected = nextWorkerReply(harness.executor, "claim-selected");
+    const sampled = nextWorkerReply(harness.executor, "clock-sampled");
+    const result = nextWorkerReply(harness.executor, "commit-result");
+    harness.executor.postMessage({ type: "claimed-commit" });
+    await starting;
+
+    assertEquals(await selected, {
+      type: "claim-selected",
+      nowMs: harness.claimExpiresAt - 1,
+    });
+    Atomics.store(harness.clock, 0, harness.claimExpiresAt);
+    await releaseWriteLock(harness);
+
+    assertEquals(await sampled, {
+      type: "clock-sampled",
+      operation: "claimed-commit",
+      nowMs: harness.claimExpiresAt,
+    });
+    const commit = await result;
+    assertEquals(commit.accepted, false);
+    assertEquals(commit.errorName, "ExecutionLeaseFenceError");
+    assertEquals(commit.errorMessage?.includes("execution claim"), true);
     assertEquals(commit.document, null);
   });
 });

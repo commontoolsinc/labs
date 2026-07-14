@@ -3636,6 +3636,11 @@ const assertExecutionLeaseFenceTransaction = (
     );
   }
   for (const claim of options.claims) {
+    if (claim.expiresAt <= nowMs) {
+      throw new ExecutionLeaseFenceError(
+        "execution claim incarnation is expired",
+      );
+    }
     if (
       claim.branch !== options.branch || claim.space !== options.space ||
       claim.leaseGeneration !== current.lease_generation

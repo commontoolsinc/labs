@@ -1167,6 +1167,115 @@ Deno.test("live executors renew an exact claim without changing its incarnation"
   }
 });
 
+Deno.test("claim renewal rejects a deadline crossed while opening the engine", async () => {
+  let nowMs = 1_000;
+  const server = createControlServer(
+    "memory-v2-execution-renew-expired-await",
+    {
+      executionControl: { claimTtlMs: 10_000, nowMs: () => nowMs },
+    },
+  );
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const mutableServer = server as unknown as {
+    openEngine: (space: string) => Promise<Engine.Engine>;
+  };
+  const originalOpenEngine = mutableServer.openEngine.bind(server);
+  const openStarted = Promise.withResolvers<void>();
+  const releaseOpen = Promise.withResolvers<void>();
+  try {
+    await setPolicy(session, true);
+    const lease = await demandAndAcquireLease(server, session);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(POLICY_SPACE, ""),
+    );
+    let pauseNextOpen = true;
+    mutableServer.openEngine = async (space) => {
+      if (pauseNextOpen) {
+        pauseNextOpen = false;
+        openStarted.resolve();
+        await releaseOpen.promise;
+      }
+      return await originalOpenEngine(space);
+    };
+
+    nowMs = claim.expiresAt - 1;
+    const renewal = server.renewExecutionClaim(lease, claim);
+    await openStarted.promise;
+    nowMs = claim.expiresAt;
+    releaseOpen.resolve();
+
+    assertEquals(await renewal, null);
+    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+  } finally {
+    releaseOpen.resolve();
+    mutableServer.openEngine = originalOpenEngine;
+    await client.close();
+    await server.close();
+  }
+});
+
+for (const mutation of ["removed", "replaced"] as const) {
+  Deno.test(`claim renewal does not resurrect a ${mutation} claim across engine open`, async () => {
+    let nowMs = 1_000;
+    const server = createControlServer(
+      `memory-v2-execution-renew-${mutation}-await`,
+      {
+        executionControl: { claimTtlMs: 10_000, nowMs: () => nowMs },
+      },
+    );
+    const client = await connectControlClient(server);
+    const session = await mount(client) as ExecutionSession;
+    const mutableServer = server as unknown as {
+      openEngine: (space: string) => Promise<Engine.Engine>;
+    };
+    const originalOpenEngine = mutableServer.openEngine.bind(server);
+    const openStarted = Promise.withResolvers<void>();
+    const releaseOpen = Promise.withResolvers<void>();
+    try {
+      await setPolicy(session, true);
+      const lease = await demandAndAcquireLease(server, session);
+      const claim = await server.setExecutionClaim(
+        lease,
+        claimKey(POLICY_SPACE, ""),
+      );
+      let pauseNextOpen = true;
+      mutableServer.openEngine = async (space) => {
+        if (pauseNextOpen) {
+          pauseNextOpen = false;
+          openStarted.resolve();
+          await releaseOpen.promise;
+        }
+        return await originalOpenEngine(space);
+      };
+
+      nowMs = 1_001;
+      const renewal = server.renewExecutionClaim(lease, claim);
+      await openStarted.promise;
+      assertEquals(server.revokeExecutionClaim(claim), true);
+      const replacement = mutation === "replaced"
+        ? await server.setExecutionClaim(
+          lease,
+          claimKey(POLICY_SPACE, ""),
+        )
+        : undefined;
+      releaseOpen.resolve();
+
+      assertEquals(await renewal, null);
+      assertEquals(
+        server.listExecutionClaims(POLICY_SPACE),
+        replacement === undefined ? [] : [replacement],
+      );
+    } finally {
+      releaseOpen.resolve();
+      mutableServer.openEngine = originalOpenEngine;
+      await client.close();
+      await server.close();
+    }
+  });
+}
+
 Deno.test("closing a control server cancels a live claim deadline", async () => {
   const server = createControlServer("memory-v2-execution-claim-expiry-close", {
     executionControl: { claimTtlMs: 60_000 },
