@@ -2245,6 +2245,11 @@ class SpaceReplica implements ISpaceReplica {
     const wirePreparation = deferredWireOperations.length === 0
       ? undefined
       : Promise.all(deferredWireOperations).then((groups) => groups.flat());
+    // Preparation starts before this semantic commit reserves and reaches its
+    // wire turn. Attach a handler immediately so a fast rejection cannot
+    // become an unhandled promise while an earlier causal turn is still held;
+    // pushCommit awaits the original promise and owns the actual rejection.
+    void wirePreparation?.catch(() => {});
     const confirmationCallbacks = (transaction.preparations ?? []).flatMap(
       (preparation) =>
         preparation.onConfirmed === undefined ? [] : [preparation.onConfirmed],
@@ -2685,9 +2690,11 @@ class SpaceReplica implements ISpaceReplica {
         ),
     );
     this.#commitPromises.add(promise);
-    const result = await promise;
-    this.#commitPromises.delete(promise);
-    return result;
+    try {
+      return await promise;
+    } finally {
+      this.#commitPromises.delete(promise);
+    }
   }
 
   private async pushCommit(
@@ -2718,33 +2725,57 @@ class SpaceReplica implements ISpaceReplica {
       if (predecessor !== undefined) await predecessor;
       releaseTurn();
     };
-    // Strategy 1: a commit whose read set lands on a still-catching-up id.
-    const admissionMode = conflictAdmissionMode();
-    if (admissionMode !== "off") {
-      const threshold = this.preemptThreshold(commit);
-      if (threshold !== undefined) {
-        if (admissionMode === "hold") {
-          const rejection = this.makePreemptRejection(commit, threshold);
-          // Precise mode: hold until the catch-up is applied, then run the
-          // server's stale-read check locally. Revert only the genuinely stale
-          // commits; fall through to send the ones whose reads still hold.
-          try {
-            await this.waitForCaughtUpLocalSeq(threshold);
-          } catch {
-            // Session/replica closing or reset: do not open/send a new session
-            // while shutdown is in progress. Finalize the held rejection so the
-            // optimistic write is dropped and close can drain promptly.
-            await releaseTurnInOrder();
-            return await this.finalizeRejection(
-              localSeq,
-              operations,
-              source,
-              rejection,
-            );
-          }
-          if (!this.#closed && this.commitReadsStaleLocally(commit)) {
-            logger.debug("commit-held-revert", () => [
-              `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
+    // Every operation after reserving the causal turn must release it on an
+    // unexpected admission/preflight throw, or later localSeq commits wedge.
+    let admissionMode = "off" as ReturnType<typeof conflictAdmissionMode>;
+    try {
+      // Strategy 1: a commit whose read set lands on a still-catching-up id.
+      admissionMode = conflictAdmissionMode();
+      if (admissionMode !== "off") {
+        const threshold = this.preemptThreshold(commit);
+        if (threshold !== undefined) {
+          if (admissionMode === "hold") {
+            const rejection = this.makePreemptRejection(commit, threshold);
+            // Precise mode: hold until the catch-up is applied, then run the
+            // server's stale-read check locally. Revert only the genuinely stale
+            // commits; fall through to send the ones whose reads still hold.
+            try {
+              await this.waitForCaughtUpLocalSeq(threshold);
+            } catch {
+              // Session/replica closing or reset: do not open/send a new session
+              // while shutdown is in progress. Finalize the held rejection so the
+              // optimistic write is dropped and close can drain promptly.
+              await releaseTurnInOrder();
+              return await this.finalizeRejection(
+                localSeq,
+                operations,
+                source,
+                rejection,
+              );
+            }
+            if (!this.#closed && this.commitReadsStaleLocally(commit)) {
+              logger.debug("commit-held-revert", () => [
+                `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
+                { localSeq, operations: operations.length },
+              ]);
+              await releaseTurnInOrder();
+              return await this.finalizeRejection(
+                localSeq,
+                operations,
+                source,
+                rejection,
+              );
+            }
+            logger.debug("commit-held-sent", () => [
+              `held commit sent after catch-up (reads still valid)`,
+              { localSeq, operations: operations.length },
+            ]);
+            // fall through to send
+          } else {
+            // Coarse mode: assume conflict and pre-empt without sending.
+            const rejection = this.makePreemptRejection(commit, threshold);
+            logger.debug("commit-preempted", () => [
+              `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
               { localSeq, operations: operations.length },
             ]);
             await releaseTurnInOrder();
@@ -2755,27 +2786,11 @@ class SpaceReplica implements ISpaceReplica {
               rejection,
             );
           }
-          logger.debug("commit-held-sent", () => [
-            `held commit sent after catch-up (reads still valid)`,
-            { localSeq, operations: operations.length },
-          ]);
-          // fall through to send
-        } else {
-          // Coarse mode: assume conflict and pre-empt without sending.
-          const rejection = this.makePreemptRejection(commit, threshold);
-          logger.debug("commit-preempted", () => [
-            `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
-            { localSeq, operations: operations.length },
-          ]);
-          await releaseTurnInOrder();
-          return await this.finalizeRejection(
-            localSeq,
-            operations,
-            source,
-            rejection,
-          );
         }
       }
+    } catch (error) {
+      await releaseTurnInOrder();
+      throw error;
     }
     // The push marker window covers observation flush + (re)dial + send +
     // confirm: the full client-side cost of durably landing this commit.

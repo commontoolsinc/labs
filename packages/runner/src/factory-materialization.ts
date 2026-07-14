@@ -71,6 +71,14 @@ export class FactoryArtifactUnavailableError extends Error {
   }
 }
 
+/** Internal control-flow signal for a cold load whose owner changed in flight. */
+export class FactoryMaterializationSupersededError extends Error {
+  constructor() {
+    super("Factory materialization was superseded while loading");
+    this.name = "FactoryMaterializationSupersededError";
+  }
+}
+
 interface InspectedFactory {
   readonly value: MaterializedFactory;
   readonly state: FactoryStateView;
@@ -535,7 +543,7 @@ function assertCurrentAfterAwait(
     owner !== fence.owner || generation !== fence.generation ||
     !sameSelection(selection, originalSelection)
   ) {
-    throw new Error("Factory materialization was superseded while loading");
+    throw new FactoryMaterializationSupersededError();
   }
 }
 

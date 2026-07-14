@@ -93,23 +93,25 @@ function decodeJsonPointerSegment(segment: string): string | undefined {
   return segment.replaceAll("~1", "/").replaceAll("~0", "~");
 }
 
-function resolveLocalSchemaRef(
+export function resolveLocalSchemaRef(
   ref: string,
   root: JSONSchema,
 ): JSONSchema | undefined {
   if (ref === "" || ref === "#") return root;
   if (!ref.startsWith("#/")) return undefined;
 
-  let pointer: string;
-  try {
-    pointer = decodeURIComponent(ref.slice(2));
-  } catch {
-    return undefined;
-  }
-
   let current: unknown = root;
-  for (const encodedSegment of pointer.split("/")) {
-    const segment = decodeJsonPointerSegment(encodedSegment);
+  for (const encodedSegment of ref.slice(2).split("/")) {
+    let pointerSegment: string;
+    try {
+      // Split the URI-fragment JSON Pointer before percent-decoding. `%2F`
+      // belongs to one property name; decoding the whole fragment first would
+      // incorrectly turn it into another path separator.
+      pointerSegment = decodeURIComponent(encodedSegment);
+    } catch {
+      return undefined;
+    }
+    const segment = decodeJsonPointerSegment(pointerSegment);
     if (
       segment === undefined || current === null ||
       (typeof current !== "object" && typeof current !== "function") ||
@@ -155,7 +157,9 @@ function normalizeSchemaData(
     if (!isPlainObject(value)) return SCHEMA_NORMALIZATION_FAILED;
 
     const record = value as Record<string, unknown>;
-    const normalized: Record<string, NormalizedSchemaValue> = {};
+    const normalized: Record<string, NormalizedSchemaValue> = Object.create(
+      null,
+    );
     for (const key of Object.keys(record).sort()) {
       const result = normalizeSchemaData(record[key], context);
       if (result === SCHEMA_NORMALIZATION_FAILED) return result;
@@ -173,7 +177,7 @@ function normalizeSchemaMap(
 ): SchemaNormalizationResult {
   if (!isPlainObject(value)) return SCHEMA_NORMALIZATION_FAILED;
   const record = value as Record<string, unknown>;
-  const normalized: Record<string, NormalizedSchemaValue> = {};
+  const normalized: Record<string, NormalizedSchemaValue> = Object.create(null);
   for (const key of Object.keys(record).sort()) {
     const result = normalizeSchemaNode(record[key] as JSONSchema, context);
     if (result === SCHEMA_NORMALIZATION_FAILED) return result;
@@ -188,7 +192,7 @@ function normalizeFactoryContract(
 ): SchemaNormalizationResult {
   if (!isPlainObject(value)) return SCHEMA_NORMALIZATION_FAILED;
   const record = value as Record<string, unknown>;
-  const normalized: Record<string, NormalizedSchemaValue> = {};
+  const normalized: Record<string, NormalizedSchemaValue> = Object.create(null);
   for (const key of Object.keys(record).sort()) {
     const result = FACTORY_SCHEMA_FIELDS.has(key)
       ? normalizeSchemaNode(record[key] as JSONSchema, context)
@@ -251,7 +255,9 @@ function normalizeSchemaKeyword(
   if (key === "dependencies") {
     if (!isPlainObject(value)) return SCHEMA_NORMALIZATION_FAILED;
     const record = value as Record<string, unknown>;
-    const normalized: Record<string, NormalizedSchemaValue> = {};
+    const normalized: Record<string, NormalizedSchemaValue> = Object.create(
+      null,
+    );
     for (const dependency of Object.keys(record).sort()) {
       const entry = record[dependency];
       const result = Array.isArray(entry)
@@ -323,7 +329,9 @@ function normalizeSchemaNode(
       }
     }
 
-    const normalized: Record<string, NormalizedSchemaValue> = {};
+    const normalized: Record<string, NormalizedSchemaValue> = Object.create(
+      null,
+    );
     const schemaRecord = schema as unknown as Record<string, unknown>;
     for (const key of Object.keys(schema).sort()) {
       if (key === "$ref" || key === "$defs" || key === "definitions") {

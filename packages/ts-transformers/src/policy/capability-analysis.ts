@@ -18,7 +18,7 @@ import {
 } from "../core/mod.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
 import { type CellBrand } from "@commonfabric/schema-generator/cell-brand";
-import { detectFactoryType } from "@commonfabric/schema-generator";
+import { detectTrustedFactoryType } from "@commonfabric/schema-generator";
 import { getKnownComputedKeyPathSegment } from "../utils/reactive-keys.ts";
 import { decodePath, encodePath } from "../utils/path-serialization.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -3627,7 +3627,7 @@ function isFirstClassFactoryExpression(
     const members = type.isUnion() ? type.types : [type];
     return members.length > 0 &&
       members.every((member) =>
-        detectFactoryType(member, checker) !== undefined
+        detectTrustedFactoryType(member, checker) !== undefined
       );
   } catch {
     return false;

@@ -1,6 +1,6 @@
 import ts from "typescript";
 import {
-  detectFactoryType,
+  detectTrustedFactoryType,
   type FactoryTypeInfo,
 } from "@commonfabric/schema-generator";
 
@@ -194,7 +194,7 @@ function factoryMembers(
 ): FactoryTypeInfo[] {
   const members = type.isUnion() ? type.types : [type];
   return members.flatMap((member) => {
-    const factory = detectFactoryType(member, checker);
+    const factory = detectTrustedFactoryType(member, checker);
     return factory ? [factory] : [];
   });
 }

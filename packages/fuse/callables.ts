@@ -82,7 +82,14 @@ export function encodeFactoryProjection(value: unknown): string | undefined {
     : undefined;
 }
 
-/** Decode an explicit `fvj1:` factory projection to a context-free shell. */
+/**
+ * Decode an explicit `fvj1:` factory projection to a context-free shell.
+ *
+ * The prefix is reserved by the FUSE file projection. A literal authored
+ * string with that prefix must be stored through another interface;
+ * silently treating a malformed tagged value as text would make a read/write
+ * echo corrupt factory-bearing JSON.
+ */
 export function decodeFactoryProjection(value: unknown): unknown | undefined {
   if (
     typeof value !== "string" || !seemsLikeJsonEncodedFabricValue(value)
@@ -94,6 +101,20 @@ export function decodeFactoryProjection(value: unknown): unknown | undefined {
     throw new TypeError("Tagged FUSE callable value is not a Factory@1");
   }
   return decoded;
+}
+
+/** Parse a handler file payload while keeping tagged-value failures explicit. */
+export function decodeHandlerWritePayload(text: string): unknown {
+  const trimmed = text.trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    // Bare strings remain convenient for shell callers such as
+    // `echo book > addItem.handler`.
+    return trimmed;
+  }
+  return decodeFactoryProjections(parsed);
 }
 
 /** Decode tagged factory leaves without reinterpreting ordinary JSON values. */

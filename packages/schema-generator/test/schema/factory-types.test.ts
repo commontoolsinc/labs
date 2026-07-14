@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { detectTrustedFactoryType } from "../../src/formatters/factory-formatter.ts";
 import { asObjectSchema, getTypeFromCode } from "../utils.ts";
 
 const FACTORY_DECLARATIONS = `
@@ -32,6 +33,15 @@ const FACTORY_DECLARATIONS = `
 `;
 
 describe("Schema: factory types", () => {
+  it("does not grant factory semantics to a user type merely named PatternFactory", async () => {
+    const code = `
+      type PatternFactory<T, R> = (input: T) => R;
+      type SchemaRoot = PatternFactory<{ value: number }, string>;
+    `;
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    expect(detectTrustedFactoryType(type, checker)).toBeUndefined();
+  });
+
   it("emits the public schemas for all three factory kinds", async () => {
     const code = `${FACTORY_DECLARATIONS}
       interface SchemaRoot {

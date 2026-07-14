@@ -11,6 +11,7 @@ import {
   classifyCallableEntry,
   decodeFactoryProjection,
   decodeFactoryProjections,
+  decodeHandlerWritePayload,
   isPatternFactoryValue,
 } from "./callables.ts";
 import {
@@ -723,6 +724,16 @@ Deno.test("decodeFactoryProjections restores nested factory leaves", () => {
 Deno.test("decodeFactoryProjections preserves ordinary JSON container identity", () => {
   const object = { nested: { value: 1 }, list: [1, 2, 3] };
   assertStrictEquals(decodeFactoryProjections(object), object);
+});
+
+Deno.test("handler payload decoding does not downgrade a malformed factory tag to text", () => {
+  assertEquals(
+    decodeHandlerWritePayload("plain shell text\n"),
+    "plain shell text",
+  );
+  assertThrows(
+    () => decodeHandlerWritePayload(JSON.stringify("fvj1:not-a-factory")),
+  );
 });
 
 Deno.test("buildJsonTree - nested .json siblings keep ordinary pattern-shaped objects intact", () => {

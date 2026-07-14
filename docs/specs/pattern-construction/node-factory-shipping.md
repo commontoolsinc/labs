@@ -249,6 +249,12 @@ params, regardless of where it was declared. A module-scoped helper that the
 hoisted callback references lexically is not a capture; it remains part of the
 verified module.
 
+This capture exception belongs specifically to closure-converted nested
+`pattern()` callbacks. Reactive array-method callbacks remain self-contained SES
+callbacks and do not capture a locally scoped factory directly. When an array
+lowering needs one, it carries the bound nested pattern factory as the list
+operation's single factory operand; no sibling params object is introduced.
+
 ### Inline patterns are the public partial-application model
 
 Authors do not call `.curry()`. They define a wrapper pattern that closes over
@@ -703,6 +709,9 @@ Every canonical by-value write route uses this traversal, including direct Cell
 and stream writes, normal result/output binding, writable query-result proxies,
 runtime-client, CLI, and FUSE adapters. A route may not bypass publication merely
 because it reaches storage through a binding or proxy rather than `Cell.set()`.
+When a raw Cell read follows a link, runner provenance records the resolved
+target space, not the address space of the link container. A later cross-space
+publication therefore copies from the space that actually supplied the artifact.
 
 When a parent pattern is built, traversal recursively maps `params` and
 `spaceSelector`. Captured cells become normal aliases, captured factory state
@@ -937,11 +946,21 @@ factory argument into a symbolic proxy nor drop a pattern's public schemas.
 
 Version 1 requires the stored factory's canonical public schemas to equal the
 call site's generated schemas after reference resolution and normalization.
+Any transformer decision that grants factory call, capture, or trusted metadata
+semantics requires the public alias or private factory-brand symbol to resolve
+to a Common Fabric declaration. A user-defined type merely named
+`PatternFactory`, `ModuleFactory`, or `HandlerFactory` remains an ordinary
+callable type. Structural factory detection is confined to schema formatting of
+compiler-owned synthetic types and does not grant runtime or transformer trust.
 Because JSON Schema defines `enum` as a set, normalization compares its members
 independently of array order while still requiring the exact same member values.
 This permits schema sanitization and Fabric round-tripping to reorder an enum
 without creating a false factory-contract mismatch; no other array-valued
 keyword is made order-insensitive by this rule. Schema variance is deferred.
+Local URI-fragment JSON Pointers are split into segments before percent decoding,
+so a `%2F` names a slash inside one property rather than a path separator.
+Normalization also preserves every own schema key (including `__proto__`) in
+prototype-safe maps; browser object accessors cannot erase a contract difference.
 The resolved trusted artifact is authoritative; wire-carried schema hints never
 grant execution or CFC authority.
 
@@ -1261,6 +1280,11 @@ If execution temporarily reconstructs the tool through another Cell, that Cell
 is an implementation detail and does not replace the durable call-site
 identity. Removing a nested protected path also removes any now-system-only
 required ancestor from the authored help and flag schema.
+
+FUSE reserves the `fvj1:` string prefix for explicit Factory codec projections.
+JSON containing a malformed reserved tag is a write error; handler-file parsing
+falls back to convenient bare text only when JSON parsing itself fails, never
+when tagged Factory decoding fails.
 
 Authored code may neither supply a literal for such a field nor capture a
 chosen value and forward it. If a required system value or stable tool identity

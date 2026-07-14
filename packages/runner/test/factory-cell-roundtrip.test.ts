@@ -19,6 +19,7 @@ import {
 } from "../src/factory-materialization.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { MemorySpace } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("factory cell roundtrip test");
@@ -334,6 +335,40 @@ describe("typed Factory@1 Cell round trips", () => {
     ).toThrow(
       `Factory artifact ${REFS.pattern.identity} is not available in space ${destinationSpace}`,
     );
+  });
+
+  it("records the resolved target space as factory provenance after a cross-space raw read", async () => {
+    const sourceTx = runtime.edit();
+    const source = runtime.getCell<FabricValue>(
+      space,
+      "cross-space-factory-provenance-source",
+      undefined,
+      sourceTx,
+    );
+    source.set(fixtures.pattern.shell);
+    runtime.prepareTxForCommit(sourceTx);
+    expect((await sourceTx.commit()).error).toBeUndefined();
+
+    const linkTx = runtime.edit();
+    const linked = runtime.getCell<FabricValue>(
+      destinationSpace,
+      "cross-space-factory-provenance-link",
+      undefined,
+      linkTx,
+    );
+    linked.setRaw(source.getAsLink() as FabricValue);
+    runtime.prepareTxForCommit(linkTx);
+    expect((await linkTx.commit()).error).toBeUndefined();
+
+    const observed: MemorySpace[] = [];
+    const note = runtime.noteFactoryArtifactSource.bind(runtime);
+    runtime.noteFactoryArtifactSource = (value, sourceSpace) => {
+      observed.push(sourceSpace);
+      note(value, sourceSpace);
+    };
+
+    linked.withTx().getRaw({ lastNode: "value" });
+    expect(observed.at(-1)).toBe(space);
   });
 
   for (const method of ["push", "addUnique"] as const) {

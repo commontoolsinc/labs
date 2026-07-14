@@ -1,5 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { isAdmittedFabricFactory } from "@commonfabric/data-model/fabric-factory";
+import { resolveLocalSchemaRef } from "@commonfabric/data-model/schema-utils";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 
@@ -90,7 +91,7 @@ function resolveFactoryDiscoverySchema(
     const ref = current.$ref;
     if (seen.has(ref)) return current;
     seen.add(ref);
-    const target = resolveFactoryDiscoveryRef(ref, root);
+    const target = resolveLocalSchemaRef(ref, root);
     if (target === undefined) return current;
     const { $ref: _, ...siblings } = current;
     if (target === false) return false;
@@ -112,33 +113,6 @@ function resolveFactoryDiscoverySchema(
     };
   }
   return current;
-}
-
-function resolveFactoryDiscoveryRef(
-  ref: string,
-  root: JSONSchema,
-): JSONSchema | undefined {
-  if (ref === "#") return root;
-  if (!ref.startsWith("#/")) return undefined;
-
-  let pointer: string;
-  try {
-    pointer = decodeURIComponent(ref.slice(2));
-  } catch {
-    return undefined;
-  }
-
-  let target: unknown = root;
-  for (const encoded of pointer.split("/")) {
-    if (/~(?:[^01]|$)/.test(encoded)) return undefined;
-    if (!isRecord(target)) return undefined;
-    const key = encoded.replaceAll("~1", "/").replaceAll("~0", "~");
-    if (!Object.hasOwn(target, key)) return undefined;
-    target = target[key];
-  }
-  return typeof target === "boolean" || isRecord(target)
-    ? target as JSONSchema
-    : undefined;
 }
 
 /**

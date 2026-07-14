@@ -20,7 +20,7 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { deepFreeze, isDeepFrozenFabricValue } from "./deep-freeze.ts";
-import { isAdmittedFabricFactory } from "./fabric-factory.ts";
+import { isAdmittedFabricFactory, sealFactoryState } from "./fabric-factory.ts";
 
 /**
  * Helper for `shallowFabricFromNativeValue()`, which rejects native objects
@@ -508,7 +508,17 @@ function isFabricCompatibleInternal(
     }
 
     case "function": {
-      if (isAdmittedFabricFactory(value)) return true;
+      if (isAdmittedFabricFactory(value)) {
+        try {
+          // Conversion seals the atom through the same path. In particular, a
+          // trusted live builder factory is not yet a Fabric-compatible value
+          // while its complete content-addressed artifact ref is unavailable.
+          sealFactoryState(value);
+          return true;
+        } catch {
+          return false;
+        }
+      }
       // Functions are only fabric-compatible if they have toJSON().
       if (hasToJSONMethod(value)) {
         const converted = value.toJSON();

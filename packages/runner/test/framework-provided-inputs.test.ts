@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
   applyFrameworkProvidedInputs,
   stripFrameworkProvidedPaths,
@@ -48,4 +48,12 @@ Deno.test("FrameworkProvided injection overwrites nested authored values", () =>
     },
   );
   assertEquals(authored.request.sandboxId, "authored");
+});
+
+Deno.test("FrameworkProvided injection fails closed without a stable entity id", () => {
+  assertThrows(
+    () => applyFrameworkProvidedInputs({}, [["sandboxId"]], undefined),
+    Error,
+    "tool instance has no stable entity id",
+  );
 });

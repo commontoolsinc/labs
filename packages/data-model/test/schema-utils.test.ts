@@ -1180,6 +1180,27 @@ describe("schema-utils", () => {
   });
 
   describe("factorySchemasEqual()", () => {
+    it("distinguishes schemas whose own __proto__ properties differ", () => {
+      const properties = (value: string) =>
+        Object.fromEntries([["__proto__", { const: value }]]);
+
+      expect(factorySchemasEqual(
+        { type: "object", properties: properties("left") },
+        { type: "object", properties: properties("right") },
+      )).toBe(false);
+    });
+
+    it("resolves percent-encoded slashes within one JSON Pointer segment", () => {
+      const referenced = {
+        $ref: "#/$defs/a%2Fb",
+        $defs: {
+          "a/b": { type: "string" },
+        },
+      } as const;
+
+      expect(factorySchemasEqual(referenced, { type: "string" })).toBe(true);
+    });
+
     it("compares exact normalized structure deterministically", () => {
       expect(factorySchemasEqual(
         {

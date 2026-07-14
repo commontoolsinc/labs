@@ -2,7 +2,10 @@ import {
   factoryStateOf,
   isAdmittedFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
-import { factorySchemasEqual } from "@commonfabric/data-model/schema-utils";
+import {
+  factorySchemasEqual,
+  resolveLocalSchemaRef,
+} from "@commonfabric/data-model/schema-utils";
 import { isRecord } from "@commonfabric/utils/types";
 
 import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
@@ -30,13 +33,8 @@ function schemaAtRef(
     typeof schema.$ref !== "string" || !schema.$ref.startsWith("#/") ||
     root === true || root === false
   ) return schema;
-  let current: unknown = root;
-  for (const encoded of schema.$ref.slice(2).split("/")) {
-    if (!isRecord(current)) return undefined;
-    const key = encoded.replaceAll("~1", "/").replaceAll("~0", "~");
-    current = current[key];
-  }
-  if (typeof current !== "boolean" && !isRecord(current)) return undefined;
+  const current = resolveLocalSchemaRef(schema.$ref, root);
+  if (current === undefined) return undefined;
   const { $ref: _, ...siblings } = schema;
   if (Object.keys(siblings).length === 0) return current as JSONSchema;
   if (current === false) return false;

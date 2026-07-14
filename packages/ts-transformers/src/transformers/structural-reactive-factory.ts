@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { detectFactoryType } from "@commonfabric/schema-generator";
+import { detectTrustedFactoryType } from "@commonfabric/schema-generator";
 
 import { detectCallKind } from "../ast/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
@@ -52,7 +52,7 @@ export function isFirstClassFactoryCalleeExpression(
     return members.length > 0 && members.every((member) =>
       (member.flags &
           (ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Never)) !==
-        0 || detectFactoryType(member, checker) !== undefined
+        0 || detectTrustedFactoryType(member, checker) !== undefined
     );
   } catch {
     return false;

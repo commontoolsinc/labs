@@ -89,12 +89,8 @@ When done, call presentResult with your structured findings.`,
     system: systemPrompt,
     messages,
     tools: {
-      searchWeb: pattern<{ query: string }, any>(({ query }) =>
-        searchWeb({ query })
-      ),
-      readWebpage: pattern<{ url: string }, any>(({ url }) =>
-        readWebpage({ url })
-      ),
+      searchWeb,
+      readWebpage,
     },
     model: "anthropic:claude-sonnet-4-5",
     context: computed(() => context ?? {}),

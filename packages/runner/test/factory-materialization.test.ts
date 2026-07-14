@@ -24,6 +24,7 @@ import {
 import type { Frame } from "../src/builder/types.ts";
 import {
   type FactoryContract,
+  FactoryMaterializationSupersededError,
   materializeFactory,
   materializeFactoryForSchema,
   prepareFactory,
@@ -630,9 +631,7 @@ describe("runner-owned factory materialization", () => {
         currentGeneration: () => 1,
         currentSelection: () => shellB,
       },
-    })).rejects.toThrow(
-      "Factory materialization was superseded while loading",
-    );
+    })).rejects.toBeInstanceOf(FactoryMaterializationSupersededError);
   });
 
   it("rejects malformed decoded params through the trusted curry validator", () => {
@@ -697,8 +696,8 @@ describe("runner-owned factory materialization", () => {
     selection = shellB;
     release();
 
-    await expect(preparing).rejects.toThrow(
-      "Factory materialization was superseded while loading",
+    await expect(preparing).rejects.toBeInstanceOf(
+      FactoryMaterializationSupersededError,
     );
     expect(
       runtime.patternManager.artifactFromIdentitySync(

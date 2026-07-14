@@ -6,6 +6,7 @@ import type {
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
 import { getCellWrapperInfo } from "../typescript/cell-brand.ts";
+import { isCommonFabricSymbol } from "../typescript/common-fabric-symbols.ts";
 import type { TypeWithInternals } from "../type-utils.ts";
 
 export type FactoryTypeKind = "pattern" | "module" | "handler";
@@ -33,9 +34,11 @@ const FACTORY_ALIAS_KINDS: Readonly<Record<string, FactoryTypeKind>> = {
 function hasFabricFactoryBrand(
   type: ts.Type,
   checker: ts.TypeChecker,
+  requireProvenance: boolean,
 ): boolean {
   return checker.getPropertiesOfType(type).some((property) =>
-    property.getName().startsWith("__@FABRIC_FACTORY_TYPE")
+    property.getName().startsWith("__@FABRIC_FACTORY_TYPE") &&
+    (!requireProvenance || isCommonFabricSymbol(property))
   );
 }
 
@@ -50,6 +53,7 @@ function hasProperty(
 function detectFactoryKind(
   type: ts.Type,
   checker: ts.TypeChecker,
+  requireProvenance = false,
 ): FactoryTypeKind | undefined {
   // A union remains a stored union. UnionFormatter must retain every arm as
   // `anyOf`; invocation compatibility is a transformer concern.
@@ -63,8 +67,17 @@ function detectFactoryKind(
   // Direct public aliases are authoritative. Alias and branded-intersection
   // spellings lose the public alias name, so recognize those by the private
   // FabricFactory brand plus the stable public factory surface.
-  if (namedKind !== undefined) return namedKind;
-  if (!hasFabricFactoryBrand(type, checker)) return undefined;
+  if (
+    namedKind !== undefined &&
+    (!requireProvenance ||
+      ((type as TypeWithInternals).aliasSymbol !== undefined &&
+        isCommonFabricSymbol((type as TypeWithInternals).aliasSymbol!)))
+  ) {
+    return namedKind;
+  }
+  if (!hasFabricFactoryBrand(type, checker, requireProvenance)) {
+    return undefined;
+  }
 
   if (
     hasProperty(type, checker, "argumentSchema") &&
@@ -108,7 +121,27 @@ export function detectFactoryType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): FactoryTypeInfo | undefined {
-  const kind = detectFactoryKind(type, checker);
+  return detectFactoryTypeInternal(type, checker, false);
+}
+
+/**
+ * Detect only a factory whose alias or private brand comes from Common Fabric.
+ * Transformer/runtime-authority decisions must use this form; the structural
+ * form above remains for schema formatting of compiler-owned synthetic types.
+ */
+export function detectTrustedFactoryType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): FactoryTypeInfo | undefined {
+  return detectFactoryTypeInternal(type, checker, true);
+}
+
+function detectFactoryTypeInternal(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  requireProvenance: boolean,
+): FactoryTypeInfo | undefined {
+  const kind = detectFactoryKind(type, checker, requireProvenance);
   if (kind === undefined) return undefined;
 
   const signature = type.getCallSignatures()[0];

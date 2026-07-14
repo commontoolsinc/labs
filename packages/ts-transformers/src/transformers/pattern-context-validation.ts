@@ -37,7 +37,7 @@
  *   callback: ERROR (use a nested computed()/lift())
  */
 import ts from "typescript";
-import { detectFactoryType } from "@commonfabric/schema-generator";
+import { detectTrustedFactoryType } from "@commonfabric/schema-generator";
 import { COMMONFABRIC_REACTIVE_ORIGIN_BUILDER_NAMES } from "../core/commonfabric-runtime-registry.ts";
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
@@ -1234,7 +1234,7 @@ export class PatternContextValidationTransformer
       : [type];
     return members.length > 0 &&
       members.every((member) =>
-        detectFactoryType(member, checker) !== undefined &&
+        detectTrustedFactoryType(member, checker) !== undefined &&
         checker.getPropertiesOfType(member).some((property) =>
           property.getName().startsWith("__@FABRIC_FACTORY_TYPE") &&
           isCommonFabricSymbol(property)

@@ -1857,6 +1857,15 @@ describe("native-conversion", () => {
       expect(toJSONCalls).toBe(0);
     });
 
+    it("rejects an admitted live factory until its artifact ref is available", () => {
+      const factory = registerFabricFactory(() => undefined, "module", {
+        kind: "module",
+        rootToken: {},
+      });
+
+      expect(isFabricCompatible(factory)).toBe(false);
+    });
+
     // -- FabricNativeObject types (would be wrapped) --
     it("accepts `Error` instances", () => {
       expect(isFabricCompatible(new Error("test"))).toBe(true);

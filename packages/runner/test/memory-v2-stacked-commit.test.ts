@@ -1004,6 +1004,42 @@ Deno.test("memory v2 keeps cold prepared commits optimistic while preserving wir
   }
 });
 
+Deno.test("memory v2 releases the causal wire turn when preparation rejects", async () => {
+  const harness = createHarness();
+  try {
+    const first = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("first") },
+      }],
+      preparations: [{
+        key: "artifact:rejected",
+        prepare: () => Promise.reject(new Error("artifact preparation failed")),
+      }],
+    });
+    const second = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.B,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("second") },
+      }],
+    });
+
+    const rejected = await first;
+    assertExists(rejected.error);
+    assert(
+      String(rejected.error.message).includes("artifact preparation failed"),
+    );
+    assertEquals(await second, { ok: {} });
+    assertEquals(harness.model.transactLocalSeqs, [2]);
+  } finally {
+    await harness.close();
+  }
+});
+
 const beginSet = (
   harness: Harness,
   id: URI,

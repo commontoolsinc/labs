@@ -184,7 +184,7 @@ than a separate V2 system. See `rollout-plan.md` for detailed task breakdown.
    - Track created cells and causes in context during execution
    - Wire lift/handler returns to auto-assign causes to returned cells
 
-### Independent Track: First-Class Factory Values (Proposed)
+### Independent Track: First-Class Factory Values (Shipped)
 
 This track depends on content-addressed builder-artifact identity, not on graph
 snapshots or the reactive-interpreter rollout. See

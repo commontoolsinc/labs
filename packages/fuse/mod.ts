@@ -82,7 +82,10 @@ import {
 } from "./mount-options.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 import { ReverseInvalidationQueue } from "./invalidation.ts";
-import { decodeFactoryProjections } from "./callables.ts";
+import {
+  decodeFactoryProjections,
+  decodeHandlerWritePayload,
+} from "./callables.ts";
 
 const encoder = new TextEncoder();
 // Operation ring buffer — last 50 ops for crash diagnostics
@@ -1680,15 +1683,7 @@ export async function main(argv: string[] = Deno.args) {
 
       if (writeTarget?.kind === "handler") {
         const text = new TextDecoder().decode(buffer);
-        const trimmed = text.trim();
-        let value: unknown;
-        try {
-          value = decodeFactoryProjections(JSON.parse(trimmed));
-        } catch {
-          // Bare string — treat as string value so callers don't need
-          // to double-quote (e.g. `echo book > addItem.handler`).
-          value = trimmed;
-        }
+        const value = decodeHandlerWritePayload(text);
         await bridge.sendToHandlerTarget(writeTarget.target, value);
         // Don't invalidate here — sendToHandlerTarget waits for
         // runtime.idle() + synced(), but the downstream reactive graph

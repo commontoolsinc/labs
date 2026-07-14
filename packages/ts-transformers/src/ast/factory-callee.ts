@@ -1,6 +1,6 @@
 import ts from "typescript";
 import {
-  detectFactoryType,
+  detectTrustedFactoryType,
   type FactoryTypeInfo,
 } from "@commonfabric/schema-generator";
 
@@ -61,7 +61,7 @@ export function classifyFactoryCallee(
     ) {
       continue;
     }
-    const member = detectFactoryType(memberType, checker);
+    const member = detectTrustedFactoryType(memberType, checker);
     if (member) {
       members.push(member);
     } else {

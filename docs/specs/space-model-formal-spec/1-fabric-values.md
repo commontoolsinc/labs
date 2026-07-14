@@ -147,7 +147,10 @@ type FabricValue =
 >   runner-owned materializer may resolve its content-addressed builder artifact
 >   and return an executable factory. Conversion, freezing, cloning, equality,
 >   hashing, and traversal all dispatch admitted factories before generic
->   function rejection. Every unadmitted function remains rejected. See
+>   function rejection. Admission alone is not sufficient while a trusted live
+>   builder factory still lacks its complete artifact ref: conversion fails and
+>   `isFabricCompatible()` returns `false` until the same canonical state can be
+>   sealed. Every unadmitted function remains rejected. See
 >   [First-Class Serializable Factories](../pattern-construction/node-factory-shipping.md).
 >
 > Of the two JS primitive types whose `typeof` results (`"symbol"` and
@@ -3025,7 +3028,7 @@ export function fabricFromNativeValue(
 |------------|--------|
 | `null`, `boolean`, `number`, `string`, `undefined`, `bigint` | Returned as-is (primitives are `FabricValue` directly). All numbers pass through unchanged, including `-0`, `NaN`, and `±Infinity`. See Section 1.3 callout for layer-by-layer details. |
 | `symbol` | Registry-interned symbols (`Symbol.keyFor(s)` returns a string) returned as-is; unique symbols (`Symbol(desc)`) throw with the message `"Cannot store unique (uninterned) symbol"`. See Section 1.3 callout for layer-by-layer details. |
-| Admitted `FabricFactory` callable | Returned as the callable Fabric value. Deep conversion seals and recursively hardens its canonical `Factory@1` state before freezing the callable. An arbitrary function, copied protocol symbol, or malformed state is rejected. A codec-decoded shell remains inert; conversion never grants runner execution trust. |
+| Admitted `FabricFactory` callable | Returned as the callable Fabric value. Deep conversion seals and recursively hardens its canonical `Factory@1` state before freezing the callable. `isFabricCompatible()` performs the same sealing check and returns `false` for a live builder factory whose artifact ref is not available yet. An arbitrary function, copied protocol symbol, or malformed state is rejected. A codec-decoded shell remains inert; conversion never grants runner execution trust. |
 | `FabricPrimitive` (`FabricEpochNsec`, `FabricEpochDays`, `FabricHash`, `FabricBytes`) | Returned as-is. Always-frozen: the `freeze` option has no effect on these types (see Section 1.4.6). |
 | `FabricInstance` (including wrapper classes) | Returned as-is (already `FabricValue`). |
 | `Error` | Wrapped into `FabricError`. Before wrapping, `cause` and custom enumerable properties are recursively converted to `FabricValue` (deep variant) or left as-is (shallow variant). Extra enumerable properties are preserved (see Section 1.4.1). This ensures that by the time the `FabricError` codec's `encode()` runs, all nested values are already valid `FabricValue`. |

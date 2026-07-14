@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { detectFactoryType } from "@commonfabric/schema-generator";
+import { detectTrustedFactoryType } from "@commonfabric/schema-generator";
 import {
   cloneTypeNode,
   createRegisteredTypeLiteral,
@@ -822,7 +822,8 @@ function resolveNonPatternFactorySchemaContract(
     context.checker,
     context.options.state?.typeRegistry,
   );
-  const detected = callType && detectFactoryType(callType, context.checker);
+  const detected = callType &&
+    detectTrustedFactoryType(callType, context.checker);
   if (!detected || detected.kind !== kind) return undefined;
 
   const inputTypeNode = typeToInjectableSchemaTypeNode(
@@ -889,7 +890,7 @@ export function resolvePatternFactorySchemaContract(
       checker,
       typeRegistry,
     );
-    const detected = callType && detectFactoryType(callType, checker);
+    const detected = callType && detectTrustedFactoryType(callType, checker);
     if (!detected || detected.kind !== "pattern") {
       reportUnresolvableFactorySchema(node, context);
       return undefined;

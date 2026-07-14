@@ -2200,15 +2200,13 @@ export class CellImpl<T extends FabricValue>
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
-    const value = tx.readValueOrThrow(
-      resolveLink(this.runtime, tx, this.link, lastNode),
-      readOptions,
-    );
+    const resolvedLink = resolveLink(this.runtime, tx, this.link, lastNode);
+    const value = tx.readValueOrThrow(resolvedLink, readOptions);
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
     // and getRawUntyped() return fabric-layer values, not native ("wild
     // west") values.
     const result = cloneIfNecessary(value, { frozen });
-    this.runtime.noteFactoryArtifactSource(result, this.link.space);
+    this.runtime.noteFactoryArtifactSource(result, resolvedLink.space);
     return result;
   }
 

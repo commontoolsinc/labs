@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { detectFactoryType } from "@commonfabric/schema-generator";
+import { detectTrustedFactoryType } from "@commonfabric/schema-generator";
 
 import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 
@@ -43,7 +43,7 @@ export function findFactoryInputFrameworkProvidedPaths(
       // Factory aliases are commonly branded intersections. Detect the full
       // callable before decomposing compound types or the public factory
       // contract would be split away from its brand.
-      const factory = detectFactoryType(current, checker);
+      const factory = detectTrustedFactoryType(current, checker);
       if (factory) {
         for (
           const path of findFrameworkProvidedPaths(factory.inputType, checker)

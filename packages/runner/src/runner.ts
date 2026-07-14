@@ -138,6 +138,7 @@ import type { FactoryContract } from "./factory-contract.ts";
 import { materializeScheduledFactoryInputs } from "./factory-input-preparation.ts";
 import {
   FactoryArtifactUnavailableError,
+  FactoryMaterializationSupersededError,
   type MaterializedFactory,
   materializeFactory,
   prepareFactory,
@@ -3703,11 +3704,7 @@ export class Runner {
         );
       }).catch((error) => {
         if (!active || generation !== selectedGeneration) return;
-        if (
-          error instanceof Error &&
-          error.message ===
-            "Factory materialization was superseded while loading"
-        ) {
+        if (error instanceof FactoryMaterializationSupersededError) {
           return;
         }
         this.runtime.scheduler.reportError(error, {
