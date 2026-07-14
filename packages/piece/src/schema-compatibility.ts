@@ -8,6 +8,7 @@ import {
   resolveCfcSchemaRefs,
   validateAgainstSchema,
 } from "@commonfabric/runner/cfc";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -481,9 +482,10 @@ function resolveSchema(
   schema: JSONSchema,
   root: JSONSchema,
 ): JSONSchema | undefined {
-  return typeof schema === "object" && schema !== null && schema.$ref
+  const resolved = typeof schema === "object" && schema !== null && schema.$ref
     ? resolveCfcSchemaRefs(schema, root)
     : schema;
+  return resolved === undefined ? undefined : internSchema(resolved);
 }
 
 function pairIsActive(
