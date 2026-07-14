@@ -14,6 +14,7 @@ import {
   resetMockMode,
 } from "./client.ts";
 import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "./types.ts";
+import { createInternalLLMBrokerRequestOptions } from "./internal.ts";
 
 const GUARD_MESSAGE =
   "LLMClient: live LLM calls are blocked in test environments.";
@@ -65,6 +66,44 @@ describe("LLMClient test-environment guard", () => {
         schema: { type: "object", properties: { name: { type: "string" } } },
       }),
     ).rejects.toThrow(GUARD_MESSAGE);
+  });
+
+  it("global fetch injection does not bypass the guard", async () => {
+    disableMockMode();
+
+    await expect(
+      client.sendRequest(
+        {
+          messages: [{ role: "user", content: "hello" }],
+          model: "test-model",
+          stream: false,
+        },
+        undefined,
+        undefined,
+        { fetch: globalThis.fetch },
+      ),
+    ).rejects.toThrow(GUARD_MESSAGE);
+  });
+
+  it("ordinary fetch wrappers do not bypass the guard", async () => {
+    disableMockMode();
+    let calls = 0;
+    const ordinaryFetch: typeof globalThis.fetch = () => {
+      calls += 1;
+      return Promise.resolve(Response.json({ object: { allowed: false } }));
+    };
+
+    await expect(
+      client.generateObject(
+        {
+          messages: [{ role: "user", content: "hello" }],
+          schema: { type: "object" },
+        },
+        undefined,
+        { fetch: ordinaryFetch },
+      ),
+    ).rejects.toThrow(GUARD_MESSAGE);
+    expect(calls).toBe(0);
   });
 
   it("sendRequest with mock mode bypasses guard", async () => {
@@ -449,7 +488,7 @@ describe("LLMClient test-environment guard", () => {
   });
 });
 
-describe("LLMClient per-call transport", () => {
+describe("LLMClient authorized internal transport", () => {
   const client = new LLMClient();
 
   it("routes sendRequest through the injected fetch and endpoint", async () => {
@@ -463,7 +502,7 @@ describe("LLMClient per-call transport", () => {
       },
       undefined,
       undefined,
-      {
+      createInternalLLMBrokerRequestOptions({
         endpoint: new URL("https://broker.example/api/ai/llm"),
         fetch: (input, init) => {
           calls.push({ url: input.toString(), init });
@@ -472,7 +511,7 @@ describe("LLMClient per-call transport", () => {
             content: "brokered",
           }, { headers: { "x-cf-llm-trace-id": "trace-broker" } }));
         },
-      },
+      }),
     );
 
     expect(result.content).toBe("brokered");
@@ -489,13 +528,13 @@ describe("LLMClient per-call transport", () => {
         schema: { type: "object" },
       },
       undefined,
-      {
+      createInternalLLMBrokerRequestOptions({
         endpoint: new URL("https://broker.example/api/ai/llm"),
         fetch: (input) => {
           calls.push(input.toString());
           return Promise.resolve(Response.json({ object: { ok: true } }));
         },
-      },
+      }),
     );
 
     expect(result.object).toEqual({ ok: true });

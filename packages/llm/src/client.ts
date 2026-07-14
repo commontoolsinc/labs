@@ -8,15 +8,14 @@ import {
   LLMToolCall,
   LLMToolResult,
 } from "./types.ts";
+import {
+  isInternalLLMBrokerRequestOptions,
+  type LLMClientRequestOptions,
+} from "./request-options.ts";
+
+export type { LLMClientRequestOptions } from "./request-options.ts";
 
 type PartialCallback = (text: string) => void;
-
-export interface LLMClientRequestOptions {
-  /** Full LLM endpoint URL for this call. */
-  endpoint?: string | URL;
-  /** Per-call transport, used by the server executor's narrow egress broker. */
-  fetch?: typeof globalThis.fetch;
-}
 
 export class LLMStreamError extends Error {
   constructor(message: string) {
@@ -465,7 +464,7 @@ export class LLMClient {
     }
 
     // Guard: block live calls in test environments
-    if (_isTestEnvironment && opts?.fetch === undefined) {
+    if (_isTestEnvironment && !isInternalLLMBrokerRequestOptions(opts)) {
       throw new Error(TEST_GUARD_MESSAGE);
     }
 
@@ -558,7 +557,7 @@ export class LLMClient {
     }
 
     // Guard: block live calls in test environments
-    if (_isTestEnvironment && opts?.fetch === undefined) {
+    if (_isTestEnvironment && !isInternalLLMBrokerRequestOptions(opts)) {
       throw new Error(TEST_GUARD_MESSAGE);
     }
 

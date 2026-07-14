@@ -11,6 +11,7 @@ import {
   LLMRequest,
   LLMResponse,
 } from "@commonfabric/llm";
+import { createInternalLLMBrokerRequestOptions } from "@commonfabric/llm/internal";
 import {
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
@@ -82,7 +83,7 @@ function llmClientOptions(
     "/api/ai/llm",
     mappedLlmHost ?? getPatternEnvironment().apiUrl,
   );
-  return {
+  return createInternalLLMBrokerRequestOptions({
     endpoint,
     fetch: (input, init) => {
       const target = input instanceof URL
@@ -95,7 +96,7 @@ function llmClientOptions(
         init,
       );
     },
-  };
+  });
 }
 
 // TODO(ja): investigate if generateText should be replaced by
