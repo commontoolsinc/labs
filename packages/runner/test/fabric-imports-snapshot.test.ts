@@ -11,6 +11,7 @@ import { resolveFabricRefToIdentity } from "../src/fabric-ref-resolution.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
+import { isPattern } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase(
   "fabric imports snapshot semantics test",
@@ -147,10 +148,13 @@ describe("fabric import snapshot semantics", () => {
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
+    const pattern = evaluated.main?.default;
+    if (!isPattern(pattern)) {
+      throw new Error("Expected evaluated default export to be a pattern");
+    }
     const result = runtime.run(
       tx,
-      evaluated.main?.default as any,
+      pattern,
       { value },
       resultCell,
     );
