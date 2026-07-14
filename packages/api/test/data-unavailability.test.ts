@@ -202,10 +202,7 @@ function directAsyncBuiltinTypecheck(
     typeof generatedObject,
     AsyncResult<Repo>
   > = true;
-  const streamedDataIsAsync: Equal<
-    typeof streamedData,
-    AsyncResult<Repo>
-  > = true;
+  const streamedDataIsAsync: AsyncResult<Repo> = streamedData;
 
   const availableBinary = resultOf(binary);
   const availableText = resultOf(text);

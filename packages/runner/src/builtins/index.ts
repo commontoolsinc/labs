@@ -54,6 +54,7 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef("fetchProgram", raw(fetchProgram));
   moduleRegistry.addModuleByRef("latestComplete", raw(latestComplete));
   moduleRegistry.addModuleByRef("streamData", raw(streamData));
+  moduleRegistry.addModuleByRef("streamDataResult", raw(streamData));
   moduleRegistry.addModuleByRef("llm", raw(llm, { isEffect: true }));
   moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
   moduleRegistry.addModuleByRef(

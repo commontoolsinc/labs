@@ -4313,6 +4313,86 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         }
       }
 
+      // streamData<T>({ url, ... }) validates every decoded event against T.
+      // Like fetchJson, the typed event schema is injected into the request.
+      if (
+        callKind?.kind === "runtime-call" &&
+        callKind.exportName === "streamData"
+      ) {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        if (!typeArgs || typeArgs.length !== 1) {
+          context.reportDiagnostic({
+            severity: "error",
+            type: "stream-data:missing-type-argument",
+            message: "streamData requires an explicit event type, e.g. " +
+              "streamData<MyEvent>({ url }).",
+            node,
+          });
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        const paramsArg = args[0];
+        const hasExplicitSchema = paramsArg &&
+          ts.isObjectLiteralExpression(paramsArg) &&
+          paramsArg.properties.some(
+            (property) =>
+              property.name && ts.isIdentifier(property.name) &&
+              property.name.text === "schema",
+          );
+
+        if (!hasExplicitSchema) {
+          const resolved = resolveInjectableSchemaType(
+            typeArgs[0],
+            checker,
+            sourceFile,
+            factory,
+            typeRegistry,
+            () => undefined,
+          );
+          const schemaCall = createRegisteredSchemaCallFromResolvedType(
+            context,
+            resolved,
+            checker,
+            typeRegistry,
+          );
+
+          if (schemaCall) {
+            const schemaProperty = factory.createPropertyAssignment(
+              "schema",
+              schemaCall,
+            );
+            let newParams: ts.Expression;
+            if (paramsArg && ts.isObjectLiteralExpression(paramsArg)) {
+              newParams = factory.createObjectLiteralExpression(
+                [schemaProperty, ...paramsArg.properties],
+                true,
+              );
+            } else if (paramsArg) {
+              newParams = factory.createObjectLiteralExpression(
+                [schemaProperty, factory.createSpreadAssignment(paramsArg)],
+                true,
+              );
+            } else {
+              newParams = factory.createObjectLiteralExpression(
+                [schemaProperty],
+                true,
+              );
+            }
+
+            const updated = factory.createCallExpression(
+              node.expression,
+              node.typeArguments,
+              [newParams, ...args.slice(1)],
+            );
+            context.markSchemaInjected(updated);
+            return ts.visitEachChild(updated, visit, transformation);
+          }
+        }
+      }
+
       // latestComplete(value) retains a stateful snapshot through one schema
       // that represents the call's recursively usable return type. Lower the
       // public one-argument form to the raw built-in's hidden input record.

@@ -2538,10 +2538,11 @@ export type FetchProgramFunction = (
 export type StreamDataFunction = <T>(
   params: FactoryInput<{
     url: string;
+    schema?: JSONSchema;
     options?: FetchOptions;
     result?: T;
   }>,
-) => Reactive<{ pending: boolean; result: T; error?: any }>;
+) => Reactive<AsyncStreamResult<T, T>>;
 
 export type CompileAndRunFunction = <T = any, S = any>(
   params: FactoryInput<BuiltInCompileAndRunParams<T>>,

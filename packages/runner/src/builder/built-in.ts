@@ -40,6 +40,7 @@ import type {
   PatternToolResult,
   SqliteDatabaseFunction,
   SqliteQueryFunction,
+  StreamDataFunction,
   UIVariantKind,
   VNode,
   WishParams,
@@ -255,16 +256,37 @@ export const latestComplete = createNodeFactory({
   implementation: "latestComplete",
 }) as unknown as LatestCompleteFunction;
 
-export const streamData = createNodeFactory({
+type StreamDataState<T> = {
+  pending: boolean;
+  result: AsyncResult<T>;
+  partial: AsyncResult<T>;
+  error?: unknown;
+};
+
+/** @internal Raw persisted state for the direct streamData contract. */
+const streamDataState = createNodeFactory({
   type: "ref",
-  implementation: "streamData",
+  implementation: "streamDataResult",
 }) as <T>(
   params: FactoryInput<{
     url: string;
+    schema?: JSONSchema;
     options?: FetchOptions;
     result?: T;
   }>,
-) => Reactive<{ pending: boolean; result: T; error?: unknown }>;
+) => Reactive<StreamDataState<T>>;
+
+export const streamData = (<T>(
+  params: FactoryInput<{
+    url: string;
+    schema?: JSONSchema;
+    options?: FetchOptions;
+    result?: T;
+  }>,
+) => {
+  const state = streamDataState<T>(params);
+  return associatePartialResult<T, T>(state.result, state.partial);
+}) as StreamDataFunction;
 
 export const sqliteDatabase = createNodeFactory({
   type: "ref",
