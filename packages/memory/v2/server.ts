@@ -81,6 +81,13 @@ import {
 import { respondToHello } from "./handshake.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
+  classifyClientMessage,
+  classifyServerMessage,
+  type MemoryWireAccountingObserver,
+  type MemoryWireConnectionMetadata,
+  memoryWireUtf8Bytes,
+} from "./wire-accounting.ts";
+import {
   buildDiffSync,
   buildFullSync,
   cacheKeyForEntity,
@@ -367,17 +374,67 @@ class Connection {
   #receiving: Promise<void> = Promise.resolve();
   #pendingReceives = 0;
   #receiveIdle: PromiseWithResolvers<void> | null = null;
+  #requestTypesById = new Map<string, string>();
 
   constructor(
     readonly id: string,
     private readonly server: Server,
     private readonly sendRaw: Send,
+    private readonly metadata?: MemoryWireConnectionMetadata,
   ) {}
 
   private send(message: ServerMessage): void {
-    this.sendRaw(
-      this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
-    );
+    const originatingRequestType = message.type === "response"
+      ? this.#requestTypesById.get(message.requestId)
+      : undefined;
+    if (message.type === "response") {
+      this.#requestTypesById.delete(message.requestId);
+    }
+
+    const observer = this.server.activeWireAccountingObserver();
+    if (observer === undefined) {
+      this.sendRaw(
+        this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
+      );
+      return;
+    }
+
+    const actualMessage = this.#syncSchemaTable
+      ? compressServerMessageSchemas(message)
+      : message;
+    this.server.recordWireAccounting(observer, {
+      direction: "outbound",
+      connectionId: this.id,
+      metadata: this.metadata,
+      classification: classifyServerMessage(message, originatingRequestType),
+      baselineBytes: memoryWireUtf8Bytes(encodeMemoryBoundary(message)),
+      actualBytes: memoryWireUtf8Bytes(encodeMemoryBoundary(actualMessage)),
+    });
+    this.sendRaw(actualMessage);
+  }
+
+  private recordParsedInbound(
+    payload: string,
+    parsed: ClientMessage | null,
+  ): void {
+    const observer = this.server.activeWireAccountingObserver();
+    if (observer === undefined) {
+      return;
+    }
+    const bytes = memoryWireUtf8Bytes(payload);
+    this.server.recordWireAccounting(observer, {
+      direction: "inbound",
+      connectionId: this.id,
+      metadata: this.metadata,
+      classification: classifyClientMessage(parsed),
+      baselineBytes: bytes,
+      actualBytes: bytes,
+    });
+    if (parsed !== null) {
+      if ("requestId" in parsed) {
+        this.#requestTypesById.set(parsed.requestId, parsed.type);
+      }
+    }
   }
 
   hasSession(space: string, sessionId: string): boolean {
@@ -567,6 +624,7 @@ class Connection {
     }
 
     const parsed = parseClientMessage(payload);
+    this.recordParsedInbound(payload, parsed);
     if (parsed === null) {
       this.send({
         type: "response",
@@ -919,6 +977,7 @@ export class Server {
         mode: MemoryAclMode;
         serviceDids?: readonly string[];
       };
+      wireAccountingObserver?: MemoryWireAccountingObserver;
     },
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
@@ -1209,8 +1268,35 @@ export class Server {
     }
   }
 
-  connect(send: Send): Connection {
-    const connection = new Connection(crypto.randomUUID(), this, send);
+  activeWireAccountingObserver(): MemoryWireAccountingObserver | undefined {
+    const observer = this.options.wireAccountingObserver;
+    if (observer?.isActive?.() === false) {
+      return undefined;
+    }
+    return observer;
+  }
+
+  recordWireAccounting(
+    observer: MemoryWireAccountingObserver,
+    record: Parameters<MemoryWireAccountingObserver["observe"]>[0],
+  ): void {
+    try {
+      observer.observe(record);
+    } catch (error) {
+      console.warn("Memory wire accounting observer failed:", error);
+    }
+  }
+
+  connect(
+    send: Send,
+    metadata?: MemoryWireConnectionMetadata,
+  ): Connection {
+    const connection = new Connection(
+      crypto.randomUUID(),
+      this,
+      send,
+      metadata,
+    );
     this.#connections.set(connection.id, connection);
     return connection;
   }
