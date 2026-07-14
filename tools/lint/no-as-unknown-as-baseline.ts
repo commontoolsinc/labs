@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/scheduler-observation-capability-skew.test.ts": [
-    "248:48:vabkme",
-  ],
   "packages/runner/test/scheduler-pull-handlers.test.ts": [
     "1187:43:g7982p",
   ],

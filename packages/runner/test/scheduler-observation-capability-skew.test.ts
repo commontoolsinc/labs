@@ -200,22 +200,35 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
   }
 }
 
-type ReplicaSurface = {
-  commitNative(
-    transaction: {
-      operations: Array<
-        { op: "set"; id: URI; type: typeof DOCUMENT_MIME; value: unknown }
-      >;
-      schedulerObservation?: unknown;
-    },
-  ): Promise<
-    { ok?: Record<PropertyKey, never>; error?: { message?: string } }
-  >;
-  listSchedulerActionSnapshots(query: Record<never, never>): Promise<{
-    serverSeq: number;
-    snapshots: unknown[];
-  }>;
-};
+type MemoryV2Provider = ReturnType<TestStorageManager["open"]>;
+type CommitNative = NonNullable<
+  MemoryV2Provider["replica"]["commitNative"]
+>;
+type ListSchedulerActionSnapshots = NonNullable<
+  MemoryV2Provider["listSchedulerActionSnapshots"]
+>;
+
+function requireCommitNative(provider: MemoryV2Provider): CommitNative {
+  const { commitNative } = provider.replica;
+  if (typeof commitNative !== "function") {
+    throw new TypeError("Memory v2 replica missing commitNative");
+  }
+  const boundCommitNative: CommitNative = (transaction, source) =>
+    commitNative.call(provider.replica, transaction, source);
+  return boundCommitNative;
+}
+
+function requireListSchedulerActionSnapshots(
+  provider: MemoryV2Provider,
+): ListSchedulerActionSnapshots {
+  const { listSchedulerActionSnapshots } = provider;
+  if (typeof listSchedulerActionSnapshots !== "function") {
+    throw new TypeError(
+      "Memory v2 provider missing scheduler snapshot listing",
+    );
+  }
+  return listSchedulerActionSnapshots.bind(provider);
+}
 
 const schedulerObservation = {
   version: 1,
@@ -245,16 +258,17 @@ Deno.test("flag-ON client degrades observation traffic against a server that did
     memoryHost: new URL(`memory://capability-skew-${crypto.randomUUID()}`),
   }, new SingleSessionFactory(transport));
   try {
-    const provider = storageManager.open(space) as unknown as {
-      replica: ReplicaSurface;
-    };
-    const replica = provider.replica;
+    const provider = storageManager.open(space);
+    const commitNative = requireCommitNative(provider);
+    const listSchedulerActionSnapshots = requireListSchedulerActionSnapshots(
+      provider,
+    );
 
     // An action run's observation-only commit: must resolve ok WITHOUT a wire
     // commit (nothing to send it to — the server would reject it as empty
     // after stripping, and that rejection used to poison the next semantic
     // commit through the flush-before-commit ordering in pushCommit).
-    const observationResult = await replica.commitNative({
+    const observationResult = await commitNative({
       operations: [],
       schedulerObservation,
     });
@@ -265,7 +279,7 @@ Deno.test("flag-ON client degrades observation traffic against a server that did
     // before the capability gate it failed with the server's "memory v2
     // commit requires at least one operation" and the handler dropped the
     // write without retry.
-    const writeResult = await replica.commitNative({
+    const writeResult = await commitNative({
       operations: [{
         op: "set",
         id: DOC,
@@ -278,7 +292,7 @@ Deno.test("flag-ON client degrades observation traffic against a server that did
     // The session is now established and its negotiated flag is known. A
     // later observation must take the synchronous established-session fast
     // path rather than entering (and then flushing) another batch.
-    const laterObservationResult = await replica.commitNative({
+    const laterObservationResult = await commitNative({
       operations: [],
       schedulerObservation: {
         ...schedulerObservation,
@@ -300,7 +314,7 @@ Deno.test("flag-ON client degrades observation traffic against a server that did
 
     // The resume path degrades to "no snapshots" without asking the server
     // for a capability it never offered.
-    const listed = await replica.listSchedulerActionSnapshots({});
+    const listed = await listSchedulerActionSnapshots({});
     assertEquals(listed, { serverSeq: 0, snapshots: [] });
     assertEquals(
       transport.requestTypes.filter((type) =>
