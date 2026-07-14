@@ -11,7 +11,6 @@ import { isCellResult } from "../src/query-result-proxy.ts";
 import { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
-import { areLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -420,31 +419,34 @@ describe("createProxy", () => {
     expect(log.writes).toEqual([]);
   });
 
-  it.skip("should allow changing array lengths by writing length", () => {
+  it("should allow changing array lengths by writing length", async () => {
+    // Seed the cell in its own committed transaction so the transaction under
+    // test records only the writes done through the proxy.
+    const setupTx = runtime.edit();
     const c = runtime.getCell<number[]>(
       space,
       "should allow changing array lengths by writing length",
+      undefined,
+      setupTx,
     );
     c.set([1, 2, 3]);
-    const proxy = c.getAsQueryResult();
+    await setupTx.commit();
+
+    const proxy = c.withTx(tx).getAsQueryResult([], tx, true);
     proxy.length = 2;
-    expect(c.get()).toEqual([1, 2]);
+    expect(c.withTx(tx).get()).toEqual([1, 2]);
+    // A length write is recorded as the rewritten array at the document's
+    // "value" facet plus a write of its length.
     const log = txToReactivityLog(tx);
-    expect(areLinksSame(log.writes[0], c.key("length").getAsLink()))
-      .toBe(true);
-    expect(areLinksSame(log.writes[1], c.key(2).getAsLink())).toBe(
-      true,
-    );
-    proxy.length = 4;
     const cLink = c.getAsNormalizedFullLink();
-    expect(c.get()).toEqual([1, 2, undefined, undefined]);
-    expect(log.writes.length).toBe(5);
-    expect(log.writes[2].id).toBe(cLink.id);
-    expect(log.writes[2].path).toEqual(["length"]);
-    expect(log.writes[3].id).toBe(cLink.id);
-    expect(log.writes[3].path).toEqual([2]);
-    expect(log.writes[4].id).toBe(cLink.id);
-    expect(log.writes[4].path).toEqual([3]);
+    expect(log.writes.every((write) => write.id === cLink.id)).toBe(true);
+    expect(log.writes.map((write) => write.path)).toEqual([
+      ["value"],
+      ["value", "length"],
+    ]);
+
+    proxy.length = 4;
+    expect(c.withTx(tx).get()).toEqual([1, 2, undefined, undefined]);
   });
 
   it.skip("should allow changing array by splicing", () => {
