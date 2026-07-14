@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import type { URI } from "@commonfabric/memory/interface";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -27,6 +28,9 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       confidentiality?: unknown[];
       integrity?: Array<{ type?: string }>;
     };
+  };
+  type PersistedDocument = {
+    cfc?: { labelMap?: { entries: PersistedEntry[] } };
   };
 
   const setup = async () => {
@@ -73,14 +77,14 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
 
   const persistedEntriesFor = (
     storageManager: ReturnType<typeof StorageManager.emulate>,
-    id: string,
+    id: URI,
   ): PersistedEntry[] => {
-    const replica = storageManager.open(signer.did()).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: PersistedEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+    const document = storageManager.open(signer.did()).replica.getDocument(
+      id,
+    ) as
+      | PersistedDocument
+      | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
 
   const commitLinkWrite = async (
@@ -313,23 +317,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
       expect((await tx.commit()).ok).toBeDefined();
 
       const persistedId = parseLink(target.getAsLink()).id!;
-      const replica = storageManager.open(signer.did()).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: {
-            labelMap?: {
-              entries: Array<{
-                path: string[];
-                label: {
-                  confidentiality?: unknown[];
-                  integrity?: Array<{ type?: string }>;
-                };
-              }>;
-            };
-          };
-        } | undefined;
-      };
-      const entries =
-        replica.getDocument(persistedId)?.cfc?.labelMap?.entries ?? [];
+      const entries = persistedEntriesFor(storageManager, persistedId);
       const allIntegrity = entries.flatMap((e) => e.label.integrity ?? []);
       expect(
         allIntegrity.some((a) => a?.type?.endsWith("/InjectionSafe")),

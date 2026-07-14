@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-label-metadata-persist.test.ts": [
-    "78:62:1r82iq7",
-    "316:64:30mg0f",
-  ],
   "packages/runner/test/cfc-label-metadata-protection.test.ts": [
     "78:55:1rywnmh",
   ],
