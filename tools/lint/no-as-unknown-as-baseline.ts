@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-trigger-read-gating.test.ts": [
-    "313:37:g6m25b",
-    "336:17:1roz0at",
-  ],
   "packages/runner/test/cfc-trust.test.ts": [
     "306:52:trmbk9",
     "311:10:30l9v3",

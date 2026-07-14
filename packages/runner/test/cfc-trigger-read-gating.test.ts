@@ -39,6 +39,19 @@ const OUT_SCHEMA = internSchema(
   true,
 );
 
+type MutableCfcStateView = {
+  triggerReadGating: boolean;
+  relevant: boolean;
+  triggerReads: unknown[];
+  prepare: { status: string };
+};
+
+const mutableCfcStateView = (state: unknown): MutableCfcStateView =>
+  state as MutableCfcStateView;
+
+const publicTxFields = (tx: unknown): Record<string, unknown> =>
+  tx as Record<string, unknown>;
+
 const makeRuntime = (opts: {
   storageManager: ReturnType<typeof StorageManager.emulate>;
   cfcTriggerReadGating?: boolean;
@@ -310,12 +323,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
         type: "application/json",
         path: ["value", "secret"],
       }]);
-      const state = tx.getCfcState() as unknown as {
-        triggerReadGating: boolean;
-        relevant: boolean;
-        triggerReads: unknown[];
-        prepare: { status: string };
-      };
+      const state = mutableCfcStateView(tx.getCfcState());
       expect(() => {
         state.triggerReadGating = false;
       }).toThrow("read-only");
@@ -333,7 +341,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
       }).toThrow("read-only");
       // The backing state is not reachable around the view either: the field
       // is ECMAScript-private, so `(tx as any).cfcState` finds nothing.
-      expect((tx as unknown as Record<string, unknown>).cfcState)
+      expect(publicTxFields(tx).cfcState)
         .toBeUndefined();
       // The Map facade forwards reads bound to the real Map and rejects
       // mutators.
