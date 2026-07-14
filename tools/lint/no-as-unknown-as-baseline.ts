@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/acl-manager.test.ts": [
-    "43:4:p06mdh",
-    "136:4:tm50wp",
-  ],
   "packages/runner/test/cell-set-flat-index-list.bench.ts": [
     "231:23:8qn009",
   ],

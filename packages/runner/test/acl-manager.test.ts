@@ -1,7 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import type { ACL } from "@commonfabric/memory/acl";
 import { ACLManager } from "../src/acl-manager.ts";
-import type { Runtime } from "../src/runtime.ts";
 
 const SPACE = "did:key:z6Mk-acl-manager-space";
 const ALICE = "did:key:z6Mk-acl-manager-alice";
@@ -40,7 +39,7 @@ const createHarness = (
       return Promise.resolve(commitResult);
     },
     idle: () => Promise.resolve(),
-  } as unknown as Runtime;
+  };
   return {
     manager: new ACLManager(runtime, SPACE),
     written: () => written,
@@ -133,7 +132,7 @@ Deno.test("ACLManager retry preserves a concurrent ACL update", async () => {
       return Promise.resolve({ ok: undefined });
     },
     idle: () => Promise.resolve(),
-  } as unknown as Runtime;
+  };
 
   await new ACLManager(runtime, SPACE).set(BOB, "WRITE");
 

@@ -10,14 +10,12 @@ import {
   cloneIfNecessary,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import type { Cell } from "./cell.ts";
-import type { Runtime } from "./runtime.ts";
 
 export class ACLManager {
-  #runtime: Runtime;
+  #runtime: ACLRuntime;
   #spaceDid: DID;
 
-  constructor(runtime: Runtime, spaceDid: DID) {
+  constructor(runtime: ACLRuntime, spaceDid: DID) {
     this.#runtime = runtime;
     this.#spaceDid = spaceDid;
   }
@@ -88,7 +86,7 @@ export class ACLManager {
     await this.#runtime.storageManager.synced();
   }
 
-  #getCell(): Cell<unknown> {
+  #getCell(): ACLCell {
     return this.#runtime.getCellFromLink({
       id: `of:${this.#spaceDid}` as URI,
       path: [],
@@ -96,3 +94,25 @@ export class ACLManager {
     });
   }
 }
+
+type ACLCommitResult =
+  | { ok: void; error?: undefined }
+  | { ok?: undefined; error: { name: string; message: string } };
+
+type ACLTransactionCell = {
+  get(): unknown;
+  set(value: ACL): void;
+};
+
+type ACLCell = {
+  sync(): Promise<unknown>;
+  get(): unknown;
+  withTx(tx: unknown): ACLTransactionCell;
+};
+
+type ACLRuntime = {
+  storageManager: { synced(): Promise<void> };
+  editWithRetry(fn: (tx: unknown) => void): Promise<ACLCommitResult>;
+  idle(): Promise<void>;
+  getCellFromLink(link: { id: URI; path: []; space: DID }): ACLCell;
+};
