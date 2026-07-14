@@ -2152,7 +2152,11 @@ export class Scheduler {
         prepareClaimedRerun?: () => void;
       };
       action.prepareClaimedRerun?.();
-      this.markAndScheduleInvalidAction(action);
+      // Claim loss is an exact host wake, not merely a local differential.
+      // The producing computation may be dormant between temporary pull
+      // consumers, so retain it in the pending set until one fail-open rerun
+      // has had a chance to restore client authority.
+      this.invalidateActionForHostWake(action);
       return;
     }
     if (notification.type === "scheduler-observations") {

@@ -3,6 +3,7 @@ import { toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, Signer } from "@commonfabric/memory/interface";
 import {
+  actionClaimMapKey,
   type ActionSettlement,
   type BranchName,
   type ClientCommit,
@@ -263,6 +264,53 @@ async function waitForExactClientClaim(
     `client did not integrate replacement claim: ${
       JSON.stringify(diagnostics)
     }`,
+  );
+}
+
+async function waitForExactClientClaimRevocation(
+  session: MemoryClient.SpaceSession,
+  storage: StorageManager,
+  space: MemorySpace,
+  claim: ExecutionClaim,
+): Promise<void> {
+  const claimKey = actionClaimMapKey(claim);
+  const isExact = (candidate: ExecutionClaim): boolean =>
+    executionClaimIncarnationKey(candidate) ===
+      executionClaimIncarnationKey(claim);
+  if (session.executionClaims.some(isExact)) {
+    const observed = Promise.withResolvers<void>();
+    const unsubscribe = session.subscribeExecutionControl((event) => {
+      if (
+        event.type === "session.execution.claim.revoke" &&
+        actionClaimMapKey(event.claim) === claimKey &&
+        event.leaseGeneration === claim.leaseGeneration &&
+        event.claimGeneration === claim.claimGeneration
+      ) {
+        observed.resolve();
+      }
+    });
+    try {
+      // Close the read-then-subscribe race before waiting for this client's
+      // ordered revoke. Another session observing the host event does not imply
+      // that this writer client has integrated it yet.
+      if (session.executionClaims.some(isExact)) {
+        await within(observed.promise, "writer client claim revoke");
+      }
+    } finally {
+      unsubscribe();
+    }
+  }
+
+  const diagnostics = storage.getExecutionRoutingDiagnostics({
+    space,
+    branch: claim.branch,
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  });
+  assertEquals(
+    diagnostics.claims.some(isExact),
+    false,
+    `client retained revoked claim: ${JSON.stringify(diagnostics)}`,
   );
 }
 
@@ -1032,6 +1080,7 @@ Deno.test("real executor crash rejects stale work and converges once through cli
   let pool: SharedExecutionPool | null = null;
   let unsubscribeAccepted = () => {};
   let unsubscribeControl = () => {};
+  let cancelClientDemand = () => {};
 
   try {
     const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
@@ -1110,6 +1159,11 @@ Deno.test("real executor crash rejects stale work and converges once through cli
     await resumed.sync();
     assertEquals(await clientRuntime.start(resumed), true);
     await resumed.pull();
+    await clientRuntime.settled();
+    // Model the active client that caused server demand: keeping the result
+    // consumed lets a data update racing the claim revoke complete fail-open
+    // fallback instead of ending with a one-shot pull between those events.
+    cancelClientDemand = resumed.sink(() => undefined);
     await clientRuntime.settled();
 
     const claims: ExecutionClaim[] = [];
@@ -1270,6 +1324,12 @@ Deno.test("real executor crash rejects stale work and converges once through cli
     await within(revoked.promise, "crashed claim revoke");
     await pool.idle();
     assertEquals(pool.snapshot(space, "")?.state, "backoff");
+    await waitForExactClientClaimRevocation(
+      clientSession!,
+      clientStorage,
+      space,
+      firstClaim,
+    );
     await resumed.pull();
     await clientRuntime.settled();
     await within(fallbackOutput, "client fail-open output");
@@ -1414,6 +1474,7 @@ Deno.test("real executor crash rejects stale work and converges once through cli
     assertEquals(pool.metrics().crashes, 1);
     assertEquals(pool.metrics().abruptStops, 1);
   } finally {
+    cancelClientDemand();
     unsubscribeAccepted();
     unsubscribeControl();
     await pool?.close();

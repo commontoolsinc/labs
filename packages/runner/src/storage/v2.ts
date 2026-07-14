@@ -904,7 +904,8 @@ export class StorageManager implements IStorageManager {
   #sessionFactory: SessionFactory;
   readonly #shadowWrites: boolean;
   readonly #actionTransactionRouter?: ActionTransactionRouter;
-  readonly #executionActionKeys = new WeakMap<object, ActionClaimKey>();
+  #executionActionKeys = new WeakMap<object, ActionClaimKey>();
+  readonly #executionActionsByKey = new Map<string, Set<object>>();
   readonly #clientExecutionEffects = new WeakMap<object, number>();
   #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
@@ -1007,12 +1008,40 @@ export class StorageManager implements IStorageManager {
   }
 
   registerExecutionAction(action: object, key: ActionClaimKey): void {
+    this.removeExecutionAction(action);
     this.#executionActionKeys.set(action, key);
+    const mapKey = actionClaimMapKey(key);
+    let actions = this.#executionActionsByKey.get(mapKey);
+    if (actions === undefined) {
+      actions = new Set();
+      this.#executionActionsByKey.set(mapKey, actions);
+    }
+    actions.add(action);
   }
 
   unregisterExecutionAction(action: object): void {
-    this.#executionActionKeys.delete(action);
+    this.removeExecutionAction(action);
     this.#clientExecutionEffects.delete(action);
+  }
+
+  private removeExecutionAction(action: object): void {
+    const previous = this.#executionActionKeys.get(action);
+    if (previous !== undefined) {
+      const mapKey = actionClaimMapKey(previous);
+      const actions = this.#executionActionsByKey.get(mapKey);
+      actions?.delete(action);
+      if (actions?.size === 0) this.#executionActionsByKey.delete(mapKey);
+    }
+    this.#executionActionKeys.delete(action);
+  }
+
+  private executionActionsForClaimKey(key: ActionClaimKey): readonly object[] {
+    return [...this.#executionActionsByKey.get(actionClaimMapKey(key)) ?? []];
+  }
+
+  private clearExecutionActions(): void {
+    this.#executionActionKeys = new WeakMap();
+    this.#executionActionsByKey.clear();
   }
 
   hasLiveExecutionClaimForAction(action: object): boolean {
@@ -1085,6 +1114,8 @@ export class StorageManager implements IStorageManager {
         actionTransactionRouter: this.#actionTransactionRouter,
         clientExecutionEffectInFlight: (action) =>
           this.clientExecutionEffectInFlight(action),
+        executionActionsForClaimKey: (key) =>
+          this.executionActionsForClaimKey(key),
         supportsExecutionDemand:
           this.#sessionFactory.supportsExecutionDemand === true,
         createSession: this.#sessionFactory.supportsAclBootstrap === true
@@ -1224,23 +1255,27 @@ export class StorageManager implements IStorageManager {
 
   async close(): Promise<void> {
     if (this.#providers.size === 0) {
+      this.clearExecutionActions();
       return;
     }
     await Promise.all(
       [...this.#providers.values()].map((provider) => provider.destroy()),
     );
     this.#providers.clear();
+    this.clearExecutionActions();
     this.#sessionId = crypto.randomUUID();
   }
 
   async closeNow(): Promise<void> {
     if (this.#providers.size === 0) {
+      this.clearExecutionActions();
       return;
     }
     await Promise.all(
       [...this.#providers.values()].map((provider) => provider.destroyNow()),
     );
     this.#providers.clear();
+    this.clearExecutionActions();
     this.#sessionId = crypto.randomUUID();
   }
 
@@ -1684,6 +1719,7 @@ type ProviderOptions = {
   shadowWrites: boolean;
   actionTransactionRouter?: ActionTransactionRouter;
   clientExecutionEffectInFlight: (action: object) => boolean;
+  executionActionsForClaimKey: (key: ActionClaimKey) => readonly object[];
   supportsExecutionDemand: boolean;
   createSession: () => Promise<ReplicaSessionHandle>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
@@ -1911,6 +1947,9 @@ class SpaceReplica implements ISpaceReplica {
   readonly #shadowWrites: boolean;
   readonly #actionTransactionRouter?: ActionTransactionRouter;
   readonly #clientExecutionEffectInFlight: (action: object) => boolean;
+  readonly #executionActionsForClaimKey: (
+    key: ActionClaimKey,
+  ) => readonly object[];
   readonly #shadowLocalSeqsByAction = new WeakMap<object, Set<number>>();
   readonly #executionClaims = new Map<string, ExecutionClaim>();
   readonly #claimedOverlays = new Map<number, ClaimedOverlayGeneration>();
@@ -1983,6 +2022,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#shadowWrites = options.shadowWrites;
     this.#actionTransactionRouter = options.actionTransactionRouter;
     this.#clientExecutionEffectInFlight = options.clientExecutionEffectInFlight;
+    this.#executionActionsForClaimKey = options.executionActionsForClaimKey;
   }
 
   did(): MemorySpace {
@@ -4517,11 +4557,16 @@ class SpaceReplica implements ISpaceReplica {
           executionClaimIncarnationKey(previous)
       ) {
         this.clearEarlyExecutionSettlement(previous);
-        this.dropClaimedOverlays(
+        const invalidated = this.dropClaimedOverlays(
           (overlay) =>
             executionClaimIncarnationKey(overlay.claim) ===
               executionClaimIncarnationKey(previous),
           { dirtyProducer: true, diagnosticCode: "claim-snapshot-replaced" },
+        );
+        this.invalidateRegisteredExecutionActions(
+          previous,
+          "claim-snapshot-replaced",
+          invalidated,
         );
       }
     }
@@ -4554,11 +4599,16 @@ class SpaceReplica implements ISpaceReplica {
         ) {
           return;
         }
-        this.dropClaimedOverlays(
+        const invalidated = this.dropClaimedOverlays(
           (overlay) =>
             executionClaimIncarnationKey(overlay.claim) ===
               executionClaimIncarnationKey(current),
           { dirtyProducer: true, diagnosticCode: "claim-generation-replaced" },
+        );
+        this.invalidateRegisteredExecutionActions(
+          current,
+          "claim-generation-replaced",
+          invalidated,
         );
         this.clearEarlyExecutionSettlement(current);
       }
@@ -4578,11 +4628,16 @@ class SpaceReplica implements ISpaceReplica {
       }
       this.#executionClaims.delete(key);
       this.clearEarlyExecutionSettlement(current);
-      this.dropClaimedOverlays(
+      const invalidated = this.dropClaimedOverlays(
         (overlay) =>
           executionClaimIncarnationKey(overlay.claim) ===
             executionClaimIncarnationKey(current),
         { dirtyProducer: true, diagnosticCode: "claim-revoked" },
+      );
+      this.invalidateRegisteredExecutionActions(
+        current,
+        "claim-revoked",
+        invalidated,
       );
       return;
     }
@@ -4703,9 +4758,9 @@ class SpaceReplica implements ISpaceReplica {
   private dropClaimedOverlays(
     predicate: (overlay: ClaimedOverlayGeneration) => boolean,
     options: { dirtyProducer: boolean; diagnosticCode: string },
-  ): void {
+  ): ReadonlySet<object> {
     const dropped = [...this.#claimedOverlays.values()].filter(predicate);
-    if (dropped.length === 0) return;
+    if (dropped.length === 0) return new Set();
     const basisCovered = options.diagnosticCode === "claim-committed" ||
       options.diagnosticCode === "claim-no-op";
     for (const overlay of dropped) {
@@ -4796,16 +4851,33 @@ class SpaceReplica implements ISpaceReplica {
     } else if (shouldNotifySinks) {
       this.notifySinksForIds(touched);
     }
-    if (options.dirtyProducer) {
-      const actions = new Set(dropped.map((overlay) => overlay.sourceAction));
-      for (const sourceAction of actions) {
-        this.#subscription.next({
-          type: "execution-claim-invalidation",
-          space: this.#space,
-          sourceAction,
-          diagnosticCode: options.diagnosticCode,
-        });
-      }
+    const invalidatedActions = options.dirtyProducer
+      ? new Set(dropped.map((overlay) => overlay.sourceAction))
+      : new Set<object>();
+    for (const sourceAction of invalidatedActions) {
+      this.#subscription.next({
+        type: "execution-claim-invalidation",
+        space: this.#space,
+        sourceAction,
+        diagnosticCode: options.diagnosticCode,
+      });
+    }
+    return invalidatedActions;
+  }
+
+  private invalidateRegisteredExecutionActions(
+    claim: ActionClaimKey,
+    diagnosticCode: string,
+    alreadyInvalidated: ReadonlySet<object>,
+  ): void {
+    for (const sourceAction of this.#executionActionsForClaimKey(claim)) {
+      if (alreadyInvalidated.has(sourceAction)) continue;
+      this.#subscription.next({
+        type: "execution-claim-invalidation",
+        space: this.#space,
+        sourceAction,
+        diagnosticCode,
+      });
     }
   }
 

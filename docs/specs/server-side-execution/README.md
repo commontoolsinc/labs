@@ -540,6 +540,12 @@ routes by that exact identity:
 - server-confirmed claim removal/fingerprint mismatch restores client
   authority and dirties the action for a normal rerun/commit.
 
+Claim removal targets the exact currently registered action even when that
+action produced no speculative overlay. Overlay provenance remains useful for
+discarding local pending state, but it is not the producer registry: a dormant
+action between pull consumers must still receive the ordered authority-loss
+wake and get one fail-open rerun opportunity.
+
 Connection loss is not proof that a claim ended: another requester may keep the
 shared Worker and claim alive. While disconnected, a client may continue local
 speculation but must not enqueue previously claimed derived writes. Reconnect

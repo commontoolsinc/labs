@@ -1000,8 +1000,9 @@ speculation coalescing.
    split.
 5. Source/setup/UI-binding/handler transactions commit as today.
 6. An explicit revoke/expiry/feature-disable received on the live ordered
-   stream discards affected overlays, marks actions dirty, and resumes
-   committing from the next settle.
+   stream discards affected overlays, marks the exact registered action dirty
+   even when it has no overlay, and gives dormant-between-pulls actions one
+   fail-open rerun opportunity before resuming ordinary client commits.
 7. Connection loss is not evidence that authority returned: keep claimed
    derived writes local/speculative and do not enqueue them upstream. On
    reconnect, complete capability negotiation and apply an authoritative full

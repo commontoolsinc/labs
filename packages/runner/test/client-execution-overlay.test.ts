@@ -785,6 +785,54 @@ Deno.test("live computation claims are exposed without broadening builtin captur
   }
 });
 
+Deno.test("ordered revoke invalidates a registered computation without a speculative overlay", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const computationAction = {};
+  const notifications: StorageNotification[] = [];
+  storage.registerExecutionAction(
+    computationAction,
+    canonicalActionClaimKey(claim),
+  );
+  storage.subscribe({
+    next(notification) {
+      notifications.push(notification);
+      return { done: false };
+    },
+  });
+  try {
+    await storage.open(SPACE).sync(INPUT);
+
+    factory.claims = [];
+    factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.claim.revoke",
+          branch: "",
+          claim,
+          leaseGeneration: claim.leaseGeneration,
+          claimGeneration: claim.claimGeneration,
+        }],
+      },
+    }));
+
+    await waitFor(() =>
+      notifications.some((notification) =>
+        notification.type === "execution-claim-invalidation" &&
+        notification.sourceAction === computationAction &&
+        notification.diagnosticCode === "claim-revoked"
+      )
+    );
+  } finally {
+    storage.unregisterExecutionAction(computationAction);
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
 Deno.test("settlement basis older than a direct confirmed read retains the overlay", async () => {
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();
