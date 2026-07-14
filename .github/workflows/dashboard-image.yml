@@ -161,16 +161,32 @@ jobs:
 
       - name: Resolve existing immutable image
         id: existing
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         shell: bash
         run: |
-          if manifest=$(docker buildx imagetools inspect "${IMAGE}:${SOURCE_SHA}" --format '{{json .Manifest}}' 2>/dev/null); then
-            digest=$(jq -r '.digest' <<< "$manifest")
-            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          result=$(curl --silent --show-error --output /dev/null --head \
+            --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            --write-out '%header{docker-content-digest}\n%{http_code}' \
+            "https://us-central1-docker.pkg.dev/v2/commontools-core/containers/dev-dashboard/manifests/${SOURCE_SHA}")
+          digest=${result%%$'\n'*}
+          status=${result##*$'\n'}
+
+          case "$status" in
+            200)
+              [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "digest=$digest" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Artifact Registry manifest lookup failed with HTTP $status" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Select image tags
         id: image
