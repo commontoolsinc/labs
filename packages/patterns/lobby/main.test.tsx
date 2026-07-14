@@ -11,6 +11,7 @@ import Lobby, {
   type LobbyProfile,
   type LobbyRosterCell,
   type LobbyRosterValue,
+  LobbyViewerState,
   TRUSTED_LOBBY_ACTION,
   TRUSTED_LOBBY_SURFACE,
 } from "./main.tsx";
@@ -35,6 +36,35 @@ export default pattern(() => {
   const firstAlexProfile = Writable.of<LobbyProfile>({ name: "Alex" });
   const secondAlexProfile = Writable.of<LobbyProfile>({ name: "Alex" });
   const blankProfile = Writable.of<LobbyProfile>({ name: "   " });
+
+  const viewerRoster = Writable.of<LobbyRosterValue>(DEFAULT_LOBBY_ROSTER);
+  const viewerAdminRegistry = Writable.of<LobbyAdminRegistryValue>(
+    {} as LobbyAdminRegistryValue,
+  );
+  const selectedProfile = Writable.of<LobbyProfile>({
+    initialNameApplied: "Selected Profile",
+  });
+  const selectedViewer = LobbyViewerState({
+    viewerProfile: selectedProfile,
+    roster: viewerRoster,
+    adminRegistry: viewerAdminRegistry,
+  });
+  const missingProfileViewer = LobbyViewerState({
+    roster: viewerRoster,
+    adminRegistry: viewerAdminRegistry,
+  });
+  const selectedAddSelf = addSelfToLobby({
+    roster: viewerRoster,
+    viewerProfile: selectedProfile,
+    viewerName: selectedViewer.myName,
+  });
+  const selectedSetEveryone = commitTrustedLobbyAction({
+    kind: "set-everyone-admin",
+    roster: viewerRoster,
+    adminRegistry: viewerAdminRegistry,
+    viewerProfile: selectedProfile,
+    viewerName: selectedViewer.myName,
+  });
 
   const aliceAddSelf = addSelfToLobby({
     roster,
@@ -111,6 +141,41 @@ export default pattern(() => {
 
   const lobby = Lobby({ roster, adminRegistry } as LobbyInputArg);
 
+  const assert_selected_profile_drives_viewer_state = computed(() =>
+    selectedViewer.myName === "Selected Profile" &&
+    selectedViewer.hasProfile === true &&
+    selectedViewer.hasJoined === false &&
+    selectedViewer.joinLabel === "Join as Selected Profile" &&
+    selectedViewer.joinDisabled === false &&
+    selectedViewer.everyoneIsAdmin === true &&
+    selectedViewer.currentUserIsAdmin === false &&
+    selectedViewer.adminSummary ===
+      "Open fallback: every joined person is an admin." &&
+    selectedViewer.adminBadgeColor === "accent" &&
+    selectedViewer.adminBadgeLabel === "Open" &&
+    missingProfileViewer.myName === "" &&
+    missingProfileViewer.hasProfile === false &&
+    missingProfileViewer.hasJoined === false &&
+    missingProfileViewer.joinLabel === "Choose a profile" &&
+    missingProfileViewer.joinDisabled === true &&
+    missingProfileViewer.currentUserIsAdmin === false
+  );
+  const assert_selected_profile_joined = computed(() =>
+    participantNames(viewerRoster).join(",") === "Selected Profile" &&
+    selectedViewer.hasJoined === true &&
+    selectedViewer.joinLabel === "You’re here" &&
+    selectedViewer.joinDisabled === true &&
+    selectedViewer.currentUserIsAdmin === true
+  );
+  const assert_selected_admin_lockdown = computed(() =>
+    selectedViewer.everyoneIsAdmin === false &&
+    selectedViewer.currentUserIsAdmin === true &&
+    selectedViewer.adminSummary ===
+      "Only explicitly named admins can manage this lobby." &&
+    selectedViewer.adminBadgeColor === "neutral" &&
+    selectedViewer.adminBadgeLabel === "Explicit admins"
+  );
+
   const assert_initial_open_fallback = computed(() =>
     lobbyParticipantsValue(roster).length === 0 &&
     lobbyAdminRolesValue(adminRegistry).length === 0 &&
@@ -145,6 +210,11 @@ export default pattern(() => {
     lobbyAdminRolesValue(adminRegistry).length === 2 &&
     currentLobbyUserIsAdmin(bobProfile, roster, adminRegistry)
   );
+  const assert_public_output_explicit_policy = computed(() =>
+    lobby.everyoneIsAdmin === false &&
+    lobby.allParticipants[0]?.isAdmin === true &&
+    lobby.allParticipants[1]?.isAdmin === true
+  );
   const assert_bob_removed_alice_and_role = computed(() =>
     participantNames(roster).join(",") === "Bob" &&
     lobbyAdminRolesValue(adminRegistry).length === 1 &&
@@ -178,6 +248,15 @@ export default pattern(() => {
 
   return {
     tests: [
+      { assertion: assert_selected_profile_drives_viewer_state },
+      { action: selectedAddSelf },
+      { assertion: assert_selected_profile_joined },
+      {
+        action: selectedSetEveryone,
+        event: { everyoneIsAdmin: false },
+        trustedUi: trustedLobbyGesture,
+      },
+      { assertion: assert_selected_admin_lockdown },
       { assertion: assert_initial_open_fallback },
       { action: aliceAddSelf },
       { action: aliceAddSelf },
@@ -199,6 +278,9 @@ export default pattern(() => {
       { assertion: assert_non_admin_remove_is_blocked },
       { action: aliceToggleBobAdmin, trustedUi: trustedLobbyGesture },
       { assertion: assert_bob_promoted },
+      { assertion: assert_public_output_explicit_policy },
+      // Materialize rows while explicit-role checks are active.
+      { render: lobby[UI] },
       { action: bobRemoveAlice, trustedUi: trustedLobbyGesture },
       { assertion: assert_bob_removed_alice_and_role },
       { action: bobToggleSelfAdmin, trustedUi: trustedLobbyGesture },

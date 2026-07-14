@@ -38,6 +38,7 @@ export const TRUSTED_LOBBY_ACTION = "TrustedLobbyAction";
 export const LOBBY_ADMIN_INTEGRITY = "lobby-admin" as const;
 
 export interface LobbyProfile {
+  readonly initialNameApplied?: string;
   readonly name?: string;
   readonly avatar?: string;
   readonly bio?: string;
@@ -118,6 +119,10 @@ export type LobbyAdminRegistryCell = Writable<LobbyAdminRegistryValue>;
 
 const EMPTY_PARTICIPANTS: LobbyParticipant[] = [];
 const EMPTY_PARTICIPANT_VIEWS: LobbyParticipantView[] = [];
+
+export const lobbyProfileDisplayName = (
+  profile: LobbyProfile | undefined,
+): string => (profile?.initialNameApplied ?? profile?.name ?? "").trim();
 
 export const lobbyParticipantsValue = (
   roster: LobbyRosterCell,
@@ -275,7 +280,8 @@ const addLobbyParticipant = (
   profile: LobbyProfileCell | undefined,
   name: string,
 ): void => {
-  const participantName = name.trim() || (profile?.get()?.name ?? "").trim();
+  const participantName = name.trim() ||
+    lobbyProfileDisplayName(profile?.get());
   if (profile === undefined || !participantName) return;
 
   const participants = roster.key("participants");
@@ -324,7 +330,7 @@ export const commitTrustedLobbyAction = handler<
   const participants = roster.key("participants");
   const actorProfile = viewerProfile ?? event?.profile;
   const actorName = viewerName.trim() ||
-    (actorProfile?.get()?.name ?? "").trim();
+    lobbyProfileDisplayName(actorProfile?.get());
 
   if (kind === "join") {
     addLobbyParticipant(roster, actorProfile, actorName);
@@ -482,6 +488,76 @@ interface LobbyParticipantRowOutput {
   [UI]: VNode;
 }
 
+export interface LobbyViewerStateInput {
+  viewerProfile?: LobbyProfileCell;
+  roster: LobbyRosterCell;
+  adminRegistry: LobbyAdminRegistryCell;
+}
+
+export interface LobbyViewerStateOutput {
+  myName: string;
+  hasProfile: boolean;
+  hasJoined: boolean;
+  joinLabel: string;
+  joinDisabled: boolean;
+  everyoneIsAdmin: boolean;
+  currentUserIsAdmin: boolean;
+  adminSummary: string;
+  adminBadgeColor: "accent" | "neutral";
+  adminBadgeLabel: "Open" | "Explicit admins";
+}
+
+/** Viewer-specific state, split from the wish wrapper so it is testable. */
+export const LobbyViewerState = pattern<
+  LobbyViewerStateInput,
+  LobbyViewerStateOutput
+>(({ viewerProfile, roster, adminRegistry }) => {
+  const myName = computed(() => lobbyProfileDisplayName(viewerProfile?.get()));
+  const hasProfile = computed(() => myName !== "");
+  const hasJoined = computed(() =>
+    viewerProfile !== undefined &&
+    lobbyParticipantsValue(roster).some((participant) =>
+      equals(participant.profile, viewerProfile)
+    )
+  );
+  const everyoneIsAdmin = computed(() => lobbyEveryoneIsAdmin(adminRegistry));
+  const currentUserIsAdmin = computed(() =>
+    currentLobbyUserIsAdmin(viewerProfile, roster, adminRegistry)
+  );
+  const joinLabel = computed(() =>
+    hasJoined
+      ? "You’re here"
+      : hasProfile
+      ? `Join as ${myName}`
+      : "Choose a profile"
+  );
+  const joinDisabled = computed(() => !hasProfile || hasJoined);
+  const adminSummary = computed(() =>
+    everyoneIsAdmin
+      ? "Open fallback: every joined person is an admin."
+      : "Only explicitly named admins can manage this lobby."
+  );
+  const adminBadgeColor = computed(() =>
+    everyoneIsAdmin ? "accent" as const : "neutral" as const
+  );
+  const adminBadgeLabel = computed(() =>
+    everyoneIsAdmin ? "Open" as const : "Explicit admins" as const
+  );
+
+  return {
+    myName,
+    hasProfile,
+    hasJoined,
+    joinLabel,
+    joinDisabled,
+    everyoneIsAdmin,
+    currentUserIsAdmin,
+    adminSummary,
+    adminBadgeColor,
+    adminBadgeLabel,
+  };
+});
+
 /** Stable subgraph per participant; keeps row-specific handler bindings calm. */
 const LobbyParticipantRow = pattern<
   LobbyParticipantRowInput,
@@ -580,43 +656,16 @@ const LobbyParticipantRow = pattern<
 const Lobby = pattern<LobbyInput, LobbyOutput>(({ roster, adminRegistry }) => {
   const adminRegistryCell: LobbyAdminRegistryCell = adminRegistry!;
   const profileWish = wish<LobbyProfile>({ query: "#profile" });
-  const profileNameWish = wish<string>({ query: "#profileName" });
   const myProfile = profileWish.result;
-  const myName = computed(() => (profileNameWish.result ?? "").trim());
-  const hasProfile = computed(() => myName !== "");
-  const hasJoined = computed(() =>
-    myProfile !== undefined &&
-    roster.participants.some((participant) =>
-      equals(participant.profile, myProfile)
-    )
-  );
-  const participantCount = roster.participants.length;
-  const everyoneIsAdmin = computed(() =>
-    lobbyEveryoneIsAdmin(adminRegistryCell)
-  );
-  const currentUserIsAdmin = computed(() => {
-    if (myProfile === undefined) return false;
-    const isParticipant = roster.participants.some((participant) =>
-      equals(participant.profile, myProfile)
-    );
-    if (!isParticipant) return false;
-    return everyoneIsAdmin ||
-      lobbyAdminRolesValue(adminRegistryCell).some((role) =>
-        equals(role.subject, myProfile)
-      );
+  const viewerState = LobbyViewerState({
+    viewerProfile: myProfile,
+    roster,
+    adminRegistry: adminRegistryCell,
   });
-  const joinLabel = computed(() =>
-    hasJoined
-      ? "You’re here"
-      : hasProfile
-      ? `Join as ${myName}`
-      : "Choose a profile"
-  );
-  const adminSummary = computed(() =>
-    everyoneIsAdmin
-      ? "Open fallback: every joined person is an admin."
-      : "Only explicitly named admins can manage this lobby."
-  );
+  const myName = viewerState.myName;
+  const participantCount = roster.participants.length;
+  const everyoneIsAdmin = viewerState.everyoneIsAdmin;
+  const currentUserIsAdmin = viewerState.currentUserIsAdmin;
 
   const participants = roster.participants;
   const participantViews = computed(() => {
@@ -695,9 +744,9 @@ const Lobby = pattern<LobbyInput, LobbyOutput>(({ roster, adminRegistry }) => {
                 <cf-button
                   data-ui-action={TRUSTED_LOBBY_ACTION}
                   onClick={addSelf}
-                  disabled={computed(() => !hasProfile || hasJoined)}
+                  disabled={viewerState.joinDisabled}
                 >
-                  {joinLabel}
+                  {viewerState.joinLabel}
                 </cf-button>
               </cf-vstack>
             </cf-card>
@@ -747,16 +796,12 @@ const Lobby = pattern<LobbyInput, LobbyOutput>(({ roster, adminRegistry }) => {
                     >
                       <cf-vstack gap="1">
                         <cf-heading level={3}>Admin access</cf-heading>
-                        <cf-text tone="muted">{adminSummary}</cf-text>
+                        <cf-text tone="muted">
+                          {viewerState.adminSummary}
+                        </cf-text>
                       </cf-vstack>
-                      <cf-badge
-                        color={computed(() =>
-                          everyoneIsAdmin ? "accent" : "neutral"
-                        )}
-                      >
-                        {computed(() =>
-                          everyoneIsAdmin ? "Open" : "Explicit admins"
-                        )}
+                      <cf-badge color={viewerState.adminBadgeColor}>
+                        {viewerState.adminBadgeLabel}
                       </cf-badge>
                     </cf-hstack>
                     <cf-checkbox
