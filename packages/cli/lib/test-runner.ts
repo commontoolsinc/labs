@@ -69,6 +69,7 @@ import {
   makeMockFetch,
   readFetchMocks,
 } from "./fetch-mock.ts";
+import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 import {
   type CDFPoint,
   getLogger,
@@ -121,7 +122,8 @@ function formatError(error: unknown): string {
 }
 
 /**
- * A test step is an object with an 'assertion', 'action', or 'settle' property.
+ * A test step is an object with an 'assertion', 'action', 'render', or 'settle'
+ * property.
  * This discriminated union avoids TypeScript trying to unify incompatible Cell/Stream types.
  * Add `skip: true` to temporarily disable a step (like it.skip in other frameworks).
  *
@@ -145,6 +147,7 @@ export type TestStep =
     trustedUi?: TrustedUiDescriptor;
     skip?: boolean;
   }
+  | { render: unknown; skip?: boolean }
   | { settle: true; skip?: boolean };
 
 type HarnessTestStepMeta = {
@@ -152,6 +155,7 @@ type HarnessTestStepMeta = {
   assertion?: unknown;
   event?: unknown;
   trustedUi?: unknown;
+  render?: unknown;
   skip?: boolean;
   // `{ settle: true }` step: wait for full settlement (scheduler + storage +
   // in-flight async builtin I/O) via `runtime.settled()` before the next step.
@@ -174,6 +178,7 @@ const testStepPeekSchema = internSchema(
           action: { type: "string" },
         },
       },
+      render: { type: "unknown" },
       skip: { type: "boolean" },
       settle: { type: "boolean" },
     },
@@ -276,6 +281,8 @@ export interface TestRunnerOptions {
   storageStatsLimit?: number;
   /** Directory for pattern runtime coverage LCOV artifacts. */
   patternCoverageDir?: string;
+  /** Keep the test descriptor's `$UI` demanded for the full test run. */
+  continuousUI?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -888,6 +895,8 @@ export async function runTestPattern(
     ? new PatternCoverageCollector()
     : undefined;
   let writeLocalPatternCoverage = patternCoverage !== undefined;
+  let continuousUiCancel: (() => void) | undefined;
+  const continuousUiErrors: Error[] = [];
 
   // Collect pattern-code console.error / console.warn calls (channel 1: harness
   // console event) and logger-level error/warn activity (channel 2: logger count
@@ -1113,6 +1122,20 @@ export async function runTestPattern(
       },
     );
 
+    if (options.continuousUI) {
+      continuousUiCancel = await withPhase(
+        ["runTestPattern", "continuousUI", "mount"],
+        () =>
+          mountTestVDOM(
+            patternResult.key("$UI") as Cell<unknown>,
+            (error) => continuousUiErrors.push(error),
+          ),
+      );
+      if (options.verbose) {
+        console.log("  Continuous $UI demand enabled");
+      }
+    }
+
     await withPhase(["runTestPattern", "initialSettle"], async () => {
       // Wait for initial setup to complete
       await runtime.idle();
@@ -1261,6 +1284,7 @@ export async function runTestPattern(
     let lastActionIndex: number | null = null;
     let assertionCount = 0;
     let actionCount = 0;
+    let renderCount = 0;
 
     for (let i = 0; i < testSteps.length; i++) {
       if (options.verbose) {
@@ -1272,9 +1296,10 @@ export async function runTestPattern(
       const stepValue = stepCell.asSchema(testStepPeekSchema)
         .get() as HarnessTestStepMeta;
 
-      // Check if this step has 'action', 'assertion', or 'settle' key
+      // Check which discriminant this step carries.
       const isAction = Object.hasOwn(stepValue, "action");
       const isAssertion = Object.hasOwn(stepValue, "assertion");
+      const isRender = Object.hasOwn(stepValue, "render");
       const isSettle = Object.hasOwn(stepValue, "settle");
 
       // `{ settle: true }` step: wait for FULL settlement (scheduler + storage +
@@ -1288,10 +1313,29 @@ export async function runTestPattern(
         continue;
       }
 
+      // `{ render: subject[UI] }` is a headless, per-step demand window. Run
+      // the VDOM through the worker reconciler, discard its DOM
+      // operations, wait for all recursively discovered UI cells, then remove
+      // the demand before advancing to the next step.
+      if (isRender) {
+        renderCount++;
+        const renderName = `render_${renderCount}`;
+        if (!stepValue.skip) {
+          await materializeTestVDOM(
+            stepCell.key("render") as Cell<unknown>,
+            () => settleRuntime(i, renderName, 20),
+          );
+          if (options.verbose) console.log(`  ◇ ${renderName}`);
+        } else if (options.verbose) {
+          console.log(`  ⊘ ${renderName} (skipped)`);
+        }
+        continue;
+      }
+
       if (!isAction && !isAssertion) {
         throw new Error(
-          `Test step at index ${i} must have an 'action', 'assertion', or ` +
-            `'settle' key. Got: ${
+          `Test step at index ${i} must have an 'action', 'assertion', ` +
+            `'render', or 'settle' key. Got: ${
               toCompactDebugString(Object.keys(stepValue))
             }`,
         );
@@ -1642,7 +1686,10 @@ export async function runTestPattern(
       consoleWarnings,
     );
 
-    const errorMessages = runtimeErrors.map((e) => String(e));
+    const errorMessages = [
+      ...runtimeErrors.map((e) => String(e)),
+      ...continuousUiErrors.map((e) => `[continuous $UI] ${String(e)}`),
+    ];
     return {
       path: testPath,
       results,
@@ -1670,7 +1717,10 @@ export async function runTestPattern(
         "\n    Hint: If the test imports from sibling directories (e.g., ../shared/), use --root to specify a common ancestor.";
     }
 
-    const errorMessages = runtimeErrors.map((e) => String(e));
+    const errorMessages = [
+      ...runtimeErrors.map((e) => String(e)),
+      ...continuousUiErrors.map((e) => `[continuous $UI] ${String(e)}`),
+    ];
     return {
       path: testPath,
       results: [],
@@ -1704,6 +1754,8 @@ export async function runTestPattern(
       });
     }
     // 6. Cleanup
+    continuousUiCancel?.();
+    continuousUiCancel = undefined;
     await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
       engine.dispose();
     });

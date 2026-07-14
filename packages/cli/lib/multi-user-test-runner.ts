@@ -229,6 +229,7 @@ export async function runMultiUserTestPattern(
           testPath,
           root: options.root,
           patternCoverageDir: options.patternCoverageDir,
+          continuousUI: options.continuousUI,
           participant: spec.name,
           seedDefaults: index === 0,
         }) as ParticipantInitResult;
@@ -299,6 +300,18 @@ export async function runMultiUserTestPattern(
             if (options.verbose) {
               console.log(
                 `  [${participant.spec.name}] ${participant.lastActionName} (${
+                  Math.round(performance.now() - stepStart)
+                }ms)`,
+              );
+            }
+            continue;
+          }
+          if (step.kind === "render") {
+            const stepStart = performance.now();
+            await participant.worker.call("render", { index }, stepTimeout);
+            if (options.verbose) {
+              console.log(
+                `  [${participant.spec.name}] ◇ render (${
                   Math.round(performance.now() - stepStart)
                 }ms)`,
               );
