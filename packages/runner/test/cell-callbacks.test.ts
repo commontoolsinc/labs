@@ -9,7 +9,7 @@ import { Writable } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
-import { JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
@@ -18,6 +18,10 @@ import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+type RemovableCell = {
+  remove(ref: unknown): void;
+};
 
 describe("Cell commit callbacks", () => {
   let runtime: Runtime;
@@ -574,7 +578,7 @@ describe("Cell commit callbacks", () => {
 
       cell.set({ value: 42 });
 
-      expect(() => (cell as any).remove(42)).toThrow(
+      expect(() => (cell as unknown as RemovableCell).remove(42)).toThrow(
         "Can't remove from non-array value",
       );
       popFrame(frame);
@@ -987,15 +991,16 @@ describe("Cell commit callbacks", () => {
 
     it("should handle null and undefined comparisons", () => {
       const cell = runtime.getCell<number>(space, "test", undefined, tx);
-      expect(cell.equals(null as any)).toBe(false);
-      expect(cell.equals(undefined as any)).toBe(false);
+      const nullComparison = null as unknown as object;
+      expect(cell.equals(nullComparison)).toBe(false);
+      expect(cell.equals(undefined)).toBe(false);
     });
 
     it("should work with nested cell structures", () => {
       const innerCell = runtime.getCell<number>(space, "inner", undefined, tx);
       innerCell.set(42);
 
-      const outerCell = runtime.getCell<{ value: any }>(
+      const outerCell = runtime.getCell<{ value: unknown }>(
         space,
         "outer",
         undefined,
@@ -1113,8 +1118,9 @@ describe("Cell commit callbacks", () => {
 
     it("should handle null and undefined comparisons", () => {
       const cell = runtime.getCell<number>(space, "test-null", undefined, tx);
-      expect(cell.equalLinks(null as any)).toBe(false);
-      expect(cell.equalLinks(undefined as any)).toBe(false);
+      const nullComparison = null as unknown as object;
+      expect(cell.equalLinks(nullComparison)).toBe(false);
+      expect(cell.equalLinks(undefined)).toBe(false);
     });
 
     it("should distinguish between direct value and linked value", () => {
@@ -1276,20 +1282,21 @@ describe("Cell commit callbacks", () => {
       const searchCell = resultCell.key("search");
       expect(searchCell.schema).toBeUndefined();
       const normalizedLink = parseLink(linkWithSchema);
-      const resolvedSchema = resultCell.asSchema(normalizedLink.schema).key(
-        "search",
-      ).schema as JSONSchema;
+      const resolvedSchema = resultCell.asSchema(normalizedLink.schema)
+        .key("search")
+        .schema as JSONSchemaObj;
+      const extraParamsSchema = resolvedSchema.properties
+        ?.extraParams as JSONSchemaObj | undefined;
+      const patternSchema = resolvedSchema.properties
+        ?.pattern as JSONSchemaObj | undefined;
+      const patternNodesSchema = patternSchema?.properties
+        ?.nodes as JSONSchemaObj | undefined;
       expect(resolvedSchema).toBeDefined();
-      expect((resolvedSchema as any).type).toBe("object");
-      expect(
-        (resolvedSchema as any).properties?.extraParams?.properties?.source,
-      )
+      expect(resolvedSchema.type).toBe("object");
+      expect(extraParamsSchema?.properties?.source)
         .toEqual({ type: "string" });
-      expect((resolvedSchema as any).properties?.pattern?.type).toBe("object");
-      expect(
-        (resolvedSchema as any).properties?.pattern?.properties?.nodes?.type,
-      )
-        .toBe("array");
+      expect(patternSchema?.type).toBe("object");
+      expect(patternNodesSchema?.type).toBe("array");
     });
 
     it("should return undefined schema if neither present nor in pattern", () => {
