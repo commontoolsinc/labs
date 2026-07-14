@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-label-metadata-protection.test.ts": [
-    "78:55:1rywnmh",
-  ],
   "packages/runner/test/cfc-llm-derived-stamp-builtins.test.ts": [
     "462:52:1n7u56b",
     "463:35:1ul8g8n",

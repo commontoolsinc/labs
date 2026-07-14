@@ -12,7 +12,7 @@ import {
   containsCfcFieldCommitment,
 } from "../src/cfc/label-representation.ts";
 import { stampExternalIngest } from "../src/cfc/external-ingest.ts";
-import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -33,6 +33,9 @@ type PersistedEntry = {
     confidentiality?: unknown[];
     integrity?: Array<Record<string, unknown>>;
   };
+};
+type PersistedDocument = {
+  cfc?: { labelMap?: { entries: PersistedEntry[] } };
 };
 
 // Inv-12 Stage 1 (SC-25; docs/specs/cfc-label-metadata-confidentiality.md
@@ -73,14 +76,12 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
   const persistedEntriesFor = (
     storageManager: ReturnType<typeof StorageManager.emulate>,
     space: MemorySpace,
-    id: string,
+    id: URI,
   ): PersistedEntry[] => {
-    const replica = storageManager.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: PersistedEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+    const document = storageManager.open(space).replica.getDocument(id) as
+      | PersistedDocument
+      | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
 
   // Seed a source doc in `sourceSpace` whose STORED cfc metadata carries a
@@ -90,7 +91,7 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
     runtime: Runtime,
     sourceSpace: MemorySpace,
     name: string,
-  ): Promise<string> => {
+  ): Promise<URI> => {
     const seed = runtime.edit();
     const sourceId = parseLink(
       runtime.getCell(sourceSpace, name, undefined, seed).getAsLink(),
@@ -125,9 +126,9 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
   const commitLinkWrite = async (
     runtime: Runtime,
     sourceSpace: MemorySpace,
-    sourceId: string,
+    sourceId: URI,
     targetName: string,
-  ): Promise<{ targetId: string; tx: ReturnType<Runtime["edit"]> }> => {
+  ): Promise<{ targetId: URI; tx: ReturnType<Runtime["edit"]> }> => {
     const tx = runtime.edit();
     const target = runtime.getCell(spaceB, targetName, undefined, tx);
     const targetId = target.getAsNormalizedFullLink().id;
