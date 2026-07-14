@@ -25,6 +25,79 @@ const promptInfluence = {
   source: "of:hostile",
 } as const;
 
+type AnnotatedIfc = {
+  readonly addIntegrity?: readonly unknown[];
+  readonly confidentiality?: readonly unknown[];
+};
+
+type AnnotatedSchemaNode = {
+  readonly ifc?: AnnotatedIfc;
+  readonly required?: readonly string[];
+  readonly properties?: Readonly<Record<string, AnnotatedSchemaNode>>;
+  readonly items?: AnnotatedSchemaNode;
+  readonly anyOf?: readonly AnnotatedSchemaNode[];
+  readonly oneOf?: readonly AnnotatedSchemaNode[];
+  readonly allOf?: readonly AnnotatedSchemaNode[];
+  readonly not?: AnnotatedSchemaNode;
+};
+
+const asAnnotatedNode = (schema: JSONSchema): AnnotatedSchemaNode => {
+  expect(typeof schema).toBe("object");
+  expect(schema).not.toBeNull();
+  if (typeof schema !== "object" || schema === null) {
+    throw new Error("expected annotated schema object");
+  }
+  return schema as AnnotatedSchemaNode;
+};
+
+const annotate = (
+  schema: JSONSchema,
+  observedConfidentiality: readonly unknown[] = [],
+): AnnotatedSchemaNode =>
+  asAnnotatedNode(
+    schemaWithInjectionSafeAnnotations(schema, observedConfidentiality),
+  );
+
+const property = (
+  schema: AnnotatedSchemaNode,
+  name: string,
+): AnnotatedSchemaNode => {
+  const child = schema.properties?.[name];
+  expect(child).toBeDefined();
+  if (child === undefined) {
+    throw new Error(`expected schema property ${name}`);
+  }
+  return child;
+};
+
+const items = (schema: AnnotatedSchemaNode): AnnotatedSchemaNode => {
+  expect(schema.items).toBeDefined();
+  if (schema.items === undefined) {
+    throw new Error("expected schema items");
+  }
+  return schema.items;
+};
+
+const branch = (
+  branches: readonly AnnotatedSchemaNode[] | undefined,
+  index: number,
+): AnnotatedSchemaNode => {
+  const child = branches?.[index];
+  expect(child).toBeDefined();
+  if (child === undefined) {
+    throw new Error(`expected schema branch ${index}`);
+  }
+  return child;
+};
+
+const negatedSchema = (schema: AnnotatedSchemaNode): AnnotatedSchemaNode => {
+  expect(schema.not).toBeDefined();
+  if (schema.not === undefined) {
+    throw new Error("expected not schema");
+  }
+  return schema.not;
+};
+
 describe("cfc schema sanitization", () => {
   it("classifies primitive values and prompt-injection risk atoms", () => {
     expect(isPrimitiveJsonValue(null)).toBe(true);
@@ -85,7 +158,7 @@ describe("cfc schema sanitization", () => {
       kind: "prompt-influence",
     } as const;
 
-    const annotated = schemaWithInjectionSafeAnnotations({
+    const annotated = annotate({
       type: "object",
       properties: {
         approved: { type: "boolean" },
@@ -94,20 +167,22 @@ describe("cfc schema sanitization", () => {
       },
       required: ["approved", "status", "note"],
       additionalProperties: false,
-    }, [risk, retained]) as any;
+    }, [risk, retained]);
 
     expect(annotated.required).toBeUndefined();
-    expect(annotated.properties.approved.ifc.addIntegrity).toContainEqual(
+    expect(property(annotated, "approved").ifc?.addIntegrity).toContainEqual(
       INJECTION_SAFE_ATOM,
     );
-    expect(annotated.properties.approved.ifc.confidentiality).toEqual([
+    expect(property(annotated, "approved").ifc?.confidentiality).toEqual([
       retained,
     ]);
-    expect(annotated.properties.status.ifc.addIntegrity).toContainEqual(
+    expect(property(annotated, "status").ifc?.addIntegrity).toContainEqual(
       INJECTION_SAFE_ATOM,
     );
-    expect(annotated.properties.note.ifc.confidentiality).toContainEqual(risk);
-    expect(annotated.properties.note.ifc.confidentiality).toContainEqual(
+    expect(property(annotated, "note").ifc?.confidentiality).toContainEqual(
+      risk,
+    );
+    expect(property(annotated, "note").ifc?.confidentiality).toContainEqual(
       retained,
     );
   });
@@ -117,19 +192,19 @@ describe("cfc schema sanitization", () => {
   });
 
   it("breaks ref cycles during annotation", () => {
-    const annotated = schemaWithInjectionSafeAnnotations({
+    const annotated = annotate({
       $defs: {
         Node: { $ref: "#/$defs/Node" },
       },
       $ref: "#/$defs/Node",
-    }, ["secret"]) as any;
+    }, ["secret"]);
 
-    expect(annotated.ifc.confidentiality).toEqual(["secret"]);
+    expect(annotated.ifc?.confidentiality).toEqual(["secret"]);
   });
 
   it("annotates refs, branches, arrays, and open objects", () => {
     const observed = ["secret"];
-    const annotated = schemaWithInjectionSafeAnnotations({
+    const annotated = annotate({
       $defs: {
         Choice: {
           anyOf: [
@@ -147,20 +222,22 @@ describe("cfc schema sanitization", () => {
         },
       },
       additionalProperties: true,
-    }, observed) as any;
+    }, observed);
 
-    expect(annotated.ifc.confidentiality).toEqual(observed);
-    expect(annotated.properties.child.ifc.confidentiality).toEqual(observed);
-    expect(annotated.properties.list.ifc.addIntegrity).toContainEqual(
+    const list = property(annotated, "list");
+
+    expect(annotated.ifc?.confidentiality).toEqual(observed);
+    expect(property(annotated, "child").ifc?.confidentiality).toEqual(observed);
+    expect(list.ifc?.addIntegrity).toContainEqual(
       INJECTION_SAFE_ATOM,
     );
-    expect(annotated.properties.list.items.ifc.addIntegrity).toContainEqual(
+    expect(items(list).ifc?.addIntegrity).toContainEqual(
       INJECTION_SAFE_ATOM,
     );
   });
 
   it("annotates oneOf, allOf, empty objects, and not schemas", () => {
-    const annotated = schemaWithInjectionSafeAnnotations({
+    const annotated = annotate({
       type: "object",
       properties: {
         choice: {
@@ -181,20 +258,22 @@ describe("cfc schema sanitization", () => {
       not: {
         required: ["blocked"],
       },
-    }, ["secret"]) as any;
+    }, ["secret"]);
+    const choice = property(annotated, "choice");
+    const combined = property(annotated, "combined");
 
     expect(annotated.required).toBeUndefined();
-    expect(annotated.properties.choice.oneOf[0].ifc.addIntegrity)
+    expect(branch(choice.oneOf, 0).ifc?.addIntegrity)
       .toContainEqual(INJECTION_SAFE_ATOM);
-    expect(annotated.properties.combined.allOf[1].ifc.addIntegrity)
+    expect(branch(combined.allOf, 1).ifc?.addIntegrity)
       .toContainEqual(INJECTION_SAFE_ATOM);
-    expect(annotated.not.required).toBeUndefined();
+    expect(negatedSchema(annotated).required).toBeUndefined();
 
-    const emptyObject = schemaWithInjectionSafeAnnotations({
+    const emptyObject = annotate({
       type: "object",
       additionalProperties: false,
-    }, ["secret"]) as any;
-    expect(emptyObject.ifc.addIntegrity).toContainEqual(INJECTION_SAFE_ATOM);
+    }, ["secret"]);
+    expect(emptyObject.ifc?.addIntegrity).toContainEqual(INJECTION_SAFE_ATOM);
   });
 
   it("validates values against schema features", () => {
@@ -230,7 +309,12 @@ describe("cfc schema sanitization", () => {
     expect(validateAgainstSchema({ type: "unknown" }, Symbol("value")))
       .toBeUndefined();
     expect(validateAgainstSchema({ type: "null" }, null)).toBeUndefined();
-    expect(validateAgainstSchema({ type: "custom" } as any, "value"))
+    expect(
+      validateAgainstSchema(
+        { type: "custom" } as unknown as JSONSchema,
+        "value",
+      ),
+    )
       .toBeUndefined();
     expect(validateAgainstSchema({
       type: "object",
@@ -265,28 +349,29 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       additionalProperties: false,
     } as const satisfies JSONSchema;
 
-    const sanitized = schemaWithInjectionSafeAnnotations(schema, [
+    const sanitized = annotate(schema, [
       promptRisk,
       promptInfluence,
-    ]) as any;
+    ]);
 
     expect(sanitized.ifc).toBeUndefined();
-    expect(sanitized.properties.action.ifc).toMatchObject({
+    expect(property(sanitized, "action").ifc).toMatchObject({
       confidentiality: [promptInfluence],
       addIntegrity: [INJECTION_SAFE_ATOM],
     });
-    expect(sanitized.properties.confidence.ifc).toMatchObject({
+    expect(property(sanitized, "confidence").ifc).toMatchObject({
       confidentiality: [promptInfluence],
       addIntegrity: [INJECTION_SAFE_ATOM],
     });
-    expect(sanitized.properties.approved.ifc).toMatchObject({
+    expect(property(sanitized, "approved").ifc).toMatchObject({
       confidentiality: [promptInfluence],
       addIntegrity: [INJECTION_SAFE_ATOM],
     });
-    expect(sanitized.properties.reason.ifc).toMatchObject({
+    const reason = property(sanitized, "reason");
+    expect(reason.ifc).toMatchObject({
       confidentiality: [promptRisk, promptInfluence],
     });
-    expect(sanitized.properties.reason.ifc.addIntegrity).toBeUndefined();
+    expect(reason.ifc?.addIntegrity).toBeUndefined();
   });
 
   it("discharges ALL material-risk caveats on a large label (fuel scales past the default 64)", () => {
@@ -322,13 +407,12 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       additionalProperties: false,
     } as const satisfies JSONSchema;
 
-    const sanitized = schemaWithInjectionSafeAnnotations(
+    const sanitized = annotate(
       schema,
       [...flatRisks, ...orRisks],
-    ) as any;
+    );
 
-    const remaining: unknown[] = sanitized.properties.action.ifc
-      .confidentiality ?? [];
+    const remaining = property(sanitized, "action").ifc?.confidentiality ?? [];
     // No material-risk alternative survives anywhere — not as a bare clause,
     // not nested inside a surviving OR-clause.
     const hasMaterialRiskAnywhere = remaining.some((clause) =>
@@ -354,14 +438,14 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       required: ["action", "confidence"],
     } as const satisfies JSONSchema;
 
-    const sanitized = schemaWithInjectionSafeAnnotations(schema, [
+    const sanitized = annotate(schema, [
       promptRisk,
-    ]) as any;
+    ]);
 
     expect(sanitized.ifc).toMatchObject({
       addIntegrity: [INJECTION_SAFE_ATOM],
     });
-    expect(sanitized.ifc.confidentiality ?? []).not.toContain(promptRisk);
+    expect(sanitized.ifc?.confidentiality ?? []).not.toContain(promptRisk);
   });
 
   it("keeps open object schemas tainted at the parent", () => {
@@ -373,12 +457,12 @@ describe("schema-based prompt injection sanitization compatibility", () => {
       additionalProperties: true,
     } as const satisfies JSONSchema;
 
-    const sanitized = schemaWithInjectionSafeAnnotations(schema, [
+    const sanitized = annotate(schema, [
       promptRisk,
-    ]) as any;
+    ]);
 
-    expect(sanitized.ifc.confidentiality).toEqual([promptRisk]);
-    expect(sanitized.properties.confidence.ifc).toMatchObject({
+    expect(sanitized.ifc?.confidentiality).toEqual([promptRisk]);
+    expect(property(sanitized, "confidence").ifc).toMatchObject({
       addIntegrity: [INJECTION_SAFE_ATOM],
     });
   });
@@ -439,7 +523,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
 
     const sanitized = schemaWithInjectionSafeAnnotations(schema, [
       promptInfluence,
-    ]) as any;
+    ]);
 
     expect(sanitized).toBeDefined();
     expect(typeof sanitized).toBe("object");
