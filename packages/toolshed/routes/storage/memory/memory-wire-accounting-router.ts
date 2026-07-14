@@ -1,10 +1,7 @@
 import { createRouter } from "@/lib/create-app.ts";
 import type { AppBindings } from "@/lib/types.ts";
 import { isMemoryWireAccountingEnabled } from "./memory-wire-accounting-policy.ts";
-import type {
-  MemoryWireAccountingAccumulator,
-  MemoryWireAccountingReport,
-} from "@commonfabric/memory/v2/wire-accounting";
+import type { MemoryWireAccountingAccumulator } from "@commonfabric/memory/v2/wire-accounting";
 import type { MiddlewareHandler } from "@hono/hono";
 
 const BASE = "/api/storage/memory/wire-accounting";
@@ -36,27 +33,26 @@ function tokenEquals(actual: string, expected: string): boolean {
   return diff === 0;
 }
 
-const emptyReport = (): MemoryWireAccountingReport => ({
-  totals: { baselineBytes: 0, actualBytes: 0, frames: 0, connections: 0 },
-  byDirection: [],
-  byConnection: [],
-  byMetadataKind: [],
-  byClassification: [],
-  records: [],
-});
-
 export function createMemoryWireAccountingRouter(
   options: MemoryWireAccountingRouteOptions,
 ) {
   const router = createRouter();
   const expectedToken = options.token.trim();
-  const enabled = isMemoryWireAccountingEnabled({
-    token: options.token,
-    env: options.env,
-  }) && options.accumulator !== undefined;
+  if (
+    !isMemoryWireAccountingEnabled({
+      token: options.token,
+      env: options.env,
+    }) || options.accumulator === undefined
+  ) {
+    const notFound: MiddlewareHandler<AppBindings> = (c) =>
+      Promise.resolve(c.notFound());
+    router.use(BASE, notFound);
+    router.use(`${BASE}/*`, notFound);
+    return router;
+  }
+  const accumulator = options.accumulator;
 
   const requireAccess: MiddlewareHandler<AppBindings> = async (c, next) => {
-    if (!enabled) return c.notFound();
     const actual = bearerToken(c.req.header("authorization") ?? null);
     if (actual === undefined || !tokenEquals(actual, expectedToken)) {
       return c.json({ error: "Unauthorized" }, 401);
@@ -68,14 +64,12 @@ export function createMemoryWireAccountingRouter(
   router.use(`${BASE}/*`, requireAccess);
 
   router.post(`${BASE}/start`, (c) => {
-    options.accumulator?.start();
+    accumulator.start();
     return c.json({ ok: true });
   });
 
   router.post(`${BASE}/stop`, (c) => {
-    const report: MemoryWireAccountingReport = options.accumulator?.stop() ??
-      emptyReport();
-    return c.json(report);
+    return c.json(accumulator.stop());
   });
 
   return router;
