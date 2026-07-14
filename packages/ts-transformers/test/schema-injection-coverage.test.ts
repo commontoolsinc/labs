@@ -334,21 +334,62 @@ Deno.test("llmDialog preserves an authored resultSchema", async () => {
   assertStringIncludes(output, "resultSchema: authored");
 });
 
-Deno.test("llmDialog injects resultSchema into non-literal and missing options", async () => {
+Deno.test("llmDialog lets variable and spread options override the generated resultSchema", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { llmDialog } from "commonfabric";',
+    'const authored = { type: "object" } as const;',
+    "const options = { messages: [], resultSchema: authored };",
+    "const variable = llmDialog<{ answer: number }>(options);",
+    "const spread = llmDialog<{ answer: number }>({ ...options });",
+  ].join("\n");
+  const output = await transformSource(source, {
+    types: COMMONFABRIC_TYPES,
+    typeCheck: true,
+  });
+  const calls = callsNamed(parseModule(output), "llmDialog");
+  assertEquals(calls.length, 2);
+
+  for (const call of calls) {
+    const options = call.arguments[0];
+    assert(options && ts.isObjectLiteralExpression(options));
+    const [generatedDefault, authoredOptions] = options.properties;
+    assert(generatedDefault && ts.isPropertyAssignment(generatedDefault));
+    assertEquals(generatedDefault.name.getText(), "resultSchema");
+    assert(authoredOptions && ts.isSpreadAssignment(authoredOptions));
+    assertEquals(authoredOptions.expression.getText(), "options");
+  }
+});
+
+Deno.test("llmDialog injects resultSchema into non-literal options", async () => {
   const source = [
     "/// <cts-enable />",
     'import { llmDialog } from "commonfabric";',
     "const options = { messages: [] };",
     "const spread = llmDialog<{ answer: number }>(options);",
-    "const empty = llmDialog<{ label: string }>();",
   ].join("\n");
   const output = await t(source);
   const schemas = emittedSchemas(parseModule(output));
-  assertEquals(schemas.length, 2);
+  assertEquals(schemas.length, 1);
   assertEquals((schemas[0]!.properties as Obj).answer.type, "number");
-  assertEquals((schemas[1]!.properties as Obj).label.type, "string");
   assertStringIncludes(output, "...options");
-  assertEquals(output.match(/resultSchema:/g)?.length, 2);
+  assertEquals(output.match(/resultSchema:/g)?.length, 1);
+});
+
+Deno.test("malformed zero-argument llmDialog receives recovery options", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { llmDialog } from "commonfabric";',
+    "// @ts-expect-error Exercise transformer recovery for an incomplete call.",
+    "const empty = llmDialog<{ label: string }>();",
+  ].join("\n");
+  const output = await transformSource(source, {
+    types: COMMONFABRIC_TYPES,
+    typeCheck: true,
+  });
+  const [schema] = emittedSchemas(parseModule(output));
+  assertEquals((schema.properties as Obj).label.type, "string");
+  assertEquals(output.match(/resultSchema:/g)?.length, 1);
 });
 
 Deno.test("streamData<T>({...}) injects an event schema", async () => {
@@ -383,21 +424,35 @@ Deno.test("streamData diagnoses a missing event type", async () => {
   );
 });
 
-Deno.test("streamData injects schema into non-literal and missing parameters", async () => {
+Deno.test("streamData injects schema into non-literal parameters", async () => {
   const source = [
     "/// <cts-enable />",
     'import { streamData } from "commonfabric";',
     'const params = { url: "/events" };',
     "const spread = streamData<{ id: string }>(params);",
-    "const empty = streamData<{ value: number }>();",
   ].join("\n");
   const output = await t(source);
   const schemas = emittedSchemas(parseModule(output));
-  assertEquals(schemas.length, 2);
+  assertEquals(schemas.length, 1);
   assertEquals((schemas[0]!.properties as Obj).id.type, "string");
-  assertEquals((schemas[1]!.properties as Obj).value.type, "number");
   assertStringIncludes(output, "...params");
-  assertEquals(output.match(/schema:/g)?.length, 2);
+  assertEquals(output.match(/schema:/g)?.length, 1);
+});
+
+Deno.test("malformed zero-argument streamData receives recovery parameters", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { streamData } from "commonfabric";',
+    "// @ts-expect-error Exercise transformer recovery for an incomplete call.",
+    "const empty = streamData<{ value: number }>();",
+  ].join("\n");
+  const output = await transformSource(source, {
+    types: COMMONFABRIC_TYPES,
+    typeCheck: true,
+  });
+  const [schema] = emittedSchemas(parseModule(output));
+  assertEquals((schema.properties as Obj).value.type, "number");
+  assertEquals(output.match(/schema:/g)?.length, 1);
 });
 
 // ---------------------------------------------------------------------------

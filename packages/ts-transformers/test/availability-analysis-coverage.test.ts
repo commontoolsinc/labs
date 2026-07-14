@@ -182,7 +182,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
       import * as cf from "commonfabric";
 
       type Repo = { name: string };
-      declare function ordinary(value: unknown): unknown;
+      declare function ordinary(value: unknown): { result: unknown };
       const fetched = fetchText({ url: "/repo" });
       const fetchedAny = fetchJsonUnchecked({ url: "/repo" });
       const textGenerated = generateText({ prompt: "repo" });

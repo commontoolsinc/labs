@@ -99,13 +99,17 @@ Deno.test("latestComplete diagnoses an unresolved complete-value type", async ()
   );
 });
 
-Deno.test("latestComplete without a value remains unchanged", async () => {
+Deno.test("malformed zero-argument latestComplete remains unchanged for recovery", async () => {
   const output = await transformSource(
     `
       import { latestComplete } from "commonfabric";
+      // @ts-expect-error Exercise transformer recovery for an incomplete call.
       const snapshot = latestComplete();
     `,
-    { types: { "commonfabric.d.ts": commonfabricTypes } },
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
   );
 
   assertStringIncludes(output, "latestComplete()");

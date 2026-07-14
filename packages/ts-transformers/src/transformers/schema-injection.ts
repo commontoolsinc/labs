@@ -4019,16 +4019,16 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
           if (args.length > 0 && ts.isObjectLiteralExpression(args[0]!)) {
             newOptions = factory.createObjectLiteralExpression(
               [
-                ...args[0].properties,
                 factory.createPropertyAssignment("resultSchema", schemaCall),
+                ...args[0].properties,
               ],
               true,
             );
           } else if (args.length > 0) {
             newOptions = factory.createObjectLiteralExpression(
               [
-                factory.createSpreadAssignment(args[0]!),
                 factory.createPropertyAssignment("resultSchema", schemaCall),
+                factory.createSpreadAssignment(args[0]!),
               ],
               true,
             );
