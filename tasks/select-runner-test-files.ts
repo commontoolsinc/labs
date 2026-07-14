@@ -3,11 +3,15 @@
 import { parseShard } from "./shard-utils.ts";
 export { parseShard };
 
+const FIVE_WAY_SHARD_ASSIGNMENTS: Readonly<Partial<Record<string, number>>> = {
+  "engine-ses.test.ts": 1,
+  "fabric-imports-engine.test.ts": 2,
+  "json-utils.test.ts": 1,
+};
+
 // Runner test files are split across shards by round-robin over the sorted file
-// list. There is no per-file weighting: a byte-size table used to live here, but
-// file size does not track run time, so it balanced no better than plain
-// round-robin. A time-weighted split would do better and can be added if the
-// imbalance starts to matter on the critical path.
+// list. The five-way CI split pins a few long-running files to named shards, so
+// one bucket does not carry the slowest files together.
 export function selectRunnerTestFiles(
   files: { name: string }[],
   shard: { index: number; total: number },
@@ -15,7 +19,14 @@ export function selectRunnerTestFiles(
   return files
     .map((file) => file.name)
     .sort()
-    .filter((_, i) => i % shard.total === shard.index - 1);
+    .filter((name, i) => {
+      const assignedShard = shard.total === 5
+        ? FIVE_WAY_SHARD_ASSIGNMENTS[name]
+        : undefined;
+      return assignedShard === undefined
+        ? i % shard.total === shard.index - 1
+        : assignedShard === shard.index;
+    });
 }
 
 export async function listRunnerTests(): Promise<{ name: string }[]> {

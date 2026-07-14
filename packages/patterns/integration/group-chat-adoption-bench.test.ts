@@ -67,10 +67,9 @@ async function sendMessage(
   });
 }
 
-// deno-lint-ignore no-explicit-any
 async function messageCount(session: MultiRuntimeSession): Promise<number> {
-  // deno-lint-ignore no-explicit-any
-  return (((await session.read(["messages"])) as any[]) ?? []).length;
+  const messages = await session.read(["messages"]);
+  return Array.isArray(messages) ? messages.length : 0;
 }
 
 type Counts = Record<string, Record<string, { total?: number }>>;

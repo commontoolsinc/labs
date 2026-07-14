@@ -143,8 +143,7 @@ describe("incremental observation adoption (live)", () => {
       const resultCell1 = rt1.getCell(space, "adopt-result", undefined, tx1);
       const r1 = rt1.run(
         tx1,
-        // deno-lint-ignore no-explicit-any
-        compiled as any,
+        compiled,
         { value: valueCell1 },
         resultCell1,
       );

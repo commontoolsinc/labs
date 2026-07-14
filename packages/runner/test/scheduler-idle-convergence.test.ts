@@ -34,12 +34,14 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { MAX_ITERS } from "../src/scheduler/constants.ts";
 import { RuntimeTelemetryEvent } from "../src/telemetry.ts";
+import type { NormalizedFullLink } from "../src/link-types.ts";
 
-function addr(cell: { getAsNormalizedFullLink(): unknown }): ReturnType<
+function addr(
+  cell: { getAsNormalizedFullLink(): NormalizedFullLink },
+): ReturnType<
   typeof toMemorySpaceAddress
 > {
-  // deno-lint-ignore no-explicit-any
-  return toMemorySpaceAddress((cell as any).getAsNormalizedFullLink());
+  return toMemorySpaceAddress(cell.getAsNormalizedFullLink());
 }
 
 // Race idle() against a wall-clock deadline so a hang surfaces as a value

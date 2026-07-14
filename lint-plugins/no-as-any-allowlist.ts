@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/content-addressed-identity.test.ts",
   "packages/runner/test/cross-space-value-read.test.ts",
   "packages/runner/test/data-updating.test.ts",
   "packages/runner/test/data-uri-inlining.test.ts",

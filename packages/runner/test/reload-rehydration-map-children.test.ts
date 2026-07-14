@@ -132,10 +132,9 @@ describe("reload isolation: map per-element children", () => {
       tx: tx1,
     });
     const resultCell1 = rt1.getCell(space, "map-result", undefined, tx1);
-    // deno-lint-ignore no-explicit-any
     const r1 = rt1.run(
       tx1,
-      compiled as any,
+      compiled,
       { items: itemsCell1 },
       resultCell1,
     );

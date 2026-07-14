@@ -171,8 +171,7 @@ describe("content-addressed action identity", () => {
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const r = runtime!.run(tx, rehydrated, {}, resultCell) as any;
+    const r = runtime!.run(tx, rehydrated, {}, resultCell);
     await tx.commit();
     await r.pull();
     r.key("setName").send({ name: "resolved-after-eviction" });
@@ -233,8 +232,7 @@ export default pattern<{ out: string }>(({ out }) => ({
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const r = runtime.run(tx, pattern, {}, resultCell) as any;
+    const r = runtime.run(tx, pattern, {}, resultCell);
     await tx.commit();
     await r.pull();
     r.key("dump").send({});

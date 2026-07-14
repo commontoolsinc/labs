@@ -37,6 +37,29 @@ Deno.test("runner test round-robin keeps shard counts even", () => {
   );
 });
 
+Deno.test("runner test five-way split separates assigned long-running files", () => {
+  const files = [
+    { name: "alpha.test.ts" },
+    { name: "engine-ses.test.ts" },
+    { name: "fabric-imports-engine.test.ts" },
+    { name: "json-utils.test.ts" },
+    { name: "omega.test.ts" },
+  ];
+
+  const shardOf = new Map<string, number>();
+  for (let index = 1; index <= TOTAL_SHARDS; index++) {
+    for (
+      const name of selectRunnerTestFiles(files, { index, total: TOTAL_SHARDS })
+    ) {
+      shardOf.set(name, index);
+    }
+  }
+
+  assertEquals(shardOf.get("engine-ses.test.ts"), 1);
+  assertEquals(shardOf.get("json-utils.test.ts"), 1);
+  assertEquals(shardOf.get("fabric-imports-engine.test.ts"), 2);
+});
+
 Deno.test("every real runner test file is covered exactly once across shards", async () => {
   // Read the actual runner test directory so a file that silently falls out of
   // every shard fails here — CI itself would run green, because a dropped file

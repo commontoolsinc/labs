@@ -12,6 +12,7 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase(
@@ -158,8 +159,7 @@ describe("resume pre-sync covers argument link targets", () => {
         undefined,
         tx1,
       );
-      // deno-lint-ignore no-explicit-any
-      const r1 = rt1.run(tx1, parent as any, { def: profileCell }, resultCell1);
+      const r1 = rt1.run(tx1, parent, { def: profileCell }, resultCell1);
       rt1.prepareTxForCommit(tx1);
       const commit1 = await tx1.commit();
       expect(commit1.error).toBeUndefined();
@@ -206,9 +206,8 @@ describe("resume pre-sync covers argument link targets", () => {
       const label2 = rt2.getCellFromLink(parentLink)
         .key("child")
         .key("label");
-      const render = (actionTx: unknown) => {
-        // deno-lint-ignore no-explicit-any
-        label2.withTx(actionTx as any).get();
+      const render = (actionTx: IExtendedStorageTransaction) => {
+        label2.withTx(actionTx).get();
       };
       rt2.scheduler.subscribe(render, {
         reads: [toMemorySpaceAddress(label2.getAsNormalizedFullLink())],
