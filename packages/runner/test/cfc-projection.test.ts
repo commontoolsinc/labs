@@ -5,8 +5,27 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { URI } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-projection");
+
+type PersistedEntry = {
+  path: string[];
+  label: {
+    confidentiality?: unknown[];
+    integrity?: unknown[];
+  };
+};
+
+type PersistedDocument = {
+  cfc?: {
+    labelMap?: {
+      entries: PersistedEntry[];
+    };
+  };
+};
+
+const malformedSchema = (schema: unknown): JSONSchema => schema as JSONSchema;
 
 // §8.3 projection claims (spec cfc/08-03-projection-semantics.md): a field
 // copied out of a structured source inherits the source's confidentiality in
@@ -29,25 +48,12 @@ describe("CFC projection claims", () => {
 
   const readPersistedEntries = (
     storageManager: ReturnType<typeof StorageManager.emulate>,
-    persistedId: string,
+    persistedId: URI,
   ) => {
-    const replica = storageManager.open(signer.did()).replica as unknown as {
-      getDocument(id: string): {
-        value?: unknown;
-        cfc?: {
-          labelMap?: {
-            entries: Array<{
-              path: string[];
-              label: {
-                confidentiality?: unknown[];
-                integrity?: unknown[];
-              };
-            }>;
-          };
-        };
-      } | undefined;
-    };
-    return replica.getDocument(persistedId)?.cfc?.labelMap?.entries;
+    const document = storageManager.open(signer.did()).replica.getDocument(
+      persistedId,
+    ) as PersistedDocument | undefined;
+    return document?.cfc?.labelMap?.entries;
   };
 
   const gpsSchema = {
@@ -354,7 +360,7 @@ describe("CFC projection claims", () => {
       const cell = runtime.getCell(
         signer.did(),
         "cfc-projection-non-record",
-        {
+        malformedSchema({
           type: "object",
           properties: {
             latitude: {
@@ -363,7 +369,7 @@ describe("CFC projection claims", () => {
             },
           },
           required: ["latitude"],
-        } as unknown as JSONSchema,
+        }),
         tx,
       );
 
@@ -463,7 +469,7 @@ describe("CFC projection claims", () => {
       const cell = runtime.getCell(
         signer.did(),
         "cfc-projection-malformed",
-        {
+        malformedSchema({
           type: "object",
           properties: {
             measurement: {
@@ -481,7 +487,7 @@ describe("CFC projection claims", () => {
             },
           },
           required: ["measurement", "latitude"],
-        } as unknown as JSONSchema,
+        }),
         tx,
       );
 

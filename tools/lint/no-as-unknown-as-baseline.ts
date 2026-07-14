@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-projection.test.ts": [
-    "34:62:exq85l",
-    "366:10:8gzo1j",
-    "484:10:16x1tc5",
-  ],
   "packages/runner/test/cfc-single-use-grants.test.ts": [
     "779:10:1icc09g",
     "953:20:3xvecj",
