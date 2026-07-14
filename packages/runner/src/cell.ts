@@ -1964,11 +1964,14 @@ export class CellImpl<T extends FabricValue>
    * and a present-but-undefined read cannot tell a still-loading cell from a
    * settled-empty one, so neither works as a synchronous pending check.
    *
-   * A deferred `sync().then(...)` chain is invisible to `Cell.pull()` and the
-   * scheduler's `idle()` until it is registered, so a convergence waiter can
-   * return before the chain settles and read held, not-yet-loaded state. Wrap
-   * such a chain in `storageManager.trackUntilSettled` to have those waiters
-   * await it.
+   * A deferred `sync().then(...)` chain is not awaited by `Cell.pull()` until it
+   * is registered in the storage manager's cross-space promise set; before that,
+   * a pull can return while the chain is still in flight and read held,
+   * not-yet-loaded state. Register it with `storageManager.trackUntilSettled` so
+   * `Cell.pull()` and `storageManager.synced()` await it. The scheduler's
+   * `idle()` waits for reactive quiescence only, not that set, so it does not
+   * await such a chain even when registered — code gating on `idle()` alone can
+   * still race the deferred sync.
    */
   sync(): Promise<Cell<T>> {
     this.synced = true;

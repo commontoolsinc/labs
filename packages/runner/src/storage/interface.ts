@@ -213,17 +213,19 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /**
    * Register a deferred async chain in the cross-space promise set so
-   * `Cell.pull()` and the scheduler's `idle()` await it, then drop it from the
-   * set once it settles. Until a chain is registered it is invisible to the
-   * convergence waiters: a pull can return before the chain has settled and
-   * observe held, not-yet-loaded state. This is the safe composition of
-   * `addCrossSpacePromise` and `removeCrossSpacePromise` — prefer it over
-   * wiring the self-removing `finally` by hand at each call site.
+   * `Cell.pull()` and `synced()` await it, then drop it from the set once it
+   * settles. Until a chain is registered it is invisible to those waiters: a
+   * pull can return before the chain has settled and observe held,
+   * not-yet-loaded state. The scheduler's `idle()` does not consult this set at
+   * all, so registering a chain does not make `idle()` await it. This is the
+   * safe composition of `addCrossSpacePromise` and `removeCrossSpacePromise` —
+   * prefer it over wiring the self-removing `finally` by hand at each call site.
    *
    * `work` must eventually settle (resolve or reject). A chain that never
-   * settles stays registered and keeps `Cell.pull()`/`idle()` from observing
-   * convergence until the scheduler's convergence bound trips, so a caller that
-   * wraps an external `sync()` should ensure it cannot hang unbounded.
+   * settles stays registered and keeps `Cell.pull()` and `synced()` from
+   * observing convergence — `Cell.pull()` escapes only at its bounded round cap
+   * — so a caller that wraps an external `sync()` should ensure it cannot hang
+   * unbounded.
    */
   trackUntilSettled(work: Promise<unknown>): void;
 
