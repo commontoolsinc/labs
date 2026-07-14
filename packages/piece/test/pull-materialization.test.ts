@@ -462,6 +462,13 @@ describe("piece pull materialization", () => {
         runtime.patternManager.getArtifactEntryRef(numberPattern),
       );
       expect(await controller.result.get()).toEqual({ value: 4 });
+
+      await expect(
+        manager.runWithPattern(numberPattern, controller.id, undefined, {
+          start: false,
+          expectedPatternIdentity: getPatternIdentityRef(piece),
+        }),
+      ).rejects.toThrow(/atomic pattern updates require starting the piece/);
     } finally {
       releaseCompile.resolve();
       runtime.patternManager.compilePattern = originalCompile;

@@ -25,5 +25,8 @@ deno task cf piece link ... editor-id/items viewer-id/items
 - Deploy once, then use `setsrc` for updates
 - `setsrc` rejects backward-incompatible argument or result schema changes
   before updating the piece. Existing fields must keep compatible types; new
-  fields must be optional or have defaults. Input unions may be widened.
+  fields must be optional or have defaults. Input unions may be widened and
+  result unions may be narrowed, including Common Fabric schema types such as
+  `undefined`. Concurrent updates are applied atomically; a stale update fails
+  instead of overwriting a newer source.
 - Test one feature at a time

@@ -1854,6 +1854,12 @@ describe("runner utils", () => {
         options: { attempts: 1 },
       });
     });
+
+    it("returns no defaults for non-object and unresolved schemas", () => {
+      expect(extractDefaultValues(false)).toBeUndefined();
+      expect(extractDefaultValues({ $ref: "#/$defs/Missing" }))
+        .toBeUndefined();
+    });
   });
 
   describe("mergeObjects", () => {

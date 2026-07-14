@@ -176,7 +176,6 @@ function extractDefaultValuesInternal(
   if (typeof resolved !== "object" || resolved === null) return undefined;
 
   const canonical = internSchema(resolved);
-  if (typeof canonical !== "object" || canonical === null) return undefined;
   if (activeSchemas.has(canonical)) return undefined;
   activeSchemas.add(canonical);
 
