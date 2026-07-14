@@ -494,13 +494,11 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-    const profileName = computed(() => (profileNameWish.result ?? "").trim());
-    const profileAvatar = computed(() =>
-      (profileAvatarWish.result ?? "").trim()
-    );
-    const hasProfile = computed(() =>
-      (profileNameWish.result ?? "").trim() !== ""
-    );
+    const resolvedProfileName = resultOf(profileNameWish.result);
+    const resolvedProfileAvatar = resultOf(profileAvatarWish.result);
+    const profileName = computed(() => resolvedProfileName.trim());
+    const profileAvatar = computed(() => resolvedProfileAvatar.trim());
+    const hasProfile = computed(() => resolvedProfileName.trim() !== "");
     const reporterLabel = computed(() => (reporterName.get() || "").trim());
     const hasReporter = computed(() => reporterLabel !== "");
     // Show the profile avatar only while the reporter IS the profile (an
@@ -720,7 +718,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     // Adopt the viewer's resolved shared-profile name as the reporter name.
     const adoptProfileName = action(() => {
-      const name = (profileNameWish.result ?? "").trim();
+      const name = resolvedProfileName.trim();
       if (!name) return;
       reporterName.set(name);
     });

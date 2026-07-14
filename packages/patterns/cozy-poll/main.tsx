@@ -29,6 +29,7 @@ import {
   pattern,
   type PerSpace,
   type PerUser,
+  resultOf,
   safeDateNow,
   Stream,
   UI,
@@ -397,11 +398,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
-    const profileName = computed(() => profileNameWish.result ?? "");
-    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
-    const hasProfile = computed(() =>
-      (profileNameWish.result ?? "").trim() !== ""
-    );
+    const profileName = resultOf(profileNameWish.result);
+    const profileAvatar = resultOf(profileAvatarWish.result);
+    const hasProfile = computed(() => profileName.trim() !== "");
     const joinLabel = computed(() =>
       hasProfile ? `Join as ${profileName}` : "Create a profile to join"
     );

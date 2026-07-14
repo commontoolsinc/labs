@@ -8,6 +8,7 @@ import {
   pattern,
   type PerSpace,
   type PerUser,
+  resultOf,
   safeDateNow,
   Stream,
   UI,
@@ -151,10 +152,10 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
-    const myName = computed(() => profileNameWish.result ?? "");
-    const myAvatar = computed(() => profileAvatarWish.result ?? "");
+    const myName = resultOf(profileNameWish.result);
+    const myAvatar = resultOf(profileAvatarWish.result);
     // The live profile cell — passed to the join handler as the identity key.
-    const myProfile = profileWish.result;
+    const myProfile = resultOf(profileWish.result);
 
     const participants = roster.participants;
     const participantCount = participants.length;
@@ -194,7 +195,7 @@ export default pattern<RosterDemoInput, RosterDemoOutput>(
               >
                 You
               </span>
-              <cf-profile-badge $profile={profileWish.result} size="md" />
+              <cf-profile-badge $profile={myProfile} size="md" />
             </cf-vstack>
 
             <cf-hstack justify="between" align="center">

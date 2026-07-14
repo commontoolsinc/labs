@@ -9,6 +9,7 @@ import {
   pattern,
   type PerSpace,
   type PerUser,
+  resultOf,
   safeDateNow,
   Stream,
   UI,
@@ -117,17 +118,15 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
-    const myName = computed(() => profileNameWish.result ?? "");
-    const myAvatar = computed(() => profileAvatarWish.result ?? "");
+    const myName = resultOf(profileNameWish.result);
+    const myAvatar = resultOf(profileAvatarWish.result);
     // The live profile cell — stored on each message and passed to the badge.
-    const myProfile = profileWish.result;
+    const myProfile = resultOf(profileWish.result);
     // Gate the composer on BOTH the name (for the snapshot/label) AND the live
     // profile CELL the send handler requires. Keying only on `#profileName`
     // would enable Send in the window where the name resolves but the `#profile`
     // cell hasn't, and the handler would then silently drop the message.
-    const hasProfile = computed(() =>
-      (profileNameWish.result ?? "") !== "" && profileWish.result !== undefined
-    );
+    const hasProfile = computed(() => myName !== "" && myProfile !== undefined);
 
     const messageCount = messages.length;
 
@@ -169,7 +168,7 @@ export default pattern<ProfileGroupChatInput, ProfileGroupChatOutput>(
               <cf-heading level={3}>Profile chat</cf-heading>
               <cf-vstack gap="1" align="end">
                 <cf-text variant="caption" tone="muted">You</cf-text>
-                <cf-profile-badge $profile={profileWish.result} size="sm" />
+                <cf-profile-badge $profile={myProfile} size="sm" />
               </cf-vstack>
             </cf-hstack>
 

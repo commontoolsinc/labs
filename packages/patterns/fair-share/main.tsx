@@ -28,6 +28,7 @@ import {
   NAME,
   pattern,
   type PerUser,
+  resultOf,
   safeDateNow,
   UI,
   wish,
@@ -174,13 +175,12 @@ export default pattern<State>(({ people, expenses, myName }) => {
   const profileWish = wish({ query: "#profile" });
   const profileNameWish = wish<string>({ query: "#profileName" });
   const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-  const myProfileName = computed(() => (profileNameWish.result ?? "").trim());
-  const myProfileAvatar = computed(() =>
-    (profileAvatarWish.result ?? "").trim()
-  );
-  const hasProfile = computed(() =>
-    (profileNameWish.result ?? "").trim() !== ""
-  );
+  const profile = resultOf(profileWish.result);
+  const profileName = resultOf(profileNameWish.result);
+  const profileAvatar = resultOf(profileAvatarWish.result);
+  const myProfileName = computed(() => profileName.trim());
+  const myProfileAvatar = computed(() => profileAvatar.trim());
+  const hasProfile = computed(() => profileName.trim() !== "");
 
   // --- Derived data ---
   const peopleOptions = computed(() =>
@@ -266,7 +266,7 @@ export default pattern<State>(({ people, expenses, myName }) => {
             }
             <cf-hstack gap="3" align="center" wrap>
               <cf-label>You are</cf-label>
-              <cf-profile-badge $profile={profileWish.result} size="sm" />
+              <cf-profile-badge $profile={profile} size="sm" />
               <cf-button
                 color="primary"
                 variant="solid"

@@ -4,8 +4,10 @@ import {
   computed,
   type Default,
   handler,
+  hasError,
   NAME,
   pattern,
+  resultOf,
   safeDateNow,
   type Stream,
   UI,
@@ -102,7 +104,9 @@ export default pattern<AgentInput, AgentOutput>(
       query: "#activityLog",
       headless: true,
     });
-    const activityLog = activityLogWish.result;
+    const activityLog = hasError(activityLogWish.result)
+      ? undefined
+      : resultOf(activityLogWish.result);
 
     // Bind module-scope handlers
     const setDirective = setDirectiveHandler({ directive });
