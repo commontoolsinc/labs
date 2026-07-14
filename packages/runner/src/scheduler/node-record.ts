@@ -57,6 +57,11 @@ export class NodeRegistry {
   private invalidNodes = new Set<Action>();
   // Source of monotonic registration ordinals (see SchedulerNode.ordinal).
   private nextOrdinal = 0;
+  // Invalidates derived indexes of active effect registration surfaces. Effect
+  // annotations are read at registration time, so every effect registration
+  // (including reactivation and computation -> effect promotion) advances the
+  // generation; removal advances it only when an active effect is removed.
+  private effectRegistrationGeneration = 0;
 
   readonly effects: ReadonlySet<Action> = this.activeEffects;
   readonly computations: ReadonlySet<Action> = this.activeComputations;
@@ -81,6 +86,9 @@ export class NodeRegistry {
         }
       }
       this.activate(existing);
+      if (existing.kind === "effect") {
+        this.effectRegistrationGeneration++;
+      }
       return existing;
     }
 
@@ -102,6 +110,9 @@ export class NodeRegistry {
       record.children = children;
     }
     this.activate(record);
+    if (record.kind === "effect") {
+      this.effectRegistrationGeneration++;
+    }
     if (parentAction !== undefined) {
       this.captureParentAction(record, parentAction);
     }
@@ -112,7 +123,9 @@ export class NodeRegistry {
     const record = this.records.get(action);
     if (!record) return undefined;
     this.all.delete(record);
-    this.activeEffects.delete(action);
+    if (this.activeEffects.delete(action)) {
+      this.effectRegistrationGeneration++;
+    }
     this.activeComputations.delete(action);
     this.invalidNodes.delete(action);
     return record;
@@ -131,6 +144,14 @@ export class NodeRegistry {
    */
   getRegistrationOrdinal(action: Action): number | undefined {
     return this.records.get(action)?.ordinal;
+  }
+
+  /**
+   * Monotonic invalidation token for indexes derived from active effects and
+   * their registration-time annotations.
+   */
+  getEffectRegistrationGeneration(): number {
+    return this.effectRegistrationGeneration;
   }
 
   /**

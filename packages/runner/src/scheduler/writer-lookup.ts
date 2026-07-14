@@ -72,6 +72,50 @@ type LiveCandidateAccumulator = {
   matchedWrites: Map<string, LiveSchedulerMatchedWrite>;
 };
 
+type EffectWriterIndex = {
+  generation: number;
+  writersByEntity: Map<ReturnType<typeof entityKey>, Set<Action>>;
+  writesByAction: Map<Action, readonly IMemorySpaceAddress[]>;
+};
+
+// Effect write surfaces deliberately stay outside SchedulerWriteIndex because
+// effects are not dependency-propagation producers. Keep the discovery-only
+// projection per registry instead: the WeakMap neither owns registries nor
+// leaks scheduler instances, and NodeRegistry's generation makes every
+// registration/removal/promotion rebuild atomic from the current active set.
+const effectWriterIndexes = new WeakMap<NodeRegistry, EffectWriterIndex>();
+
+function getEffectWriterIndex(nodes: NodeRegistry): EffectWriterIndex {
+  const generation = nodes.getEffectRegistrationGeneration();
+  const cached = effectWriterIndexes.get(nodes);
+  if (cached?.generation === generation) return cached;
+
+  const writersByEntity = new Map<
+    ReturnType<typeof entityKey>,
+    Set<Action>
+  >();
+  const writesByAction = new Map<
+    Action,
+    readonly IMemorySpaceAddress[]
+  >();
+  for (const action of nodes.effects) {
+    const writes = resolveRegistrationSurface(action, undefined);
+    writesByAction.set(action, writes);
+    for (const write of writes) {
+      const key = entityKey(write);
+      let writers = writersByEntity.get(key);
+      if (!writers) {
+        writers = new Set();
+        writersByEntity.set(key, writers);
+      }
+      writers.add(action);
+    }
+  }
+  const index = { generation, writersByEntity, writesByAction };
+  effectWriterIndexes.set(nodes, index);
+  return index;
+}
+
 export async function schedulerWritersForTargets(
   state: SchedulerWriterLookupState,
   options: {
@@ -114,7 +158,9 @@ function collectLiveSchedulerWriters(
     targets: readonly IMemorySpaceAddress[];
   },
 ): LiveSchedulerWriterCandidate[] {
+  if (options.targets.length === 0) return [];
   const accumulators = new Map<Action, LiveCandidateAccumulator>();
+  const effectWriterIndex = getEffectWriterIndex(state.nodes);
   const addMatches = (
     target: IMemorySpaceAddress,
     actions: ReadonlySet<Action> | undefined,
@@ -171,9 +217,9 @@ function collectLiveSchedulerWriters(
     // surface directly, without changing dependency propagation semantics.
     addMatches(
       target,
-      state.nodes.effects,
+      effectWriterIndex.writersByEntity.get(key),
       "current-known",
-      (action) => resolveRegistrationSurface(action, undefined),
+      (action) => effectWriterIndex.writesByAction.get(action),
     );
     addMatches(
       target,

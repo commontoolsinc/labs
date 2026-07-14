@@ -86,8 +86,8 @@ function registerIdentifiedWriter(
   action: Action,
   pieceId = PIECE_ID,
   isEffect = false,
-): void {
-  runtime.scheduler.register(action, {
+): () => void {
+  return runtime.scheduler.register(action, {
     ...(isEffect ? { isEffect: true } : {}),
     rehydrateFromStorage: {
       space,
@@ -259,6 +259,123 @@ describe("scheduler writer lookup", () => {
         source: "live",
       });
       expect(candidates[0]?.live?.action).toBe(action);
+    } finally {
+      await disposeSchedulerTestRuntime(env);
+    }
+  });
+
+  it("indexes effect surfaces by registration generation", async () => {
+    const env = createSchedulerTestRuntime(import.meta.url);
+    try {
+      stubDurableWriters(env.runtime, []);
+      const output = env.runtime.getCell<number>(
+        space,
+        "writer-lookup-indexed-effect-output",
+        undefined,
+        env.tx,
+      );
+      const outputLink = output.getAsNormalizedFullLink();
+      const unrelated = env.runtime.getCell<number>(
+        space,
+        "writer-lookup-unrelated-effect-output",
+        undefined,
+        env.tx,
+      );
+      const unrelatedAddress = toMemorySpaceAddress(
+        unrelated.getAsNormalizedFullLink(),
+      );
+      let surfaceReads = 0;
+      const action = createWriterAction("writer-lookup:indexed-effect");
+      Object.defineProperty(action, "writes", {
+        configurable: true,
+        get() {
+          surfaceReads++;
+          return [outputLink];
+        },
+      });
+      const cancel = registerIdentifiedWriter(
+        env.runtime,
+        action,
+        PIECE_ID,
+        true,
+      );
+      await env.runtime.scheduler.idle();
+      surfaceReads = 0;
+
+      expect(
+        await writersForTargets(env.runtime, [
+          unrelatedAddress,
+          {
+            ...unrelatedAddress,
+            path: [...unrelatedAddress.path, "nested"],
+          },
+        ]),
+      ).toEqual([]);
+      expect(
+        await writersForTargets(env.runtime, [unrelatedAddress]),
+      ).toEqual([]);
+      expect(surfaceReads).toBe(1);
+
+      const secondOutput = env.runtime.getCell<number>(
+        space,
+        "writer-lookup-second-indexed-effect-output",
+        undefined,
+        env.tx,
+      );
+      const secondOutputLink = secondOutput.getAsNormalizedFullLink();
+      const secondAction = createWriterAction(
+        "writer-lookup:second-indexed-effect",
+        { writes: [secondOutputLink] },
+      );
+      const cancelSecond = registerIdentifiedWriter(
+        env.runtime,
+        secondAction,
+        PIECE_ID,
+        true,
+      );
+      expect(
+        await writersForTargets(env.runtime, [
+          toMemorySpaceAddress(secondOutputLink),
+        ]),
+      ).toHaveLength(1);
+
+      cancelSecond();
+      expect(
+        await writersForTargets(env.runtime, [
+          toMemorySpaceAddress(secondOutputLink),
+        ]),
+      ).toEqual([]);
+
+      const promotedOutput = env.runtime.getCell<number>(
+        space,
+        "writer-lookup-promoted-effect-output",
+        undefined,
+        env.tx,
+      );
+      const promotedOutputLink = promotedOutput.getAsNormalizedFullLink();
+      const promotedAction = createWriterAction(
+        "writer-lookup:promoted-effect",
+        { writes: [promotedOutputLink] },
+      );
+      const cancelComputation = registerIdentifiedWriter(
+        env.runtime,
+        promotedAction,
+      );
+      cancelComputation();
+      const cancelPromoted = registerIdentifiedWriter(
+        env.runtime,
+        promotedAction,
+        PIECE_ID,
+        true,
+      );
+      expect(
+        await writersForTargets(env.runtime, [
+          toMemorySpaceAddress(promotedOutputLink),
+        ]),
+      ).toMatchObject([{ actionKind: "effect" }]);
+
+      cancelPromoted();
+      cancel();
     } finally {
       await disposeSchedulerTestRuntime(env);
     }
