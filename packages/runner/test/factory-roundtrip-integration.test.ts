@@ -42,6 +42,9 @@ const sourceSpace = signer.did();
 const destinationSpace = (await Identity.fromPassphrase(
   "factory roundtrip integration destination",
 )).did();
+const onwardDestinationSpace = (await Identity.fromPassphrase(
+  "factory roundtrip integration onward destination",
+)).did();
 
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
@@ -512,6 +515,55 @@ describe("Factory@1 runner round trips", () => {
       });
       expect(sealFactoryState(materialized)).toEqual(states[index]);
     }
+  });
+
+  it("prefers a verified source over a speculative Cell-read candidate", async () => {
+    const { identity, factories } = await storeFactories();
+    writer.noteFactoryArtifactSource(factories[0], destinationSpace);
+
+    let publication: {
+      identity: string;
+      fromSpace: MemorySpace;
+      toSpace: MemorySpace;
+    } | undefined;
+    const prepareArtifactPublication = writer.patternManager
+      .prepareArtifactPublication.bind(writer.patternManager);
+    writer.patternManager.prepareArtifactPublication = ((
+      selectedIdentity,
+      fromSpace,
+      toSpace,
+    ) => {
+      publication = {
+        identity: selectedIdentity,
+        fromSpace,
+        toSpace,
+      };
+      return [];
+    }) as typeof writer.patternManager.prepareArtifactPublication;
+
+    try {
+      const tx = writer.edit();
+      const destination = writer.getCell<{
+        factory: PatternFactory<unknown, unknown>;
+      }>(
+        onwardDestinationSpace,
+        "verified-source-precedence",
+        undefined,
+        tx,
+      );
+      destination.set({ factory: factories[0] });
+      writer.prepareTxForCommit(tx);
+      expect((await tx.commit()).error).toBeUndefined();
+    } finally {
+      writer.patternManager.prepareArtifactPublication =
+        prepareArtifactPublication;
+    }
+
+    expect(publication).toEqual({
+      identity,
+      fromSpace: sourceSpace,
+      toSpace: onwardDestinationSpace,
+    });
   });
 
   it("cold-loads private source provenance while keeping the destination write optimistic", async () => {

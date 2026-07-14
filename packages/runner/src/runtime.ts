@@ -1726,8 +1726,15 @@ export class Runtime {
         ) {
           continue;
         }
-        const source = this.factoryArtifactSourceFor(factories, destination) ??
-          this.patternManager.artifactSourceSpace(identity, destination);
+        // Prefer already-verified runner authority over a Cell-read candidate.
+        // The candidate may name an intermediate destination whose containing
+        // publication is still only speculative; using the verified origin
+        // lets a causally dependent copy prepare without racing that earlier
+        // commit's wire confirmation. Candidate provenance remains the cold
+        // fallback and must still pass complete source verification.
+        const source =
+          this.patternManager.artifactSourceSpace(identity, destination) ??
+            this.factoryArtifactSourceFor(factories, destination);
         if (source === undefined) {
           this.patternManager.assertArtifactAvailableInSpace(
             identity,

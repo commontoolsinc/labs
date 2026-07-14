@@ -631,6 +631,12 @@ This association is only a candidate source location: cold preparation must
 load and verify the complete closure there before the containing commit can
 reach the wire. The association itself grants no execution authority and is
 lost when the runtime or shell is collected.
+When both a verified runner-owned source and a Cell-read candidate exist, the
+verified source wins. The candidate may be an intermediate destination whose
+containing publication is still speculative; it must not make a causally
+dependent copy race that predecessor's wire confirmation when the original
+verified closure is already available. Cell provenance remains the cold
+fallback and still requires complete closure verification.
 
 ### Inline document transport
 
