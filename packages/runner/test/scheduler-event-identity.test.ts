@@ -28,6 +28,20 @@ function eventKey(id: string): string {
   return id.split(":")[1];
 }
 
+type SchedulerEventQueueTestState = {
+  loadPieceForEvent?: () => Promise<boolean>;
+};
+
+function getSchedulerEventQueueState(
+  scheduler: Runtime["scheduler"],
+): SchedulerEventQueueTestState {
+  const state = Reflect.get(scheduler, "eventQueueState");
+  if (typeof state !== "object" || state === null) {
+    throw new TypeError("Scheduler internals invalid eventQueueState");
+  }
+  return state as SchedulerEventQueueTestState;
+}
+
 describe("scheduler event identity", () => {
   it("mints sequential ids from the same origin transaction", () => {
     const originTx = {} as IExtendedStorageTransaction;
@@ -101,14 +115,10 @@ describe("scheduler event identity", () => {
       finishPieceLoad = resolve;
     });
     try {
-      // Inject only the asynchronous piece-start seam; queueing, head parking,
-      // dispatch, commits, and continuation all run through the real Scheduler.
-      const schedulerInternals = env.runtime.scheduler as unknown as {
-        eventQueueState: {
-          loadPieceForEvent?: () => Promise<boolean>;
-        };
-      };
-      schedulerInternals.eventQueueState.loadPieceForEvent = () => pieceLoad;
+      const eventQueueState = getSchedulerEventQueueState(
+        env.runtime.scheduler,
+      );
+      eventQueueState.loadPieceForEvent = () => pieceLoad;
 
       env.runtime.scheduler.queueEvent(loadingLink, "first");
       env.runtime.scheduler.addEventHandler((_tx, value) => {
@@ -135,78 +145,81 @@ describe("scheduler event identity", () => {
   });
 
   it("settles a piece-start failure exactly once", async () => {
+    const env = createSchedulerTestRuntime(import.meta.url);
     const eventQueue: QueuedEvent[] = [];
     const backgroundTasks = new Set<Promise<unknown>>();
     let callbackCount = 0;
     let callbackStatus: string | undefined;
-    const droppedTx = {
-      abort: () => {},
-      status: () => ({ status: "error" }),
-    } as unknown as IExtendedStorageTransaction;
 
-    queueSchedulerEvent({
-      runtime: { edit: () => droppedTx } as unknown as Runtime,
-      eventHandlers: [],
-      eventQueue,
-      backgroundTasks,
-      loadPieceForEvent: () => Promise.reject(new Error("start failed")),
-      queueExecution: () => {},
-      recordLineageEvent: () => {},
-      releaseLineageEvent: () => {},
-    }, {
-      eventLink,
-      event: "payload",
-      retries: true,
-      doNotLoadPieceIfNotRunning: false,
-      onCommit: (commitTx) => {
-        callbackCount++;
-        callbackStatus = commitTx.status().status;
-      },
-    });
+    try {
+      queueSchedulerEvent({
+        runtime: env.runtime,
+        eventHandlers: [],
+        eventQueue,
+        backgroundTasks,
+        loadPieceForEvent: () => Promise.reject(new Error("start failed")),
+        queueExecution: () => {},
+        recordLineageEvent: () => {},
+        releaseLineageEvent: () => {},
+      }, {
+        eventLink,
+        event: "payload",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        onCommit: (commitTx) => {
+          callbackCount++;
+          callbackStatus = commitTx.status().status;
+        },
+      });
 
-    await Promise.all([...backgroundTasks]);
-    expect(eventQueue).toEqual([]);
-    expect(callbackCount).toBe(1);
-    expect(callbackStatus).toBe("error");
+      await Promise.all([...backgroundTasks]);
+      expect(eventQueue).toEqual([]);
+      expect(callbackCount).toBe(1);
+      expect(callbackStatus).toBe("error");
+    } finally {
+      await disposeSchedulerTestRuntime(env);
+    }
   });
 
   it("does not resurrect an event dropped while its handler is loading", async () => {
+    const env = createSchedulerTestRuntime(import.meta.url);
     const eventQueue: QueuedEvent[] = [];
     const backgroundTasks = new Set<Promise<unknown>>();
     const pieceLoad = Promise.withResolvers<boolean>();
     let callbackCount = 0;
-    const droppedTx = {
-      abort: () => {},
-      status: () => ({ status: "error" }),
-    } as unknown as IExtendedStorageTransaction;
-    const state = {
-      runtime: { edit: () => droppedTx } as unknown as Runtime,
-      eventHandlers: [],
-      eventQueue,
-      backgroundTasks,
-      loadPieceForEvent: () => pieceLoad.promise,
-      queueExecution: () => {},
-      recordLineageEvent: () => {},
-      releaseLineageEvent: () => {},
-    };
 
-    queueSchedulerEvent(state, {
-      eventLink,
-      event: "payload",
-      retries: true,
-      doNotLoadPieceIfNotRunning: false,
-      onCommit: () => callbackCount++,
-    });
-    const queued = eventQueue[0];
-    expect(queued.handlerLoadPending).toBe(true);
+    try {
+      const state = {
+        runtime: env.runtime,
+        eventHandlers: [],
+        eventQueue,
+        backgroundTasks,
+        loadPieceForEvent: () => pieceLoad.promise,
+        queueExecution: () => {},
+        recordLineageEvent: () => {},
+        releaseLineageEvent: () => {},
+      };
 
-    dropQueuedEvent(state, queued, "lineage failed while loading");
-    dropQueuedEvent(state, queued, "duplicate terminal notification");
-    pieceLoad.resolve(true);
-    await Promise.all([...backgroundTasks]);
+      queueSchedulerEvent(state, {
+        eventLink,
+        event: "payload",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        onCommit: () => callbackCount++,
+      });
+      const queued = eventQueue[0];
+      expect(queued.handlerLoadPending).toBe(true);
 
-    expect(eventQueue).toEqual([]);
-    expect(callbackCount).toBe(1);
-    expect(queued.handlerLoadPending).toBe(true);
+      dropQueuedEvent(state, queued, "lineage failed while loading");
+      dropQueuedEvent(state, queued, "duplicate terminal notification");
+      pieceLoad.resolve(true);
+      await Promise.all([...backgroundTasks]);
+
+      expect(eventQueue).toEqual([]);
+      expect(callbackCount).toBe(1);
+      expect(queued.handlerLoadPending).toBe(true);
+    } finally {
+      await disposeSchedulerTestRuntime(env);
+    }
   });
 });
