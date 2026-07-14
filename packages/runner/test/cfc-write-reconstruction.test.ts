@@ -34,8 +34,7 @@ const detail = (
   value: unknown,
 ): TransactionWriteDetail => ({
   address: { space: SPACE, id: ID, scope: SCOPE, path },
-  // deno-lint-ignore no-explicit-any
-  value: value as any,
+  value: value as FabricValue,
 });
 
 const target = (path: readonly string[]) => ({
@@ -143,10 +142,8 @@ Deno.test("writeDetailValueForTarget: previousValue uses the coarse ancestor sna
   const tx = txWith([
     {
       address: { space: SPACE, id: ID, scope: SCOPE, path: ["value"] },
-      // deno-lint-ignore no-explicit-any
-      value: {} as any,
-      // deno-lint-ignore no-explicit-any
-      previousValue: { origin: "old", body: "old-body" } as any,
+      value: {},
+      previousValue: { origin: "old", body: "old-body" },
     },
     {
       address: {
@@ -155,8 +152,7 @@ Deno.test("writeDetailValueForTarget: previousValue uses the coarse ancestor sna
         scope: SCOPE,
         path: ["value", "origin"],
       },
-      // deno-lint-ignore no-explicit-any
-      value: "new" as any,
+      value: "new",
     },
   ]);
   assertEquals(writeDetailValueForTarget(tx, target([]), "previousValue"), {
