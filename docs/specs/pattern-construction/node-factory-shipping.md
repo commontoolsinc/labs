@@ -571,7 +571,11 @@ Publication preserves the memory system's optimistic local-commit contract:
    asynchronous readiness boundary. Every successful source-verification path,
    including a storage-backed compiled-cache load and runtime-version source
    recovery, retains the complete verified module set in the exact source-space
-   publication cache before returning the live artifact.
+   publication cache before returning the live artifact. The requested or
+   compiled entry retains the complete verified set, including synthetic extra
+   roots. Every other verified module identity retains its separately rooted
+   forward-import closure, so a factory defined outside the entry module remains
+   synchronously publishable without including importer-only siblings.
 3. If a trusted source closure is not loaded, the same local commit remains
    speculative while runner-owned preparation loads and verifies it. No
    authored callback or setter becomes asynchronous.
@@ -662,6 +666,15 @@ writers switch. Once expanded into a containing document write, nested factories
 follow the same speculative-local, causally gated publication protocol as every
 other by-value write.
 
+Query traversal may construct a transient data-URI address from a value already
+read inside a persisted containing Cell. That internal address is derived from
+the containing Cell's full source-space address and is not a canonical durable
+writer, so constructing it does not repeat destination-availability proof. It
+grants neither artifact availability nor execution authority. If the value is
+subsequently written, data-URI expansion restores the containing value before
+the ordinary codec-state walk, source verification, and atomic publication
+proof; no transient address creates a durable publication bypass.
+
 Storage transaction fast paths operate on the containing entity document and
 must preserve `Factory@1` as an atomic value at its document path (normally
 `value` or a descendant). They use the same Fabric freeze, equality, and
@@ -716,8 +729,12 @@ All Fabric-aware walks use the factory state accessor or a shared codec-state
 visitor. Builder traversal, alias conversion, CFC inspection, deep freeze,
 clone, equality, hashing, serialization, IPC detection, and destination-artifact
 publication must not each invent a different view of factory state. Registered
-codec-backed Fabric instances recurse through their encoded state. Actual Cells
-and links remain atomic references whose own source-space provenance is
+codec-backed Fabric instances recurse through their encoded state. Walks that
+change that state, including data-URI normalization and inlining and live
+factory-state write preparation, reconstruct the same registered instance type
+through its codec rather than flattening its enumerable properties. This
+context-free reconstruction cannot materialize a decoded factory shell. Actual
+Cells and links remain atomic references whose own source-space provenance is
 preserved.
 
 Every canonical by-value write route uses this traversal, including direct Cell

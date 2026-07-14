@@ -333,6 +333,93 @@ describe("Factory@1 runner round trips", () => {
     }
   });
 
+  it("publishes a verified non-entry factory synchronously", async () => {
+    const program: RuntimeProgram = {
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { pattern } from 'commonfabric';",
+          "import { dependencyFactory } from './dependency.tsx';",
+          "export default pattern<{ value: number }>(({ value }) => ({ child: dependencyFactory({ value }) }));",
+        ].join("\n"),
+      }, {
+        name: "/dependency.tsx",
+        contents: [
+          "import { pattern } from 'commonfabric';",
+          "export const dependencyFactory = pattern<{ value: number }>(({ value }) => ({ result: value }));",
+        ].join("\n"),
+      }],
+    };
+    const compiled = await writer.harness.compileToRecordGraph(program);
+    const dependencyIdentity =
+      compiled.modules.find((module) => module.filename === "/dependency.tsx")!
+        .identity;
+    const extraRootIdentity =
+      compiled.modules.find((module) => module.filename === "cfc.ts")!
+        .identity;
+    let entryIdentity: string | undefined;
+    await writer.patternManager.compilePattern(program, {
+      space: sourceSpace,
+      onEntryIdentity(identity) {
+        entryIdentity = identity;
+      },
+    });
+    expect(entryIdentity).toBeDefined();
+    await storageManager.synced();
+
+    const dependencyFactory = writer.patternManager.artifactFromIdentitySync(
+      dependencyIdentity,
+      "dependencyFactory",
+    );
+    expect(dependencyFactory).toBeDefined();
+    expect(sealFactoryState(dependencyFactory).ref.identity).toBe(
+      dependencyIdentity,
+    );
+    expect(dependencyIdentity).not.toBe(entryIdentity);
+    expect(
+      writer.patternManager.isArtifactAvailableInSpace(
+        dependencyIdentity,
+        sourceSpace,
+      ),
+    ).toBe(true);
+
+    const publication = writer.patternManager.prepareArtifactPublication(
+      dependencyIdentity,
+      sourceSpace,
+      destinationSpace,
+    );
+    expect(Array.isArray(publication)).toBe(true);
+    expect((publication as readonly unknown[]).length).toBeGreaterThan(0);
+    const publishedModuleIdentities = (publication as readonly {
+      value: { value?: { identity?: string } };
+    }[]).flatMap((operation) =>
+      operation.value.value?.identity === undefined
+        ? []
+        : [operation.value.value.identity]
+    );
+    expect(publishedModuleIdentities).toContain(dependencyIdentity);
+    expect(publishedModuleIdentities).not.toContain(entryIdentity);
+    expect(publishedModuleIdentities).not.toContain(extraRootIdentity);
+
+    const entryPublication = writer.patternManager.prepareArtifactPublication(
+      entryIdentity!,
+      sourceSpace,
+      destinationSpace,
+    );
+    expect(Array.isArray(entryPublication)).toBe(true);
+    const entryPublishedModuleIdentities = (entryPublication as readonly {
+      value: { value?: { identity?: string } };
+    }[]).flatMap((operation) =>
+      operation.value.value?.identity === undefined
+        ? []
+        : [operation.value.value.identity]
+    );
+    expect(entryPublishedModuleIdentities).toContain(entryIdentity);
+    expect(entryPublishedModuleIdentities).toContain(dependencyIdentity);
+    expect(entryPublishedModuleIdentities).toContain(extraRootIdentity);
+  });
+
   it("warm-materializes a decoded root PatternFactory before synchronous run", async () => {
     const { identity } = await storeFactories();
     const live = writer.patternManager.artifactFromIdentitySync(

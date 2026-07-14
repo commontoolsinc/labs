@@ -398,6 +398,54 @@ export class PatternManager {
   }
 
   /**
+   * Retain the exact forward import closure rooted at every verified module.
+   *
+   * A compiled entry can expose factories from any module in its graph. Once
+   * that graph is verified, each such factory is warm and must publish without
+   * introducing an asynchronous readiness boundary. The original entry keeps
+   * the complete verified set, including synthetic extra roots. Other modules
+   * retain independently rooted forward closures so publishing a dependency
+   * directly does not include importer-only siblings.
+   */
+  private cacheArtifactPublicationClosures(
+    space: MemorySpace,
+    modules: CacheableModule[],
+    entryIdentity: string,
+  ): void {
+    const modulesByIdentity = new Map(
+      modules.map((module) => [module.identity, module]),
+    );
+    for (const rootIdentity of modulesByIdentity.keys()) {
+      if (rootIdentity === entryIdentity) {
+        this.cacheArtifactPublicationModules(space, rootIdentity, modules);
+        continue;
+      }
+      const reachable = new Set<string>();
+      const pending = [rootIdentity];
+      while (pending.length > 0) {
+        const identity = pending.pop()!;
+        if (reachable.has(identity)) continue;
+        const module = modulesByIdentity.get(identity);
+        if (module === undefined) continue;
+        reachable.add(identity);
+        for (const imp of module.imports) {
+          if (
+            !imp.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
+            modulesByIdentity.has(imp.targetIdentity)
+          ) {
+            pending.push(imp.targetIdentity);
+          }
+        }
+      }
+      this.cacheArtifactPublicationModules(
+        space,
+        rootIdentity,
+        modules.filter((module) => reachable.has(module.identity)),
+      );
+    }
+  }
+
+  /**
    * Build the source-document ensures that make a by-value Factory@1 durable
    * in `toSpace`. Warm verified source returns synchronously. A cold source
    * returns a promise, which the v2 replica holds behind the already-visible
@@ -436,10 +484,10 @@ export class PatternManager {
         );
       }
       const modules = this.modulesFromVerifiedArtifactClosure(closure);
-      this.cacheArtifactPublicationModules(
+      this.cacheArtifactPublicationClosures(
         fromSpace,
-        entryIdentity,
         modules,
+        entryIdentity,
       );
       return this.buildArtifactPublicationOperations(
         modules,
@@ -589,10 +637,10 @@ export class PatternManager {
     // Every caller that successfully loads a closure — compiled-cache hits,
     // runtime-version recovery, ordinary pattern compilation, and explicit
     // closure verification — now warms the same synchronous publication path.
-    this.cacheArtifactPublicationModules(
+    this.cacheArtifactPublicationClosures(
       artifactSpace,
-      entryIdentity,
       this.modulesFromVerifiedArtifactClosure({ sourceDocs: verified }),
+      entryIdentity,
     );
     return verified;
   }
@@ -2147,7 +2195,7 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(persistence);
     try {
       await persistence;
-      this.cacheArtifactPublicationModules(space, entryIdentity, modules);
+      this.cacheArtifactPublicationClosures(space, modules, entryIdentity);
       this.noteArtifactClosureAvailable(
         space,
         modules.map((module) => module.identity),
@@ -2230,7 +2278,7 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(writeBack);
     try {
       await writeBack;
-      this.cacheArtifactPublicationModules(space, entryIdentity, modules);
+      this.cacheArtifactPublicationClosures(space, modules, entryIdentity);
       this.noteArtifactClosureAvailable(
         space,
         modules.map((module) => module.identity),
