@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/stored-pattern-rehydration.test.ts": [
-    "89:52:4f6ebu",
-    "143:8:lriet0",
-  ],
   "packages/runner/test/telemetry-otel-bridge.test.ts": [
     "52:4:odh5cc",
     "83:4:104x6pt",
@@ -345,6 +341,13 @@ export const noAsUnknownAsBaselineEntries = {
   "packages/ui/src/v2/components/cf-image/cf-image.test.ts": [
     "21:17:35np34",
     "70:29:1ife3s6",
+  ],
+  "packages/ui/src/v2/components/cf-pointer-accessibility.test.ts": [
+    "31:25:1vvswj",
+    "53:4:ksqs7q",
+    "66:25:1g4q9mk",
+    "91:25:1dj30wv",
+    "122:26:1qmdj85",
   ],
   "packages/ui/src/v2/components/cf-profile-badge/cf-profile-badge.test.ts": [
     "715:37:1iool1a",

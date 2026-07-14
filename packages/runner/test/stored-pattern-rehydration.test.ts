@@ -6,7 +6,11 @@ import { Runtime } from "../src/runtime.ts";
 import type { Pattern } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { serializePatternGraph } from "../src/builder/json-utils.ts";
-import { resolveStoredPattern } from "../src/builtins/op-pattern-ref.ts";
+import {
+  isPatternRefSentinel,
+  type PatternRefSentinel,
+  resolveStoredPattern,
+} from "../src/builtins/op-pattern-ref.ts";
 
 /**
  * Stored pattern-VALUE rehydration (design §7, identity E4/E5): the JSON
@@ -32,6 +36,12 @@ const fixture = JSON.parse(
   program: RuntimeProgram;
   serialized: Record<string, Record<string, unknown>>;
 };
+
+function expectPatternRefSentinel(
+  value: unknown,
+): asserts value is PatternRefSentinel {
+  expect(isPatternRefSentinel(value)).toBe(true);
+}
 
 describe("stored pattern-value rehydration", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
@@ -86,7 +96,7 @@ describe("stored pattern-value rehydration", () => {
       fixture.program,
     );
     const graph = JSON.parse(
-      JSON.stringify(serializePatternGraph(compiled as unknown as Pattern)),
+      JSON.stringify(serializePatternGraph(compiled)),
     ) as Pattern;
     expect("$patternRef" in graph).toBe(false);
     expect(Array.isArray(graph.nodes)).toBe(true);
@@ -140,9 +150,8 @@ describe("stored pattern-value rehydration", () => {
       });
       const stored = structuredClone(
         fixture.serialized.refsOnly,
-      ) as unknown as {
-        $patternRef: { identity: string; symbol: string };
-      };
+      );
+      expectPatternRefSentinel(stored);
       expect(resolveStoredPattern(runtime, stored)).toBeUndefined();
 
       const loaded = await runtime.patternManager.loadPatternByIdentity(
