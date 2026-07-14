@@ -3,7 +3,9 @@
 ## Status
 
 Implemented. The separately specified `latestComplete()` snapshot helper
-remains planned work.
+remains planned work. Pending renderer continuity is implemented; migration of
+the remaining asynchronous APIs is tracked in the
+[`async API availability plan`](../plans/async-api-availability-migration.md).
 
 ## Summary
 
