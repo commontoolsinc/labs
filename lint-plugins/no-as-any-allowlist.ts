@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/cfc-boundary.test.ts",
   "packages/runner/test/cfc-flow-pointwise.test.ts",
   "packages/runner/test/cfc-label-view.test.ts",
   "packages/runner/test/cfc-nonexported-binding-identity.test.ts",

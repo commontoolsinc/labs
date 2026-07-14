@@ -30,8 +30,13 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcEnforcementMode,
 } from "../src/cfc/types.ts";
-import type { JSONSchema, Pattern } from "../src/builder/types.ts";
+import type {
+  JSONSchema,
+  JSONSchemaObj,
+  Pattern,
+} from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+import { setLinkCfcLabelView } from "../src/cfc/link-label-view.ts";
 import { ignoreReadForScheduling } from "../src/scheduler.ts";
 import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
 import { setResultCell } from "../src/result-utils.ts";
@@ -668,11 +673,15 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }, resultCell);
 
       expect(resultCell.getArgumentCell()).toBeDefined();
-      expect(
-        (resultCell.getArgumentCell()?.getRaw() as any)?.savedTitle?.[
-          "/"
-        ]?.["link@1"]?.id,
-      ).toBe(sourceCell.getAsNormalizedFullLink().id);
+      expect(resultCell.getArgumentCell()?.getRaw()).toMatchObject({
+        savedTitle: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: sourceCell.getAsNormalizedFullLink().id,
+            },
+          },
+        },
+      });
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -2245,8 +2254,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       const tx = runtime.edit();
       tx.setCfcEnforcementMode("enforce-explicit");
-      const link = source.getAsLink() as any;
-      link["/"][LINK_V1_TAG].cfcLabelView = {
+      const link = source.getAsLink();
+      setLinkCfcLabelView(link, {
         version: 1,
         entries: [{
           path: [],
@@ -2255,7 +2264,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           path: ["title"],
           label: { confidentiality: ["selected-title"] },
         }],
-      };
+      });
       const target = runtime.getCell(
         signer.did(),
         "cfc-link-carried-only-target",
@@ -5763,7 +5772,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
           properties: {
             value: {
               type: "string",
-              ifc: { opaque: true } as any,
+              ifc: { opaque: true } as unknown as JSONSchemaObj["ifc"],
             },
           },
           required: ["value"],
@@ -5804,7 +5813,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
                   from: ["input", "value"],
                   path: ["value"],
                 },
-              } as any,
+              } as unknown as JSONSchemaObj["ifc"],
             },
           },
           required: ["value"],
@@ -5844,7 +5853,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
                   subsetOf: ["input", "items"],
                   memberIntegrity: "preserved",
                 },
-              } as any,
+              } as unknown as JSONSchemaObj["ifc"],
             },
           },
           required: ["value"],
