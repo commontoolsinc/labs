@@ -90,8 +90,19 @@ export interface ServerBuiltinFetchResult {
   redirectCount: number;
 }
 
+export interface ServerBuiltinFetchControl {
+  /** Application policy for each redirect target, after Fetch method/body
+   * rewriting and before any DNS lookup or transport dispatch for that hop. */
+  authorizeRedirectTarget?: (
+    request: Omit<ServerBuiltinFetchRequest, "signal">,
+  ) => void | Promise<void>;
+}
+
 export interface ServerBuiltinFetchBroker {
-  fetch(request: ServerBuiltinFetchRequest): Promise<ServerBuiltinFetchResult>;
+  fetch(
+    request: ServerBuiltinFetchRequest,
+    control?: ServerBuiltinFetchControl,
+  ): Promise<ServerBuiltinFetchResult>;
 }
 
 /**
@@ -692,7 +703,7 @@ export const createServerBuiltinEgressBroker = (
   const scheduleTimeout = options.scheduleTimeout ?? defaultScheduleTimeout;
 
   return {
-    async fetch(request): Promise<ServerBuiltinFetchResult> {
+    async fetch(request, control): Promise<ServerBuiltinFetchResult> {
       let method = normalizeMethod(request.method);
       const headers = normalizeHeaders(request.headers);
       let body = copyBody(request.body);
@@ -811,6 +822,13 @@ export const createServerBuiltinEgressBroker = (
             headers,
           ));
           await cancelBody(response.body, controller.signal);
+          await control?.authorizeRedirectTarget?.({
+            url: nextUrl.href,
+            method,
+            headers: new Headers(headers),
+            ...(body !== undefined ? { body: copyBody(body) } : {}),
+          });
+          throwIfAborted(controller.signal);
           target = { url: nextUrl, trustedServingOrigin: remainsTrusted };
           redirectCount += 1;
         }

@@ -166,12 +166,25 @@ export function createServerBuiltinBrokerHost(
         claim: request.claim,
         fetch: fetchRequest,
       } satisfies AuthorizedServerBuiltinRequest;
-      await options.authorize?.(authorized, options.context);
+      const authorize = options.authorize;
+      const authorizeTarget = authorize === undefined
+        ? undefined
+        : (target: Omit<ServerBuiltinFetchRequest, "signal">) =>
+          authorize(
+            { ...authorized, fetch: target },
+            options.context,
+          );
+      await authorizeTarget?.(fetchRequest);
       if (controller.signal.aborted) throw abortReason(controller.signal);
-      const result = await options.broker.fetch({
-        ...fetchRequest,
-        signal: controller.signal,
-      });
+      const result = await options.broker.fetch(
+        {
+          ...fetchRequest,
+          signal: controller.signal,
+        },
+        authorizeTarget === undefined
+          ? undefined
+          : { authorizeRedirectTarget: authorizeTarget },
+      );
       const body = new Uint8Array(await result.response.arrayBuffer());
       respond({
         type: "server-builtin.fetch-result",

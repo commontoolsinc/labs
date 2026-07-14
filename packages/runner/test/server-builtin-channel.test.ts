@@ -6,9 +6,12 @@ import {
   ServerBuiltinUnservedError,
 } from "../src/executor/server-builtin-channel.ts";
 import {
+  createServerBuiltinEgressBroker,
   ServerBuiltinEgressError,
   type ServerBuiltinFetchBroker,
+  type ServerBuiltinTransportRequest,
 } from "../src/executor/server-builtin-egress.ts";
+import { authorizeDefaultServerBuiltinRequest } from "../src/executor/server-builtin-transport.ts";
 import {
   SERVER_EXECUTABLE_BUILTIN_IDS,
   serverBuiltinImplementationHash,
@@ -199,6 +202,89 @@ Deno.test("builtin broker channel tags permanent authorization denial without eg
     host.dispose();
   }
 });
+
+for (const redirectStatus of [307, 308] as const) {
+  for (const redirectKind of ["same-origin", "cross-origin"] as const) {
+    Deno.test(`${redirectKind} ${redirectStatus} redirect cannot enter a protected first-party POST target`, async () => {
+      const channel = new MessageChannel();
+      const dispatched: ServerBuiltinTransportRequest[] = [];
+      const resolvedHosts: string[] = [];
+      const broker = createServerBuiltinEgressBroker({
+        servingOrigin: "https://toolshed.example/",
+        resolveHostAddresses: (hostname) => {
+          resolvedHosts.push(hostname);
+          return Promise.resolve(["93.184.216.34"]);
+        },
+        transport: {
+          request(request) {
+            dispatched.push(request);
+            if (dispatched.length === 1) {
+              return new Response(null, {
+                status: redirectStatus,
+                headers: {
+                  location: redirectKind === "same-origin"
+                    ? "/api/sandbox/exec"
+                    : "https://toolshed.example/api/sandbox/exec",
+                },
+              });
+            }
+            return new Response("protected target dispatched", { status: 200 });
+          },
+        },
+      });
+      const host = createServerBuiltinBrokerHost({
+        port: channel.port1,
+        context: {
+          space: SPACE,
+          branch: "",
+          leaseGeneration: 4,
+          onBehalfOf: ACTOR,
+          servingOrigin: new URL("https://toolshed.example/"),
+        },
+        broker,
+        isClaimLive: () => true,
+        authorize: authorizeDefaultServerBuiltinRequest,
+      });
+      const client = createServerBuiltinBrokerClient({
+        port: channel.port2,
+        claimForRequest: () => claim,
+      });
+
+      try {
+        const error = await assertRejects(
+          () =>
+            client.fetch(
+              "fetchText",
+              redirectKind === "same-origin"
+                ? "/api/public"
+                : "https://public.example/start",
+              {
+                method: "POST",
+                headers: { "content-type": "text/plain" },
+                body: "broker payload",
+              },
+            ),
+          ServerBuiltinUnservedError,
+          "protected first-party builtin request",
+        );
+        assertEquals(
+          error.diagnosticCode,
+          "server-builtin-authorization-denied",
+        );
+        assertEquals(dispatched.length, 1);
+        assertEquals(dispatched[0].method, "POST");
+        assertEquals(dispatched[0].body, "broker payload");
+        assertEquals(
+          resolvedHosts,
+          redirectKind === "same-origin" ? [] : ["public.example"],
+        );
+      } finally {
+        client.dispose();
+        host.dispose();
+      }
+    });
+  }
+}
 
 Deno.test("builtin broker channel distinguishes permanent egress policy from transient failure", async () => {
   const exercise = async (code: "blocked-destination" | "request-timeout") => {
