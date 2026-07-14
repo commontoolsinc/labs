@@ -5,7 +5,7 @@ import { schemaHasIfc } from "../src/schema.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 
-describe("ContextualFlowControl.schemaAtPath array index validation", () => {
+describe("ContextualFlowControl.schemaAtPath", () => {
   it("rejects leading-zero array index like '01'", () => {
     const cfc = new ContextualFlowControl();
 
@@ -60,7 +60,7 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
     expect(ContextualFlowControl.isTrueSchema({ scope: "any" })).toBe(true);
   });
 
-  it("carries nested property $defs while traversing through array item refs", () => {
+  it("uses nested property $defs while traversing through array item refs", () => {
     const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
       type: "object",
@@ -92,18 +92,174 @@ describe("ContextualFlowControl.schemaAtPath array index validation", () => {
       .toEqual({
         type: "array",
         items: { type: "number" },
-        $defs: {
-          Item: {
-            type: "object",
-            properties: {
-              values: {
-                type: "array",
-                items: { type: "number" },
-              },
-            },
+      });
+  });
+
+  it("drops definitions that the derived schema cannot reach", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+      },
+      $defs: {
+        Unused: {
+          type: "object",
+          properties: { value: { type: "number" } },
+        },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["title"])).toEqual({
+      type: "string",
+    });
+  });
+
+  it("keeps the transitive definition closure for a derived schema", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "array",
+      items: { $ref: "#/$defs/Entry" },
+      $defs: {
+        Entry: {
+          type: "object",
+          properties: {
+            label: { $ref: "#/$defs/Label" },
           },
         },
-      });
+        Label: { type: "string" },
+        Unused: { type: "number" },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["0"])).toEqual({
+      $ref: "#/$defs/Entry",
+      $defs: {
+        Entry: {
+          type: "object",
+          properties: {
+            label: { $ref: "#/$defs/Label" },
+          },
+        },
+        Label: { type: "string" },
+      },
+    });
+  });
+
+  it("does not enumerate or read unreachable definitions", () => {
+    const cfc = new ContextualFlowControl();
+    const definitions = new Proxy<Record<string, JSONSchema>>(
+      {
+        Used: { type: "string" },
+        Unused: { type: "number" },
+      },
+      {
+        ownKeys: () => {
+          throw new Error("definition map was enumerated");
+        },
+        get: (target, property, receiver) => {
+          if (property === "Unused") {
+            throw new Error("unreachable definition was read");
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      },
+    );
+    const schema: JSONSchema = {
+      type: "array",
+      items: { $ref: "#/$defs/Used" },
+      $defs: definitions,
+    };
+
+    expect(cfc.schemaAtPath(schema, ["0"])).toEqual({
+      $ref: "#/$defs/Used",
+      $defs: { Used: { type: "string" } },
+    });
+  });
+
+  it("keeps refs resolved from a reached definition body", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "array",
+      items: { $ref: "#/$defs/Entry" },
+      $defs: {
+        Entry: {
+          type: "object",
+          properties: {
+            value: { $ref: "#/$defs/Shared" },
+          },
+          $defs: {
+            Shared: { type: "number" },
+          },
+        },
+        Shared: { type: "string" },
+        Unused: { type: "boolean" },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["0"])).toEqual({
+      $ref: "#/$defs/Entry",
+      $defs: {
+        Entry: {
+          type: "object",
+          properties: {
+            value: { $ref: "#/$defs/Shared" },
+          },
+          $defs: {
+            Shared: { type: "number" },
+          },
+        },
+        Shared: { type: "string" },
+      },
+    });
+  });
+
+  it("keeps cyclic and JSON-pointer-escaped definition references", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "array",
+      items: { $ref: "#/$defs/a~1b~0c" },
+      $defs: {
+        "a/b~c": { $ref: "#/$defs/Back" },
+        Back: { $ref: "#/$defs/a~1b~0c" },
+        Unused: { type: "boolean" },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["17"])).toEqual({
+      $ref: "#/$defs/a~1b~0c",
+      $defs: {
+        "a/b~c": { $ref: "#/$defs/Back" },
+        Back: { $ref: "#/$defs/a~1b~0c" },
+      },
+    });
+  });
+
+  it("does not mix nested and inherited definition scopes", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        nested: {
+          $ref: "#/$defs/Inner",
+          $defs: {
+            Inner: { type: "string" },
+            NestedUnused: { type: "null" },
+          },
+        },
+      },
+      $defs: {
+        Inner: { type: "number" },
+        OuterUnused: { type: "boolean" },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["nested"])).toEqual({
+      $ref: "#/$defs/Inner",
+      $defs: {
+        Inner: { type: "string" },
+      },
+    });
   });
 });
 

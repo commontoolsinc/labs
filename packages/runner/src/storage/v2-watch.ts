@@ -7,6 +7,7 @@ import type { MIME } from "@commonfabric/memory/interface";
 import type { CellScope } from "@commonfabric/memory/v2";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { ContextualFlowControl } from "../cfc.ts";
+import { pruneCfcSchemaDefinitions } from "../cfc/schema-refs.ts";
 import { SelectorTracker } from "./selector-tracker.ts";
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type { PullError, Result, Unit, URI } from "./interface.ts";
@@ -20,7 +21,12 @@ export const normalizeSyncSelector = (
   if (selector === undefined || selector.schema === false) {
     return REJECTING_SELECTOR;
   }
-  return internPathSelector(selector);
+  const schema = selector.schema === undefined
+    ? undefined
+    : pruneCfcSchemaDefinitions(selector.schema);
+  return internPathSelector(
+    schema === selector.schema ? selector : { path: selector.path, schema },
+  );
 };
 
 export const normalizeSyncEntries = (

@@ -22,6 +22,7 @@ import {
   resolveCfcSchemaRef,
   resolveCfcSchemaRefs,
   resolveCfcSchemaRefsOrThrow,
+  selectReferencedCfcSchemaDefs,
 } from "./cfc/schema-refs.ts";
 export {
   CFC_ATOM_TYPE,
@@ -43,6 +44,66 @@ type IFCAtom = ImmutableJSONValue;
 // contexts), which would leave a per-instance cache permanently cold.
 // Mutable schemas are never cached (in-place edits must be observed).
 const schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+
+/**
+ * A one-segment path key based on schema behavior rather than data cardinality.
+ *
+ * Homogeneous array indices and undeclared object property names all select the
+ * same schema. Sharing those cache entries bounds the cache by schema shape
+ * instead of by array length or dynamic object key count. Complex ref/union
+ * roots retain the exact-path fallback below.
+ */
+const symbolicSchemaAtPathPart = (
+  schema: JSONSchemaObj,
+  part: string,
+): string | undefined => {
+  if (schema.$ref !== undefined || schema.anyOf || schema.oneOf) {
+    return undefined;
+  }
+  if (cfcSchemaIsTrue(schema)) return "wildcard";
+  if (schema.type === "object") {
+    if (schema.properties && part in schema.properties) {
+      return `property:${part.length}:${part}`;
+    }
+    if (schema.additionalProperties !== undefined) return "additional";
+    if (schema.properties) {
+      return Object.keys(schema.properties).length === 0 ? "empty" : "missing";
+    }
+    return "open";
+  }
+  if (schema.type === "array") {
+    if (!isArrayIndexPropertyName(part)) return "invalid-index";
+    const index = Number(part);
+    return schema.prefixItems && index < schema.prefixItems.length
+      ? `prefix:${index}`
+      : "items";
+  }
+  if (
+    schema.type === "unknown" ||
+    Array.isArray(schema.type) && schema.type.includes("unknown")
+  ) {
+    return "unknown";
+  }
+  // schemaAtPath cannot descend through terminal primitive schemas.
+  return "terminal";
+};
+
+const schemaAtPathKey = (
+  schema: JSONSchemaObj,
+  path: readonly string[],
+  defaultEmptyProperties: boolean,
+  defaultMissingProperty: boolean,
+): string => {
+  let key = `${defaultEmptyProperties}|${defaultMissingProperty}`;
+  if (path.length === 1) {
+    const symbolic = symbolicSchemaAtPathPart(schema, path[0]);
+    if (symbolic !== undefined) return `${key}|s:${symbolic}`;
+  }
+  // Length-prefix each segment so a segment containing the separator (a
+  // NUL-bearing property name) cannot collide with a differently-split path.
+  for (const part of path) key += `|${part.length}:${part}`;
+  return key;
+};
 
 // Class for handling cfc rules.
 // The spec's confidentiality model is based on structured atoms.
@@ -364,6 +425,8 @@ export class ContextualFlowControl {
     defaultEmptyProperties: JSONSchema = true,
     defaultMissingProperty: JSONSchema = true,
   ): JSONSchema {
+    if (schema === false) return false;
+    if (schema === true && extraConfidentiality === undefined) return true;
     // Take defs from schema if available
     const defs = isRecord(schema) && schema.$defs ? schema.$defs : undefined;
     const cacheable = extraConfidentiality === undefined &&
@@ -385,13 +448,12 @@ export class ContextualFlowControl {
       byKey = new Map();
       schemaAtPathCache.set(schema, byKey);
     }
-    // Length-prefix each segment so a segment containing the separator (a
-    // NUL-bearing property name) cannot collide with a differently-split
-    // path — same idiom as traverse.ts's pathKey.
-    let key = `${defaultEmptyProperties}|${defaultMissingProperty}`;
-    for (const part of path) {
-      key += `|${part.length}:${part}`;
-    }
+    const key = schemaAtPathKey(
+      schema,
+      path,
+      defaultEmptyProperties,
+      defaultMissingProperty,
+    );
     let result = byKey.get(key);
     if (result === undefined) {
       // Intern the derivation so the cached result is the canonical frozen
@@ -566,8 +628,14 @@ export class ContextualFlowControl {
     const ifc = (joined.size !== 0)
       ? { ...cursor.ifc, confidentiality: this.lub(joined) }
       : cursor.ifc;
-    // Merge any ifc and defs
-    return { ...cursor, ...(ifc && { ifc }), ...(defs && { $defs: defs }) };
+    const selectedDefs = selectReferencedCfcSchemaDefs(cursor, defs);
+    const result = { ...cursor, ...(ifc && { ifc }) } as Record<
+      string,
+      unknown
+    >;
+    delete result.$defs;
+    if (selectedDefs !== undefined) result.$defs = selectedDefs;
+    return result as JSONSchema;
   }
 
   // Check to see if the specified schema is one of the special values meaning

@@ -6,7 +6,6 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Identity } from "@commonfabric/identity";
-import { isRecord } from "@commonfabric/utils/types";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -327,8 +326,8 @@ describe("Reactive Schema Support", () => {
   });
 
   describe("Schema $ref and $defs Resolution", () => {
-    it("should preserve schema with $defs when navigating with key()", () => {
-      // Schema with $defs that needs to be preserved for nested $ref resolution
+    it("should preserve only reachable $defs while navigating with key()", () => {
+      // Schema with $defs that are needed for nested $ref resolution.
       const schema = {
         $defs: {
           Address: {
@@ -367,32 +366,28 @@ describe("Reactive Schema Support", () => {
       const userRef = ref.key("user");
       const userExport = userRef.export();
 
-      // The schema should be preserved (contains $defs)
+      // Person and its Address dependency are both still reachable.
       expect(userExport.schema).toBeDefined();
       expect((userExport.schema as any).$defs).toBeDefined();
       expect((userExport.schema as any).$defs.Address).toBeDefined();
+      expect((userExport.schema as any).$defs.Person).toBeDefined();
 
       // Navigate further to home (which references Address via $ref)
       const homeRef = userRef.key("home");
       const homeExport = homeRef.export();
 
-      // The schema should still be preserved at this level
+      // Person is no longer reachable, but Address is needed by the cursor.
       expect(homeExport.schema).toBeDefined();
       expect((homeExport.schema as any).$defs).toBeDefined();
       expect((homeExport.schema as any).$defs.Address).toBeDefined();
+      expect((homeExport.schema as any).$defs.Person).toBeUndefined();
 
       // Navigate to street (final property)
       const streetRef = homeRef.key("street");
       const streetExport = streetRef.export();
 
-      // The schema at this level should be the string type
-      expect(isRecord(streetExport.schema)).toBe(true);
-      if (isRecord(streetExport.schema)) {
-        const { $defs: defs, ...rest } = streetExport.schema;
-        // Even at the leaf level, defs should be preserved
-        expect(defs).toBeDefined();
-        expect(rest).toEqual({ type: "string" });
-      }
+      // No definitions are reachable from the concrete leaf.
+      expect(streetExport.schema).toEqual({ type: "string" });
     });
 
     it("should handle deeply nested $ref chains with key() navigation", () => {
@@ -434,22 +429,28 @@ describe("Reactive Schema Support", () => {
         };
       }>(undefined, schema);
 
-      // Navigate through the chain
-      const valueRef = ref.key("outer").key("middle").key("inner").key("value");
+      // Each step retains the remaining transitive closure and drops definitions
+      // that can no longer be reached.
+      const outerRef = ref.key("outer");
+      expect(Object.keys((outerRef.export().schema as any).$defs)).toEqual([
+        "Inner",
+        "Middle",
+        "Outer",
+      ]);
+      const middleRef = outerRef.key("middle");
+      expect(Object.keys((middleRef.export().schema as any).$defs)).toEqual([
+        "Inner",
+        "Middle",
+      ]);
+      const innerRef = middleRef.key("inner");
+      expect(Object.keys((innerRef.export().schema as any).$defs)).toEqual([
+        "Inner",
+      ]);
+      const valueRef = innerRef.key("value");
       const exported = valueRef.export();
 
-      // The schema defs should be preserved all the way down
-      expect(isRecord(exported.schema)).toBe(true);
-      if (isRecord(exported.schema)) {
-        const { $defs: defs, ...rest } = exported.schema;
-        expect(defs).toBeDefined();
-        expect(defs?.Inner).toBeDefined();
-        expect(defs?.Middle).toBeDefined();
-        expect(defs?.Outer).toBeDefined();
-
-        // The schema at this level should be the number type
-        expect(rest).toEqual({ type: "number" });
-      }
+      // The concrete leaf no longer needs the chain's definitions.
+      expect(exported.schema).toEqual({ type: "number" });
     });
   });
 });

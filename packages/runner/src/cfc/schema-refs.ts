@@ -9,14 +9,40 @@ import { decodeJsonPointer } from "../link-types.ts";
 
 const logger = getLogger("cfc");
 
+type SchemaDefinitions = NonNullable<JSONSchemaObj["$defs"]>;
+
+type SchemaRefSummary = {
+  /** All refs below this fragment, excluding dormant `$defs` bodies. */
+  all: ReadonlySet<string>;
+  /** Local definition names resolved by this fragment's definition scope. */
+  localDefinitions: ReadonlySet<string>;
+};
+
+type DefinitionIndex = {
+  dependencies: Map<string, ReadonlySet<string>>;
+  subsets: Map<string, SchemaDefinitions>;
+};
+
+const EMPTY_REFS: ReadonlySet<string> = new Set<string>();
+const EMPTY_REF_SUMMARY: SchemaRefSummary = {
+  all: EMPTY_REFS,
+  localDefinitions: EMPTY_REFS,
+};
+
 // Memos for the pure schema-ref walks below, keyed by schema object identity.
-// Only deep-frozen schemas are cached (isDeepFrozen is O(1) for graphs it has
-// seen): mutable schemas could be edited in place after caching. The interned
-// schemas on the hot read path (e.g. rendererVDOMSchema) are deep-frozen, so
-// they hit. Caching resolveCfcSchemaRef also makes its result identity-STABLE
-// per (fullSchema, ref), which lets downstream identity-keyed hash/traverse
-// caches hit instead of seeing a fresh spread per resolution.
-const schemaRefsCache = new WeakMap<object, ReadonlySet<string>>();
+// A walk populates summaries bottom-up for every visited fragment, so a root
+// scan also prepares its child fragments for later schemaAtPath() lookups.
+// Only deep-frozen schemas are cached: mutable schemas could be edited in place
+// after caching. Definition dependency graphs and canonical subsets are keyed
+// separately by the active `$defs` object, since the same fragment may be used
+// with different local definition scopes.
+const schemaRefSummaryCache = new WeakMap<object, SchemaRefSummary>();
+const definitionIndexCache = new WeakMap<object, DefinitionIndex>();
+const prunedSchemaCache = new WeakMap<object, JSONSchema>();
+
+// Caching resolveCfcSchemaRef also makes its result identity-STABLE per
+// (fullSchema, ref), which lets downstream identity-keyed hash/traverse caches
+// hit instead of seeing a fresh spread per resolution.
 const resolvedRefCache = new WeakMap<
   object,
   Map<string, JSONSchema | undefined>
@@ -59,68 +85,203 @@ export const cfcSchemaIsFalse = (schema: JSONSchema): boolean =>
   schema === false ||
   (isRecord(schema) && "not" in schema && cfcSchemaIsTrue(schema["not"]!));
 
-const collectCfcSchemaRefs = (
-  schema: JSONSchema,
-  refSet: Set<string>,
+const localDefinitionName = (schemaRef: string): string | undefined => {
+  if (!schemaRef.startsWith("#")) return undefined;
+  const path = decodeJsonPointer(schemaRef);
+  return isRootDefsSchemaPointer(path) ? path[2] : undefined;
+};
+
+const forEachSubschema = (
+  schema: JSONSchemaObj,
+  visit: (child: JSONSchema) => void,
 ): void => {
-  if (typeof schema === "boolean") {
-    return;
+  if (schema.not !== undefined) visit(schema.not);
+  if (schema.if !== undefined) visit(schema.if);
+  if (schema.then !== undefined) visit(schema.then);
+  if (schema.else !== undefined) visit(schema.else);
+  if (schema.items !== undefined) visit(schema.items);
+  if (schema.contains !== undefined) visit(schema.contains);
+  if (schema.additionalProperties !== undefined) {
+    visit(schema.additionalProperties);
   }
-  const cached = schemaRefsCache.get(schema);
-  if (cached !== undefined) {
-    for (const ref of cached) refSet.add(ref);
-    return;
+  if (schema.propertyNames !== undefined) visit(schema.propertyNames);
+  if (schema.contentSchema !== undefined) visit(schema.contentSchema);
+
+  for (const child of schema.allOf ?? []) visit(child);
+  for (const child of schema.anyOf ?? []) visit(child);
+  for (const child of schema.oneOf ?? []) visit(child);
+  for (const child of schema.prefixItems ?? []) visit(child);
+  for (const child of Object.values(schema.dependentSchemas ?? {})) {
+    visit(child);
   }
+  for (const child of Object.values(schema.properties ?? {})) visit(child);
+  for (const child of Object.values(schema.patternProperties ?? {})) {
+    visit(child);
+  }
+};
+
+const addRefs = (target: Set<string>, source: ReadonlySet<string>): void => {
+  for (const ref of source) target.add(ref);
+};
+
+const summarizeCfcSchemaRefs = (schema: JSONSchema): SchemaRefSummary => {
+  if (typeof schema === "boolean") return EMPTY_REF_SUMMARY;
+  const cached = schemaRefSummaryCache.get(schema);
+  if (cached !== undefined) return cached;
+
+  const all = new Set<string>();
+  const localDefinitions = new Set<string>();
   if (schema.$ref !== undefined) {
-    refSet.add(schema.$ref);
+    all.add(schema.$ref);
+    const name = localDefinitionName(schema.$ref);
+    if (name !== undefined) localDefinitions.add(name);
   }
-  if (schema.type === "array") {
-    if (schema.items !== undefined) {
-      collectCfcSchemaRefs(schema.items, refSet);
+  forEachSubschema(schema, (child) => {
+    const childSummary = summarizeCfcSchemaRefs(child);
+    addRefs(all, childSummary.all);
+    // A child carrying its own `$defs` starts a new local-ref scope. Its refs
+    // still count for the public findRefs() walk, but must not retain names in
+    // the parent's definition map.
+    if (!(isRecord(child) && child.$defs !== undefined)) {
+      addRefs(localDefinitions, childSummary.localDefinitions);
     }
-    if (schema.prefixItems !== undefined) {
-      for (const item of schema.prefixItems) {
-        collectCfcSchemaRefs(item, refSet);
-      }
-    }
-  } else if (schema.type === "object") {
-    if (schema.additionalProperties !== undefined) {
-      collectCfcSchemaRefs(schema.additionalProperties, refSet);
-    }
-    if (schema.properties !== undefined) {
-      for (const propSchema of Object.values(schema.properties)) {
-        collectCfcSchemaRefs(propSchema, refSet);
-      }
-    }
-  }
-  const optSchemas = [
-    ...(schema.anyOf ? schema.anyOf : []),
-    ...(schema.oneOf ? schema.oneOf : []),
-    ...(schema.allOf ? schema.allOf : []),
-  ];
-  for (const optSchema of optSchemas) {
-    collectCfcSchemaRefs(optSchema, refSet);
-  }
+  });
+
+  const summary: SchemaRefSummary = {
+    all: all.size === 0 ? EMPTY_REFS : all,
+    localDefinitions: localDefinitions.size === 0
+      ? EMPTY_REFS
+      : localDefinitions,
+  };
+  if (isDeepFrozen(schema)) schemaRefSummaryCache.set(schema, summary);
+  return summary;
 };
 
 export const findCfcSchemaRefs = (
   schema: JSONSchema,
   refSet: Set<string> = new Set<string>(),
 ): void => {
-  if (typeof schema === "boolean") {
-    return;
+  addRefs(refSet, summarizeCfcSchemaRefs(schema).all);
+};
+
+const definitionIndexFor = (
+  definitions: SchemaDefinitions,
+): { index: DefinitionIndex; cacheable: boolean } => {
+  const cacheable = isDeepFrozen(definitions);
+  if (!cacheable) {
+    return {
+      index: { dependencies: new Map(), subsets: new Map() },
+      cacheable,
+    };
   }
-  const cached = schemaRefsCache.get(schema);
-  if (cached !== undefined) {
-    for (const ref of cached) refSet.add(ref);
-    return;
+  let index = definitionIndexCache.get(definitions);
+  if (index === undefined) {
+    index = { dependencies: new Map(), subsets: new Map() };
+    definitionIndexCache.set(definitions, index);
   }
-  const collected = new Set<string>();
-  collectCfcSchemaRefs(schema, collected);
-  if (isDeepFrozen(schema)) {
-    schemaRefsCache.set(schema, collected);
+  return { index, cacheable };
+};
+
+const definitionDependencies = (
+  name: string,
+  definitions: SchemaDefinitions,
+  index: DefinitionIndex,
+): ReadonlySet<string> => {
+  const cached = index.dependencies.get(name);
+  if (cached !== undefined) return cached;
+  const definition = definitions[name];
+  // resolveCfcSchemaRef() attaches the containing definition map to a reached
+  // definition body. Nested children with their own `$defs` remain scope
+  // boundaries (captured by `summary.localDefinitions`), but refs local to the
+  // definition body itself therefore depend on this containing map.
+  const dependencies = definition === undefined
+    ? EMPTY_REFS
+    : summarizeCfcSchemaRefs(definition).localDefinitions;
+  index.dependencies.set(name, dependencies);
+  return dependencies;
+};
+
+const definitionSetKey = (names: readonly string[]): string => {
+  let key = "";
+  for (const name of names) key += `${name.length}:${name}`;
+  return key;
+};
+
+/**
+ * Return the minimal active `$defs` map needed by `schema`'s local refs.
+ *
+ * Definition bodies are scanned lazily and only when reachable. Frozen schema
+ * fragments populate reusable ref summaries bottom-up, while frozen definition
+ * maps reuse dependency closures and canonical subset objects across callers.
+ */
+export const selectReferencedCfcSchemaDefs = (
+  schema: JSONSchema,
+  inheritedDefinitions?: SchemaDefinitions,
+): SchemaDefinitions | undefined => {
+  if (typeof schema === "boolean") return undefined;
+  const definitions = schema.$defs ?? inheritedDefinitions;
+  if (definitions === undefined) return undefined;
+
+  const initial = summarizeCfcSchemaRefs(schema).localDefinitions;
+  if (initial.size === 0) return undefined;
+
+  const { index, cacheable } = definitionIndexFor(definitions);
+  const needed = new Set<string>();
+  const pending = [...initial];
+  while (pending.length > 0) {
+    const name = pending.pop()!;
+    if (needed.has(name) || definitions[name] === undefined) continue;
+    needed.add(name);
+    for (
+      const dependency of definitionDependencies(
+        name,
+        definitions,
+        index,
+      )
+    ) {
+      if (!needed.has(dependency)) pending.push(dependency);
+    }
   }
-  for (const ref of collected) refSet.add(ref);
+  if (needed.size === 0) return undefined;
+
+  const names = [...needed].toSorted();
+  const key = definitionSetKey(names);
+  if (cacheable) {
+    const cached = index.subsets.get(key);
+    if (cached !== undefined) return cached;
+  }
+
+  const subset: Record<string, JSONSchema> = {};
+  for (const name of names) subset[name] = definitions[name];
+  if (!cacheable) return subset;
+
+  // Intern once so every derived schema sharing this closure also shares one
+  // frozen, deterministically ordered `$defs` object.
+  const holder = internSchema({ $defs: subset });
+  const canonical = (holder as JSONSchemaObj).$defs!;
+  index.subsets.set(key, canonical);
+  return canonical;
+};
+
+/** Remove definitions that cannot be reached from this schema document. */
+export const pruneCfcSchemaDefinitions = (schema: JSONSchema): JSONSchema => {
+  if (typeof schema === "boolean" || schema.$defs === undefined) return schema;
+  const cacheable = isDeepFrozen(schema);
+  if (cacheable) {
+    const cached = prunedSchemaCache.get(schema);
+    if (cached !== undefined) return cached;
+  }
+
+  const selected = selectReferencedCfcSchemaDefs(schema);
+  if (selected === schema.$defs) return schema;
+  const result = { ...schema } as Record<string, unknown>;
+  delete result.$defs;
+  if (selected !== undefined) result.$defs = selected;
+  const pruned = cacheable
+    ? internSchema(result as JSONSchemaObj)
+    : result as JSONSchemaObj;
+  if (cacheable) prunedSchemaCache.set(schema, pruned);
+  return pruned;
 };
 
 export const resolveCfcSchemaRef = (
