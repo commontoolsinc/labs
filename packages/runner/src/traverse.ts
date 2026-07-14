@@ -494,7 +494,7 @@ const TRAVERSE_DIAGNOSTICS: boolean = (() => {
  */
 const _resolvedRefCache = new WeakMap<JSONSchemaObj, JSONSchema | null>();
 
-function resolveSchemaRefsCanonical(
+export function resolveSchemaRefsCanonical(
   schema: JSONSchemaObj,
 ): JSONSchema | undefined {
   if (!isMemoizableSchemaInput(schema)) {
@@ -3286,143 +3286,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     schema: JSONSchema,
     valueType: string,
   ): TypeValidity {
-    let resolved: JSONSchema | undefined = schema;
-    if (isRecord(schema) && "$ref" in schema) {
-      // Handle any top-level $ref in the schema
-      resolved = resolveSchemaRefsCanonical(schema);
-      if (resolved === undefined) {
-        logger.warn(
-          "traverse",
-          () => ["Failed to resolve schema ref", schema],
-        );
-        return TypeValidity.False;
-      }
-    }
-    if (ContextualFlowControl.isTrueSchema(resolved)) {
-      return TypeValidity.True;
-    } else if (ContextualFlowControl.isFalseSchema(resolved)) {
-      return TypeValidity.False;
-    }
-    const schemaObj = resolved as JSONSchemaObj;
-    // Check the top level type flag
-    let typeValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
-    if ("type" in schemaObj) {
-      if (Array.isArray(schemaObj["type"])) {
-        const types = schemaObj["type"];
-        // type unknown matches anything
-        if (types.includes("unknown")) {
-          typeValidity = TypeValidity.Unknown;
-        } else if (!types.includes(valueType)) {
-          return TypeValidity.False;
-        }
-      } else if (isString(schemaObj["type"])) {
-        const type = schemaObj["type"];
-        // type unknown matches anything
-        if (type === "unknown") {
-          typeValidity = TypeValidity.Unknown;
-        } else if (type !== valueType) {
-          return TypeValidity.False;
-        }
-      } else {
-        // invalid schema type
-        throw new Error("Invalid schema type");
-      }
-    }
-    // Limited allOf handling
-    let allOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
-    if (schemaObj.allOf) {
-      // unknown & T => T
-      let match: TypeValidity.True | TypeValidity.Unknown | undefined;
-      for (const option of schemaObj.allOf) {
-        const valid = this.isValidType(
-          schemaWithDefs(schemaObj, option),
-          valueType,
-        );
-        // ignore undefined result (unknown type), but if any option returns
-        // false, the whole thing is false
-        if (valid === TypeValidity.False) {
-          return TypeValidity.False;
-        } else if (valid === TypeValidity.True) {
-          match = TypeValidity.True;
-        } else if (valid === TypeValidity.Unknown && match === undefined) {
-          match = TypeValidity.Unknown;
-        }
-      }
-      allOfValidity = match ?? TypeValidity.True;
-    }
-    // Limited anyOf handling
-    let anyOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
-    if (schemaObj.anyOf) {
-      // unknown | T => unknown
-      let match: TypeValidity.True | TypeValidity.Unknown | undefined;
-      for (const option of schemaObj.anyOf) {
-        if (ContextualFlowControl.isTrueSchema(option)) {
-          // unknown | any => any
-          match = TypeValidity.True;
-          break;
-        }
-        const valid = this.isValidType(
-          schemaWithDefs(schemaObj, option),
-          valueType,
-        );
-        if (valid === TypeValidity.False) {
-          continue;
-        } else if (match !== TypeValidity.Unknown) {
-          match = valid;
-        }
-      }
-      if (match === undefined) {
-        return TypeValidity.False;
-      } else {
-        anyOfValidity = match;
-      }
-    }
-    // Limited oneOf handling
-    // This is handled the same as anyOf here
-    let oneOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
-    if (schemaObj.oneOf) {
-      let match: TypeValidity.True | TypeValidity.Unknown | undefined;
-      for (const option of schemaObj.oneOf) {
-        if (ContextualFlowControl.isTrueSchema(option)) {
-          // unknown | any => any
-          match = TypeValidity.True;
-          break;
-        }
-        const valid = this.isValidType(
-          schemaWithDefs(schemaObj, option),
-          valueType,
-        );
-        if (valid === TypeValidity.False) {
-          continue;
-        } else if (match !== TypeValidity.Unknown) {
-          // this may be more than one, but we don't know that the rest of
-          // the validation will pass, so don't reject.
-          match = valid;
-        }
-      }
-      if (match === undefined) {
-        return TypeValidity.False;
-      } else {
-        oneOfValidity = match;
-      }
-    }
-    // We can't rule out a matched type based on the logical `not` clause,
-    // so we don't deal with that here.
-    // We have four sources of validity, which are all and-ed together.
-    // Since unknown disappears in type intersections, any true will win.
-    const validities = [
-      typeValidity,
-      allOfValidity,
-      anyOfValidity,
-      oneOfValidity,
-    ];
-    if (
-      validities.some((x) => x === TypeValidity.True) ||
-      validities.every((x) => x === undefined)
-    ) {
-      return TypeValidity.True;
-    }
-    return TypeValidity.Unknown;
+    return schemaTypeValidity(schema, valueType);
   }
 
   /**
@@ -4360,6 +4224,169 @@ function appendToPath(path: ValuePath, part: string): ValuePath {
 // helper function - since path starts with value, the new array will too
 function appendPartsToPath(path: ValuePath, parts: string[]): ValuePath {
   return [...path, ...parts] as ValuePath;
+}
+
+/**
+ * Canonical schema/type matching (extracted from SchemaObjectTraverser so the
+ * write path can share it): whether a schema can match a value of the given
+ * type name, with the same $ref resolution and allOf/anyOf/oneOf handling the
+ * read-side validation uses.
+ */
+function schemaTypeValidity(
+  schema: JSONSchema,
+  valueType: string,
+): TypeValidity {
+  let resolved: JSONSchema | undefined = schema;
+  if (isRecord(schema) && "$ref" in schema) {
+    // Handle any top-level $ref in the schema
+    resolved = resolveSchemaRefsCanonical(schema);
+    if (resolved === undefined) {
+      logger.warn(
+        "traverse",
+        () => ["Failed to resolve schema ref", schema],
+      );
+      return TypeValidity.False;
+    }
+  }
+  if (ContextualFlowControl.isTrueSchema(resolved)) {
+    return TypeValidity.True;
+  } else if (ContextualFlowControl.isFalseSchema(resolved)) {
+    return TypeValidity.False;
+  }
+  const schemaObj = resolved as JSONSchemaObj;
+  // Check the top level type flag
+  let typeValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
+  if ("type" in schemaObj) {
+    if (Array.isArray(schemaObj["type"])) {
+      const types = schemaObj["type"];
+      // type unknown matches anything
+      if (types.includes("unknown")) {
+        typeValidity = TypeValidity.Unknown;
+      } else if (!types.includes(valueType)) {
+        return TypeValidity.False;
+      }
+    } else if (isString(schemaObj["type"])) {
+      const type = schemaObj["type"];
+      // type unknown matches anything
+      if (type === "unknown") {
+        typeValidity = TypeValidity.Unknown;
+      } else if (type !== valueType) {
+        return TypeValidity.False;
+      }
+    } else {
+      // invalid schema type
+      throw new Error("Invalid schema type");
+    }
+  }
+  // Limited allOf handling
+  let allOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
+  if (schemaObj.allOf) {
+    // unknown & T => T
+    let match: TypeValidity.True | TypeValidity.Unknown | undefined;
+    for (const option of schemaObj.allOf) {
+      const valid = schemaTypeValidity(
+        schemaWithDefs(schemaObj, option),
+        valueType,
+      );
+      // ignore undefined result (unknown type), but if any option returns
+      // false, the whole thing is false
+      if (valid === TypeValidity.False) {
+        return TypeValidity.False;
+      } else if (valid === TypeValidity.True) {
+        match = TypeValidity.True;
+      } else if (valid === TypeValidity.Unknown && match === undefined) {
+        match = TypeValidity.Unknown;
+      }
+    }
+    allOfValidity = match ?? TypeValidity.True;
+  }
+  // Limited anyOf handling
+  let anyOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
+  if (schemaObj.anyOf) {
+    // unknown | T => unknown
+    let match: TypeValidity.True | TypeValidity.Unknown | undefined;
+    for (const option of schemaObj.anyOf) {
+      if (ContextualFlowControl.isTrueSchema(option)) {
+        // unknown | any => any
+        match = TypeValidity.True;
+        break;
+      }
+      const valid = schemaTypeValidity(
+        schemaWithDefs(schemaObj, option),
+        valueType,
+      );
+      if (valid === TypeValidity.False) {
+        continue;
+      } else if (match !== TypeValidity.Unknown) {
+        match = valid;
+      }
+    }
+    if (match === undefined) {
+      return TypeValidity.False;
+    } else {
+      anyOfValidity = match;
+    }
+  }
+  // Limited oneOf handling
+  // This is handled the same as anyOf here
+  let oneOfValidity: TypeValidity.True | TypeValidity.Unknown | undefined;
+  if (schemaObj.oneOf) {
+    let match: TypeValidity.True | TypeValidity.Unknown | undefined;
+    for (const option of schemaObj.oneOf) {
+      if (ContextualFlowControl.isTrueSchema(option)) {
+        // unknown | any => any
+        match = TypeValidity.True;
+        break;
+      }
+      const valid = schemaTypeValidity(
+        schemaWithDefs(schemaObj, option),
+        valueType,
+      );
+      if (valid === TypeValidity.False) {
+        continue;
+      } else if (match !== TypeValidity.Unknown) {
+        // this may be more than one, but we don't know that the rest of
+        // the validation will pass, so don't reject.
+        match = valid;
+      }
+    }
+    if (match === undefined) {
+      return TypeValidity.False;
+    } else {
+      oneOfValidity = match;
+    }
+  }
+  // We can't rule out a matched type based on the logical `not` clause,
+  // so we don't deal with that here.
+  // We have four sources of validity, which are all and-ed together.
+  // Since unknown disappears in type intersections, any true will win.
+  const validities = [
+    typeValidity,
+    allOfValidity,
+    anyOfValidity,
+    oneOfValidity,
+  ];
+  if (
+    validities.some((x) => x === TypeValidity.True) ||
+    validities.every((x) => x === undefined)
+  ) {
+    return TypeValidity.True;
+  }
+  return TypeValidity.Unknown;
+}
+
+/**
+ * Boolean face of the canonical matcher for callers outside this module
+ * (notably the write-side scope-isolation guard in data-updating.ts):
+ * `Unknown` counts as accepting, since it cannot be ruled out. Judged with
+ * the exact same logic the read side uses to reject, so the write-side
+ * warning and the read-side behavior cannot drift apart.
+ */
+export function schemaAcceptsType(
+  schema: JSONSchema,
+  valueType: string,
+): boolean {
+  return schemaTypeValidity(schema, valueType) !== TypeValidity.False;
 }
 
 function schemaWithDefs(parent: JSONSchemaObj, option: JSONSchema): JSONSchema {
