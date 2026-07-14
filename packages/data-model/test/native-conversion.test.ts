@@ -1866,6 +1866,27 @@ describe("native-conversion", () => {
       expect(isFabricCompatible(factory)).toBe(false);
     });
 
+    it("accepts a factory whose captured FabricInstance can be hardened", () => {
+      const captured = new UnknownValue(
+        "Captured@1",
+        { value: 1 } as FabricValue,
+      );
+      const factory = registerFabricFactory(() => undefined, "pattern", {
+        kind: "pattern",
+        rootToken: {},
+        ref: FACTORY_REF,
+        argumentSchema: true,
+        resultSchema: true,
+        paramsSchema: true,
+        params: { captured },
+      });
+
+      expect(Object.isFrozen(captured)).toBe(false);
+      expect(isFabricCompatible(factory)).toBe(true);
+      expect(Object.isFrozen(captured)).toBe(true);
+      expect(fabricFromNativeValue(factory, false)).toBe(factory);
+    });
+
     // -- FabricNativeObject types (would be wrapped) --
     it("accepts `Error` instances", () => {
       expect(isFabricCompatible(new Error("test"))).toBe(true);

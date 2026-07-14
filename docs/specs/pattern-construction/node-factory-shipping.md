@@ -653,6 +653,12 @@ writers switch. Once expanded into a containing document write, nested factories
 follow the same speculative-local, causally gated publication protocol as every
 other by-value write.
 
+Storage transaction fast paths operate on the containing entity document and
+must preserve `Factory@1` as an atomic value at its document path (normally
+`value` or a descendant). They use the same Fabric freeze, equality, and
+arbitrary-function rejection rules as generic reads and writes; no raw-state
+reader or root-function document representation is part of this contract.
+
 ### Structured-clone runtime IPC
 
 Browser runtime messages may carry factories inside cell values, VDOM props,

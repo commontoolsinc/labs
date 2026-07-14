@@ -513,7 +513,7 @@ function isFabricCompatibleInternal(
           // Conversion seals the atom through the same path. In particular, a
           // trusted live builder factory is not yet a Fabric-compatible value
           // while its complete content-addressed artifact ref is unavailable.
-          sealFactoryState(value);
+          sealFactoryState(value, deepFreeze);
           return true;
         } catch {
           return false;

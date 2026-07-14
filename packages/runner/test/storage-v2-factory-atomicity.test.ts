@@ -28,7 +28,7 @@ const ADDRESS = {
   scope: "space" as const,
   id: "of:factory-storage-atomicity" as const,
   type: "application/json" as const,
-  path: [] as string[],
+  path: ["value"] as string[],
 };
 
 const shell = (symbol: string = REF.symbol) =>
@@ -38,15 +38,16 @@ const shell = (symbol: string = REF.symbol) =>
   });
 
 const managerWith = (value: FabricValue): IStorageManager => {
+  const document = value === undefined ? undefined : { value };
   const state: State = {
     the: ADDRESS.type,
     of: ADDRESS.id,
-    is: value,
+    is: document,
   } as State;
   const replica = {
     did: () => SPACE,
     get: () => state,
-    getDocument: () => undefined,
+    getDocument: () => document,
   };
   return {
     open: () => ({ replica }),
@@ -85,7 +86,7 @@ Deno.test("storage v2 rejects an arbitrary function returned by a transaction re
   );
 });
 
-Deno.test("storage v2 treats equal factory shells as a no-op and changed state as a root write", () => {
+Deno.test("storage v2 treats equal factory shells as a no-op and changed state as a root-value write", () => {
   const equalTx = new V2StorageTransaction(managerWith(shell()));
   const equalWrite = equalTx.write(ADDRESS, shell());
   assert(equalWrite.ok);
@@ -97,7 +98,7 @@ Deno.test("storage v2 treats equal factory shells as a no-op and changed state a
   assert(changedWrite.ok);
   const details = [...changedTx.getWriteDetails(SPACE)];
   assertEquals(details.length, 1);
-  assertEquals(details[0].address.path, []);
+  assertEquals(details[0].address.path, ["value"]);
   assertStrictEquals(details[0].value, replacement);
 });
 
