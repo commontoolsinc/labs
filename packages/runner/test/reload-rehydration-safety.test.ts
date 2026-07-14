@@ -84,6 +84,83 @@ async function reloadRuntime(
   return env;
 }
 
+type ResumeSnapshotBuckets = ReadonlyMap<
+  string,
+  ReadonlyMap<
+    string,
+    readonly {
+      executionContextKey: string;
+      observation: SchedulerActionObservation;
+      directDirtySeq?: number;
+      staleSeq?: number;
+      unknownReason?: string;
+    }[]
+  >
+>;
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function runnerNumber(runner: object, property: string): number {
+  const value = Reflect.get(runner, property);
+  if (typeof value !== "number") {
+    throw new TypeError(`Expected runner ${property} number`);
+  }
+  return value;
+}
+
+function runnerMap<K, V>(runner: object, property: string): Map<K, V> {
+  const value = Reflect.get(runner, property);
+  if (!(value instanceof Map)) {
+    throw new TypeError(`Expected runner ${property} map`);
+  }
+  return value as Map<K, V>;
+}
+
+function runnerSet<T>(runner: object, property: string): Set<T> {
+  const value = Reflect.get(runner, property);
+  if (!(value instanceof Set)) {
+    throw new TypeError(`Expected runner ${property} set`);
+  }
+  return value as Set<T>;
+}
+
+function runnerMethod<Args extends unknown[], Return>(
+  runner: object,
+  property: string,
+): (...args: Args) => Return {
+  const value = Reflect.get(runner, property);
+  if (typeof value !== "function") {
+    throw new TypeError(`Expected runner ${property} method`);
+  }
+  return value.bind(runner) as (...args: Args) => Return;
+}
+
+function setRunnerProperty(
+  runner: object,
+  property: string,
+  value: unknown,
+): void {
+  if (!Reflect.set(runner, property, value)) {
+    throw new TypeError(`Unable to set runner ${property}`);
+  }
+}
+
+function preResolutionStopKeys(value: unknown): Set<unknown> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new TypeError("Expected active start attempt record");
+  }
+  const stopKeys = Reflect.get(value, "preResolutionStopKeys");
+  if (!(stopKeys instanceof Set)) {
+    throw new TypeError("Expected active start attempt stop keys");
+  }
+  return stopKeys;
+}
+
 Deno.test("reload rejects a snapshot when an input advances after listing", async () => {
   const seeded = await seedReloadablePiece("snapshot-list-race");
   const reloaded = await reloadRuntime(seeded.env.storageManager);
@@ -199,31 +276,13 @@ Deno.test("reload buckets valid snapshot metadata and ignores invalid observatio
         ],
       });
 
-    const runnerHarness = runtime.runner as unknown as {
-      lifecycleEpoch: number;
-      loadResumeSnapshotsForSpace(
-        targetSpace: string,
-        lifecycleEpoch: number,
-      ): Promise<
-        | ReadonlyMap<
-          string,
-          ReadonlyMap<
-            string,
-            readonly {
-              executionContextKey: string;
-              observation: SchedulerActionObservation;
-              directDirtySeq?: number;
-              staleSeq?: number;
-              unknownReason?: string;
-            }[]
-          >
-        >
-        | undefined
-      >;
-    };
-    const byPiece = await runnerHarness.loadResumeSnapshotsForSpace(
+    const loadResumeSnapshotsForSpace = runnerMethod<
+      [string, number],
+      Promise<ResumeSnapshotBuckets | undefined>
+    >(runtime.runner, "loadResumeSnapshotsForSpace");
+    const byPiece = await loadResumeSnapshotsForSpace(
       space,
-      runnerHarness.lifecycleEpoch,
+      runnerNumber(runtime.runner, "lifecycleEpoch"),
     );
     expect(byPiece?.size).toBe(1);
     expect([...byPiece?.keys() ?? []]).toEqual([valid.observation.pieceId]);
@@ -340,26 +399,30 @@ Deno.test("stop invalidates a held snapshot listing for that piece", async () =>
     const result = runtime.getCellFromLink(
       seeded.result.getAsNormalizedFullLink(),
     ) as Cell<{ doubled: number }>;
-    const lifecycleState = runtime.runner as unknown as {
-      startGenerationByDoc: Map<string, number>;
-      activeStartAttemptsByDoc: Map<string, Set<unknown>>;
-    };
+    const startGenerationByDoc = runnerMap<string, number>(
+      runtime.runner,
+      "startGenerationByDoc",
+    );
+    const activeStartAttemptsByDoc = runnerMap<string, Set<unknown>>(
+      runtime.runner,
+      "activeStartAttemptsByDoc",
+    );
     const starts = [runtime.start(result), runtime.start(result)];
     await listingStarted.promise;
-    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(1);
+    expect(activeStartAttemptsByDoc.size).toBe(1);
     expect(
-      [...lifecycleState.activeStartAttemptsByDoc.values()][0]?.size,
+      [...activeStartAttemptsByDoc.values()][0]?.size,
     ).toBe(2);
     runtime.runner.stop(result);
-    expect(lifecycleState.startGenerationByDoc.size).toBe(1);
+    expect(startGenerationByDoc.size).toBe(1);
     const editsAfterStop = editCalls;
     heldList.resolve(seededPage);
 
     expect(await Promise.all(starts)).toEqual([false, false]);
     expect(runtime.runner.cancels.size).toBe(0);
     expect(editCalls).toBe(editsAfterStop);
-    expect(lifecycleState.startGenerationByDoc.size).toBe(0);
-    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(0);
+    expect(startGenerationByDoc.size).toBe(0);
+    expect(activeStartAttemptsByDoc.size).toBe(0);
   } finally {
     await disposeSchedulerTestRuntime(reloaded);
   }
@@ -423,34 +486,41 @@ Deno.test("stopping a target before link resolution invalidates the held start",
       });
     }) as typeof link.sync;
 
-    const runnerHarness = runtime.runner as unknown as {
-      startCore(resultCell: Cell<unknown>, options?: unknown): void;
-    };
-    const originalStartCore = runnerHarness.startCore.bind(runtime.runner);
+    const originalStartCore = runnerMethod<
+      [Cell<unknown>, unknown?],
+      void
+    >(runtime.runner, "startCore");
     let startCoreCalls = 0;
-    runnerHarness.startCore = (resultCell, options) => {
+    setRunnerProperty(runtime.runner, "startCore", (
+      resultCell: Cell<unknown>,
+      options?: unknown,
+    ) => {
       startCoreCalls++;
       originalStartCore(resultCell, options);
-    };
-    const lifecycleState = runtime.runner as unknown as {
-      startGenerationByDoc: Map<string, number>;
-      activeStartAttempts: Set<{ preResolutionStopKeys: Set<string> }>;
-    };
+    });
+    const startGenerationByDoc = runnerMap<string, number>(
+      runtime.runner,
+      "startGenerationByDoc",
+    );
+    const activeStartAttempts = runnerSet<unknown>(
+      runtime.runner,
+      "activeStartAttempts",
+    );
 
     const start = runtime.start(link);
     await syncStarted.promise;
-    expect(lifecycleState.activeStartAttempts.size).toBe(1);
+    expect(activeStartAttempts.size).toBe(1);
     runtime.runner.stop(target);
-    expect(lifecycleState.startGenerationByDoc.size).toBe(0);
+    expect(startGenerationByDoc.size).toBe(0);
     expect(
-      [...lifecycleState.activeStartAttempts][0]?.preResolutionStopKeys.size,
+      preResolutionStopKeys([...activeStartAttempts][0])?.size,
     ).toBe(1);
     releaseSync.resolve();
 
     expect(await start).toBe(false);
     expect(runtime.runner.cancels.size).toBe(0);
     expect(startCoreCalls).toBe(0);
-    expect(lifecycleState.activeStartAttempts.size).toBe(0);
+    expect(activeStartAttempts.size).toBe(0);
 
     // `stop(target)` above only invalidated the unresolved attempt; target was
     // never locally running. A later explicit start must therefore take the
@@ -503,23 +573,27 @@ Deno.test("stopping a link target invalidates its held start", async () => {
       return originalEdit(...args);
     }) as typeof runtime.edit;
 
-    const lifecycleState = runtime.runner as unknown as {
-      startGenerationByDoc: Map<string, number>;
-      activeStartAttemptsByDoc: Map<string, Set<unknown>>;
-    };
+    const startGenerationByDoc = runnerMap<string, number>(
+      runtime.runner,
+      "startGenerationByDoc",
+    );
+    const activeStartAttemptsByDoc = runnerMap<string, Set<unknown>>(
+      runtime.runner,
+      "activeStartAttemptsByDoc",
+    );
     const start = runtime.start(link);
     await listingStarted.promise;
-    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(2);
+    expect(activeStartAttemptsByDoc.size).toBe(2);
     runtime.runner.stop(target);
-    expect(lifecycleState.startGenerationByDoc.size).toBe(1);
+    expect(startGenerationByDoc.size).toBe(1);
     const editsAfterStop = editCalls;
     heldList.resolve(seededPage);
 
     expect(await start).toBe(false);
     expect(runtime.runner.cancels.size).toBe(0);
     expect(editCalls).toBe(editsAfterStop);
-    expect(lifecycleState.startGenerationByDoc.size).toBe(0);
-    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(0);
+    expect(startGenerationByDoc.size).toBe(0);
+    expect(activeStartAttemptsByDoc.size).toBe(0);
   } finally {
     await disposeSchedulerTestRuntime(reloaded);
   }
@@ -529,12 +603,19 @@ Deno.test("completed and stopped start churn releases lifecycle state", async ()
   const env = createSchedulerTestRuntime(import.meta.url, {});
   try {
     const { runtime, tx } = env;
-    const lifecycleState = env.runtime.runner as unknown as {
-      startGenerationByDoc: Map<string, number>;
-      activeStartAttemptsByDoc: Map<string, Set<unknown>>;
-      activeStartAttempts: Set<unknown>;
-      allCancels: Set<unknown>;
-    };
+    const startGenerationByDoc = runnerMap<string, number>(
+      env.runtime.runner,
+      "startGenerationByDoc",
+    );
+    const activeStartAttemptsByDoc = runnerMap<string, Set<unknown>>(
+      env.runtime.runner,
+      "activeStartAttemptsByDoc",
+    );
+    const activeStartAttempts = runnerSet<unknown>(
+      env.runtime.runner,
+      "activeStartAttempts",
+    );
+    const allCancels = runnerSet<unknown>(env.runtime.runner, "allCancels");
     const compiled = await runtime.patternManager.compilePattern(PROGRAM, {
       space,
       tx,
@@ -559,11 +640,11 @@ Deno.test("completed and stopped start churn releases lifecycle state", async ()
       runtime.runner.stop(result);
     }
 
-    expect(lifecycleState.startGenerationByDoc.size).toBe(0);
-    expect(lifecycleState.activeStartAttemptsByDoc.size).toBe(0);
-    expect(lifecycleState.activeStartAttempts.size).toBe(0);
+    expect(startGenerationByDoc.size).toBe(0);
+    expect(activeStartAttemptsByDoc.size).toBe(0);
+    expect(activeStartAttempts.size).toBe(0);
     expect(runtime.runner.cancels.size).toBe(0);
-    expect(lifecycleState.allCancels.size).toBe(0);
+    expect(allCancels.size).toBe(0);
   } finally {
     await disposeSchedulerTestRuntime(env);
   }
@@ -576,20 +657,20 @@ Deno.test("stop invalidates a resume while dependency pre-sync is held", async (
   try {
     const { runtime } = reloaded;
     const syncStarted = Promise.withResolvers<void>();
-    const runnerHarness = runtime.runner as unknown as {
-      syncCellsForRunningPattern: (...args: unknown[]) => Promise<boolean>;
-    };
-    const originalSync = runnerHarness.syncCellsForRunningPattern.bind(
+    const originalSync = runnerMethod<unknown[], Promise<boolean>>(
       runtime.runner,
+      "syncCellsForRunningPattern",
     );
     let calls = 0;
-    runnerHarness.syncCellsForRunningPattern = async (...args) => {
+    setRunnerProperty(runtime.runner, "syncCellsForRunningPattern", async (
+      ...args: unknown[]
+    ) => {
       if (calls++ === 0) {
         syncStarted.resolve();
         await releaseSync.promise;
       }
       return await originalSync(...args);
-    };
+    });
 
     const result = runtime.getCellFromLink(
       seeded.result.getAsNormalizedFullLink(),
@@ -623,20 +704,20 @@ Deno.test("resume restarts pattern resolution when identity changes during depen
     if (!replacementRef) throw new Error("replacement pattern has no identity");
 
     const syncStarted = Promise.withResolvers<void>();
-    const runnerHarness = runtime.runner as unknown as {
-      syncCellsForRunningPattern: (...args: unknown[]) => Promise<boolean>;
-    };
-    const originalSync = runnerHarness.syncCellsForRunningPattern.bind(
+    const originalSync = runnerMethod<unknown[], Promise<boolean>>(
       runtime.runner,
+      "syncCellsForRunningPattern",
     );
     let calls = 0;
-    runnerHarness.syncCellsForRunningPattern = async (...args) => {
+    setRunnerProperty(runtime.runner, "syncCellsForRunningPattern", async (
+      ...args: unknown[]
+    ) => {
       if (calls++ === 0) {
         syncStarted.resolve();
         await releaseSync.promise;
       }
       return await originalSync(...args);
-    };
+    });
 
     const result = runtime.getCellFromLink(
       seeded.result.getAsNormalizedFullLink(),

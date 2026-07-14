@@ -1,14 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/reload-rehydration-safety.test.ts": [
-    "202:41:1yi6hjr",
-    "343:42:1xx5z04",
-    "426:41:1vuqa5m",
-    "435:42:1xejbyc",
-    "506:42:1xx5z04",
-    "532:46:1mvm2a1",
-    "579:41:ipxkne",
-    "626:41:ipxkne",
-  ],
   "packages/runner/test/resume-argument-link-target-presync.test.ts": [
     "194:44:n5r017",
   ],
