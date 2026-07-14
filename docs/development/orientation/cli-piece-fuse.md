@@ -30,7 +30,7 @@ flowchart TB
     tree --- c2["check / dev (compile + run a pattern)"]
     tree --- c3["fuse (mount, unmount, status)"]
     tree --- c4["id (new, did, derive, from-mnemonic)"]
-    tree --- c5["acl (ls, add, remove)"]
+    tree --- c5["acl (ls, set, remove)"]
     tree --- c6["exec, init, test, deps"]
 ```
 
@@ -86,7 +86,7 @@ sequenceDiagram
     Conn->>Transport: postMessage(request)
     Transport->>Worker: onmessage
     Worker->>Worker: handleRequest(switch RequestType)
-    Worker->>RT: handleCellGet / Set / Send / PieceCreate
+    Worker->>RT: handleCellGet / Set / Send / PageCreate
     RT-->>Worker: result
     Worker-->>Transport: postMessage({ msgId, data })
     Transport-->>Conn: resolve the Deferred
@@ -160,7 +160,7 @@ hand-maintained and differ between macOS (FUSE v2 / FUSE-T) and Linux
   string in that service, plain-English "charm" occurrences in test-data
   fixtures (a Scrabble word list, a Frankenstein excerpt), and git history.
 - **`cli` is a hub, and a growing one** (about 25k non-test lines now). It
-  imports `runner` (25), `identity` (9), `utils` (9), `js-compiler` (8),
+  imports `runner` (26), `identity` (9), `utils` (9), `js-compiler` (8),
   `piece`/`api` (5 each), and now `state-inspector` (2) — it wires the offline
   space-inspector (see the [storage page](storage-substrate.md)) into the `cf`
   command. A change in any of those can break the command line.
@@ -171,9 +171,9 @@ hand-maintained and differ between macOS (FUSE v2 / FUSE-T) and Linux
   worker silently acknowledges late requests and drops notifications. This is by
   design but surprising while debugging.
 - **The biggest files to budget for:** `fuse/mod.ts` (3389) and
-  `fuse/cell-bridge.ts` (3287); `cli/lib/test-runner.ts` (1899) and
+  `fuse/cell-bridge.ts` (3287); `cli/lib/test-runner.ts` (1951) and
   `cli/lib/piece.ts` (1417); `runtime-client/backends/runtime-processor.ts`
-  (1798) and `protocol/types.ts` (1153).
+  (1794) and `protocol/types.ts` (1177).
 
 ---
 

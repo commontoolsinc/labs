@@ -61,7 +61,7 @@ flowchart TB
     src[".tsx source + a Program (entry + in-memory sources)"]
     compiler["TypeScriptCompiler<br/>(virtual filesystem host, type-check)"]
     bridge["harness/engine.ts supplies beforeTransformers =<br/>CommonFabricTransformerPipeline.toFactories()"]
-    emit["tsProgram.emit() runs the 20 transformer stages"]
+    emit["tsProgram.emit() runs the 22 transformer stages"]
     out["per-module CommonJS + source map"]
     records["module records → runner evaluates in the SES sandbox"]
 
@@ -71,7 +71,7 @@ flowchart TB
 
 ---
 
-## The transformer pipeline: 20 stages in three phases
+## The transformer pipeline: 22 stages in three phases
 
 The pipeline is an ordered list (`cf-pipeline.ts`, `CFC_TRANSFORMER_STAGE_SPECS`).
 The ordering matters: most validation runs first so illegal code is rejected
@@ -83,12 +83,14 @@ injected.
 
 ```mermaid
 flowchart TB
-    subgraph p1["Phase 1 · Validate (reject illegal code)"]
+    subgraph p1["Phase 1 · Validate + compile CFC policy (stages 1-7)"]
         v1["CastValidation"]
         v2["EmptyArrayOfValidation"]
         v3["OpaqueGetValidation"]
         v4["PatternContextValidation"]
         v5["MergeablePushValidation"]
+        v6["CfcPolicyAuthoring (policy imports → manifests)"]
+        v7["CfcPolicyOfValidation"]
     end
     subgraph p2["Phase 2 · Lower (rewrite structure)"]
         l1["JsxExpressionSiteRouter"]
@@ -100,10 +102,10 @@ flowchart TB
     end
     subgraph p3["Phase 3 · Schemas + module scope"]
         s1["SchemaInjection (writes synthetic TypeNodes + registry)"]
-        s2["BuilderCallHoisting"]
+        s2["BuilderCallHoisting (emits the trailing __cfReg)"]
         s3["SchemaGenerator (reads the registry → JSON Schema)"]
         s4["ReactiveVariableFor"]
-        s5["ModuleScope: shadowing, __cfReg cf-data,<br/>PatternCoverage, function hardening"]
+        s5["ModuleScope: shadowing, __cf_data,<br/>PatternCoverage, function hardening"]
     end
     p1 --> p2 --> p3
     s1 -.->|"hands off via CrossStageState"| s3
@@ -202,7 +204,7 @@ generator walks the node instead of the type.
   explicit sync note at the top of the file) the Fabric value types against
   `data-model`. Changing a signature means editing it in two places.
 - **The biggest files are the densest part of the system.**
-  `schema-injection.ts` (4123 lines) and `type-shrinking.ts` (3285) are the
+  `schema-injection.ts` (4134 lines) and `type-shrinking.ts` (3285) are the
   least approachable region; budget accordingly.
 - **The `lift-applied` distinction is subtle.** `__cfHelpers.lift(cb)(input)` —
   a single application — is classified as `lift-applied` and is what `computed`
@@ -213,9 +215,13 @@ generator walks the node instead of the type.
 
 ## Public surfaces
 
-- **`api`** — `.` (`index.ts`), `./cfc`, `./cfc-authoring`, `./cfc-atoms`,
-  `./schema`. Authors reach it via the `commonfabric*` import aliases in the root
-  `deno.jsonc`.
+- **`api`** — the package exports five subpaths (`.` → `index.ts`, `./cfc` →
+  `cfc.ts` the canonical CFC authoring surface, `./cfc-authoring` and
+  `./cfc-atoms` re-export barrels over it, `./schema` → `schema.ts` the
+  `Schema<>` type-inference machinery). Authors, however, get only three
+  `commonfabric*` aliases (root `deno.jsonc`): `commonfabric` → `index.ts`,
+  `commonfabric/cfc` → `cfc-authoring.ts` (not `cfc.ts`), `commonfabric/schema` →
+  `schema.ts`.
 - **`ts-transformers`** — `src/mod.ts` exports
   `CommonFabricTransformerPipeline`, the base `Pipeline`/`Transformer`/
   `CrossStageState`, and the individual transformers.

@@ -99,7 +99,8 @@ Most groups follow a `*.routes.ts` (the Zod/OpenAPI schema) plus `*.handlers.ts`
 | `/api/ingest/:id` | journal-sink ingest channel — posts external data into a space |
 | `/api/webhooks[/:id]` | webhook CRUD and delivery |
 | `/api/telemetry/*` | telemetry ingest |
-| `/api/whoami`, `/api/meta`, `/api/blobs` | identity, build info, blobs |
+| `/api/whoami`, `/api/meta` | identity, build info |
+| `/:spaceDid/blobs[/:name]` | per-space blob upload/fetch (not under `/api`) |
 | `/*` | the shell SPA (mounted last) |
 
 ---

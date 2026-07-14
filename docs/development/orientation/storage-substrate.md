@@ -110,33 +110,45 @@ erDiagram
     revision ||--|| head : "latest pointer per entity"
     revision }o--o| snapshot : "materialized periodically"
 
+    branch ||--o{ commit : "owns"
+
     commit {
         int seq PK
         string branch
         string session_id
+        int local_seq
+        string invocation_ref FK
+        string authorization_ref FK
         json original
         json resolution
     }
     revision {
-        string branch_id_scope PK
-        int seq
-        int op_index
+        string branch_id_scope_seq_opindex PK "compound: (branch,id,scope_key,seq,op_index)"
+        int commit_seq FK
         string op
         json data
     }
     head {
-        string branch_id_scope PK
+        string branch_id_scope PK "compound: (branch,id,scope_key)"
         int seq
         int op_index
     }
     snapshot {
-        string branch_id_scope_seq PK
+        string branch_id_scope_seq PK "compound: (branch,id,scope_key,seq)"
         json value
+    }
+    branch {
+        string name PK
+        string parent_branch
+        int fork_seq
+        int head_seq
+        string status
     }
     blob_store {
         string hash PK
         blob data
         string content_type
+        int size
     }
 ```
 

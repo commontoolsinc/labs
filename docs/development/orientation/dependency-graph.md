@@ -88,7 +88,7 @@ flowchart TD
     toolshed -->|7| memory["memory"]
     toolshed -->|6| llm["llm"]
     toolshed -->|2| bcs["background-piece-service"]
-    cli["cli"] -->|25| runner
+    cli["cli"] -->|26| runner
     cli -->|8| jsc["js-compiler"]
     cli -->|5| piece["piece"]
     cli -->|2| sinsp["state-inspector"]
@@ -246,8 +246,8 @@ means test, fixture, integration, and benchmark files were excluded.
 api               → memory(comment only), runner(comment only), utils(comment only)
 background-piece  → identity(9), piece(2), runner(15), utils(3)
 cf-harness        → api(18), llm(4), runner(28), utils(2)
-cli               → api(5), data-model(3), fuse(1), html(1), identity(9),
-                    js-compiler(8), llm(2), memory(3), piece(5), runner(25),
+cli               → api(5), data-model(3), fuse(1), html(2), identity(9),
+                    js-compiler(8), llm(2), memory(3), piece(5), runner(26),
                     runtime-client(1), state-inspector(2), static(1),
                     test-support(1), ts-transformers(1), utils(9)
 content-hash      → utils(2)

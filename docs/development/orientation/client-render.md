@@ -184,8 +184,10 @@ tools.
 - **`html`** — `.` (`h`, a few UI helpers), plus `./client`, `./jsx-runtime`,
   `./jsx-dev-runtime`, `./worker`, `./main`, `./vdom-ops`, `./mock-doc`,
   `./utils`, `./debug`.
-- **`ui`** — `.` → `v2/index.ts` (the `BaseElement`, `CellController`, the Lit
-  contexts, the style tokens, and all `cf-*` classes, which self-register).
+- **`ui`** — `.` → `v2/index.ts` (the `BaseElement`, `DebugController`, the Lit
+  contexts `runtimeContext`/`spaceContext`, the style tokens, and all `cf-*`
+  classes, which self-register). Note `CellController` is *not* re-exported from
+  the barrel — components import it by relative path from `v2/core/`.
 - **`iframe-sandbox`** — `.` exports `CommonIframeSandboxElement`, the `IPC`
   namespace, and `setIframeContextHandler`.
 - **`shell`** — the app entry is `src/index.ts`; the library export is
