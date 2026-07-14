@@ -40,10 +40,7 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveLink } from "../link-resolution.ts";
-import {
-  listElementLink,
-  listElementPatternInput,
-} from "./list-element-link.ts";
+import { listElementLink } from "./list-element-link.ts";
 import {
   linkResolutionProbe,
   machineryRead,
@@ -237,9 +234,7 @@ export function map(
       .withTx(tx);
 
     const createRunInput = (element: Cell<any>, index: number) => ({
-      ...(argumentUsage.usesElement
-        ? { element: listElementPatternInput(element) }
-        : {}),
+      ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
       ...(argumentUsage.usesArray ? { array: listCell } : {}),
       ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),

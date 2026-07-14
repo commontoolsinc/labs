@@ -1,9 +1,6 @@
 import type { ContextualFlowControl } from "../cfc.ts";
-import type { Cell } from "../cell.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
-
-const LIST_ELEMENT_PATTERN_INPUT_SCHEMA = { type: "unknown" } as const;
 
 /**
  * Build the link for one raw list slot without reading the slot's value.
@@ -31,14 +28,4 @@ export function listElementLink(
   };
 
   return slotBase;
-}
-
-/**
- * Keep the coordinator's schema-bearing element cell identity-only when it is
- * passed into the child pattern. The child pattern's argument schema supplies
- * the value shape; serializing the source's structural type here would turn a
- * direct alias callback into a materialized value instead of a reference.
- */
-export function listElementPatternInput(element: Cell<any>): Cell<any> {
-  return element.asSchema(LIST_ELEMENT_PATTERN_INPUT_SCHEMA);
 }
