@@ -2732,10 +2732,9 @@ export type WishParams = {
 };
 
 export type WishState<T> = {
-  // A failed wish should have result of undefined and candidates of []
-  result: T | undefined;
+  /** The current selection, or its availability state while resolving. */
+  result: AsyncResult<T>;
   candidates: T[];
-  error?: any;
   [UI]?: VNode;
 };
 
