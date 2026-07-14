@@ -16,7 +16,11 @@ import { when } from "./when.ts";
 import { unless } from "./unless.ts";
 import type { Runtime } from "../runtime.ts";
 import { compileAndRun, compileAndRunResult } from "./compile-and-run.ts";
-import { sqliteDatabase, sqliteQuery } from "./sqlite-builtins.ts";
+import {
+  sqliteDatabase,
+  sqliteQuery,
+  sqliteQueryResult,
+} from "./sqlite-builtins.ts";
 import { navigateTo } from "./navigate-to.ts";
 import { inspectConfLabel } from "./inspect-conf-label.ts";
 import { wish } from "./wish.ts";
@@ -71,6 +75,10 @@ export function registerBuiltins(runtime: Runtime) {
   moduleRegistry.addModuleByRef(
     "sqliteQuery",
     raw(sqliteQuery, { isEffect: true }),
+  );
+  moduleRegistry.addModuleByRef(
+    "sqliteQueryResult",
+    raw(sqliteQueryResult, { isEffect: true }),
   );
   moduleRegistry.addModuleByRef(
     "generateObject",

@@ -2567,9 +2567,7 @@ export interface ISqliteQueryable {
        *  count of withheld rows is reported as `withheld`. */
       readClearance?: boolean;
     },
-  ): Reactive<
-    { pending: boolean; result?: Row[]; error?: any; withheld?: number }
-  >;
+  ): Reactive<AsyncResult<SqliteQueryResult<Row>>>;
 }
 
 /**
@@ -2632,11 +2630,17 @@ export type SqliteQueryParams = {
    *  of withheld rows is reported back as `withheld`. */
   readClearance?: boolean;
 };
+
+/** Atomic successful value of a SQLite query. */
+export type SqliteQueryResult<Row> = {
+  rows: Row[];
+  /** Rows hidden by declared read clearance; absent when clearance is unused. */
+  withheld?: number;
+};
+
 export type SqliteQueryFunction = <Row = Record<string, unknown>>(
   params: FactoryInput<SqliteQueryParams>,
-) => Reactive<
-  { pending: boolean; result?: Row[]; error?: any; withheld?: number }
->;
+) => Reactive<AsyncResult<SqliteQueryResult<Row>>>;
 
 // Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes). There

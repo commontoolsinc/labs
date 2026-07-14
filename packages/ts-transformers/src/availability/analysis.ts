@@ -56,6 +56,7 @@ const ASYNC_RUNTIME_EXPORTS = new Set([
   "fetchJsonUnchecked",
   "fetchProgram",
   "generateTextStream",
+  "sqliteQuery",
 ]);
 
 function isAdvancedStreamProducer(

@@ -13,6 +13,12 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  type DataUnavailable,
+  DataUnavailable as DataUnavailableValue,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import { sqliteQueryStateNodeFactory } from "../src/builtins/sqlite/query-node.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -73,13 +79,12 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     const result = runtime.run(tx, queryPattern, {}, resultCell);
     tx.commit();
 
-    const q = await waitUntil<QueryState>(
+    const q = await waitUntil<QueryValue>(
       runtime,
       result,
-      (v) => v.pending === false,
+      (v) => !isDataUnavailable(v),
     );
-    expect(q.error).toBeUndefined();
-    expect(q.result).toEqual([]);
+    expect(q).toEqual({ rows: [] });
   });
 
   it("settled() waits for an in-flight reactive query flush (no stale read)", async () => {
@@ -128,19 +133,21 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
       // before the latency-bounded flush completes (still pending); `settled()`
       // waits for it.
       const view = result as unknown as {
-        get: () => QueryState;
+        get: () => QueryValue;
+        resolveAsCell: () => { getRaw: () => QueryValue };
         sink: (f: () => void) => () => void;
       };
       const cancel = view.sink(() => {});
       try {
         await runtime.idle();
-        expect(view.get().pending).toBe(true);
+        const pending = view.resolveAsCell().getRaw();
+        expect(isDataUnavailable(pending) && pending.reason === "pending").toBe(
+          true,
+        );
 
         await runtime.settled();
         const v = view.get();
-        expect(v.pending).toBe(false);
-        expect(v.error).toBeUndefined();
-        expect(v.result).toEqual([]);
+        expect(v).toEqual({ rows: [] });
       } finally {
         cancel();
       }
@@ -224,14 +231,18 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
   // stays open until the post-commit flush writes the result (or error) back, so
   // the write-back handlers run every time rather than depending on whether the
   // async flush lands inside the observation window.
-  async function runQueryToSettled(sql: string, label: string) {
+  async function runQueryToSettled(
+    sql: string,
+    label: string,
+    extra: Record<string, unknown> = {},
+  ) {
     const queryPattern = cf.pattern(() => {
       const db = cf.sqliteDatabase({
         tables: {
           notes: cf.table({ id: "integer primary key", body: "text" }),
         },
       });
-      return cf.sqliteQuery({ db, sql, reactOn: db });
+      return cf.sqliteQuery({ db, sql, reactOn: db, ...extra });
     });
     const resultCell = runtime.getCell(
       space,
@@ -243,14 +254,16 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     await tx.commit();
 
     const view = result as unknown as {
-      get: () => QueryState;
+      get: () => QueryValue;
+      resolveAsCell: () => { getRaw: () => QueryValue };
       sink: (f: () => void) => () => void;
     };
     const cancel = view.sink(() => {});
     try {
       await runtime.idle();
       await runtime.settled();
-      return view.get();
+      const raw = view.resolveAsCell().getRaw();
+      return isDataUnavailable(raw) ? raw : view.get();
     } finally {
       cancel();
     }
@@ -261,9 +274,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
       "SELECT body FROM notes",
       "sqlite-success-writeback",
     );
-    expect(q.pending).toBe(false);
-    expect(q.error).toBeUndefined();
-    expect(q.result).toEqual([]);
+    expect(q).toEqual({ rows: [] });
   });
 
   it("writes an error result when the sqlite read fails, rather than staying pending", async () => {
@@ -280,9 +291,72 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
         "SELECT body FROM notes",
         "sqlite-error-writeback",
       );
-      expect(q.pending).toBe(false);
-      expect(q.error).toBeDefined();
-      expect(q.result).toBeUndefined();
+      expect(isDataUnavailable(q) && q.reason === "error").toBe(true);
+      if (isDataUnavailable(q) && q.reason === "error") {
+        expect(q.error.message).toContain("sqlite backend unavailable");
+      }
+    } finally {
+      provider.sqliteQuery = original;
+    }
+  });
+
+  it("publishes schema mismatch for a typed row violation", async () => {
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    provider.sqliteQuery = () => Promise.resolve({ rows: [{ id: "wrong" }] });
+    try {
+      const q = await runQueryToSettled(
+        "SELECT id FROM notes",
+        "sqlite-row-schema-mismatch",
+        {
+          rowSchema: {
+            type: "object",
+            properties: { id: { type: "number" } },
+            required: ["id"],
+          },
+        },
+      );
+      expect(isDataUnavailable(q) && q.reason === "schema-mismatch").toBe(
+        true,
+      );
+    } finally {
+      provider.sqliteQuery = original;
+    }
+  });
+
+  it("propagates unavailable query inputs without issuing a read", async () => {
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    let calls = 0;
+    provider.sqliteQuery = (...args) => {
+      calls++;
+      return original(...args);
+    };
+    try {
+      const pending = DataUnavailableValue.pending();
+      const queryPattern = cf.pattern(() =>
+        cf.sqliteQuery({
+          // deno-lint-ignore no-explicit-any
+          db: pending as any,
+          sql: "SELECT 1",
+        })
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "sqlite-unavailable-input",
+        queryPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, queryPattern, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+
+      expect(result.resolveAsCell().getRaw()).toEqual(pending);
+      expect(calls).toBe(0);
     } finally {
       provider.sqliteQuery = original;
     }
@@ -317,7 +391,7 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
             notes: cf.table({ id: "integer primary key", body: "text" }),
           },
         });
-        const q = cf.sqliteQuery({
+        const q = sqliteQueryStateNodeFactory({
           db,
           sql: "SELECT body FROM notes",
           reactOn: db,
@@ -398,6 +472,10 @@ type QueryState = {
   error?: unknown;
   requestHash?: string;
 };
+
+type QueryValue =
+  | { rows: unknown[]; withheld?: number }
+  | DataUnavailable;
 
 // Wait until `pred(cell value)` holds. A `sink` keeps the effect chain live so
 // reactOn re-runs are driven (pull-mode runs effects only while observed); the

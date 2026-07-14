@@ -148,7 +148,11 @@ import { listResultSchema } from "./builtins/list-result-schema.ts";
 import { propagateRendererTrustedEvent } from "./cfc/ui-contract.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { MetaField } from "@commonfabric/api";
+import {
+  type AsyncResult,
+  MetaField,
+  type SqliteQueryResult,
+} from "@commonfabric/api";
 ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
@@ -2394,9 +2398,7 @@ export class CellImpl<T extends FabricValue>
       onExceed?: "fail" | "skip";
       readClearance?: boolean;
     },
-  ): Reactive<
-    { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
-  > {
+  ): Reactive<AsyncResult<SqliteQueryResult<Row>>> {
     return sqliteQueryNodeFactory({
       db: this,
       sql,
@@ -2411,9 +2413,7 @@ export class CellImpl<T extends FabricValue>
       // options object) to the node so the builtin can decode `_cf_link`
       // columns. Read loosely — it is not part of the public options type.
       rowSchema: (options as { rowSchema?: unknown } | undefined)?.rowSchema,
-    }) as Reactive<
-      { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
-    >;
+    }) as Reactive<AsyncResult<SqliteQueryResult<Row>>>;
   }
 
   map<S>(
