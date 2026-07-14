@@ -260,8 +260,8 @@ the boot load is paginated and off the hot path (parallel to the pre-sync).
   the field-level alias chain, so the same coupled 1-conflict residual remains.
   It reaches zero when resume-time runners pre-warm their persisted read sets —
   an application of the incremental observation-adoption direction (see below),
-  not of the boot listing. Explicit-false rollback is covered by the runtime and
-  memory protocol suites rather than a second browser population.
+  not of the boot listing. Explicit-false rollback is covered by the same
+  browser suite re-run with the flag off.
 
 ## 7.1 Live counterpart: incremental adoption
 
