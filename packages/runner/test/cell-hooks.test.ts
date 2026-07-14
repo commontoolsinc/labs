@@ -7,15 +7,43 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { isCell } from "../src/cell.ts";
+import { type Cell, isCell } from "../src/cell.ts";
 import { isCellResult } from "../src/query-result-proxy.ts";
-import { toCell } from "../src/back-to-cell.ts";
+import { toCell, type WithBackToCell } from "../src/back-to-cell.ts";
 import { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+type DeepHookValue = {
+  level1: {
+    level2: {
+      level3: {
+        value: number;
+      };
+    };
+  };
+};
+type CircularHookValue = {
+  name: string;
+  self: CircularHookValue;
+};
+type BackToCellHook = () => Cell<unknown>;
+
+function backToCellHook<T extends object>(value: T): BackToCellHook {
+  return (value as WithBackToCell<T>)[toCell];
+}
+
+function linkedCellFor<T extends object>(value: T): Cell<T> {
+  return backToCellHook(value)() as Cell<T>;
+}
+
+function assertObject(value: unknown): asserts value is object {
+  expect(typeof value).toBe("object");
+  expect(value).not.toBeNull();
+}
 
 describe("toCell and toReactive hooks", () => {
   let runtime: Runtime;
@@ -57,7 +85,7 @@ describe("toCell and toReactive hooks", () => {
 
       const result = c.get();
       expect(toCell in result).toBe(true);
-      expect(typeof (result as any)[toCell]).toBe("function");
+      expect(typeof backToCellHook(result)).toBe("function");
     });
 
     it("should add hooks to arrays returned from Cell.get()", () => {
@@ -126,7 +154,7 @@ describe("toCell and toReactive hooks", () => {
         },
       } as const satisfies JSONSchema;
 
-      const c = runtime.getCell<{ cell: any }>(
+      const c = runtime.getCell<{ cell: unknown }>(
         space,
         "hook-basic-outer-cell",
         schema,
@@ -142,6 +170,7 @@ describe("toCell and toReactive hooks", () => {
       // The value itself doesn't have hooks (no schema on inner cell)
       expect(isCell(result.cell)).toBe(false);
       expect(result.cell).toEqual({ inner: 42 });
+      assertObject(result.cell);
       expect(toCell in result.cell).toBe(false);
     });
 
@@ -179,7 +208,7 @@ describe("toCell and toReactive hooks", () => {
       c.set({ value: 42 });
 
       const result = c.get();
-      const linkedCell = (result as any)[toCell]();
+      const linkedCell = linkedCellFor(result);
 
       expect(isCell(linkedCell)).toBe(true);
       // The linked cell returns the same result with hooks
@@ -216,7 +245,7 @@ describe("toCell and toReactive hooks", () => {
       c.set({ a: { b: { c: 42 } } });
 
       const nestedValue = c.key("a").key("b").get();
-      const linkedCell = (nestedValue as any)[toCell]();
+      const linkedCell = linkedCellFor(nestedValue);
 
       expect(isCell(linkedCell)).toBe(true);
       const linkedResult = linkedCell.get();
@@ -241,7 +270,7 @@ describe("toCell and toReactive hooks", () => {
       c.set({ value: 42 });
 
       const result = c.get();
-      const linkedCell = (result as any)[toCell]();
+      const linkedCell = linkedCellFor(result);
 
       linkedCell.set({ value: 100 });
       const updatedResult = c.get();
@@ -273,7 +302,7 @@ describe("toCell and toReactive hooks", () => {
       c.set({ items: [{ name: "first" }, { name: "second" }] });
 
       const itemValue = c.key("items").key(0).get();
-      const linkedCell = (itemValue as any)[toCell]();
+      const linkedCell = linkedCellFor(itemValue);
 
       expect(isCell(linkedCell)).toBe(true);
       const linkedResult = linkedCell.get();
@@ -310,7 +339,7 @@ describe("toCell and toReactive hooks", () => {
 
       const itemValue = c.key("items").key(0).get();
       const itemCell = c.key("items").key(0);
-      const linkedCell = (itemValue as any)[toCell]();
+      const linkedCell = linkedCellFor(itemValue);
       expect(linkedCell.getAsNormalizedFullLink()).toEqual(
         itemCell.getAsNormalizedFullLink(),
       );
@@ -387,7 +416,7 @@ describe("toCell and toReactive hooks", () => {
       const argument = inputCell.asSchema(schema).get();
 
       // Pattern code can use toCell to get back to the cell
-      const cellFromHook = (argument as any)[toCell]();
+      const cellFromHook = linkedCellFor(argument);
       expect(isCell(cellFromHook)).toBe(true);
       const cellResult = cellFromHook.get();
       expect(cellResult.data).toBe("test");
@@ -561,7 +590,9 @@ describe("toCell and toReactive hooks", () => {
         additionalProperties: { type: "number" },
       } as const satisfies JSONSchema;
 
-      const c = runtime.getCell<{ known: string; [key: string]: any }>(
+      const c = runtime.getCell<
+        { known: string; [key: string]: string | number }
+      >(
         space,
         "hook-schema-additional",
         schema,
@@ -635,7 +666,7 @@ describe("toCell and toReactive hooks", () => {
       } as const satisfies JSONSchema;
 
       const c = runtime.getCell<
-        { emptyObj: Record<string, never>; emptyArr: any[] }
+        { emptyObj: Record<string, never>; emptyArr: unknown[] }
       >(
         space,
         "hook-edge-empty",
@@ -675,7 +706,7 @@ describe("toCell and toReactive hooks", () => {
         },
       } as const satisfies JSONSchema;
 
-      const c = runtime.getCell<any>(
+      const c = runtime.getCell<DeepHookValue>(
         space,
         "hook-edge-deep",
         schema,
@@ -700,7 +731,7 @@ describe("toCell and toReactive hooks", () => {
       expect(toCell in result.level1.level2.level3).toBe(true);
 
       // Can navigate to deep cells
-      const deepCell = (result.level1.level2.level3 as any)[toCell]();
+      const deepCell = linkedCellFor(result.level1.level2.level3);
       expect(isCell(deepCell)).toBe(true);
       expect(deepCell.get().value).toBe(42);
     });
@@ -741,14 +772,14 @@ describe("toCell and toReactive hooks: circular references", () => {
       },
     } as const satisfies JSONSchema;
 
-    const c = runtime.getCell<any>(
+    const c = runtime.getCell<CircularHookValue>(
       space,
       "hook-edge-circular",
       schema,
       tx,
     );
 
-    const data: any = { name: "circular" };
+    const data = { name: "circular" } as CircularHookValue;
     data.self = data;
     c.set(data);
 
