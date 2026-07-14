@@ -469,11 +469,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "ix-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "ix-el-1", { n: 2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = createTrustedBuilder(runtime).commonfabric;
     const keepFirst = lift((i: number) => i < 1);
     let filteredRef: any;
 
@@ -541,11 +537,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "grow-el-1", { n: 2 }, "bob-secret");
     await seedLabeledDoc(runtime, "grow-el-2", { n: 3 }, "carol-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = createTrustedBuilder(runtime).commonfabric;
     const isPositive = lift((value: { n: number }) => value.n > 0);
     let filteredRef: any;
 
@@ -633,11 +625,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "fm-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "fm-el-1", { n: 2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = createTrustedBuilder(runtime).commonfabric;
     // op reads element content and emits a one-element segment
     const toSegment = lift((value: { n: number }) => [value.n]);
     let flattenedRef: any;
@@ -701,13 +689,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "rp-el-0", { n: 1 }, "dave-secret");
     await seedLabeledDoc(runtime, "rp-el-1", { n: 2 }, "erin-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: { n: number }) => unknown) => (
-        value: unknown,
-      ) => unknown;
-    };
+    const { pattern, lift } = createTrustedBuilder(runtime).commonfabric;
     // Reads element content, drops everything: the result stays [] across
     // membership changes, so the re-stamp rides the declared-container path
     // (no container value write to piggyback on).
@@ -726,9 +708,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
-      const kept = (values as unknown as {
-        filterWithPattern: (op: unknown, params: unknown) => unknown;
-      }).filterWithPattern(
+      const kept = (values as any).filterWithPattern(
         pattern(({ element }: FactoryInput<any>) => dropAll(element)),
         {},
       );
