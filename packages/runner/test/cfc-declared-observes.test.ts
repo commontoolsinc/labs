@@ -2,6 +2,7 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { URI } from "@commonfabric/memory/interface";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { labelResultSchema } from "../src/builtins/sqlite-builtins.ts";
@@ -16,6 +17,13 @@ type StoredEntry = {
   origin?: string;
   observes?: string;
 };
+
+type StoredDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
+};
+
+const uncheckedJsonSchema = (schema: unknown): JSONSchema =>
+  schema as JSONSchema;
 
 // Epic C stage C5 (docs/specs/cfc-observation-classes.md §8): an authored
 // `ifc.observes` classes the declared entry, and the sqlite null-origin
@@ -46,16 +54,12 @@ describe("CFC declared observation classes (C5)", () => {
     return runtime;
   };
 
-  const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  const entriesOf = (id: URI): StoredEntry[] => {
+    const document = storageManager!.open(space).replica.getDocument(id) as
+      | StoredDocument
+      | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
-
-  const uri = (id: string) => id as `${string}:${string}`;
 
   // The sqlite seam, unit level: a null-origin projection declares the
   // whole-schema confidentiality union as a VALUE-class label; a resolved
@@ -136,14 +140,14 @@ describe("CFC declared observation classes (C5)", () => {
     countTx.readOrThrow({
       space,
       scope: "space",
-      id: uri(id),
+      id,
       type: "application/json",
       path: ["value", "rows"],
     }, { nonRecursive: true });
     const countOut = rt.getCell(space, "dobs-count-out", undefined, countTx);
     const countOutId = countOut.getAsNormalizedFullLink().id;
     countTx.writeOrThrow(
-      { space, scope: "space", id: uri(countOutId), path: ["value"] },
+      { space, scope: "space", id: countOutId, path: ["value"] },
       { count: 2 },
     );
     countTx.prepareCfc();
@@ -157,14 +161,14 @@ describe("CFC declared observation classes (C5)", () => {
     valueTx.readOrThrow({
       space,
       scope: "space",
-      id: uri(id),
+      id,
       type: "application/json",
       path: ["value", "rows"],
     });
     const valueOut = rt.getCell(space, "dobs-value-out", undefined, valueTx);
     const valueOutId = valueOut.getAsNormalizedFullLink().id;
     valueTx.writeOrThrow(
-      { space, scope: "space", id: uri(valueOutId), path: ["value"] },
+      { space, scope: "space", id: valueOutId, path: ["value"] },
       { copied: true },
     );
     valueTx.prepareCfc();
@@ -211,7 +215,7 @@ describe("CFC declared observation classes (C5)", () => {
     tx.readOrThrow({
       space,
       scope: "space",
-      id: uri(secretId),
+      id: secretId,
       type: "application/json",
       path: ["value"],
     });
@@ -244,7 +248,7 @@ describe("CFC declared observation classes (C5)", () => {
   it("an invalid ifc.observes value mints a covering entry", async () => {
     const rt = makeRuntime();
     const guarded = internSchema(
-      {
+      uncheckedJsonSchema({
         type: "object",
         properties: {
           rows: {
@@ -255,7 +259,7 @@ describe("CFC declared observation classes (C5)", () => {
         },
         // Deliberately invalid class value — the narrowed ifc type rejects
         // it, which is the point of the runtime fallback under test.
-      } as unknown as JSONSchema,
+      }),
       true,
     );
     const tx = rt.edit();
@@ -275,14 +279,14 @@ describe("CFC declared observation classes (C5)", () => {
     countTx.readOrThrow({
       space,
       scope: "space",
-      id: uri(id),
+      id,
       type: "application/json",
       path: ["value", "rows"],
     }, { nonRecursive: true });
     const out = rt.getCell(space, "dobs-invalid-out", undefined, countTx);
     const outId = out.getAsNormalizedFullLink().id;
     countTx.writeOrThrow(
-      { space, scope: "space", id: uri(outId), path: ["value"] },
+      { space, scope: "space", id: outId, path: ["value"] },
       { count: 1 },
     );
     countTx.prepareCfc();

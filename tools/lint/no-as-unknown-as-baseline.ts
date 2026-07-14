@@ -1,8 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-declared-observes.test.ts": [
-    "50:56:10q9jc",
-    "258:8:1ki6ke3",
-  ],
   "packages/runner/test/cfc-existence-channel.test.ts": [
     "76:56:10q9jc",
     "517:56:1n5gi8u",

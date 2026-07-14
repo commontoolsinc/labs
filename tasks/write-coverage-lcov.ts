@@ -38,13 +38,30 @@ async function collectCoverageProfileFiles(dir: string): Promise<string[]> {
   return files;
 }
 
-async function removeEmptyCoverageProfiles(files: string[]): Promise<number> {
-  let removed = 0;
+export type CoverageProfileRemovalSummary = {
+  empty: number;
+  invalid: number;
+};
+
+export async function removeUnusableCoverageProfiles(
+  files: string[],
+): Promise<CoverageProfileRemovalSummary> {
+  const removed = { empty: 0, invalid: 0 };
   for (const file of files) {
     const info = await Deno.stat(file);
-    if (info.size > 0) continue;
-    await Deno.remove(file);
-    removed++;
+    if (info.size === 0) {
+      await Deno.remove(file);
+      removed.empty++;
+      continue;
+    }
+
+    try {
+      JSON.parse(await Deno.readTextFile(file));
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      await Deno.remove(file);
+      removed.invalid++;
+    }
   }
   return removed;
 }
@@ -76,10 +93,15 @@ async function main(): Promise<void> {
     return;
   }
 
-  const removedEmptyProfiles = await removeEmptyCoverageProfiles(profileFiles);
-  if (removedEmptyProfiles > 0) {
+  const removedProfiles = await removeUnusableCoverageProfiles(profileFiles);
+  if (removedProfiles.empty > 0) {
     console.warn(
-      `Removed ${removedEmptyProfiles} empty coverage profile file(s) from ${profileDir}.`,
+      `Removed ${removedProfiles.empty} empty coverage profile file(s) from ${profileDir}.`,
+    );
+  }
+  if (removedProfiles.invalid > 0) {
+    console.warn(
+      `Removed ${removedProfiles.invalid} invalid coverage profile file(s) from ${profileDir}.`,
     );
   }
 
@@ -87,7 +109,7 @@ async function main(): Promise<void> {
   if (remainingProfileFiles.length === 0) {
     await writeEmptyLcov(
       outputPath,
-      `No non-empty coverage profile files remain in ${profileDir}`,
+      `No usable coverage profile files remain in ${profileDir}`,
     );
     return;
   }
