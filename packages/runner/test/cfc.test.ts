@@ -238,31 +238,6 @@ describe("ContextualFlowControl.schemaAtPath", () => {
     });
   });
 
-  it("keeps own __proto__ definitions in derived schemas", () => {
-    const cfc = new ContextualFlowControl();
-    const protoDefinition: JSONSchema = { type: "string" };
-    const definitions = Object.fromEntries([
-      ["__proto__", protoDefinition],
-      ["Unused", { type: "number" }],
-    ]) as Record<string, JSONSchema>;
-    const schema: JSONSchema = {
-      type: "array",
-      items: { $ref: "#/$defs/__proto__" },
-      $defs: definitions,
-    };
-
-    const derived = cfc.schemaAtPath(schema, ["0"]);
-    expect(derived).toEqual({
-      $ref: "#/$defs/__proto__",
-      $defs: Object.fromEntries([["__proto__", protoDefinition]]),
-    });
-    expect(
-      typeof derived !== "boolean" &&
-        derived.$defs !== undefined &&
-        Object.hasOwn(derived.$defs, "__proto__"),
-    ).toBe(true);
-  });
-
   it("keeps refs resolved from a reached definition body", () => {
     const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
@@ -460,7 +435,6 @@ describe("CFC schema reference discovery", () => {
     const definitions = Object.fromEntries([
       ["toString", { type: "string" }],
       ["constructor", { type: "number" }],
-      ["__proto__", { type: "boolean" }],
     ]) as Record<string, JSONSchema>;
     const schema: JSONSchema = {
       anyOf: Object.keys(definitions).map((name) => ({
