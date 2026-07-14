@@ -169,11 +169,11 @@ propagate](#how-flags-propagate).
   overlays, claimed-builtin passivity, causal-actor gating, canonical
   permanent-builtin failure, failure drills, bounded pool/control health
   signals, and the local Phase 2 product-derived/literal rollout gates are also
-  implemented. Durable placement counters separate completed server scheduler
-  runs, shadow/authoritative action transactions, and server builtin requests;
-  client demand publication, Worker start outcomes, and accepted-commit index
-  lookup work have distinct wait-path telemetry. The parked-worker claim-
-  readiness failure is fixed with
+  implemented. Process-lifetime placement counters separate completed server
+  action runs, classified shadow/authoritative action transactions, and server
+  builtin broker requests; client demand publication, Worker start outcomes,
+  and accepted-commit index lookup work have distinct wait-path telemetry. The
+  parked-worker claim-readiness failure is fixed with
   deterministic cold-wake and replacement coverage. The 500-event
   counterbalanced browser/CPU acceptance gate passes; see the
   [accepted Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-13.md).

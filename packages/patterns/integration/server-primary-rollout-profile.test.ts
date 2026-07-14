@@ -8,6 +8,7 @@ import {
   parseCpuBenchmarkEventCount,
   type RendererProcessCpuDelta,
   summarizeCPUProfile,
+  waitFor,
   waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -87,6 +88,9 @@ type PhaseResult = {
   lazyActionRuns: number;
   clientDerivedSuppressed: number;
   clientDerivedUpstreamCommits: number;
+  serverExecutionBoundary:
+    | "claimed-settlement"
+    | "client-upstream";
   serverExecution: {
     schedulerRuns: number;
     actionTransactions: {
@@ -110,6 +114,25 @@ type PhaseResult = {
 };
 
 type ServerExecutionCounters = PhaseResult["serverExecution"];
+
+async function serverExecutionPoolIsQuiescent(): Promise<boolean> {
+  const response = await fetch(new URL("/api/health/stats", API_URL));
+  assert(response.ok, `execution health returned ${response.status}`);
+  const health = await response.json() as {
+    serverExecutionPool?: {
+      activeLanes?: number;
+      activeWorkers?: number;
+      activeDemands?: number;
+    } | null;
+  };
+  const pool = health.serverExecutionPool;
+  assert(
+    pool !== undefined && pool !== null,
+    "server execution pool unavailable",
+  );
+  return pool.activeLanes === 0 && pool.activeWorkers === 0 &&
+    pool.activeDemands === 0;
+}
 
 async function readServerExecutionCounters(): Promise<ServerExecutionCounters> {
   const response = await fetch(new URL("/api/health/stats", API_URL));
@@ -703,6 +726,10 @@ const assertRendererCountersContinue = (
     let resultSinkCancel: (() => void) | undefined;
 
     beforeAll(async () => {
+      // Empty-demand publication acknowledges before asynchronous pool drain
+      // finishes. Fence prior serial integration tests before taking any
+      // process-global placement baseline or creating this test's own demand.
+      await waitFor(serverExecutionPoolIsQuiescent, { timeout: TIMEOUT });
       [actorIdentity, lazyIdentity] = await Promise.all([
         Identity.generate({ implementation: "noble" }),
         Identity.generate({ implementation: "noble" }),
@@ -1145,6 +1172,9 @@ const assertRendererCountersContinue = (
           clientDerivedUpstreamCommits:
             loadAfter.churn.clientDerivedUpstreamCommits -
             loadBefore.churn.clientDerivedUpstreamCommits,
+          serverExecutionBoundary: policyEnabled
+            ? "claimed-settlement"
+            : "client-upstream",
           serverExecution: serverExecutionDelta(
             serverExecutionBefore,
             serverExecutionAfter,
@@ -1161,19 +1191,26 @@ const assertRendererCountersContinue = (
         }
         console.log(
           `server-primary execution placement phases: ${
-            JSON.stringify(phases.map((phase) => ({
-              label: phase.label,
-              policyEnabled: phase.policyEnabled,
-              events: phase.events,
-              client: {
-                exactLazySchedulerRuns: phase.lazyActionRuns,
-                actionTransactions: {
-                  suppressed: phase.clientDerivedSuppressed,
-                  upstream: phase.clientDerivedUpstreamCommits,
+            JSON.stringify({
+              serverScope: "toolshed-process",
+              baseline: "zero-lane-quiescence",
+              phases: phases.map((phase) => ({
+                label: phase.label,
+                policyEnabled: phase.policyEnabled,
+                events: phase.events,
+                client: {
+                  exactLazySchedulerRuns: phase.lazyActionRuns,
+                  actionTransactions: {
+                    suppressed: phase.clientDerivedSuppressed,
+                    upstream: phase.clientDerivedUpstreamCommits,
+                  },
                 },
-              },
-              server: phase.serverExecution,
-            })))
+                server: {
+                  boundary: phase.serverExecutionBoundary,
+                  ...phase.serverExecution,
+                },
+              })),
+            })
           }`,
         );
 
@@ -1198,6 +1235,7 @@ const assertRendererCountersContinue = (
             lazyActionRuns: phase.lazyActionRuns,
             clientDerivedSuppressed: phase.clientDerivedSuppressed,
             clientDerivedUpstreamCommits: phase.clientDerivedUpstreamCommits,
+            serverExecutionBoundary: phase.serverExecutionBoundary,
             serverExecution: phase.serverExecution,
           }));
           console.log(
