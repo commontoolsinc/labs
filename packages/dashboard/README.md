@@ -419,7 +419,8 @@ override a failed dashboard test by temporarily setting the repository Actions
 variable `PUSH_BRANCH=true`; the image build must still pass, the rerun must have
 `github.run_attempt > 1`, and GCP independently verifies the actor's numeric org
 membership ID. Reset `PUSH_BRANCH=false` immediately after testing. Main-branch
-pushes publish both the immutable SHA tag and `latest`.
+pushes publish both the immutable SHA tag and `latest`. Once a SHA tag exists,
+reruns reuse its digest instead of rebuilding or moving the tag.
 
 The publish job authenticates with GitHub OIDC and GCP Workload Identity
 Federation. It emits the immutable `sha256:` image reference in the workflow
