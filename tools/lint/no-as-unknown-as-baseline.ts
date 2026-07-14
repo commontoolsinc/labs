@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-writer-fit.test.ts": [
-    "22:60:1vjves4",
-  ],
   "packages/runner/test/data-updating.test.ts": [
     "1898:8:1hppxiw",
     "1922:8:ehlquf",

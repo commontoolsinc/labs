@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
+import type { ISpaceReplica, URI } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-writer-fit");
 
@@ -15,22 +16,17 @@ type StoredEntry = {
 
 const storedDocument = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
-  id: string,
+  id: URI,
 ):
   | { value?: unknown; cfc?: { labelMap?: { entries: StoredEntry[] } } }
   | undefined => {
-  const replica = storageManager.open(signer.did()).replica as unknown as {
-    getDocument(id: string): {
-      value?: unknown;
-      cfc?: { labelMap?: { entries: StoredEntry[] } };
-    } | undefined;
-  };
+  const replica: ISpaceReplica = storageManager.open(signer.did()).replica;
   return replica.getDocument(id);
 };
 
 const replicaEntries = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
-  id: string,
+  id: URI,
 ): StoredEntry[] =>
   storedDocument(storageManager, id)?.cfc?.labelMap?.entries ?? [];
 
