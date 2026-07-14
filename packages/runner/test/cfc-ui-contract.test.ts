@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import type { Cell } from "../src/cell.ts";
 import type { EventHandler } from "../src/scheduler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { ID } from "../src/builder/types.ts";
@@ -44,6 +45,10 @@ const rendererEvent = <T extends Record<string, unknown>>(event: T): T => {
   markRendererTrustedEvent(event);
   return event;
 };
+
+type ContractMessage = { origin: string; body: string };
+type IdentifiedContractMessage = ContractMessage & { [ID]: string };
+type BodyMessage = { body: string };
 
 describe("CFC UI contract matching", () => {
   it("matches UiAction contracts against trusted DOM dataset markers", () => {
@@ -1442,7 +1447,7 @@ describe("CFC trusted UI event enforcement", () => {
       "cfc-ui-contract-stream-mixed-array-imported-write-auth",
       { asCell: ["stream"] },
     );
-    const messages = runtime.getCell<Array<{ origin: string; body: string }>>(
+    const messages = runtime.getCell<Array<ContractMessage>>(
       space,
       "cfc-ui-contract-output-mixed-array-write-auth",
       {
@@ -1488,11 +1493,13 @@ describe("CFC trusted UI event enforcement", () => {
           sourceFile: "/trusted.tsx",
           bindingPath: ["commitTrustedMessageSend"],
         });
-        messages.withTx(tx).push({
-          [ID]: "trusted-sent-1",
-          origin: "sent",
-          body: "accepted",
-        } as any);
+        messages.withTx(tx).push(
+          {
+            [ID]: "trusted-sent-1",
+            origin: "sent",
+            body: "accepted",
+          } satisfies IdentifiedContractMessage,
+        );
       }) as EventHandler,
       {
         reads: [],
@@ -1503,11 +1510,13 @@ describe("CFC trusted UI event enforcement", () => {
     );
     const fakeSentHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
-        messages.withTx(tx).push({
-          [ID]: "fake-sent-1",
-          origin: "sent",
-          body: "rejected",
-        } as any);
+        messages.withTx(tx).push(
+          {
+            [ID]: "fake-sent-1",
+            origin: "sent",
+            body: "rejected",
+          } satisfies IdentifiedContractMessage,
+        );
       }) as EventHandler,
       {
         reads: [],
@@ -1518,11 +1527,13 @@ describe("CFC trusted UI event enforcement", () => {
     );
     const importedHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
-        messages.withTx(tx).push({
-          [ID]: "imported-1",
-          origin: "imported",
-          body: "allowed",
-        } as any);
+        messages.withTx(tx).push(
+          {
+            [ID]: "imported-1",
+            origin: "imported",
+            body: "allowed",
+          } satisfies IdentifiedContractMessage,
+        );
       }) as EventHandler,
       {
         reads: [],
@@ -1657,7 +1668,7 @@ describe("CFC trusted UI event enforcement", () => {
       { asCell: ["stream"] },
     );
     const state = runtime.getCell<
-      { messages: Array<{ origin: string; body: string }> }
+      { messages: Array<ContractMessage> }
     >(
       space,
       "cfc-ui-contract-output-nested-mixed-array-write-auth",
@@ -1710,11 +1721,13 @@ describe("CFC trusted UI event enforcement", () => {
           sourceFile: "/trusted.tsx",
           bindingPath: ["commitTrustedMessageSend"],
         });
-        state.withTx(tx).key("messages").push({
-          [ID]: "trusted-sent-1",
-          origin: "sent",
-          body: "accepted",
-        } as any);
+        state.withTx(tx).key("messages").push(
+          {
+            [ID]: "trusted-sent-1",
+            origin: "sent",
+            body: "accepted",
+          } satisfies IdentifiedContractMessage,
+        );
       }) as EventHandler,
       {
         reads: [],
@@ -1725,11 +1738,13 @@ describe("CFC trusted UI event enforcement", () => {
     );
     const fakeSentHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
-        state.withTx(tx).key("messages").push({
-          [ID]: "fake-sent-1",
-          origin: "sent",
-          body: "rejected",
-        } as any);
+        state.withTx(tx).key("messages").push(
+          {
+            [ID]: "fake-sent-1",
+            origin: "sent",
+            body: "rejected",
+          } satisfies IdentifiedContractMessage,
+        );
       }) as EventHandler,
       {
         reads: [],
@@ -1740,11 +1755,13 @@ describe("CFC trusted UI event enforcement", () => {
     );
     const importedHandler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
-        state.withTx(tx).key("messages").push({
-          [ID]: "imported-1",
-          origin: "imported",
-          body: "allowed",
-        } as any);
+        state.withTx(tx).key("messages").push(
+          {
+            [ID]: "imported-1",
+            origin: "imported",
+            body: "allowed",
+          } satisfies IdentifiedContractMessage,
+        );
       }) as EventHandler,
       {
         reads: [],
@@ -2055,7 +2072,7 @@ describe("CFC trusted UI event enforcement", () => {
     const handler = Object.assign(
       ((tx: IExtendedStorageTransaction) => {
         const messages = holder.withTx(tx).key("messages")
-          .resolveAsCell() as any;
+          .resolveAsCell() as Cell<Array<BodyMessage>>;
         messages.push({ body: "rejected" });
       }) as EventHandler,
       {
