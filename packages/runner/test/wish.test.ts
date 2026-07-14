@@ -17,6 +17,7 @@ import { NAME, UI } from "../src/builder/types.ts";
 import {
   createSidecarPatternCache,
   parseWishTarget,
+  projectSuggestionPatternResult,
   tagMatchesHashtag,
 } from "../src/builtins/wish.ts";
 import {
@@ -65,6 +66,25 @@ describe("wish built-in", () => {
     await tx.commit();
     await runtime.dispose();
     await storageManager.close();
+  });
+
+  it("projects an unselected suggestion result as pending", () => {
+    const suggestion = runtime.getCell<Record<string, unknown>>(
+      space,
+      "wish suggestion projection",
+      undefined,
+      tx,
+    );
+    const result = suggestion.key("result");
+
+    expect(projectSuggestionPatternResult(result)).toBe(
+      DataUnavailable.pending(),
+    );
+
+    result.set({ name: "Selected" });
+    const selected = projectSuggestionPatternResult(result);
+    expect(isDataUnavailable(selected)).toBe(false);
+    expect((selected as typeof result).get()).toEqual({ name: "Selected" });
   });
 
   it("resolves the well known all pieces cell", async () => {

@@ -1368,6 +1368,17 @@ function projectWishCellValue(
   return cell.asSchema(schema as JSONSchema).getAsLink({ includeSchema: true });
 }
 
+/**
+ * Adapt the legacy suggestion sidecar's optional result to Wish availability.
+ * Keep available values as cells so the outer Wish retains the same live link.
+ */
+export function projectSuggestionPatternResult(
+  resultCell: Cell<unknown>,
+): Cell<unknown> | DataUnavailableVariant {
+  const resolved = resultCell.resolveAsCell();
+  return resolved.getRaw() === undefined ? DataUnavailable.pending() : resolved;
+}
+
 function dataUnavailableWishCell(
   runtime: Runtime,
   space: Cell<unknown>["space"],
@@ -1653,6 +1664,29 @@ export function wish(
     }
 
     return suggestionPatternResultCell;
+  }
+
+  function sendSuggestionPatternState(
+    tx: IExtendedStorageTransaction,
+    input: {
+      situation: string;
+      context: Record<string, any>;
+      initialResults?: unknown;
+    },
+    outputScope: CellScope,
+    schema: unknown,
+  ): void {
+    const state = launchSuggestionPattern(input, tx).withTx(tx);
+    sendWishState(
+      tx,
+      {
+        result: projectSuggestionPatternResult(state.key("result")),
+        candidates: state.key("candidates"),
+        [UI]: state.key(UI),
+      },
+      outputScope,
+      schema,
+    );
   }
 
   // Renders an error message into a pattern result cell in its own committed
@@ -2177,16 +2211,15 @@ export function wish(
                   "send-suggestion",
                   queryKey,
                   () =>
-                    sendResult(
+                    sendSuggestionPatternState(
                       tx,
-                      launchSuggestionPattern(
-                        {
-                          situation: query,
-                          context: context ?? {},
-                          initialResults: candidatesCell,
-                        },
-                        tx,
-                      ),
+                      {
+                        situation: query,
+                        context: context ?? {},
+                        initialResults: candidatesCell,
+                      },
+                      outputScope,
+                      schema,
                     ),
                 );
               } else {
@@ -2278,12 +2311,15 @@ export function wish(
             "send-suggestion",
             queryKey,
             () =>
-              sendResult(
+              sendSuggestionPatternState(
                 tx,
-                launchSuggestionPattern(
-                  { situation: query, context: context ?? {} },
-                  tx,
+                { situation: query, context: context ?? {} },
+                wishOutputScope(
+                  schema,
+                  tx.getNarrowestReadScope(),
+                  false,
                 ),
+                schema,
               ),
           );
         }
