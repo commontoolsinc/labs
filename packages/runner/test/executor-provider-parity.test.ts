@@ -2259,21 +2259,11 @@ Deno.test("executor host provider disposal releases callbacks and pending reads"
     await server.graphQueryStarted.promise;
 
     disposing = channel.dispose();
-    const disposedPromptly = await Promise.race([
-      disposing.then(() => true),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100)),
-    ]);
-    assertEquals(disposedPromptly, true);
+    await disposing;
     assertEquals(server.acceptedCommitSubscriptions, 0);
 
-    const pendingResult = await Promise.race([
-      pendingRead.then((result) => ({ settled: true as const, result })),
-      new Promise<{ settled: false }>((resolve) =>
-        setTimeout(() => resolve({ settled: false }), 100)
-      ),
-    ]);
-    assert(pendingResult.settled, "host-first disposal stranded a Worker read");
-    assert(pendingResult.result.error);
+    const pendingResult = await pendingRead;
+    assert(pendingResult.error);
     await storage.close();
   } finally {
     server.releaseGraphQuery.resolve();

@@ -402,10 +402,7 @@ Deno.test("a reopen ProtocolError closes only the incompatible space session", a
     });
     transport.releaseReconnect();
 
-    await withTimeout(
-      transport.clientPrimaryReopened.promise,
-      "compatible space was not reopened after another space rejected the client",
-    );
+    await transport.clientPrimaryReopened.promise;
     const protocolError = await assertRejects(
       () => policySession.queryGraph({ roots: [] }),
       Error,

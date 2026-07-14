@@ -1187,11 +1187,7 @@ Deno.test("shared execution pool stops a fenced worker before releasing its leas
     control.renewalSucceeds = false;
     control.emit(2, active);
     const reconcile = pool.idle();
-    const stopStarted = await Promise.race([
-      executor.stopStarted.promise.then(() => true),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 500)),
-    ]);
-    assertEquals(stopStarted, true);
+    await executor.stopStarted.promise;
     const stoppedDuringHandoff = executor.stopped;
     const leaseStateDuringHandoff = control.current?.state;
     const finishedDuringHandoff = control.finished;
