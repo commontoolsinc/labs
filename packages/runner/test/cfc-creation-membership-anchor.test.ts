@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { URI } from "@commonfabric/memory/interface";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 
@@ -12,6 +13,10 @@ type StoredEntry = {
   label: { confidentiality?: string[]; integrity?: unknown[] };
   origin?: string;
   observes?: string;
+};
+
+type StoredCfcDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
 };
 
 // A document-creating write lands at the RAW document root: writeOrThrow's
@@ -43,7 +48,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     cause: string,
     value: unknown,
     atom: string,
-  ): Promise<string> => {
+  ): Promise<URI> => {
     const seed = rt.edit();
     const cell = rt.getCell(space, cause, undefined, seed);
     const id = cell.getAsNormalizedFullLink().id;
@@ -67,16 +72,14 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     return id;
   };
 
-  const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica!.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+  const entriesOf = (id: URI): StoredEntry[] => {
+    const document = storageManager!.open(space).replica.getDocument(id) as
+      | StoredCfcDocument
+      | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
 
-  const createList = async (): Promise<string> => {
+  const createList = async (): Promise<URI> => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -140,7 +143,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     readTx.readOrThrow({
       space,
       scope: "space",
-      id: listId as `${string}:${string}`,
+      id: listId,
       type: "application/json",
       path: ["value"],
     }, { nonRecursive: true });

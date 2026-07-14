@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-creation-membership-anchor.test.ts": [
-    "71:56:10q9jc",
-  ],
   "packages/runner/test/cfc-cross-space-integrity.test.ts": [
     "64:38:1n7cv82",
     "242:26:1x3ca4o",
