@@ -76,11 +76,59 @@ async function tick() {
     ticking = false;
   }
 }
-tick();
-setInterval(tick, 15_000);
+if (import.meta.main) {
+  tick();
+  setInterval(tick, 15_000);
+}
 
 // Collect drill-down routes declared by tiles.
 const routes = TILES.flatMap((t) => t.routes ?? []);
+
+const ROUTE_CACHE_TTL_MS = 60_000;
+const ROUTE_CACHE_MAX_ENTRIES = 16;
+interface RouteCacheEntry {
+  at: number;
+  response: Response;
+}
+const routeCache = new Map<string, RouteCacheEntry>();
+let routeInflight: { key: string; response: Promise<Response> } | undefined;
+
+export async function cachedRoute(
+  key: string,
+  render: () => Promise<Response>,
+  now = Date.now(),
+  ttlMs = ROUTE_CACHE_TTL_MS,
+): Promise<Response> {
+  const cached = routeCache.get(key);
+  if (cached && now - cached.at <= ttlMs) {
+    routeCache.delete(key);
+    routeCache.set(key, cached);
+    return cached.response.clone();
+  }
+  routeCache.delete(key);
+  if (routeInflight?.key === key) return (await routeInflight.response).clone();
+  if (routeInflight) {
+    return new Response("render already in progress", {
+      status: 429,
+      headers: { "retry-after": "5" },
+    });
+  }
+  const pending = (async () => {
+    const res = await render();
+    if (res.ok) {
+      routeCache.set(key, { at: now, response: res.clone() });
+      if (routeCache.size > ROUTE_CACHE_MAX_ENTRIES) {
+        const oldest = routeCache.keys().next().value;
+        if (oldest !== undefined) routeCache.delete(oldest);
+      }
+    }
+    return res;
+  })().finally(() => {
+    if (routeInflight?.response === pending) routeInflight = undefined;
+  });
+  routeInflight = { key, response: pending };
+  return (await pending).clone();
+}
 
 function page(): string {
   const ago = Math.floor((Date.now() - (lastChange || Date.now())) / 1000);
@@ -94,10 +142,7 @@ function page(): string {
   return shell(grid.join(""), wide.join(""), ago);
 }
 
-Deno.serve({
-  port: PORT,
-  onListen: () => console.log(`\n  Fabric wall LIVE:  http://localhost:${PORT}\n  ${TILES.length} tiles registered.\n`),
-}, async (req) => {
+export async function handleDashboardRequest(req: Request): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname === "/events") {
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
@@ -115,7 +160,17 @@ Deno.serve({
   }
   if (url.pathname === "/healthz") return Response.json({ ok: views.size > 0, at: lastChange });
   for (const r of routes) {
-    if (url.pathname === r.path) return await r.handler(req, url);
+    if (url.pathname === r.path) {
+      if (url.pathname === "/ci-gantt.png") return await cachedRoute(url.href, () => Promise.resolve(r.handler(req, url)));
+      return await r.handler(req, url);
+    }
   }
   return new Response(page(), { headers: { "content-type": "text/html; charset=utf-8" } });
-});
+}
+
+if (import.meta.main) {
+  Deno.serve({
+    port: PORT,
+    onListen: () => console.log(`\n  Fabric wall LIVE:  http://localhost:${PORT}\n  ${TILES.length} tiles registered.\n`),
+  }, handleDashboardRequest);
+}
