@@ -570,3 +570,118 @@ describe("CFTabs plain-string value contract (one-behind regression)", () => {
     expect(h.selectedTab()).toBe("notes");
   });
 });
+
+/**
+ * Deferred-retry supersession + slot-listener lifetime.
+ *
+ * Review follow-ups on the one-behind fix (PR #4711): the deferred rAF retry
+ * now CAPTURES its call's valueOverride, so a retry left armed across a newer
+ * synchronous pass would replay the older delivery next frame; and the
+ * cf-tab-list slotchange listener must survive the VDOM replacing the
+ * tab-list element (previously a one-shot boolean pinned it to the first).
+ */
+describe("CFTabs deferred retry + slot listener lifetime", () => {
+  it("a newer sync pass cancels a pending deferred retry (stale delivery must not replay)", () => {
+    // Capturable rAF: the module-level shim swallows callbacks; these stubs
+    // record them so the test can fire (or prove the cancellation of) the
+    // deferred retry deterministically.
+    const rafCbs = new Map<number, () => void>();
+    let nextRafId = 1;
+    const origRaf = g.requestAnimationFrame;
+    const origCaf = g.cancelAnimationFrame;
+    g.requestAnimationFrame = (cb: () => void) => {
+      const id = nextRafId++;
+      rafCbs.set(id, cb);
+      return id;
+    };
+    g.cancelAnimationFrame = (id: number) => {
+      rafCbs.delete(id);
+    };
+    try {
+      const cell = createMockCellHandle<string>("");
+      const h = makeTabs(cell, ["a", "b"]);
+      // Simulate the VDOM timing gap: tab elements exist, properties not yet
+      // assigned — the condition that arms the deferred retry.
+      h.fakeTabs.forEach((t) => {
+        (t as unknown as { value?: string }).value = undefined;
+      });
+
+      pushUpdate(cell, "a"); // delivery "a" can't apply → arms a retry carrying "a"
+      expect(rafCbs.size).toBe(1);
+
+      // Properties arrive, then a NEWER delivery applies synchronously.
+      h.fakeTabs[0].value = "a";
+      h.fakeTabs[1].value = "b";
+      pushUpdate(cell, "b");
+      expect(h.selectedTab()).toBe("b");
+
+      // The stale "a" retry must be gone — pre-fix it survived here...
+      expect(rafCbs.size).toBe(0);
+      // ...and firing any survivor must not overwrite the latest selection
+      // (pre-fix this replayed "a" over "b" on the next frame).
+      for (const cb of [...rafCbs.values()]) cb();
+      expect(h.selectedTab()).toBe("b");
+    } finally {
+      g.requestAnimationFrame = origRaf;
+      g.cancelAnimationFrame = origCaf;
+    }
+  });
+
+  it("re-attaches the slotchange listener when the cf-tab-list element is replaced, and its slotchange re-syncs", () => {
+    // Fake cf-tab-list: just the surface setupTabListSlotListener touches — a
+    // shadow root exposing a <slot> that records slotchange listeners.
+    function makeFakeTabList() {
+      const listeners: Array<() => void> = [];
+      const slot = {
+        addEventListener: (_type: string, cb: () => void) => {
+          listeners.push(cb);
+        },
+        // Empty: skip the "tabs already present" immediate-sync branch so the
+        // test exercises the LISTENER path explicitly via fireSlotChange.
+        assignedElements: () => [] as unknown[],
+      };
+      return {
+        el: {
+          tagName: "CF-TAB-LIST",
+          shadowRoot: {
+            querySelector: (sel: string) => (sel === "slot" ? slot : null),
+          },
+        },
+        listeners,
+        fireSlotChange: () => listeners.forEach((cb) => cb()),
+      };
+    }
+
+    const cell = createMockCellHandle<string>("a");
+    const h = makeTabs(cell, ["a", "b"]);
+    const listA = makeFakeTabList();
+    const listB = makeFakeTabList();
+    let currentTabList: unknown = listA.el;
+    (h.tabs as unknown as {
+      querySelector: (sel: string) => unknown;
+    }).querySelector = (sel: string) =>
+      sel === "cf-tab-list" ? currentTabList : null;
+    const setup = (h.tabs as unknown as {
+      setupTabListSlotListener: () => void;
+    }).setupTabListSlotListener.bind(h.tabs);
+
+    setup();
+    expect(listA.listeners.length).toBe(1);
+    setup(); // same element: idempotent, no duplicate listener
+    expect(listA.listeners.length).toBe(1);
+
+    // The VDOM re-renders the consumer's tab row, re-creating cf-tab-list.
+    currentTabList = listB.el;
+    setup();
+    // Pre-fix the one-shot boolean left the replacement without a listener
+    // (0 here) — cf-tabs went deaf to every subsequent tab change.
+    expect(listB.listeners.length).toBe(1);
+
+    // And the re-attached listener actually re-syncs: knock the selection out
+    // from under the component (as freshly created, unselected children would
+    // be), then fire B's slotchange.
+    h.fakeTabs.forEach((t) => (t.selected = false));
+    listB.fireSlotChange();
+    expect(h.selectedTab()).toBe("a");
+  });
+});

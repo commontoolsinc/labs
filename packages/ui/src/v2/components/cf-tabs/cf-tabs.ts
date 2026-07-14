@@ -233,6 +233,17 @@ export class CFTabs extends BaseElement {
   // write — a getValue() re-read here would return the stale bound literal
   // and silently no-op the sync.
   private updateTabSelection(valueOverride?: string): void {
+    // Every sync pass supersedes any pending deferred retry. The retry
+    // captures its call's valueOverride, so a retry left armed across a NEWER
+    // pass would replay the older delivery next frame, overwriting the latest
+    // selection (delivery "a" defers → delivery "b" applies synchronously →
+    // stale "a" fires). If THIS pass still can't apply, the defer branch
+    // below re-arms with the current value.
+    if (this._pendingRetry !== null) {
+      cancelAnimationFrame(this._pendingRetry);
+      this._pendingRetry = null;
+    }
+
     const tabs = this.getTabs();
     const panels = this.getTabPanels();
     const currentValue = valueOverride !== undefined
@@ -243,9 +254,6 @@ export class CFTabs extends BaseElement {
     // defer selection until the next frame when properties will be available.
     // This handles the timing gap between DOM element creation and property assignment.
     if (tabs.length > 0 && (tabs[0] as CFTab).value === undefined) {
-      if (this._pendingRetry !== null) {
-        cancelAnimationFrame(this._pendingRetry);
-      }
       this._pendingRetry = requestAnimationFrame(() => {
         this._pendingRetry = null;
         this.updateTabSelection(valueOverride);
