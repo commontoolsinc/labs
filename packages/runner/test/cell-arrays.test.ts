@@ -148,6 +148,30 @@ describe("plain-schema array traversal", () => {
     tx = runtime.edit();
   }
 
+  it("accepts integer values in plain number schemas", async () => {
+    await seed("plain-schema-numbers", {
+      count: 1,
+      values: [1, 1.5, 2],
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        count: { type: "number" },
+        values: { type: "array", items: { type: "number" } },
+      },
+    } as const satisfies JSONSchema;
+    const cell = runtime.getCell<{
+      count: number;
+      values: number[];
+    }>(space, "plain-schema-numbers", schema, tx);
+
+    expect(cell.get()).toEqual({
+      count: 1,
+      values: [1, 1.5, 2],
+    });
+  });
+
   it("materializes linked rows with projection, hooks, and stable mutation", async () => {
     await seed("plain-schema-rows", [{
       data: { id: "one", label: "First", ignored: "nested" },

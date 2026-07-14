@@ -38,6 +38,7 @@ import type {
   CellScope,
   JSONObject,
   JSONSchema,
+  JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
 import {
@@ -225,7 +226,26 @@ function narrowAndCombineSelectorForLink(
     if (cached !== undefined) return cached;
   }
   const narrowed = narrowSchema(docPath, selector, targetPath, cfc);
-  narrowed.schema = combineOptionalSchema(narrowed.schema, linkSchema);
+  // A link schema describes the value at the link's target path. If the
+  // selector continues below the source link, narrow the link schema by that
+  // source-relative suffix before combining it with the selector schema.
+  // `targetPath` already accounts for the link's destination path, so applying
+  // that path to the link schema here would narrow it twice.
+  const linkSchemaPath = selector.path.length > docPath.length &&
+      pathStartsWith(selector.path, docPath)
+    ? selector.path.slice(docPath.length)
+    : [];
+  const narrowedLinkSchema = linkSchema !== undefined &&
+      linkSchemaPath.length > 0
+    // Match resolveLink(): if the link schema does not describe the remaining
+    // path (for example, an array's synthetic `length` property), the link
+    // stops contributing a schema rather than rejecting the traversal.
+    ? cfc.getSchemaAtPath(linkSchema, linkSchemaPath)
+    : linkSchema;
+  narrowed.schema = combineOptionalSchema(
+    narrowed.schema,
+    narrowedLinkSchema,
+  );
   const interned = internPathSelector(narrowed);
   if (key !== undefined) {
     if (_linkHopSelectorCache.size >= INTERN_CACHE_MAX) {
@@ -475,7 +495,7 @@ type PreparedAnyOfBranch = {
   constant: boolean | undefined;
   hasAsCell: boolean;
   /** Normalized type list of the resolved merged schema, if constrained. */
-  types: readonly string[] | undefined;
+  types: readonly JSONSchemaTypes[] | undefined;
   /** Required property names, when the resolved type admits objects. */
   required: readonly string[] | undefined;
 };
@@ -2403,6 +2423,10 @@ function _mergeSchemaFlagsUncached(
  * There's a lot of things you can express with JSONSchema that aren't
  * going to be properly handled here, but make a best effort.
  *
+ * This operation is not generally commutative: parent and link schemas have
+ * distinct precedence rules. False schemas absorb the other constraint, and
+ * schemas with provably disjoint types combine to false in either order.
+ *
  * We don't handle $refs in the schema, so it's quite possible to end up with
  * $ref links that can't be resolved.
  *
@@ -2421,18 +2445,96 @@ export function combineSchema(
   return internSet(_combineSchemaCache, key, result);
 }
 
+function schemaTypesAreDisjoint(
+  parentType: JSONSchemaObj["type"],
+  linkType: JSONSchemaObj["type"],
+): boolean {
+  if (parentType === undefined || linkType === undefined) return false;
+
+  const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
+  const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
+  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
+    return false;
+  }
+
+  return !parentTypes.some((parent) =>
+    linkTypes.some((link) =>
+      parent === link ||
+      (parent === "number" && link === "integer") ||
+      (parent === "integer" && link === "number")
+    )
+  );
+}
+
+function schemaTypeMatchesValueType(
+  schemaType: JSONSchemaTypes,
+  valueType: JSONSchemaTypes,
+): boolean {
+  // Integer is a subtype of number: an integer value satisfies either schema,
+  // while a fractional number only satisfies a number schema.
+  return schemaType === valueType ||
+    (schemaType === "number" && valueType === "integer");
+}
+
+function getJsonNumberType(value: number): "integer" | "number" {
+  return Number.isInteger(value) ? "integer" : "number";
+}
+
+function narrowNumberIntegerIntersection(
+  parentType: JSONSchemaObj["type"],
+  linkType: JSONSchemaObj["type"],
+): JSONSchemaObj["type"] | undefined {
+  if (parentType === undefined || linkType === undefined) return undefined;
+
+  const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
+  const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
+  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
+    return undefined;
+  }
+
+  let narrowedNumber = false;
+  const intersection = new Set<JSONSchemaTypes>();
+  for (const parent of parentTypes) {
+    for (const link of linkTypes) {
+      if (parent === link) {
+        intersection.add(parent);
+      } else if (
+        (parent === "number" && link === "integer") ||
+        (parent === "integer" && link === "number")
+      ) {
+        intersection.add("integer");
+        narrowedNumber = true;
+      }
+    }
+  }
+
+  if (!narrowedNumber) return undefined;
+  const types = [...intersection].sort();
+  return types.length === 1 ? types[0] : types;
+}
+
 function _combineSchemaUncached(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  if (ContextualFlowControl.isTrueSchema(parentSchema)) {
+  if (ContextualFlowControl.isFalseSchema(parentSchema)) {
+    return parentSchema;
+  } else if (ContextualFlowControl.isFalseSchema(linkSchema)) {
+    return linkSchema;
+  } else if (ContextualFlowControl.isTrueSchema(parentSchema)) {
     return mergeSchemaFlags(parentSchema, linkSchema);
   } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
     return mergeSchemaFlags(linkSchema, parentSchema);
   } else if (isRecord(linkSchema) && isRecord(parentSchema)) {
+    if (
+      schemaTypesAreDisjoint(parentSchema.type, linkSchema.type)
+    ) return false;
+    const narrowedType = narrowNumberIntegerIntersection(
+      parentSchema.type,
+      linkSchema.type,
+    );
     if (linkSchema.type === "object" && parentSchema.type === "object") {
-      // If both schemas have required properties, only include those that are
-      // in both lists
+      // A property required by either intersected schema remains required.
       const {
         required: parentRequired,
         $defs: parentDefs,
@@ -2440,11 +2542,9 @@ function _combineSchemaUncached(
       } = parentSchema;
       const { required: linkRequired, $defs: linkDefs, ...linkSchemaRest } =
         linkSchema;
-      const required = parentRequired && linkRequired
-        ? parentRequired.filter((item) => linkRequired.includes(item))
-        : parentRequired
-        ? parentRequired
-        : linkRequired;
+      const required = parentRequired || linkRequired
+        ? [...new Set([...(parentRequired ?? []), ...(linkRequired ?? [])])]
+        : undefined;
       const mergedDefs = { ...linkDefs, ...parentDefs };
       // When combining these object types, if they both have properties,
       // we only want to include any properties that they both have.
@@ -2456,12 +2556,18 @@ function _combineSchemaUncached(
       // If one schema has a property defined, and another schema has an
       // additionalProperties that covers that, we use the defined property
       // and don't pick up flags like asCell from additionalProperties.
+      // Conceptually, this mirrors how TypeScript maps any & T ,
+      // i.e. true + a link, yields T, interestingly. but
+      // { foo?: string } & { bar?: string } is allowing both foo and bar.
+      // this allows polymorphism (when caller asks for it), but stops
+      // schemaless queries from exploding.
       const parentAdditionalProperties = parentSchema.additionalProperties ??
-        (parentSchema.properties === undefined);
+        ((parentSchema.properties === undefined) || undefined);
       const linkAdditionalProperties = linkSchema.additionalProperties ??
-        (linkSchema.properties === undefined);
+        ((linkSchema.properties === undefined) || undefined);
       if (
         parentSchema.properties === undefined &&
+        parentAdditionalProperties !== undefined &&
         ContextualFlowControl.isTrueSchema(parentAdditionalProperties)
       ) {
         const additionalProperties =
@@ -2481,6 +2587,7 @@ function _combineSchemaUncached(
         });
       } else if (
         linkSchema.properties === undefined &&
+        linkAdditionalProperties !== undefined &&
         ContextualFlowControl.isTrueSchema(linkAdditionalProperties)
       ) {
         if (parentSchema.additionalProperties !== undefined) {
@@ -2512,9 +2619,13 @@ function _combineSchemaUncached(
               parentSchema.properties[key],
               value,
             );
+          } else if (parentAdditionalProperties === undefined) {
+            // we have parentSchema.properties, but nothing for this property
+            // so just use the linkSchema's value
+            mergedSchemaProperties[key] = value;
           } else {
             mergedSchemaProperties[key] = combineSchema(
-              parentAdditionalProperties,
+              parentAdditionalProperties!,
               value,
             );
           }
@@ -2527,6 +2638,10 @@ function _combineSchemaUncached(
             linkSchema.properties[key] !== undefined
           ) {
             continue; // already handled
+          } else if (linkAdditionalProperties === undefined) {
+            // we have linkSchema.properties, but nothing for this property
+            // so just use the parentSchema's value
+            mergedSchemaProperties[key] = value;
           } else {
             mergedSchemaProperties[key] = combineSchema(
               value,
@@ -2545,23 +2660,19 @@ function _combineSchemaUncached(
       };
     } else if (linkSchema.type === "array" && parentSchema.type === "array") {
       // TODO(@ubik2): We should handle prefixItems
-      if (parentSchema.items === undefined) {
-        return linkSchema;
-      } else if (linkSchema.items === undefined) {
-        return parentSchema;
-      }
       const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
-      const mergedSchemaItems = combineSchema(
-        parentSchema.items,
-        linkSchema.items,
-      );
-      // this isn't great, but at least grab the flags from parent schema
-      return mergeSchemaFlags(parentSchema, {
+      const mergedSchemaItems = parentSchema.items === undefined
+        ? linkSchema.items
+        : linkSchema.items === undefined
+        ? parentSchema.items
+        : combineSchema(parentSchema.items, linkSchema.items);
+      return {
         ...linkSchema,
+        ...parentSchema,
         type: "array",
-        items: mergedSchemaItems,
+        ...(mergedSchemaItems !== undefined && { items: mergedSchemaItems }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
-      });
+      };
     } else {
       // this isn't great, but at least grab the flags from parent schema
       // Merge $defs from the two schema, with parent taking priority
@@ -2570,6 +2681,7 @@ function _combineSchemaUncached(
       // since the object types may be different
       return mergeSchemaFlags(linkSchema, {
         ...parentSchema,
+        ...(narrowedType !== undefined && { type: narrowedType }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       });
     }
@@ -3096,7 +3208,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
             match = true;
           } else if (
             branch.types !== undefined && actualType !== null &&
-            !branch.types.includes(actualType)
+            !branch.types.some((type) =>
+              schemaTypeMatchesValueType(type, actualType)
+            )
           ) {
             match = false;
           } else if (branch.required !== undefined && valueIsRecord) {
@@ -3309,9 +3423,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
           this.isValidType(schemaObj, "string")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
-    } else if (isFiniteNumber(doc.value)) {
+    } else if (
+      typeof doc.value === "number" && isFiniteNumber(doc.value)
+    ) {
       return isPlainTypeSchema(schemaObj, "number") ||
-          this.isValidType(schemaObj, "number")
+          this.isValidType(schemaObj, getJsonNumberType(doc.value))
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isBoolean(doc.value)) {
@@ -3425,7 +3541,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    */
   private isValidType(
     schema: JSONSchema,
-    valueType: string,
+    valueType: JSONSchemaTypes,
   ): TypeValidity {
     return schemaTypeValidity(schema, valueType);
   }
@@ -3489,7 +3605,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (isSigilLink(doc.value)) return undefined;
 
     if (plan.kind === "primitive") {
-      return getJsonType(doc.value) === plan.type
+      return getPlainJsonType(doc.value) === plan.type
         ? { ok: doc.value }
         : fail(TRAVERSE_FAILURES.invalidType);
     }
@@ -3510,7 +3626,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       let valid = true;
       doc.value.forEach((item, index) => {
         reads.paths.push(appendToPath(doc.address.path, index.toString()));
-        if (getJsonType(item) === itemPlan.type) {
+        if (getPlainJsonType(item) === itemPlan.type) {
           newValue[index] = item;
         } else if (itemPlan.type === "undefined") {
           newValue[index] = undefined;
@@ -3543,7 +3659,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const propPath = appendToPath(doc.address.path, propKey);
       reads.paths.push(propPath);
       if (childPlan.kind === "primitive" && !isSigilLink(propValue)) {
-        if (getJsonType(propValue) === childPlan.type) {
+        if (getPlainJsonType(propValue) === childPlan.type) {
           newValue[propKey] = propValue;
         }
       } else {
@@ -4509,7 +4625,11 @@ export function canBranchMatch(
       const schemaTypes = Array.isArray(resolved.type)
         ? resolved.type
         : [resolved.type];
-      if (!schemaTypes.includes(actualType)) return false;
+      if (
+        !schemaTypes.some((type) =>
+          schemaTypeMatchesValueType(type, actualType)
+        )
+      ) return false;
     }
   }
 
@@ -4530,18 +4650,25 @@ export function canBranchMatch(
   return true;
 }
 
-/** Map JS typeof to JSON Schema type string, or null if unknown */
-function getJsonType(
+/** Map JS typeof to its broad JSON Schema type, or null if unknown. */
+function getPlainJsonType(
   value: unknown,
-): string | null {
+): JSONSchemaTypes | null {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
   if (isString(value)) return "string";
-  if (isFiniteNumber(value)) return "number";
+  if (typeof value === "number" && isFiniteNumber(value)) return "number";
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
   if (isObject(value)) return "object";
   return null;
+}
+
+/** Refine the broad JSON Schema type so integer values can be distinguished. */
+function getJsonType(value: unknown): JSONSchemaTypes | null {
+  return (typeof value === "number" && isFiniteNumber(value))
+    ? getJsonNumberType(value)
+    : getPlainJsonType(value);
 }
 
 /**
@@ -4737,7 +4864,7 @@ function appendPartsToPath(path: ValuePath, parts: string[]): ValuePath {
  */
 function schemaTypeValidity(
   schema: JSONSchema,
-  valueType: string,
+  valueType: JSONSchemaTypes,
 ): TypeValidity {
   let resolved: JSONSchema | undefined = schema;
   if (isRecord(schema) && "$ref" in schema) {
@@ -4765,7 +4892,9 @@ function schemaTypeValidity(
       // type unknown matches anything
       if (types.includes("unknown")) {
         typeValidity = TypeValidity.Unknown;
-      } else if (!types.includes(valueType)) {
+      } else if (
+        !types.some((type) => schemaTypeMatchesValueType(type, valueType))
+      ) {
         return TypeValidity.False;
       }
     } else if (isString(schemaObj["type"])) {
@@ -4773,7 +4902,7 @@ function schemaTypeValidity(
       // type unknown matches anything
       if (type === "unknown") {
         typeValidity = TypeValidity.Unknown;
-      } else if (type !== valueType) {
+      } else if (!schemaTypeMatchesValueType(type, valueType)) {
         return TypeValidity.False;
       }
     } else {
@@ -4887,7 +5016,7 @@ function schemaTypeValidity(
  */
 export function schemaAcceptsType(
   schema: JSONSchema,
-  valueType: string,
+  valueType: JSONSchemaTypes,
 ): boolean {
   return schemaTypeValidity(schema, valueType) !== TypeValidity.False;
 }

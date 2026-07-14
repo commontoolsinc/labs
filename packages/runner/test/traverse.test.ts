@@ -1815,6 +1815,50 @@ describe("CompoundCycleTracker intern-based keying (Tactic 2B)", () => {
   });
 });
 
+const numericTypeCases = [
+  {
+    name: "number accepts an integer value",
+    schema: { type: "number" },
+    value: 42,
+    expected: true,
+  },
+  {
+    name: "number accepts a fractional value",
+    schema: { type: "number" },
+    value: 1.5,
+    expected: true,
+  },
+  {
+    name: "integer accepts an integer value",
+    schema: { type: "integer" },
+    value: 42,
+    expected: true,
+  },
+  {
+    name: "integer rejects a fractional value",
+    schema: { type: "integer" },
+    value: 1.5,
+    expected: false,
+  },
+  {
+    name: "a union containing integer accepts an integer value",
+    schema: { type: ["string", "integer"] },
+    value: 42,
+    expected: true,
+  },
+  {
+    name: "a union containing integer rejects a fractional value",
+    schema: { type: ["string", "integer"] },
+    value: 1.5,
+    expected: false,
+  },
+] as const satisfies readonly {
+  name: string;
+  schema: JSONSchema;
+  value: number;
+  expected: boolean;
+}[];
+
 describe("canBranchMatch", () => {
   it("rejects type mismatch: string value vs number schema", () => {
     expect(canBranchMatch({ type: "number" }, "hello")).toBe(false);
@@ -1836,6 +1880,14 @@ describe("canBranchMatch", () => {
     expect(canBranchMatch({ type: "boolean" }, true)).toBe(true);
     expect(canBranchMatch({ type: "null" }, null)).toBe(true);
   });
+
+  for (const testCase of numericTypeCases) {
+    it(testCase.name, () => {
+      expect(canBranchMatch(testCase.schema, testCase.value)).toBe(
+        testCase.expected,
+      );
+    });
+  }
 
   it("conservatively accepts const schemas (values may contain unresolved links)", () => {
     expect(canBranchMatch({ const: "a" }, "b")).toBe(true);
@@ -1993,6 +2045,47 @@ describe("canBranchMatch", () => {
   it("accepts empty array against items: false (only empty arrays match)", () => {
     expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
   });
+});
+
+describe("SchemaObjectTraverser number/integer type pruning", () => {
+  for (const [index, testCase] of numericTypeCases.entries()) {
+    it(testCase.name, () => {
+      const store = new Map<string, Revision<State>>();
+      const type = "application/json" as const;
+      const docUri = `of:number-integer-${index}` as URI;
+      const docEntity = docUri as Entity;
+      const value = testCase.value;
+
+      store.set(`${docUri}/${type}`, {
+        the: type,
+        of: docEntity,
+        is: { value },
+        cause: hashOf({ the: type, of: docEntity }),
+        since: 1,
+      });
+
+      const { ok, error } = getTraverser(store, {
+        path: ["value"],
+        schema: testCase.schema,
+      }).traverse({
+        address: {
+          space: "did:null:null",
+          id: docUri,
+          type,
+          path: ["value"],
+        },
+        value,
+      });
+
+      if (testCase.expected) {
+        expect(error).toBeUndefined();
+        expect(ok).toBe(value);
+      } else {
+        expect(error?.code).toBe("INVALID_TYPE");
+        expect(ok).toBeUndefined();
+      }
+    });
+  }
 });
 
 describe("mergeAnyOfMatches", () => {
@@ -2174,6 +2267,45 @@ describe("mergeAnyOfBranchSchemas", () => {
 });
 
 describe("anyOf optimization integration", () => {
+  it("preserves integer subtype matching in the prepared type prefilter", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-anyof-integer-subtype" as URI;
+    const docEntity = docUri as Entity;
+    const value = 42;
+
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value },
+      cause: hashOf({ the: type, of: docEntity }),
+      since: 1,
+    });
+
+    const selector = internPathSelector({
+      path: ["value"],
+      schema: {
+        anyOf: [{ type: "number" }, { type: "string" }],
+      },
+    });
+    expect(isInternedSchema(selector.schema!)).toBe(true);
+
+    const traverser = getTraverser(store, selector);
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value,
+    });
+
+    expect(error).toBeUndefined();
+    expect(ok).toBe(value);
+    expect(traverser.anyOfFastRejects).toBe(1);
+  });
+
   it("fast-rejects incompatible branches and still produces correct result", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
@@ -2440,6 +2572,183 @@ describe("anyOf optimization integration", () => {
     expect(result).toEqual({ name: "test" });
     // string and null branches should be fast-rejected
     expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("link schema path narrowing", () => {
+  const SPACE = "did:null:null";
+  const TYPE = "application/json" as const;
+
+  function putDoc(
+    store: Map<string, Revision<State>>,
+    id: URI,
+    value: unknown,
+  ) {
+    const entity = id as Entity;
+    store.set(`${entity}/${TYPE}`, {
+      the: TYPE,
+      of: entity,
+      is: { value },
+      cause: hashOf({ the: TYPE, of: entity }),
+      since: 1,
+    } as Revision<State>);
+  }
+
+  function makeLink(
+    targetId: URI,
+    path: string[],
+    schema: JSONSchema,
+  ) {
+    return {
+      "/": {
+        [LINK_V1_TAG]: { id: targetId, path, schema },
+      },
+    };
+  }
+
+  const cases: Array<{
+    name: string;
+    targetPath: string[];
+    targetValue: unknown;
+    selectorPath: string[];
+    selectorSchema: JSONSchema;
+    linkSchema: JSONSchema;
+    expected: unknown;
+  }> = [
+    {
+      name: "narrows an object link schema to the selected property",
+      targetPath: [],
+      targetValue: { label: "Numbers", values: [1, 2, 3] },
+      selectorPath: ["label"],
+      selectorSchema: { type: "string" },
+      linkSchema: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          values: { type: "array", items: { type: "number" } },
+        },
+        required: ["label", "values"],
+      },
+      expected: "Numbers",
+    },
+    {
+      name: "narrows an array link schema to the selected element",
+      targetPath: [],
+      targetValue: [7, 8],
+      selectorPath: ["0"],
+      selectorSchema: { type: "number" },
+      linkSchema: { type: "array", items: { type: "number" } },
+      expected: 7,
+    },
+    {
+      name: "does not apply the link destination path to its schema",
+      targetPath: ["payload"],
+      targetValue: { payload: { label: "Nested" } },
+      selectorPath: ["label"],
+      selectorSchema: { type: "string" },
+      linkSchema: {
+        type: "object",
+        properties: { label: { type: "string" } },
+        required: ["label"],
+      },
+      expected: "Nested",
+    },
+    {
+      name: "drops an array link schema for its synthetic length property",
+      targetPath: [],
+      targetValue: [7, 8],
+      selectorPath: ["length"],
+      selectorSchema: { type: "number" },
+      linkSchema: { type: "array", items: { type: "number" } },
+      expected: 2,
+    },
+    {
+      name: "preserves a false link schema at the exact link path",
+      targetPath: [],
+      targetValue: "Rejected",
+      selectorPath: [],
+      selectorSchema: { type: "string" },
+      linkSchema: false,
+      expected: undefined,
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(testCase.name, () => {
+      const store = new Map<string, Revision<State>>();
+      const rootUri = `of:link-schema-root-${testCase.name}` as URI;
+      const targetUri = `of:link-schema-target-${testCase.name}` as URI;
+      const rootValue = makeLink(
+        targetUri,
+        testCase.targetPath,
+        testCase.linkSchema,
+      );
+      putDoc(store, rootUri, rootValue);
+      putDoc(store, targetUri, testCase.targetValue);
+
+      const traverser = getTraverser(store, {
+        path: ["value", ...testCase.selectorPath],
+        schema: testCase.selectorSchema,
+      });
+      const { ok: result } = traverser.traverse({
+        address: {
+          space: SPACE,
+          id: rootUri,
+          type: TYPE,
+          path: ["value"],
+        },
+        value: rootValue,
+      });
+
+      expect(result).toEqual(testCase.expected);
+    });
+  }
+
+  it("voids a linked object missing a field required only by the link schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:link-schema-required-union-root" as URI;
+    const targetUri = "of:link-schema-required-union-target" as URI;
+    const linkSchema = {
+      type: "object",
+      properties: {
+        a: { type: "string" },
+        b: { type: "string" },
+      },
+      required: ["b"],
+    } as const satisfies JSONSchema;
+    const rootValue = {
+      item: makeLink(targetUri, [], linkSchema),
+    };
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, targetUri, { a: "present" });
+
+    const readerSchema = {
+      type: "object",
+      properties: {
+        item: {
+          type: "object",
+          properties: { a: { type: "string" } },
+          required: ["a"],
+        },
+      },
+      required: ["item"],
+    } as const satisfies JSONSchema;
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schema: readerSchema,
+    });
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(ok).toBeUndefined();
+    expect(error).toBeDefined();
   });
 });
 
