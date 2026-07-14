@@ -1,10 +1,14 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
+import type { MemoryWireConnectionMetadata } from "@commonfabric/memory/v2/wire-accounting";
 import type * as Routes from "./memory.routes.ts";
 import { memoryServer } from "../memory.ts";
 import { createSpan } from "@/middlewares/opentelemetry.ts";
 import { formatMemWriteTrace, type MemWriteOp } from "./memwrite-trace.ts";
+import { memoryWireConnectionMetadataFromHeaders } from "./memory-metadata.ts";
+
+export { memoryWireConnectionMetadataFromHeaders } from "./memory-metadata.ts";
 
 type NegotiatedSocketHandlers = {
   onMessage: (message: string) => void;
@@ -144,6 +148,7 @@ const attachMemorySocketPipeline = (
   socket: WebSocket,
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
+  metadata: MemoryWireConnectionMetadata,
 ): boolean => {
   if (MemoryServer.parseClientMessage(firstMessage) === null) {
     return false;
@@ -167,7 +172,7 @@ const attachMemorySocketPipeline = (
       return;
     }
     socket.send(encodeMemoryBoundary(message));
-  });
+  }, metadata);
   const closeConnection = () => {
     connection.close();
   };
@@ -250,7 +255,14 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
           return;
         }
 
-        if (attachMemorySocketPipeline(socket, negotiation, firstMessage)) {
+        if (
+          attachMemorySocketPipeline(
+            socket,
+            negotiation,
+            firstMessage,
+            memoryWireConnectionMetadataFromHeaders(c.req.raw.headers),
+          )
+        ) {
           setupSpan.setAttribute("socket.setup", "memory");
           return;
         }
