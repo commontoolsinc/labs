@@ -18,7 +18,7 @@ shape:
 | --- | --- | --- | --- |
 | One logical control, such as `cf-button` or `cf-input` | Custom-element host | Visible even to shadow-blind DOM readers; one role and one set of bounds | Requires forwarding keyboard, focus, state, and accessible-name behavior that a native control would otherwise provide |
 | Multiple independent actions, such as an interactive removable `cf-chip`, `cf-tags`, or a clickable `cf-tile` with nested details | Native controls inside the shadow root | Correct native keyboard and focus behavior; each action has its own role and name | Simple DOM walkers that do not consume the flattened tree cannot see the inner actions |
-| Informational collections, such as message-history beads | Native structural roles with no artificial tab stops | Preserves reading structure without claiming that information-only items are buttons | Items appear in a full accessibility snapshot, not an interactive-elements-only snapshot |
+| Informational collections, such as message-history beads | Native structural roles with no artificial tab stops | Preserves reading structure without claiming that information-only items are buttons | Readable in the accessibility tree and may appear in filtered snapshots, but intentionally remain outside the keyboard tab order |
 
 Use host-anchored semantics for a single logical control. Use named native
 shadow controls when the component is composite and needs more than one action.
