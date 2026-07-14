@@ -19,6 +19,7 @@ import {
   NAME,
   nonPrivateRandom,
   pattern,
+  resultOf,
   safeDateNow,
   UI,
   wish,
@@ -352,9 +353,10 @@ const ImportedCalendar = pattern<Input, Output>(({ title, localEvents }) => {
   // ==========================================================================
   // WISH FOR CALENDAR EVENTS from Google Calendar Importer
   // ==========================================================================
-  const { events: importedEvents } = wish<{ events: CalendarEvent[] }>(
+  const calendarWish = wish<{ events: CalendarEvent[] }>(
     { query: "#calendarEvents" },
-  ).result!;
+  );
+  const { events: importedEvents } = resultOf(calendarWish.result);
 
   // Navigation State (Writable so navigation buttons work)
   const startDate = new Writable(getWeekStart(getTodayDate()));

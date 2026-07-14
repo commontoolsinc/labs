@@ -20,6 +20,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   safeDateNow,
   UI,
   wish,
@@ -616,9 +617,10 @@ const handleFileUpload = handler<
 
 export default pattern<Input, Output>(({ importJson }) => {
   // Get all pieces in the space
-  const { allPieces } = wish<{ allPieces: RecordPiece[] }>({
+  const defaultWish = wish<{ allPieces: RecordPiece[] }>({
     query: "#default",
-  }).result!;
+  });
+  const { allPieces } = resultOf(defaultWish.result);
 
   // Build export data
   const exportData = buildExportData({ allPieces });

@@ -9,6 +9,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   safeDateNow,
   Stream,
   toSchema,
@@ -184,9 +185,10 @@ export interface DailyJournalOutput {
 export default pattern<DailyJournalInput, DailyJournalOutput>(
   ({ title, entries, template }) => {
     // Access default-app for addPiece (global piece registration)
-    const { addPiece } = wish<{
+    const defaultWish = wish<{
       addPiece: Stream<{ piece: MentionablePiece }>;
-    }>({ query: "#default" }).result!;
+    }>({ query: "#default" });
+    const { addPiece } = resultOf(defaultWish.result);
 
     // UI state
     const showSettings = new Writable(false);

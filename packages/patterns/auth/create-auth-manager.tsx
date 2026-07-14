@@ -17,9 +17,11 @@ import {
   computed,
   Default,
   handler,
+  hasError,
   lift,
   navigateTo,
   pattern,
+  resultOf,
   safeDateNow,
   type Stream,
   UI,
@@ -349,6 +351,9 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
       query: wishTag,
       scope: [".", "~"],
     });
+    const authPiece = hasError(wishResult.result)
+      ? null
+      : resultOf(wishResult.result);
 
     const now = new Writable(safeDateNow());
     startReactiveClock(now);
@@ -359,7 +364,7 @@ const AuthManagerBasePattern = pattern<AuthManagerBaseInput, AuthManagerOutput>(
     const pickerUI = <>{wishResult[UI]}</>;
     const authState = deriveAuthState({
       descriptor,
-      piece: wishResult.result,
+      piece: authPiece,
       requiredScopes,
       now,
       debugMode,

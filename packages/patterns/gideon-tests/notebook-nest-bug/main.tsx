@@ -3,6 +3,7 @@ import {
   computed,
   NAME,
   pattern,
+  resultOf,
   Stream,
   UI,
   type VNode,
@@ -17,9 +18,10 @@ export default pattern<
   Record<PropertyKey, never>,
   { [NAME]: string; [UI]: VNode; requestCreate: Stream<void> }
 >(() => {
-  const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>({
+  const defaultWish = wish<{ allPieces: Writable<MinimalPiece[]> }>({
     query: "#default",
-  }).result!;
+  });
+  const { allPieces } = resultOf(defaultWish.result);
 
   // "idle" | "creating" | "done"
   const status = new Writable<string>("idle");

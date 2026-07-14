@@ -611,7 +611,10 @@ export default pattern<PatternInput, PatternOutput>(() => {
   }>({
     query: "#emailStyle",
   });
-  const emailStylePrompt = emailStyleWish.result?.stylePrompt ?? "";
+  const emailStyle = hasError(emailStyleWish.result)
+    ? undefined
+    : resultOf(emailStyleWish.result);
+  const emailStylePrompt = emailStyle?.stylePrompt ?? "";
 
   // ==========================================================================
   // GMAIL EXTRACTOR

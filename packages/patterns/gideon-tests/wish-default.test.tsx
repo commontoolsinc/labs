@@ -6,7 +6,15 @@
  *
  * Run: deno task cf test packages/patterns/gideon-tests/wish-default.test.tsx --verbose
  */
-import { action, computed, NAME, pattern, wish, Writable } from "commonfabric";
+import {
+  action,
+  computed,
+  NAME,
+  pattern,
+  resultOf,
+  wish,
+  Writable,
+} from "commonfabric";
 
 interface MinimalPiece {
   [NAME]?: string;
@@ -15,9 +23,10 @@ interface MinimalPiece {
 export default pattern(() => {
   // This is the core thing being tested: wish("#default") should resolve
   // and provide allPieces as a writable array
-  const { allPieces } = wish<{ allPieces: Writable<MinimalPiece[]> }>({
+  const defaultWish = wish<{ allPieces: Writable<MinimalPiece[]> }>({
     query: "#default",
-  }).result!;
+  });
+  const { allPieces } = resultOf(defaultWish.result);
 
   // Track state for assertions
   const initialLength = computed(() => allPieces?.get?.()?.length ?? -1);

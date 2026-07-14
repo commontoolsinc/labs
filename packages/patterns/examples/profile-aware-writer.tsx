@@ -31,9 +31,10 @@ export default pattern<Input>(({ title }) => {
   const topic = new Writable("");
 
   const profile = wish<Cell<string>>({ query: "#learnedSummary" });
+  const profileCell = resultOf(profile.result);
 
   const systemPrompt = computed(() => {
-    const profileText = profile.result!.get();
+    const profileText = profileCell.get();
     const profileSection = profileText
       ? `\n\n--- About the User ---\n${profileText}\n---\n`
       : "";
@@ -56,7 +57,7 @@ Write content personalized to the user when appropriate.`;
         <cf-card>
           <h4 style="margin-top: 0;">Profile Context:</h4>
           <cf-code-editor
-            $value={profile.result}
+            $value={profileCell}
             style={{ maxHeight: "256px" }}
           />
         </cf-card>

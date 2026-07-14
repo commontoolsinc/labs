@@ -23,6 +23,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   safeDateNow,
   Stream,
   UI,
@@ -366,9 +367,10 @@ const handleSetTitle = handler<
 
 const WeeklyCalendar = pattern<Input, Output>(
   ({ title, events, isCalendar, isHidden }) => {
-    const { allPieces } = wish<{ allPieces: EventPiece[] }>({
+    const defaultWish = wish<{ allPieces: EventPiece[] }>({
       query: "#default",
-    }).result!;
+    });
+    const { allPieces } = resultOf(defaultWish.result);
 
     // Navigation State
     const startDate = new Cell(getWeekStart(getTodayDate()));
