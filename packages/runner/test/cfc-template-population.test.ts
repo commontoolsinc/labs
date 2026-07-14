@@ -16,6 +16,7 @@ import {
 } from "../src/cfc/label-representation.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { LabelMapEntry } from "../src/cfc/types.ts";
+import type { URI } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-template-population");
 const foreignSigner = await Identity.fromPassphrase(
@@ -29,6 +30,23 @@ type StoredEntry = {
   label: { confidentiality?: unknown[]; integrity?: unknown[] };
   origin?: string;
   observes?: string;
+};
+
+type StoredDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
+};
+
+const asUri = (id: string): URI => id as URI;
+
+const persistedEntriesOf = (
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+  spaceId: typeof space,
+  id: URI,
+): StoredEntry[] => {
+  const document = storageManager.open(spaceId).replica.getDocument(id) as
+    | StoredDocument
+    | undefined;
+  return document?.cfc?.labelMap?.entries ?? [];
 };
 
 // Stage A of docs/specs/cfc-template-population.md: runtime-minted `*`-path
@@ -90,12 +108,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
   };
 
   const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+    return persistedEntriesOf(storageManager!, space, asUri(id));
   };
 
   const derivedConfidentiality = (id: string): unknown[] =>
@@ -577,12 +590,7 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
   };
 
   const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+    return persistedEntriesOf(storageManager!, space, asUri(id));
   };
 
   const derivedConfidentiality = (id: string): unknown[] =>
@@ -794,12 +802,7 @@ describe("CFC template population (Stage A): class-split resolution", () => {
   };
 
   const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+    return persistedEntriesOf(storageManager!, space, asUri(id));
   };
 
   const derivedConfidentiality = (id: string): unknown[] =>
@@ -1044,12 +1047,7 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
   };
 
   const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+    return persistedEntriesOf(storageManager!, space, asUri(id));
   };
 
   const persistThroughSchema = async (
@@ -1214,13 +1212,7 @@ describe("CFC template population (Stage A): cross-space label protection", () =
       tx.prepareCfc();
       expect((await tx.commit()).ok).toBeDefined();
 
-      const replica = storageManager.open(space).replica as unknown as {
-        getDocument(id: string): {
-          cfc?: { labelMap?: { entries: StoredEntry[] } };
-        } | undefined;
-      };
-      const entries = replica.getDocument(listId)?.cfc?.labelMap?.entries ??
-        [];
+      const entries = persistedEntriesOf(storageManager, space, asUri(listId));
       const templates = entries.filter((e) =>
         e.origin === "structure" && e.path.length === 1 && e.path[0] === "*"
       );

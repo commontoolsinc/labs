@@ -1,11 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-template-population.test.ts": [
-    "93:56:10q9jc",
-    "580:56:10q9jc",
-    "797:56:10q9jc",
-    "1047:56:10q9jc",
-    "1217:57:fr6z7j",
-  ],
   "packages/runner/test/cfc-trigger-read-gating.test.ts": [
     "313:37:g6m25b",
     "336:17:1roz0at",
