@@ -78,6 +78,24 @@ async function runCommand(
   return { process, endpoint };
 }
 
+function isChildProcessAlreadyTerminated(error: unknown): boolean {
+  return error instanceof TypeError &&
+    error.message.includes("Child process has already terminated");
+}
+
+function killRunningProcess(
+  process: Deno.ChildProcess,
+  signal?: Deno.Signal,
+): boolean {
+  try {
+    process.kill(signal);
+    return true;
+  } catch (error) {
+    if (isChildProcessAlreadyTerminated(error)) return false;
+    throw error;
+  }
+}
+
 /** Options for launching a browser */
 export interface BrowserOptions {
   headless?: boolean;
@@ -148,22 +166,14 @@ export class Browser implements AsyncDisposable {
     if (!process) {
       await Promise.allSettled(this.pages.map((page) => page.close()));
     } else {
-      // The CDP `Browser.close` above already asks the browser to exit, so
-      // the process may be gone before either signal below is sent — and
-      // killing an already-exited child throws. That race is a success (the
-      // process is down), not an error, so both kills tolerate it and the
-      // final wait is on `process.status`.
-      try {
-        // ask nicely first
-        process.kill();
-        await deadline(process.status, 10 * 1000);
-      } catch {
-        // then force
+      if (killRunningProcess(process)) {
         try {
-          process.kill("SIGKILL");
+          await deadline(process.status, 10 * 1000);
         } catch {
-          // Already terminated between the polite close and the SIGKILL.
+          killRunningProcess(process, "SIGKILL");
+          await process.status;
         }
+      } else {
         await process.status;
       }
     }

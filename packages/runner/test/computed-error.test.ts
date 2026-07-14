@@ -9,6 +9,15 @@ import { trustPattern } from "./support/trusted-builder.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+type CauseableReactive<T> = T & {
+  for(cause: unknown): T;
+};
+
+type ComputedErrorResult = {
+  poisoned?: string;
+  healthy?: string;
+};
+
 Deno.test("computed throws error", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
@@ -26,28 +35,29 @@ Deno.test("computed throws error", async () => {
   const testPattern = trustPattern(
     runtime,
     pattern<{ input: number }>(({ input }) => {
-      // deno-lint-ignore no-explicit-any
       const poisoned = (lift((val: number) => {
         if (val > 1) throw new Error("Poisoned!");
         return `got: ${val}`;
-      })(input) as any).for("poisoned");
+      })(input) as CauseableReactive<string>).for("poisoned");
 
-      // deno-lint-ignore no-explicit-any
-      const healthy = (lift((p: string) => `healthy: ${p}`)(poisoned) as any)
-        .for(
-          "healthy",
-        );
+      const healthy = (lift((p: string) =>
+        `healthy: ${p}`
+      )(poisoned) as CauseableReactive<
+        string
+      >).for("healthy");
 
       return { poisoned, healthy };
     }),
   );
 
-  const resultCell = runtime.getCell(space, "test-instance");
+  const resultCell = runtime.getCell<ComputedErrorResult>(
+    space,
+    "test-instance",
+  );
 
   let errorCaught = false;
 
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
-  errorHandlers.add((_err: Error, _action: unknown) => {
+  runtime.scheduler.onError(() => {
     errorCaught = true;
   });
 
@@ -55,7 +65,7 @@ Deno.test("computed throws error", async () => {
   runtime.setup(undefined, testPattern, { input: 0 }, resultCell);
   runtime.start(resultCell);
 
-  const initial = (await resultCell.pull()) as any;
+  const initial = await resultCell.pull();
   assertEquals(initial.poisoned, "got: 0");
   assertEquals(initial.healthy, "healthy: got: 0");
 
@@ -65,7 +75,7 @@ Deno.test("computed throws error", async () => {
   argumentCell.withTx(tx1).set({ input: 1 });
   await tx1.commit();
 
-  const updated1 = (await resultCell.pull()) as any;
+  const updated1 = await resultCell.pull();
   assertEquals(updated1.poisoned, "got: 1");
   assertEquals(updated1.healthy, "healthy: got: 1");
 
@@ -74,7 +84,7 @@ Deno.test("computed throws error", async () => {
   argumentCell.withTx(tx2).set({ input: 2 });
   await tx2.commit();
 
-  const afterError = (await resultCell.pull()) as any;
+  const afterError = await resultCell.pull();
 
   assertEquals(afterError.poisoned, undefined);
   assertEquals(afterError.healthy, undefined);
