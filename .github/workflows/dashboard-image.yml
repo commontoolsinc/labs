@@ -84,32 +84,43 @@ jobs:
           cache-from: type=gha,scope=dashboard-${{ env.SOURCE_SHA }}
           cache-to: type=gha,mode=max,scope=dashboard-${{ env.SOURCE_SHA }}
 
+  publish_authorization:
+    name: Authorize dashboard image publish
+    needs: [dashboard_tests, dashboard_build]
+    if: ${{ !cancelled() }}
+    outputs:
+      allowed: ${{ steps.decision.outputs.allowed }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate publish policy
+        id: decision
+        env:
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          BUILD_RESULT: ${{ needs.dashboard_build.result }}
+          PUSH_BRANCH: ${{ vars.PUSH_BRANCH }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          TEST_RESULT: ${{ needs.dashboard_tests.result }}
+        shell: bash
+        run: |
+          allowed=false
+
+          if [[ "$BUILD_RESULT" == "success" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" && "$TEST_RESULT" == "success" ]]; then
+              allowed=true
+            elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && ("$AUTHOR_ASSOCIATION" == "MEMBER" || "$AUTHOR_ASSOCIATION" == "OWNER") ]]; then
+              if [[ "$TEST_RESULT" == "success" || ("$PUSH_BRANCH" == "true" && "$RUN_ATTEMPT" -gt 1) ]]; then
+                allowed=true
+              fi
+            fi
+          fi
+
+          echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
+
   publish:
     name: Publish dashboard image
-    needs: [dashboard_tests, dashboard_build]
-    if: >-
-      ${{
-        !cancelled() &&
-        needs.dashboard_build.result == 'success' &&
-        (
-          (
-            github.event_name == 'push' &&
-            github.ref == 'refs/heads/main' &&
-            needs.dashboard_tests.result == 'success'
-          ) ||
-          (
-            github.event_name == 'pull_request' &&
-            (
-              github.event.pull_request.author_association == 'MEMBER' ||
-              github.event.pull_request.author_association == 'OWNER'
-            ) &&
-            (
-              needs.dashboard_tests.result == 'success' ||
-              (vars.PUSH_BRANCH == 'true' && github.run_attempt > 1)
-            )
-          )
-        )
-      }}
+    needs: [dashboard_tests, dashboard_build, publish_authorization]
+    if: ${{ needs.publish_authorization.outputs.allowed == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
