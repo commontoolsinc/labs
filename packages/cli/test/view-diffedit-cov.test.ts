@@ -16,7 +16,11 @@ import {
   type DiffEdit,
   type DiffWorkspace,
 } from "../lib/view/diffdoc.ts";
-import { createDiffHighlighter, diffSource } from "../lib/view/diffedit.ts";
+import {
+  _internal as _de,
+  createDiffHighlighter,
+  diffSource,
+} from "../lib/view/diffedit.ts";
 
 /** A workspace backed by a real temp dir. */
 function tempWs(
@@ -463,7 +467,7 @@ Deno.test("diffedit cov: dirtyLabels names a single file when a change is inside
   }
 });
 
-Deno.test("diffedit cov: dirtyLabels names every file when the changed region pins to none", () => {
+Deno.test("diffedit cov: dirtyLabels names no file when the change pins to none (e.g. a message)", () => {
   const root = Deno.makeTempDirSync();
   try {
     Deno.writeTextFileSync(join(root, "x.ts"), "const x = 1;\nconst y = 3;\n");
@@ -479,8 +483,8 @@ Deno.test("diffedit cov: dirtyLabels names every file when the changed region pi
     };
     // A leading noise line precedes the first file. Both diffs carry it; the
     // edit only changes that leading line, which sits outside every file's
-    // header..endLine slice, so no per-file body differs and the fallback names
-    // every file.
+    // header..endLine slice, so no per-file body differs — a save writes no
+    // file, and dirtyLabels names none.
     const original = `preamble note
 diff --git a/x.ts b/x.ts
 --- a/x.ts
@@ -494,8 +498,8 @@ diff --git a/x.ts b/x.ts
     const { src } = sourceFor(original, ws);
     assertEquals(
       src.dirtyLabels!(original, current),
-      ["x.ts"],
-      "a change outside every file slice falls back to naming every file",
+      [],
+      "a change outside every file slice names no file",
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
@@ -639,6 +643,142 @@ Deno.test("diffedit cov: save writes the verified hunk's new side back to the ca
     assertEquals(onDisk[1], "const y = 2; // saved");
     assertEquals(onDisk[0], "const x = 1;");
     assertEquals(onDisk[2], "const z = 3;");
+  } finally {
+    done();
+  }
+});
+
+// --- editableStart: position/verified-aware line editability -----------------
+
+Deno.test("editableStart: a null model (buffer is not a diff) refuses every line", () => {
+  assertEquals(_de.editableStart(null, [], " some text", 0), null);
+});
+
+Deno.test("editableStart: editable only inside a verified hunk", () => {
+  const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,2 +1,3 @@
+ keep
+-old
++new
++added
+`;
+  const model = parseDiff(diff)!;
+  const lines = diff.split("\n");
+  // One hunk, marked verified and backed by a file.
+  const verified = [{
+    absPath: "/x",
+    newStart: 1,
+    newCount: 3,
+    verified: true,
+  }];
+  // Line 4 = " keep" (ctx) → editable past the marker; 5 = "-old" (removed) →
+  // refused; 6/7 = "+new"/"+added" (add) → editable; 0 = the file header → not
+  // in any hunk, refused.
+  assertEquals(_de.editableStart(model, verified, lines[4], 4), 1, "context");
+  assertEquals(
+    _de.editableStart(model, verified, lines[5], 5),
+    null,
+    "removed",
+  );
+  assertEquals(_de.editableStart(model, verified, lines[6], 6), 1, "added");
+  assertEquals(_de.editableStart(model, verified, lines[0], 0), null, "header");
+  // The same hunk, unverified: even its context/added lines are refused.
+  const unver = [{ absPath: null, newStart: 1, newCount: 3, verified: false }];
+  assertEquals(
+    _de.editableStart(model, unver, lines[4], 4),
+    null,
+    "unverified",
+  );
+});
+
+// --- commit-message amend helpers -------------------------------------------
+
+Deno.test("amendCommit: throws with no git runner (defensive; caller checks first)", () => {
+  let threw = false;
+  try {
+    _de.amendCommit(undefined, () => null, "", "");
+  } catch {
+    threw = true;
+  }
+  assert(threw, "no git runner means nothing to amend");
+});
+
+Deno.test("pendingAmend: null when there is no editable message", () => {
+  assertEquals(_de.pendingAmend(() => null, "a", "b"), null);
+});
+
+Deno.test("pendingAmend: null when the message is unchanged", () => {
+  const msg = { sha: "abcdef1", start: 0, end: 0 };
+  // The same one-line message in both baseline and current: no change.
+  const both = () => msg;
+  assertEquals(_de.pendingAmend(both, "    hi", "    hi"), null);
+});
+
+// --- message-scope revert ----------------------------------------------------
+
+const SHOW_DIFF = [
+  "commit 0123456789abcdef0123456789abcdef01234567",
+  "Author: A B <a@b>",
+  "Date:   now",
+  "",
+  "    Subject",
+  "",
+  "diff --git a/m.ts b/m.ts",
+  "--- a/m.ts",
+  "+++ b/m.ts",
+  "@@ -1,2 +1,2 @@",
+  " const x = 1;",
+  "-const y = 0;",
+  "+const y = 2;",
+  " const z = 3;",
+  "",
+].join("\n");
+
+Deno.test("diffedit cov: message revert restores the message region", () => {
+  const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    const { src } = sourceFor(SHOW_DIFF, ws);
+    const edited = SHOW_DIFF.replace("    Subject", "    Subject CHANGED");
+    const out = src.revert!(SHOW_DIFF, edited, 4, "message")!;
+    assert(out, "reverted");
+    assertEquals(out.text.split("\n")[4], "    Subject", "message restored");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: message revert is null when the cursor is in no message", () => {
+  const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    const { src } = sourceFor(SHOW_DIFF, ws);
+    const edited = SHOW_DIFF.replace("    Subject", "    Subject CHANGED");
+    // Cursor on the "commit" line, outside the indented message region.
+    assertEquals(src.revert!(SHOW_DIFF, edited, 0, "message"), null);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit cov: message revert is null when the baseline has no such region", () => {
+  const { ws, done } = tempWs({ "m.ts": FILE_TEXT });
+  try {
+    // Original has no commit header; current gains one. The baseline lacks the
+    // message region the cursor is in, so the revert declines.
+    const original = [
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -1,2 +1,2 @@",
+      " const x = 1;",
+      "-const y = 0;",
+      "+const y = 2;",
+      " const z = 3;",
+      "",
+    ].join("\n");
+    const { src } = sourceFor(original, ws);
+    assertEquals(src.revert!(original, SHOW_DIFF, 4, "message"), null);
   } finally {
     done();
   }
