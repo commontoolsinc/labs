@@ -120,10 +120,16 @@ export async function resolveWish(
   const outCell = result.key("out");
   const error: unknown = outCell.key("error").get();
   const value: unknown = outCell.key("result").get();
+  const errorMessage = typeof error === "string" && error.length > 0
+    ? error
+    : undefined;
 
   return {
-    result: value === undefined ? null : value,
-    error: typeof error === "string" && error.length > 0 ? error : undefined,
+    // The runner exposes unavailable states explicitly, but this headless CLI
+    // boundary predates AsyncResult and promises callers null on failure. The
+    // wish error field is its stable failure signal across the cell boundary.
+    result: value === undefined || errorMessage !== undefined ? null : value,
+    error: errorMessage,
   };
 }
 
