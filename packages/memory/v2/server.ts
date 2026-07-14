@@ -1270,10 +1270,15 @@ export class Server {
 
   activeWireAccountingObserver(): MemoryWireAccountingObserver | undefined {
     const observer = this.options.wireAccountingObserver;
-    if (observer?.isActive?.() === false) {
+    try {
+      if (observer?.isActive?.() === false) {
+        return undefined;
+      }
+      return observer;
+    } catch (error) {
+      console.warn("Memory wire accounting observer failed:", error);
       return undefined;
     }
-    return observer;
   }
 
   recordWireAccounting(

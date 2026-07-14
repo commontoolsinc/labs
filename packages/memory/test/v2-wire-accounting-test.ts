@@ -549,3 +549,29 @@ Deno.test("memory wire accounting observer exceptions are non-fatal", async () =
     await server.close();
   }
 });
+
+Deno.test("memory wire accounting activity exceptions are non-fatal", async () => {
+  let observed = false;
+  const observer: MemoryWireAccountingObserver = {
+    isActive() {
+      throw new Error("activity check failed");
+    },
+    observe() {
+      observed = true;
+    },
+  };
+  const server = createServer(
+    "memory://wire-accounting-activity-error",
+    observer,
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    assertEquals(shiftMessage(messages).type, "hello.ok");
+    assertEquals(observed, false);
+  } finally {
+    await server.close();
+  }
+});
