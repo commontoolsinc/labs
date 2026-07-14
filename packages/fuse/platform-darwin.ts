@@ -9,6 +9,7 @@ import {
   type FileInfo,
   type FuseLib,
   type FusePlatform,
+  type FuseProvider,
   makeWriteEntryParam,
   type MountHandle,
   type StatOpts,
@@ -179,10 +180,15 @@ const FUSE_ARGS_STRUCT_SIZE = 24;
 // --- Module state ---
 
 let fullLib: DarwinLib | null = null;
+let loadedProvider: FuseProvider = "unknown";
 
 // --- Platform implementation ---
 
 const darwinPlatform: FusePlatform = {
+  provider() {
+    return loadedProvider;
+  },
+
   openFuse(): FuseLib {
     if (fullLib) return fullLib as unknown as FuseLib;
 
@@ -190,6 +196,7 @@ const darwinPlatform: FusePlatform = {
     for (const path of libfusePaths()) {
       try {
         fullLib = Deno.dlopen(path, DARWIN_SYMBOLS);
+        loadedProvider = path.includes("libfuse-t") ? "fuse-t" : "macfuse";
         console.log(`Loaded ${path}`);
         return fullLib as unknown as FuseLib;
       } catch (e) {

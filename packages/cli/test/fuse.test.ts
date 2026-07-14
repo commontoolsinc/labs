@@ -993,6 +993,88 @@ describe("buildDenoArgs", () => {
     expect(args).toContain("--cfc-writeback-state");
     expect(args).toContain("/tmp/cf-writeback.json");
   });
+
+  it("passes noattrcache through to the daemon", () => {
+    const args = buildDenoArgs({
+      modPath: "/mod.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      noattrcache: true,
+    });
+    expect(args).toContain("--noattrcache");
+    expect(args).not.toContain("--attrcache-timeout");
+  });
+
+  it("passes attrcache-timeout through to the daemon", () => {
+    const args = buildDenoArgs({
+      modPath: "/mod.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      attrcacheTimeout: "2",
+    });
+    const flagIndex = args.indexOf("--attrcache-timeout");
+    expect(flagIndex).toBeGreaterThan(-1);
+    expect(args[flagIndex + 1]).toBe("2");
+    expect(args).not.toContain("--noattrcache");
+  });
+
+  it("forwards an attrcache-timeout of zero to the daemon", () => {
+    // "0" selects untuned caching in the daemon and must survive every
+    // forwarding layer even though the layers test the field for truthiness.
+    const args = buildDenoArgs({
+      modPath: "/mod.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      attrcacheTimeout: "0",
+    });
+    const flagIndex = args.indexOf("--attrcache-timeout");
+    expect(flagIndex).toBeGreaterThan(-1);
+    expect(args[flagIndex + 1]).toBe("0");
+
+    const supervisorArgs = buildBackgroundSupervisorDenoArgs({
+      cliModPath: "/repo/packages/cli/lib/fuse-supervisor.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      attrcacheTimeout: "0",
+    });
+    const supIndex = supervisorArgs.indexOf("--attrcache-timeout");
+    expect(supIndex).toBeGreaterThan(-1);
+    expect(supervisorArgs[supIndex + 1]).toBe("0");
+
+    const child = buildFuseChildCommand({
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+      logFile: "",
+      spaces: [],
+      execPath: "/usr/local/bin/cf",
+      attrcacheTimeout: "0",
+    });
+    const childIndex = child.args.indexOf("--attrcache-timeout");
+    expect(childIndex).toBeGreaterThan(-1);
+    expect(child.args[childIndex + 1]).toBe("0");
+  });
+
+  it("omits NFS cache mount options when unset", () => {
+    const args = buildDenoArgs({
+      modPath: "/mod.ts",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+    });
+    expect(args).not.toContain("--noattrcache");
+    expect(args).not.toContain("--attrcache-timeout");
+  });
 });
 
 describe("FUSE supervisor command construction", () => {
@@ -1027,6 +1109,7 @@ describe("FUSE supervisor command construction", () => {
       supervisorStatusPath: "/tmp/cf-state.json.child-status",
       supervisorToken: "token-1",
       allowOther: true,
+      noattrcache: true,
       cfcMode: "observe",
       cfcAnnotations: true,
       cfcXattrNamespace: "both",
@@ -1055,6 +1138,7 @@ describe("FUSE supervisor command construction", () => {
     expect(args).toContain("/tmp/cf-state.json.child-status");
     expect(args).toContain("--supervisor-token");
     expect(args).toContain("token-1");
+    expect(args).toContain("--noattrcache");
     expect(args.filter((arg) => arg === "--space").length).toBe(2);
   });
 
@@ -1127,6 +1211,7 @@ describe("FUSE supervisor command construction", () => {
       execPath: "/usr/local/bin/cf",
       supervisorStatusPath: "/tmp/cf-status",
       supervisorToken: "token-1",
+      attrcacheTimeout: "2",
     });
 
     expect(child.command).toBe("/usr/local/bin/cf");
@@ -1135,6 +1220,9 @@ describe("FUSE supervisor command construction", () => {
     expect(child.args).toContain("/tmp/cf-status");
     expect(child.args).toContain("--supervisor-token");
     expect(child.args).toContain("token-1");
+    const flagIndex = child.args.indexOf("--attrcache-timeout");
+    expect(flagIndex).toBeGreaterThan(-1);
+    expect(child.args[flagIndex + 1]).toBe("2");
   });
 
   it("terminates the spawned FUSE child during supervisor cleanup", async () => {

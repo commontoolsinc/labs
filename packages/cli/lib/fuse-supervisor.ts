@@ -9,6 +9,8 @@ export interface FuseSupervisorOptions {
   logFile: string;
   spaces: string[];
   allowOther?: boolean;
+  noattrcache?: boolean;
+  attrcacheTimeout?: string;
   cfcMode?: string;
   cfcAnnotations?: boolean;
   cfcXattrNamespace?: string;
@@ -60,6 +62,10 @@ export function buildFuseChildCommand(
     if (options.execCli) args.push("--exec-cli", options.execCli);
     if (options.logFile) args.push("--log-file", options.logFile);
     if (options.allowOther) args.push("--allow-other");
+    if (options.noattrcache) args.push("--noattrcache");
+    if (options.attrcacheTimeout) {
+      args.push("--attrcache-timeout", options.attrcacheTimeout);
+    }
     if (options.cfcMode) args.push("--cfc-mode", options.cfcMode);
     if (options.cfcAnnotations) args.push("--cfc-annotations");
     if (options.cfcXattrNamespace) {
@@ -90,6 +96,8 @@ export function buildFuseChildCommand(
       logFile: options.logFile,
       spaces: options.spaces,
       allowOther: options.allowOther,
+      noattrcache: options.noattrcache,
+      attrcacheTimeout: options.attrcacheTimeout,
       cfcMode: options.cfcMode,
       cfcAnnotations: options.cfcAnnotations,
       cfcXattrNamespace: options.cfcXattrNamespace,
@@ -255,6 +263,12 @@ function parseSupervisorArgs(rawArgs: string[]): ParsedSupervisorArgs {
       case "--allow-other":
         options.allowOther = true;
         break;
+      case "--noattrcache":
+        options.noattrcache = true;
+        break;
+      case "--attrcache-timeout":
+        options.attrcacheTimeout = requireValue(rawArgs, ++i, arg);
+        break;
       case "--cfc-mode":
         options.cfcMode = requireValue(rawArgs, ++i, arg);
         break;
@@ -316,6 +330,8 @@ Options:
   --exec-cli <path>               Path to the cf exec shim
   --log-file <path>               Path to the FUSE child log file
   --allow-other                   Pass allow_other through to the FUSE child
+  --noattrcache                   Pass noattrcache through to the FUSE child
+  --attrcache-timeout <seconds>   Pass attrcache-timeout through to the FUSE child
   --cfc-mode <mode>               FUSE-side CFC mode
   --cfc-annotations               Publish CFC annotation xattrs
   --cfc-xattr-namespace <ns>      CFC xattr namespace

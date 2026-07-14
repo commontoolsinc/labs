@@ -185,6 +185,10 @@ let fullLib: LinuxLib | null = null;
 // --- Platform implementation ---
 
 const linuxPlatform: FusePlatform = {
+  provider() {
+    return fullLib ? "linux-libfuse" : "unknown";
+  },
+
   openFuse(): FuseLib {
     if (fullLib) return fullLib as unknown as FuseLib;
 

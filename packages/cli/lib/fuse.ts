@@ -30,6 +30,8 @@ export interface FuseChildDenoArgsOptions {
   logFile?: string;
   spaces?: string[];
   allowOther?: boolean;
+  noattrcache?: boolean;
+  attrcacheTimeout?: string;
   cfcMode?: string;
   cfcAnnotations?: boolean;
   cfcXattrNamespace?: string;
@@ -361,6 +363,10 @@ export function buildFuseChildDenoArgs(
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
   if (opts.logFile) args.push("--log-file", opts.logFile);
   if (opts.allowOther) args.push("--allow-other");
+  if (opts.noattrcache) args.push("--noattrcache");
+  if (opts.attrcacheTimeout) {
+    args.push("--attrcache-timeout", opts.attrcacheTimeout);
+  }
   if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
   if (opts.cfcAnnotations) args.push("--cfc-annotations");
   if (opts.cfcXattrNamespace) {
@@ -403,6 +409,10 @@ export function buildBackgroundSupervisorDenoArgs(
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
   if (opts.logFile) args.push("--log-file", opts.logFile);
   if (opts.allowOther) args.push("--allow-other");
+  if (opts.noattrcache) args.push("--noattrcache");
+  if (opts.attrcacheTimeout) {
+    args.push("--attrcache-timeout", opts.attrcacheTimeout);
+  }
   if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
   if (opts.cfcAnnotations) args.push("--cfc-annotations");
   if (opts.cfcXattrNamespace) {

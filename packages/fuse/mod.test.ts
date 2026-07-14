@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
   appendDecodedJsonPath,
   bufferForNoHandleTruncate,
@@ -13,6 +13,12 @@ import {
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
+import {
+  ATTRCACHE_TIMEOUT_MAX_SECONDS,
+  buildMountFuseArgs,
+  DEFAULT_FUSE_T_ATTRCACHE_TIMEOUT_SECONDS,
+  parseAttrcacheTimeoutSeconds,
+} from "./mount-options.ts";
 import darwinPlatform, { libfusePaths } from "./platform-darwin.ts";
 import linuxPlatform from "./platform-linux.ts";
 import { EACCES, EINVAL, EROFS } from "./platform.ts";
@@ -307,6 +313,166 @@ Deno.test("root space lookup decodes request names and replies with canonical na
     spaceName: "home",
     directoryName: "home",
   });
+});
+
+Deno.test("mount fuse args apply allow_other on Linux only", () => {
+  assertEquals(
+    buildMountFuseArgs({
+      os: "linux",
+      provider: "linux-libfuse",
+      allowOther: true,
+      cfcWritebackXattrs: false,
+      noattrcache: false,
+    }),
+    ["fuse_ct", "-o", "allow_other", "-o", "default_permissions"],
+  );
+  assertEquals(
+    buildMountFuseArgs({
+      os: "linux",
+      provider: "linux-libfuse",
+      allowOther: true,
+      cfcWritebackXattrs: true,
+      noattrcache: false,
+    }),
+    ["fuse_ct", "-o", "allow_other"],
+  );
+  assertEquals(
+    buildMountFuseArgs({
+      os: "darwin",
+      provider: "fuse-t",
+      allowOther: true,
+      cfcWritebackXattrs: false,
+      noattrcache: false,
+      attrcacheTimeoutSeconds: 0,
+    }),
+    ["fuse_ct"],
+  );
+});
+
+Deno.test("mount fuse args apply noattrcache to FUSE-T mounts only", () => {
+  assertEquals(
+    buildMountFuseArgs({
+      os: "darwin",
+      provider: "fuse-t",
+      allowOther: false,
+      cfcWritebackXattrs: false,
+      noattrcache: true,
+    }),
+    ["fuse_ct", "-o", "noattrcache"],
+  );
+  for (
+    const [os, provider] of [
+      ["linux", "linux-libfuse"],
+      ["darwin", "macfuse"],
+      ["darwin", "unknown"],
+    ] as const
+  ) {
+    assertEquals(
+      buildMountFuseArgs({
+        os,
+        provider,
+        allowOther: false,
+        cfcWritebackXattrs: false,
+        noattrcache: true,
+      }),
+      ["fuse_ct"],
+    );
+  }
+});
+
+Deno.test("FUSE-T mounts default to a one-second attrcache-timeout", () => {
+  assertEquals(
+    buildMountFuseArgs({
+      os: "darwin",
+      provider: "fuse-t",
+      allowOther: false,
+      cfcWritebackXattrs: false,
+      noattrcache: false,
+    }),
+    ["fuse_ct", "-o", "attrcache-timeout=1"],
+  );
+  assertEquals(DEFAULT_FUSE_T_ATTRCACHE_TIMEOUT_SECONDS, 1);
+  // Explicit zero restores the NFS client's default caching.
+  assertEquals(
+    buildMountFuseArgs({
+      os: "darwin",
+      provider: "fuse-t",
+      allowOther: false,
+      cfcWritebackXattrs: false,
+      noattrcache: false,
+      attrcacheTimeoutSeconds: 0,
+    }),
+    ["fuse_ct"],
+  );
+  // noattrcache suppresses the timeout default.
+  assertEquals(
+    buildMountFuseArgs({
+      os: "darwin",
+      provider: "fuse-t",
+      allowOther: false,
+      cfcWritebackXattrs: false,
+      noattrcache: true,
+      attrcacheTimeoutSeconds: 5,
+    }),
+    ["fuse_ct", "-o", "noattrcache"],
+  );
+  // macFUSE rejects the option, so no default is applied there, and an
+  // unresolved provider gets no default either.
+  for (const provider of ["macfuse", "unknown"] as const) {
+    assertEquals(
+      buildMountFuseArgs({
+        os: "darwin",
+        provider,
+        allowOther: false,
+        cfcWritebackXattrs: false,
+        noattrcache: false,
+      }),
+      ["fuse_ct"],
+    );
+  }
+});
+
+Deno.test("mount fuse args apply attrcache-timeout to FUSE-T mounts only", () => {
+  assertEquals(
+    buildMountFuseArgs({
+      os: "darwin",
+      provider: "fuse-t",
+      allowOther: false,
+      cfcWritebackXattrs: false,
+      noattrcache: false,
+      attrcacheTimeoutSeconds: 30,
+    }),
+    ["fuse_ct", "-o", "attrcache-timeout=30"],
+  );
+  assertEquals(
+    buildMountFuseArgs({
+      os: "linux",
+      provider: "linux-libfuse",
+      allowOther: false,
+      cfcWritebackXattrs: false,
+      noattrcache: false,
+      attrcacheTimeoutSeconds: 30,
+    }),
+    ["fuse_ct"],
+  );
+});
+
+Deno.test("attrcache-timeout parses whole seconds within bounds", () => {
+  assertEquals(parseAttrcacheTimeoutSeconds(""), undefined);
+  assertEquals(parseAttrcacheTimeoutSeconds("1"), 1);
+  assertEquals(parseAttrcacheTimeoutSeconds("30"), 30);
+  assertEquals(
+    parseAttrcacheTimeoutSeconds(String(ATTRCACHE_TIMEOUT_MAX_SECONDS)),
+    ATTRCACHE_TIMEOUT_MAX_SECONDS,
+  );
+  assertEquals(parseAttrcacheTimeoutSeconds("0"), 0);
+  assertThrows(() => parseAttrcacheTimeoutSeconds("-1"));
+  assertThrows(() => parseAttrcacheTimeoutSeconds("1.5"));
+  assertThrows(() => parseAttrcacheTimeoutSeconds("abc"));
+  assertThrows(() =>
+    parseAttrcacheTimeoutSeconds(String(ATTRCACHE_TIMEOUT_MAX_SECONDS + 1))
+  );
+  assertThrows(() => parseAttrcacheTimeoutSeconds("1e21"));
 });
 
 Deno.test("libfuse search includes the FUSE-T per-user install location", () => {

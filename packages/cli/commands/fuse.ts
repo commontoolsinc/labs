@@ -17,6 +17,7 @@ import {
   removeMountStateFile,
   writeMountState,
 } from "../lib/fuse.ts";
+import { parseAttrcacheTimeoutSeconds } from "../../fuse/mount-options.ts";
 import { cliText } from "../lib/cli-name.ts";
 
 export function isFuseProcessCommand(command: string): boolean {
@@ -327,6 +328,15 @@ export const fuse = new Command()
     "Linux only: export the mount to other users such as Docker daemon. Requires user_allow_other in /etc/fuse.conf.",
   )
   .option(
+    "--noattrcache",
+    "macOS/FUSE-T only: mount with FUSE-T's noattrcache option (the NFS nonegnamecache flag on current FUSE-T). Negative name lookups are never cached; positive attribute caching keeps the NFS client's 5-60 second defaults.",
+    { conflicts: ["attrcache-timeout"] },
+  )
+  .option(
+    "--attrcache-timeout <seconds:integer>",
+    "macOS/FUSE-T only: bound every NFS client attribute-cache window to the given whole seconds (0-86400). FUSE-T mounts default to 1; 0 keeps the NFS client's age-based 5-60 second default caching.",
+  )
+  .option(
     "--cfc-mode <mode:string>",
     "Enable FUSE-side CFC mode: disabled, observe, enforce-explicit, or enforce-strict.",
   )
@@ -377,6 +387,13 @@ export const fuse = new Command()
     const identity = options.identity ? resolve(options.identity) : "";
     const absMountpoint = resolve(mountpoint);
 
+    // cliffy's integer type accepts any whole number; enforce the daemon's
+    // range here so the error surfaces at the command line rather than in
+    // the (possibly backgrounded) FUSE child.
+    if (options.attrcacheTimeout !== undefined) {
+      parseAttrcacheTimeoutSeconds(String(options.attrcacheTimeout));
+    }
+
     if (identity) {
       let stat: Deno.FileInfo;
       try {
@@ -410,6 +427,10 @@ export const fuse = new Command()
       if (apiUrl) spawnArgs.push("--api-url", apiUrl);
       if (identity) spawnArgs.push("--identity", identity);
       if (options.allowOther) spawnArgs.push("--allow-other");
+      if (options.noattrcache) spawnArgs.push("--noattrcache");
+      if (options.attrcacheTimeout !== undefined) {
+        spawnArgs.push("--attrcache-timeout", String(options.attrcacheTimeout));
+      }
       if (options.cfcMode) spawnArgs.push("--cfc-mode", options.cfcMode);
       if (options.cfcAnnotations) spawnArgs.push("--cfc-annotations");
       if (options.cfcXattrNamespace) {
@@ -433,6 +454,10 @@ export const fuse = new Command()
         identity,
         execCli,
         allowOther: options.allowOther,
+        noattrcache: options.noattrcache,
+        attrcacheTimeout: options.attrcacheTimeout !== undefined
+          ? String(options.attrcacheTimeout)
+          : undefined,
         cfcMode: options.cfcMode,
         cfcAnnotations: options.cfcAnnotations,
         cfcXattrNamespace: options.cfcXattrNamespace,
@@ -464,6 +489,13 @@ export const fuse = new Command()
         if (apiUrl) spawnArgs.push("--api-url", apiUrl);
         if (identity) spawnArgs.push("--identity", identity);
         if (options.allowOther) spawnArgs.push("--allow-other");
+        if (options.noattrcache) spawnArgs.push("--noattrcache");
+        if (options.attrcacheTimeout !== undefined) {
+          spawnArgs.push(
+            "--attrcache-timeout",
+            String(options.attrcacheTimeout),
+          );
+        }
         if (options.cfcMode) spawnArgs.push("--cfc-mode", options.cfcMode);
         if (options.cfcAnnotations) spawnArgs.push("--cfc-annotations");
         if (options.cfcXattrNamespace) {
@@ -492,6 +524,10 @@ export const fuse = new Command()
           logFile,
           spaces: options.space ?? [],
           allowOther: options.allowOther,
+          noattrcache: options.noattrcache,
+          attrcacheTimeout: options.attrcacheTimeout !== undefined
+            ? String(options.attrcacheTimeout)
+            : undefined,
           cfcMode: options.cfcMode,
           cfcAnnotations: options.cfcAnnotations,
           cfcXattrNamespace: options.cfcXattrNamespace,
