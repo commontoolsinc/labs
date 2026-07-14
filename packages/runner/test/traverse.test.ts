@@ -1815,6 +1815,50 @@ describe("CompoundCycleTracker intern-based keying (Tactic 2B)", () => {
   });
 });
 
+const numericTypeCases = [
+  {
+    name: "number accepts an integer value",
+    schema: { type: "number" },
+    value: 42,
+    expected: true,
+  },
+  {
+    name: "number accepts a fractional value",
+    schema: { type: "number" },
+    value: 1.5,
+    expected: true,
+  },
+  {
+    name: "integer accepts an integer value",
+    schema: { type: "integer" },
+    value: 42,
+    expected: true,
+  },
+  {
+    name: "integer rejects a fractional value",
+    schema: { type: "integer" },
+    value: 1.5,
+    expected: false,
+  },
+  {
+    name: "a union containing integer accepts an integer value",
+    schema: { type: ["string", "integer"] },
+    value: 42,
+    expected: true,
+  },
+  {
+    name: "a union containing integer rejects a fractional value",
+    schema: { type: ["string", "integer"] },
+    value: 1.5,
+    expected: false,
+  },
+] as const satisfies readonly {
+  name: string;
+  schema: JSONSchema;
+  value: number;
+  expected: boolean;
+}[];
+
 describe("canBranchMatch", () => {
   it("rejects type mismatch: string value vs number schema", () => {
     expect(canBranchMatch({ type: "number" }, "hello")).toBe(false);
@@ -1837,10 +1881,13 @@ describe("canBranchMatch", () => {
     expect(canBranchMatch({ type: "null" }, null)).toBe(true);
   });
 
-  it("does not treat a JavaScript number as an integer type", () => {
-    expect(canBranchMatch({ type: "integer" }, 42)).toBe(false);
-    expect(canBranchMatch({ type: ["string", "integer"] }, 42)).toBe(false);
-  });
+  for (const testCase of numericTypeCases) {
+    it(testCase.name, () => {
+      expect(canBranchMatch(testCase.schema, testCase.value)).toBe(
+        testCase.expected,
+      );
+    });
+  }
 
   it("conservatively accepts const schemas (values may contain unresolved links)", () => {
     expect(canBranchMatch({ const: "a" }, "b")).toBe(true);
@@ -2000,22 +2047,14 @@ describe("canBranchMatch", () => {
   });
 });
 
-describe("SchemaObjectTraverser integer type pruning", () => {
-  const schemas = [
-    { name: "integer", schema: { type: "integer" } },
-    {
-      name: "a union containing integer",
-      schema: { type: ["string", "integer"] },
-    },
-  ] as const satisfies readonly { name: string; schema: JSONSchema }[];
-
-  for (const testCase of schemas) {
-    it(`rejects a JavaScript number for ${testCase.name}`, () => {
+describe("SchemaObjectTraverser number/integer type pruning", () => {
+  for (const [index, testCase] of numericTypeCases.entries()) {
+    it(testCase.name, () => {
       const store = new Map<string, Revision<State>>();
       const type = "application/json" as const;
-      const docUri = `of:integer-${testCase.name}` as URI;
+      const docUri = `of:number-integer-${index}` as URI;
       const docEntity = docUri as Entity;
-      const value = 42;
+      const value = testCase.value;
 
       store.set(`${docUri}/${type}`, {
         the: type,
@@ -2038,8 +2077,13 @@ describe("SchemaObjectTraverser integer type pruning", () => {
         value,
       });
 
-      expect(error?.code).toBe("INVALID_TYPE");
-      expect(ok).toBeUndefined();
+      if (testCase.expected) {
+        expect(error).toBeUndefined();
+        expect(ok).toBe(value);
+      } else {
+        expect(error?.code).toBe("INVALID_TYPE");
+        expect(ok).toBeUndefined();
+      }
     });
   }
 });
@@ -2223,6 +2267,45 @@ describe("mergeAnyOfBranchSchemas", () => {
 });
 
 describe("anyOf optimization integration", () => {
+  it("preserves integer subtype matching in the prepared type prefilter", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-anyof-integer-subtype" as URI;
+    const docEntity = docUri as Entity;
+    const value = 42;
+
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value },
+      cause: hashOf({ the: type, of: docEntity }),
+      since: 1,
+    });
+
+    const selector = internPathSelector({
+      path: ["value"],
+      schema: {
+        anyOf: [{ type: "number" }, { type: "string" }],
+      },
+    });
+    expect(isInternedSchema(selector.schema!)).toBe(true);
+
+    const traverser = getTraverser(store, selector);
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value,
+    });
+
+    expect(error).toBeUndefined();
+    expect(ok).toBe(value);
+    expect(traverser.anyOfFastRejects).toBe(1);
+  });
+
   it("fast-rejects incompatible branches and still produces correct result", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;

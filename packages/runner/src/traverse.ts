@@ -495,7 +495,7 @@ type PreparedAnyOfBranch = {
   constant: boolean | undefined;
   hasAsCell: boolean;
   /** Normalized type list of the resolved merged schema, if constrained. */
-  types: readonly string[] | undefined;
+  types: readonly JSONSchemaTypes[] | undefined;
   /** Required property names, when the resolved type admits objects. */
   required: readonly string[] | undefined;
 };
@@ -2468,13 +2468,16 @@ function schemaTypesAreDisjoint(
 
 function schemaTypeMatchesValueType(
   schemaType: JSONSchemaTypes,
-  valueType: string,
+  valueType: JSONSchemaTypes,
 ): boolean {
-  // Runtime traversal currently classifies every finite JavaScript number as
-  // "number". Keep compatibility one-way: an integer-classified value can
-  // satisfy a number schema, but a general number cannot satisfy integer.
+  // Integer is a subtype of number: an integer value satisfies either schema,
+  // while a fractional number only satisfies a number schema.
   return schemaType === valueType ||
     (schemaType === "number" && valueType === "integer");
+}
+
+function getJsonNumberType(value: number): "integer" | "number" {
+  return Number.isInteger(value) ? "integer" : "number";
 }
 
 function narrowNumberIntegerIntersection(
@@ -3205,7 +3208,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
             match = true;
           } else if (
             branch.types !== undefined && actualType !== null &&
-            !branch.types.includes(actualType)
+            !branch.types.some((type) =>
+              schemaTypeMatchesValueType(type, actualType)
+            )
           ) {
             match = false;
           } else if (branch.required !== undefined && valueIsRecord) {
@@ -3418,9 +3423,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
           this.isValidType(schemaObj, "string")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
-    } else if (isFiniteNumber(doc.value)) {
+    } else if (
+      typeof doc.value === "number" && isFiniteNumber(doc.value)
+    ) {
       return isPlainTypeSchema(schemaObj, "number") ||
-          this.isValidType(schemaObj, "number")
+          this.isValidType(schemaObj, getJsonNumberType(doc.value))
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isBoolean(doc.value)) {
@@ -3534,7 +3541,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    */
   private isValidType(
     schema: JSONSchema,
-    valueType: string,
+    valueType: JSONSchemaTypes,
   ): TypeValidity {
     return schemaTypeValidity(schema, valueType);
   }
@@ -4638,11 +4645,13 @@ export function canBranchMatch(
 /** Map JS typeof to JSON Schema type string, or null if unknown */
 function getJsonType(
   value: unknown,
-): string | null {
+): JSONSchemaTypes | null {
   if (value === null) return "null";
   if (value === undefined) return "undefined";
   if (isString(value)) return "string";
-  if (isFiniteNumber(value)) return "number";
+  if (typeof value === "number" && isFiniteNumber(value)) {
+    return getJsonNumberType(value);
+  }
   if (isBoolean(value)) return "boolean";
   if (Array.isArray(value)) return "array";
   if (isObject(value)) return "object";
@@ -4842,7 +4851,7 @@ function appendPartsToPath(path: ValuePath, parts: string[]): ValuePath {
  */
 function schemaTypeValidity(
   schema: JSONSchema,
-  valueType: string,
+  valueType: JSONSchemaTypes,
 ): TypeValidity {
   let resolved: JSONSchema | undefined = schema;
   if (isRecord(schema) && "$ref" in schema) {
@@ -4994,7 +5003,7 @@ function schemaTypeValidity(
  */
 export function schemaAcceptsType(
   schema: JSONSchema,
-  valueType: string,
+  valueType: JSONSchemaTypes,
 ): boolean {
   return schemaTypeValidity(schema, valueType) !== TypeValidity.False;
 }
