@@ -688,6 +688,11 @@ After a usable value has rendered, an unavailable update preserves the last
 rendered subtree until another usable value arrives. It is never stringified as
 `{}` and is not reported as invalid VDOM.
 
+Authored `undefined` remains ordinary empty render content, not a suspense
+signal. It contributes no visible content initially, and a transition from a
+visible value to `undefined` removes that visible content instead of preserving
+it.
+
 This suspense behavior is the unguarded default, not a loading or error UI.
 Authors use the reason-specific guards when the interface should replace the
 prior subtree with explicit status content. Confidentiality and integrity
