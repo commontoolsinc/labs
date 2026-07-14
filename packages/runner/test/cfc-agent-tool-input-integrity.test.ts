@@ -4,7 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { enableMockMode } from "@commonfabric/llm/client";
-import type { JSONSchema } from "@commonfabric/api";
+import type { Cell, JSONSchema } from "@commonfabric/api";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { CfcEnforcementMode } from "../src/cfc/types.ts";
@@ -29,6 +29,41 @@ const KERNEL_ATOM = {
   type: "https://commonfabric.org/cfc/atom/Builtin",
   name: "agent-kernel-demo-v1",
 } as const;
+
+type SentEmail = { recipient: string; subject: string; body: string };
+type SendMailState = { emails: Cell<SentEmail[]> };
+type NoteState = { notes: Cell<string[]> };
+type BroadcastState = { sent: Cell<string[]> };
+type ToolCatalogCell = Parameters<
+  typeof llmToolExecutionHelpers.buildToolCatalog
+>[0];
+type ToolCatalog = Parameters<
+  typeof llmToolExecutionHelpers.executeToolCalls
+>[2];
+type ToolCallParts = Parameters<
+  typeof llmToolExecutionHelpers.executeToolCalls
+>[3];
+
+function buildTestToolCatalog(
+  tools: Cell<unknown>,
+  includeBuiltinTools: boolean,
+): ToolCatalog {
+  return llmToolExecutionHelpers.buildToolCatalog(
+    tools as ToolCatalogCell,
+    includeBuiltinTools,
+  );
+}
+
+async function executeToolCall(
+  runtime: Runtime,
+  catalog: ToolCatalog,
+  call: ToolCallParts[number],
+): Promise<void> {
+  await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [
+    call,
+  ]);
+  await runtime.idle();
+}
 
 // A sendMail tool. `withFloor` toggles the requiredIntegrity floor on
 // `recipient` so we can prove the gate fires only for floor-declaring fields.
@@ -62,7 +97,7 @@ async function setupSendMail(
 
   const sendMail = handler<
     { recipient: string; subject: string; body: string },
-    { emails: any }
+    SendMailState
   >(
     {
       type: "object",
@@ -133,19 +168,15 @@ async function setupSendMail(
   await tx.commit();
   await runtime.idle();
 
-  const catalog = llmToolExecutionHelpers.buildToolCatalog(
-    result.key("tools") as any,
-    false,
-  );
+  const catalog = buildTestToolCatalog(result.key("tools"), false);
 
-  const sendCall = async (input: unknown) => {
-    await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+  const sendCall = async (input: Record<string, unknown>) => {
+    await executeToolCall(runtime, catalog, {
       type: "tool-call",
       toolCallId: "call-under-test",
       toolName: "sendMail",
       input,
-    }] as any);
-    await runtime.idle();
+    });
   };
 
   const sendInjected = () =>
@@ -440,7 +471,7 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     try {
       const sendMail = handler<
         { recipient: string; subject: string; body: string },
-        { emails: any }
+        SendMailState
       >(
         {
           type: "object",
@@ -503,15 +534,12 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
       await runtime.idle();
 
       // builtinTools=true → the generic `invoke` tool is available.
-      const catalog = llmToolExecutionHelpers.buildToolCatalog(
-        result.key("tools") as any,
-        true,
-      );
+      const catalog = buildTestToolCatalog(result.key("tools"), true);
       const handlerLink = createLLMFriendlyLink(
         result.key("sendMail").getAsNormalizedFullLink(),
         space,
       );
-      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+      await executeToolCall(runtime, catalog, {
         type: "tool-call",
         toolCallId: "call-invoke-bypass",
         toolName: "invoke",
@@ -519,8 +547,7 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
           path: handlerLink,
           args: { recipient: "bob@evil.org", subject: "x", body: "y" },
         },
-      }] as any);
-      await runtime.idle();
+      });
 
       const emails = (await result.key("emails").pull()) as
         | { recipient: string }[]
@@ -548,7 +575,7 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { pattern, handler, Writable } = commonfabric;
     try {
-      const note = handler<{ text: string; cc?: string }, { notes: any }>(
+      const note = handler<{ text: string; cc?: string }, NoteState>(
         {
           type: "object",
           properties: {
@@ -620,28 +647,23 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
       await tx.commit();
       await runtime.idle();
 
-      const catalog = llmToolExecutionHelpers.buildToolCatalog(
-        result.key("tools") as any,
-        false,
-      );
+      const catalog = buildTestToolCatalog(result.key("tools"), false);
       // `cc` (the floor field) is omitted → the call proceeds.
-      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+      await executeToolCall(runtime, catalog, {
         type: "tool-call",
         toolCallId: "call-omit",
         toolName: "note",
         input: { text: "hello" },
-      }] as any);
-      await runtime.idle();
+      });
       expect((await result.key("notes").pull()) ?? []).toEqual(["hello"]);
 
       // ...but supplying `cc` as a literal still fails its floor.
-      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+      await executeToolCall(runtime, catalog, {
         type: "tool-call",
         toolCallId: "call-cc",
         toolName: "note",
         input: { text: "again", cc: "bob@evil.org" },
-      }] as any);
-      await runtime.idle();
+      });
       expect((await result.key("notes").pull()) ?? []).toEqual(["hello"]);
     } finally {
       await runtime.dispose();
@@ -661,7 +683,7 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     const { pattern, handler, Writable } = commonfabric;
     try {
-      const broadcast = handler<{ recipients: string[] }, { sent: any }>(
+      const broadcast = handler<{ recipients: string[] }, BroadcastState>(
         {
           type: "object",
           properties: {
@@ -740,17 +762,13 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
       await tx.commit();
       await runtime.idle();
 
-      const catalog = llmToolExecutionHelpers.buildToolCatalog(
-        result.key("tools") as any,
-        false,
-      );
-      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+      const catalog = buildTestToolCatalog(result.key("tools"), false);
+      await executeToolCall(runtime, catalog, {
         type: "tool-call",
         toolCallId: "call-items",
         toolName: "broadcast",
         input: { recipients: ["evil@x.org"] },
-      }] as any);
-      await runtime.idle();
+      });
 
       const sent = (await result.key("sent").pull()) as string[] | undefined;
       expect((sent ?? []).includes("evil@x.org")).toBe(false);

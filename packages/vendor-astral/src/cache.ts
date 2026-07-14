@@ -17,25 +17,26 @@ const CONFIG_FILE = "cache.json";
 
 const LOCK_FILES = {} as { [cache: string]: { [product: string]: Lock } };
 
-interface KnownGoodVersions {
-  timestamps: string;
-  versions: {
-    version: string;
-    revision: string;
-    downloads: {
-      chrome: {
-        platform: "linux64" | "mac-arm64" | "mac-x64" | "win32" | "win64";
-        url: string;
-      }[];
-    };
-  }[];
+type ChromeDownloadPlatform = "linux64" | "mac-arm64" | "mac-x64" | "win64";
+
+function getChromeDownloadPlatform(): ChromeDownloadPlatform {
+  if (Deno.build.os === "darwin" && Deno.build.arch === "aarch64") {
+    return "mac-arm64";
+  } else if (Deno.build.os === "darwin" && Deno.build.arch === "x86_64") {
+    return "mac-x64";
+  } else if (Deno.build.os === "windows") {
+    return "win64";
+  } else if (Deno.build.os === "linux") {
+    return "linux64";
+  }
+  throw new Error(
+    "Unsupported platform, provide a path to a chromium or firefox binary instead",
+  );
 }
 
-async function knownGoodVersions(): Promise<KnownGoodVersions> {
-  const req = await fetch(
-    "https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json",
-  );
-  return await req.json();
+function chromeForTestingDownloadUrl(version: string): string {
+  const platform = getChromeDownloadPlatform();
+  return `https://storage.googleapis.com/chrome-for-testing-public/${version}/${platform}/chrome-${platform}.zip`;
 }
 
 /** Stolen from https://github.com/justjavac/deno_dirs/blob/main/cache_dir/mod.ts
@@ -183,24 +184,12 @@ export async function getBinary(
   // If the config doesn't have the revision, download it and return that
   if (!config[VERSION]) {
     const quiet = await isQuietInstall();
-    const versions = await knownGoodVersions();
-    const version = versions.versions.filter((val) =>
-      val.version === VERSION
-    )[0];
-    const download = version.downloads.chrome.filter((val) => {
-      if (Deno.build.os === "darwin" && Deno.build.arch === "aarch64") {
-        return val.platform === "mac-arm64";
-      } else if (Deno.build.os === "darwin" && Deno.build.arch === "x86_64") {
-        return val.platform === "mac-x64";
-      } else if (Deno.build.os === "windows") {
-        return val.platform === "win64";
-      } else if (Deno.build.os === "linux") {
-        return val.platform === "linux64";
-      }
+    if (browser !== "chrome") {
       throw new Error(
-        "Unsupported platform, provide a path to a chromium or firefox binary instead",
+        "Firefox download is not supported, provide a path to a firefox binary instead",
       );
-    })[0];
+    }
+    const downloadUrl = chromeForTestingDownloadUrl(VERSION);
 
     ensureDirSync(cache);
     const lock = new Lock({ cache });
@@ -210,7 +199,7 @@ export async function getBinary(
       return getBinary(browser, { cache, timeout });
     }
     try {
-      const req = await fetch(download.url);
+      const req = await fetch(downloadUrl);
       if (!req.body) {
         throw new Error(
           "Download failed, please check your internet connection and try again",
