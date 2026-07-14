@@ -642,24 +642,28 @@ Deno.test("acl enforce: a taken-over session cannot finish an in-flight transact
   const second = await connect(server);
   const openEngineStarted = Promise.withResolvers<void>();
   const releaseOpenEngine = Promise.withResolvers<void>();
-  const mutableServer = server as unknown as {
-    openEngine: (space: string) => Promise<unknown>;
-  };
-  const originalOpenEngine = mutableServer.openEngine.bind(server);
+  type OpenEngine = (space: string) => Promise<unknown>;
+  const originalOpenEngine = Reflect.get(server, "openEngine", server).bind(
+    server,
+  ) as OpenEngine;
   try {
     await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
     const opened = await openSession(first, space, ALICE);
     assertExists(opened.ok);
 
     let pauseNextOpen = true;
-    mutableServer.openEngine = async (requestedSpace: string) => {
-      if (pauseNextOpen) {
-        pauseNextOpen = false;
-        openEngineStarted.resolve();
-        await releaseOpenEngine.promise;
-      }
-      return await originalOpenEngine(requestedSpace);
-    };
+    Reflect.set(
+      server,
+      "openEngine",
+      async (requestedSpace: string) => {
+        if (pauseNextOpen) {
+          pauseNextOpen = false;
+          openEngineStarted.resolve();
+          await releaseOpenEngine.promise;
+        }
+        return await originalOpenEngine(requestedSpace);
+      },
+    );
 
     const staleWrite = server.transact({
       type: "transact",
@@ -699,7 +703,7 @@ Deno.test("acl enforce: a taken-over session cannot finish an in-flight transact
     );
   } finally {
     releaseOpenEngine.resolve();
-    mutableServer.openEngine = originalOpenEngine;
+    Reflect.set(server, "openEngine", originalOpenEngine);
     await server.close();
   }
 });

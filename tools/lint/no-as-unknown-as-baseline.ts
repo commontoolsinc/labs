@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/memory/test/v2-server-acl-test.ts": [
-    "645:31:1q4tduj",
-  ],
   "packages/patterns/integration/cfc-authorship-chat.test.ts": [
     "115:39:10fdpmm",
   ],
