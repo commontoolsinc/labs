@@ -206,6 +206,7 @@ export type CallKind =
   | { kind: "cell-factory"; symbol?: ts.Symbol; factoryName: string }
   | { kind: "cell-for"; symbol?: ts.Symbol }
   | { kind: "wish"; symbol?: ts.Symbol }
+  | { kind: "llm-dialog"; symbol?: ts.Symbol }
   | { kind: "generate-text"; symbol?: ts.Symbol }
   | { kind: "generate-object"; symbol?: ts.Symbol; exportName: string }
   | { kind: "pattern-tool"; symbol?: ts.Symbol }
@@ -2019,6 +2020,8 @@ function createNamedCallKind(
         : { kind: "cell-factory", factoryName: name };
     case "wish":
       return symbol ? { kind: "wish", symbol } : { kind: "wish" };
+    case "llm-dialog":
+      return symbol ? { kind: "llm-dialog", symbol } : { kind: "llm-dialog" };
     case "generate-text":
       return symbol
         ? { kind: "generate-text", symbol }

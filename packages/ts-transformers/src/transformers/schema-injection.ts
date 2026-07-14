@@ -35,11 +35,11 @@ import {
   type CapabilityParamSummary,
   type FunctionCapabilitySummary,
   HelpersOnlyTransformer,
+  isCommonFabricSymbol,
   type SchemaHint,
   type SchemaHints,
   TransformationContext,
   type TypeRegistry,
-  isCommonFabricSymbol,
 } from "../core/mod.ts";
 import { analyzeFunctionCapabilities } from "../policy/mod.ts";
 import {
@@ -3973,6 +3973,76 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
             node.expression,
             node.typeArguments,
             [...args, schemaCall],
+          );
+          context.markSchemaInjected(updated);
+          return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
+      if (callKind?.kind === "llm-dialog") {
+        const factory = transformation.factory;
+        const typeArgs = node.typeArguments;
+        const args = node.arguments;
+
+        // An authored resultSchema remains the source of truth. Calls without
+        // a result type and without this property are control-only dialogs and
+        // deliberately receive no presented-result channel.
+        if (args.length > 0 && ts.isObjectLiteralExpression(args[0]!)) {
+          const props = args[0].properties;
+          if (
+            props.some((property) =>
+              property.name && ts.isIdentifier(property.name) &&
+              property.name.text === "resultSchema"
+            )
+          ) {
+            return ts.visitEachChild(node, visit, transformation);
+          }
+        }
+
+        const resolved = resolveInjectableSchemaType(
+          typeArgs?.[0],
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          () => undefined,
+        );
+        const schemaCall = createRegisteredSchemaCallFromResolvedType(
+          context,
+          resolved,
+          checker,
+          typeRegistry,
+        );
+
+        if (schemaCall) {
+          let newOptions: ts.Expression;
+          if (args.length > 0 && ts.isObjectLiteralExpression(args[0]!)) {
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                ...args[0].properties,
+                factory.createPropertyAssignment("resultSchema", schemaCall),
+              ],
+              true,
+            );
+          } else if (args.length > 0) {
+            newOptions = factory.createObjectLiteralExpression(
+              [
+                factory.createSpreadAssignment(args[0]!),
+                factory.createPropertyAssignment("resultSchema", schemaCall),
+              ],
+              true,
+            );
+          } else {
+            newOptions = factory.createObjectLiteralExpression(
+              [factory.createPropertyAssignment("resultSchema", schemaCall)],
+              true,
+            );
+          }
+
+          const updated = factory.createCallExpression(
+            node.expression,
+            node.typeArguments,
+            [newOptions, ...args.slice(1)],
           );
           context.markSchemaInjected(updated);
           return ts.visitEachChild(updated, visit, transformation);

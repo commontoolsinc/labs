@@ -15,6 +15,7 @@ export type CommonFabricRuntimeExportSpec =
       | "when"
       | "unless"
       | "wish"
+      | "llm-dialog"
       | "generate-text"
       | "generate-object"
       | "pattern-tool"
@@ -166,7 +167,7 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
   {
     exportName: "llmDialog",
     category: "call",
-    callKind: "runtime-call",
+    callKind: "llm-dialog",
     reactiveOrigin: true,
   },
   {

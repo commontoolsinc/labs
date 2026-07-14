@@ -294,6 +294,33 @@ Deno.test("wish<T>() injects a schema argument for the wished type", async () =>
 });
 
 // ---------------------------------------------------------------------------
+// llmDialog(...) — presented-result schema injected into the options object
+// ---------------------------------------------------------------------------
+
+Deno.test("llmDialog<T>({...}) injects a resultSchema for presentResult", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { llmDialog } from "commonfabric";',
+    "const dialog = llmDialog<{ answer: number }>({ messages: [] });",
+  ].join("\n");
+  const output = await t(source);
+  const [schema] = emittedSchemas(parseModule(output));
+  assertEquals((schema.properties as Obj).answer.type, "number");
+  assertStringIncludes(output, "resultSchema:");
+});
+
+Deno.test("untyped llmDialog without presentResult does not inject a resultSchema", async () => {
+  const source = [
+    "/// <cts-enable />",
+    'import { llmDialog } from "commonfabric";',
+    "const dialog = llmDialog({ messages: [] });",
+  ].join("\n");
+  const output = await t(source);
+  assertEquals(emittedSchemas(parseModule(output)).length, 0);
+  assertEquals(output.includes("resultSchema:"), false);
+});
+
+// ---------------------------------------------------------------------------
 // generateObject — schema property injected into the options object
 // ---------------------------------------------------------------------------
 
