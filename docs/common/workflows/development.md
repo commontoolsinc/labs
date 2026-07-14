@@ -23,4 +23,7 @@ deno task cf piece link ... editor-id/items viewer-id/items
 **Tips:**
 - Use `check` first to catch TypeScript errors
 - Deploy once, then use `setsrc` for updates
+- `setsrc` rejects backward-incompatible argument or result schema changes
+  before updating the piece. Existing fields must keep compatible types; new
+  fields must be optional or have defaults. Input unions may be widened.
 - Test one feature at a time

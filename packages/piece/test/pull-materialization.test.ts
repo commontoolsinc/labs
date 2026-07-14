@@ -135,6 +135,45 @@ function compiledMultiplierProgram(
   };
 }
 
+function compiledSchemaEvolutionProgram(version: 1 | 2 | 3): RuntimeProgram {
+  const contents = version === 1
+    ? [
+      "import { pattern } from 'commonfabric';",
+      "interface Input { value: number; }",
+      "interface Output { doubled: number; }",
+      "export default pattern<Input, Output>(({ value }) => ({",
+      "  doubled: value,",
+      "}));",
+    ]
+    : version === 2
+    ? [
+      "import { Default, pattern } from 'commonfabric';",
+      "interface Input {",
+      "  value: number;",
+      "  label?: string;",
+      "  retries: number | Default<0>;",
+      "  mode?: string | number;",
+      "}",
+      "interface Output { doubled: number; summary?: string; }",
+      "export default pattern<Input, Output>(({ value }) => ({",
+      "  doubled: value,",
+      "  summary: 'updated',",
+      "}));",
+    ]
+    : [
+      "import { pattern } from 'commonfabric';",
+      "interface Input { value: string; }",
+      "interface Output { doubled: string; }",
+      "export default pattern<Input, Output>(({ value }) => ({",
+      "  doubled: value,",
+      "}));",
+    ];
+  return {
+    main: "/main.tsx",
+    files: [{ name: "/main.tsx", contents: contents.join("\n") }],
+  };
+}
+
 function trustPattern(runtime: Runtime, pattern: Pattern): Pattern {
   return runtime.unsafeTrustPattern(pattern, {
     reason: "piece pull materialization test fixture",
@@ -279,6 +318,70 @@ describe("piece pull materialization", () => {
     } finally {
       await freshRuntime.dispose();
     }
+  });
+
+  it("updates a piece across backward-compatible schema additions", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledSchemaEvolutionProgram(1),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { value: 4 },
+      "compatible-schema-update-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    expect(await controller.input.get()).toEqual({ value: 4 });
+    expect(await controller.result.get()).toEqual({ doubled: 4 });
+
+    await controller.setPattern(compiledSchemaEvolutionProgram(2));
+
+    const updatedPattern = await controller.getPattern();
+    expect(updatedPattern.result).toMatchObject({ summary: "updated" });
+    const inputProperties = updatedPattern.argumentSchema &&
+        typeof updatedPattern.argumentSchema === "object"
+      ? updatedPattern.argumentSchema.properties
+      : undefined;
+    expect(inputProperties?.mode).toMatchObject({
+      type: ["number", "string"],
+    });
+    expect(await controller.input.get()).toEqual({
+      value: 4,
+      retries: 0,
+    });
+    expect((await controller.input.getCell()).getRaw()).toEqual({
+      value: 4,
+      retries: 0,
+    });
+    expect(await controller.result.get()).toEqual({
+      doubled: 4,
+      summary: "updated",
+    });
+  });
+
+  it("rejects an incompatible schema update before changing the piece", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledSchemaEvolutionProgram(1),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { value: 4 },
+      "incompatible-schema-update-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const previousRef = getPatternIdentityRef(controller.getCell());
+
+    await expect(
+      controller.setPattern(compiledSchemaEvolutionProgram(3)),
+    ).rejects.toThrow(/not backward compatible/);
+
+    expect(getPatternIdentityRef(controller.getCell())).toEqual(previousRef);
+    expect(await controller.input.get()).toEqual({ value: 4 });
+    expect(await controller.result.get()).toEqual({ doubled: 4 });
   });
 
   it("waits for setup to settle before setupPersistent syncs pattern metadata", async () => {

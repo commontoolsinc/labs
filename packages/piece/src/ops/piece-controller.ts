@@ -10,6 +10,7 @@ import {
 import { pieceId, PieceManager } from "../manager.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { compileProgram } from "./utils.ts";
+import { assertPatternSchemasBackwardCompatible } from "../schema-compatibility.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -160,8 +161,11 @@ export class PieceController<T = unknown> {
   }
 
   async setPattern(program: RuntimeProgram): Promise<void> {
+    const previousPattern = await this.getPattern();
     const pattern = await compileProgram(this.#manager, program);
+    assertPatternSchemasBackwardCompatible(previousPattern, pattern);
     await execute(this.#manager, this.id, pattern);
+    this.#cell = this.#cell.asSchema(pattern.resultSchema);
   }
 
   async readingFrom(): Promise<PieceController[]> {

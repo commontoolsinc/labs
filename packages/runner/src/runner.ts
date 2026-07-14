@@ -1080,7 +1080,7 @@ export class Runner {
     );
     resultCell.withTx(tx).setMetaRaw("internal", internalManifest);
 
-    let nextArgument = argument;
+    let nextArgument: T | undefined = argument;
     // The argument meta field of the result cell should be a link to the
     // argument cell. If it doesn't exist, we need to apply the defaults
     // I don't include the schema here, since I don't want cfc enforcement yet
@@ -1105,6 +1105,29 @@ export class Runner {
       if (argumentLink === undefined) {
         throw new Error("Invalid argument link in updateArgument");
       }
+    } else if (!samePattern) {
+      const previousArgumentCell = this.runtime.getCellFromLink(
+        argumentLink,
+        undefined,
+        tx,
+      );
+      const previousArgument = previousArgumentCell.getRaw({
+        meta: ignoreReadForScheduling,
+      }) as T | undefined;
+      nextArgument = mergeObjects<T>(
+        argument === undefined ? previousArgument : argument,
+        defaults,
+      );
+
+      const nextArgumentCell = previousArgumentCell.asSchema(
+        pattern.argumentSchema,
+      );
+      const nextArgumentSigilLink = nextArgumentCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+      });
+      resultCell.withTx(tx).setMetaRaw("argument", nextArgumentSigilLink);
+      argumentLink = nextArgumentCell.getAsNormalizedFullLink();
     }
     if (nextArgument !== undefined) {
       this.updateArgument(
