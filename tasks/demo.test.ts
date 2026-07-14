@@ -1,6 +1,8 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
+  defaultDependencies,
   type DemoDependencies,
+  main,
   parseDemoArgs,
   resolveDemoTest,
   runDemo,
@@ -32,6 +34,71 @@ Deno.test("parseDemoArgs rejects non-browser packages", () => {
     () => parseDemoArgs(["runner", "counter"]),
     Error,
     "unsupported browser-test package",
+  );
+});
+
+Deno.test("parseDemoArgs rejects invalid and incomplete options", () => {
+  assertThrows(
+    () => parseDemoArgs(["patterns", "demo", "--port-offset=-1"]),
+    Error,
+    "invalid --port-offset",
+  );
+  assertThrows(
+    () => parseDemoArgs(["patterns", "demo", "--unknown"]),
+    Error,
+    "unknown option",
+  );
+  assertThrows(
+    () => parseDemoArgs(["patterns"]),
+    Error,
+    "usage:",
+  );
+});
+
+Deno.test("default demo dependencies provide time, preflight, and subprocess", async () => {
+  assertEquals(defaultDependencies.now() instanceof Date, true);
+  await defaultDependencies.preflight();
+  const root = await Deno.makeTempDir();
+  try {
+    const status = await defaultDependencies.runIntegration(
+      ["eval", "Deno.exit(0)"],
+      root,
+      {},
+    );
+    assertEquals(status.success, true);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("demo main handles help, errors, and an injected successful run", async () => {
+  assertEquals(await main(["--help"]), 0);
+  assertEquals(await main(["--unknown"]), 1);
+  assertEquals(
+    await main(["shell", "worker-runtime"], async (options) => {
+      assertEquals(options.packageName, "shell");
+      return 0;
+    }),
+    0,
+  );
+  assertEquals(
+    await main(["shell", "worker-runtime"], () => Promise.reject("failed")),
+    1,
+  );
+});
+
+Deno.test("demo CLI help exits successfully", async () => {
+  const command = new Deno.Command(Deno.execPath(), {
+    args: ["run", "-A", "tasks/demo.ts", "--help"],
+    cwd: Deno.cwd(),
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const output = await command.output();
+  assertEquals(output.success, true);
+  assertEquals(
+    new TextDecoder().decode(output.stdout).includes("Usage:"),
+    true,
   );
 });
 
@@ -154,6 +221,52 @@ Deno.test("runDemo rejects a successful test without a video", async () => {
         ),
       Error,
       "did not produce one-demo.mp4",
+    );
+  });
+});
+
+Deno.test("runDemo retains a named video in its artifact directory", async () => {
+  await withDemoFixture(async (root) => {
+    const result = await runDemo(
+      {
+        packageName: "patterns",
+        filter: "one-demo",
+        keepFrames: false,
+      },
+      root,
+      demoDependencies({
+        runIntegration: async (_args, _cwd, env) => {
+          await Deno.writeTextFile(
+            `${env.CF_DEMO_OUTPUT_DIR}/one-demo.mp4`,
+            "video bytes",
+          );
+          return { success: true, code: 0 };
+        },
+      }),
+    );
+    assertEquals(result, 0);
+    assertEquals(
+      await Deno.readTextFile(`${demoRunDir(root)}/one-demo.mp4`),
+      "video bytes",
+    );
+  });
+});
+
+Deno.test("runDemo preserves a setup failure without a manifest", async () => {
+  await withDemoFixture(async (root) => {
+    assertEquals(
+      await runDemo(
+        {
+          packageName: "patterns",
+          filter: "one-demo",
+          keepFrames: false,
+        },
+        root,
+        demoDependencies({
+          runIntegration: () => Promise.resolve({ success: false, code: 4 }),
+        }),
+      ),
+      4,
     );
   });
 });

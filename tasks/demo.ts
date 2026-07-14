@@ -23,7 +23,7 @@ export type DemoDependencies = {
   ): Promise<{ success: boolean; code: number }>;
 };
 
-const defaultDependencies: DemoDependencies = {
+export const defaultDependencies: DemoDependencies = {
   now: () => new Date(),
   preflight: async () => {
     await findFfmpeg();
@@ -190,16 +190,20 @@ Options:
 `);
 }
 
-if (import.meta.main) {
+export async function main(
+  args: string[],
+  run: (options: DemoOptions) => Promise<number> = runDemo,
+): Promise<number> {
   try {
-    const options = parseDemoArgs(Deno.args);
-    Deno.exit(await runDemo(options));
+    return await run(parseDemoArgs(args));
   } catch (error) {
     if (error instanceof HelpRequested) {
       printHelp();
-      Deno.exit(0);
+      return 0;
     }
     console.error(error instanceof Error ? error.message : error);
-    Deno.exit(1);
+    return 1;
   }
 }
+
+if (import.meta.main) Deno.exitCode = await main(Deno.args);
