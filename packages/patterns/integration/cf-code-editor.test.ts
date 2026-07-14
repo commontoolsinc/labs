@@ -1151,49 +1151,6 @@ describe("cf-code-editor cursor stability", () => {
     await waitForEditorContent(page, "ExternalAfterBlur");
   });
 
-  /*
-  // TODO(runtime-worker-refactor)
-  it("ADVERSARIAL: Component disconnect/reconnect during typing should handle state correctly", async () => {
-    // Type, disconnect component, reconnect, verify external updates work
-    const page = shell.page();
-
-    await resetEditorState(page);
-
-    // Focus and type
-    await focusEditor(page);
-    await page.keyboard.type("BeforeDisconnect");
-
-    // Force disconnect/reconnect by navigating away and back
-    // We'll simulate by canceling pending debounced writes
-    await page.evaluate(`
-      (() => {
-        function findCfCodeEditor(root) {
-          if (!root) return null;
-          const editor = root.querySelector?.('cf-code-editor');
-          if (editor) return editor;
-          const allElements = root.querySelectorAll?.('*') || [];
-          for (const el of allElements) {
-            if (el.shadowRoot) {
-              const found = findCfCodeEditor(el.shadowRoot);
-              if (found) return found;
-            }
-          }
-          return null;
-        }
-
-        const cfEditor = findCfCodeEditor(document);
-        if (cfEditor) {
-          cfEditor._cellController.cancel();
-        }
-      })()
-    `);
-
-    // Now external updates should apply (simulating reconnection)
-    await piece.result.set("AfterReconnect", ["content"]);
-    await waitForEditorContent(page, "AfterReconnect");
-  });
-  */
-
   it("ADVERSARIAL: Value property change to different Cell during typing", async () => {
     // This test verifies that switching to a different Cell mid-typing
     // properly cancels pending updates and resets state.
