@@ -170,27 +170,62 @@ const emptySync = (overrides: Partial<SessionSync> = {}): SessionSync => ({
 
 class PushView implements ReplicaWatchView {
   #pending: PromiseWithResolvers<IteratorResult<SessionSync>>[] = [];
-  #queued: SessionSync[] = [];
+  #queued: {
+    sync: SessionSync;
+    delivered: PromiseWithResolvers<void>;
+    processed: PromiseWithResolvers<void>;
+  }[] = [];
+  #inFlight: PromiseWithResolvers<void> | undefined;
   #closed = false;
 
   close(): void {
     this.#closed = true;
+    this.#inFlight?.resolve();
+    this.#inFlight = undefined;
+    for (const queued of this.#queued.splice(0)) {
+      queued.delivered.resolve();
+      queued.processed.resolve();
+    }
     for (const pending of this.#pending.splice(0)) {
       pending.resolve({ done: true, value: undefined });
     }
   }
 
-  push(sync: SessionSync): void {
+  push(sync: SessionSync): Promise<void> {
+    return this.enqueue(sync).processed;
+  }
+
+  enqueue(sync: SessionSync): {
+    delivered: Promise<void>;
+    processed: Promise<void>;
+  } {
+    const delivered = Promise.withResolvers<void>();
+    const processed = Promise.withResolvers<void>();
     const pending = this.#pending.shift();
-    if (pending) pending.resolve({ done: false, value: sync });
-    else this.#queued.push(sync);
+    if (pending) {
+      this.#inFlight = processed;
+      delivered.resolve();
+      pending.resolve({ done: false, value: sync });
+    } else {
+      this.#queued.push({ sync, delivered, processed });
+    }
+    return { delivered: delivered.promise, processed: processed.promise };
   }
 
   subscribeSync(): AsyncIterator<SessionSync> {
     return {
       next: () => {
+        // The replica asks for the next item only after applying the previous
+        // sync. Resolve the test-owned acknowledgement at that exact event so
+        // callers never need to poll visible state or guess a deadline.
+        this.#inFlight?.resolve();
+        this.#inFlight = undefined;
         const queued = this.#queued.shift();
-        if (queued) return Promise.resolve({ done: false, value: queued });
+        if (queued) {
+          this.#inFlight = queued.processed;
+          queued.delivered.resolve();
+          return Promise.resolve({ done: false, value: queued.sync });
+        }
         if (this.#closed) {
           return Promise.resolve({ done: true, value: undefined });
         }
@@ -211,8 +246,27 @@ class OverlaySessionFactory implements SessionFactory {
     attempt: number,
   ) => Promise<AppliedCommit>;
   #seq = 0;
+  #commitWaiters: {
+    count: number;
+    pending: PromiseWithResolvers<void>;
+  }[] = [];
 
   constructor(private readonly builtinPassivity = false) {}
+
+  waitForCommitCount(count: number): Promise<void> {
+    if (this.commits.length >= count) return Promise.resolve();
+    const pending = Promise.withResolvers<void>();
+    this.#commitWaiters.push({ count, pending });
+    return pending.promise;
+  }
+
+  #notifyCommitWaiters(): void {
+    this.#commitWaiters = this.#commitWaiters.filter((waiter) => {
+      if (this.commits.length < waiter.count) return true;
+      waiter.pending.resolve();
+      return false;
+    });
+  }
 
   create(
     _space: MemorySpace,
@@ -228,6 +282,7 @@ class OverlaySessionFactory implements SessionFactory {
       },
       transact: async (commit: ClientCommit): Promise<AppliedCommit> => {
         this.commits.push(structuredClone(commit));
+        this.#notifyCommitWaiters();
         if (this.onTransact) {
           return await this.onTransact(commit, this.commits.length);
         }
@@ -273,12 +328,25 @@ class OverlayStorageManager extends StorageManager {
   }
 }
 
-async function waitFor(check: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (check()) return;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  throw new Error("condition did not become true");
+function assertCondition(check: () => boolean): void {
+  assertEquals(check(), true, "condition did not become true");
+}
+
+function notificationCondition(
+  storage: StorageManager,
+  check: () => boolean,
+): Promise<void> {
+  if (check()) return Promise.resolve();
+  const observed = Promise.withResolvers<void>();
+  const subscription = {
+    next(_notification: StorageNotification) {
+      if (check()) observed.resolve();
+      return { done: false as const };
+    },
+  };
+  storage.subscribe(subscription);
+  if (check()) observed.resolve();
+  return observed.promise.finally(() => storage.unsubscribe(subscription));
 }
 
 async function writeClaimedOutput(
@@ -425,7 +493,7 @@ Deno.test("ordered revoke drops the matching overlay and resumes upstream author
     await writeClaimedOutput(storage, "local-overlay");
 
     factory.claims = [];
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -438,7 +506,7 @@ Deno.test("ordered revoke drops the matching overlay and resumes upstream author
         }],
       },
     }));
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
     const invalidation = notifications.find((notification) =>
       notification.type === "execution-claim-invalidation"
     );
@@ -484,7 +552,7 @@ Deno.test("unserved settlement dirties the claimed producer before exact revoke"
     await writeClaimedOutput(storage, "unserved-overlay");
 
     factory.claims = [];
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 3,
@@ -506,7 +574,7 @@ Deno.test("unserved settlement dirties the claimed producer before exact revoke"
       },
     }));
 
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
     assertEquals(
       notifications.some((notification) =>
         notification.type === "execution-claim-invalidation" &&
@@ -555,7 +623,7 @@ Deno.test("matching no-op settlement clears a claimed overlay", async () => {
       inputBasisSeq: toInputBasisSeq(0),
       outcome: "no-op",
     };
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -565,7 +633,7 @@ Deno.test("matching no-op settlement clears a claimed overlay", async () => {
         }],
       },
     }));
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
     assertEquals(visibleOutput(storage), undefined);
     assertEquals(
       getLoggerCountsBreakdown()["storage.v2"]?.[
@@ -591,7 +659,7 @@ Deno.test("a no-op settlement arriving before speculation clears the later overl
   const storage = OverlayStorageManager.connect(factory);
   try {
     await storage.open(SPACE).sync(INPUT);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -606,7 +674,7 @@ Deno.test("a no-op settlement arriving before speculation clears the later overl
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics({
         space: SPACE,
         branch: "",
@@ -638,7 +706,7 @@ Deno.test("a committed settlement arriving before speculation retains its data b
   const storage = OverlayStorageManager.connect(factory);
   try {
     await storage.open(SPACE).sync(INPUT);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -654,7 +722,7 @@ Deno.test("a committed settlement arriving before speculation retains its data b
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics({
         space: SPACE,
         branch: "",
@@ -666,7 +734,7 @@ Deno.test("a committed settlement arriving before speculation retains its data b
     await writeClaimedOutput(storage, "late-local-overlay");
     assertEquals(visibleOutput(storage), "late-local-overlay");
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 5,
       upserts: [{
         branch: "",
@@ -675,7 +743,7 @@ Deno.test("a committed settlement arriving before speculation retains its data b
         doc: { value: "server-output" },
       }],
     }));
-    await waitFor(() => visibleOutput(storage) === "server-output");
+    assertCondition(() => visibleOutput(storage) === "server-output");
     const diagnostics = storage.getExecutionRoutingDiagnostics({
       space: SPACE,
       branch: "",
@@ -696,7 +764,7 @@ Deno.test("a later early no-op retains an earlier committed data barrier", async
   const storage = OverlayStorageManager.connect(factory);
   try {
     await storage.open(SPACE).sync(INPUT);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 3,
@@ -720,7 +788,7 @@ Deno.test("a later early no-op retains an earlier committed data barrier", async
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics({
         space: SPACE,
         branch: "",
@@ -732,7 +800,7 @@ Deno.test("a later early no-op retains an earlier committed data barrier", async
     await writeClaimedOutput(storage, "held-for-earlier-committed-data");
     assertEquals(visibleOutput(storage), "held-for-earlier-committed-data");
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 5,
       upserts: [{
         branch: "",
@@ -741,7 +809,7 @@ Deno.test("a later early no-op retains an earlier committed data barrier", async
         doc: { value: "authoritative-after-merged-barrier" },
       }],
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       visibleOutput(storage) === "authoritative-after-merged-barrier"
     );
   } finally {
@@ -767,7 +835,7 @@ Deno.test("live computation claims are exposed without broadening builtin captur
     );
     assertEquals(storage.captureExecutionClaim(computationAction), undefined);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -775,7 +843,7 @@ Deno.test("live computation claims are exposed without broadening builtin captur
         events: [],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.hasLiveExecutionClaimForAction(computationAction) === false
     );
   } finally {
@@ -805,7 +873,7 @@ Deno.test("ordered revoke invalidates a registered computation without a specula
     await storage.open(SPACE).sync(INPUT);
 
     factory.claims = [];
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -819,7 +887,7 @@ Deno.test("ordered revoke invalidates a registered computation without a specula
       },
     }));
 
-    await waitFor(() =>
+    assertCondition(() =>
       notifications.some((notification) =>
         notification.type === "execution-claim-invalidation" &&
         notification.sourceAction === computationAction &&
@@ -842,7 +910,7 @@ Deno.test("settlement basis older than a direct confirmed read retains the overl
   ]?.debug ?? 0;
   try {
     await storage.open(SPACE).sync(INPUT);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 5,
       upserts: [{
         branch: "",
@@ -851,7 +919,7 @@ Deno.test("settlement basis older than a direct confirmed read retains the overl
         doc: { value: "confirmed-input" },
       }],
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.open(SPACE).replica.get({
         id: INPUT,
         type: "application/json",
@@ -859,7 +927,7 @@ Deno.test("settlement basis older than a direct confirmed read retains the overl
     );
     await writeClaimedOutput(storage, "basis-five", true);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 5,
       toSeq: 5,
       execution: {
@@ -876,7 +944,6 @@ Deno.test("settlement basis older than a direct confirmed read retains the overl
         }],
       },
     }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(visibleOutput(storage), "basis-five");
     assertEquals(
       getLoggerCountsBreakdown()["storage.v2"]?.[
@@ -885,7 +952,7 @@ Deno.test("settlement basis older than a direct confirmed read retains the overl
       retainedBaseline + 1,
     );
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 5,
       toSeq: 5,
       execution: {
@@ -902,7 +969,7 @@ Deno.test("settlement basis older than a direct confirmed read retains the overl
         }],
       },
     }));
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
@@ -915,13 +982,20 @@ Deno.test("pending source basis translates to its confirmation-assigned sequence
   const sourceApplied = Promise.withResolvers<AppliedCommit>();
   factory.onTransact = () => sourceApplied.promise;
   const storage = OverlayStorageManager.connect(factory);
+  const sourceDrained = Promise.withResolvers<void>();
+  let sourceWasPending = false;
+  const unsubscribePending = storage.subscribePendingCommits((pending) => {
+    if (pending) sourceWasPending = true;
+    else if (sourceWasPending) sourceDrained.resolve();
+  });
   try {
     await storage.open(SPACE).sync(INPUT);
+    const sourceStarted = factory.waitForCommitCount(1);
     const sourceCommit = beginSourceInputWrite(storage, "pending-source");
-    await waitFor(() => factory.commits.length === 1);
+    await sourceStarted;
     await writeClaimedOutput(storage, "pending-basis-overlay", true);
 
-    factory.view.push(emptySync({
+    const settlement = factory.view.enqueue(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -936,13 +1010,21 @@ Deno.test("pending source basis translates to its confirmation-assigned sequence
         }],
       },
     }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(visibleOutput(storage), "pending-basis-overlay");
+    const overlayDropped = notificationCondition(
+      storage,
+      () => visibleOutput(storage) === undefined,
+    );
 
     sourceApplied.resolve({ seq: 6, branch: "", revisions: [] });
+    await sourceDrained.promise;
     await sourceCommit;
-    await waitFor(() => visibleOutput(storage) === undefined);
+    await settlement.delivered;
+    await overlayDropped;
+    await settlement.processed;
+    assertCondition(() => visibleOutput(storage) === undefined);
   } finally {
+    unsubscribePending();
     await storage.close();
     resetServerPrimaryExecutionConfig();
   }
@@ -963,14 +1045,15 @@ Deno.test("rejected source basis discards its dependent overlay", async () => {
   });
   try {
     await storage.open(SPACE).sync(INPUT);
+    const sourceStarted = factory.waitForCommitCount(1);
     const sourceCommit = beginSourceInputWrite(storage, "doomed-source");
-    await waitFor(() => factory.commits.length === 1);
+    await sourceStarted;
     await writeClaimedOutput(storage, "doomed-overlay", true);
     sourceApplied.reject(Object.assign(new Error("source rejected"), {
       name: "TransactionError",
     }));
     await sourceCommit;
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
     assertEquals(
       notifications.some((notification) =>
         notification.type === "execution-claim-invalidation" &&
@@ -998,10 +1081,11 @@ Deno.test("source rejection transfers a pending no-op before an immediate rerun"
   };
   try {
     await storage.open(SPACE).sync(INPUT);
+    const sourceStarted = factory.waitForCommitCount(1);
     const sourceCommit = beginSourceInputWrite(storage, "doomed-source");
-    await waitFor(() => factory.commits.length === 1);
+    await sourceStarted;
     await writeClaimedOutput(storage, "doomed-overlay", true);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -1016,7 +1100,7 @@ Deno.test("source rejection transfers a pending no-op before an immediate rerun"
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
     );
     assertEquals(
@@ -1029,7 +1113,7 @@ Deno.test("source rejection transfers a pending no-op before an immediate rerun"
       name: "TransactionError",
     }));
     await sourceCommit;
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
 
     await writeClaimedOutput(storage, "immediate-rerun-overlay");
     assertEquals(visibleOutput(storage), undefined);
@@ -1056,11 +1140,12 @@ Deno.test("early no-op preserves a pending committed barrier after overlay loss"
   };
   try {
     await storage.open(SPACE).sync(INPUT);
+    const sourceStarted = factory.waitForCommitCount(1);
     const sourceCommit = beginSourceInputWrite(storage, "doomed-source");
-    await waitFor(() => factory.commits.length === 1);
+    await sourceStarted;
     await writeClaimedOutput(storage, "first-overlay", true);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -1076,7 +1161,7 @@ Deno.test("early no-op preserves a pending committed barrier after overlay loss"
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
     );
 
@@ -1084,9 +1169,9 @@ Deno.test("early no-op preserves a pending committed barrier after overlay loss"
       name: "TransactionError",
     }));
     await sourceCommit;
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 2,
         toFeedSeq: 3,
@@ -1101,7 +1186,7 @@ Deno.test("early no-op preserves a pending committed barrier after overlay loss"
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 3
     );
 
@@ -1111,7 +1196,7 @@ Deno.test("early no-op preserves a pending committed barrier after overlay loss"
     assertEquals(held.actions[0]?.pendingOverlayCount, 1);
     assertEquals(held.actions[0]?.pendingSettlementCount, 1);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 7,
       upserts: [{
         branch: "",
@@ -1120,7 +1205,7 @@ Deno.test("early no-op preserves a pending committed barrier after overlay loss"
         doc: { value: "authoritative-after-recovery" },
       }],
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       visibleOutput(storage) === "authoritative-after-recovery"
     );
     const settled = storage.getExecutionRoutingDiagnostics(query);
@@ -1142,7 +1227,7 @@ Deno.test("committed settlement waits for the accepted data to be replica-applie
     const divergenceBaseline = getLoggerCountsBreakdown()["storage.v2"]?.[
       "execution-overlay-divergence"
     ]?.debug ?? 0;
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -1158,10 +1243,9 @@ Deno.test("committed settlement waits for the accepted data to be replica-applie
         }],
       },
     }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(visibleOutput(storage), "speculative");
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 7,
       upserts: [{
         branch: "",
@@ -1170,7 +1254,7 @@ Deno.test("committed settlement waits for the accepted data to be replica-applie
         doc: { value: "authoritative" },
       }],
     }));
-    await waitFor(() => visibleOutput(storage) === "authoritative");
+    assertCondition(() => visibleOutput(storage) === "authoritative");
     assertEquals(
       getLoggerCountsBreakdown()["storage.v2"]?.[
         "execution-overlay-divergence"
@@ -1196,7 +1280,7 @@ Deno.test("a later live no-op retains an earlier committed data barrier", async 
   try {
     await storage.open(SPACE).sync(INPUT);
     await writeClaimedOutput(storage, "speculative");
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -1212,12 +1296,12 @@ Deno.test("a later live no-op retains an earlier committed data barrier", async 
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
     );
     assertEquals(visibleOutput(storage), "speculative");
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 2,
         toFeedSeq: 3,
@@ -1232,7 +1316,7 @@ Deno.test("a later live no-op retains an earlier committed data barrier", async 
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 3
     );
 
@@ -1241,7 +1325,7 @@ Deno.test("a later live no-op retains an earlier committed data barrier", async 
     assertEquals(held.actions[0]?.pendingOverlayCount, 1);
     assertEquals(held.actions[0]?.pendingSettlementCount, 1);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 7,
       upserts: [{
         branch: "",
@@ -1250,7 +1334,7 @@ Deno.test("a later live no-op retains an earlier committed data barrier", async 
         doc: { value: "authoritative" },
       }],
     }));
-    await waitFor(() => visibleOutput(storage) === "authoritative");
+    assertCondition(() => visibleOutput(storage) === "authoritative");
     const settled = storage.getExecutionRoutingDiagnostics(query);
     assertEquals(settled.actions[0]?.pendingOverlayCount, 0);
     assertEquals(settled.actions[0]?.pendingSettlementCount, 0);
@@ -1269,7 +1353,7 @@ Deno.test("old claim generation settlement cannot clear a replacement overlay", 
   try {
     await storage.open(SPACE).sync(INPUT);
     await writeClaimedOutput(storage, "old-overlay");
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -1279,10 +1363,10 @@ Deno.test("old claim generation settlement cannot clear a replacement overlay", 
         }],
       },
     }));
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
     await writeClaimedOutput(storage, "replacement-overlay");
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 2,
         toFeedSeq: 3,
@@ -1297,7 +1381,6 @@ Deno.test("old claim generation settlement cannot clear a replacement overlay", 
         }],
       },
     }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(visibleOutput(storage), "replacement-overlay");
   } finally {
     await storage.close();
@@ -1311,7 +1394,7 @@ Deno.test("two rapid source bases require settlement through the later basis", a
   const storage = OverlayStorageManager.connect(factory);
   try {
     await storage.open(SPACE).sync(INPUT);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 5,
       upserts: [{
         branch: "",
@@ -1320,14 +1403,14 @@ Deno.test("two rapid source bases require settlement through the later basis", a
         doc: { value: "source-five" },
       }],
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.open(SPACE).replica.get({
         id: INPUT,
         type: "application/json",
       }) !== undefined
     );
     await writeClaimedOutput(storage, "overlay-five", true);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 5,
       toSeq: 6,
       upserts: [{
@@ -1337,7 +1420,7 @@ Deno.test("two rapid source bases require settlement through the later basis", a
         doc: { value: "source-six" },
       }],
     }));
-    await waitFor(() => {
+    assertCondition(() => {
       const value = storage.open(SPACE).replica.get({
         id: INPUT,
         type: "application/json",
@@ -1346,7 +1429,7 @@ Deno.test("two rapid source bases require settlement through the later basis", a
     });
     await writeClaimedOutput(storage, "overlay-six", true);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 6,
       toSeq: 6,
       execution: {
@@ -1363,10 +1446,9 @@ Deno.test("two rapid source bases require settlement through the later basis", a
         }],
       },
     }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(visibleOutput(storage), "overlay-six");
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 6,
       toSeq: 6,
       execution: {
@@ -1383,7 +1465,7 @@ Deno.test("two rapid source bases require settlement through the later basis", a
         }],
       },
     }));
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
@@ -1405,7 +1487,7 @@ Deno.test("resolved replace overlays compact physical pending versions without l
   };
   try {
     await storage.open(SPACE).sync(INPUT);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 5,
       upserts: [{
         branch: "",
@@ -1414,7 +1496,7 @@ Deno.test("resolved replace overlays compact physical pending versions without l
         doc: { value: "resolved-source" },
       }],
     }));
-    await waitFor(() => visibleValue(storage, INPUT) === "resolved-source");
+    assertCondition(() => visibleValue(storage, INPUT) === "resolved-source");
 
     const overlayCount = 100;
     for (let index = 1; index <= overlayCount; index++) {
@@ -1432,7 +1514,7 @@ Deno.test("resolved replace overlays compact physical pending versions without l
       compactedBaseline + overlayCount - 2,
     );
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 5,
       toSeq: 5,
       execution: {
@@ -1449,7 +1531,7 @@ Deno.test("resolved replace overlays compact physical pending versions without l
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
     );
     assertEquals(visibleOutput(storage), `overlay-${overlayCount}`);
@@ -1459,7 +1541,7 @@ Deno.test("resolved replace overlays compact physical pending versions without l
       overlayCount,
     );
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 5,
       toSeq: 5,
       execution: {
@@ -1476,7 +1558,7 @@ Deno.test("resolved replace overlays compact physical pending versions without l
         }],
       },
     }));
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
     const settled = storage.getExecutionRoutingDiagnostics(query);
     assertEquals(settled.actions[0]?.pendingOverlayCount, 0);
     assertEquals(settled.actions[0]?.basisCoveredOverlayDrops, overlayCount);
@@ -1513,13 +1595,14 @@ Deno.test("chained claimed overlays expose the accepted non-transitive basis win
     0;
   try {
     await storage.open(SPACE).sync(CHAIN_SOURCE);
+    const sourceStarted = factory.waitForCommitCount(1);
     const sourceCommit = beginSourceInputWrite(
       storage,
       "source-new",
       CHAIN_SOURCE,
     );
-    await waitFor(() => factory.commits.length === 1);
-    factory.view.push(emptySync({
+    await sourceStarted;
+    await factory.view.push(emptySync({
       toSeq: 12,
       upserts: [{
         branch: "",
@@ -1538,7 +1621,7 @@ Deno.test("chained claimed overlays expose the accepted non-transitive basis win
         doc: Object.freeze({ value: "downstream-stale" }),
       }],
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       visibleValue(storage, CHAIN_UNRELATED) === "unrelated-new"
     );
     assertEquals(
@@ -1586,7 +1669,7 @@ Deno.test("chained claimed overlays expose the accepted non-transitive basis win
     // The server can settle the downstream run at basis 12 after reading the
     // stale confirmed intermediate. Dropping the overlay intentionally exposes
     // that stale result for the accepted v1 non-transitive window.
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 12,
       toSeq: 13,
       upserts: [{
@@ -1610,7 +1693,7 @@ Deno.test("chained claimed overlays expose the accepted non-transitive basis win
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       visibleValue(storage, CHAIN_DOWNSTREAM) ===
         "downstream-from-stale-intermediate"
     );
@@ -1624,7 +1707,7 @@ Deno.test("chained claimed overlays expose the accepted non-transitive basis win
     // The intermediate then settles from the direct source basis. Once the
     // downstream reruns against it, its next committed settlement converges the
     // visible state deterministically without another client overlay.
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 13,
       toSeq: 14,
       upserts: [{
@@ -1648,7 +1731,7 @@ Deno.test("chained claimed overlays expose the accepted non-transitive basis win
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       visibleValue(storage, CHAIN_INTERMEDIATE) === "intermediate-fresh"
     );
     assertEquals(
@@ -1656,7 +1739,7 @@ Deno.test("chained claimed overlays expose the accepted non-transitive basis win
       "downstream-from-stale-intermediate",
     );
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 14,
       toSeq: 15,
       upserts: [{
@@ -1680,7 +1763,7 @@ Deno.test("chained claimed overlays expose the accepted non-transitive basis win
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       visibleValue(storage, CHAIN_DOWNSTREAM) === "downstream-fresh"
     );
     assertEquals(
@@ -1703,7 +1786,7 @@ Deno.test("execution feed gap freezes known authority until an authoritative sna
   try {
     await storage.open(SPACE).sync(INPUT);
     await writeClaimedOutput(storage, "held-through-gap");
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 99,
         toFeedSeq: 100,
@@ -1716,12 +1799,11 @@ Deno.test("execution feed gap freezes known authority until an authoritative sna
         }],
       },
     }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(visibleOutput(storage), "held-through-gap");
     await writeClaimedOutput(storage, "still-local-through-gap");
     assertEquals(factory.commits, []);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 0,
         toFeedSeq: 1,
@@ -1729,7 +1811,7 @@ Deno.test("execution feed gap freezes known authority until an authoritative sna
         events: [],
       },
     }));
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
     await writeClaimedOutput(storage, "resumed-upstream");
     assertEquals(factory.commits.length, 1);
   } finally {
@@ -1747,7 +1829,7 @@ Deno.test("reconnect snapshot applies an evicted successful settlement to a live
     await writeClaimedOutput(storage, "settled-while-disconnected");
     assertEquals(visibleOutput(storage), "settled-while-disconnected");
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 6,
@@ -1764,7 +1846,7 @@ Deno.test("reconnect snapshot applies an evicted successful settlement to a live
       },
     }));
 
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
     assertEquals(factory.commits, []);
   } finally {
     await storage.close();
@@ -1785,7 +1867,7 @@ Deno.test("reconnect installs a claim before its retained settlement exactly onc
   };
   try {
     await storage.open(SPACE).sync(INPUT);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 3,
@@ -1801,7 +1883,7 @@ Deno.test("reconnect installs a claim before its retained settlement exactly onc
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 3
     );
     assertEquals(
@@ -1811,7 +1893,7 @@ Deno.test("reconnect installs a claim before its retained settlement exactly onc
     );
 
     await writeClaimedOutput(storage, "late-after-retained-settlement");
-    await waitFor(() => visibleOutput(storage) === undefined);
+    assertCondition(() => visibleOutput(storage) === undefined);
     const diagnostics = storage.getExecutionRoutingDiagnostics(query);
     assertEquals(diagnostics.actions[0]?.settlements.noOp, 1);
     assertEquals(diagnostics.actions[0]?.pendingOverlayCount, 0);
@@ -1829,7 +1911,7 @@ Deno.test("committed reconnect frontier preserves its accepted data barrier", as
   try {
     await storage.open(SPACE).sync(INPUT);
     await writeClaimedOutput(storage, "held-for-frontier-data");
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 4,
@@ -1846,10 +1928,9 @@ Deno.test("committed reconnect frontier preserves its accepted data barrier", as
         events: [],
       },
     }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(visibleOutput(storage), "held-for-frontier-data");
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 5,
       upserts: [{
         branch: "",
@@ -1858,7 +1939,7 @@ Deno.test("committed reconnect frontier preserves its accepted data barrier", as
         doc: { value: "frontier-server-output" },
       }],
     }));
-    await waitFor(() => visibleOutput(storage) === "frontier-server-output");
+    assertCondition(() => visibleOutput(storage) === "frontier-server-output");
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
@@ -1885,7 +1966,7 @@ Deno.test("execution feed gap keeps an exact claimed builtin passive", async () 
   try {
     await storage.open(SPACE).sync(INPUT);
     assertEquals(storage.captureExecutionClaim(effectAction), effectClaim);
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 99,
         toFeedSeq: 100,
@@ -1898,10 +1979,9 @@ Deno.test("execution feed gap keeps an exact claimed builtin passive", async () 
         }],
       },
     }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
     assertEquals(storage.captureExecutionClaim(effectAction), effectClaim);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 0,
         toFeedSeq: 1,
@@ -1909,7 +1989,7 @@ Deno.test("execution feed gap keeps an exact claimed builtin passive", async () 
         events: [],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.captureExecutionClaim(effectAction) === undefined
     );
   } finally {
@@ -1953,8 +2033,9 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
   };
   try {
     await storage.open(SPACE).sync(INPUT);
+    const sourceStarted = factory.waitForCommitCount(1);
     const sourceCommit = beginSourceInputWrite(storage, "pending-diagnostic");
-    await waitFor(() => factory.commits.length === 1);
+    await sourceStarted;
     await writeClaimedOutput(storage, "speculative-diagnostic", true);
 
     const routed = storage.getExecutionRoutingDiagnostics(query);
@@ -1981,7 +2062,7 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
       outcome: "committed",
       acceptedCommitSeq: 7 as AcceptedCommitSeq,
     };
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -1991,7 +2072,7 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
     );
 
@@ -2026,7 +2107,7 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
 
     sourceApplied.resolve({ seq: 6, branch: "", revisions: [] });
     await sourceCommit;
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).actions[0]
         ?.unresolvedBasisOverlayCount === 0
     );
@@ -2036,7 +2117,7 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
       1,
     );
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       toSeq: 7,
       upserts: [{
         branch: "",
@@ -2045,7 +2126,7 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
         doc: { value: "authoritative-diagnostic" },
       }],
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionAppliedSeq === 7
     );
     const applied = storage.getExecutionRoutingDiagnostics(query);
@@ -2053,7 +2134,7 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
     assertEquals(applied.actions[0]?.pendingOverlayCount, 0);
     assertEquals(applied.actions[0]?.pendingSettlementCount, 0);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       fromSeq: 7,
       toSeq: 7,
       execution: {
@@ -2070,7 +2151,7 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
         })),
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 5
     );
     const outcomes = storage.getExecutionRoutingDiagnostics(query);
@@ -2108,7 +2189,7 @@ Deno.test("execution diagnostics clone fabric claim values canonically", async (
     assertInstanceOf(routedClaim.metadata, FabricHash);
     assertEquals(routedClaim.metadata.taggedHashString, "sha256:abcd");
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -2123,7 +2204,7 @@ Deno.test("execution diagnostics clone fabric claim values canonically", async (
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
     );
 
@@ -2153,7 +2234,7 @@ Deno.test("execution routing diagnostics scope authority and count non-authorita
     await storage.open(SPACE).sync(INPUT);
     await writeClaimedOutput(storage, "revoked-diagnostic");
     factory.claims = [];
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 1,
         toFeedSeq: 2,
@@ -2166,7 +2247,7 @@ Deno.test("execution routing diagnostics scope authority and count non-authorita
         }],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 2
     );
     await writeClaimedOutput(storage, "upstream-diagnostic");
@@ -2200,21 +2281,21 @@ Deno.test("execution routing diagnostics scope authority and count non-authorita
       [],
     );
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 99,
         toFeedSeq: 100,
         events: [],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       storage.getExecutionRoutingDiagnostics(query).snapshotRequired
     );
     const gap = storage.getExecutionRoutingDiagnostics(query);
     assertEquals(gap.executionFeedSeq, 2);
     assertEquals(gap.snapshotRequired, true);
 
-    factory.view.push(emptySync({
+    await factory.view.push(emptySync({
       execution: {
         fromFeedSeq: 0,
         toFeedSeq: 1,
@@ -2222,7 +2303,7 @@ Deno.test("execution routing diagnostics scope authority and count non-authorita
         events: [],
       },
     }));
-    await waitFor(() =>
+    assertCondition(() =>
       !storage.getExecutionRoutingDiagnostics(query).snapshotRequired
     );
     assertEquals(
