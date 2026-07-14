@@ -227,7 +227,7 @@ export const discordOnline: Tile = {
       snap = await takeSnapshot(token, guildId);
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e);
-      return { label, status: "unknown" as Status, value: "—", sub: escapeHtml(reason).slice(0, 80) };
+      return { label, status: "unknown" as Status, value: "—", sub: reason.slice(0, 80) };
     }
 
     if (!snap) {

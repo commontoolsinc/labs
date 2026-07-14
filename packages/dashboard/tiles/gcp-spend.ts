@@ -7,7 +7,7 @@
 // an optional daily budget.
 import type { Tile, TileView } from "../types.ts";
 import { bigQuery } from "../gcp.ts";
-import { budgetStatus, readBudget } from "../lib.ts";
+import { budgetStatus, friendlyError, readBudget } from "../lib.ts";
 
 // Sums cost for the most recent full UTC day from the billing-export table.
 const sqlFor = (table: string) =>
@@ -45,8 +45,9 @@ export const gcpSpend: Tile = {
       if (!Number.isFinite(cost)) {
         return { label, status: "unknown", value: "—", sub: "unavailable — check credentials" };
       }
-    } catch {
-      return { label, status: "unknown", value: "—", sub: "unavailable — check credentials" };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { label, status: "unknown", value: "—", sub: friendlyError(msg) };
     }
 
     return {

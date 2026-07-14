@@ -4,10 +4,11 @@
 // resolves to "unknown" rather than a guessed number.
 import type { Status, Tile, TileView } from "../types.ts";
 
-// Pull the first finite number out of a nested SigNoz result. The v3/v4
+// Pull the first finite metric number out of a nested SigNoz result. The v3/v4
 // query_range response nests series values under result[].series[].values[],
-// where each value is a [timestamp, "stringNumber"] pair. This walks whatever
-// shape comes back and returns the first numeric leaf it can parse.
+// where each value is a [timestamp, "stringNumber"] pair. Prefer those metric
+// strings over the numeric timestamps so a response never reports the epoch as
+// the error percentage.
 function firstNumber(node: unknown, depth = 0): number | undefined {
   if (depth > 8 || node == null) return undefined;
   if (typeof node === "number") return Number.isFinite(node) ? node : undefined;
@@ -17,6 +18,10 @@ function firstNumber(node: unknown, depth = 0): number | undefined {
     return Number.isFinite(n) ? n : undefined;
   }
   if (Array.isArray(node)) {
+    if (node.length === 2 && typeof node[0] === "number" && typeof node[1] === "string") {
+      const n = firstNumber(node[1], depth + 1);
+      if (n !== undefined) return n;
+    }
     for (const item of node) {
       const n = firstNumber(item, depth + 1);
       if (n !== undefined) return n;
@@ -113,7 +118,7 @@ export const prodErrors: Tile = {
       }
       json = await res.json();
     } catch {
-      return { label: "prod errors", status: "bad", sub: "SigNoz unreachable" };
+      return { label: "prod errors", status: "unknown", sub: "SigNoz unreachable" };
     }
 
     const pct = firstNumber(json);
