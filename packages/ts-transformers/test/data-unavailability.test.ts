@@ -108,6 +108,42 @@ Deno.test("a visible AsyncResult guard inside computed needs no observation cast
   assertEquals(output.includes("observeAvailability"), false);
 });
 
+Deno.test("a computed-local alias retains its captured availability path", async () => {
+  const output = await transformSource(
+    `
+    import {
+      AsyncResult,
+      computed,
+      hasError,
+      pattern,
+    } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: { request: AsyncResult<Repo> }) => {
+      const failed = computed(() => {
+        const request = input.request;
+        return hasError(request);
+      });
+      return { failed };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["input", "request"], reasons: ["error"] }]',
+  );
+  assertEquals(
+    output.includes('path: ["request"], reasons: ["error"]'),
+    false,
+  );
+});
+
 Deno.test("reports a helper guard whose caller path cannot be represented", async () => {
   const { diagnostics } = await validateSource(
     `

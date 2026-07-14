@@ -65,6 +65,70 @@ function parseAvailabilityCaptureExpression(
     : undefined;
 }
 
+function captureRootIdentifier(
+  expression: ts.Expression,
+): ts.Identifier | undefined {
+  let current = unwrapAvailabilityExpression(expression);
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    current = unwrapAvailabilityExpression(current.expression);
+  }
+  return ts.isIdentifier(current) ? current : undefined;
+}
+
+function nodeIsWithin(node: ts.Node, boundary: ts.Node): boolean {
+  for (
+    let current: ts.Node | undefined = node;
+    current;
+    current = current.parent
+  ) {
+    if (current === boundary) return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve aliases declared inside an explicit compute back to the closure
+ * capture which initializes them. Those locals are not fields of the emitted
+ * lift input, so policy paths must not use the local binding name.
+ */
+function parseExplicitAvailabilityCaptureExpression(
+  expression: ts.Expression,
+  boundary: ts.Expression | ts.Block,
+  context: TransformationContext,
+  seen: Set<ts.Symbol> = new Set(),
+): ReturnType<typeof parseCaptureExpression> {
+  const parsed = parseAvailabilityCaptureExpression(expression);
+  if (!parsed) return undefined;
+  const root = captureRootIdentifier(expression);
+  if (!root) return parsed;
+  const symbol = context.checker.getSymbolAtLocation(root);
+  if (!symbol || seen.has(symbol)) return parsed;
+  const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
+  if (
+    !declaration || !ts.isVariableDeclaration(declaration) ||
+    !declaration.initializer || !nodeIsWithin(declaration, boundary)
+  ) {
+    return parsed;
+  }
+  seen.add(symbol);
+  const source = parseExplicitAvailabilityCaptureExpression(
+    declaration.initializer,
+    boundary,
+    context,
+    seen,
+  );
+  return source
+    ? {
+      root: source.root,
+      path: [...source.path, ...parsed.path],
+      expression,
+    }
+    : parsed;
+}
+
 function predicateTypeForCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -482,7 +546,11 @@ function collectExplicitAvailabilityGuardCapturesInternal(
               predicateType,
             );
           }
-          const capture = parseAvailabilityCaptureExpression(operand);
+          const capture = parseExplicitAvailabilityCaptureExpression(
+            operand,
+            expression,
+            context,
+          );
           if (capture) {
             const path = [capture.root, ...capture.path];
             record(path, [callKind.reason]);
