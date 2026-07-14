@@ -99,7 +99,10 @@ jobs:
           ) ||
           (
             github.event_name == 'pull_request' &&
-            contains(fromJSON('["MEMBER","OWNER"]'), github.event.pull_request.author_association) &&
+            (
+              github.event.pull_request.author_association == 'MEMBER' ||
+              github.event.pull_request.author_association == 'OWNER'
+            ) &&
             (
               needs.dashboard_tests.result == 'success' ||
               (vars.PUSH_BRANCH == 'true' && github.run_attempt > 1)
