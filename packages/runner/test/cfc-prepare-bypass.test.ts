@@ -4,8 +4,14 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import type { PreparedDigestInput } from "../src/cfc/mod.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-prepare-bypass-tests");
+
+type PrepareCfcBypassProbe = {
+  buildPreparedDigestInput?: () => PreparedDigestInput;
+  prepareCfc(input: PreparedDigestInput): string;
+};
 
 // Regression guard for the prepareCfc verification-bypass (audit S2).
 //
@@ -63,11 +69,13 @@ describe("CFC prepareCfc verification bypass", () => {
       // public transaction surfaces, there is no way to feed it to prepareCfc:
       // the parameter was removed (audit S2) so verification always runs. Pin
       // that prepareCfc accepts no argument and still rejects the violation.
-      // deno-lint-ignore no-explicit-any
-      const attackerInput = (tx as any).buildPreparedDigestInput?.();
+      const prepareProbe = tx as unknown as PrepareCfcBypassProbe;
+      const attackerInput = prepareProbe.buildPreparedDigestInput?.();
       expect(attackerInput).toBeDefined();
-      // deno-lint-ignore no-explicit-any
-      expect(() => (tx as any).prepareCfc(attackerInput)).not.toThrow();
+      if (attackerInput === undefined) {
+        throw new Error("expected prepared digest input");
+      }
+      expect(() => prepareProbe.prepareCfc(attackerInput)).not.toThrow();
 
       // Verification must have run and invalidated the transaction regardless of
       // the ignored extra argument.
