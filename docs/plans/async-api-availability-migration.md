@@ -38,8 +38,9 @@ update the DataUnavailable spec and archive this plan under
    independent state such as an active dialog turn remains explicit.
 5. A durable raw built-in may keep an internal state object. Builder-time
    projections expose the direct result and associate it with auxiliary
-   zero-node projections such as `partialResultOf()` or
-   `presentedResultOf()`; callers do not navigate the raw state.
+   zero-node projections such as `partialResultOf()`; genuine state machines
+   expose their data-bearing channels directly on their public state object.
+   Callers do not navigate raw implementation state.
 6. Existing raw implementation references and persisted state shapes are not
    changed in place without compatibility tests. Old compiled graphs must
    continue to rehydrate while newly compiled code receives the new public
@@ -110,7 +111,7 @@ resurrect content cleared by an error.
 | `compileAndRun` | one result with failure diagnostics | specialized `AsyncResult<T>` | diagnostics on `CompileError` |
 | `db.query`, `sqliteQuery` | one result plus success audit metadata | `AsyncResult<{ rows: Row[]; withheld?: number }>` | none |
 | `wish` | discovery and selection state machine | `WishState<T>.result: AsyncResult<T>` | candidates and trusted `[UI]` |
-| `llmDialog` | multi-turn state machine | `presentedResultOf(dialog): AsyncResult<T>` when requested | turn activity, controls, pins, tools |
+| `llmDialog` | multi-turn state machine | `LLMDialogState<T>.result: AsyncResult<T>` when requested | turn activity, controls, pins, tools |
 | `streamData` | long-lived stream with a final value | `AsyncResult<T>` | `partialResultOf(request)` while open |
 | legacy `llm` | deprecated state API | no new surface | migrate callers, then remove |
 
@@ -262,8 +263,8 @@ failure no longer collapse into `undefined`.
 ## A5 — `llmDialog`
 
 Dialog `pending` describes an active turn, not necessarily the availability of
-a previously presented structured result. Keep the dialog control object, but
-remove its ambiguous untyped `.result` field from authored code.
+a previously presented structured result. Keep the dialog control object and
+make its presented-result channel honestly typed, just like `wish.result`.
 
 Current use:
 
@@ -289,31 +290,27 @@ Proposed use:
 // Shown for illustration only.
 const dialog = llmDialog<ResearchResult>({ messages });
 const { addMessage, pending } = dialog;
-const resultRequest = presentedResultOf(dialog);
-const result = resultOf(resultRequest);
+const result = resultOf(dialog.result);
 
 return (
   <>
     <cf-autostart onstart={startResearch({ addMessage })} />
-    {hasError(resultRequest)
-      ? <div>{resultRequest.error.message}</div>
+    {hasError(dialog.result)
+      ? <div>{dialog.result.error.message}</div>
       : <ResearchView result={result} pendingTurn={pending} />}
   </>
 );
 ```
 
-`presentedResultOf()` is a zero-node associated projection, analogous to
-`partialResultOf()`. `addMessage`, `pending`, cancellation, pins, and the other
-dialog controls remain on the dialog object unchanged. Only the presented data
-channel moves behind the typed projection; `pending` remains independent turn
-activity.
+`addMessage`, `pending`, cancellation, pins, and the other dialog controls
+remain on the dialog object unchanged. `pending` remains independent turn
+activity; `.result` is the availability-aware presented data channel.
 
 - [ ] Add a typed dialog overload and transformer schema injection for its
-      presented result.
-- [ ] Add `presentedResultOf(dialog): AsyncResult<T>` without adding a second
-      dialog node.
+      `result: AsyncResult<T>` channel.
 - [ ] Do not manufacture a perpetual pending result for dialogs which do not
-      declare or use `presentResult`; their public state omits that channel.
+      declare or use `presentResult`; their public type omits that channel even
+      if legacy raw state remains readable internally.
 - [ ] Before the first presentation, expose pending while a turn can still
       produce it and error when that attempt fails terminally.
 - [ ] After a successful presentation, preserve that result across later active
@@ -322,7 +319,7 @@ activity.
 - [ ] Preserve message append/cancel streams, pins, flattened tools, tool-call
       availability handling, queueing, and CFC attribution.
 - [ ] Migrate unsafe `as T | undefined` result casts to
-      `presentedResultOf(dialog)`.
+      `resultOf(dialog.result)`.
 
 **A5 exit:** structured dialog results are typed and availability-aware without
 conflating them with the dialog's multi-turn lifecycle.
