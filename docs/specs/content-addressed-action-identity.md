@@ -149,7 +149,7 @@ The scheduler is migrated to content addressing, with a fingerprint/id split:
 
 - The durable implementation **fingerprint** keys on the per-**symbol** content
   address `impl:cf:module/<hash>:<symbol>` (`schedulerImplementationFingerprint`,
-  `scheduler/action-run.ts`) — it identifies the implementation *code*, with no
+  `scheduler/run.ts`) — it identifies the implementation *code*, with no
   `implementationRef` dependence.
 - The action **id** — the durable observation lookup key and the in-session
   `actionStats` key — must stay per-**instance**, so it appends a

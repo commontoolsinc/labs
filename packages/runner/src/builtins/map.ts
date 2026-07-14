@@ -28,6 +28,7 @@ import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { outputSpotFromBinding } from "./scope-policy.ts";
 import { listResultSchema } from "./list-result-schema.ts";
@@ -87,7 +88,7 @@ export function map(
   runtime: Runtime, // Runtime will be injected by the registration function
   outputBinding?: NormalizedFullLink,
   awaitSync?: boolean,
-): Action {
+): RawBuiltinReturnType {
   let result: Cell<any[]> | undefined;
 
   // Identity-based tracking: maps element address key → { resultCell, lastIndex }
@@ -99,8 +100,11 @@ export function map(
   >();
 
   // Only the initial (resume) reconcile should defer its per-element sub-pattern
-  // runs until storage sync completes. This map action is itself sync-gated when
-  // resumed, so its first reconcile already runs against synced data; elements
+  // runs until storage sync completes. This coordinator registers as
+  // resumeMode "always-run" with a synced-hold (it never rehydrates clean —
+  // see the return below), so its first reconcile runs against synced data;
+  // the per-element runs it starts carry the same intent, which is what lets
+  // each child rehydrate its own persisted state at registration. Elements
   // added by later (post-resume) reconciles are fresh and must not wait.
   let resumeBatchAwaitSync = !!awaitSync;
 
@@ -144,7 +148,7 @@ export function map(
     );
   };
 
-  return (tx: IExtendedStorageTransaction) => {
+  const reconcile: Action = (tx: IExtendedStorageTransaction) => {
     // Captured before the loop consumes it: this reconcile's element runs use
     // the current value; the flag is cleared only once a non-empty resume batch
     // has been processed (below), so a transient empty first reconcile doesn't
@@ -405,4 +409,10 @@ export function map(
     // not present in the current list if this becomes a problem for
     // long-lived maps with high element churn.
   };
+
+  // Child-starting coordinator: never rehydrates clean on resume — the
+  // reconcile must run to re-attach the per-element children (which then
+  // rehydrate their own persisted state). See
+  // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
+  return { action: reconcile, resumeMode: "always-run" };
 }

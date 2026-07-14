@@ -161,17 +161,35 @@ describe("home rehydration", () => {
     logChurnMetric("reload", reload.churn);
 
     const c = reload.churn;
-    // Read-mostly reload: re-commits stay at zero rather than scaling into a
+    // Read-mostly reload: re-commits stay bounded rather than scaling into a
     // storm. Resuming reads confirmed-loaded state before re-deriving — owned
-    // cells are pre-synced, the manifest probe no longer reads not-yet-loaded
-    // derived cells, and the list builtins defer their reconcile until the
-    // durable container lands instead of overwriting it with []. Across the CI
-    // distribution these counters hold at zero, so the bound is zero: any
-    // conflict, revert, or schedule-run-error on reload is a regression. The
-    // durability test below is the precise correctness gate.
-    expect(c.commitConflicts).toBeLessThanOrEqual(0);
-    expect(c.commitReverts).toBeLessThanOrEqual(0);
-    expect(c.scheduleRunErrors).toBeLessThanOrEqual(0);
+    // cells are pre-synced, argument link targets are pulled two levels deep,
+    // the manifest probe no longer reads not-yet-loaded derived cells, and the
+    // list builtins defer their reconcile until the durable container lands
+    // instead of overwriting it with [].
+    //
+    // The conflict bound is ONE, not zero: under the v2 scheduler (which
+    // commits first runs instead of running them inside populate's aborted
+    // transactions) the profile picker's row map follows field-level alias
+    // chains into the profile-home piece's document graph on its first
+    // post-reload run. That read set is only knowable by running the row, so
+    // one hop is cold (seq-0 basis) and the commit conflicts once — self-healing
+    // on the immediate retry, and the rewrite is value-identical. Bounded
+    // pre-loading cannot close this without reintroducing populate (spec §15
+    // decision 17), so the single residual conflict is accepted and pinned.
+    //
+    // The revert and schedule-run-error are COUPLED to that conflict rather
+    // than given their own flat allowance: the accepted residual is one
+    // conflict that produces exactly one revert and one re-run, so those must
+    // not exceed the conflict count. This keeps the residual green while still
+    // catching a regression that introduces an UNRELATED revert or run-error
+    // (which would not be accompanied by a matching second conflict) — a flat
+    // <= 1 on all three would have let one such unrelated event hide. Re-tighten
+    // the conflict bound to zero if the row-scoped read set ever becomes
+    // pre-syncable. The durability test below is the precise correctness gate.
+    expect(c.commitConflicts).toBeLessThanOrEqual(1);
+    expect(c.commitReverts).toBeLessThanOrEqual(c.commitConflicts);
+    expect(c.scheduleRunErrors).toBeLessThanOrEqual(c.commitConflicts);
   });
 
   it("a profile created in the post-reload window is durable", async () => {

@@ -337,7 +337,7 @@ describe("effect/computation tracking", () => {
       data.withTx(actionTx).key("foo").get();
     };
 
-    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    runtime.scheduler.subscribe(effect, { isEffect: true });
     await runtime.scheduler.idle();
 
     const fooLink = data.key("foo").getAsNormalizedFullLink();
@@ -380,7 +380,7 @@ describe("effect/computation tracking", () => {
       data.withTx(actionTx).key("bar").get();
     };
 
-    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    runtime.scheduler.subscribe(effect, { isEffect: true });
     await runtime.scheduler.idle();
 
     const fooLink = data.key("foo").getAsNormalizedFullLink();
@@ -502,7 +502,7 @@ describe("effect/computation tracking", () => {
     const effect: Action = (actionTx) => {
       cellA.withTx(actionTx).get();
     };
-    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    runtime.scheduler.subscribe(effect, { isEffect: true });
     await runtime.scheduler.idle();
 
     const cellALink = cellA.getAsNormalizedFullLink();
@@ -544,7 +544,7 @@ describe("effect/computation tracking", () => {
     const effect: Action = (actionTx) => {
       output.withTx(actionTx).get();
     };
-    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    runtime.scheduler.subscribe(effect, { isEffect: true });
     await runtime.scheduler.idle();
 
     const computation: Action = () => {};
@@ -684,10 +684,10 @@ describe("effect/computation tracking", () => {
       shallowReads: [],
       writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
     });
-    runtime.scheduler.subscribe(outputEffect, outputEffect, {
+    runtime.scheduler.subscribe(outputEffect, {
       isEffect: true,
     });
-    runtime.scheduler.subscribe(unrelatedEffect, unrelatedEffect, {
+    runtime.scheduler.subscribe(unrelatedEffect, {
       isEffect: true,
     });
     await runtime.idle();
@@ -707,8 +707,16 @@ describe("effect/computation tracking", () => {
       .flatMap((entry) =>
         entry.stats.iterations.filter((iteration) => iteration.actionsRun > 0)
       );
-    expect(nonEmptyIterations.length).toBe(1);
-    expect(nonEmptyIterations[0]?.actionsRun).toBe(3);
+    // The unrelated ordinary effect runs first. With no primary work left,
+    // the standing-demand materializer runs at idle priority and its changed
+    // output invalidates/runs the output effect in the following iteration.
+    expect(nonEmptyIterations.length).toBe(2);
+    expect(
+      nonEmptyIterations.reduce(
+        (total, iteration) => total + iteration.actionsRun,
+        0,
+      ),
+    ).toBe(3);
     expect(runOrder.indexOf("materializer")).toBeLessThan(
       runOrder.indexOf("output-effect"),
     );
@@ -757,10 +765,10 @@ describe("effect/computation tracking", () => {
       shallowReads: [],
       writes: [],
     });
-    runtime.scheduler.subscribe(changedEffect, changedEffect, {
+    runtime.scheduler.subscribe(changedEffect, {
       isEffect: true,
     });
-    runtime.scheduler.subscribe(stableEffect, stableEffect, { isEffect: true });
+    runtime.scheduler.subscribe(stableEffect, { isEffect: true });
     await runtime.idle();
 
     expect(runtime.scheduler.getDependents(materializer).has(changedEffect))
@@ -870,7 +878,7 @@ describe("effect/computation tracking", () => {
         effectRuns[index]++;
         target.withTx(actionTx).key(key).get();
       };
-      runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+      runtime.scheduler.subscribe(effect, { isEffect: true });
     }
     await runtime.idle();
     materializerRuns = 0;
@@ -934,7 +942,7 @@ describe("effect/computation tracking", () => {
       shallowReads: [],
       writes: [],
     });
-    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    runtime.scheduler.subscribe(effect, { isEffect: true });
     await runtime.idle();
     observed.length = 0;
 
@@ -1054,12 +1062,12 @@ describe("effect/computation tracking", () => {
     const effect: Action = (actionTx) => {
       target.withTx(actionTx).get();
     };
-    runtime.scheduler.subscribe(effect, effect, { isEffect: true });
+    runtime.scheduler.subscribe(effect, { isEffect: true });
     await runtime.idle();
     expect(computationRuns).toBe(1);
   });
 
-  it("should keep push mode eager for materializer-annotated computations", async () => {
+  it("should keep materializer-annotated computations eager", async () => {
     const source = runtime.getCell<number>(
       space,
       "materializer-push-source",

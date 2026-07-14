@@ -1,8 +1,8 @@
 # Immediate Event Invocation
 
 **Symptom:** Pattern tests or runtime checks report a non-idempotent `raw:map`,
-`Too many iterations: ... raw:map`, link-resolution churn, or an action timeout
-after rendering a list.
+`Reactive graph did not settle ... Actions: raw:map`, link-resolution churn,
+or an action timeout after rendering a list.
 
 **Cause:** A JSX event prop is invoking a stream or mutation while the UI is
 rendering, instead of passing a handler to run later.

@@ -337,7 +337,9 @@ export function createRuntimeTelemetryOtelBridge(
             "ct.read_count": marker.readCount,
             "ct.shallow_read_count": marker.shallowReadCount,
             "ct.dirty_dependency_count": marker.dirtyDependencyCount,
-            "ct.preflight.max_depth": marker.stats.maxDepth,
+            // v2 preflight has no depth-tracked upstream walk (decision 15
+            // inverted it); the walk's cost signal is its visit count.
+            "ct.preflight.visit_count": marker.stats.visitCount,
             "ct.preflight.work_set_add_count": marker.stats.workSetAddCount,
             "ct.preflight.reverse_dependency_edge_count":
               marker.stats.reverseDependencyEdgeCount,

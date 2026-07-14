@@ -19,13 +19,6 @@ const sourceAddress = (index: number): IMemorySpaceAddress => ({
   path: ["value"],
 });
 
-const targetAddress = (index: number): IMemorySpaceAddress => ({
-  space: benchSpace,
-  scope: "space",
-  id: `scheduler-persistent-target:${index}`,
-  path: ["value"],
-});
-
 const createAction = (index: number): Action =>
   Object.assign((_tx: unknown) => {}, {
     src: `scheduler-persistent-action:${index}`,
@@ -42,12 +35,12 @@ const createObservation = (index: number) =>
     runtimeFingerprint: "runtime:bench",
     observedAtSeq: 1,
     transactionKind: "action-run",
+    currentKnownWrites: [],
     transactionLog: {
       reads: [sourceAddress(index)],
       shallowReads: [],
       writes: [],
     },
-    currentKnownWrites: [targetAddress(index)],
   });
 
 for (const actionCount of ACTION_COUNTS) {
@@ -77,6 +70,7 @@ for (const actionCount of ACTION_COUNTS) {
           resetMeasuredTiming();
           for (const [index, action] of actions.entries()) {
             env.runtime.scheduler.rehydrateActionFromObservation(action, {
+              executionContextKey: "session:test:test",
               observation: createObservation(index),
             });
           }
@@ -111,6 +105,7 @@ for (const actionCount of ACTION_COUNTS) {
           resetMeasuredTiming();
           for (const [index, action] of actions.entries()) {
             env.runtime.scheduler.rehydrateActionFromObservation(action, {
+              executionContextKey: "session:test:test",
               observation: createObservation(index),
               ...(index === 0 ? { directDirtySeq: 2 } : {}),
             });

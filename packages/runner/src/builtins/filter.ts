@@ -26,6 +26,7 @@ import type { Action } from "../scheduler.ts";
 import type { AddCancel } from "../cancel.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
@@ -80,7 +81,7 @@ export function filter(
   runtime: Runtime,
   outputBinding?: NormalizedFullLink,
   awaitSync?: boolean,
-): Action {
+): RawBuiltinReturnType {
   let result: Cell<any[]> | undefined;
 
   // Identity-based tracking: maps element address key → { resultCell, lastIndex }
@@ -168,7 +169,7 @@ export function filter(
     logger,
   });
 
-  return (tx: IExtendedStorageTransaction) => {
+  const reconcile: Action = (tx: IExtendedStorageTransaction) => {
     const elementAwaitSync = resumeBatchAwaitSync;
     // Identity-only list materialization (mirrors map.ts:163-188): read `op`
     // through the schema, but build element cells from the raw slot links
@@ -450,4 +451,10 @@ export function filter(
 
     // NOTE: Same as map — elementRuns is not pruned. See map.ts for rationale.
   };
+
+  // Child-starting coordinator: never rehydrates clean on resume — the
+  // reconcile must run to re-attach the per-element children (which then
+  // rehydrate their own persisted state). See
+  // docs/specs/scheduler-v2/per-doc-rehydration.md §3.3.
+  return { action: reconcile, resumeMode: "always-run" };
 }

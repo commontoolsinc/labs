@@ -10,12 +10,14 @@ import {
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import {
+  waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
 } from "./cfc-browser-helpers.ts";
 import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
+import { resolveSpaceDid } from "@commonfabric/lib-shell";
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -54,7 +56,6 @@ type BrowserTriggerTraceEntry = {
     pendingAfter: boolean;
     dirtyBefore: boolean;
     dirtyAfter: boolean;
-    scheduledEffects: Array<{ actionId: string }>;
   }>;
 };
 
@@ -191,6 +192,7 @@ type NoteCreateTimingEntry = {
 
 type NoteCreateProfileEntry = {
   noteIndex: number;
+  missingRequiredTimingKeys: string[];
   focusTiming: Array<{
     logger: string;
     key: string;
@@ -387,7 +389,8 @@ describe("default-app flow test", () => {
       }
 
       console.log(`Click notes drop down (note ${noteIndex})...`);
-      await clickButtonWithText(page, "Notes");
+      await clickButtonWithExactText(page, "Notes ▾");
+      await awaitViewSettled(page);
 
       const noteCreateStartedAt = performance.now();
       console.log(`Click 'New Note' (note ${noteIndex})...`);
@@ -483,7 +486,16 @@ describe("default-app flow test", () => {
       await waitFor(async () => {
         return await clickPieceLinkWithText(page, spaceName);
       });
-      await shell.waitForState({ view: { spaceName }, identity });
+      try {
+        await shell.waitForState({ view: { spaceName }, identity });
+      } catch (error) {
+        throw new Error(
+          `Space-link navigation did not reach ${spaceName}; current state: ${
+            JSON.stringify(await shell.state())
+          }`,
+          { cause: error },
+        );
+      }
       await waitForRuntimeIdle(page);
 
       console.log(`Wait for note count to increase (note ${noteIndex})...`);
@@ -658,6 +670,10 @@ describe("default-app flow test", () => {
   it("should persist and reload every rapidly created notebook note", async () => {
     identity = await Identity.generate({ implementation: "noble" });
     const notebookSpaceName = globalThis.crypto.randomUUID();
+    const notebookSpaceDid = await resolveSpaceDid(
+      identity,
+      notebookSpaceName,
+    );
 
     const page = shell.page();
     await disposeBrowserRuntime(page);
@@ -667,11 +683,25 @@ describe("default-app flow test", () => {
       identity,
     });
 
+    // shell.goto() waits for URL state and login, while RootView resolves the
+    // named view space independently. Do not interact with the previous
+    // space's still-rendered root while that resolution is in flight.
+    await waitForActiveSpaceRoot(page, notebookSpaceDid);
+
     console.log("Await runtime idle for notebook regression...");
     await waitForRuntimeIdle(page);
+    // Runtime idle can precede the page renderer's Lit update. Wait for the
+    // freshly navigated default-app view to bind its menu handlers before the
+    // first trusted click, just as the notebook toolbar does below.
+    await waitForCondition(
+      page,
+      () => typeof globalThis.commonfabric?.viewSettled === "function",
+    );
+    await awaitViewSettled(page);
 
     try {
-      await clickButtonWithText(page, "Notes");
+      await clickButtonWithExactText(page, "Notes ▾");
+      await awaitViewSettled(page);
       await clickButtonWithText(page, "New Notebook");
       try {
         await waitForCondition(page, async () => {
@@ -1264,7 +1294,6 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
       writerActionId?: string;
       change: string;
       decision: string;
-      scheduledEffects: string[];
     };
 
     const counts = new Map<string, number>();
@@ -1310,18 +1339,7 @@ async function collectTriggerTraceSummary(page: Page): Promise<unknown> {
           writerActionId: entry.writerActionId,
           change,
           decision: action.decision,
-          scheduledEffects: action.scheduledEffects.map((effect: {
-            actionId: string;
-          }) => effect.actionId),
         });
-        for (const effect of action.scheduledEffects) {
-          pushSample(effect.actionId, {
-            writerActionId: entry.writerActionId,
-            change,
-            decision: `scheduled-by:${action.actionId}`,
-            scheduledEffects: [],
-          });
-        }
       }
     }
 
@@ -1938,9 +1956,6 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
         typeof appState.view.pieceId === "string"
       ? appState.view.pieceId
       : undefined;
-    const resultEntityId = resultPieceId
-      ? resultPieceId.startsWith("of:") ? resultPieceId : `of:${resultPieceId}`
-      : undefined;
 
     const markers = (api?.__eventInvocationTrace ?? []) as Array<{
       type?: string;
@@ -2039,9 +2054,6 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
           pendingAfter: triggered.pendingAfter,
           dirtyBefore: triggered.dirtyBefore,
           dirtyAfter: triggered.dirtyAfter,
-          scheduledEffects: triggered.scheduledEffects.map((effect) =>
-            effect.actionId
-          ),
         })),
       }));
     const notebookNotesTriggersByPath = triggerTrace
@@ -2064,63 +2076,10 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
             pendingAfter: triggered.pendingAfter,
             dirtyBefore: triggered.dirtyBefore,
             dirtyAfter: triggered.dirtyAfter,
-            scheduledEffects: triggered.scheduledEffects.map((effect) =>
-              effect.actionId
-            ),
           })),
       }));
     const finalNotebookNotesTriggers = notebookNotesTriggers.slice(-2);
-    const finalScheduledEffectIds = new Set(
-      finalNotebookNotesTriggers.flatMap((entry) =>
-        entry.triggered.flatMap((triggered) => triggered.scheduledEffects)
-      ),
-    );
-    const finalScheduledSinkIds = [...finalScheduledEffectIds].filter((id) =>
-      id.startsWith("sink:")
-    );
     const graph = await rt?.getGraphSnapshot?.();
-    const finalScheduledSinkNodes = (graph?.nodes ?? [])
-      .filter((node: any) =>
-        typeof node.id === "string" && finalScheduledSinkIds.includes(node.id)
-      )
-      .map((node: any) => ({
-        id: node.id,
-        isPending: node.isPending,
-        isDirty: node.isDirty,
-        isDemanded: node.isDemanded,
-        isConditionallyScheduled: node.isConditionallyScheduled,
-        reads: (node.reads ?? []).filter((read: string) =>
-          notebookEntityId === undefined ||
-          read.includes(notebookEntityId) ||
-          read.includes("/value/internal/noteCount") ||
-          read.includes("/value/internal/$NAME")
-        ).slice(0, 8),
-        writes: (node.writes ?? []).filter((write: string) =>
-          write.includes("/noteCount") ||
-          write.includes("/mentionable") ||
-          write.includes("/showNewNotePrompt") ||
-          write.includes("/usedCreateAnotherNote")
-        ).slice(0, 8),
-      }));
-    const interestingFinalScheduledSinkIds = new Set(
-      finalScheduledSinkNodes
-        .filter((node) =>
-          (resultEntityId !== undefined && node.id.includes(resultEntityId)) ||
-          node.reads.some((read: string) =>
-            read.includes("/value/argument/notes") ||
-            read.includes("/value/internal/noteCount") ||
-            read.includes("/value/internal/showNewNotePrompt") ||
-            read.includes("/value/internal/usedCreateAnotherNote")
-          ) ||
-          node.writes.some((write: string) =>
-            write.includes("/noteCount") ||
-            write.includes("/mentionable") ||
-            write.includes("/showNewNotePrompt") ||
-            write.includes("/usedCreateAnotherNote")
-          )
-        )
-        .map((node) => node.id),
-    );
     const notebookCoreNodes = (graph?.nodes ?? [])
       .filter((node: any) =>
         typeof node.id === "string" &&
@@ -2182,22 +2141,6 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
           `${write.space}/${write.entityId}/${write.path.join("/")}`
         ),
       }));
-    const finalScheduledSinkRuns = trace
-      .filter((entry) => interestingFinalScheduledSinkIds.has(entry.actionId))
-      .map((entry) => ({
-        actionId: entry.actionId,
-        actionType: entry.actionType,
-        actualWrites: entry.actualWrites.map((write) =>
-          `${write.space}/${write.entityId}/${write.path.join("/")}`
-        ),
-      }));
-    const finalScheduledSinkRunCounts = new Map<string, number>();
-    for (const entry of finalScheduledSinkRuns) {
-      finalScheduledSinkRunCounts.set(
-        entry.actionId,
-        (finalScheduledSinkRunCounts.get(entry.actionId) ?? 0) + 1,
-      );
-    }
 
     const byNotebookHandler = new Map<string, number>();
     for (const marker of notebookInvocations) {
@@ -2260,20 +2203,8 @@ async function collectNotebookCreateTraceSummary(page: Page): Promise<unknown> {
           pendingAfter: triggered.pendingAfter,
           dirtyBefore: triggered.dirtyBefore,
           dirtyAfter: triggered.dirtyAfter,
-          scheduledEffectCount: triggered.scheduledEffects.length,
-          scheduledSinkCount: triggered.scheduledEffects.filter((id) =>
-            id.startsWith("sink:")
-          ).length,
         })),
       })),
-      finalScheduledSinkCount: finalScheduledSinkIds.length,
-      interestingFinalScheduledSinkCount: interestingFinalScheduledSinkIds.size,
-      finalScheduledSinkRunCounts: [...finalScheduledSinkRunCounts.entries()]
-        .map(([actionId, count]) => ({ actionId, count })),
-      finalScheduledSinkRunTail: finalScheduledSinkRuns.slice(-30),
-      finalScheduledSinkNodes: finalScheduledSinkNodes.filter((node) =>
-        interestingFinalScheduledSinkIds.has(node.id)
-      ),
       notebookNotesTriggersByPath: notebookNotesTriggersByPath.slice(-3),
       notebookCoreNodes,
       notebookActionCount: notebookActions.length,
@@ -2541,6 +2472,10 @@ function compareNoteCreateProfiles(
       settleMaxIterations: entry.settle.maxIterations,
     })),
     focusTimingGrowth,
+    missingRequiredTimingKeys: series.map((entry) => ({
+      noteIndex: entry.noteIndex,
+      keys: entry.missingRequiredTimingKeys,
+    })),
     focusTimingAtMaxNoteCount: lastEntry?.focusTiming ?? [],
     topTimingAtMaxNoteCount: lastEntry?.topTiming ?? [],
     settleAtMaxNoteCount: lastEntry?.settle ?? null,
@@ -2706,25 +2641,27 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
     };
 
     const { timing } = await api.getLoggerCounts();
-    const focusKeys = [
+    // These phases are the stable scheduler-v2 spine and must exist after a
+    // note-create run. Keep them separate from workload-dependent event and
+    // builtin phases so deleted/misspelled scheduler keys are reported rather
+    // than silently disappearing from the profile.
+    const requiredSchedulerKeys = [
       ["scheduler", "scheduler/execute"],
       ["scheduler", "scheduler/execute/settle"],
-      ["scheduler", "scheduler/execute/depCollect"],
+      ["scheduler", "scheduler/run"],
+      ["scheduler", "scheduler/run/action"],
+      ["scheduler", "scheduler/run/commit"],
+      ["scheduler", "scheduler/run/resubscribe"],
+    ] as const;
+    const focusKeys = [
+      ...requiredSchedulerKeys,
       ["scheduler", "scheduler/execute/event"],
       ["scheduler", "scheduler/execute/event/pullPopulateDependencies"],
       ["scheduler", "scheduler/execute/event/pullTxToReactivityLog"],
       ["scheduler", "scheduler/execute/event/pullDepCommitStart"],
-      ["scheduler", "scheduler/execute/event/pullCollectDirtyDependencies"],
-      ["scheduler", "scheduler/execute/event/pullScheduleDirtyDependencies"],
+      ["scheduler", "scheduler/execute/event/pullCollectInvalidUpstream"],
+      ["scheduler", "scheduler/execute/event/pullScheduleInvalidUpstream"],
       ["scheduler", "scheduler/execute/event/handlerAction"],
-      ["scheduler", "scheduler/execute/buildPullWorkSet"],
-      ["scheduler", "scheduler/execute/collectDirtyDependencies"],
-      ["scheduler", "scheduler/execute/collectDirtyDependencies/writerLookup"],
-      ["scheduler", "scheduler/execute/topologicalSort"],
-      ["scheduler", "scheduler/scheduleAffectedEffects"],
-      ["scheduler", "scheduler/run"],
-      ["scheduler", "scheduler/run/action"],
-      ["scheduler", "scheduler/run/commit"],
       ["traverse", "traverse"],
       ["runner", "stream/readInputs"],
       ["runner", "stream/invokeJavaScriptImplementation"],
@@ -2732,7 +2669,6 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
       ["runner", "action/readInputs"],
       ["runner", "action/invokeJavaScriptImplementation"],
       ["runner", "action/postRun"],
-      ["runner", "action/populateDependencies"],
       ["runner", "raw/run/wish"],
       ["runner.wish-flow", "wish/phase/action-total"],
       ["runner.wish-flow", "wish/phase/input-get"],
@@ -2761,8 +2697,11 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
       ["runner", "raw/run/map"],
       ["runner", "raw/run/ifElse"],
       ["runner", "raw/run/when"],
-      ["runner", "raw/populateDependencies"],
     ] as const;
+
+    const missingRequiredTimingKeys = requiredSchedulerKeys
+      .filter(([loggerName, key]) => !(timing[loggerName] ?? {})[key])
+      .map(([loggerName, key]) => `${loggerName}:${key}`);
 
     const focusTiming = focusKeys
       .map(([loggerName, key]) => {
@@ -2868,6 +2807,7 @@ async function collectNoteCreateProfile(page: Page): Promise<unknown> {
       focusTiming,
       topTiming,
       settle,
+      missingRequiredTimingKeys,
     };
   });
 }
@@ -3277,6 +3217,7 @@ const markNoteButton = async (
   const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
     | HTMLElement
     | null) ?? target;
+  if (!clickTarget.isConnected || !isRendered(clickTarget)) return false;
   clickTarget.setAttribute(attr, token);
   return true;
 };
@@ -3309,11 +3250,15 @@ async function settleAndClickNoteButton(
   match: "includes" | "exact" | "title",
   needle: string,
 ): Promise<void> {
-  const token = `cfc-note-button-${crypto.randomUUID()}`;
-  try {
+  const markTarget = async (token: string) => {
     await waitForCondition(page, markNoteButton, {
       args: [selector, match, needle, token, NOTE_BUTTON_CLICK_TARGET_ATTR],
     });
+  };
+
+  let token = `cfc-note-button-${crypto.randomUUID()}`;
+  try {
+    await markTarget(token);
   } catch (cause) {
     throw new Error(
       `Unable to find a ${
@@ -3322,15 +3267,35 @@ async function settleAndClickNoteButton(
       { cause },
     );
   }
-  try {
-    const clickTarget = await page.waitForSelector(
-      `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
-      { strategy: "pierce" },
-    );
-    await clickTarget.click();
-  } finally {
-    await clearNoteButtonMark(page, token);
+
+  let lastCause: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const clickTarget = await page.waitForSelector(
+        `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
+        { strategy: "pierce" },
+      );
+      await clickTarget.click();
+      return;
+    } catch (cause) {
+      lastCause = cause;
+      const retryable = cause instanceof Error &&
+        cause.message.includes("stable box model");
+      if (!retryable || attempt === 2) break;
+    } finally {
+      await clearNoteButtonMark(page, token);
+    }
+
+    // A root-pattern hot swap can replace the marked button after discovery
+    // but before Astral resolves its box. Re-mark the current rendered node and
+    // retry the coordinate click; only the successful attempt dispatches.
+    token = `cfc-note-button-${crypto.randomUUID()}`;
+    await markTarget(token);
   }
+
+  throw new Error(`Unable to click the stable "${needle}" button`, {
+    cause: lastCause,
+  });
 }
 
 // The click helpers resolve `true` once the single click has landed (they throw
@@ -3513,11 +3478,22 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
       ? await commonfabric?.readCell?.({ id: pieceId })
       : undefined;
     const buttonTexts: string[] = [];
+    const renderedButtonTexts: string[] = [];
 
     function collectButtonTexts(root: Document | ShadowRoot): void {
       for (const el of root.querySelectorAll("cf-button, button, a")) {
         const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
-        if (text) buttonTexts.push(text);
+        if (text) {
+          buttonTexts.push(text);
+          const style = getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          if (
+            style.display !== "none" && style.visibility !== "hidden" &&
+            rect.width > 0 && rect.height > 0
+          ) {
+            renderedButtonTexts.push(text);
+          }
+        }
         if ((el as HTMLElement).shadowRoot) {
           collectButtonTexts((el as HTMLElement).shadowRoot!);
         }
@@ -3534,7 +3510,9 @@ async function collectNavigationDiagnostics(page: Page): Promise<unknown> {
       currentKeys: current && typeof current === "object"
         ? Object.keys(current).slice(0, 30)
         : [],
+      runtimeSpace: globalThis.app.element().getRuntimeSpaceDID(),
       buttonTexts: buttonTexts.slice(0, 40),
+      renderedButtonTexts: renderedButtonTexts.slice(0, 40),
     };
   });
 }
@@ -3544,20 +3522,41 @@ async function clickPieceLinkWithText(
   searchText: string,
 ): Promise<boolean> {
   try {
-    const links = await page.$$(
-      "#header-space, #header-space-link, .header-space, a",
-      {
-        strategy: "pierce",
-      },
-    );
-    for (const link of links) {
-      const text = await link.innerText();
-      if (text?.trim().includes(searchText)) {
-        await link.click();
-        return true;
+    return await page.evaluate((searchText: string) => {
+      const roots: Array<Document | ShadowRoot> = [document];
+      for (let index = 0; index < roots.length; index++) {
+        for (const element of roots[index].querySelectorAll("*")) {
+          if ((element as HTMLElement).shadowRoot) {
+            roots.push((element as HTMLElement).shadowRoot!);
+          }
+        }
       }
-    }
-    return false;
+
+      // Prefer the shell breadcrumb before falling back to generic anchors.
+      // A combined selector is returned in document order, so an unrelated
+      // descendant <a> containing the space name can otherwise win the race.
+      for (
+        const selector of [
+          ".header-space",
+          "#header-space-link",
+          "#header-space",
+          "a",
+        ]
+      ) {
+        for (const root of roots) {
+          for (const link of root.querySelectorAll<HTMLElement>(selector)) {
+            if (link.innerText.trim().includes(searchText)) {
+              // Use the DOM activation behavior. Astral's coordinate click can
+              // hit a transient overlay even after resolving the right node.
+              link.click();
+              return true;
+            }
+          }
+        }
+      }
+
+      return false;
+    }, { args: [searchText] });
   } catch (_) {
     return false;
   }

@@ -4,8 +4,8 @@ This document specifies how changes propagate through the system.
 
 ## Status
 
-Draft — based on codebase investigation. This document primarily describes the
-current implementation.
+Current behavior. The scheduler-v2 spec contains the normative algorithm; this
+chapter describes the space-model view.
 
 ---
 
@@ -35,8 +35,8 @@ The system supports two fundamental patterns of data flow:
 
 This is **pull-based / demand-driven** reactivity:
 - Pattern declares dependencies on input cells
-- When any input changes, dependent computations are marked dirty/stale
-- Dirty computations re-execute when an effect, handler preflight, or explicit
+- When any input value changes, dependent computations are marked invalid
+- Invalid computations re-execute when an effect, handler preflight, or explicit
   `pull()` needs their output
 - Result cell receives the new computed value
 - Like a lazy spreadsheet: change a cell, and dependent formulas update when
@@ -72,17 +72,21 @@ click event ──> stream ──> handler ──> writes to value cell ──> 
 This is how user interactions flow through the system: an event triggers a
 handler, which updates state, which causes dependent computations to re-run.
 
-### Key Insight: The Graph Is Not Persisted
+### Graph structure and persisted observations
 
-The reactive dependency graph is **reconstructed at runtime**, not stored
-directly. What is persisted:
+The live object graph is reconstructed at runtime; JavaScript node objects and
+edges are not serialized directly. What is persisted:
 
 - Cell values (including stream markers)
 - Result-cell metadata (`pattern`, `argument`, and the `internal` manifest)
 - Ownership links from generated cells back to their result cell
+- When persistent scheduler state is enabled, per-action observations containing
+  durable identity, reads, the fixed registered write surface, gate options,
+  and clean/invalid markers
 
-From this persistent data, the system can reconstruct the dataflow graph by
-loading patterns and registering handlers.
+From this persistent data, the system loads patterns, registers handlers, and
+restores valid dependency/write indexes without re-running clean computations.
+Missing, stale, or mismatched observations conservatively run fresh.
 
 The dependency graph is also **dynamic and state-dependent**. Conditional
 constructs like `ifElse(cond, left, right)` cause downstream nodes to react to
@@ -127,8 +131,10 @@ Used for one-shot reads with dependency tracking.
 
 When `stream.send(event)` is called:
 
-1. Event is queued with the stream's link
-2. Handlers registered for that stream are invoked
+1. The event receives a durable id and reserves its position in the global FIFO
+2. If necessary, the owning piece loads while that position remains parked
+3. Exactly one registered handler is consistency-preflighted and invoked
+4. The handling transaction creates the event-derived result-cell receipt
 
 ### Lazy Piece Loading
 
@@ -137,7 +143,7 @@ When an event arrives but no handler is registered:
 1. Start from the event cell's document root
 2. Follow `result` metadata to the owning result cell
 3. Read the result cell's `pattern` metadata
-4. Load the pattern, start the piece, and re-queue the event
+4. Load the pattern, start the piece, and hydrate the reserved queue slot
 
 This enables pieces to start on-demand when events arrive.
 
@@ -213,13 +219,13 @@ This would eliminate the special-casing for streams.
 
 ## Open Questions (Answered)
 
-- ~~What is the exact scheduling algorithm?~~ Two implementations exist: **push**
-  (eagerly executes all dirty nodes) and **pull** (only computes what is needed,
-  driven by dirty effects registered via `.sink()` or `.pull()` calls). Both
-  topologically sort the dirty nodes before execution.
-- ~~How are cycles in the dependency graph handled?~~ Cycles are detected and
-  re-executed in a tight loop with bounds. The expectation is that they converge
-  quickly.
+- ~~What is the exact scheduling algorithm?~~ One demand-driven scheduler runs
+  invalid live nodes. Effects/materializers establish demand; handler preflight
+  and `.pull()` add transient demand. Each settle iteration topologically orders
+  the active wave using writer→reader edges.
+- ~~How are cycles in the dependency graph handled?~~ Settle iterations and
+  per-node run budgets are bounded. Work that still fails to converge is
+  deferred behind a capped escalating backoff gate rather than spinning.
 - ~~What are the consistency guarantees during propagation?~~ Effects (sinks)
   should only run once all computations are done, so they observe a consistent
   state. Exceptions exist for deliberate debouncing or threshold-based execution.
@@ -232,9 +238,9 @@ This would eliminate the special-casing for streams.
 
 ## Remaining Open Questions
 
-- Should the last reads made by an action be persisted? This would allow
-  reconstructing current dependency edges on load and determining dirtiness
-  from changes without re-running the computation.
+- Persisted scheduler state records the last reads and fixed write surface when
+  its experimental option is enabled; see
+  [Persistent Scheduler State](../persistent-scheduler-state.md).
 - How should deliberate debouncing and threshold-based execution be specified?
 
 ---

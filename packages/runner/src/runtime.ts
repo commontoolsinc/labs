@@ -214,7 +214,7 @@ export interface ExperimentalOptions {
   modernCellRep?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */
   persistentSchedulerState?: boolean | undefined;
-  /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
+  /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
@@ -588,7 +588,7 @@ export class Runtime {
   readonly moduleByteCache?: ModuleByteCache;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly telemetry: RuntimeTelemetry;
-  /** Resolved experimental flags (all properties present, defaulting to `false`). */
+  /** Resolved experimental flags (all properties present with built-in defaults). */
   readonly experimental: ExperimentalOptions;
   /** Resolved committed-write backpressure policy (all fields present). */
   readonly commitBackpressure: CommitBackpressurePolicy;
@@ -822,14 +822,22 @@ export class Runtime {
       ...options.experimental,
     };
 
-    // Log any overridden experimental flags.
+    // Log any overridden experimental flags. Never on stdout: the cf CLI's
+    // machine-readable output (`cf piece ls` etc.) is consumed by scripts, and
+    // this banner made every command's stdout non-empty under a flag override.
+    // Not console.error/warn either: the cf test console enforcement fails
+    // tests on those. Direct process stderr in Deno; plain console in browser
+    // realms (no stdout contract there).
     const overrideFlags = Object.entries(this.experimental)
       .filter(([_, v]) => v !== undefined)
       .map(([k, v]) => `${k}=${v}`);
     if (overrideFlags.length > 0) {
-      console.log(
-        `Experimental flag overrides: ${overrideFlags.join(", ")}`,
-      );
+      const banner = `Experimental flag overrides: ${overrideFlags.join(", ")}`;
+      if (typeof Deno !== "undefined" && Deno.stderr) {
+        Deno.stderr.writeSync(new TextEncoder().encode(banner + "\n"));
+      } else {
+        console.log(banner);
+      }
     }
 
     // Propagate experimental flags to their ambient control points, then read
@@ -1006,11 +1014,11 @@ export class Runtime {
     return this.scheduler.idle();
   }
 
-  // In-flight async builtin operations — the work the async builtins (fetchJson,
-  // fetchProgram, llm/llmDialog, and reactive sqlite queries) perform AFTER their
-  // handler returns, from a post-commit outbox flush: a network / LLM call or a
-  // sqlite RPC, plus the result writeback. `idle()` deliberately does NOT wait
-  // for these (a handler must never block on network I/O); `settled()` does.
+  // In-flight async builtin operations — the work async builtins (fetchJson,
+  // fetchProgram, llm/llmDialog, reactive sqlite queries, and navigation)
+  // perform AFTER their handler returns, from a post-commit outbox flush: a
+  // network / LLM / navigation call or a sqlite RPC, plus any result writeback.
+  // `idle()` deliberately does NOT wait for these; `settled()` does.
   #pendingAsyncWork = new Set<Promise<unknown>>();
 
   /**
@@ -1039,7 +1047,12 @@ export class Runtime {
    */
   async settled(maxRounds = 50): Promise<void> {
     for (let round = 0; round < maxRounds; round++) {
-      await this.scheduler.idle();
+      // Use the commit-aware scheduler barrier. A successful handler commit can
+      // synchronously schedule a deferred result pattern (notably navigateTo)
+      // from its commit callback; plain idle() can resolve in the gap before
+      // that callback queues the next scheduler turn. The joint barrier
+      // rechecks scheduler work whenever pending commits drain.
+      await this.scheduler.idleWithPendingCommits();
       await this.storageManager.synced();
       if (this.#pendingAsyncWork.size === 0) return;
       await Promise.allSettled([...this.#pendingAsyncWork]);
@@ -1113,7 +1126,7 @@ export class Runtime {
     this.runner.stopAll();
 
     // Scheduler background work can still be using storage, for example the
-    // subscription-time persistent-state rehydration lookup. Let that finish
+    // lifecycle-guarded boot-time persistent-state listing. Let that finish
     // before tearing down storage sessions.
     await this.scheduler.idle();
 

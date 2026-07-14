@@ -63,7 +63,7 @@ const __cfLift_1 = __cfHelpers.lift<{
         }
     },
     required: ["req"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: pattern-optional-destructured-capture
 // Verifies: an optional pattern input (`opt?`) destructured and captured in a
 //   closure is emitted optional in the derived lift's input schema (so it does

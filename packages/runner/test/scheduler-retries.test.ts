@@ -18,7 +18,7 @@ import type {
   ReactivityLog,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
-import { watchReactiveActionCommit } from "../src/scheduler/action-run.ts";
+import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
 
 describe("reactive retries", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -116,11 +116,11 @@ describe("reactive retries", () => {
       resubscribe: () => {
         resubscribed++;
       },
-      markDirectDirty: () => {},
+      markInvalid: () => {},
       queueExecution: () => {
         queued++;
       },
-      restoreCfcTriggerReads: () => {},
+      restoreInvalidCauses: () => {},
     });
     await commitPromise;
     await new Promise((r) => setTimeout(r, 0));

@@ -71,6 +71,7 @@ export function navigateTo(
 
       // Resolve to root piece - follows links until path is empty
       const resolvedTarget = target.resolveAsCell();
+      const navigateCallback = runtime.navigateCallback;
 
       const previousNavigated = navigated;
       const thisAttempt = ++navigationAttempt;
@@ -80,27 +81,44 @@ export function navigateTo(
           navigated = previousNavigated;
         }
       });
-      // TODO(seefeld): This post-commit handoff regresses the previous
-      // speculative-navigation latency. Model navigation as an event instead.
+      // Navigation is an external effect: release it only after a successful
+      // commit. The outbox promise is tracked explicitly so runtime.settled()
+      // cannot race async shell navigation.
+      const targetLink = resolvedTarget.getAsNormalizedFullLink();
       tx.enqueuePostCommitEffect({
-        id: `navigate-to:${JSON.stringify(resolvedTarget.getAsLink())}`,
-        kind: "navigate-to",
-        idempotencyKey: `navigate-to:${
-          JSON.stringify(resolvedTarget.getAsLink())
+        // The outbox deduplicates by id within a transaction. Encode the full
+        // normalized link as a tuple so scoped targets remain distinct and path
+        // segments containing separators cannot collide.
+        id: `navigateTo:${
+          JSON.stringify([
+            targetLink.space,
+            targetLink.scope,
+            targetLink.id,
+            targetLink.path,
+          ])
         }`,
-        async flush() {
-          await runtime.navigateCallback!(resolvedTarget);
+        kind: "navigateTo",
+        flush: async () => {
+          if (navigationAttempt !== thisAttempt) return;
+          const work = Promise.resolve().then(() =>
+            navigateCallback(resolvedTarget)
+          );
+          runtime.trackAsyncWork(work);
+          try {
+            await work;
+          } catch (error) {
+            console.error("navigateTo callback failed:", error);
+          }
         },
       });
       resultCell.withTx(tx).set(true);
+      runtime.scheduler.queueExecution();
     }
   };
 
   return {
     action,
     isEffect: true,
-    populateDependencies: (depTx) => {
-      inputsCell.asSchema(targetCellSchema).withTx(depTx).get();
-    },
+    useDeclaredReadsAsDependencies: true,
   };
 }

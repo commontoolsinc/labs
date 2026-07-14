@@ -1,4 +1,4 @@
-// Scheduler debounce and cycle-debounce tests.
+// Scheduler debounce and throttle tests.
 
 import {
   afterEach,
@@ -287,6 +287,81 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
   });
 
+  // #4108: clearing/unsubscribing a debounced action must recompute the single
+  // shared wake timer. Otherwise the stale wake keeps idle() blocked until its
+  // dead deadline fires, even though no gated work remains.
+  it("resolves idle promptly after unsubscribing a debounced effect with an armed wake", async () => {
+    let runCount = 0;
+    const effect: Action = () => {
+      runCount++;
+    };
+
+    // A long debounce so the armed wake is far in the future; the fix must not
+    // wait for it.
+    runtime.scheduler.setDebounce(effect, 30_000);
+    const cancel = runtime.scheduler.subscribe(
+      effect,
+      { reads: [], shallowReads: [], writes: [] },
+      { isEffect: true },
+    );
+
+    // Let the settle pass arm the debounce wake. The first run is deferred, so
+    // the effect has not run yet.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(runCount).toBe(0);
+
+    // idle() is blocked behind the armed wake + idle-blocking effect.
+    const idlePromise = runtime.idle();
+
+    // Unsubscribing clears the debounced node; the shared wake must be
+    // recomputed so idle() resolves now rather than after the 30s deadline.
+    cancel();
+
+    const timedOut = Symbol("timeout");
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<typeof timedOut>((resolve) => {
+      timer = setTimeout(() => resolve(timedOut), 1000);
+    });
+    const outcome = await Promise.race([
+      idlePromise.then(() => "idle" as const),
+      timeout,
+    ]);
+    clearTimeout(timer!);
+
+    expect(outcome).toBe("idle");
+    expect(runCount).toBe(0);
+  });
+
+  it("should cancel pending debounce wake on dispose", async () => {
+    const local = createSchedulerTestRuntime(`${import.meta.url}#dispose-wake`);
+    let runCount = 0;
+    const action: Action = () => {
+      runCount++;
+    };
+
+    try {
+      local.runtime.scheduler.subscribe(
+        action,
+        { reads: [], shallowReads: [], writes: [] },
+        { isEffect: true, debounce: 50 },
+      );
+      expect(runCount).toBe(0);
+
+      local.runtime.scheduler.dispose();
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(runCount).toBe(0);
+    } finally {
+      await local.tx.commit();
+      // NB: only the scheduler is disposed above (the behaviour under test).
+      // Calling runtime.dispose() here as well leaks a still-pending promise
+      // (the runtime dispose path does not compose with an already-disposed
+      // scheduler), so we close storage directly.
+      await local.storageManager.close();
+    }
+  });
+
   it("should auto-debounce slow actions after threshold runs", async () => {
     const cell = runtime.getCell<number>(
       space,
@@ -517,256 +592,10 @@ describe("debounce and throttling", () => {
     expect(result.get()).toBe(2);
   });
 
-  it("should track run counts per execute cycle for cycle-aware debounce", async () => {
-    // The cycle-aware debounce mechanism tracks how many times each action
-    // runs within a single execute() call. If an action runs 3+ times and
-    // the execute() took >100ms, adaptive debounce is applied.
-    //
-    // Note: The scheduler actively prevents cycles, so effects typically
-    // only run once per execute(). This test verifies the tracking mechanism
-    // exists and works when multiple runs DO occur through separate execute()
-    // cycles triggered by sequential input changes.
-
-    const input = runtime.getCell<number>(
-      space,
-      "cycle-debounce-input",
-      undefined,
-      tx,
-    );
-    const output = runtime.getCell<number>(
-      space,
-      "cycle-debounce-output",
-      undefined,
-      tx,
-    );
-    input.set(0);
-    output.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let runCount = 0;
-
-    // A slow effect that we'll trigger multiple times
-    const slowEffect: Action = async (actionTx) => {
-      runCount++;
-      const val = input.withTx(actionTx).get() ?? 0;
-      // Add delay to make execution slow enough to potentially trigger cycle debounce
-      await new Promise((resolve) => setTimeout(resolve, 40));
-      output.withTx(actionTx).send(val * 2);
-    };
-
-    runtime.scheduler.subscribe(
-      slowEffect,
-      (depTx) => {
-        input.withTx(depTx).get();
-      },
-      { isEffect: true },
-    );
-
-    // Initial run
-    await output.pull();
-    await runtime.idle();
-
-    // Should have run at least once
-    expect(runCount).toBeGreaterThanOrEqual(1);
-
-    // The action runs across multiple execute() cycles, not within one
-    // So cycle-aware debounce (which tracks runs within one execute) won't trigger
-    // This is expected - the scheduler prevents in-execute cycles by design
-  });
-
-  it("should not apply cycle-aware debounce to fast executes", async () => {
-    // Fast actions that run multiple times should not get cycle debounce
-    // because the execute() time threshold (100ms) isn't met
-
-    const counter = runtime.getCell<number>(
-      space,
-      "fast-cycle-counter",
-      undefined,
-      tx,
-    );
-    const output = runtime.getCell<number>(
-      space,
-      "fast-cycle-output",
-      undefined,
-      tx,
-    );
-    counter.set(0);
-    output.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let runCount = 0;
-
-    // Fast self-cycling computation (no delay)
-    const fastCycling: Action = (actionTx) => {
-      runCount++;
-      const val = counter.withTx(actionTx).get() ?? 0;
-      output.withTx(actionTx).send(val);
-      if (val < 5) {
-        counter.withTx(actionTx).send(val + 1);
-      }
-    };
-
-    runtime.scheduler.subscribe(
-      fastCycling,
-      (depTx) => {
-        counter.withTx(depTx).get();
-      },
-      { isEffect: true },
-    );
-
-    await output.pull();
-    await runtime.idle();
-
-    // Action may have run multiple times
-    expect(runCount).toBeGreaterThanOrEqual(1);
-
-    // But execute was fast (<100ms total), so no cycle debounce applied
-    const debounce = runtime.scheduler.getDebounce(fastCycling);
-    // Fast execution shouldn't trigger cycle debounce
-    expect(debounce === undefined || debounce < 200).toBe(true);
-  });
-
-  it("should respect noDebounce option for cycle-aware debounce", async () => {
-    const counter = runtime.getCell<number>(
-      space,
-      "no-debounce-counter",
-      undefined,
-      tx,
-    );
-    const output = runtime.getCell<number>(
-      space,
-      "no-debounce-output",
-      undefined,
-      tx,
-    );
-    counter.set(0);
-    output.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let runCount = 0;
-
-    // Slow cycling computation
-    const slowCycling: Action = async (actionTx) => {
-      runCount++;
-      const val = counter.withTx(actionTx).get() ?? 0;
-      await new Promise((resolve) => setTimeout(resolve, 40));
-      output.withTx(actionTx).send(val);
-      if (val < 5) {
-        counter.withTx(actionTx).send(val + 1);
-      }
-    };
-
-    // Subscribe with noDebounce: true - should opt out of cycle debounce
-    runtime.scheduler.subscribe(
-      slowCycling,
-      (depTx) => {
-        counter.withTx(depTx).get();
-      },
-      { isEffect: true, noDebounce: true },
-    );
-
-    await output.pull();
-    await runtime.idle();
-
-    expect(runCount).toBeGreaterThanOrEqual(1);
-
-    // Should NOT have debounce even if it cycled slowly
-    expect(runtime.scheduler.getDebounce(slowCycling)).toBeUndefined();
-  });
-
-  it("should not cycle-debounce pull computations with live effect demand", async () => {
-    const counter = runtime.getCell<number>(
-      space,
-      "no-cycle-debounce-computation-counter",
-      undefined,
-      tx,
-    );
-    const output = runtime.getCell<number>(
-      space,
-      "no-cycle-debounce-computation-output",
-      undefined,
-      tx,
-    );
-    const sink = runtime.getCell<number>(
-      space,
-      "no-cycle-debounce-computation-sink",
-      undefined,
-      tx,
-    );
-    counter.set(0);
-    output.set(0);
-    sink.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let producerRuns = 0;
-    let feedbackRuns = 0;
-
-    const producer: Action = async (actionTx) => {
-      producerRuns++;
-      await new Promise((resolve) => setTimeout(resolve, 35));
-      output.withTx(actionTx).send(counter.withTx(actionTx).get() ?? 0);
-    };
-
-    const feedback: Action = async (actionTx) => {
-      feedbackRuns++;
-      await new Promise((resolve) => setTimeout(resolve, 35));
-      const value = output.withTx(actionTx).get() ?? 0;
-      if (value < 3) {
-        counter.withTx(actionTx).send(value + 1);
-      }
-    };
-
-    const effect: Action = (actionTx) => {
-      sink.withTx(actionTx).send(output.withTx(actionTx).get() ?? 0);
-    };
-
-    runtime.scheduler.subscribe(
-      producer,
-      {
-        reads: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
-        shallowReads: [],
-        writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
-      },
-      {},
-    );
-    runtime.scheduler.subscribe(
-      feedback,
-      {
-        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
-        shallowReads: [],
-        writes: [toMemorySpaceAddress(counter.getAsNormalizedFullLink())],
-      },
-      {},
-    );
-    runtime.scheduler.subscribe(
-      effect,
-      {
-        reads: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
-        shallowReads: [],
-        writes: [toMemorySpaceAddress(sink.getAsNormalizedFullLink())],
-      },
-      { isEffect: true },
-    );
-
-    await runtime.scheduler.idle();
-
-    expect(producerRuns).toBeGreaterThanOrEqual(3);
-    expect(feedbackRuns).toBeGreaterThanOrEqual(3);
-    expect(runtime.scheduler.getDebounce(producer)).toBeUndefined();
-    expect(runtime.scheduler.getDebounce(feedback)).toBeUndefined();
-  });
-
-  it("should only increase debounce if cycle debounce is larger than existing", async () => {
-    // If an action already has a higher debounce set (manually or from previous
-    // cycle debounce), the cycle-aware mechanism should not reduce it.
-
+  it("should allow clearDebounce to remove a manual debounce", async () => {
     const cell = runtime.getCell<number>(
       space,
-      "debounce-precedence-test",
+      "clear-manual-debounce-test",
       undefined,
       tx,
     );
@@ -778,187 +607,9 @@ describe("debounce and throttling", () => {
       cell.withTx(actionTx).send(1);
     };
 
-    // Manually set a high debounce
-    runtime.scheduler.setDebounce(action, 5000);
-
-    runtime.scheduler.subscribe(
-      action,
-      {
-        reads: [],
-        shallowReads: [],
-        writes: [toMemorySpaceAddress(cell.getAsNormalizedFullLink())],
-      },
-      {},
-    );
-
-    await cell.pull();
-    await runtime.idle();
-
-    // The manually set debounce should still be in place
-    // (cycle debounce wouldn't have triggered anyway since only 1 run,
-    // but even if it did, 5000ms > any likely cycle debounce)
-    expect(runtime.scheduler.getDebounce(action)).toBe(5000);
-  });
-
-  it("should track multiple actions independently for cycle debounce", async () => {
-    // Each action's run count should be tracked separately within an execute()
-
-    const inputA = runtime.getCell<number>(
-      space,
-      "multi-action-input-a",
-      undefined,
-      tx,
-    );
-    const inputB = runtime.getCell<number>(
-      space,
-      "multi-action-input-b",
-      undefined,
-      tx,
-    );
-    const output = runtime.getCell<number>(
-      space,
-      "multi-action-output",
-      undefined,
-      tx,
-    );
-    inputA.set(0);
-    inputB.set(0);
-    output.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let runCountA = 0;
-    let runCountB = 0;
-
-    const actionA: Action = async (actionTx) => {
-      runCountA++;
-      const val = inputA.withTx(actionTx).get() ?? 0;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      output.withTx(actionTx).send(val);
-    };
-
-    const actionB: Action = (actionTx) => {
-      runCountB++;
-      const val = inputB.withTx(actionTx).get() ?? 0;
-      // Fast action - no delay
-      output.withTx(actionTx).send(val);
-    };
-
-    runtime.scheduler.subscribe(
-      actionA,
-      (depTx) => {
-        inputA.withTx(depTx).get();
-      },
-      { isEffect: true },
-    );
-
-    runtime.scheduler.subscribe(
-      actionB,
-      (depTx) => {
-        inputB.withTx(depTx).get();
-      },
-      { isEffect: true },
-    );
-
-    await output.pull();
-    await runtime.idle();
-
-    // Both should have run
-    expect(runCountA).toBeGreaterThanOrEqual(1);
-    expect(runCountB).toBeGreaterThanOrEqual(1);
-
-    // Actions are tracked independently - neither should have cycle debounce
-    // since each only ran once per execute cycle
-    const debounceA = runtime.scheduler.getDebounce(actionA);
-    const debounceB = runtime.scheduler.getDebounce(actionB);
-
-    // Neither should have high cycle debounce (may have auto-debounce if slow)
-    expect(debounceA === undefined || debounceA <= 100).toBe(true);
-    expect(debounceB === undefined || debounceB <= 100).toBe(true);
-  });
-
-  it("should reset run tracking between execute cycles", async () => {
-    // The runsThisExecute map should be cleared at the start of each execute(),
-    // so runs from previous cycles don't affect the current cycle's debounce.
-
-    const input = runtime.getCell<number>(
-      space,
-      "reset-tracking-input",
-      undefined,
-      tx,
-    );
-    const output = runtime.getCell<number>(
-      space,
-      "reset-tracking-output",
-      undefined,
-      tx,
-    );
-    input.set(0);
-    output.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    let runCount = 0;
-
-    const action: Action = (actionTx) => {
-      runCount++;
-      const val = input.withTx(actionTx).get() ?? 0;
-      output.withTx(actionTx).send(val * 2);
-    };
-
-    runtime.scheduler.subscribe(
-      action,
-      (depTx) => {
-        input.withTx(depTx).get();
-      },
-      { isEffect: true },
-    );
-
-    // First execute cycle
-    await output.pull();
-    await runtime.idle();
-    expect(runCount).toBe(1);
-
-    // Second execute cycle (triggered by input change)
-    const editTx1 = runtime.edit();
-    input.withTx(editTx1).send(1);
-    await editTx1.commit();
-    await runtime.idle();
-    expect(runCount).toBe(2);
-
-    // Third execute cycle
-    const editTx2 = runtime.edit();
-    input.withTx(editTx2).send(2);
-    await editTx2.commit();
-    await runtime.idle();
-    expect(runCount).toBe(3);
-
-    // Even though total runs = 3, each execute() cycle only had 1 run
-    // So no cycle debounce should be applied
-    const debounce = runtime.scheduler.getDebounce(action);
-    expect(debounce === undefined || debounce < 200).toBe(true);
-  });
-
-  it("should allow clearDebounce to remove cycle-applied debounce", async () => {
-    const cell = runtime.getCell<number>(
-      space,
-      "clear-cycle-debounce-test",
-      undefined,
-      tx,
-    );
-    cell.set(0);
-    await tx.commit();
-    tx = runtime.edit();
-
-    const action: Action = (actionTx) => {
-      cell.withTx(actionTx).send(1);
-    };
-
-    // Set a debounce (simulating what cycle debounce would do)
     runtime.scheduler.setDebounce(action, 500);
     expect(runtime.scheduler.getDebounce(action)).toBe(500);
 
-    // Clear it
     runtime.scheduler.clearDebounce(action);
     expect(runtime.scheduler.getDebounce(action)).toBeUndefined();
   });

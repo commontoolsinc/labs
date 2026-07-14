@@ -122,6 +122,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
         opIndex: 0,
         commitSeq: 1,
         op: "set",
+        scopeKey: "space",
         document: {
           value: {
             hello: "world",

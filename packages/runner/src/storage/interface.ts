@@ -9,6 +9,7 @@ import type {
   EntityDocument,
   PatchOp,
   SchedulerActionSnapshotQuery,
+  SchedulerExecutionContextKey,
   SchedulerSnapshotListResult,
   SqliteDbRef,
   SqliteOperation,
@@ -266,6 +267,35 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   crossSpaceSettled?(): Promise<void>;
 
   /**
+   * Documents whose load (`syncCell`) is currently in flight, as
+   * `(space, scope, id)` addresses. The scheduler's event preflight parks the
+   * head event while an address in the handler's read closure (or upstream of
+   * it) is still loading — a load that completes with the document absent
+   * counts as complete (CT-1795).
+   */
+  pendingLoadAddresses?(): readonly Pick<
+    IMemorySpaceAddress,
+    "space" | "scope" | "id"
+  >[];
+
+  /**
+   * Generation of the currently in-flight load for an entity key, or
+   * `undefined` when the key is not loading. A new generation is allocated
+   * after a prior load settles so event preflight can distinguish a genuinely
+   * new provisional snapshot from the load it already waited for.
+   */
+  pendingLoadGeneration?(key: string): number | undefined;
+
+  /**
+   * Resolves when none of the given documents (keyed
+   * `space/scope/id`, see the scheduler's `entityKey`) has an in-flight
+   * load. Resolves immediately when none do. Rejects when any of the captured
+   * load generations fails, so an at-most-once event is not dispatched against
+   * a replica whose required load failed.
+   */
+  loadsSettled?(keys: readonly string[]): Promise<void>;
+
+  /**
    * Load cell from storage. Will also subscribe to new changes.
    *
    * @returns Promise that resolves when the cell sync is complete.
@@ -340,6 +370,21 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   listSchedulerActionSnapshots?(
     query?: SchedulerActionSnapshotQuery,
   ): Promise<SchedulerSnapshotListResult>;
+
+  /**
+   * Conservative scheduler-snapshot currency oracle. Returns true only when
+   * every address belongs to this provider, has a confirmed local base, and
+   * that base is no newer than the observation sequence.
+   */
+  areSchedulerAddressesCurrentAtOrBelow?(
+    addresses: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean;
+
+  /** Whether an optimistic local write overlaps any supplied address. */
+  schedulerHasPendingWriteOverlapping?(
+    addresses: readonly IMemorySpaceAddress[],
+  ): boolean;
 
   /** Run a server-side read-only SQLite query against a cell-derived db. */
   sqliteQuery?(
@@ -453,6 +498,7 @@ export type StorageNotification =
   | ILoadNotification
   | IPullNotification
   | IIntegrateNotification
+  | ISchedulerObservationsNotification
   | IResetNotification;
 
 /**
@@ -542,6 +588,38 @@ export interface IIntegrateNotification {
   type: "integrate";
   space: MemorySpace;
   changes: IMergedChanges;
+}
+
+/**
+ * Broadcast after an integrate whose subscription push carried scheduler
+ * observation rows for the sync window: other clients' committed action runs
+ * that this runtime's scheduler may ADOPT instead of re-running
+ * (docs/specs/scheduler-v2/incremental-observation-adoption.md). Fired after
+ * the corresponding {@link IIntegrateNotification} in the same synchronous
+ * turn, so adoption clears the dirt those writes caused before dispatch.
+ * `observations` entries are protocol-shaped (observation payload is
+ * `unknown`); the scheduler owns validation. `seqCurrentAtOrBelow` and
+ * `hasPendingWriteOverlapping` are the storage-side adoption oracles
+ * (per-doc replica seq currency; local uncommitted-write overlap).
+ */
+export interface ISchedulerObservationsNotification {
+  type: "scheduler-observations";
+  space: MemorySpace;
+  observations: readonly {
+    observedAtSeq: number;
+    executionContextKey: SchedulerExecutionContextKey;
+    observation: unknown;
+    directDirtySeq?: number;
+    staleSeq?: number;
+    unknownReason?: string;
+  }[];
+  seqCurrentAtOrBelow(
+    reads: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean;
+  hasPendingWriteOverlapping(
+    reads: readonly IMemorySpaceAddress[],
+  ): boolean;
 }
 
 /**

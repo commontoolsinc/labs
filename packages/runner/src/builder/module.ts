@@ -364,11 +364,15 @@ export function lift<T, R>(
     ...(options?.materializerWriteInputPaths
       ? { materializerWriteInputPaths: options.materializerWriteInputPaths }
       : {}),
+    ...(options?.completeSchedulerScopeSummary
+      ? { completeSchedulerScopeSummary: true as const }
+      : {}),
   });
 }
 
 interface DeriveSchedulerOptions {
   materializerWriteInputPaths?: readonly (readonly string[])[];
+  completeSchedulerScopeSummary?: true;
 }
 
 export function byRef<T, R>(ref: string): ModuleFactory<T, R> {

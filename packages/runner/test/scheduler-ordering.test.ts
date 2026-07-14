@@ -18,6 +18,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { topologicalSort } from "../src/scheduler/topology.ts";
+import { NodeRegistry } from "../src/scheduler/node-record.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 
 type SchedulerTestScope = "space" | "user" | "session";
@@ -290,6 +291,78 @@ describe("push-triggered filtering", () => {
     expect(runtime.scheduler.getMightWrite(action)).not.toEqual([
       toMemorySpaceAddress(firstChild),
     ]);
+  });
+
+  it("should break write-only ties by registration order, not arrival order", () => {
+    // Spec §7.4 rule 3: once data edges and parent tie-breaks are applied,
+    // remaining ties fall back to REGISTRATION order. Two actions that both
+    // write the same address with NO read edge between them get no ordering
+    // edge, so last-writer-wins on that address must not flip with the order
+    // the actions were invalidated / arrived over the network.
+    const registry = new NodeRegistry();
+    const writerA: Action = () => {};
+    const writerB: Action = () => {};
+    // Fixed registration order: A before B (first registration wins).
+    registry.register(writerA, "computation");
+    registry.register(writerB, "computation");
+
+    const sharedWrite: IMemorySpaceAddress = {
+      space,
+      id: "of:scheduler-shared-write",
+      type: "application/json",
+      scope: undefined,
+      path: ["value"],
+    };
+
+    // Both write the SAME address; neither reads it → no read edge orders them.
+    const dependencies = new WeakMap<Action, {
+      reads: IMemorySpaceAddress[];
+      shallowReads: IMemorySpaceAddress[];
+      writes: IMemorySpaceAddress[];
+    }>([
+      [writerA, { reads: [], shallowReads: [], writes: [sharedWrite] }],
+      [writerB, { reads: [], shallowReads: [], writes: [sharedWrite] }],
+    ]);
+    const mightWrite = new WeakMap<Action, IMemorySpaceAddress[]>([
+      [writerA, [sharedWrite]],
+      [writerB, [sharedWrite]],
+    ]);
+
+    const sortWith = (seed: Action[]) =>
+      topologicalSort(new Set(seed), dependencies, mightWrite, registry);
+
+    // Drive the settle with the two actions queued in DIFFERENT orders,
+    // simulating opposite network-arrival orders.
+    const arrivalAB = sortWith([writerA, writerB]);
+    const arrivalBA = sortWith([writerB, writerA]);
+
+    // Deterministic and in registration order, regardless of arrival order.
+    expect(arrivalAB).toEqual([writerA, writerB]);
+    expect(arrivalBA).toEqual([writerA, writerB]);
+    expect(arrivalBA).toEqual(arrivalAB);
+  });
+
+  it("should insert newly-ready nodes into the global registration order", () => {
+    const registry = new NodeRegistry();
+    const upstream: Action = () => {};
+    const newlyReady: Action = () => {};
+    const alreadyReady: Action = () => {};
+    registry.register(upstream, "computation");
+    registry.register(newlyReady, "computation");
+    registry.register(alreadyReady, "computation");
+
+    const dependents = new WeakMap<Action, Set<Action>>([
+      [upstream, new Set([newlyReady])],
+    ]);
+    const order = topologicalSort(
+      new Set([upstream, newlyReady, alreadyReady]),
+      new WeakMap(),
+      new WeakMap(),
+      registry,
+      dependents,
+    );
+
+    expect(order).toEqual([upstream, newlyReady, alreadyReady]);
   });
 
   it("should not order materializer writes before readers in other scopes", () => {

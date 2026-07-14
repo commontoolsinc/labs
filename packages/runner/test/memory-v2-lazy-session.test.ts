@@ -42,6 +42,7 @@ const appliedCommitFor = (ids: URI[]): AppliedCommit => ({
   branch: "",
   revisions: ids.map((id, index) => ({
     id,
+    scopeKey: "space",
     branch: "",
     seq: 1,
     opIndex: index,
@@ -143,6 +144,58 @@ describe("Memory v2 lazy session creation", () => {
     expect(closes).toBe(1);
   });
 
+  it("coalesces session creation across synchronous factory re-entry", async () => {
+    let sessionCreates = 0;
+    let commits = 0;
+    let reentrantCommit: Promise<unknown> | undefined;
+    const state: { storage?: TestStorageManager } = {};
+    const sessionFactory = {
+      create(_space: MemorySpace) {
+        sessionCreates += 1;
+        if (sessionCreates === 1) {
+          const nestedTx = state.storage!.edit();
+          nestedTx.write({
+            space,
+            id: "of:memory-v2-reentrant-session-nested" as URI,
+            type,
+            path: [],
+          }, { value: { count: 2 } });
+          reentrantCommit = nestedTx.commit();
+        }
+        return Promise.resolve({
+          client: { close: () => Promise.resolve() } as never,
+          session: {
+            transact: (commit: { operations: { id: URI }[] }) => {
+              commits += 1;
+              return Promise.resolve(
+                appliedCommitFor(commit.operations.map((op) => op.id)),
+              );
+            },
+          } as never,
+        });
+      },
+    };
+    const storage = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("memory://"),
+    }, sessionFactory);
+    state.storage = storage;
+
+    const tx = storage.edit();
+    tx.write({
+      space,
+      id: "of:memory-v2-reentrant-session-outer" as URI,
+      type,
+      path: [],
+    }, { value: { count: 1 } });
+
+    expect(await tx.commit()).toEqual({ ok: {} });
+    expect(await reentrantCommit).toEqual({ ok: {} });
+    expect(sessionCreates).toBe(1);
+    expect(commits).toBe(2);
+    await storage.close();
+  });
+
   it("retries lazy session creation after a transient failure", async () => {
     let sessionCreates = 0;
     let commits = 0;
@@ -208,6 +261,42 @@ describe("Memory v2 lazy session creation", () => {
 });
 
 describe("Memory v2 lazy emulated server creation", () => {
+  it("uses the manager id for every emulated space session", async () => {
+    const opened: Array<{ space: string; sessionId?: string }> = [];
+    const managerId = "runner-emulated-construction-session";
+    const storage = TestEmulatedStorageManager.emulateWithServerFactory(
+      { as: signer, id: managerId },
+      () =>
+        new MemoryV2Server.Server({
+          authorizeSessionOpen(message) {
+            opened.push({
+              space: message.space,
+              sessionId: message.session.sessionId,
+            });
+            return signer.did();
+          },
+          sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+          acl: { mode: "off" },
+        }),
+    );
+    const otherSpace = "did:key:z6Mk-emulated-manager-session" as MemorySpace;
+
+    try {
+      for (const targetSpace of [space, otherSpace]) {
+        const result = await storage.open(targetSpace).sync(
+          "of:emulated-manager-session" as URI,
+        );
+        expect(result.error).toBeUndefined();
+      }
+      expect(opened).toEqual([
+        { space, sessionId: managerId },
+        { space: otherSpace, sessionId: managerId },
+      ]);
+    } finally {
+      await storage.close();
+    }
+  });
+
   it("does not create an emulated server for local-only transaction work", async () => {
     let serverCreates = 0;
     const storage = TestEmulatedStorageManager.emulateWithServerFactory(

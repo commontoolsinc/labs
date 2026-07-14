@@ -10,25 +10,28 @@ import {
   space,
   toMemorySpaceAddress,
 } from "./scheduler-test-utils.ts";
-import { FakeTime } from "@std/testing/time";
 import type {
   Action,
+  Cell,
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
+import {
+  BACKOFF_BASE_MS,
+  CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+  PASS_RUN_BUDGET,
+} from "../src/scheduler/constants.ts";
 import { NodeRegistry } from "../src/scheduler/node-record.ts";
+import { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import {
   type DependencyGraphState,
   isLive,
+  recomputeLiveRefs,
   registerDependentEdge,
   unregisterDependentEdge,
 } from "../src/scheduler/dependency-graph.ts";
-import { SchedulerDelays } from "../src/scheduler/delays.ts";
-import {
-  getNextDebounceRunTime,
-  isDebouncedComputationWaiting,
-  type SchedulerDelayControlState,
-} from "../src/scheduler/delay-control.ts";
+import { SchedulerGates } from "../src/scheduler/gates.ts";
+import { planBudgetBackoff } from "../src/scheduler/execution.ts";
 
 async function expectSchedulerIdle(runtime: Runtime): Promise<void> {
   const result = await Promise.race([
@@ -267,6 +270,79 @@ describe("scheduler v2 cutover fixtures", () => {
     }
   });
 
+  it("does not invalidate a clean effect merely because a writer is gated", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-gated-writer-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-gated-writer-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const outputAddress = toMemorySpaceAddress(
+      output.getAsNormalizedFullLink(),
+    );
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        output.withTx(actionTx).send(source.withTx(actionTx).get());
+      }) as Action,
+      { writes: [output.getAsNormalizedFullLink()] },
+    );
+    const effect: Action = (actionTx) => {
+      output.withTx(actionTx).get();
+    };
+    const writerCancel = runtime.scheduler.subscribe(writer, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [outputAddress],
+    });
+    const effectLog = {
+      reads: [outputAddress],
+      shallowReads: [],
+      writes: [],
+    };
+    const effectCancel = runtime.scheduler.subscribe(
+      effect,
+      effectLog,
+      { isEffect: true },
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      expect(runtime.scheduler.isDirty(effect)).toBe(false);
+
+      const internal = runtime.scheduler as unknown as {
+        nodes: {
+          get: (action: Action) =>
+            | { gate: { backoffUntil?: number } }
+            | undefined;
+        };
+        markAndScheduleInvalidAction: (action: Action) => void;
+      };
+      internal.nodes.get(writer)!.gate.backoffUntil = performance.now() +
+        30_000;
+      internal.markAndScheduleInvalidAction(writer);
+      runtime.scheduler.resubscribe(effect, effectLog);
+
+      // P2/I3: writer reachability and dirtiness are not a value-bearing
+      // change. Only the writer's eventual changed commit may invalidate this
+      // already-ran effect.
+      expect(runtime.scheduler.isDirty(effect)).toBe(false);
+    } finally {
+      writerCancel();
+      effectCancel();
+    }
+  });
+
   it("runs an effect once per changed upstream output", async () => {
     const source = runtime.getCell<number>(
       space,
@@ -464,9 +540,12 @@ describe("scheduler v2 cutover fixtures", () => {
     try {
       await expectSchedulerIdle(runtime);
       expect(runCountA + runCountB).toBeGreaterThan(0);
-      // 3pre keeps the v1-compatible cycle-break bound; 3c.iv tightens this
-      // fixture to the v2 PASS_RUN_BUDGET backoff rule.
-      expect(runCountA + runCountB).toBeLessThan(500);
+      expect(runCountA).toBeLessThanOrEqual(
+        PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+      );
+      expect(runCountB).toBeLessThanOrEqual(
+        PASS_RUN_BUDGET * CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
+      );
       expect(unrelatedValues[unrelatedValues.length - 1]).toBe(70);
     } finally {
       cancelA();
@@ -627,7 +706,7 @@ describe("scheduler v2 cutover fixtures", () => {
         childCancel = runtime.scheduler.subscribe(
           child,
           { reads: [sourceAddress], shallowReads: [], writes: [outputAddress] },
-          { debounce: 40 },
+          { debounce: 200 },
         );
       }
     };
@@ -643,12 +722,9 @@ describe("scheduler v2 cutover fixtures", () => {
     );
 
     try {
+      const idleStart = performance.now();
       await runtime.scheduler.idle();
-      expect(childRuns).toBe(0);
-      expect(output.get()).toBe(0);
-
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      await runtime.scheduler.idle();
+      expect(performance.now() - idleStart).toBeGreaterThanOrEqual(180);
       expect(childRuns).toBe(1);
       expect(output.get()).toBe(30);
     } finally {
@@ -786,6 +862,71 @@ describe("scheduler v2 cutover fixtures", () => {
 
     expect(runs).toBe(0);
     expect(output.get()).toBe(0);
+  });
+
+  it("does not trigger a never-ran node from declared reads alone", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-declared-read-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-declared-read-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    output.set(0);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let runs = 0;
+    const sourceLink = source.getAsNormalizedFullLink();
+    const outputLink = output.getAsNormalizedFullLink();
+    const sourceAddress = toMemorySpaceAddress(sourceLink);
+    const writer = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        runs++;
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 10);
+      }) as Action,
+      {
+        reads: [sourceLink],
+        writes: [outputLink],
+      },
+    );
+    const internal = runtime.scheduler as unknown as {
+      nodes: {
+        get(action: Action): {
+          status: string;
+          declaredReads: unknown[];
+          invalidCauses: unknown[];
+        } | undefined;
+      };
+    };
+
+    const cancel = runtime.scheduler.subscribe(writer);
+
+    try {
+      await runtime.scheduler.idle();
+      const record = internal.nodes.get(writer);
+      expect(record?.status).toBe("never-ran");
+      expect(record?.declaredReads).toEqual([sourceAddress]);
+      expect(record?.invalidCauses).toEqual([]);
+      expect(runs).toBe(0);
+
+      source.withTx(tx).send(2);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.scheduler.idle();
+
+      expect(internal.nodes.get(writer)?.invalidCauses).toEqual([]);
+      expect(runs).toBe(0);
+      expect(output.get()).toBe(0);
+    } finally {
+      cancel();
+    }
   });
 
   it("matches v1 parent-link semantics across registration paths", async () => {
@@ -1033,10 +1174,9 @@ describe("scheduler v2 cutover fixtures", () => {
   });
 
   it("releases liveness through dependency cycles", () => {
-    // Spec §5.2: edge updates propagate refcount deltas with a visited-set
-    // cycle guard. Without the guard on the increment itself, a cycle's back
-    // edge double-counts the origin (A=2), and unsubscribing the only live
-    // root drops just one ref — the cycle stays live forever.
+    // Spec §5.2: edge changes rebuild reachability from explicit roots. When
+    // the only root unsubscribes, the cycle must become unreachable instead
+    // of sustaining itself through its internal edges.
     const nodes = new NodeRegistry();
     const state = {
       nodes,
@@ -1073,21 +1213,175 @@ describe("scheduler v2 cutover fixtures", () => {
     expect(isLive(state, nodes.get(cycleB)!)).toBe(false);
   });
 
-  it("plans wake times for first-run debounced computations", () => {
-    // The waiting check and the wake-time planner must agree on the
-    // first-run debounce gate: if one schedules a debounce the other must
-    // report its ready time, or planners spin without a wake.
-    const delays = new SchedulerDelays({
+  it("keeps a shared writer live when one arm of a demand diamond is removed", () => {
+    const nodes = new NodeRegistry();
+    const state = {
+      nodes,
+      dependents: new WeakMap<Action, Set<Action>>(),
+      reverseDependencies: new WeakMap<Action, Set<Action>>(),
+      materializerIndex: { isMaterializer: () => false },
+      getSchedulingWrites: () => undefined,
+    } as unknown as DependencyGraphState;
+
+    const writer: Action = function diamondWriter() {};
+    const left: Action = function diamondLeft() {};
+    const right: Action = function diamondRight() {};
+    const merge: Action = function diamondMerge() {};
+    const root: Action = function diamondRoot() {};
+    nodes.register(writer, "computation");
+    nodes.register(left, "computation");
+    nodes.register(right, "computation");
+    nodes.register(merge, "computation");
+    nodes.register(root, "effect");
+
+    registerDependentEdge(state, writer, left);
+    registerDependentEdge(state, writer, right);
+    registerDependentEdge(state, left, merge);
+    registerDependentEdge(state, right, merge);
+    registerDependentEdge(state, merge, root);
+
+    expect(nodes.get(writer)?.liveRefs).toBe(2);
+    unregisterDependentEdge(state, writer, left);
+
+    expect(nodes.get(writer)?.liveRefs).toBe(1);
+    expect(isLive(state, nodes.get(writer)!)).toBe(true);
+
+    unregisterDependentEdge(state, writer, right);
+    expect(nodes.get(writer)?.liveRefs).toBe(0);
+    expect(isLive(state, nodes.get(writer)!)).toBe(false);
+  });
+
+  it("rejects self-dependencies without mutating the graph", () => {
+    const nodes = new NodeRegistry();
+    const action: Action = function selfDependentAction() {};
+    nodes.register(action, "computation");
+    const state = {
+      nodes,
+      dependents: new WeakMap<Action, Set<Action>>(),
+      reverseDependencies: new WeakMap<Action, Set<Action>>(),
+      materializerIndex: { isMaterializer: () => false },
+      getSchedulingWrites: () => undefined,
+    } as unknown as DependencyGraphState;
+
+    expect(registerDependentEdge(state, action, action)).toBe(false);
+    expect(state.dependents.get(action)).toBeUndefined();
+    expect(state.reverseDependencies.get(action)).toBeUndefined();
+  });
+
+  it("ignores stale dependency edges while rebuilding liveness", () => {
+    const nodes = new NodeRegistry();
+    const root: Action = function staleEdgeRoot() {};
+    const removedWriter: Action = function removedDependencyWriter() {};
+    nodes.register(root, "effect");
+    const state = {
+      nodes,
+      reverseDependencies: new WeakMap<Action, Set<Action>>([
+        [root, new Set([removedWriter])],
+      ]),
+      materializerIndex: { isMaterializer: () => false },
+    };
+
+    recomputeLiveRefs(state);
+
+    expect(isLive(state, nodes.get(root)!)).toBe(true);
+  });
+
+  it("escalates convergence backoff for consecutive exhaustion", () => {
+    const nodes = new NodeRegistry();
+    const action: Action = function nonSettlingAction() {};
+    const record = nodes.register(action, "effect");
+
+    const planAt = (now: number) =>
+      planBudgetBackoff({
+        workSet: new Set([action]),
+        nodes,
+        pending: new Set<Action>(),
+        isLiveAction: () => true,
+        getNextEligibleRunTime: (candidate) => {
+          const until = nodes.get(candidate)?.gate.backoffUntil;
+          return until !== undefined && until > now ? until : undefined;
+        },
+        isDebouncedComputationWaiting: () => false,
+        reason: "iteration-cap",
+        now,
+      });
+
+    const first = planAt(1_000);
+    expect(first.backoffUntil).toBe(1_000 + BACKOFF_BASE_MS);
+    const second = planAt(first.backoffUntil!);
+    expect(second.backoffUntil).toBe(
+      first.backoffUntil! + BACKOFF_BASE_MS * 2,
+    );
+    expect(record.gate.backoffStreak).toBe(2);
+  });
+
+  it("does not back off undemanded, debounced, or already-gated work", () => {
+    const now = 10_000;
+    const cases = [
+      {
+        name: "undemanded",
+        isLive: false,
+        isDebounced: false,
+        nextEligibleAt: undefined,
+      },
+      {
+        name: "debounced",
+        isLive: true,
+        isDebounced: true,
+        nextEligibleAt: undefined,
+      },
+      {
+        name: "already gated",
+        isLive: true,
+        isDebounced: false,
+        nextEligibleAt: now + 1_000,
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const nodes = new NodeRegistry();
+      const action: Action = function rejectedBackoffCandidate() {};
+      const record = nodes.register(action, "computation");
+
+      const plan = planBudgetBackoff({
+        workSet: new Set([action]),
+        nodes,
+        pending: new Set<Action>(),
+        isLiveAction: () => testCase.isLive,
+        getNextEligibleRunTime: () => testCase.nextEligibleAt,
+        isDebouncedComputationWaiting: () => testCase.isDebounced,
+        reason: "iteration-cap",
+        now,
+      });
+
+      expect(plan.actions, testCase.name).toEqual([]);
+      expect(plan.backoffUntil, testCase.name).toBeUndefined();
+      expect(record.gate.backoffStreak, testCase.name).toBe(0);
+      expect(record.gate.convergenceHoldPasses, testCase.name).toBe(0);
+      expect(record.gate.backoffUntil, testCase.name).toBeUndefined();
+    }
+  });
+
+  it("plans wake times for invalidation-armed debounced computations", () => {
+    // Arming happens at invalidation time (the facade's markActionInvalid →
+    // gates.onInvalidated); the waiting check and the wake-time planner are
+    // pure reads of that armed state, so they agree by construction — and a
+    // query on an un-armed gate must stay a no-op (no lazy self-arming).
+    const nodes = new NodeRegistry();
+    const action: Action = function debouncedFirstRun() {};
+    nodes.register(action, "computation");
+    const gates = new SchedulerGates({
+      nodes,
       actionStats: new Map(),
       getActionId: () => "debounced-first-run",
+      isDisposed: () => false,
+      queueExecution: () => {},
     });
-    const action: Action = function debouncedFirstRun() {};
-    delays.setDebounce(action, 50);
-    const state: SchedulerDelayControlState = {
-      delays,
+    gates.setDebounce(action, 50);
+    const context = {
       computations: new Set([action]),
       effects: new Set<Action>(),
-      dirty: new Set([action]),
+      isInvalid: () => true,
       pending: new Set<Action>(),
       queueExecution: () => {},
       logDebounce: () => {},
@@ -1095,42 +1389,200 @@ describe("scheduler v2 cutover fixtures", () => {
     };
 
     try {
-      expect(isDebouncedComputationWaiting(state, action)).toBe(true);
-      expect(getNextDebounceRunTime(state, action)).toBeDefined();
+      // Pure query on an un-armed gate: reports nothing and does not arm.
+      expect(gates.isDebouncedComputationWaiting(action, context)).toBe(false);
+      expect(gates.getNextDebounceRunTime(action, context)).toBeUndefined();
+      // Invalidation arms the trailing debounce; both reads then agree.
+      gates.onInvalidated(nodes.get(action)!, performance.now(), context);
+      expect(gates.isDebouncedComputationWaiting(action, context)).toBe(true);
+      expect(gates.getNextDebounceRunTime(action, context)).toBeDefined();
     } finally {
-      delays.clearActiveDebounceTimers();
+      gates.cancelWake();
     }
   });
 
-  it("moves a debounced action to pending after its timer fires", async () => {
-    using time = new FakeTime();
-    const delays = new SchedulerDelays({
+  it("recomputes the shared wake when a gate is released early", () => {
+    const nodes = new NodeRegistry();
+    const action: Action = function earlyGateRelease() {};
+    nodes.register(action, "computation");
+    let queued = 0;
+    const gates = new SchedulerGates({
+      nodes,
       actionStats: new Map(),
-      getActionId: () => "debounced-action",
+      getActionId: () => "early-gate-release",
+      isDisposed: () => false,
+      queueExecution: () => queued++,
     });
-    const action: Action = function debouncedAction() {};
-    const pending = new Set<Action>();
-    const messages: string[] = [];
-    let queueCount = 0;
+    const context = {
+      computations: new Set([action]),
+      effects: new Set<Action>(),
+      isInvalid: () => true,
+      pending: new Set<Action>(),
+      queueExecution: () => {},
+      logDebounce: () => {},
+      shouldDebounceFirstRun: () => true,
+    };
 
-    delays.setDebounce(action, 4);
-    delays.scheduleWithDebounce(action, {
-      pending,
-      queueExecution: () => queueCount++,
-      logDebounce: (message) => messages.push(message),
-    });
+    try {
+      gates.holdInitialRun(action, performance.now() + 30_000);
+      expect(gates.hasWakeTimer()).toBe(true);
+      gates.releaseInitialRunHold(action);
+      expect(gates.hasWakeTimer()).toBe(false);
+      expect(queued).toBe(1);
 
-    expect(pending.has(action)).toBe(false);
-    expect(queueCount).toBe(0);
-    expect(delays.hasActiveDebounceTimer(action)).toBe(true);
+      gates.setDebounce(action, 30_000);
+      gates.onInvalidated(nodes.get(action)!, performance.now(), context);
+      expect(gates.hasWakeTimer()).toBe(true);
+      gates.setDebounce(action, 0);
+      expect(gates.hasWakeTimer()).toBe(false);
+      expect(queued).toBe(2);
 
-    await time.tickAsync(4);
-
-    expect(pending.has(action)).toBe(true);
-    expect(queueCount).toBe(1);
-    expect(delays.hasActiveDebounceTimer(action)).toBe(false);
-    expect(messages).toEqual([
-      "[DEBOUNCE] Action debounced-action debounced for 4ms",
-    ]);
+      gates.setThrottle(action, 30_000);
+      gates.scheduleWake(performance.now() + 30_000);
+      expect(gates.hasWakeTimer()).toBe(true);
+      gates.clearThrottle(action);
+      expect(gates.hasWakeTimer()).toBe(false);
+      expect(queued).toBe(3);
+    } finally {
+      gates.cancelWake();
+    }
   });
+
+  it("cancels the shared wake when a clean node clears backoff", () => {
+    const scheduler = runtime.scheduler as unknown as {
+      nodes: NodeRegistry;
+      gates: SchedulerGates;
+      clearBackoffForCleanNodes: () => void;
+    };
+    const action: Action = function adoptedBeforeBackoffWake() {};
+    const record = scheduler.nodes.register(action, "computation");
+    scheduler.nodes.setStatus(action, "clean");
+    record.gate.backoffStreak = 1;
+    record.gate.convergenceHoldPasses = 1;
+    record.gate.backoffUntil = performance.now() + 30_000;
+    scheduler.gates.scheduleWake(record.gate.backoffUntil);
+
+    expect(scheduler.gates.hasWakeTimer()).toBe(true);
+    scheduler.clearBackoffForCleanNodes();
+    expect(scheduler.gates.hasWakeTimer()).toBe(false);
+    expect(record.gate.backoffUntil).toBeUndefined();
+    expect(record.gate.backoffStreak).toBe(0);
+    expect(record.gate.convergenceHoldPasses).toBe(0);
+  });
+
+  it("resets a dormant node's convergence episode at an already-idle boundary", async () => {
+    const scheduler = runtime.scheduler as unknown as {
+      nodes: NodeRegistry;
+    };
+    const action: Action = function dormantPreviousEpisode() {};
+    const record = scheduler.nodes.register(action, "computation");
+    scheduler.nodes.setStatus(action, "invalid");
+    record.gate.convergenceHoldPasses =
+      CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES;
+
+    // No demand root reaches this invalid node, so idle resolves directly
+    // without an execute/continuation cycle. That boundary must still reset the
+    // per-node episode before the action is demanded again.
+    await runtime.scheduler.idle();
+
+    expect(record.gate.convergenceHoldPasses).toBe(0);
+  });
+
+  it("settles a fully declared deep chain in one ordered pass", async () => {
+    // Every edge is declared up front, so topological ordering can run a chain
+    // deeper than MAX_ITERS in one settle iteration. This complements the
+    // discovered-read multi-pass regression in scheduler-convergence.test.ts:
+    // declared topology must not incur convergence backoff at all.
+    const DEPTH = 12;
+    const cells: Cell<number>[] = [];
+    for (let i = 0; i <= DEPTH; i++) {
+      const cell = runtime.getCell<number>(
+        space,
+        `v2-cutover-deep-chain-${i}`,
+        undefined,
+        tx,
+      );
+      cell.set(0);
+      cells.push(cell);
+    }
+    await tx.commit();
+    tx = runtime.edit();
+
+    const cancels: Array<() => void> = [];
+    let maxRunsForAnyLink = 0;
+    try {
+      // Chain: cell[i+1] = cell[i] + 1 for each hop.
+      for (let i = 0; i < DEPTH; i++) {
+        const src = cells[i];
+        const dst = cells[i + 1];
+        let runs = 0;
+        const link = Object.assign(
+          ((actionTx: IExtendedStorageTransaction) => {
+            runs++;
+            maxRunsForAnyLink = Math.max(maxRunsForAnyLink, runs);
+            dst.withTx(actionTx).send(src.withTx(actionTx).get() + 1);
+          }) as Action,
+          { writes: [dst.getAsNormalizedFullLink()] },
+        );
+        cancels.push(
+          runtime.scheduler.subscribe(link, {
+            reads: [toMemorySpaceAddress(src.getAsNormalizedFullLink())],
+            shallowReads: [],
+            writes: [toMemorySpaceAddress(dst.getAsNormalizedFullLink())],
+          }),
+        );
+      }
+
+      // A live effect at the tail makes the whole chain demanded.
+      const tailReads: number[] = [];
+      const tailEffect: Action = (actionTx) => {
+        tailReads.push(cells[DEPTH].withTx(actionTx).get());
+      };
+      cancels.push(
+        runtime.scheduler.subscribe(tailEffect, {
+          reads: [toMemorySpaceAddress(cells[DEPTH].getAsNormalizedFullLink())],
+          shallowReads: [],
+          writes: [],
+        }, { isEffect: true }),
+      );
+
+      // No iteration-cap backoff is applied and no non-settling episode is
+      // recorded. Assert that signal directly rather than racing a wall clock:
+      // a loaded CI runner could breach an elapsed-time bound with zero
+      // regressions, whereas `scheduler.non-settling` telemetry fires iff
+      // backoff was actually applied.
+      const nonSettlingMarkers: unknown[] = [];
+      const onTelemetry = (event: Event) => {
+        const marker = (event as RuntimeTelemetryEvent).marker;
+        if (marker.type === "scheduler.non-settling") {
+          nonSettlingMarkers.push(marker);
+        }
+      };
+      runtime.telemetry.addEventListener("telemetry", onTelemetry);
+      try {
+        cells[0].withTx(tx).send(5);
+        await tx.commit();
+        tx = runtime.edit();
+        await runtime.scheduler.idle();
+      } finally {
+        runtime.telemetry.removeEventListener("telemetry", onTelemetry);
+      }
+
+      // Full propagation: tail sees source + DEPTH hops.
+      expect(cells[DEPTH].get()).toBe(5 + DEPTH);
+      // Healthy progress, not a cycle: no link approached the run budget.
+      expect(maxRunsForAnyLink).toBeLessThan(5);
+      // No iteration-cap backoff was applied (deterministic; no wall clock).
+      expect(nonSettlingMarkers.length).toBe(0);
+    } finally {
+      for (const cancel of cancels) cancel();
+    }
+  });
+
+  // (Removed main's "moves a debounced action to pending after its timer fires"
+  // test: it asserts the v1 SchedulerDelays per-action-timer model — timer fires
+  // → action added directly to `pending`. v2 gates use a unified wake timer
+  // (scheduleWake) + settle re-check instead, so that premise no longer holds.
+  // Equivalent gates debounce behavior is covered by scheduler-timing.test.ts
+  // and the "plans wake times for first-run debounced computations" test above.)
 });
