@@ -75,8 +75,7 @@ describe("compileOrGetPattern persists the closure per requested space", () => {
         undefined,
         tx1,
       );
-      // deno-lint-ignore no-explicit-any
-      const r1 = rt1.run(tx1, patternB as any, {}, resultCell1);
+      const r1 = rt1.run(tx1, patternB, {}, resultCell1);
       await tx1.commit();
       await r1.pull();
       await rt1.idle();
