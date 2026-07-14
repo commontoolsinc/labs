@@ -32,8 +32,11 @@ single file.
 
 **Stdout must stay pure JSON.** The workflow redirects all of stdout to
 `results.json`. One stray line printed by any bench file corrupts the
-artifact for every benchmark in the run, not just the offending file. This
-applies to module-scope code as well as bench bodies. Write diagnostics with
+artifact for every benchmark in the run, not just the offending file. A
+validation step fails the run when the artifact is not valid JSON or lists
+no benches; since the dashboard samples successful runs only, corruption
+never reaches the charts and shows up as a red run in the Actions tab. This applies to module-scope
+code as well as bench bodies. Write diagnostics with
 `console.error`, which goes to stderr and shows up in the workflow log. A
 stray diagnostic once corrupted every benchmark artifact for five weeks
 before anyone noticed.
