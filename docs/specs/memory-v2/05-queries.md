@@ -357,7 +357,8 @@ combineSchema(parentSchema, linkSchema):
     return parentSchema  (link accepts anything, use parent's constraint)
 
   compare parentSchema.type and linkSchema.type:
-    let integer, unknown, or an absent type use legacy parent precedence
+    let unknown or an absent type use legacy parent precedence
+    treat integer as a subtype of number; their intersection is integer
     if their possible types cannot overlap, return false
 
   if both are type:"object":

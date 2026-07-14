@@ -1837,6 +1837,11 @@ describe("canBranchMatch", () => {
     expect(canBranchMatch({ type: "null" }, null)).toBe(true);
   });
 
+  it("accepts a JavaScript number for an integer type", () => {
+    expect(canBranchMatch({ type: "integer" }, 42)).toBe(true);
+    expect(canBranchMatch({ type: ["string", "integer"] }, 42)).toBe(true);
+  });
+
   it("conservatively accepts const schemas (values may contain unresolved links)", () => {
     expect(canBranchMatch({ const: "a" }, "b")).toBe(true);
     expect(canBranchMatch({ const: "a" }, "a")).toBe(true);
@@ -1993,6 +1998,50 @@ describe("canBranchMatch", () => {
   it("accepts empty array against items: false (only empty arrays match)", () => {
     expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
   });
+});
+
+describe("SchemaObjectTraverser integer type pruning", () => {
+  const schemas = [
+    { name: "integer", schema: { type: "integer" } },
+    {
+      name: "a union containing integer",
+      schema: { type: ["string", "integer"] },
+    },
+  ] as const satisfies readonly { name: string; schema: JSONSchema }[];
+
+  for (const testCase of schemas) {
+    it(`accepts a JavaScript number for ${testCase.name}`, () => {
+      const store = new Map<string, Revision<State>>();
+      const type = "application/json" as const;
+      const docUri = `of:integer-${testCase.name}` as URI;
+      const docEntity = docUri as Entity;
+      const value = 42;
+
+      store.set(`${docUri}/${type}`, {
+        the: type,
+        of: docEntity,
+        is: { value },
+        cause: hashOf({ the: type, of: docEntity }),
+        since: 1,
+      });
+
+      const { ok, error } = getTraverser(store, {
+        path: ["value"],
+        schema: testCase.schema,
+      }).traverse({
+        address: {
+          space: "did:null:null",
+          id: docUri,
+          type,
+          path: ["value"],
+        },
+        value,
+      });
+
+      expect(error).toBeUndefined();
+      expect(ok).toBe(value);
+    });
+  }
 });
 
 describe("mergeAnyOfMatches", () => {

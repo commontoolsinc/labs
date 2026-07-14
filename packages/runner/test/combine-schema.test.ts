@@ -24,6 +24,11 @@ describe("combineSchema type handling", () => {
       a: { type: "object" },
       b: { type: "array" },
     },
+    {
+      name: "integer and string are disjoint",
+      a: { type: "integer" },
+      b: { type: "string" },
+    },
   ];
   const directions = [
     { name: "a is the parent", combine: combineSchema },
@@ -47,16 +52,6 @@ describe("combineSchema type handling", () => {
     b: JSONSchema;
   }[] = [
     {
-      name: "integer and number",
-      a: { type: "number" },
-      b: { type: "integer" },
-    },
-    {
-      name: "integer is excluded from disjointness checks",
-      a: { type: "integer" },
-      b: { type: "string" },
-    },
-    {
       name: "a type union can overlap one member",
       a: { type: ["string", "number"] },
       b: { type: "number" },
@@ -77,6 +72,38 @@ describe("combineSchema type handling", () => {
     it(`${testCase.name} while retaining parent precedence`, () => {
       expect(combineSchema(testCase.a, testCase.b)).toEqual(testCase.a);
       expect(combineSchema(testCase.b, testCase.a)).toEqual(testCase.b);
+    });
+  }
+
+  const numberIntegerCases = [
+    {
+      name: "scalar number and integer",
+      a: { type: "number" },
+      b: { type: "integer" },
+      expectedType: "integer",
+    },
+    {
+      name: "type arrays with only a number/integer overlap",
+      a: { type: ["string", "number"] },
+      b: { type: ["boolean", "integer"] },
+      expectedType: "integer",
+    },
+    {
+      name: "type arrays with exact and number/integer overlaps",
+      a: { type: ["string", "number"] },
+      b: { type: ["integer", "string"] },
+      expectedType: ["integer", "string"],
+    },
+  ] as const;
+
+  for (const testCase of numberIntegerCases) {
+    it(`${testCase.name} narrows number to integer in either direction`, () => {
+      expect(combineSchema(testCase.a, testCase.b)).toEqual({
+        type: testCase.expectedType,
+      });
+      expect(combineSchema(testCase.b, testCase.a)).toEqual({
+        type: testCase.expectedType,
+      });
     });
   }
 });

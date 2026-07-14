@@ -38,6 +38,7 @@ import type {
   CellScope,
   JSONObject,
   JSONSchema,
+  JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
 import {
@@ -2433,16 +2434,58 @@ function schemaTypesAreDisjoint(
 
   const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
   const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
-  if (
-    parentTypes.includes("unknown") || linkTypes.includes("unknown") ||
-    parentTypes.includes("integer") || linkTypes.includes("integer")
-  ) {
+  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
     return false;
   }
 
   return !parentTypes.some((parent) =>
-    linkTypes.some((link) => parent === link)
+    linkTypes.some((link) =>
+      parent === link ||
+      (parent === "number" && link === "integer") ||
+      (parent === "integer" && link === "number")
+    )
   );
+}
+
+function schemaTypeMatchesValueType(
+  schemaType: JSONSchemaTypes,
+  valueType: string,
+): boolean {
+  return schemaType === valueType ||
+    (schemaType === "integer" && valueType === "number");
+}
+
+function narrowNumberIntegerIntersection(
+  parentType: JSONSchemaObj["type"],
+  linkType: JSONSchemaObj["type"],
+): JSONSchemaObj["type"] | undefined {
+  if (parentType === undefined || linkType === undefined) return undefined;
+
+  const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
+  const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
+  if (parentTypes.includes("unknown") || linkTypes.includes("unknown")) {
+    return undefined;
+  }
+
+  let narrowedNumber = false;
+  const intersection = new Set<JSONSchemaTypes>();
+  for (const parent of parentTypes) {
+    for (const link of linkTypes) {
+      if (parent === link) {
+        intersection.add(parent);
+      } else if (
+        (parent === "number" && link === "integer") ||
+        (parent === "integer" && link === "number")
+      ) {
+        intersection.add("integer");
+        narrowedNumber = true;
+      }
+    }
+  }
+
+  if (!narrowedNumber) return undefined;
+  const types = [...intersection].sort();
+  return types.length === 1 ? types[0] : types;
 }
 
 function _combineSchemaUncached(
@@ -2461,6 +2504,10 @@ function _combineSchemaUncached(
     if (
       schemaTypesAreDisjoint(parentSchema.type, linkSchema.type)
     ) return false;
+    const narrowedType = narrowNumberIntegerIntersection(
+      parentSchema.type,
+      linkSchema.type,
+    );
     if (linkSchema.type === "object" && parentSchema.type === "object") {
       // A property required by either intersected schema remains required.
       const {
@@ -2609,6 +2656,7 @@ function _combineSchemaUncached(
       // since the object types may be different
       return mergeSchemaFlags(linkSchema, {
         ...parentSchema,
+        ...(narrowedType !== undefined && { type: narrowedType }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       });
     }
@@ -4540,7 +4588,11 @@ export function canBranchMatch(
       const schemaTypes = Array.isArray(resolved.type)
         ? resolved.type
         : [resolved.type];
-      if (!schemaTypes.includes(actualType)) return false;
+      if (
+        !schemaTypes.some((type) =>
+          schemaTypeMatchesValueType(type, actualType)
+        )
+      ) return false;
     }
   }
 
@@ -4796,7 +4848,9 @@ function schemaTypeValidity(
       // type unknown matches anything
       if (types.includes("unknown")) {
         typeValidity = TypeValidity.Unknown;
-      } else if (!types.includes(valueType)) {
+      } else if (
+        !types.some((type) => schemaTypeMatchesValueType(type, valueType))
+      ) {
         return TypeValidity.False;
       }
     } else if (isString(schemaObj["type"])) {
@@ -4804,7 +4858,7 @@ function schemaTypeValidity(
       // type unknown matches anything
       if (type === "unknown") {
         typeValidity = TypeValidity.Unknown;
-      } else if (type !== valueType) {
+      } else if (!schemaTypeMatchesValueType(type, valueType)) {
         return TypeValidity.False;
       }
     } else {
