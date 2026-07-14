@@ -124,6 +124,9 @@ export {
 } from "./runner-utils.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
+const executionDemandLogger = getLogger("execution.demand", {
+  enabled: false,
+});
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
   enabled: true,
   level: "warn",
@@ -2139,6 +2142,7 @@ export class Runner {
     pieces: readonly string[],
   ): Promise<void> {
     const send = async () => {
+      const startedAt = performance.now();
       try {
         await provider.setExecutionDemand?.("", pieces);
       } catch (error) {
@@ -2148,6 +2152,11 @@ export class Runner {
           `Failed to publish execution demand for ${space}`,
           error,
         ]);
+      } finally {
+        executionDemandLogger.time(
+          startedAt,
+          pieces.length === 0 ? "publish-empty" : "publish-active",
+        );
       }
     };
     // Invoke immediately so successive snapshots enter the connection in

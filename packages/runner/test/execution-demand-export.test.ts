@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { Cell } from "../src/cell.ts";
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
@@ -124,6 +125,41 @@ describe("runner execution demand export", () => {
     expect(calls).toEqual([{ branch: "", pieces: [rootId] }]);
   });
 
+  it("measures the active demand round trip that start awaits", async () => {
+    const { runtime, storageManager } = createRuntime(true);
+    const provider = storageManager.open(space) as DemandProvider;
+    const called = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<boolean>();
+    provider.setExecutionDemand = (_branch, pieces) => {
+      if (pieces.length === 0) return Promise.resolve(true);
+      called.resolve();
+      return response.promise;
+    };
+    const piece = await setupPiece(runtime, "execution-demand-active-timing");
+    const before = getTimingStatsBreakdown()["execution.demand"]?.[
+      "publish-active"
+    ]?.count ?? 0;
+
+    let settled = false;
+    const started = runtime.start(piece).finally(() => {
+      settled = true;
+    });
+    await called.promise;
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(
+      getTimingStatsBreakdown()["execution.demand"]?.["publish-active"]
+        ?.count ?? 0,
+    ).toBe(before);
+
+    response.resolve(true);
+    expect(await started).toBe(true);
+    expect(
+      getTimingStatsBreakdown()["execution.demand"]?.["publish-active"]
+        ?.count ?? 0,
+    ).toBe(before + 1);
+  });
+
   it("does not originate demand through an executor provider that omits it", async () => {
     const { runtime, storageManager } = createRuntime(true);
     const provider = storageManager.open(space) as DemandProvider;
@@ -160,6 +196,9 @@ describe("runner execution demand export", () => {
     const piece = await setupPiece(runtime, "execution-demand-dispose");
     expect(await runtime.start(piece)).toBe(true);
     await runtime.scheduler.idle();
+    const emptyTimingBefore = getTimingStatsBreakdown()["execution.demand"]?.[
+      "publish-empty"
+    ]?.count ?? 0;
 
     let disposed = false;
     const disposal = runtime.dispose().then(() => {
@@ -172,5 +211,9 @@ describe("runner execution demand export", () => {
     releaseFinalDemand();
     await disposal;
     expect(disposed).toBe(true);
+    expect(
+      getTimingStatsBreakdown()["execution.demand"]?.["publish-empty"]
+        ?.count ?? 0,
+    ).toBe(emptyTimingBefore + 1);
   });
 });
