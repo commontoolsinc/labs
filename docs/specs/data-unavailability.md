@@ -4,8 +4,8 @@
 
 Implemented, including the separately specified `latestComplete()` snapshot
 helper, pending renderer continuity, and the public asynchronous result APIs.
-Cleanup of the deprecated `llm()` API is tracked in the
-[`async API availability plan`](../plans/async-api-availability-migration.md).
+The deprecated `llm()` state API remains only for source and persisted-graph
+compatibility; new patterns use the direct generation APIs or `llmDialog<T>()`.
 
 ## Summary
 
@@ -1056,6 +1056,8 @@ runtime/compiler version gate before patterns emit the new type or policy.
   prompts, and live documentation use the same contract.
 - Sibling pending/error fields remain private operation state except on the
   explicitly advanced APIs.
+- The deprecated stateful `llm()` surface and its raw fields remain
+  compatibility-only; repository patterns use the replacement APIs.
 
 ## Testing Requirements
 

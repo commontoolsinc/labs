@@ -1,27 +1,34 @@
+---
+status: historical
+created: 2026-07-14
+archived: 2026-07-14
+reason: "Executed plan; pending rendering, latestComplete, and the async API availability migrations shipped."
+superseded-by: docs/specs/data-unavailability.md
+---
+
 # Pending Render Continuity And Async API Availability Migration
 
 This plan covers two follow-ups to the
-[`DataUnavailable` specification](../specs/data-unavailability.md): the pending
+[`DataUnavailable` specification](../../specs/data-unavailability.md): the pending
 renderer continuity behavior and the staged migration of the remaining
 asynchronous APIs. The renderer portion, `latestComplete()`, direct streaming
 generation results, direct compilation results, structured SQLite queries,
 availability-aware Wish results, and typed dialog results are implemented; the
-`streamData` migration is also implemented. Only the legacy `llm()` cleanup
-stage remains.
+`streamData` migration and legacy `llm()` compatibility cleanup are also
+implemented.
 
 The complementary `latestComplete()` helper is now implemented and specified in
-the [DataUnavailable spec](../specs/data-unavailability.md#latestcomplete-snapshot-helper).
+the [DataUnavailable spec](../../specs/data-unavailability.md#latestcomplete-snapshot-helper).
 `resultOf()` exposes the current usable value and propagates current
 unavailability; `latestComplete()` retains a coherent prior value.
 
 ## Status
 
 - Pending renderer continuity: implemented and tested.
-- Remaining asynchronous API migration: A1-A6 complete; A7 is next.
+- Remaining asynchronous API migration: A1-A7 complete.
 
-Keep this file live while any API stage remains. When all stages are complete,
-update the DataUnavailable spec and archive this plan under
-`docs/history/plans/`.
+The DataUnavailable spec describes the shipped behavior. This executed plan is
+archived under `docs/history/plans/`.
 
 ## Fixed Design Rules
 
@@ -122,14 +129,14 @@ asynchronous data-result APIs and are outside this migration.
 
 ## A0 — Compatibility And Contract Harness
 
-- [ ] Add compile-time fixtures for direct results, auxiliary projections,
+- [x] Add compile-time fixtures for direct results, auxiliary projections,
       genuine state-machine channels, guards, `resultOf()`, aliases, and
       namespace imports.
-- [ ] Add golden transformed-output fixtures for every generic API whose result
+- [x] Add transformed-output fixtures for every generic API whose result
       schema is injected by the transformer.
-- [ ] Add raw built-in transition tests which distinguish stored authored
+- [x] Add raw built-in transition tests which distinguish stored authored
       `undefined` from every `DataUnavailable` reason.
-- [ ] Add rehydration fixtures for the currently persisted state object of each
+- [x] Add rehydration fixtures for the currently persisted state object of each
       built-in before changing any producer.
 - [x] Inventory and classify every repository call site as result-only,
       status-aware, metadata-aware, or state-machine control.
@@ -394,18 +401,23 @@ intermediate projection, with no `.result` wrapper.
 
 ## A7 — Legacy `llm`, Cleanup, And Documentation
 
-- [ ] Migrate legacy `llm()` consumers to `generateTextStream()`,
+- [x] Migrate legacy `llm()` consumers to `generateTextStream()`,
       `generateObjectStream()`, or `llmDialog()` according to which auxiliary
-      state they use.
-- [ ] Remove the deprecated `llm()` surface only after persisted-pattern and
-      import compatibility policy permits it; do not create a second
-      DataUnavailable migration for it.
-- [ ] Remove compatibility `pending` / `error` fields only after repository and
-      rehydration tests no longer require them.
-- [ ] Update live capability, wish, SQLite, transformer, and reactivity docs in
+      state they use. No authored pattern call sites remain; the integration
+      patterns already use the replacement APIs.
+- [x] Audit removal of the deprecated `llm()` surface. Retain it while source
+      and persisted-pattern compatibility require the raw module reference; do
+      not create a second DataUnavailable migration for it.
+- [x] Audit compatibility `pending` / `error` fields. Retain them on raw
+      persisted state while compatibility and rehydration tests require them.
+- [x] Update live capability, wish, SQLite, transformer, and reactivity docs in
       the same stage as each API change.
-- [ ] Update the DataUnavailable spec's non-goals and status as stages land.
-- [ ] Archive this plan when all stages are complete.
+- [x] Update the DataUnavailable spec's non-goals and status as stages land.
+- [x] Archive this plan when all stages are complete.
+
+The remaining `llm()` calls are deliberate raw-runtime, CFC, race, outbox, and
+call-kind compatibility tests. They protect old graph behavior and are not
+authored API consumers to migrate.
 
 ## Execution Protocol And Validation
 
