@@ -5,6 +5,7 @@ import {
   createRuntimeSpaceMembershipProvider,
   spaceReaderRole,
 } from "../src/cfc/space-membership.ts";
+import type { Cell } from "../src/cell.ts";
 import type { Cancel } from "../src/cancel.ts";
 import type { Runtime } from "../src/runtime.ts";
 
@@ -17,6 +18,8 @@ const ALICE = "did:key:alice";
 const MALLORY = "did:key:mallory";
 const SPACE_TEAM = "did:key:team-space";
 const SERVICE = "did:web:commonfabric.org#runtime";
+
+const malformedAcl = (value: unknown): ACL => value as ACL;
 
 describe("spaceReaderRole (§4.9.3 capability resolver)", () => {
   it("grants implicit OWNER for a principal's own identity space", () => {
@@ -74,10 +77,10 @@ describe("spaceReaderRole (§4.9.3 capability resolver)", () => {
   });
 
   it("returns null for a malformed ACL value (fail closed)", () => {
-    expect(spaceReaderRole("not-an-acl" as unknown as ACL, SPACE_TEAM, ALICE))
+    expect(spaceReaderRole(malformedAcl("not-an-acl"), SPACE_TEAM, ALICE))
       .toBeNull();
     expect(
-      spaceReaderRole({ [ALICE]: "SUDO" } as unknown as ACL, SPACE_TEAM, ALICE),
+      spaceReaderRole(malformedAcl({ [ALICE]: "SUDO" }), SPACE_TEAM, ALICE),
     ).toBeNull();
   });
 
@@ -114,9 +117,9 @@ const fakeRuntime = (aclBySpace: Record<string, unknown>) => {
           cb(); // real Cell.sink runs the action once synchronously at subscribe
           return () => set!.delete(cb);
         },
-      };
+      } as Cell<unknown>;
     },
-  } as unknown as Runtime;
+  } as Pick<Runtime, "getCellFromLink">;
   const fire = (space: string) => {
     for (const cb of sinks.get(`of:${space}`) ?? []) cb();
   };

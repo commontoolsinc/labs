@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-space-membership.test.ts": [
-    "77:40:103cznp",
-    "80:42:1hbxd1s",
-    "119:4:1s1igfm",
-  ],
   "packages/runner/test/cfc-template-metadata-population.test.ts": [
     "132:56:10q9jc",
   ],
