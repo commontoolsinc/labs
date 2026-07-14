@@ -3,6 +3,42 @@ import { expect } from "@std/expect";
 import type { JSONSchemaObj } from "../src/builder/types.ts";
 import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
 
+type SchemaMergeWriterIdentityClaim = {
+  readonly __ctWriterIdentityOf: {
+    readonly file: string;
+    readonly path: readonly string[];
+    readonly bundleId?: string;
+    readonly moduleIdentity?: string;
+  };
+};
+
+type MalformedWriteAuthorizedByClaim = {
+  readonly notAClaim: boolean;
+};
+
+type SchemaMergeIfcFixture =
+  & Omit<
+    NonNullable<JSONSchemaObj["ifc"]>,
+    "confidentiality" | "exactCopyOf" | "projection" | "writeAuthorizedBy"
+  >
+  & {
+    readonly confidentiality?: string | readonly unknown[];
+    readonly exactCopyOf?: { readonly source: string } | readonly string[];
+    readonly projection?:
+      | { readonly from: string; readonly path: string }
+      | { readonly path: readonly string[] };
+    readonly collection?: { readonly id: string };
+    readonly flowPrecisionClaim?: { readonly path: readonly string[] };
+    readonly writeAuthorizedBy?:
+      | readonly string[]
+      | SchemaMergeWriterIdentityClaim
+      | MalformedWriteAuthorizedByClaim;
+  };
+
+const schemaWithIfc = (
+  ifc: SchemaMergeIfcFixture,
+): JSONSchemaObj => ({ ifc } as unknown as JSONSchemaObj);
+
 describe("mergeCfcSchemaEnvelopes", () => {
   // C5: `observes` is a scalar consumption class, not a set-like claim.
   // Agreement keeps the class through a merge; any disagreement (including
@@ -183,19 +219,17 @@ describe("mergeCfcSchemaEnvelopes", () => {
     ).toThrow(/ownerPrincipal must remain stable/);
 
     expect(() =>
-      mergeCfcSchemaEnvelopes({
-        ifc: { confidentiality: "secret" } as any,
-      }, {
-        ifc: { confidentiality: "internal" } as any,
-      })
+      mergeCfcSchemaEnvelopes(
+        schemaWithIfc({ confidentiality: "secret" }),
+        schemaWithIfc({ confidentiality: "internal" }),
+      )
     ).toThrow(/confidentiality must remain stable/);
 
     expect(() =>
-      mergeCfcSchemaEnvelopes({
-        ifc: { writeAuthorizedBy: { notAClaim: true } } as any,
-      }, {
-        ifc: { writeAuthorizedBy: { notAClaim: false } } as any,
-      })
+      mergeCfcSchemaEnvelopes(
+        schemaWithIfc({ writeAuthorizedBy: { notAClaim: true } }),
+        schemaWithIfc({ writeAuthorizedBy: { notAClaim: false } }),
+      )
     ).toThrow(/writeAuthorizedBy must remain stable/);
   });
 
@@ -208,11 +242,10 @@ describe("mergeCfcSchemaEnvelopes", () => {
       flowPrecisionClaim: { path: ["legacy"] },
     };
 
-    const merged = mergeCfcSchemaEnvelopes({
-      ifc: stableIfc as any,
-    }, {
-      ifc: stableIfc as any,
-    });
+    const merged = mergeCfcSchemaEnvelopes(
+      schemaWithIfc(stableIfc),
+      schemaWithIfc(stableIfc),
+    );
 
     expect((merged as JSONSchemaObj).ifc).toMatchObject(stableIfc);
   });
@@ -225,17 +258,16 @@ describe("mergeCfcSchemaEnvelopes", () => {
       },
     };
 
-    const merged = mergeCfcSchemaEnvelopes({
-      ifc: {
+    const merged = mergeCfcSchemaEnvelopes(
+      schemaWithIfc({
         confidentiality: "secret",
         writeAuthorizedBy: claim,
-      } as any,
-    }, {
-      ifc: {
+      }),
+      schemaWithIfc({
         confidentiality: "secret",
         writeAuthorizedBy: claim,
-      } as any,
-    });
+      }),
+    );
 
     expect((merged as JSONSchemaObj).ifc?.confidentiality).toBe("secret");
     expect((merged as JSONSchemaObj).ifc?.writeAuthorizedBy).toEqual(claim);
@@ -614,8 +646,8 @@ describe("mergeCfcSchemaEnvelopes", () => {
 
   it("rejects stamped writeAuthorizedBy claims with different bindings", () => {
     expect(() =>
-      mergeCfcSchemaEnvelopes({
-        ifc: {
+      mergeCfcSchemaEnvelopes(
+        schemaWithIfc({
           writeAuthorizedBy: {
             __ctWriterIdentityOf: {
               file: "/system/profile-home.tsx",
@@ -623,17 +655,16 @@ describe("mergeCfcSchemaEnvelopes", () => {
               moduleIdentity: "module-identity-hash",
             },
           },
-        } as any,
-      }, {
-        ifc: {
+        }),
+        schemaWithIfc({
           writeAuthorizedBy: {
             __ctWriterIdentityOf: {
               file: "/system/profile-home.tsx",
               path: ["delete"],
             },
           },
-        } as any,
-      })
+        }),
+      )
     ).toThrow(/writeAuthorizedBy must remain stable/);
   });
 
