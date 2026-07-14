@@ -4,7 +4,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type FactoryInput } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-flow-pointwise");
 const space = signer.did();
@@ -14,6 +14,21 @@ type StoredEntry = {
   label: { confidentiality?: string[]; integrity?: unknown[] };
   origin?: string;
   observes?: string;
+};
+
+type LiftFunction = <Input, Output>(
+  fn: (value: Input) => Output,
+) => (value: unknown) => unknown;
+
+type CollectionPatternHelpers = {
+  mapWithPattern(op: unknown, params: Record<string, unknown>): unknown;
+  filterWithPattern(op: unknown, params: Record<string, unknown>): unknown;
+  flatMapWithPattern(op: unknown, params: Record<string, unknown>): unknown;
+};
+
+type ElementPatternInput = {
+  element: unknown;
+  index: number;
 };
 
 // S16 phase B: pointwise label precision is a structural fact of the
@@ -76,6 +91,17 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       .filter((e) => e.origin === "derived")
       .flatMap((e) => e.label.confidentiality ?? []);
 
+  const builderApi = (rt: Runtime) => {
+    const { commonfabric } = createTrustedBuilder(rt);
+    return commonfabric as unknown as {
+      pattern: typeof commonfabric.pattern;
+      lift: LiftFunction;
+    };
+  };
+
+  const collectionValues = (values: unknown): CollectionPatternHelpers =>
+    values as CollectionPatternHelpers;
+
   // confidentiality of the container's STRUCTURE label (origin structure at the
   // container root) — the membership/order taint (§8.5.6.1).
   const structureConfidentiality = (id: string): string[] =>
@@ -103,13 +129,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "pointwise-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "pointwise-el-1", { n: 2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = builderApi(runtime);
     const double = lift((value: { n: number }) => ({ doubled: value.n * 2 }));
-    let mappedRef: any;
 
     const setup = runtime.edit();
     const el0 = runtime.getCell(space, "pointwise-el-0", undefined, setup);
@@ -126,11 +147,11 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
-      mappedRef = (values as any).mapWithPattern(
-        pattern(({ element }: FactoryInput<any>) => double(element)),
+      const mapped = collectionValues(values).mapWithPattern(
+        pattern(({ element }: ElementPatternInput) => double(element)),
         {},
       );
-      return { mapped: mappedRef };
+      return { mapped };
     });
 
     const tx = runtime.edit();
@@ -165,7 +186,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await result.pull();
     await runtime.idle();
 
-    const mapped = (result.key("mapped") as any).get() as Array<
+    const mapped = result.key("mapped").get() as Array<
       { doubled: number }
     >;
     expect(mapped.map((m) => m?.doubled)).toEqual([2, 4]);
@@ -184,7 +205,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     // later per-element results.
     const probe = async (index: number, cause: string): Promise<string[]> => {
       const ptx = runtime!.edit();
-      const value = (result.key("mapped") as any).key(index).withTx(ptx)
+      const value = result.key("mapped").key(index).withTx(ptx)
         .get() as { doubled: number };
       const out = runtime!.getCell(space, cause, undefined, ptx);
       out.set({ copied: value.doubled });
@@ -218,13 +239,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "memb-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "memb-el-1", { n: 2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = builderApi(runtime);
     const isPositive = lift((value: { n: number }) => value.n > 0);
-    let filteredRef: any;
 
     const setup = runtime.edit();
     const el0 = runtime.getCell(space, "memb-el-0", undefined, setup);
@@ -242,11 +258,11 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
-      filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
+      const kept = collectionValues(values).filterWithPattern(
+        pattern(({ element }: ElementPatternInput) => isPositive(element)),
         {},
       );
-      return { kept: filteredRef };
+      return { kept };
     });
 
     const tx = runtime.edit();
@@ -267,14 +283,14 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await result.pull();
     await runtime.idle();
 
-    const kept = (result.key("kept") as any).get() as Array<{ n: number }>;
+    const kept = result.key("kept").get() as Array<{ n: number }>;
     expect(kept.length).toBe(2);
 
     // A consumer of the membership structure (the array shape itself, not
     // any element's content) picks up the predicate taint of every element
     // the filter considered.
     const ptx = runtime.edit();
-    const keptLength = ((result.key("kept") as any).withTx(ptx)
+    const keptLength = (result.key("kept").withTx(ptx)
       .get() as Array<unknown>).length;
     const out = runtime.getCell(space, "memb-probe", undefined, ptx);
     out.set({ count: keptLength });
@@ -306,13 +322,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "shape-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "shape-el-1", { n: -2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = builderApi(runtime);
     const isPositive = lift((value: { n: number }) => value.n > 0);
-    let filteredRef: any;
 
     const setup = runtime.edit();
     const el0 = runtime.getCell(space, "shape-el-0", undefined, setup);
@@ -330,11 +341,11 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
-      filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
+      const kept = collectionValues(values).filterWithPattern(
+        pattern(({ element }: ElementPatternInput) => isPositive(element)),
         {},
       );
-      return { kept: filteredRef };
+      return { kept };
     });
 
     const tx = runtime.edit();
@@ -358,7 +369,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     // Elements stay cells under this schema: the probe reads the array's
     // shape (membership/length) without a single element content read.
     const ptx = runtime.edit();
-    const keptCells = (result.key("kept") as any)
+    const keptCells = result.key("kept")
       .asSchema({ type: "array", items: { asCell: ["cell"] } })
       .withTx(ptx)
       .get() as unknown[];
@@ -390,13 +401,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "empty-el-0", { n: -1 }, "alice-secret");
     await seedLabeledDoc(runtime, "empty-el-1", { n: -2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = builderApi(runtime);
     const isPositive = lift((value: { n: number }) => value.n > 0);
-    let filteredRef: any;
 
     const setup = runtime.edit();
     const el0 = runtime.getCell(space, "empty-el-0", undefined, setup);
@@ -414,11 +420,11 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
-      filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
+      const kept = collectionValues(values).filterWithPattern(
+        pattern(({ element }: ElementPatternInput) => isPositive(element)),
         {},
       );
-      return { kept: filteredRef };
+      return { kept };
     });
 
     const tx = runtime.edit();
@@ -440,7 +446,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await runtime.idle();
 
     const ptx = runtime.edit();
-    const keptCells = (result.key("kept") as any)
+    const keptCells = result.key("kept")
       .asSchema({ type: "array", items: { asCell: ["cell"] } })
       .withTx(ptx)
       .get() as unknown[];
@@ -456,7 +462,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(probeConf).toContainEqual("bob-secret");
   });
 
-  const resolvedContainerId = (keptCell: any): string => {
+  const resolvedContainerId = (keptCell: Cell<unknown>): string => {
     const rtx = runtime!.edit();
     const id =
       keptCell.withTx(rtx).resolveAsCell().getAsNormalizedFullLink().id;
@@ -482,13 +488,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "ix-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "ix-el-1", { n: 2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = builderApi(runtime);
     const keepFirst = lift((i: number) => i < 1);
-    let filteredRef: any;
 
     const setup = runtime.edit();
     const el0 = runtime.getCell(space, "ix-el-0", undefined, setup);
@@ -503,12 +504,12 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
-      filteredRef = (values as any).filterWithPattern(
+      const kept = collectionValues(values).filterWithPattern(
         // reads only `index`, never element content
-        pattern(({ index }: FactoryInput<any>) => keepFirst(index)),
+        pattern(({ index }: ElementPatternInput) => keepFirst(index)),
         {},
       );
-      return { kept: filteredRef };
+      return { kept };
     });
 
     const tx = runtime.edit();
@@ -554,13 +555,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "grow-el-1", { n: 2 }, "bob-secret");
     await seedLabeledDoc(runtime, "grow-el-2", { n: 3 }, "carol-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = builderApi(runtime);
     const isPositive = lift((value: { n: number }) => value.n > 0);
-    let filteredRef: any;
 
     const setup = runtime.edit();
     const el0 = runtime.getCell(space, "grow-el-0", undefined, setup);
@@ -576,11 +572,11 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
-      filteredRef = (values as any).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => isPositive(element)),
+      const kept = collectionValues(values).filterWithPattern(
+        pattern(({ element }: ElementPatternInput) => isPositive(element)),
         {},
       );
-      return { kept: filteredRef };
+      return { kept };
     });
 
     const tx = runtime.edit();
@@ -646,14 +642,9 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "fm-el-0", { n: 1 }, "alice-secret");
     await seedLabeledDoc(runtime, "fm-el-1", { n: 2 }, "bob-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: any) => unknown) => (value: unknown) => unknown;
-    };
+    const { pattern, lift } = builderApi(runtime);
     // op reads element content and emits a one-element segment
     const toSegment = lift((value: { n: number }) => [value.n]);
-    let flattenedRef: any;
 
     const setup = runtime.edit();
     const el0 = runtime.getCell(space, "fm-el-0", undefined, setup);
@@ -668,11 +659,11 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
-      flattenedRef = (values as any).flatMapWithPattern(
-        pattern(({ element }: FactoryInput<any>) => toSegment(element)),
+      const flattened = collectionValues(values).flatMapWithPattern(
+        pattern(({ element }: ElementPatternInput) => toSegment(element)),
         {},
       );
-      return { flattened: flattenedRef };
+      return { flattened };
     });
 
     const tx = runtime.edit();
@@ -714,13 +705,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     await seedLabeledDoc(runtime, "rp-el-0", { n: 1 }, "dave-secret");
     await seedLabeledDoc(runtime, "rp-el-1", { n: 2 }, "erin-secret");
 
-    const { commonfabric } = createTrustedBuilder(runtime);
-    const { pattern, lift } = commonfabric as unknown as {
-      pattern: typeof commonfabric.pattern;
-      lift: (fn: (value: { n: number }) => unknown) => (
-        value: unknown,
-      ) => unknown;
-    };
+    const { pattern, lift } = builderApi(runtime);
     // Reads element content, drops everything: the result stays [] across
     // membership changes, so the re-stamp rides the declared-container path
     // (no container value write to piggyback on).
@@ -739,10 +724,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
-      const kept = (values as unknown as {
-        filterWithPattern: (op: unknown, params: unknown) => unknown;
-      }).filterWithPattern(
-        pattern(({ element }: FactoryInput<any>) => dropAll(element)),
+      const kept = collectionValues(values).filterWithPattern(
+        pattern(({ element }: ElementPatternInput) => dropAll(element)),
         {},
       );
       return { kept };
