@@ -109,6 +109,7 @@ export {
 export * from "./pattern-manager.ts";
 export {
   asPatternIdentityRef,
+  extractDefaultValues,
   getPatternIdentityRef,
   getPatternSource,
   patternIdentityKey,

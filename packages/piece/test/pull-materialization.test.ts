@@ -11,6 +11,7 @@ import {
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { defer } from "@commonfabric/utils/defer";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { validateAgainstSchema } from "@commonfabric/runner/cfc";
 import { PieceManager } from "../src/manager.ts";
 import { PieceController } from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
@@ -152,6 +153,7 @@ function compiledSchemaEvolutionProgram(version: 1 | 2 | 3): RuntimeProgram {
       "  value: number;",
       "  label?: string;",
       "  retries: number | Default<0>;",
+      "  options: { attempts: number | Default<1> };",
       "  mode?: string | number;",
       "}",
       "interface Output { doubled: number; summary?: string; }",
@@ -350,11 +352,16 @@ describe("piece pull materialization", () => {
     expect(await controller.input.get()).toEqual({
       value: 4,
       retries: 0,
+      options: { attempts: 1 },
     });
-    expect((await controller.input.getCell()).getRaw()).toEqual({
+    const rawInput = (await controller.input.getCell()).getRaw();
+    expect(rawInput).toEqual({
       value: 4,
       retries: 0,
+      options: { attempts: 1 },
     });
+    expect(validateAgainstSchema(updatedPattern.argumentSchema, rawInput))
+      .toBeUndefined();
     expect(await controller.result.get()).toEqual({
       doubled: 4,
       summary: "updated",

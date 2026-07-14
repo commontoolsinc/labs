@@ -1,4 +1,13 @@
-import { deepEqual, type JSONSchema, type Pattern } from "@commonfabric/runner";
+import {
+  deepEqual,
+  extractDefaultValues,
+  type JSONSchema,
+  type Pattern,
+} from "@commonfabric/runner";
+import {
+  resolveCfcSchemaRefs,
+  validateAgainstSchema,
+} from "@commonfabric/runner/cfc";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -105,8 +114,6 @@ function schemaSubsetIssue(
   path: string,
   context: CompatibilityContext,
 ): string | undefined {
-  if (deepEqual(sourceInput, targetInput)) return undefined;
-
   const source = resolveSchema(sourceInput, context.sourceRoot);
   const target = resolveSchema(targetInput, context.targetRoot);
   if (source === undefined || target === undefined) {
@@ -130,11 +137,11 @@ function schemaSubsetIssue(
     const sourceAlternatives = schemaAlternatives(source);
     const targetAlternatives = schemaAlternatives(target);
     if (sourceAlternatives || targetAlternatives) {
-      const sources = sourceAlternatives ?? [source];
-      const targets = targetAlternatives ?? [target];
+      const sources = sourceAlternatives ?? [[source]];
+      const targets = targetAlternatives ?? [[target]];
       for (const sourceAlternative of sources) {
         const accepted = targets.some((targetAlternative) =>
-          schemaSubsetIssue(
+          schemaConjunctionSubsetIssue(
             sourceAlternative,
             targetAlternative,
             path,
@@ -212,7 +219,10 @@ function objectSubsetIssue(
     for (const property of targetRequired) {
       if (
         !sourceRequired.has(property) &&
-        !schemaProvidesDefault(targetProperties[property])
+        !schemaProvidesValidDefault(
+          targetProperties[property],
+          context.targetRoot,
+        )
       ) {
         return `${path}.${property}: newly required argument field has no default`;
       }
@@ -226,7 +236,10 @@ function objectSubsetIssue(
     for (const property of sourceRequired) {
       if (
         !(property in targetProperties) &&
-        !schemaProvidesDefault(sourceProperties[property])
+        !schemaProvidesValidDefault(
+          sourceProperties[property],
+          context.sourceRoot,
+        )
       ) {
         return `${path}.${property}: newly required result field has no default`;
       }
@@ -396,10 +409,44 @@ function scalarConstraintSubsetIssue(
   return undefined;
 }
 
-function schemaAlternatives(schema: SchemaObject): JSONSchema[] | undefined {
-  if (schema.anyOf) return [...schema.anyOf];
+function schemaAlternatives(
+  schema: SchemaObject,
+): JSONSchema[][] | undefined {
+  if (schema.anyOf) {
+    const { anyOf, ...base } = schema;
+    return anyOf.map((branch) => [base, branch]);
+  }
   if (Array.isArray(schema.type)) {
-    return schema.type.map((type) => ({ ...schema, type }));
+    return schema.type.map((type) => [{ ...schema, type }]);
+  }
+  return undefined;
+}
+
+/**
+ * Prove that one schema conjunction is a subset of another. Each target
+ * constraint must be implied by at least one source constraint. This is
+ * deliberately conservative: two source constraints might jointly imply a
+ * target constraint that neither proves alone, in which case we reject the
+ * update rather than risk accepting an incompatible one.
+ */
+function schemaConjunctionSubsetIssue(
+  source: readonly JSONSchema[],
+  target: readonly JSONSchema[],
+  path: string,
+  context: CompatibilityContext,
+): string | undefined {
+  for (const targetConstraint of target) {
+    const implied = source.some((sourceConstraint) =>
+      schemaSubsetIssue(
+        sourceConstraint,
+        targetConstraint,
+        path,
+        context,
+      ) === undefined
+    );
+    if (!implied) {
+      return `${path}: a schema alternative accepted previously is not accepted by the candidate`;
+    }
   }
   return undefined;
 }
@@ -420,33 +467,23 @@ function declaresArrayShape(schema: SchemaObject): boolean {
     schema.items !== undefined;
 }
 
-function schemaProvidesDefault(schema: JSONSchema | undefined): boolean {
-  if (typeof schema !== "object" || schema === null) return false;
-  if (Object.hasOwn(schema, "default")) return true;
-  return schema.type === "object" && schema.properties !== undefined &&
-    Object.values(schema.properties).some(schemaProvidesDefault);
+function schemaProvidesValidDefault(
+  schema: JSONSchema | undefined,
+  fullSchema: JSONSchema,
+): boolean {
+  if (schema === undefined) return false;
+  const value = extractDefaultValues(schema);
+  return value !== undefined &&
+    validateAgainstSchema(schema, value, fullSchema) === undefined;
 }
 
 function resolveSchema(
   schema: JSONSchema,
   root: JSONSchema,
 ): JSONSchema | undefined {
-  if (typeof schema !== "object" || schema === null || !schema.$ref) {
-    return schema;
-  }
-  if (!schema.$ref.startsWith("#/")) return undefined;
-  let value: unknown = root;
-  for (const encodedSegment of schema.$ref.slice(2).split("/")) {
-    const segment = encodedSegment.replaceAll("~1", "/").replaceAll("~0", "~");
-    if (typeof value !== "object" || value === null || !(segment in value)) {
-      return undefined;
-    }
-    value = (value as Record<string, unknown>)[segment];
-  }
-  return typeof value === "boolean" ||
-      (typeof value === "object" && value !== null)
-    ? value as JSONSchema
-    : undefined;
+  return typeof schema === "object" && schema !== null && schema.$ref
+    ? resolveCfcSchemaRefs(schema, root)
+    : schema;
 }
 
 function pairIsActive(
