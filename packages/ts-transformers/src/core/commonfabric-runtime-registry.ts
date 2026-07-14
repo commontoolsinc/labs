@@ -295,6 +295,12 @@ export const COMMONFABRIC_RUNTIME_EXPORT_REGISTRY = [
     reactiveOrigin: true,
   },
   {
+    exportName: "latestComplete",
+    category: "call",
+    callKind: "runtime-call",
+    reactiveOrigin: true,
+  },
+  {
     exportName: "observeAvailability",
     category: "call",
     callKind: "availability-observer",

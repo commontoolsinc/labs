@@ -49,6 +49,7 @@ import {
   generateTextStream,
   ifElse,
   inspectConfLabel,
+  latestComplete,
   llm,
   llmDialog,
   navigateTo,
@@ -187,6 +188,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     hasSchemaMismatch,
     observeAvailability,
     resultOf,
+    latestComplete,
 
     // Built-in modules
     str: trustedStr,

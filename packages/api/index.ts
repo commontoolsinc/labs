@@ -1485,6 +1485,21 @@ export type FactoryInput<T> =
     : T);
 
 /**
+ * Recursively removes unavailable control values and unwraps reactive cell
+ * inputs to the complete value shape retained by `latestComplete()`.
+ */
+export type LatestCompleteValue<T> = T extends DataUnavailableVariant ? never
+  : T extends AnyBrandedCell<infer U> ? LatestCompleteValue<U>
+  : T extends readonly unknown[] ? {
+      [K in keyof T]: LatestCompleteValue<T[K]>;
+    }
+  : T extends FabricInstance ? T
+  // deno-lint-ignore ban-types
+  : T extends Function ? T
+  : T extends object ? { [K in keyof T]: LatestCompleteValue<T[K]> }
+  : T;
+
+/**
  * Matches any non-opaque Cell type (Cell, Stream, ComparableCell, etc.) that may be
  * wrapped in any number of Reactive layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
  */
@@ -3014,6 +3029,14 @@ export interface ObserveAvailabilityFunction {
 export type ResultOfFunction = <R>(
   result: R,
 ) => Reactive<AvailableResult<R>>;
+
+/**
+ * Retains the last recursively complete snapshot of one value or value graph.
+ * Before the first complete snapshot, the result is pending at runtime.
+ */
+export type LatestCompleteFunction = <T>(
+  input: FactoryInput<T>,
+) => Reactive<LatestCompleteValue<T>>;
 export type ToCompactDebugStringFunction = (
   value: unknown,
   maxLength?: number,
@@ -3112,6 +3135,7 @@ export declare const isSyncing: IsSyncingFunction;
 export declare const hasSchemaMismatch: HasSchemaMismatchFunction;
 export declare const observeAvailability: ObserveAvailabilityFunction;
 export declare const resultOf: ResultOfFunction;
+export declare const latestComplete: LatestCompleteFunction;
 export declare const toCompactDebugString: ToCompactDebugStringFunction;
 export declare const toIndentedDebugString: ToIndentedDebugStringFunction;
 

@@ -4215,6 +4215,52 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
         }
       }
 
+      // latestComplete(value) retains a stateful snapshot through one schema
+      // that represents the call's recursively usable return type. Lower the
+      // public one-argument form to the raw built-in's hidden input record.
+      if (
+        callKind?.kind === "runtime-call" &&
+        callKind.exportName === "latestComplete"
+      ) {
+        const factory = transformation.factory;
+        const value = node.arguments[0];
+        if (!value) {
+          return ts.visitEachChild(node, visit, transformation);
+        }
+
+        const resolved = resolveInjectableSchemaType(
+          undefined,
+          checker,
+          sourceFile,
+          factory,
+          typeRegistry,
+          () => checker.getTypeAtLocation(node),
+        );
+        const schemaCall = createRegisteredSchemaCallFromResolvedType(
+          context,
+          resolved,
+          checker,
+          typeRegistry,
+        );
+        if (schemaCall) {
+          const updated = factory.createCallExpression(
+            node.expression,
+            node.typeArguments,
+            [
+              factory.createObjectLiteralExpression(
+                [
+                  factory.createPropertyAssignment("value", value),
+                  factory.createPropertyAssignment("schema", schemaCall),
+                ],
+                true,
+              ),
+            ],
+          );
+          context.markSchemaInjected(updated);
+          return ts.visitEachChild(updated, visit, transformation);
+        }
+      }
+
       // Reactive conditionals prepend a widened schema per argument plus the
       // result. when/unless are 2-arity (condition, value/fallback); ifElse is
       // 3-arity (condition, ifTrue, ifFalse).

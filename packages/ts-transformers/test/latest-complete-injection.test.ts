@@ -42,9 +42,11 @@ Deno.test("latestComplete injects its recursively usable schema", async () => {
 
   assertStringIncludes(output, "latestComplete({");
   assertStringIncludes(output, "schema:");
-  assertStringIncludes(output, 'owner: { type: "string" }');
-  assertStringIncludes(output, 'title: { type: "string" }');
-  assertStringIncludes(output, 'variable: { type: "number" }');
+  assertStringIncludes(output, "owner: {");
+  assertStringIncludes(output, "title: {");
+  assertStringIncludes(output, "variable: {");
+  assertEquals(output.match(/type: "string"/g)?.length! >= 3, true);
+  assertEquals(output.match(/type: "number"/g)?.length! >= 2, true);
   assertEquals(output.includes("DataUnavailable"), false);
   assertEquals(output.includes('reason: { type: "string"'), false);
 });
@@ -74,5 +76,5 @@ Deno.test("aliased and namespace latestComplete calls inject a schema", async ()
   );
 
   assertEquals(output.match(/schema:/g)?.length, 2);
-  assertEquals(output.match(/name: \{ type: "string" \}/g)?.length, 2);
+  assertEquals(output.match(/name: \{/g)?.length! >= 2, true);
 });

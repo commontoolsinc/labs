@@ -45,6 +45,7 @@ import type {
   JSONSchema,
   JSONValue,
   JSXElement,
+  LatestCompleteFunction,
   LiftFunction,
   LLMDialogFunction,
   LLMFunction,
@@ -353,6 +354,7 @@ export interface BuilderFunctionsAndConstants {
   hasSchemaMismatch: HasSchemaMismatchFunction;
   observeAvailability: ObserveAvailabilityFunction;
   resultOf: ResultOfFunction;
+  latestComplete: LatestCompleteFunction;
 
   // Built-in modules
   str: StrFunction;

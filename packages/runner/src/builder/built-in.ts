@@ -32,6 +32,7 @@ import type {
   GenerateTextFunction,
   GenerateTextStreamFunction,
   InspectConfLabelResult,
+  LatestCompleteFunction,
   PatternToolFunction,
   PatternToolResult,
   SqliteDatabaseFunction,
@@ -220,6 +221,11 @@ const fetchProgramState = createNodeFactory({
 
 export const fetchProgram =
   ((params) => fetchProgramState(params).result) as FetchProgramFunction;
+
+export const latestComplete = createNodeFactory({
+  type: "ref",
+  implementation: "latestComplete",
+}) as unknown as LatestCompleteFunction;
 
 export const streamData = createNodeFactory({
   type: "ref",

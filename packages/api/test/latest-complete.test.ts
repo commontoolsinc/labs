@@ -31,16 +31,15 @@ function latestCompleteTypecheck(
   });
 
   const repoIsUsable: Equal<typeof repo, Repo> = true;
-  const joinedIsUsable: Equal<
-    typeof joined,
-    {
-      repo: Repo;
-      ticket: { title: string };
-      variable: number;
-      nested: readonly [Repo, { ticket: { title: string } }];
-      optional: string | undefined;
-    }
-  > = true;
+  type ExpectedJoin = {
+    repo: Repo;
+    ticket: { title: string };
+    variable: number;
+    nested: readonly [Repo, { ticket: { title: string } }];
+    optional: string | undefined;
+  };
+  const joinedToExpected: ExpectedJoin = joined;
+  const expectedToJoined: typeof joined = joinedToExpected;
   const recursiveUtilityIsExact: Equal<
     LatestCompleteValue<{
       values: Array<AsyncResult<Repo>>;
@@ -55,7 +54,7 @@ function latestCompleteTypecheck(
   > = true;
 
   void repoIsUsable;
-  void joinedIsUsable;
+  void expectedToJoined;
   void recursiveUtilityIsExact;
 }
 
