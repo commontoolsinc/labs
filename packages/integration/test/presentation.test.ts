@@ -1,9 +1,15 @@
-import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import {
   buildCompositionPlan,
   buildFfconcat,
   FrameRecorder,
   parsePresentationConfig,
+  PresentationSession,
   type RecordedFrame,
 } from "../presentation/mod.ts";
 import type { Page_screencastFrame } from "../../vendor-astral/bindings/celestial.ts";
@@ -193,6 +199,78 @@ Deno.test("FrameRecorder acknowledges immediately and preserves variable timing"
   }
 });
 
+Deno.test("FrameRecorder waits for late acknowledgement failures", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    let rejectAcknowledgement!: (reason: Error) => void;
+    const page = new FakeScreencastPage();
+    page.acknowledge = () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectAcknowledgement = reject;
+      });
+    const recorder = new FrameRecorder(page, {
+      participantDir: dir,
+      id: "alice",
+      label: "Alice",
+      color: "#7c3aed",
+      quality: 85,
+      viewport: { width: 1280, height: 720 },
+      finalHoldMs: 800,
+      writeFile: () => Promise.resolve(),
+    });
+    await recorder.start();
+    page.emit(screencastFrame(1));
+    const stopping = recorder.stop();
+    rejectAcknowledgement(new Error("CDP closed"));
+
+    await assertRejects(
+      () => stopping,
+      Error,
+      "failed to acknowledge screencast frame",
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("PresentationSession serializes manifests and records failed steps", async () => {
+  const dir = await Deno.makeTempDir();
+  try {
+    const session = new PresentationSession({
+      enabled: true,
+      outputDir: dir,
+      videoFileName: "demo.mp4",
+      viewport: { width: 1280, height: 720 },
+      typingDelayMs: 55,
+      cursorTravelMs: 350,
+      cursorSettleMs: 150,
+      clickPulseMs: 180,
+      postResultHoldMs: 0,
+      jpegQuality: 85,
+      keepFrames: false,
+    });
+    await Promise.all(
+      Array.from({ length: 8 }, () => session.writeManifest()),
+    );
+    await assertRejects(
+      () =>
+        session.step(
+          "failing action",
+          () => Promise.reject(new Error("expected failure")),
+        ),
+      Error,
+      "expected failure",
+    );
+    const manifest = JSON.parse(
+      await Deno.readTextFile(`${dir}/manifest.json`),
+    );
+    assertEquals(manifest.status, "test-failed");
+    assertEquals(manifest.steps[0].failed, true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 function frame(
   path: string,
   recordedAtMs: number,
@@ -211,6 +289,7 @@ function frame(
 class FakeScreencastPage {
   listener?: (frame: Page_screencastFrame) => void;
   acknowledged: number[] = [];
+  acknowledge: (sessionId: number) => Promise<void> = () => Promise.resolve();
 
   startScreencast(): Promise<void> {
     return Promise.resolve();
@@ -222,7 +301,7 @@ class FakeScreencastPage {
 
   acknowledgeScreencastFrame(sessionId: number): Promise<void> {
     this.acknowledged.push(sessionId);
-    return Promise.resolve();
+    return this.acknowledge(sessionId);
   }
 
   onScreencastFrame(

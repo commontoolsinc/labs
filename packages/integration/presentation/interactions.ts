@@ -83,13 +83,19 @@ export class PresentationInteractions {
     value: string,
     timeout: number,
   ): Promise<void> {
-    await waitForCondition(this.#page, cfInputIsFillable, {
-      timeout,
-      args: [selector],
-    });
     const host = await this.#page.waitForSelector(selector, {
       strategy: "pierce",
       timeout,
+    });
+    await host.evaluate((element: Element) => {
+      const input = element instanceof HTMLInputElement
+        ? element
+        : element.shadowRoot?.querySelector("input");
+      input?.scrollIntoView({ block: "center", inline: "center" });
+    });
+    await waitForCondition(this.#page, cfInputIsFillable, {
+      timeout,
+      args: [selector],
     });
     await this.#moveCursorToElement(host);
     const focused = await host.evaluate((element: Element) => {

@@ -43,6 +43,7 @@ export class FrameRecorder {
   readonly #clock: RecorderClock;
   #removeListener?: () => void;
   #writeTail: Promise<void> = Promise.resolve();
+  #pendingAcknowledgements = new Set<Promise<void>>();
   #pendingWrites = 0;
   #error?: Error;
   #startedAtMs?: number;
@@ -95,6 +96,7 @@ export class FrameRecorder {
       this.#removeListener = undefined;
       this.#endedAtMs = this.#clock.now();
       await this.#writeTail;
+      await Promise.all(this.#pendingAcknowledgements);
       this.#finalizeDurations();
     }
     if (this.#error) throw this.#error;
@@ -118,13 +120,17 @@ export class FrameRecorder {
 
   #acceptFrame(frame: Page_screencastFrame): void {
     if (this.#state === "stopped") return;
-    void this.#page.acknowledgeScreencastFrame(frame.sessionId).catch((cause) =>
-      this.#recordError(
-        new Error("failed to acknowledge screencast frame", {
-          cause,
-        }),
+    const acknowledgement = this.#page
+      .acknowledgeScreencastFrame(frame.sessionId)
+      .catch((cause) =>
+        this.#recordError(
+          new Error("failed to acknowledge screencast frame", {
+            cause,
+          }),
+        )
       )
-    );
+      .finally(() => this.#pendingAcknowledgements.delete(acknowledgement));
+    this.#pendingAcknowledgements.add(acknowledgement);
 
     const limit = this.#options.maxPendingWrites ?? 120;
     if (this.#pendingWrites >= limit) {

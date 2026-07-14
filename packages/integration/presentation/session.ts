@@ -40,6 +40,7 @@ export class PresentationSession {
   readonly #byPage = new WeakMap<Page, ParticipantState>();
   readonly #steps: DemoStep[] = [];
   readonly #manifest: DemoManifest;
+  #manifestWriteTail: Promise<void> = Promise.resolve();
   #finalized = false;
 
   constructor(config: Extract<PresentationConfig, { enabled: true }>) {
@@ -159,6 +160,10 @@ export class PresentationSession {
       return await action();
     } catch (cause) {
       step.failed = true;
+      this.#manifest.status = "test-failed";
+      this.#manifest.error ??= cause instanceof Error
+        ? cause.message
+        : String(cause);
       throw cause;
     } finally {
       step.endedAtMs = this.now();
@@ -218,9 +223,9 @@ export class PresentationSession {
       );
       await composeParticipants({ ffmpeg: command, streams, outputPath });
       this.#manifest.outputPath = outputPath;
-      this.#manifest.status = this.#manifest.status === "capture-failed"
-        ? "capture-failed"
-        : "passed";
+      if (this.#manifest.status === "recording") {
+        this.#manifest.status = "passed";
+      }
       this.#syncManifest();
       await this.writeManifest();
       if (!this.#config.keepFrames && this.#manifest.status === "passed") {
@@ -246,12 +251,16 @@ export class PresentationSession {
   }
 
   async writeManifest(): Promise<void> {
-    await Deno.mkdir(this.#config.outputDir, { recursive: true });
-    this.#syncManifest();
-    await writeManifest(
-      join(this.#config.outputDir, "manifest.json"),
-      this.#manifest,
-    );
+    const write = this.#manifestWriteTail.then(async () => {
+      await Deno.mkdir(this.#config.outputDir, { recursive: true });
+      this.#syncManifest();
+      await writeManifest(
+        join(this.#config.outputDir, "manifest.json"),
+        this.#manifest,
+      );
+    });
+    this.#manifestWriteTail = write.catch(() => {});
+    await write;
   }
 
   #syncManifest(): void {

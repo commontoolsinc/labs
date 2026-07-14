@@ -214,10 +214,13 @@ export class ElementHandle {
       await this.#page.mouse.click(point.x, point.y, opts);
     } catch (cause) {
       error = cause;
-      throw cause;
-    } finally {
-      await this.#page.notifyAfterClick(this, point, error);
     }
+    try {
+      await this.#page.notifyAfterClick(this, point, error);
+    } catch (afterError) {
+      if (error === undefined) throw afterError;
+    }
+    if (error !== undefined) throw error;
   }
 
   /**
@@ -334,10 +337,13 @@ export class ElementHandle {
       await this.#page.keyboard.type(text, opts);
     } catch (cause) {
       error = cause;
-      throw cause;
-    } finally {
-      await this.#page.notifyAfterType(this, text, error);
     }
+    try {
+      await this.#page.notifyAfterType(this, text, error);
+    } catch (afterError) {
+      if (error === undefined) throw afterError;
+    }
+    if (error !== undefined) throw error;
   }
 
   /**
