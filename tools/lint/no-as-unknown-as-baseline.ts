@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/data-updating.test.ts": [
-    "1898:8:1hppxiw",
-    "1922:8:ehlquf",
-    "2011:8:132fkzs",
-    "2070:8:gjazrg",
-  ],
   "packages/runner/test/materializer-envelope-collection.test.ts": [
     "170:23:1m1lluo",
   ],

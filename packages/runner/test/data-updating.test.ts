@@ -1895,7 +1895,7 @@ describe("scope-isolation write guard", () => {
       {
         type: "object",
         properties: { profile: { type: ["object", "undefined"] } },
-      } as unknown as JSONSchema,
+      } as const satisfies JSONSchema,
       tx,
     );
     dest.set({});
@@ -1919,7 +1919,7 @@ describe("scope-isolation write guard", () => {
         properties: {
           profile: { type: "object", default: {} },
         },
-      } as unknown as JSONSchema,
+      } as const satisfies JSONSchema,
       tx,
     );
     dest.set({});
@@ -2008,7 +2008,7 @@ describe("scope-isolation write guard", () => {
             $ref: "#/$defs/P",
           },
         },
-      } as unknown as JSONSchema,
+      } as const satisfies JSONSchema,
       tx,
     );
     dest.set({});
@@ -2067,7 +2067,7 @@ describe("scope-isolation write guard", () => {
         properties: {
           profile: { type: "object", default: null },
         },
-      } as unknown as JSONSchema,
+      } as const satisfies JSONSchema,
       tx,
     );
     dest.set({});
