@@ -7,7 +7,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createBuilder } from "../src/builder/factory.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
-import type { Cell } from "../src/cell.ts";
+import { type Cell, createCell } from "../src/cell.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { toMemorySpaceAddress } from "../src/link-types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -246,6 +246,36 @@ describe("latestComplete", () => {
 
     await writeAndSettle(source, 4, result);
     expect(result.key("snapshot").get()).toBe(4);
+  });
+
+  it("uses the narrowest input scope for its persisted snapshot", async () => {
+    const baseSource = runtime.getCell<number>(
+      space,
+      "latest scoped source",
+      undefined,
+      tx,
+    );
+    const source = createCell<number>(
+      runtime,
+      { ...baseSource.getAsNormalizedFullLink(), scope: "user" },
+      tx,
+    );
+    source.set(9);
+
+    const Root = pattern<{ source: number }>(({ source }) => ({
+      snapshot: latestComplete({ value: source, schema: numberSchema }),
+    }));
+    const result = runtime.run(
+      tx,
+      Root,
+      { source: source.getAsLink() },
+      runtime.getCell(space, "latest scoped result", undefined, tx),
+    );
+
+    await commitAndPull(result);
+    const snapshot = result.key("snapshot").resolveAsCell();
+    expect(snapshot.get()).toBe(9);
+    expect(snapshot.getAsNormalizedFullLink().scope).toBe("user");
   });
 });
 
