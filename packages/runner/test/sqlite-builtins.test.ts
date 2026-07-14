@@ -326,6 +326,31 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     }
   });
 
+  it("validates each typed row with its own local ref root", async () => {
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    provider.sqliteQuery = () => Promise.resolve({ rows: [{ id: 1 }] });
+    try {
+      const q = await runQueryToSettled(
+        "SELECT id FROM notes",
+        "sqlite-row-schema-local-ref",
+        {
+          rowSchema: {
+            type: "object",
+            properties: { id: { $ref: "#/$defs/Identifier" } },
+            required: ["id"],
+            $defs: { Identifier: { type: "number" } },
+          },
+        },
+      );
+      expect(q).toEqual({ rows: [{ id: 1 }] });
+    } finally {
+      provider.sqliteQuery = original;
+    }
+  });
+
   it("propagates unavailable query inputs without issuing a read", async () => {
     const provider = runtime.storageManager.open(space) as unknown as {
       sqliteQuery: (...a: unknown[]) => Promise<unknown>;

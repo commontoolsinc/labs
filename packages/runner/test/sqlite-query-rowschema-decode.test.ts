@@ -115,7 +115,18 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
     const rowSchema = {
       type: "object",
       properties: {
-        author_cf_link: { asCell: ["cell"], type: "object" },
+        author_cf_link: {
+          $ref: "#/$defs/User",
+          asCell: ["cell"],
+        },
+      },
+      required: ["author_cf_link"],
+      $defs: {
+        User: {
+          type: "object",
+          properties: { name: { type: "string" } },
+          required: ["name"],
+        },
       },
     } as unknown as JSONSchema;
 

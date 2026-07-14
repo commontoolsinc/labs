@@ -214,6 +214,34 @@ function asCellColumnsFromRowSchema(rowSchema: unknown): string[] {
     .map(([k]) => k);
 }
 
+/**
+ * The row schema describes the value a pattern observes after link
+ * materialization, while SQLite stores an asCell column as an encoded link and
+ * this builtin writes its decoded sigil object. Validate those transport
+ * objects as objects rather than following the field's `$ref` and requiring
+ * the linked value itself to be embedded in the row.
+ *
+ * SQLite rows are flat, so only direct row properties can name result columns.
+ */
+function rowSchemaForDecodedLinks(
+  rowSchema: JSONSchema,
+  linkColumns: readonly string[],
+): JSONSchema {
+  if (
+    typeof rowSchema !== "object" || rowSchema === null ||
+    linkColumns.length === 0 ||
+    typeof rowSchema.properties !== "object" ||
+    rowSchema.properties === null
+  ) {
+    return rowSchema;
+  }
+  const properties = { ...rowSchema.properties };
+  for (const column of linkColumns) {
+    properties[column] = { type: "object" };
+  }
+  return { ...rowSchema, properties };
+}
+
 /** Replace each asCell column's stored sigil-link STRING with the parsed sigil
  *  OBJECT. A value that is not a decodable link is left as-is (the asCell read
  *  then yields undefined rather than crashing the whole query). */
@@ -830,13 +858,13 @@ export function sqliteQuery(
             (typeof inputs.rowSchema === "object" ||
               typeof inputs.rowSchema === "boolean")
           ) {
-            const rowSchema = schemaWithOpenObjects(
+            const rowSchema = schemaWithOpenObjects(rowSchemaForDecodedLinks(
               inputs.rowSchema as JSONSchema,
-            );
-            const failure = validateAgainstSchema(
-              { type: "array", items: rowSchema },
-              rows,
-            );
+              linkCols,
+            ));
+            const failure = rows.map((row) =>
+              validateAgainstSchema(rowSchema, row)
+            ).find((item) => item !== undefined);
             if (failure !== undefined) {
               await rejectSchemaMismatch();
               return;
