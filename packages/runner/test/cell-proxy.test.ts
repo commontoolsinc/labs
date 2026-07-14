@@ -81,25 +81,32 @@ describe("createProxy", () => {
     expect(proxy.x).toBe(42);
   });
 
-  it.skip("should support modifying array methods and log reads and writes", () => {
+  it("should support modifying array methods and log reads and writes", () => {
     const c = runtime.getCell<{ array: number[] }>(
       space,
       "should support modifying array methods and log reads and writes",
+      undefined,
+      tx,
     );
     c.set({ array: [1, 2, 3] });
-    const proxy = c.getAsQueryResult();
-    const log = txToReactivityLog(tx);
-    expect(log.reads.length).toBe(1);
+    const proxy = c.getAsQueryResult([], tx, true);
     expect(proxy.array.length).toBe(3);
-    // only read array, but not the elements
-    expect(log.reads.length).toBe(2);
 
     proxy.array.push(4);
     expect(proxy.array.length).toBe(4);
     expect(proxy.array[3]).toBe(4);
+    const log = txToReactivityLog(tx);
+    // Paths in the transaction journal are rooted at the document's "value"
+    // facet.
+    expect(
+      log.reads.some((read) =>
+        read.path[0] === "value" && read.path[1] === "array"
+      ),
+    ).toBe(true);
     expect(
       log.writes.some((write) =>
-        write.path[0] === "array" && write.path[1] === "3"
+        write.path[0] === "value" && write.path[1] === "array" &&
+        write.path[2] === "3"
       ),
     ).toBe(true);
   });
