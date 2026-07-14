@@ -53,6 +53,25 @@ const record = (
   ...overrides,
 });
 
+const malformedPolicyRecords = (
+  value: unknown,
+): readonly CfcPolicyRecordInput[] => value as readonly CfcPolicyRecordInput[];
+const malformedPolicyRecord = (value: unknown): CfcPolicyRecordInput =>
+  value as CfcPolicyRecordInput;
+const malformedExchangeRule = (value: unknown): ExchangeRule =>
+  value as ExchangeRule;
+
+const setPolicySnapshotThroughConcreteTx = (
+  tx: ReturnType<Runtime["edit"]>,
+  snapshot: unknown,
+): void => {
+  const setter = Reflect.get(tx, "setCfcPolicySnapshot");
+  if (typeof setter !== "function") {
+    throw new Error("setCfcPolicySnapshot is not available");
+  }
+  Reflect.apply(setter, tx, [snapshot]);
+};
+
 describe("CFC policy records (B2a)", () => {
   describe("digest stability", () => {
     it("is insensitive to authoring key order and explicit defaults", () => {
@@ -177,7 +196,7 @@ describe("CFC policy records (B2a)", () => {
       expect(Object.isFrozen(snapshot.records[0].rules[0].appliesTo))
         .toBe(true);
       expect(() => {
-        (snapshot.records as unknown as unknown[]).push("smuggled");
+        Reflect.apply(Array.prototype.push, snapshot.records, ["smuggled"]);
       }).toThrow();
     });
   });
@@ -186,12 +205,12 @@ describe("CFC policy records (B2a)", () => {
     const cases: Array<[string, () => unknown, RegExp]> = [
       [
         "non-array input",
-        () => buildCfcPolicySnapshot({} as unknown as never),
+        () => buildCfcPolicySnapshot(malformedPolicyRecords({})),
         /must be an array of policy records/,
       ],
       [
         "non-object record",
-        () => buildCfcPolicySnapshot(["nope" as unknown as never]),
+        () => buildCfcPolicySnapshot([malformedPolicyRecord("nope")]),
         /must be an object/,
       ],
       [
@@ -199,19 +218,22 @@ describe("CFC policy records (B2a)", () => {
         // field-by-field validation would read no guards — must fail closed
         // (cubic P1 on #4562).
         "Map-shaped record",
-        () => buildCfcPolicySnapshot([new Map() as unknown as never]),
+        () => buildCfcPolicySnapshot([malformedPolicyRecord(new Map())]),
         /must be an object/,
       ],
       [
         "non-object rule",
-        () => buildCfcPolicySnapshot([record({ rules: ["nope"] as never })]),
+        () =>
+          buildCfcPolicySnapshot([
+            record({ rules: [malformedExchangeRule("nope")] }),
+          ]),
         /must be a rule object/,
       ],
       [
         "Map-shaped rule",
         () =>
           buildCfcPolicySnapshot([
-            record({ rules: [new Map() as unknown as never] }),
+            record({ rules: [malformedExchangeRule(new Map())] }),
           ]),
         /must be a rule object/,
       ],
@@ -221,10 +243,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   preCondition: new Map([["integrity", "x"]]),
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -236,10 +258,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   post: new Map([["dropClause", true]]),
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -251,10 +273,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   preCondition: "nope",
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -266,10 +288,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   preCondition: { integrity: "nope" },
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -281,7 +303,7 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                { ...spaceReaderRule, post: undefined } as unknown as never,
+                malformedExchangeRule({ ...spaceReaderRule, post: undefined }),
               ],
             }),
           ]),
@@ -293,10 +315,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   post: { dropClause: "yes" },
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -316,7 +338,7 @@ describe("CFC policy records (B2a)", () => {
         "unknown record key (typo)",
         () =>
           buildCfcPolicySnapshot([
-            { ...record(), exchangeRules: [] } as unknown as never,
+            malformedPolicyRecord({ ...record(), exchangeRules: [] }),
           ]),
         /unknown key "exchangeRules"/,
       ],
@@ -324,7 +346,7 @@ describe("CFC policy records (B2a)", () => {
         "missing rules",
         () =>
           buildCfcPolicySnapshot([
-            { id: "r" } as unknown as never,
+            malformedPolicyRecord({ id: "r" }),
           ]),
         /needs a rules array/,
       ],
@@ -342,7 +364,7 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                { ...spaceReaderRule, id: undefined } as unknown as never,
+                malformedExchangeRule({ ...spaceReaderRule, id: undefined }),
               ],
             }),
           ]),
@@ -354,10 +376,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   appliesTo: undefined,
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -369,10 +391,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   precondition: {},
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -384,10 +406,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   preConfScope: "everywhere",
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -399,10 +421,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   preCondition: { integrity: [undefined] },
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -413,7 +435,7 @@ describe("CFC policy records (B2a)", () => {
         () =>
           buildCfcPolicySnapshot([
             record({
-              rules: [{ ...spaceReaderRule, post: {} } as unknown as never],
+              rules: [malformedExchangeRule({ ...spaceReaderRule, post: {} })],
             }),
           ]),
         /must addAlternatives or dropClause/,
@@ -424,10 +446,10 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   post: { addAlternatives: [] },
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -439,13 +461,13 @@ describe("CFC policy records (B2a)", () => {
           buildCfcPolicySnapshot([
             record({
               rules: [
-                {
+                malformedExchangeRule({
                   ...spaceReaderRule,
                   post: {
                     addAlternatives: spaceReaderRule.post.addAlternatives,
                     dropClause: true,
                   },
-                } as unknown as never,
+                }),
               ],
             }),
           ]),
@@ -475,9 +497,10 @@ describe("CFC policy records (B2a)", () => {
         expect(tx.getCfcState().policySnapshot).toBe(runtime.cfcPolicySnapshot);
         // Write-once: a later attempt (e.g. handler code reaching the
         // concrete tx) cannot swap the policy set mid-transaction.
-        (tx as unknown as {
-          setCfcPolicySnapshot: (s: unknown) => void;
-        }).setCfcPolicySnapshot({ records: [], digest: "swapped" });
+        setPolicySnapshotThroughConcreteTx(tx, {
+          records: [],
+          digest: "swapped",
+        });
         expect(tx.getCfcState().policySnapshot).toBe(runtime.cfcPolicySnapshot);
         tx.abort();
       } finally {
@@ -500,9 +523,7 @@ describe("CFC policy records (B2a)", () => {
         expect(runtime.cfcPolicySnapshot).toBeUndefined();
         const tx = runtime.edit();
         expect(tx.getCfcState().policySnapshot).toBeUndefined();
-        (tx as unknown as {
-          setCfcPolicySnapshot: (s: unknown) => void;
-        }).setCfcPolicySnapshot({
+        setPolicySnapshotThroughConcreteTx(tx, {
           records: [{ id: "injected", digest: "x", rules: [] }],
           digest: "injected",
         });
