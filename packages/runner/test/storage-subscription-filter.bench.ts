@@ -14,10 +14,9 @@ const PATTERN_B_URI = "of:subscription-filter-pattern-b" as const;
 const TARGET_A_URI = "of:subscription-filter-target-a" as const;
 const TARGET_B_URI = "of:subscription-filter-target-b" as const;
 
-type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
-  open(space: string): infer T;
-} ? T
-  : never;
+type TestProvider = ReturnType<
+  ReturnType<typeof StorageManager.emulate>["open"]
+>;
 
 const coldUri = (index: number) =>
   `of:subscription-filter-cold-${index}` as const;
@@ -76,7 +75,7 @@ const setup = async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider: TestProvider = storageManager.open(space);
 
   await (provider as any).send([
     {
@@ -123,7 +122,7 @@ const setupScoped = async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider: TestProvider = storageManager.open(space);
 
   await (provider as any).send([
     {
