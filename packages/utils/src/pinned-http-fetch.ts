@@ -660,7 +660,10 @@ const writeAll = async (
   while (offset < bytes.byteLength) {
     throwIfAborted(signal);
     try {
-      const written = await withAbort(conn.write(bytes.slice(offset)), signal);
+      const written = await withAbort(
+        conn.write(bytes.subarray(offset)),
+        signal,
+      );
       if (written <= 0) {
         throw new Error("pinned HTTP connection wrote zero bytes");
       }

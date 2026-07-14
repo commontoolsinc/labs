@@ -5,15 +5,17 @@ import { fetchPinnedHttp } from "@commonfabric/utils/pinned-http-fetch";
 interface FakeHttpConnection {
   conn: Deno.Conn;
   writes: Uint8Array[];
+  writeBuffers: ArrayBufferLike[];
   isClosed(): boolean;
 }
 
 const createFakeHttpConnection = (
   response: string,
-  options: { pendingRead?: boolean } = {},
+  options: { pendingRead?: boolean; maxWriteBytes?: number } = {},
 ): FakeHttpConnection => {
   const responseBytes = new TextEncoder().encode(response);
   const writes: Uint8Array[] = [];
+  const writeBuffers: ArrayBufferLike[] = [];
   let offset = 0;
   let closed = false;
   const conn = {
@@ -33,14 +35,19 @@ const createFakeHttpConnection = (
       return Promise.resolve(count);
     },
     write(buffer: Uint8Array): Promise<number> {
-      writes.push(buffer.slice());
-      return Promise.resolve(buffer.byteLength);
+      const count = Math.min(
+        buffer.byteLength,
+        options.maxWriteBytes ?? buffer.byteLength,
+      );
+      writeBuffers.push(buffer.buffer);
+      writes.push(buffer.slice(0, count));
+      return Promise.resolve(count);
     },
     close(): void {
       closed = true;
     },
   } as unknown as Deno.Conn;
-  return { conn, writes, isClosed: () => closed };
+  return { conn, writes, writeBuffers, isClosed: () => closed };
 };
 
 const withDenoConnect = async <T>(
@@ -75,6 +82,30 @@ const decodeWrites = (writes: Uint8Array[]): string =>
   );
 
 describe("fetchPinnedHttp", () => {
+  it("reuses the request buffer across partial socket writes", async () => {
+    const fake = createFakeHttpConnection(
+      "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n",
+      { maxWriteBytes: 3 },
+    );
+
+    await withDenoConnect(
+      (() => Promise.resolve(fake.conn)) as unknown as typeof Deno.connect,
+      async () => {
+        const response = await fetchPinnedHttp(
+          new URL("http://example.com/partial"),
+          "93.184.216.34",
+        );
+        expect(response.status).toBe(204);
+      },
+    );
+
+    expect(fake.writeBuffers.length).toBeGreaterThan(1);
+    expect(new Set(fake.writeBuffers).size).toBe(1);
+    expect(decodeWrites(fake.writes)).toContain(
+      "GET /partial HTTP/1.1\r\n",
+    );
+  });
+
   it("sends arbitrary methods, headers, and replayable request bodies", async () => {
     const fake = createFakeHttpConnection([
       "HTTP/1.1 201 Created\r\n",
