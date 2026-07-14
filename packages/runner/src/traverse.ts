@@ -2470,8 +2470,11 @@ function schemaTypeMatchesValueType(
   schemaType: JSONSchemaTypes,
   valueType: string,
 ): boolean {
+  // Runtime traversal currently classifies every finite JavaScript number as
+  // "number". Keep compatibility one-way: an integer-classified value can
+  // satisfy a number schema, but a general number cannot satisfy integer.
   return schemaType === valueType ||
-    (schemaType === "integer" && valueType === "number");
+    (schemaType === "number" && valueType === "integer");
 }
 
 function narrowNumberIntegerIntersection(

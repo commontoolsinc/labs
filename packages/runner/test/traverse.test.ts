@@ -1837,9 +1837,9 @@ describe("canBranchMatch", () => {
     expect(canBranchMatch({ type: "null" }, null)).toBe(true);
   });
 
-  it("accepts a JavaScript number for an integer type", () => {
-    expect(canBranchMatch({ type: "integer" }, 42)).toBe(true);
-    expect(canBranchMatch({ type: ["string", "integer"] }, 42)).toBe(true);
+  it("does not treat a JavaScript number as an integer type", () => {
+    expect(canBranchMatch({ type: "integer" }, 42)).toBe(false);
+    expect(canBranchMatch({ type: ["string", "integer"] }, 42)).toBe(false);
   });
 
   it("conservatively accepts const schemas (values may contain unresolved links)", () => {
@@ -2010,7 +2010,7 @@ describe("SchemaObjectTraverser integer type pruning", () => {
   ] as const satisfies readonly { name: string; schema: JSONSchema }[];
 
   for (const testCase of schemas) {
-    it(`accepts a JavaScript number for ${testCase.name}`, () => {
+    it(`rejects a JavaScript number for ${testCase.name}`, () => {
       const store = new Map<string, Revision<State>>();
       const type = "application/json" as const;
       const docUri = `of:integer-${testCase.name}` as URI;
@@ -2038,8 +2038,8 @@ describe("SchemaObjectTraverser integer type pruning", () => {
         value,
       });
 
-      expect(error).toBeUndefined();
-      expect(ok).toBe(value);
+      expect(error?.code).toBe("INVALID_TYPE");
+      expect(ok).toBeUndefined();
     });
   }
 });
