@@ -1049,7 +1049,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         id: prepared.id,
         type: "application/json",
         path: ["value"],
-      }, prepared.value as unknown as FabricValue);
+      }, prepared.value);
     });
     return { space: prepared.space, id: prepared.id };
   }

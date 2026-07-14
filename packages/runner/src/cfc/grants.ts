@@ -14,6 +14,9 @@ import type {
   CfcGrantResolverQuery,
 } from "./exchange-eval.ts";
 
+const asFabricValue = <T>(value: T): T & FabricValue =>
+  value as T & FabricValue;
+
 /**
  * CFC grant records (spec §8.12.7 route 2a; design
  * docs/specs/cfc-persisted-declassification.md §2): durable, revocable
@@ -390,7 +393,7 @@ export const prepareCfcGrantWrite = (
   input: CfcGrantWriteInput,
   actingPrincipal: string | undefined,
   now: number = Date.now(),
-): { space: MemorySpace; id: URI; value: CfcGrant } => {
+): { space: MemorySpace; id: URI; value: CfcGrant & FabricValue } => {
   if (!isRecord(input) || Array.isArray(input)) {
     throw new Error("cfc-grant: write input must be an object");
   }
@@ -472,7 +475,7 @@ export const prepareCfcGrantWrite = (
       "cfc-grant: singleUse must be boolean true or absent",
     );
   }
-  const value: CfcGrant = {
+  const value = asFabricValue<CfcGrant>({
     version: CFC_GRANT_VERSION,
     space,
     kind,
@@ -488,7 +491,7 @@ export const prepareCfcGrantWrite = (
       ? { revoked: { at: input.revoked.at, by: input.revoked.by } }
       : {}),
     ...(input.singleUse === true ? { singleUse: true as const } : {}),
-  };
+  });
   return {
     space: space as MemorySpace,
     id: cfcGrantDocId(value),

@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/storage/extended-storage-transaction.ts": [
-    "1045:24:o4irgj",
-  ],
   "packages/runner/test/acl-manager.test.ts": [
     "43:4:p06mdh",
     "136:4:tm50wp",
