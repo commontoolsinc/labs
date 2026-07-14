@@ -44,48 +44,138 @@ type IFCAtom = ImmutableJSONValue;
 // contexts), which would leave a per-instance cache permanently cold.
 // Mutable schemas are never cached (in-place edits must be observed).
 const schemaAtPathCache = new WeakMap<object, Map<string, JSONSchema>>();
+const SCHEMA_AT_PATH_CACHE_MAX_ENTRIES = 2_048;
+
+type SymbolicSchemaAtPathClassifier = (part: string) => string;
+const SYMBOLIC_CLASSIFIER_UNSUPPORTED = Symbol("unsupported");
+const symbolicSchemaAtPathClassifierCache = new WeakMap<
+  object,
+  SymbolicSchemaAtPathClassifier | typeof SYMBOLIC_CLASSIFIER_UNSUPPORTED
+>();
+
+const buildSymbolicSchemaAtPathClassifier = (
+  schema: JSONSchema,
+  fullSchema: JSONSchema,
+  active: Set<object>,
+): SymbolicSchemaAtPathClassifier | undefined => {
+  if (typeof schema === "boolean") return () => "boolean";
+  if (active.has(schema)) return undefined;
+  active.add(schema);
+  try {
+    if (schema.$ref !== undefined) {
+      const resolved = resolveCfcSchemaRefs(schema, fullSchema);
+      if (resolved === undefined) return undefined;
+      const nextFullSchema = isRecord(resolved) && resolved.$defs !== undefined
+        ? resolved
+        : fullSchema;
+      return buildSymbolicSchemaAtPathClassifier(
+        resolved,
+        nextFullSchema,
+        active,
+      );
+    }
+    if (schema.anyOf || schema.oneOf) {
+      const options = (schema.anyOf && schema.oneOf)
+        ? [...schema.anyOf, ...schema.oneOf]
+        : schema.anyOf ?? schema.oneOf ?? [];
+      const classifiers: SymbolicSchemaAtPathClassifier[] = [];
+      for (const option of options) {
+        const classifier = buildSymbolicSchemaAtPathClassifier(
+          option,
+          fullSchema,
+          active,
+        );
+        if (classifier === undefined) return undefined;
+        classifiers.push(classifier);
+      }
+      // The immediately repeated lookup is the dominant cache-hit case. One
+      // entry removes the union-width cost without reintroducing raw path-part
+      // cardinality. Combined branch behaviors are assigned compact local ids;
+      // their count is bounded by the schema's own properties/prefix items.
+      const combinedKeyIds = new Map<string, string>();
+      let memoPart: string | undefined;
+      let memoKey = "";
+      return (part) => {
+        if (part === memoPart) return memoKey;
+        let combinedKey = "union";
+        for (const classifier of classifiers) {
+          const childKey = classifier(part);
+          combinedKey += `|${childKey.length}:${childKey}`;
+        }
+        let key = combinedKeyIds.get(combinedKey);
+        if (key === undefined) {
+          key = `union:${combinedKeyIds.size}`;
+          combinedKeyIds.set(combinedKey, key);
+        }
+        memoPart = part;
+        memoKey = key;
+        return key;
+      };
+    }
+    if (cfcSchemaIsTrue(schema)) return () => "wildcard";
+    if (schema.type === "object") {
+      const properties = schema.properties;
+      if (properties !== undefined) {
+        const fallback = Object.keys(properties).length === 0
+          ? "empty"
+          : "missing";
+        return (part) =>
+          Object.hasOwn(properties, part)
+            ? `property:${part.length}:${part}`
+            : schema.additionalProperties !== undefined
+            ? "additional"
+            : fallback;
+      }
+      return schema.additionalProperties !== undefined
+        ? () => "additional"
+        : () => "open";
+    }
+    if (schema.type === "array") {
+      const prefixItemCount = schema.prefixItems?.length ?? 0;
+      return (part) => {
+        if (!isArrayIndexPropertyName(part)) return "invalid-index";
+        const index = Number(part);
+        return index < prefixItemCount ? `prefix:${index}` : "items";
+      };
+    }
+    if (
+      schema.type === "unknown" ||
+      Array.isArray(schema.type) && schema.type.includes("unknown")
+    ) {
+      return () => "unknown";
+    }
+    // schemaAtPath cannot descend through terminal primitive schemas.
+    return () => "terminal";
+  } finally {
+    active.delete(schema);
+  }
+};
 
 /**
  * A one-segment path key based on schema behavior rather than data cardinality.
  *
  * Homogeneous array indices and undeclared object property names all select the
  * same schema. Sharing those cache entries bounds the cache by schema shape
- * instead of by array length or dynamic object key count. Complex ref/union
- * roots retain the exact-path fallback below.
+ * instead of by array length or dynamic object key count. For frozen schemas,
+ * resolving the root ref/union structure once builds a reusable classifier for
+ * later lookups. Unsupported shapes retain the bounded exact-path fallback.
  */
 const symbolicSchemaAtPathPart = (
   schema: JSONSchemaObj,
   part: string,
 ): string | undefined => {
-  if (schema.$ref !== undefined || schema.anyOf || schema.oneOf) {
-    return undefined;
+  let classifier = symbolicSchemaAtPathClassifierCache.get(schema);
+  if (classifier === undefined) {
+    classifier = buildSymbolicSchemaAtPathClassifier(
+      schema,
+      schema,
+      new Set(),
+    ) ?? SYMBOLIC_CLASSIFIER_UNSUPPORTED;
+    symbolicSchemaAtPathClassifierCache.set(schema, classifier);
   }
-  if (cfcSchemaIsTrue(schema)) return "wildcard";
-  if (schema.type === "object") {
-    if (schema.properties && part in schema.properties) {
-      return `property:${part.length}:${part}`;
-    }
-    if (schema.additionalProperties !== undefined) return "additional";
-    if (schema.properties) {
-      return Object.keys(schema.properties).length === 0 ? "empty" : "missing";
-    }
-    return "open";
-  }
-  if (schema.type === "array") {
-    if (!isArrayIndexPropertyName(part)) return "invalid-index";
-    const index = Number(part);
-    return schema.prefixItems && index < schema.prefixItems.length
-      ? `prefix:${index}`
-      : "items";
-  }
-  if (
-    schema.type === "unknown" ||
-    Array.isArray(schema.type) && schema.type.includes("unknown")
-  ) {
-    return "unknown";
-  }
-  // schemaAtPath cannot descend through terminal primitive schemas.
-  return "terminal";
+  return classifier === SYMBOLIC_CLASSIFIER_UNSUPPORTED
+    ? undefined
+    : classifier(part);
 };
 
 const schemaAtPathKey = (
@@ -467,6 +557,7 @@ export class ContextualFlowControl {
         defaultEmptyProperties,
         defaultMissingProperty,
       ));
+      if (byKey.size >= SCHEMA_AT_PATH_CACHE_MAX_ENTRIES) byKey.clear();
       byKey.set(key, result);
     }
     return result;
@@ -561,7 +652,7 @@ export class ContextualFlowControl {
             cursor.ifc.confidentiality,
           );
         }
-        if (cursor.properties && part in cursor.properties) {
+        if (cursor.properties && Object.hasOwn(cursor.properties, part)) {
           const cursorObj = cursor.properties as Record<string, JSONSchema>;
           cursor = cursorObj[part];
           if (typeof cursor === "boolean") {

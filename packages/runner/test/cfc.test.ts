@@ -1,11 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
 import { schemaHasIfc } from "../src/schema.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { JSONSchemaObj } from "@commonfabric/api";
 import {
   findCfcSchemaRefs,
+  pruneCfcSchemaDefinitions,
+  resolveCfcSchemaRef,
   selectReferencedCfcSchemaDefs,
 } from "../src/cfc/schema-refs.ts";
 
@@ -51,6 +54,60 @@ describe("ContextualFlowControl.schemaAtPath", () => {
 
     expect(flat).toEqual({ type: "number" });
     expect(nested).toEqual({ type: "string" });
+  });
+
+  it("does not treat inherited property names as declared properties", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        actual: { type: "number" },
+      },
+    };
+
+    expect(cfc.schemaAtPath(schema, ["toString"])).toBe(true);
+    expect(cfc.schemaAtPath({
+      type: "object",
+      properties: Object.fromEntries([
+        ["toString", { type: "string" }],
+      ]) as Record<string, JSONSchema>,
+    }, ["toString"])).toEqual({ type: "string" });
+  });
+
+  it("classifies frozen root refs and unions without mixing path results", () => {
+    const cfc = new ContextualFlowControl();
+    const schema = deepFreeze({
+      $ref: "#/$defs/Root",
+      $defs: {
+        Root: {
+          anyOf: [
+            {
+              type: "array",
+              prefixItems: [{ type: "number" }],
+              items: { type: "string" },
+            },
+            {
+              type: "object",
+              properties: {
+                "0": { type: "boolean" },
+                named: { type: "null" },
+              },
+              additionalProperties: false,
+            },
+          ],
+        },
+      },
+    } as JSONSchemaObj);
+
+    expect(cfc.schemaAtPath(schema, ["0"])).toEqual({
+      anyOf: [{ type: "number" }, { type: "boolean" }],
+    });
+    const homogeneous = cfc.schemaAtPath(schema, ["1"]);
+    expect(homogeneous).toEqual({ type: "string" });
+    expect(cfc.schemaAtPath(schema, ["1"])).toBe(homogeneous);
+    expect(cfc.schemaAtPath(schema, ["2000"])).toBe(homogeneous);
+    expect(cfc.schemaAtPath(schema, ["named"])).toEqual({ type: "null" });
+    expect(cfc.schemaAtPath(schema, ["missing"])).toBe(false);
   });
 
   it("considers a schema with only $defs true'", () => {
@@ -358,6 +415,69 @@ describe("CFC schema reference discovery", () => {
         definitions,
       ),
     ).toBeUndefined();
+  });
+
+  it("does not resolve inherited Object prototype names as definitions", () => {
+    const fullSchema: JSONSchema = {
+      $defs: { Present: { type: "string" } },
+    };
+
+    for (const name of ["toString", "constructor", "__proto__"]) {
+      const ref = `#/$defs/${name}`;
+      expect(
+        selectReferencedCfcSchemaDefs({ $ref: ref }, fullSchema.$defs),
+      ).toBeUndefined();
+      expect(resolveCfcSchemaRef(fullSchema, ref)).toBeUndefined();
+    }
+  });
+
+  it("retains own definitions that shadow Object prototype names", () => {
+    const definitions = Object.fromEntries([
+      ["toString", { type: "string" }],
+      ["constructor", { type: "number" }],
+    ]) as Record<string, JSONSchema>;
+    const schema: JSONSchema = {
+      anyOf: Object.keys(definitions).map((name) => ({
+        $ref: `#/$defs/${name}`,
+      })),
+      $defs: definitions,
+    };
+
+    expect(selectReferencedCfcSchemaDefs(schema)).toEqual(definitions);
+    for (const [name, definition] of Object.entries(definitions)) {
+      expect(resolveCfcSchemaRef(schema, `#/$defs/${name}`)).toEqual(
+        definition,
+      );
+    }
+  });
+
+  it("preserves nested definition scope boundaries while pruning", () => {
+    const cfc = new ContextualFlowControl();
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        other: { $ref: "#/$defs/Outer" },
+        child: {
+          $ref: "#/$defs/Outer",
+          $defs: { Unused: { type: "boolean" } },
+        },
+      },
+      $defs: { Outer: { type: "string" } },
+    };
+
+    const pruned = pruneCfcSchemaDefinitions(schema);
+
+    expect(pruned).toEqual({
+      type: "object",
+      properties: {
+        other: { $ref: "#/$defs/Outer" },
+        child: { $ref: "#/$defs/Outer", $defs: {} },
+      },
+      $defs: { Outer: { type: "string" } },
+    });
+    expect(cfc.schemaAtPath(pruned, ["child"])).toEqual(
+      cfc.schemaAtPath(schema, ["child"]),
+    );
   });
 });
 

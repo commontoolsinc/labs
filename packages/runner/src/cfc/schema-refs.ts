@@ -1,6 +1,7 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isRecord } from "@commonfabric/utils/types";
 import { getLogger } from "@commonfabric/utils/logger";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
@@ -38,7 +39,32 @@ const EMPTY_REF_SUMMARY: SchemaRefSummary = {
 // with different local definition scopes.
 const schemaRefSummaryCache = new WeakMap<object, SchemaRefSummary>();
 const definitionIndexCache = new WeakMap<object, DefinitionIndex>();
-const prunedSchemaCache = new WeakMap<object, JSONSchema>();
+const prunedRootSchemaCache = new WeakMap<object, JSONSchema>();
+const prunedScopedSchemaCache = new WeakMap<object, JSONSchema>();
+const EMPTY_DEFINITIONS: SchemaDefinitions = Object.freeze({});
+
+const singleSubschemaKeys = [
+  "not",
+  "if",
+  "then",
+  "else",
+  "items",
+  "contains",
+  "additionalProperties",
+  "propertyNames",
+  "contentSchema",
+] as const;
+const arraySubschemaKeys = [
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "prefixItems",
+] as const;
+const recordSubschemaKeys = [
+  "dependentSchemas",
+  "properties",
+  "patternProperties",
+] as const;
 
 // Caching resolveCfcSchemaRef also makes its result identity-STABLE per
 // (fullSchema, ref), which lets downstream identity-keyed hash/traverse caches
@@ -58,7 +84,7 @@ const isRootDefsSchemaPointer = (pathToDef: readonly string[]): boolean =>
   pathToDef[2].length > 0;
 
 export const isEmbeddedCfcSchemaRef = (schemaRef: string): boolean =>
-  schemaRef in embeddedSchemas;
+  Object.hasOwn(embeddedSchemas, schemaRef);
 
 export const cfcSchemaToObject = (schema?: JSONSchema): JSONSchemaObj =>
   (schema === true || schema === undefined)
@@ -95,29 +121,64 @@ const forEachSubschema = (
   schema: JSONSchemaObj,
   visit: (child: JSONSchema) => void,
 ): void => {
-  if (schema.not !== undefined) visit(schema.not);
-  if (schema.if !== undefined) visit(schema.if);
-  if (schema.then !== undefined) visit(schema.then);
-  if (schema.else !== undefined) visit(schema.else);
-  if (schema.items !== undefined) visit(schema.items);
-  if (schema.contains !== undefined) visit(schema.contains);
-  if (schema.additionalProperties !== undefined) {
-    visit(schema.additionalProperties);
+  for (const key of singleSubschemaKeys) {
+    const child = schema[key];
+    if (child !== undefined) visit(child);
   }
-  if (schema.propertyNames !== undefined) visit(schema.propertyNames);
-  if (schema.contentSchema !== undefined) visit(schema.contentSchema);
+  for (const key of arraySubschemaKeys) {
+    for (const child of schema[key] ?? []) visit(child);
+  }
+  for (const key of recordSubschemaKeys) {
+    for (const child of Object.values(schema[key] ?? {})) visit(child);
+  }
+};
 
-  for (const child of schema.allOf ?? []) visit(child);
-  for (const child of schema.anyOf ?? []) visit(child);
-  for (const child of schema.oneOf ?? []) visit(child);
-  for (const child of schema.prefixItems ?? []) visit(child);
-  for (const child of Object.values(schema.dependentSchemas ?? {})) {
-    visit(child);
+const mapSubschemas = (
+  schema: JSONSchemaObj,
+  map: (child: JSONSchema) => JSONSchema,
+): JSONSchemaObj => {
+  let result: Record<string, unknown> | undefined;
+  const update = (key: string, value: unknown): void => {
+    result ??= { ...schema };
+    result[key] = value;
+  };
+
+  for (const key of singleSubschemaKeys) {
+    const child = schema[key];
+    if (child === undefined) continue;
+    const mapped = map(child);
+    if (mapped !== child) update(key, mapped);
   }
-  for (const child of Object.values(schema.properties ?? {})) visit(child);
-  for (const child of Object.values(schema.patternProperties ?? {})) {
-    visit(child);
+  for (const key of arraySubschemaKeys) {
+    const children = schema[key];
+    if (children === undefined) continue;
+    let mapped: JSONSchema[] | undefined;
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index];
+      const next = map(child);
+      if (next !== child) {
+        mapped ??= [...children];
+        mapped[index] = next;
+      }
+    }
+    if (mapped !== undefined) update(key, mapped);
   }
+  for (const key of recordSubschemaKeys) {
+    const children = schema[key];
+    if (children === undefined) continue;
+    let mapped: [string, JSONSchema][] | undefined;
+    const entries = Object.entries(children);
+    for (let index = 0; index < entries.length; index++) {
+      const [name, child] = entries[index];
+      const next = map(child);
+      if (next !== child) {
+        mapped ??= entries;
+        mapped[index] = [name, next];
+      }
+    }
+    if (mapped !== undefined) update(key, Object.fromEntries(mapped));
+  }
+  return (result ?? schema) as JSONSchemaObj;
 };
 
 const addRefs = (target: Set<string>, source: ReadonlySet<string>): void => {
@@ -230,7 +291,7 @@ export const selectReferencedCfcSchemaDefs = (
   const pending = [...initial];
   while (pending.length > 0) {
     const name = pending.pop()!;
-    if (needed.has(name) || definitions[name] === undefined) continue;
+    if (needed.has(name) || !Object.hasOwn(definitions, name)) continue;
     needed.add(name);
     for (
       const dependency of definitionDependencies(
@@ -244,15 +305,16 @@ export const selectReferencedCfcSchemaDefs = (
   }
   if (needed.size === 0) return undefined;
 
-  const names = [...needed].toSorted();
+  const names = [...needed].toSorted(utf8Compare);
   const key = definitionSetKey(names);
   if (cacheable) {
     const cached = index.subsets.get(key);
     if (cached !== undefined) return cached;
   }
 
-  const subset: Record<string, JSONSchema> = {};
-  for (const name of names) subset[name] = definitions[name];
+  const subset = Object.fromEntries(
+    names.map((name) => [name, definitions[name]]),
+  ) as Record<string, JSONSchema>;
   if (!cacheable) return subset;
 
   // Intern once so every derived schema sharing this closure also shares one
@@ -263,32 +325,62 @@ export const selectReferencedCfcSchemaDefs = (
   return canonical;
 };
 
-/** Remove definitions that cannot be reached from this schema document. */
-export const pruneCfcSchemaDefinitions = (schema: JSONSchema): JSONSchema => {
-  if (typeof schema === "boolean" || schema.$defs === undefined) return schema;
+const pruneCfcSchemaDefinitionsInternal = (
+  schema: JSONSchema,
+  preserveScopeBoundary: boolean,
+): JSONSchema => {
+  if (typeof schema === "boolean") return schema;
   const cacheable = isDeepFrozen(schema);
+  const cache = preserveScopeBoundary
+    ? prunedScopedSchemaCache
+    : prunedRootSchemaCache;
   if (cacheable) {
-    const cached = prunedSchemaCache.get(schema);
+    const cached = cache.get(schema);
     if (cached !== undefined) return cached;
   }
 
-  const selected = selectReferencedCfcSchemaDefs(schema);
-  if (selected === schema.$defs) return schema;
-  const result = { ...schema } as Record<string, unknown>;
-  delete result.$defs;
-  if (selected !== undefined) result.$defs = selected;
-  const pruned = cacheable
-    ? internSchema(result as JSONSchemaObj)
-    : result as JSONSchemaObj;
-  if (cacheable) prunedSchemaCache.set(schema, pruned);
+  let result = mapSubschemas(
+    schema,
+    (child) => pruneCfcSchemaDefinitionsInternal(child, true),
+  );
+  if (schema.$defs !== undefined) {
+    const selected = selectReferencedCfcSchemaDefs(schema);
+    let definitions = selected ??
+      (preserveScopeBoundary ? EMPTY_DEFINITIONS : undefined);
+    if (selected !== undefined) {
+      let entries: [string, JSONSchema][] | undefined;
+      const selectedEntries = Object.entries(selected);
+      for (let index = 0; index < selectedEntries.length; index++) {
+        const [name, definition] = selectedEntries[index];
+        const pruned = pruneCfcSchemaDefinitionsInternal(definition, true);
+        if (pruned !== definition) {
+          entries ??= selectedEntries;
+          entries[index] = [name, pruned];
+        }
+      }
+      if (entries !== undefined) definitions = Object.fromEntries(entries);
+    }
+    if (definitions !== schema.$defs) {
+      const next = { ...result } as Record<string, unknown>;
+      delete next.$defs;
+      if (definitions !== undefined) next.$defs = definitions;
+      result = next as JSONSchemaObj;
+    }
+  }
+  const pruned = cacheable && result !== schema ? internSchema(result) : result;
+  if (cacheable) cache.set(schema, pruned);
   return pruned;
 };
+
+/** Remove definitions that cannot be reached from this schema document. */
+export const pruneCfcSchemaDefinitions = (schema: JSONSchema): JSONSchema =>
+  pruneCfcSchemaDefinitionsInternal(schema, false);
 
 export const resolveCfcSchemaRef = (
   fullSchema: JSONSchema,
   schemaRef: string,
 ): JSONSchema | undefined => {
-  if (schemaRef in embeddedSchemas) {
+  if (Object.hasOwn(embeddedSchemas, schemaRef)) {
     return embeddedSchemas[schemaRef];
   }
   const cacheable = isRecord(fullSchema) && isDeepFrozen(fullSchema);
@@ -335,7 +427,10 @@ const resolveCfcSchemaRefUncached = (
   }
   let schemaCursor: unknown = fullSchema;
   for (let i = 1; i < pathToDef.length; i++) {
-    if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
+    if (
+      !isRecord(schemaCursor) ||
+      !Object.hasOwn(schemaCursor, pathToDef[i])
+    ) {
       logger.warn("cfc", () => [
         "Unresolved $ref in schema: ",
         schemaRef,
@@ -420,7 +515,7 @@ const resolveCfcSchemaRefsUncached = (
     if (resolved === undefined) {
       return undefined;
     }
-    if ($ref in embeddedSchemas) {
+    if (Object.hasOwn(embeddedSchemas, $ref)) {
       fullSchema = resolved;
     }
     if (Object.keys(rest).length > 0) {

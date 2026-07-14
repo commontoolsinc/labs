@@ -10,6 +10,7 @@
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { ContextualFlowControl } from "../src/cfc.ts";
+import { rendererVDOMSchema } from "../src/schemas.ts";
 
 const INDEX_COUNT = 1_000;
 const DEFINITION_COUNT = 500;
@@ -55,6 +56,23 @@ const deriveIndices = (
   if (result === false) throw new Error("unexpected rejecting schema");
 };
 
+const deriveRendererIndices = (
+  b: Deno.BenchContext,
+  distinct: boolean,
+): void => {
+  // Give every benchmark iteration a cold root identity while retaining the
+  // production renderer schema's root $ref, union, and recursive definitions.
+  const schema = deepFreeze({ ...rendererVDOMSchema });
+  const cfc = new ContextualFlowControl();
+  let result: JSONSchema = false;
+  b.start();
+  for (let index = 0; index < INDEX_COUNT; index++) {
+    result = cfc.schemaAtPath(schema, [distinct ? String(index) : "0"]);
+  }
+  b.end();
+  if (result === false) throw new Error("unexpected rejecting schema");
+};
+
 Deno.bench({
   name: "schemaAtPath — 1,000 array indices, no definitions",
   group: "schemaAtPath-array-fanout",
@@ -72,4 +90,17 @@ Deno.bench({
   name: "schemaAtPath — 1,000 array indices, 500/500 definitions reachable",
   group: "schemaAtPath-array-fanout",
   fn: (b) => deriveIndices(b, DEFINITION_COUNT, DEFINITION_COUNT),
+});
+
+Deno.bench({
+  name: "schemaAtPath — renderer root ref/union, repeated index",
+  group: "schemaAtPath-renderer-fanout",
+  baseline: true,
+  fn: (b) => deriveRendererIndices(b, false),
+});
+
+Deno.bench({
+  name: "schemaAtPath — renderer root ref/union, 1,000 distinct indices",
+  group: "schemaAtPath-renderer-fanout",
+  fn: (b) => deriveRendererIndices(b, true),
 });
