@@ -545,6 +545,56 @@ describe("piece schema compatibility", () => {
       .not.toThrow();
   });
 
+  it("treats undefined as a supported schema type", () => {
+    const argumentPrevious = pattern(
+      {
+        type: "object",
+        properties: { value: { type: "undefined" } },
+      },
+      oldPattern.resultSchema,
+    );
+    const argumentWidened = pattern(
+      {
+        type: "object",
+        properties: { value: { type: ["string", "undefined"] } },
+      },
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        argumentPrevious,
+        argumentWidened,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        argumentWidened,
+        argumentPrevious,
+      )
+    ).toThrow(/argument\.value/);
+
+    const resultPrevious = pattern(
+      oldPattern.argumentSchema,
+      {
+        type: "object",
+        properties: { value: { type: ["string", "undefined"] } },
+      },
+    );
+    const resultNarrowed = pattern(
+      oldPattern.argumentSchema,
+      {
+        type: "object",
+        properties: { value: { type: "undefined" } },
+      },
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(resultPrevious, resultNarrowed)
+    ).not.toThrow();
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(resultNarrowed, resultPrevious)
+    ).toThrow(/result\.value/);
+  });
+
   it("preserves required result guarantees and defaults new required results", () => {
     const optionalized = pattern(
       oldPattern.argumentSchema,
