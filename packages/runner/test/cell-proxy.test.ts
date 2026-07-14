@@ -365,18 +365,31 @@ describe("createProxy", () => {
     expect(proxy.a).toEqual([1, 2, 3]);
   });
 
-  it.skip("should support readonly array methods and log reads", () => {
+  it("should support readonly array methods and log reads", async () => {
+    // Seed the cell in its own committed transaction so the transaction under
+    // test records only the reads done by the read-only method.
+    const setupTx = runtime.edit();
     const c = runtime.getCell<number[]>(
       space,
       "should support readonly array methods and log reads",
+      undefined,
+      setupTx,
     );
     c.set([1, 2, 3]);
-    const proxy = c.getAsQueryResult();
+    await setupTx.commit();
+
+    const proxy = c.withTx(tx).getAsQueryResult([], tx);
     const result = proxy.find((x: any) => x === 2);
     expect(result).toBe(2);
-    expect(c.get()).toEqual([1, 2, 3]);
+    expect(c.withTx(tx).get()).toEqual([1, 2, 3]);
     const log = txToReactivityLog(tx);
-    expect(log.reads.map((r) => r.path)).toEqual([[], ["0"], ["1"], ["2"]]);
+    const pathsRead = log.reads.map((r) => r.path.join("."));
+    // Read-only array methods read the whole array recursively, which covers
+    // every element; each element also gets a link-probe read.
+    expect(pathsRead).toContain("value");
+    expect(pathsRead).toContain("value.0./.link@1");
+    expect(pathsRead).toContain("value.1./.link@1");
+    expect(pathsRead).toContain("value.2./.link@1");
     expect(log.writes).toEqual([]);
   });
 
