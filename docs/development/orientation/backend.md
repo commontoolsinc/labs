@@ -11,9 +11,12 @@ handful of third-party providers, and it serves the `shell` frontend.
 application, not an importable library. It is launched from `index.ts`.
 
 `background-piece-service` (package `@commonfabric/background-piece`) was called
-`background-charm-service` until the charm-to-piece rename. The directory and
-package name are now "piece"; only the on-the-wire `bgUpdater` stream name and a
-dated cause string keep the old vocabulary.
+`background-charm-service` until the charm-to-piece rename. The directory,
+package, and source all say "piece" now — the word "charm" appears nowhere in
+the package. A couple of persisted identifiers were deliberately left unchanged
+so existing spaces keep resolving (the `bgUpdater` stream name and a dated cause
+string); those are legacy-shaped, not "charm" — see the note under Technical
+debt below.
 
 ---
 
