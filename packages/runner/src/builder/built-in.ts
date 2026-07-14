@@ -20,6 +20,7 @@ import type {
   BuiltInGenerateTextStreamState,
   BuiltInLLMParams,
   BuiltInLLMState,
+  CompileAndRunFunction,
   ConfLabelQuery,
   FetchBinaryFunction,
   FetchBinaryResult,
@@ -113,12 +114,18 @@ export function unlessHasSchemas(argsLength: number): boolean {
   return argsLength >= SIGNATURE_ARGS.unless.withSchemas;
 }
 
-export const compileAndRun = createNodeFactory({
+/** @internal Legacy raw compilation state factory. */
+export const compileAndRunState = createNodeFactory({
   type: "ref",
   implementation: "compileAndRun",
 }) as <T = any, S = any>(
   params: FactoryInput<BuiltInCompileAndRunParams<T>>,
 ) => Reactive<BuiltInCompileAndRunState<S>>;
+
+export const compileAndRun = createNodeFactory({
+  type: "ref",
+  implementation: "compileAndRunResult",
+}) as CompileAndRunFunction;
 
 export const llm = createNodeFactory({
   type: "ref",

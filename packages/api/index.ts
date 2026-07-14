@@ -2175,17 +2175,34 @@ export interface BuiltInCompileAndRunParams<T> {
   input?: T;
 }
 
+export interface CompileDiagnostic {
+  line: number;
+  column: number;
+  message: string;
+  type: string;
+  file?: string;
+}
+
+/** Compilation or execution failure with structured compiler diagnostics. */
+export interface CompileError extends Error {
+  readonly diagnostics: readonly CompileDiagnostic[];
+}
+
+export type CompileHasError = HasError & {
+  readonly error: CompileError;
+};
+
+/** Availability-aware result of compiling and running a pattern. */
+export type CompileResult<T> =
+  | T
+  | Exclude<DataUnavailableVariant, HasError>
+  | CompileHasError;
+
 export interface BuiltInCompileAndRunState<T> {
   pending: boolean;
-  result?: T;
+  result?: CompileResult<T>;
   error?: any;
-  errors?: Array<{
-    line: number;
-    column: number;
-    message: string;
-    type: string;
-    file?: string;
-  }>;
+  errors?: CompileDiagnostic[];
 }
 
 // Function type definitions
@@ -2510,7 +2527,7 @@ export type StreamDataFunction = <T>(
 
 export type CompileAndRunFunction = <T = any, S = any>(
   params: FactoryInput<BuiltInCompileAndRunParams<T>>,
-) => Reactive<BuiltInCompileAndRunState<S>>;
+) => Reactive<CompileResult<S>>;
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
