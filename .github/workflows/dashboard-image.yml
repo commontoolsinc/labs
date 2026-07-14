@@ -159,6 +159,19 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
+      - name: Resolve existing immutable image
+        id: existing
+        shell: bash
+        run: |
+          if manifest=$(docker buildx imagetools inspect "${IMAGE}:${SOURCE_SHA}" --format '{{json .Manifest}}' 2>/dev/null); then
+            digest=$(jq -r '.digest' <<< "$manifest")
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Select image tags
         id: image
         shell: bash
@@ -175,6 +188,7 @@ jobs:
 
       - name: Build and push dashboard image
         id: build
+        if: ${{ steps.existing.outputs.exists != 'true' }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
@@ -184,9 +198,31 @@ jobs:
           tags: ${{ steps.image.outputs.tags }}
           cache-from: type=gha,scope=dashboard-${{ env.SOURCE_SHA }}
 
+      - name: Promote existing image to latest
+        if: >-
+          ${{
+            github.event_name == 'push' &&
+            github.ref == 'refs/heads/main' &&
+            steps.existing.outputs.exists == 'true'
+          }}
+        env:
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+        run: docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}@${EXISTING_DIGEST}"
+
+      - name: Resolve published digest
+        id: result
+        env:
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+        shell: bash
+        run: |
+          digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Report immutable image reference
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.result.outputs.digest }}
         run: |
           {
             echo "### Dashboard image published"
