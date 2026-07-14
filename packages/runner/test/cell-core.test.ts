@@ -36,6 +36,21 @@ const space = signer.did();
 const rawSigner = await Identity.fromPassphrase("test raw");
 const rawSpace = rawSigner.did();
 
+type CircularRoot = {
+  x: number;
+  y: number;
+  z: CircularRoot;
+};
+
+type CircularListRoot = {
+  list: CircularListChild[];
+};
+
+type CircularListChild = {
+  [ID]: number;
+  parent: CircularListRoot;
+};
+
 describe("Cell", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -349,16 +364,14 @@ describe("Cell", () => {
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const sparse: any[] = new Array(4);
+    const sparse = new Array<unknown>(4);
     sparse[0] = "hello";
     sparse[1] = { name: "Alice" };
     // index 2 is a hole
     sparse[3] = { name: "Bob" };
     c.set(sparse);
 
-    // deno-lint-ignore no-explicit-any
-    const result = c.get() as any[];
+    const result = c.get() as unknown[];
     expect(result[0]).toBe("hello");
     // Objects should have their properties
     expect(result[1]).toHaveProperty("name", "Alice");
@@ -768,7 +781,7 @@ describe("Cell circular references", () => {
       schema,
       tx,
     );
-    const data: any = { x: 1, y: 2 };
+    const data = { x: 1, y: 2 } as CircularRoot;
     data.z = data;
     c.set(data);
 
@@ -809,8 +822,8 @@ describe("Cell circular references", () => {
       schema,
       tx,
     );
-    const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
-    const outer: any = { list: [inner] };
+    const inner = { [ID]: 1 } as CircularListChild;
+    const outer: CircularListRoot = { list: [inner] };
     inner.parent = outer;
     c.set(outer);
 
