@@ -2456,6 +2456,11 @@ function _combineSchemaUncached(
       // If one schema has a property defined, and another schema has an
       // additionalProperties that covers that, we use the defined property
       // and don't pick up flags like asCell from additionalProperties.
+      // Conceptually, this mirrors how TypeScript maps any & T ,
+      // i.e. true + a link, yields T, interestingly. but
+      // { foo?: string } & { bar?: string } is allowing both foo and bar.
+      // this allows polymorphism (when caller asks for it), but stops
+      // schemaless queries from exploding.
       const parentAdditionalProperties = parentSchema.additionalProperties ??
         ((parentSchema.properties === undefined) || undefined);
       const linkAdditionalProperties = linkSchema.additionalProperties ??
