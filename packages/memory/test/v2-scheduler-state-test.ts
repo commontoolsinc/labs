@@ -17,6 +17,7 @@ import {
   principalOfSessionKey,
   resolveCommitSessionKey,
   type SchedulerActionObservation,
+  type SchedulerExecutionContextKey,
   serverSeq,
   upsertMirroredSchedulerObservation,
   upsertSchedulerObservation as upsertSchedulerObservationEngine,
@@ -118,6 +119,56 @@ const observationForAction = (
   actionId,
   ...overrides,
 });
+
+type SchedulerSideEffectSession = {
+  id: string;
+  principal: string;
+};
+
+type RunPostCommitSchedulerSideEffects = (
+  ownerSpace: string,
+  commit: AppliedCommit,
+  observations: readonly {
+    localSeq: number;
+    observation: SchedulerActionObservation;
+  }[],
+  previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
+  session: SchedulerSideEffectSession | undefined,
+) => Promise<void>;
+
+type MirrorSchedulerObservation = (
+  ownerSpace: string,
+  observation: SchedulerActionObservation,
+  executionContextKey: SchedulerExecutionContextKey,
+  commit: AppliedCommit,
+  previousReadSpaces: ReadonlySet<string>,
+  session: SchedulerSideEffectSession | undefined,
+) => Promise<void>;
+
+const bindRunPostCommitSchedulerSideEffects = (
+  server: Server,
+): RunPostCommitSchedulerSideEffects => {
+  const method = Reflect.get(server, "runPostCommitSchedulerSideEffects");
+  if (typeof method !== "function") {
+    throw new Error(
+      "Expected runPostCommitSchedulerSideEffects to be a function",
+    );
+  }
+  return method.bind(server) as RunPostCommitSchedulerSideEffects;
+};
+
+const replaceMirrorSchedulerObservation = (
+  server: Server,
+  replacement: MirrorSchedulerObservation,
+): void => {
+  const method = Reflect.get(server, "mirrorSchedulerObservation");
+  if (typeof method !== "function") {
+    throw new Error("Expected mirrorSchedulerObservation to be a function");
+  }
+  if (!Reflect.set(server, "mirrorSchedulerObservation", replacement)) {
+    throw new Error("Expected mirrorSchedulerObservation to be replaceable");
+  }
+};
 
 const schedulerAuthFactoryFor = (
   principal: string,
@@ -366,21 +417,27 @@ Deno.test("memory v2 rejects v2 scheduler observations without a write surface",
   const { engine, path } = await createEngine();
 
   try {
+    const fullObservation = {
+      ...observation,
+      version: 2 as const,
+      actionId: "pattern.tsx:computed:v2",
+    } satisfies SchedulerActionObservation;
     const {
       currentKnownWrites: _currentKnownWrites,
       declaredWrites: _declaredWrites,
       ...slimObservation
-    } = {
-      ...observation,
-      version: 2 as const,
-      actionId: "pattern.tsx:computed:v2",
-    };
+    } = fullObservation;
+    const observationWithoutWriteSurface: Omit<
+      SchedulerActionObservation,
+      "currentKnownWrites" | "declaredWrites"
+    > = slimObservation;
 
     assertThrows(() =>
       upsertSchedulerObservation(engine, {
         branch: "",
         observedAtSeq: headSeq(engine),
-        observation: slimObservation as unknown as SchedulerActionObservation,
+        observation:
+          observationWithoutWriteSurface as SchedulerActionObservation,
       })
     );
     assertEquals(countRows(engine, "scheduler_write_index"), 0);
@@ -2871,23 +2928,12 @@ Deno.test("memory v2 server contains incomplete scheduler replay metadata", asyn
     authorizeSessionOpen: () => "did:key:test-principal",
     sessionOpenAuth: testSessionOpenAuth,
   });
-  const runSideEffects = (server as unknown as {
-    runPostCommitSchedulerSideEffects: (
-      ownerSpace: string,
-      commit: AppliedCommit,
-      observations: readonly {
-        localSeq: number;
-        observation: SchedulerActionObservation;
-      }[],
-      previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
-      session: undefined,
-    ) => Promise<void>;
-  }).runPostCommitSchedulerSideEffects.bind(server);
-  const baseCommit = {
+  const runSideEffects = bindRunPostCommitSchedulerSideEffects(server);
+  const baseCommit: AppliedCommit = {
     seq: 1,
     branch: "",
     revisions: [],
-  } as unknown as AppliedCommit;
+  };
   const observations = [{ localSeq: 1, observation }];
 
   const originalWarn = console.warn;
@@ -2939,60 +2985,44 @@ Deno.test("memory v2 server serializes scheduler side effects per owner space", 
     authorizeSessionOpen: () => "did:key:scheduler-side-effect-principal",
     sessionOpenAuth: testSessionOpenAuth,
   });
-  const internals = server as unknown as {
-    runPostCommitSchedulerSideEffects: (
-      ownerSpace: string,
-      commit: AppliedCommit,
-      observations: readonly {
-        localSeq: number;
-        observation: SchedulerActionObservation;
-      }[],
-      previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
-      session: { id: string; principal: string },
-    ) => Promise<void>;
-    mirrorSchedulerObservation: (
-      ownerSpace: string,
-      observation: SchedulerActionObservation,
-      executionContextKey: string,
-      commit: AppliedCommit,
-    ) => Promise<void>;
-  };
+  const runSideEffects = bindRunPostCommitSchedulerSideEffects(server);
   const firstStarted = Promise.withResolvers<void>();
   const releaseFirst = Promise.withResolvers<void>();
   const mirroredSequences: number[] = [];
-  internals.mirrorSchedulerObservation = async (
+  replaceMirrorSchedulerObservation(server, async (
     _ownerSpace,
     _observation,
     _executionContextKey,
     commit,
+    _previousReadSpaces,
+    _session,
   ) => {
     mirroredSequences.push(commit.seq);
     if (commit.seq === 1) {
       firstStarted.resolve();
       await releaseFirst.promise;
     }
-  };
+  });
   const ownerSpace = "did:key:scheduler-side-effect-owner";
   const session = {
     id: "scheduler-side-effect-session",
     principal: "did:key:scheduler-side-effect-principal",
   };
   const observations = [{ localSeq: 1, observation }];
-  const commit = (seq: number) =>
-    ({
-      seq,
-      branch: "",
-      revisions: [],
-      schedulerObservationResults: [{
-        localSeq: 1,
-        status: "kept",
-        schedulerObservationId: seq,
-        executionContextKey: "space",
-      }],
-    }) as unknown as AppliedCommit;
+  const commit = (seq: number): AppliedCommit => ({
+    seq,
+    branch: "",
+    revisions: [],
+    schedulerObservationResults: [{
+      localSeq: 1,
+      status: "kept",
+      schedulerObservationId: seq,
+      executionContextKey: "space",
+    }],
+  });
 
   try {
-    const first = internals.runPostCommitSchedulerSideEffects(
+    const first = runSideEffects(
       ownerSpace,
       commit(1),
       observations,
@@ -3000,7 +3030,7 @@ Deno.test("memory v2 server serializes scheduler side effects per owner space", 
       session,
     );
     await firstStarted.promise;
-    const second = internals.runPostCommitSchedulerSideEffects(
+    const second = runSideEffects(
       ownerSpace,
       commit(2),
       observations,

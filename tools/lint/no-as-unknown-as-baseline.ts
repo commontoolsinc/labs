@@ -1,11 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/memory/test/v2-scheduler-state-test.ts": [
-    "383:37:1hnpzm7",
-    "2874:33:1rvmcia",
-    "2890:4:ytd6h1",
-    "2942:27:99ty7x",
-    "2992:7:h7otn2",
-  ],
   "packages/memory/v2/engine.ts": [
     "1020:15:1etu03n",
   ],
