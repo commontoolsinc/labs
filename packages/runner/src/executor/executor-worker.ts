@@ -552,7 +552,10 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   runtime.telemetry.addEventListener("telemetry", onRuntimeTelemetry);
   const metricsRuntime = runtime;
   detachExecutionMetrics = () =>
-    metricsRuntime.telemetry.removeEventListener("telemetry", onRuntimeTelemetry);
+    metricsRuntime.telemetry.removeEventListener(
+      "telemetry",
+      onRuntimeTelemetry,
+    );
   detachOtelBridge = await maybeAttachExecutorOtelBridge(runtime, {
     spanAttributes: {
       "space.did": space,
@@ -560,7 +563,6 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     },
   });
   runtime.installServerBuiltinFetch((builtinId, rawUrl, init) => {
-    executionMetrics.asyncRequests += 1;
     // Capture both object and exact claim before crossing an async broker
     // boundary. Broker IPC never receives a causal actor identity.
     const sourceAction = getTransactionSourceAction();
@@ -579,6 +581,11 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       return Promise.reject(error);
     }
     try {
+      executionMetrics.asyncRequests += 1;
+      // Builtin effects can start after the serialized pull that scheduled
+      // them has returned. Publish at this rare egress boundary so health
+      // snapshots do not wait for an unrelated later wake or shutdown.
+      publishExecutionMetrics();
       const pending = builtinBroker!.fetch(builtinId, rawUrl, init);
       return sourceAction === undefined || claim === undefined
         ? pending

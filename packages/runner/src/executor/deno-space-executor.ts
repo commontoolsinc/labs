@@ -537,6 +537,11 @@ class DenoSpaceExecutor implements SpaceExecutor {
           authoritative: next.actionTransactions.authoritative,
         }),
       });
+      try {
+        this.#startOptions.onExecutionMetrics?.(this.#executionMetrics);
+      } catch (error) {
+        console.warn("executor Worker metrics sink failed", error);
+      }
       return;
     }
     if (message.type === "writer-discovery") {

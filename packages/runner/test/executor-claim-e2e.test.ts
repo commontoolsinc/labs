@@ -2634,6 +2634,11 @@ Deno.test("claimed builtins use host broker while client sinks observe pending a
         events,
       );
       assertExists(executor);
+      assertEquals(
+        executor.executionMetrics?.().asyncRequests,
+        4,
+        "server async request placement must publish without another Worker request",
+      );
       await awaitBarrier(
         executor.wake(),
         "executor wake while claimed broker work remains unsettled",

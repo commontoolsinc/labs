@@ -374,8 +374,8 @@ Deno.test("memory v2 accepted-commit feed selects only stale demanded scheduler 
       statsBefore.acceptedCommitIndexLookups + 1,
     );
     assertEquals(
-      server.executionStats.acceptedCommitIndexTargets,
-      statsBefore.acceptedCommitIndexTargets + 1,
+      server.executionStats.acceptedCommitIndexTargetCandidates,
+      statsBefore.acceptedCommitIndexTargetCandidates + 1,
     );
     assertEquals(
       server.executionStats.acceptedCommitIndexDemandedPieces,

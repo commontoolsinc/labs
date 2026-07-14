@@ -1423,7 +1423,7 @@ export class Server {
     leaseFenceRejects: 0,
     actionFirewallRejects: 0,
     acceptedCommitIndexLookups: 0,
-    acceptedCommitIndexTargets: 0,
+    acceptedCommitIndexTargetCandidates: 0,
     acceptedCommitIndexDemandedPieces: 0,
     acceptedCommitIndexMatches: 0,
   };
@@ -3827,7 +3827,11 @@ export class Server {
     ) {
       const lookupStartedAt = performance.now();
       this.executionStats.acceptedCommitIndexLookups += 1;
-      this.executionStats.acceptedCommitIndexTargets += dirtyTargets.length;
+      // schedulerDirtiedReaders is action-derived, so two actions may supply
+      // the same address. Count pre-dedup candidates here rather than claiming
+      // this is the engine's internal unique-probe count.
+      this.executionStats.acceptedCommitIndexTargetCandidates +=
+        dirtyTargets.length;
       this.executionStats.acceptedCommitIndexDemandedPieces +=
         demandedSchedulerPieceIds.length;
       try {

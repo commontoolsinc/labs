@@ -66,7 +66,7 @@ const controlMetrics = {
   leaseFenceRejects: 0,
   actionFirewallRejects: 0,
   acceptedCommitIndexLookups: 5,
-  acceptedCommitIndexTargets: 8,
+  acceptedCommitIndexTargetCandidates: 8,
   acceptedCommitIndexDemandedPieces: 2,
   acceptedCommitIndexMatches: 4,
 };

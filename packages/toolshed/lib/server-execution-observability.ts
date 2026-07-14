@@ -18,7 +18,7 @@ export type ServerExecutionControlMetrics = Readonly<{
   leaseFenceRejects: number;
   actionFirewallRejects: number;
   acceptedCommitIndexLookups: number;
-  acceptedCommitIndexTargets: number;
+  acceptedCommitIndexTargetCandidates: number;
   acceptedCommitIndexDemandedPieces: number;
   acceptedCommitIndexMatches: number;
 }>;

@@ -313,6 +313,7 @@ const startExecutor = async (options: {
   };
   acknowledgeClaimedRuns?: boolean;
   startupTimeoutMs?: number;
+  onExecutionMetrics?: (snapshot: ExecutionMetrics) => void;
 }) => {
   const worker = new FakeWorker();
   worker.acknowledgeClaimedRuns = options.acknowledgeClaimedRuns ?? true;
@@ -352,6 +353,7 @@ const startExecutor = async (options: {
     lease: LEASE,
     pieces: [CLAIM_KEY.pieceId],
     onCrash: (error) => crashes.push(error),
+    onExecutionMetrics: options.onExecutionMetrics,
   });
   return { worker, server, crashes, executor };
 };
@@ -381,7 +383,11 @@ Deno.test("shadow executors report CandidateClaim diagnostics without publishing
 });
 
 Deno.test("executor host retains the latest cumulative execution placement snapshot", async () => {
-  const { worker, crashes, executor } = await startExecutor({ routing: false });
+  const published: ExecutionMetrics[] = [];
+  const { worker, crashes, executor } = await startExecutor({
+    routing: false,
+    onExecutionMetrics: (snapshot) => published.push(snapshot),
+  });
   try {
     assertEquals(executor.executionMetrics?.(), {
       schedulerRuns: 0,
@@ -410,6 +416,15 @@ Deno.test("executor host retains the latest cumulative execution placement snaps
       asyncRequests: 2,
       actionTransactions: { shadow: 3, authoritative: 2 },
     });
+    assertEquals(published, [{
+      schedulerRuns: 3,
+      asyncRequests: 1,
+      actionTransactions: { shadow: 2, authoritative: 1 },
+    }, {
+      schedulerRuns: 5,
+      asyncRequests: 2,
+      actionTransactions: { shadow: 3, authoritative: 2 },
+    }]);
     assertEquals(crashes, []);
   } finally {
     await executor.stop();

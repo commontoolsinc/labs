@@ -13,6 +13,7 @@ import type {
 import { Server } from "@commonfabric/memory/v2/server";
 import {
   type ExecutionPoolControl,
+  type ExecutorExecutionMetricsSnapshot,
   SharedExecutionPool,
   type SpaceExecutor,
   type SpaceExecutorFactory,
@@ -204,6 +205,19 @@ class FakeExecutionControl {
 
   acceptedCommitListenerCount(space = SPACE): number {
     return this.acceptedCommitListeners.get(space)?.size ?? 0;
+  }
+}
+
+class GatedFinishExecutionControl extends FakeExecutionControl {
+  readonly finishStarted = Promise.withResolvers<void>();
+  readonly releaseFinish = Promise.withResolvers<void>();
+
+  override async finishExecutionLeaseDrain(
+    current: ExecutionLeaseHandle,
+  ): Promise<ExecutionLease | null> {
+    this.finishStarted.resolve();
+    await this.releaseFinish.promise;
+    return await super.finishExecutionLeaseDrain(current);
   }
 }
 
@@ -887,6 +901,40 @@ Deno.test("shared execution pool aggregates placement across Worker generations"
   }
 });
 
+Deno.test("retired placement remains monotonic while lease drain completion waits", async () => {
+  const control = new GatedFinishExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    factory.executors[0]!.executionPlacement = {
+      schedulerRuns: 4,
+      asyncRequests: 1,
+      actionTransactions: { shadow: 3, authoritative: 1 },
+    };
+    const placement = {
+      schedulerRuns: 4,
+      asyncRequests: 1,
+      actionTransactions: { shadow: 3, authoritative: 1 },
+    };
+
+    const removal = control.emit(2, []);
+    await control.finishStarted.promise;
+    assertEquals(pool.metrics().executionPlacement, placement);
+
+    control.releaseFinish.resolve();
+    await removal;
+    await pool.idle();
+    assertEquals(pool.metrics().executionPlacement, placement);
+  } finally {
+    control.releaseFinish.resolve();
+    await pool.close();
+  }
+});
+
 Deno.test("shared execution pool updates disjoint roots without restarting", async () => {
   const control = new FakeExecutionControl();
   const factory = new FakeExecutorFactory();
@@ -1513,11 +1561,65 @@ Deno.test("closing the pool aborts a Worker generation still starting", async ()
   );
 });
 
+Deno.test("empty demand aborts an in-flight Worker start without backoff", async () => {
+  const control = new FakeExecutionControl();
+  const timers = new ManualTimers();
+  const started = Promise.withResolvers<void>();
+  let startupAborted = false;
+  const factory: SpaceExecutorFactory = {
+    start(options: SpaceExecutorStartOptions): Promise<SpaceExecutor> {
+      started.resolve();
+      const signal = options.signal;
+      if (signal === undefined) {
+        throw new Error("pool did not supply startup cancellation");
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          startupAborted = true;
+          reject(signal.reason);
+        }, { once: true });
+      });
+    },
+  };
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  pool.start();
+
+  try {
+    const demandAdded = control.emit(1, [demand(1, ["piece:a"])]);
+    await started.promise;
+    const demandRemoved = control.emit(2, []);
+    await Promise.all([demandAdded, demandRemoved]);
+    await pool.idle();
+
+    assertEquals(startupAborted, true);
+    assertEquals(control.finished, 1);
+    assertEquals(pool.snapshot(SPACE, BRANCH), undefined);
+    assertEquals(pool.metrics().workerStartAttempts, 1);
+    assertEquals(pool.metrics().workerStartAborts, 1);
+    assertEquals(pool.metrics().workerStartFailures, 0);
+    assertEquals(pool.metrics().workersStarted, 0);
+    assertEquals(timers.hasActive(1_000), false);
+  } finally {
+    await pool.close();
+  }
+});
+
 Deno.test("shared execution pool counts a non-abort Worker start failure", async () => {
   const control = new FakeExecutionControl();
   const timers = new ManualTimers();
+  const failedPlacement: ExecutorExecutionMetricsSnapshot = {
+    schedulerRuns: 2,
+    asyncRequests: 1,
+    actionTransactions: { shadow: 1, authoritative: 0 },
+  };
   const factory: SpaceExecutorFactory = {
-    start(): Promise<SpaceExecutor> {
+    start(options): Promise<SpaceExecutor> {
+      options.onExecutionMetrics?.(failedPlacement);
       return Promise.reject(new Error("synthetic Worker boot failure"));
     },
   };
@@ -1539,6 +1641,7 @@ Deno.test("shared execution pool counts a non-abort Worker start failure", async
     assertEquals(pool.metrics().workerStartAborts, 0);
     assertEquals(pool.metrics().workerStartFailures, 1);
     assertEquals(pool.metrics().workersStarted, 0);
+    assertEquals(pool.metrics().executionPlacement, failedPlacement);
     assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "backoff");
     assertEquals(
       getTimingStatsBreakdown()["execution.pool"]?.["worker-start-failed"]

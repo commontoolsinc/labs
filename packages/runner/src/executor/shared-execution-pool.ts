@@ -57,9 +57,10 @@ export interface ExecutorExecutionMetricsSnapshot {
   readonly schedulerRuns: number;
   /** Server-role async builtin requests started by this executor generation. */
   readonly asyncRequests: number;
-  /** Complete action transactions classified by the executor storage router.
-   * These are not settlement counts and must not be compared one-to-one with
-   * client overlays or coalesced server settlements. */
+  /** Servable action transactions classified into a concrete executor route.
+   * Unserved or otherwise unclassified attempts are omitted. These are not
+   * settlement counts and must not be compared one-to-one with client overlays
+   * or coalesced server settlements. */
   readonly actionTransactions: Readonly<{
     shadow: number;
     authoritative: number;
@@ -75,6 +76,12 @@ export interface SpaceExecutorStartOptions {
   readonly signal?: AbortSignal;
   /** Terminal realm failure. The pool fences this generation before retry. */
   readonly onCrash: (error: unknown) => void;
+  /** Best-effort sink for cumulative diagnostics emitted before start()
+   * returns. It lets the pool retain work from a generation whose
+   * initialization later fails. */
+  readonly onExecutionMetrics?: (
+    snapshot: ExecutorExecutionMetricsSnapshot,
+  ) => void;
 }
 
 export interface SpaceExecutorFactory {
@@ -118,7 +125,8 @@ export interface ExecutionPoolMetricsSnapshot {
   readonly activeDemands: number;
   readonly states: Readonly<Record<SpaceExecutionSnapshot["state"], number>>;
   readonly demandSnapshots: number;
-  /** Lifetime placement totals, including active and retired generations. */
+  /** Process-local pool-lifetime totals, including active, retired, and failed
+   * startup generations. */
   readonly executionPlacement: ExecutorExecutionMetricsSnapshot;
   /** Worker factory calls begun, including attempts still in flight. */
   readonly workerStartAttempts: number;
@@ -355,7 +363,12 @@ export class SharedExecutionPool {
   }
 
   #retireExecutionMetrics(executor: SpaceExecutor): void {
-    const placement = this.#readExecutionMetrics(executor);
+    this.#retireExecutionMetricsSnapshot(this.#readExecutionMetrics(executor));
+  }
+
+  #retireExecutionMetricsSnapshot(
+    placement: ExecutorExecutionMetricsSnapshot,
+  ): void {
     this.#retiredExecutionPlacement.schedulerRuns += placement.schedulerRuns;
     this.#retiredExecutionPlacement.asyncRequests += placement.asyncRequests;
     this.#retiredExecutionPlacement.shadowActionTransactions +=
@@ -662,6 +675,12 @@ export class SharedExecutionPool {
     const workerStartedAt = performance.now();
     this.#metrics.workerStartAttempts++;
     let startOutcome: "live" | "aborted" | "failed" = "failed";
+    let factoryReturned = false;
+    let startupExecutionMetrics: ExecutorExecutionMetricsSnapshot = {
+      schedulerRuns: 0,
+      asyncRequests: 0,
+      actionTransactions: { shadow: 0, authoritative: 0 },
+    };
     try {
       const executor = await this.#factory.start({
         space: slot.space,
@@ -669,6 +688,9 @@ export class SharedExecutionPool {
         lease: acquired,
         pieces: nextPieces,
         signal: startupAbort.signal,
+        onExecutionMetrics: (snapshot) => {
+          startupExecutionMetrics = snapshot;
+        },
         onCrash: (error) => {
           if (
             slot.generationToken !== token || slot.crashToken === token
@@ -682,6 +704,7 @@ export class SharedExecutionPool {
           void this.#enqueue(slot, () => this.#reconcile(slot));
         },
       });
+      factoryReturned = true;
       if (slot.startupAbort === startupAbort) slot.startupAbort = null;
       if (
         startupAbort.signal.aborted || slot.generationToken !== token ||
@@ -714,6 +737,9 @@ export class SharedExecutionPool {
     } catch (error) {
       if (slot.startupAbort === startupAbort) slot.startupAbort = null;
       startOutcome = startupAbort.signal.aborted ? "aborted" : "failed";
+      if (!factoryReturned) {
+        this.#retireExecutionMetricsSnapshot(startupExecutionMetrics);
+      }
       slot.crashToken = token;
       await this.#shutdown(slot, true);
       console.warn(
@@ -953,6 +979,11 @@ export class SharedExecutionPool {
         console.warn("executor Worker teardown failed", error);
         stopFailed = true;
       }
+      // stop() publishes the generation's final cumulative snapshot. Detach
+      // it before retiring that snapshot so metrics() can never observe the
+      // same generation in both the active and retired totals while lease
+      // drain completion awaits host I/O.
+      if (slot.executor === executor) slot.executor = null;
       this.#retireExecutionMetrics(executor);
       this.#metrics.workersStopped++;
       if (abrupt) this.#metrics.abruptStops++;
@@ -967,7 +998,6 @@ export class SharedExecutionPool {
         finishFailed = true;
       }
     }
-    if (slot.executor === executor) slot.executor = null;
     if (slot.lease?.leaseGeneration === leaseGeneration) {
       slot.lease = null;
     }
