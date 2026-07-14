@@ -309,7 +309,7 @@ Deno.test("broker normalizes methods and removes server-only request headers", a
   assertEquals(captured.body, "payload");
 });
 
-Deno.test("cross-origin redirects strip authorization before the next request", async () => {
+Deno.test("cross-origin redirects strip authorization while retaining trusted custom headers", async () => {
   const requests: ServerBuiltinTransportRequest[] = [];
   const broker = createServerBuiltinEgressBroker({
     servingOrigin: "https://fabric.example",
@@ -324,7 +324,10 @@ Deno.test("cross-origin redirects strip authorization before the next request", 
 
   await broker.fetch({
     url: "/api/start",
-    headers: { Authorization: "Bearer serving-origin-token" },
+    headers: {
+      Authorization: "Bearer serving-origin-token",
+      "X-Api-Key": "trusted-client-key",
+    },
   });
 
   assertEquals(
@@ -332,6 +335,7 @@ Deno.test("cross-origin redirects strip authorization before the next request", 
     "Bearer serving-origin-token",
   );
   assertEquals(requests[1].headers.get("authorization"), null);
+  assertEquals(requests[1].headers.get("x-api-key"), "trusted-client-key");
 });
 
 Deno.test("broker rejects declared and streamed responses above the byte limit", async (t) => {

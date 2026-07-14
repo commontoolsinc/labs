@@ -729,6 +729,14 @@ widen network reach relative to browser execution:
 - the worker receives the canonical serving origin explicitly and must not
   infer it from an internal memory-server address.
 
+V1's trusted-client broker deliberately matches browser Fetch redirect-header
+behavior: an origin-changing hop strips `Authorization`, but retains other
+caller-authored headers (including custom API-key headers) and preserves a
+307/308 body. This satisfies the first-round "do not widen client reach" bar;
+it is not the final untrusted-client secret policy. A later hardening pass may
+apply a sensitive-header denylist or explicit allowlist, with compatibility
+handling for APIs that redirect authenticated requests.
+
 A host egress broker is preferred so workers need no broad network
 permission. Direct builtin execution is acceptable only when it enforces the
 identical policy. Pattern code in SES has no raw-fetch escape from the builtin

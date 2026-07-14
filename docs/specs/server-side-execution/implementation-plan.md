@@ -883,7 +883,10 @@ behavior are covered by deterministic Worker and W2.4 failure drills.
    Re-resolve DNS and reapply policy on every redirect hop. A request that
    began relative remains in trusted-serving-origin mode across a same-origin
    redirect even when Location is absolute; any origin change becomes external
-   and receives the full policy.
+   and receives the full policy. For this trusted-client iteration, retain
+   browser Fetch header parity across that hop: strip `Authorization`, retain
+   other caller-authored headers and 307/308 bodies. An untrusted-client
+   sensitive-header denylist/allowlist is later hardening.
 6. Route generate-family calls through configured provider policy/credentials;
    never inherit arbitrary client secrets from the demand payload.
 7. For identity-sensitive first-party requests, the host compares the
@@ -906,6 +909,8 @@ behavior are covered by deterministic Worker and W2.4 failure drills.
       deployed fixtures.
 - [x] A relative request may follow an absolute same-serving-origin redirect;
       an origin-changing redirect is reclassified and blocked when private.
+- [x] Cross-origin redirects strip `Authorization`; trusted-client v1 retains
+      custom headers and explicitly records later secret-header hardening.
 - [x] Absolute localhost/private/metadata URLs are blocked, including DNS and
       redirect rebinding cases.
 - [x] Raw fetch remains unavailable in a pattern SES test.

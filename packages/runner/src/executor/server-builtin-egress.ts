@@ -795,6 +795,11 @@ export const createServerBuiltinEgressBroker = (
           const sameOrigin = nextUrl.origin === target.url.origin;
           const remainsTrusted = target.trustedServingOrigin &&
             nextUrl.origin === servingOrigin.origin;
+          // V1 deliberately matches browser Fetch redirect semantics for
+          // trusted clients: cross-origin hops drop Authorization, while
+          // caller-authored custom headers remain. A later untrusted-client
+          // policy can replace this with a sensitive-header denylist or
+          // allowlist without silently changing first-round builtin parity.
           if (!sameOrigin) headers.delete("authorization");
           ({ method, body } = redirectRequest(
             response.status,
