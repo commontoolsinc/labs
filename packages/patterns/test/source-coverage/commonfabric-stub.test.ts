@@ -412,8 +412,10 @@ export function fetchProgram(): { files: never[]; main: string } {
   return { files: [], main: "" };
 }
 
-export function streamData(): { pending: false; result: undefined } {
-  return { pending: false, result: undefined };
+export function streamData<T>(
+  _params: Record<string, unknown>,
+): T | UnavailableResult {
+  return {} as T;
 }
 
 export function byRef(_ref: string): () => Record<string, never> {
