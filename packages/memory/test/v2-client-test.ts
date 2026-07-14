@@ -588,6 +588,11 @@ Deno.test("memory v2 client watch views expose incremental sync effects", async 
         },
       }],
       removes: [],
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [],
+      },
     });
   } finally {
     await writerClient.close();
