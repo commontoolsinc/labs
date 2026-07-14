@@ -68,6 +68,21 @@ export type DataUnavailableFor<K extends DataUnavailableReason> = Extract<
 >;
 
 /**
+ * SES can mint tamed errors whose constructor is not in the host realm's
+ * native-type registry. Keep this check deliberately narrower than a generic
+ * error-shaped object: these are the standard Error slots plus a constructor
+ * needed to preserve the originating error type.
+ */
+function isErrorFromAnotherRealm(value: unknown): value is Error {
+  if (value === null || typeof value !== "object") return false;
+  const candidate = value as Partial<Error> & { constructor?: unknown };
+  return typeof candidate.constructor === "function" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.message === "string" &&
+    (candidate.stack === undefined || typeof candidate.stack === "string");
+}
+
+/**
  * Fabric control value representing data which a computation cannot yet use.
  *
  * Construction is runtime-owned. Pattern authors observe instances through
@@ -102,9 +117,12 @@ export class DataUnavailable extends BaseFabricInstance
    * deeply frozen {@link FabricError}.
    */
   static error(error: Error | FabricError): HasError {
+    if (!(error instanceof FabricError) && !isErrorFromAnotherRealm(error)) {
+      throw new TypeError("DataUnavailable.error() requires an Error");
+    }
     const converted = error instanceof FabricError
       ? deepFreeze(error)
-      : fabricFromNativeValue(error);
+      : fabricFromNativeValue(FabricError.fromNativeError(error));
     if (!(converted instanceof FabricError)) {
       throw new TypeError("DataUnavailable.error() requires an Error");
     }

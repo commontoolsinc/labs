@@ -86,6 +86,24 @@ describe("DataUnavailable", () => {
     expect(isDeepFrozen(error)).toBe(true);
   });
 
+  it("normalizes error objects minted by a tamed SES realm", () => {
+    class Error4 {
+      readonly name = "Error";
+      readonly message = "sandbox failed";
+      readonly stack = "Error: sandbox failed\n    at sandbox.ts:1:1";
+      readonly cause = { operation: "wish" };
+    }
+
+    const unavailable = DataUnavailable.error(new Error4() as Error);
+
+    expect(unavailable.error).toBeInstanceOf(FabricError);
+    expect(unavailable.error?.type).toBe("Error4");
+    expect(unavailable.error?.name).toBe("Error");
+    expect(unavailable.error?.message).toBe("sandbox failed");
+    expect(unavailable.error?.cause).toEqual({ operation: "wish" });
+    expect(isDeepFrozen(unavailable.error)).toBe(true);
+  });
+
   it("rejects values which are not native or Fabric errors", () => {
     expect(() => DataUnavailable.error("not an error" as never)).toThrow(
       "DataUnavailable.error() requires an Error",
