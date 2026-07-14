@@ -419,11 +419,6 @@ before the event, through a cache with no invalidation, at a granularity coarser
 than the wait itself. Making it a real signal means ordering the refresh after
 the counters, regenerating on read, and giving a reader something to notice.
 
-### Disabled tests
-
-`cf-code-editor.test.disabled.ts` holds many `waitFor` calls but never runs.
-Leave it until it is re-enabled.
-
 ## Production reconnect backoff
 
 The "wait on an event, not a poll" principle applies to production code too, and

@@ -7,10 +7,23 @@
  * 3. External Cell updates during typing
  *
  * The critical flow being tested:
- * - User types → editor updates → hash stored → debounced Cell update (500ms)
- * - Cell echo fires → hash compared → if match, skip update → cursor stays
+ * - User types → editor updates → debounced Cell update (500ms)
+ * - Cell echo fires → content compared → if match, skip update → cursor stays
+ *
+ * Waits are event-driven: editor-state conditions use waitForCondition (an
+ * in-page waiter re-evaluated on DOM mutation), and committed cell values are
+ * awaited through the result-cell sink. The remaining setTimeout calls
+ * construct timing scenarios (an update landing inside the component's
+ * wall-clock debounce window, or a settling period after which a canceled
+ * write must NOT have fired); they are the scenario, not a wait for a result.
  */
-import { env, Page, waitFor } from "@commonfabric/integration";
+import {
+  awaitViewSettled,
+  env,
+  Page,
+  type ProbeApi,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -22,12 +35,48 @@ import {
   PieceController,
   PiecesController,
 } from "./pieces-controller.ts";
+import { waitForRuntimeSynced } from "./cfc-browser-helpers.ts";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 // Debounce delay configured in cf-code-editor (default timingDelay)
 const DEBOUNCE_DELAY = 500;
 const DEBOUNCE_BUFFER = 100; // Extra time for processing
+
+// In-page predicate for waitForCondition: the editor document text equals
+// `expected`. `probe.collect` pierces shadow roots to find the editor host.
+const editorContentIs = (probe: ProbeApi, expected: string): boolean => {
+  const editor = probe.collect("cf-code-editor")[0] as
+    | (Element & { _editorView?: { state: { doc: { toString(): string } } } })
+    | undefined;
+  return editor?._editorView?.state.doc.toString() === expected;
+};
+
+// In-page predicate: the editor host exists and its CodeMirror view is up.
+const editorReady = (probe: ProbeApi): boolean => {
+  const editor = probe.collect("cf-code-editor")[0] as
+    | (Element & { _editorView?: unknown })
+    | undefined;
+  return editor?._editorView !== undefined;
+};
+
+/** Wait until the editor's document text equals `expected`. */
+async function waitForEditorContent(
+  page: Page,
+  expected: string,
+): Promise<void> {
+  try {
+    await waitForCondition(page, editorContentIs, { args: [expected] });
+  } catch (cause) {
+    const actual = await getEditorContent(page).catch(() => "<unreadable>");
+    throw new Error(
+      `Editor content did not become ${JSON.stringify(expected)}; ` +
+        `last content: ${JSON.stringify(actual)}`,
+      { cause },
+    );
+  }
+}
 
 describe("cf-code-editor cursor stability", () => {
   const shell = new ShellIntegration();
@@ -36,6 +85,23 @@ describe("cf-code-editor cursor stability", () => {
   let identity: Identity;
   let cc: PiecesController;
   let piece: PieceController;
+  let pieceSinkCancel: (() => void) | undefined;
+  // The piece's committed content value, tracked by the result-cell sink
+  // below, and a one-shot waiter the sink resolves when the value reaches a
+  // target.
+  let latestContent: string | undefined;
+  let contentWaiter: { target: string; deferred: Deferred } | undefined;
+
+  // Resolve once the piece's committed content equals `target`. The sink
+  // fires with the current value on registration and on every committed
+  // change, so a value already at the target resolves immediately; otherwise
+  // the sink resolves the waiter when the target lands.
+  const awaitCellContent = (target: string): Promise<void> => {
+    if (latestContent === target) return Promise.resolve();
+    const deferred = defer();
+    contentWaiter = { target, deferred };
+    return deferred.promise;
+  };
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -53,11 +119,49 @@ describe("cf-code-editor cursor stability", () => {
 
     // Add permissions for ANYONE
     await cc.acl().set(ANYONE_USER, "WRITE");
+
+    // In pull mode, create a sink to keep the piece reactive when inputs
+    // change. The sink also drives awaitCellContent: it records the latest
+    // committed content and resolves a pending waiter when its target lands.
+    const resultCell = cc.manager().getResult(piece.getCell());
+    pieceSinkCancel = resultCell.sink((value) => {
+      latestContent = (value as { content?: string } | undefined)?.content;
+      if (contentWaiter && latestContent === contentWaiter.target) {
+        contentWaiter.deferred.resolve();
+        contentWaiter = undefined;
+      }
+    });
   });
 
   afterAll(async () => {
+    pieceSinkCancel?.();
     if (cc) await cc.dispose();
   });
+
+  /**
+   * Reset editor state to empty for test isolation: clear the editor without
+   * scheduling a cell write, clear the cell, and wait until the editor, the
+   * committed cell value, and the page's runtime have all settled at empty.
+   */
+  async function resetEditorState(page: Page): Promise<void> {
+    await clearEditor(page);
+    await piece.result.set("", ["content"]);
+    await waitForEditorContent(page, "");
+    await awaitCellContent("");
+    await waitForRuntimeSynced(page);
+    await awaitViewSettled(page);
+  }
+
+  /**
+   * Wait for the cell echo of a just-committed edit to reach the page: the
+   * committed value is already at `content`, so once the page's runtime has
+   * synced and the view has settled, the subscription delivery (and its
+   * potential — incorrect — cursor move) has happened.
+   */
+  async function awaitEchoDelivered(page: Page): Promise<void> {
+    await waitForRuntimeSynced(page);
+    await awaitViewSettled(page);
+  }
 
   it("should load the cf-code-editor piece", async () => {
     const page = shell.page();
@@ -69,8 +173,7 @@ describe("cf-code-editor cursor stability", () => {
       },
       identity,
     });
-    await page.waitForSelector("cf-code-editor", { strategy: "pierce" });
-    await new Promise((r) => setTimeout(r, 1000));
+    await waitForCondition(page, editorReady);
   });
 
   it("should sync Cell value to editor", async () => {
@@ -78,49 +181,23 @@ describe("cf-code-editor cursor stability", () => {
     const text = "initial";
 
     // Clear any initial state first and wait for editor to show empty
-    await clearEditor(page);
+    await resetEditorState(page);
 
     // Set Cell value
     await piece.result.set(text, ["content"]);
 
     // Wait for editor to reflect it
-    await waitFor(
-      async () => (await getEditorContent(page)) === text,
-      { timeout: 3000, delay: 50 },
-    );
-
-    // Short delay
-    await new Promise((r) => setTimeout(r, 300));
+    await waitForEditorContent(page, text);
 
     // Clear for next test
     await piece.result.set("", ["content"]);
-    await waitFor(
-      async () => (await getEditorContent(page)) === "",
-      { timeout: 5000, delay: 50 },
-    );
+    await waitForEditorContent(page, "");
   });
 
   it("should maintain cursor position during normal typing with Cell echo", async () => {
     const page = shell.page();
 
-    // Clear any initial state first and wait for editor to show empty
-    await clearEditor(page);
-    // Also set Cell to empty to ensure sync
-    await piece.result.set("", ["content"]);
-
-    // Wait for both editor and Cell to be empty and synchronized
-    await waitFor(
-      async () => {
-        const editorContent = await getEditorContent(page);
-        const cellValue = await piece.result.get(["content"]);
-        return editorContent === "" && cellValue === "";
-      },
-    );
-
-    // Extra settling time for any pending Cell subscription callbacks to drain.
-    // This is critical because shared piece between tests can have stale
-    // subscription callbacks queued that fire after we start typing.
-    await new Promise((r) => setTimeout(r, 300));
+    await resetEditorState(page);
 
     // Focus the editor
     await focusEditor(page);
@@ -146,13 +223,10 @@ describe("cf-code-editor cursor stability", () => {
     assertEquals(contentBeforeDebounce, textToType);
 
     // Wait for debounce to complete and Cell to update
-    await waitFor(
-      async () => await piece.result.get(["content"]) === textToType,
-    );
+    await awaitCellContent(textToType);
 
-    // Wait for the Cell echo to propagate and confirm cursor stays stable.
-    // We poll multiple times to ensure cursor doesn't jump transiently.
-    await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
+    // Wait for the Cell echo to propagate back to the page.
+    await awaitEchoDelivered(page);
 
     // Critical test: cursor should NOT have jumped after Cell echo
     const cursorAfterEcho = await getCursorPosition(page);
@@ -170,19 +244,15 @@ describe("cf-code-editor cursor stability", () => {
   it("should maintain cursor during rapid typing (multiple chars in debounce window)", async () => {
     const page = shell.page();
 
-    // Clear the editor first and sync Cell to empty
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 200));
-
+    await resetEditorState(page);
     await focusEditor(page);
 
-    // Type several characters rapidly (within debounce window)
-    // Each character typed resets the debounce timer
+    // Type several characters rapidly (within debounce window). The short
+    // pause between characters constructs the scenario: each keystroke lands
+    // inside the debounce window of the previous one and resets its timer.
     const chars = ["A", "B", "C", "D", "E"];
     for (const char of chars) {
       await page.keyboard.type(char);
-      // Small delay between chars but less than debounce
       await new Promise((r) => setTimeout(r, 50));
     }
 
@@ -193,11 +263,8 @@ describe("cf-code-editor cursor stability", () => {
     assertEquals(cursorBeforeDebounce, fullText.length);
 
     // Wait for debounce to complete (only fires ONCE after last character)
-    await waitFor(
-      async () => await piece.result.get(["content"]) === fullText,
-    );
-
-    await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
+    await awaitCellContent(fullText);
+    await awaitEchoDelivered(page);
 
     // Cursor should still be at end, not jumped
     const cursorAfterDebounce = await getCursorPosition(page);
@@ -211,15 +278,12 @@ describe("cf-code-editor cursor stability", () => {
   it("should maintain cursor when typing mid-document", async () => {
     const page = shell.page();
 
-    // Set initial content
-    await clearEditor(page);
+    await resetEditorState(page);
     const initialText = "Start End";
     await typeInEditor(page, initialText);
 
     // Wait for Cell to sync
-    await waitFor(
-      async () => await piece.result.get(["content"]) === initialText,
-    );
+    await awaitCellContent(initialText);
 
     // Move cursor to middle (after "Start ")
     const middlePos = 6; // After "Start "
@@ -240,11 +304,8 @@ describe("cf-code-editor cursor stability", () => {
     ); // "Start MIDDLE ".length
 
     // Wait for debounce
-    await waitFor(
-      async () => await piece.result.get(["content"]) === expectedText,
-    );
-
-    await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
+    await awaitCellContent(expectedText);
+    await awaitEchoDelivered(page);
 
     // Cursor should stay where it was after typing
     const cursorAfterEcho = await getCursorPosition(page);
@@ -255,14 +316,14 @@ describe("cf-code-editor cursor stability", () => {
     );
   });
 
-  it("should apply external Cell update during debounce window", async () => {
+  it("should preserve a pending local edit over an external update during the debounce window", async () => {
+    // A locally-edited value that bound state has not yet confirmed wins over
+    // deliveries of other values until its write settles (see CellController's
+    // pending-local-edit tracking); an external update landing mid-debounce
+    // must not repaint the editor, and the local edit commits over it.
     const page = shell.page();
 
-    // Clear the editor and sync Cell to empty
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 200));
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Start typing
@@ -271,39 +332,28 @@ describe("cf-code-editor cursor stability", () => {
     const cursorAfterTyping = await getCursorPosition(page);
     assertEquals(cursorAfterTyping, 4);
 
-    // BEFORE debounce completes, simulate external update
-    // This simulates another user/process updating the Cell
-    await new Promise((r) => setTimeout(r, 200)); // Partway through debounce
+    // BEFORE debounce completes, simulate external update. The pause places
+    // the update partway through the component's 500ms debounce window.
+    await new Promise((r) => setTimeout(r, 200));
     await piece.result.set("External Update", ["content"]);
 
-    // Wait a moment for the external update to potentially propagate
-    await new Promise((r) => setTimeout(r, 100));
+    // The pending local edit's debounced write commits over the external
+    // value.
+    await awaitCellContent("User");
+    await awaitEchoDelivered(page);
 
-    // External updates override local edits, even during debounce.
-    const contentDuringDebounce = await getEditorContent(page);
+    // The editor kept the local edit throughout; the cursor never moved.
+    const editorContent = await getEditorContent(page);
     assertEquals(
-      contentDuringDebounce,
-      "External Update",
-      "Editor should apply external update during debounce",
+      editorContent,
+      "User",
+      "Editor should keep the pending local edit over the external update",
     );
-
-    // Cursor should be clamped, not invalid
-    const cursorDuringDebounce = await getCursorPosition(page);
+    const cursorAfterCommit = await getCursorPosition(page);
     assertEquals(
-      cursorDuringDebounce,
+      cursorAfterCommit,
       4,
-      "Cursor should remain valid after external update",
-    );
-
-    // Wait for debounce to complete - pending local write was canceled
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + DEBOUNCE_BUFFER));
-
-    // After debounce, the Cell should still have the external update
-    const cellValue = await piece.result.get(["content"]);
-    assertEquals(
-      cellValue,
-      "External Update",
-      "External update should remain after canceling local debounce",
+      "Cursor should remain in place while the local edit is pending",
     );
   });
 
@@ -313,23 +363,13 @@ describe("cf-code-editor cursor stability", () => {
     // cursor clamping when content is shortened.
     const page = shell.page();
 
-    // Clear editor state from previous tests and sync Cell to empty
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    // Allow time for any pending Cell subscription callbacks
-    await new Promise((r) => setTimeout(r, 300));
+    await resetEditorState(page);
 
-    // Set long content externally (no typing, no hash stored)
+    // Set long content externally (no typing)
     const longContent =
       "This is a very long piece of content that will be shortened";
     await piece.result.set(longContent, ["content"]);
-
-    await waitFor(
-      async () => {
-        const content = await getEditorContent(page);
-        return content === longContent;
-      },
-    );
+    await waitForEditorContent(page, longContent);
 
     // Move cursor to end (still no typing)
     await focusEditor(page);
@@ -342,13 +382,7 @@ describe("cf-code-editor cursor stability", () => {
     // Since no typing is in progress, this should apply immediately
     const shortContent = "Short";
     await piece.result.set(shortContent, ["content"]);
-
-    await waitFor(
-      async () => {
-        const content = await getEditorContent(page);
-        return content === shortContent;
-      },
-    );
+    await waitForEditorContent(page, shortContent);
 
     // Cursor should be clamped to new content length
     const cursorAfterShorten = await getCursorPosition(page);
@@ -358,14 +392,10 @@ describe("cf-code-editor cursor stability", () => {
     );
   });
 
-  it("should not apply Cell echo if content hash matches (own change)", async () => {
+  it("should not apply Cell echo if content matches (own change)", async () => {
     const page = shell.page();
 
-    // Clear the editor and sync Cell to empty
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 200));
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type text
@@ -376,55 +406,37 @@ describe("cf-code-editor cursor stability", () => {
     assertEquals(cursorBeforeEcho, text.length);
 
     // Wait for debounce to fire and Cell to update
-    await waitFor(
-      async () => await piece.result.get(["content"]) === text,
-    );
+    await awaitCellContent(text);
 
-    // The Cell echo should be detected and skipped (hash match)
+    // The Cell echo should be detected and skipped (content match)
     // Cursor should NOT move
-    await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
+    await awaitEchoDelivered(page);
 
     const cursorAfterEcho = await getCursorPosition(page);
     assertEquals(
       cursorAfterEcho,
       text.length,
-      "Cursor should not move when Cell echo is detected (hash match)",
+      "Cursor should not move when Cell echo is detected (content match)",
     );
 
     // Now simulate EXTERNAL change with different content
     await piece.result.set("Different content", ["content"]);
-
-    await waitFor(
-      async () => {
-        const content = await getEditorContent(page);
-        return content === "Different content";
-      },
-    );
-
-    // This should apply because hash doesn't match (external change)
-    const finalContent = await getEditorContent(page);
-    assertEquals(finalContent, "Different content");
+    await waitForEditorContent(page, "Different content");
   });
 
   it("should handle backspace and maintain cursor", async () => {
     const page = shell.page();
 
-    // Clear the editor and sync Cell to empty
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 200));
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type some text
     await typeInEditor(page, "Hello World");
-    await waitFor(
-      async () => await piece.result.get(["content"]) === "Hello World",
-    );
+    await awaitCellContent("Hello World");
 
-    // Backspace several times
+    // Backspace several times to delete " World". The short pause between
+    // keystrokes keeps each one inside the previous one's debounce window.
     for (let i = 0; i < 6; i++) {
-      // Delete " World"
       await page.keyboard.press("Backspace");
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -434,11 +446,8 @@ describe("cf-code-editor cursor stability", () => {
     assertEquals(cursorAfterBackspace, expectedText.length);
 
     // Wait for debounce
-    await waitFor(
-      async () => await piece.result.get(["content"]) === expectedText,
-    );
-
-    await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
+    await awaitCellContent(expectedText);
+    await awaitEchoDelivered(page);
 
     // Cursor should still be at correct position
     const cursorAfterEcho = await getCursorPosition(page);
@@ -453,17 +462,12 @@ describe("cf-code-editor cursor stability", () => {
     // This is a NEGATIVE test: cursor SHOULD move when user is not actively editing
     const page = shell.page();
 
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 200));
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type and wait for sync
     await typeInEditor(page, "Hello World");
-    await waitFor(
-      async () => await piece.result.get(["content"]) === "Hello World",
-    );
+    await awaitCellContent("Hello World");
 
     // Blur the editor - this should allow external updates to apply
     await page.evaluate(`
@@ -472,15 +476,10 @@ describe("cf-code-editor cursor stability", () => {
         if (active && active.blur) active.blur();
       })()
     `);
-    await new Promise((r) => setTimeout(r, 100));
 
     // External update with shorter content
     await piece.result.set("Short", ["content"]);
-
-    // Wait for external update to apply
-    await waitFor(
-      async () => (await getEditorContent(page)) === "Short",
-    );
+    await waitForEditorContent(page, "Short");
 
     // Cursor should be clamped to new content length (not stuck at old position)
     const cursor = await getCursorPosition(page);
@@ -491,33 +490,20 @@ describe("cf-code-editor cursor stability", () => {
   });
 
   it("should apply external update after debounce window fully expires", async () => {
-    // After debounce completes and hash is cleared, external updates should apply
+    // After debounce completes, external updates should apply
     const page = shell.page();
 
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 200));
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type and wait for debounce to complete
     await typeInEditor(page, "User typed");
-    await waitFor(
-      async () => await piece.result.get(["content"]) === "User typed",
-    );
+    await awaitCellContent("User typed");
+    await awaitEchoDelivered(page);
 
-    // Wait extra time to ensure hash is fully cleared
-    await new Promise((r) => setTimeout(r, 200));
-
-    // Now external update should apply (no hash blocking it)
+    // Now external update should apply (no pending local edit blocking it)
     await piece.result.set("External update", ["content"]);
-
-    await waitFor(
-      async () => (await getEditorContent(page)) === "External update",
-    );
-
-    const content = await getEditorContent(page);
-    assertEquals(content, "External update");
+    await waitForEditorContent(page, "External update");
   });
 
   // ==========================================================================
@@ -528,20 +514,15 @@ describe("cf-code-editor cursor stability", () => {
     // Stress test: rapid Cell updates should all apply correctly
     const page = shell.page();
 
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 200));
+    await resetEditorState(page);
 
-    // Send 5 external updates rapidly (no user typing)
+    // Send 5 external updates in quick succession (no user typing)
     for (let i = 0; i < 5; i++) {
       await piece.result.set(`Update ${i}`, ["content"]);
-      await new Promise((r) => setTimeout(r, 50));
     }
 
     // Final content should be last update
-    await waitFor(
-      async () => (await getEditorContent(page)) === "Update 4",
-    );
+    await waitForEditorContent(page, "Update 4");
 
     // Cursor should be valid
     const cursor = await getCursorPosition(page);
@@ -552,26 +533,19 @@ describe("cf-code-editor cursor stability", () => {
   });
 
   it("should handle undo operation and maintain correct state", async () => {
-    // Undo triggers updateListener - verify hash doesn't cause issues
+    // Undo triggers updateListener - verify echo detection doesn't cause issues
     const page = shell.page();
 
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 200));
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type initial text
     await typeInEditor(page, "Hello");
-    await waitFor(
-      async () => await piece.result.get(["content"]) === "Hello",
-    );
+    await awaitCellContent("Hello");
 
     // Type more text
     await typeInEditor(page, " World");
-    await waitFor(
-      async () => await piece.result.get(["content"]) === "Hello World",
-    );
+    await awaitCellContent("Hello World");
 
     // Undo (Cmd+Z on Mac, Ctrl+Z on others)
     const isMac = await page.evaluate(`navigator.platform.includes('Mac')`);
@@ -584,8 +558,7 @@ describe("cf-code-editor cursor stability", () => {
       await page.keyboard.press("z");
       await page.keyboard.up("Control");
     }
-
-    await new Promise((r) => setTimeout(r, 100));
+    await awaitViewSettled(page);
 
     // After undo, editor should show previous state
     const contentAfterUndo = await getEditorContent(page);
@@ -597,8 +570,9 @@ describe("cf-code-editor cursor stability", () => {
       `Cursor should be valid after undo, got ${cursorAfterUndo}`,
     );
 
-    // Wait for any Cell sync from undo
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
+    // The undo edit schedules its own debounced write; wait for the committed
+    // value to catch up with the editor.
+    await awaitCellContent(contentAfterUndo);
 
     // Verify editor and Cell are in sync
     const finalContent = await getEditorContent(page);
@@ -614,15 +588,11 @@ describe("cf-code-editor cursor stability", () => {
     // Test that selections are preserved/clamped correctly
     const page = shell.page();
 
-    await clearEditor(page);
-    await piece.result.set("", ["content"]);
-    await new Promise((r) => setTimeout(r, 200));
+    await resetEditorState(page);
 
     // Set initial content externally
     await piece.result.set("Hello World Test", ["content"]);
-    await waitFor(
-      async () => (await getEditorContent(page)) === "Hello World Test",
-    );
+    await waitForEditorContent(page, "Hello World Test");
 
     await focusEditor(page);
 
@@ -680,9 +650,7 @@ describe("cf-code-editor cursor stability", () => {
 
     // External update with shorter content - selection should be clamped
     await piece.result.set("Hi", ["content"]);
-    await waitFor(
-      async () => (await getEditorContent(page)) === "Hi",
-    );
+    await waitForEditorContent(page, "Hi");
 
     // Selection should be clamped to new content length
     const clampedSelection = (await page.evaluate(`
@@ -724,73 +692,68 @@ describe("cf-code-editor cursor stability", () => {
 
   it("ADVERSARIAL: Cell update at exact debounce boundary should not corrupt state", async () => {
     // This tests the race condition where a Cell update arrives exactly
-    // when the debounce timer fires. The fix should handle this gracefully.
+    // when the debounce timer fires. Either side may win the race; the
+    // invariant is that editor and Cell converge and the cursor stays valid.
     const page = shell.page();
 
-    await resetEditorState(page, piece);
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type some text
     await page.keyboard.type("Test");
 
-    // Wait for ALMOST the full debounce window (490ms of 500ms)
+    // Wait for ALMOST the full debounce window (490ms of 500ms), then send
+    // the external update at the boundary. The two pauses construct the
+    // race; the second lets whichever side lost the race finish.
     await new Promise((r) => setTimeout(r, 490));
-
-    // Send external update at the boundary
     await piece.result.set("External at boundary", ["content"]);
-
-    // Let the race play out
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + DEBOUNCE_BUFFER));
 
     // After settling, editor and Cell should match
-    await waitFor(
-      async () => {
-        const e = await getEditorContent(page);
-        const c = await piece.result.get(["content"]);
-        return e === c;
-      },
+    await waitForRuntimeSynced(page);
+    await awaitViewSettled(page);
+    const editorContent = await getEditorContent(page);
+    const cellContent = await piece.result.get(["content"]);
+    assertEquals(
+      editorContent,
+      cellContent,
+      "Editor and Cell should converge after the boundary race",
     );
 
     // Cursor should be valid
     const cursor = await getCursorPosition(page);
-    const finalContent = await getEditorContent(page);
     assert(
-      cursor >= 0 && cursor <= finalContent.length,
-      `Cursor ${cursor} should be valid for content length ${finalContent.length}`,
+      cursor >= 0 && cursor <= editorContent.length,
+      `Cursor ${cursor} should be valid for content length ${editorContent.length}`,
     );
   });
 
   it("ADVERSARIAL: Rapid alternating type-Cell-type-Cell pattern", async () => {
     // Simulates a pathological case: user types, Cell updates, user types again
-    // repeatedly. This can expose issues with timestamp tracking.
+    // repeatedly. This can expose issues with edit tracking.
     //
-    // CORRECT BEHAVIOR: External Cell updates override local edits when they
-    // arrive. Local edits after the last external update will be committed.
+    // CORRECT BEHAVIOR: the pending local edit wins over external deliveries
+    // for as long as its write has not settled, so the typed characters
+    // accumulate and the debounced write commits them over the external
+    // values.
     const page = shell.page();
 
-    await resetEditorState(page, piece);
-
+    await resetEditorState(page);
     await focusEditor(page);
 
-    // Alternating pattern: type → Cell → type → Cell → type
+    // Alternating pattern: type → Cell → type → Cell → type. The pauses
+    // place each external update inside the debounce window opened by the
+    // keystroke before it.
     for (let i = 0; i < 3; i++) {
-      // Type a character
       await page.keyboard.type(`${i}`);
-
-      // Small delay to ensure typing is registered
       await new Promise((r) => setTimeout(r, 50));
-
-      // Send Cell update (different content to force conflict)
-      // This should override the current editor content
       await piece.result.set(`External-${i}`, ["content"]);
-
-      // Another small delay
       await new Promise((r) => setTimeout(r, 100));
     }
 
-    // Let things settle - user's typed content should win
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 300));
+    // The typed characters commit as one debounced write.
+    await awaitCellContent("012");
+    await awaitEchoDelivered(page);
 
     // Editor should be in a consistent state
     const content = await getEditorContent(page);
@@ -808,11 +771,11 @@ describe("cf-code-editor cursor stability", () => {
       "Editor and Cell should be in sync after settling",
     );
 
-    // The final value should be the last external update
+    // The final value is the accumulated local edit
     assertEquals(
       content,
-      "External-2",
-      "External update should override local edits in alternating pattern",
+      "012",
+      "Pending local edits should win over external updates while unsettled",
     );
   });
 
@@ -820,16 +783,16 @@ describe("cf-code-editor cursor stability", () => {
     // User types continuously (letters every 50ms) while external updates
     // bombard the Cell. The editor should not corrupt or crash.
     //
-    // CORRECT BEHAVIOR: External updates override current content when they
-    // arrive. Any typing after the final external update is appended and
-    // committed after debounce.
+    // CORRECT BEHAVIOR: the pending local edit wins over the bombarding
+    // deliveries for as long as its write has not settled, so the typed
+    // characters accumulate and commit as one debounced write.
     const page = shell.page();
 
-    await resetEditorState(page, piece);
-
+    await resetEditorState(page);
     await focusEditor(page);
 
-    // Start typing in the background (simulated)
+    // Interleave keystrokes and external updates on their own clocks; the
+    // pauses shape the interleaving.
     const typingPromise = (async () => {
       for (let i = 0; i < 10; i++) {
         await page.keyboard.type(String.fromCharCode(65 + i)); // A, B, C...
@@ -837,7 +800,6 @@ describe("cf-code-editor cursor stability", () => {
       }
     })();
 
-    // Bombard with Cell updates concurrently
     const cellBombardPromise = (async () => {
       for (let i = 0; i < 5; i++) {
         await new Promise((r) => setTimeout(r, 80));
@@ -845,11 +807,11 @@ describe("cf-code-editor cursor stability", () => {
       }
     })();
 
-    // Wait for both to complete
     await Promise.all([typingPromise, cellBombardPromise]);
 
-    // Let debounce complete
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 300));
+    // The typed characters commit as one debounced write over the bombards.
+    await awaitCellContent("ABCDEFGHIJ");
+    await awaitEchoDelivered(page);
 
     // Final state should be consistent
     const content = await getEditorContent(page);
@@ -869,9 +831,10 @@ describe("cf-code-editor cursor stability", () => {
       "Editor and Cell should be in sync after chaos",
     );
 
-    assert(
-      content.startsWith("Bombard-4"),
-      "Final content should include last external update",
+    assertEquals(
+      content,
+      "ABCDEFGHIJ",
+      "Typed content should win over the bombarding external updates",
     );
   });
 
@@ -888,8 +851,7 @@ describe("cf-code-editor cursor stability", () => {
     // 3. Content matches one of the valid states (empty or user's content)
     const page = shell.page();
 
-    await resetEditorState(page, piece);
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type some content
@@ -898,18 +860,18 @@ describe("cf-code-editor cursor stability", () => {
     const cursorAfterTyping = await getCursorPosition(page);
     assertEquals(cursorAfterTyping, 11);
 
-    // Immediately try to clear via Cell (within debounce window)
+    // Immediately try to clear via Cell (within debounce window; the pause
+    // keeps the follow-up typing inside the same window).
     await piece.result.set("", ["content"]);
-
-    // Wait a bit but not full debounce
     await new Promise((r) => setTimeout(r, 100));
 
     // User continues typing - editor now has "Hello WorldMore"
     // This triggers setValue which will overwrite the Cell's ""
     await page.keyboard.type("More");
 
-    // Let everything settle
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 300));
+    // The combined edit commits after debounce.
+    await awaitCellContent("Hello WorldMore");
+    await awaitEchoDelivered(page);
 
     const finalContent = await getEditorContent(page);
     const cursor = await getCursorPosition(page);
@@ -941,15 +903,12 @@ describe("cf-code-editor cursor stability", () => {
     // Cursor should be clamped, not left at an invalid position.
     const page = shell.page();
 
-    await resetEditorState(page, piece);
+    await resetEditorState(page);
 
     // Set very long content
     const longContent = "A".repeat(1000);
     await piece.result.set(longContent, ["content"]);
-
-    await waitFor(
-      async () => (await getEditorContent(page)) === longContent,
-    );
+    await waitForEditorContent(page, longContent);
 
     // Position cursor at the very end
     await focusEditor(page);
@@ -960,10 +919,7 @@ describe("cf-code-editor cursor stability", () => {
 
     // Replace with very short content
     await piece.result.set("X", ["content"]);
-
-    await waitFor(
-      async () => (await getEditorContent(page)) === "X",
-    );
+    await waitForEditorContent(page, "X");
 
     // Cursor should be clamped to valid range [0, 1]
     const clampedCursor = await getCursorPosition(page);
@@ -976,11 +932,10 @@ describe("cf-code-editor cursor stability", () => {
   it("ADVERSARIAL: Cell echo with slightly modified content should apply", async () => {
     // Edge case: Cell echoes back content that's ALMOST the same as what
     // was typed but with a small modification (e.g., trailing whitespace trimmed).
-    // The hash comparison should detect this and apply the update.
+    // The content comparison should detect this and apply the update.
     const page = shell.page();
 
-    await resetEditorState(page, piece);
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type content with trailing spaces
@@ -990,17 +945,11 @@ describe("cf-code-editor cursor stability", () => {
     assertEquals(cursorAfterTyping, 8); // "Hello   " is 8 chars
 
     // Wait for debounce to send to Cell
-    await waitFor(
-      async () => await piece.result.get(["content"]) === "Hello   ",
-    );
+    await awaitCellContent("Hello   ");
 
     // Simulate backend trimming the content
     await piece.result.set("Hello", ["content"]);
-
-    // Wait for the update to apply
-    await waitFor(
-      async () => (await getEditorContent(page)) === "Hello",
-    );
+    await waitForEditorContent(page, "Hello");
 
     // Cursor should be clamped to new length
     const finalCursor = await getCursorPosition(page);
@@ -1015,8 +964,7 @@ describe("cf-code-editor cursor stability", () => {
     // The blur handler should flush any pending content.
     const page = shell.page();
 
-    await resetEditorState(page, piece);
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type some content
@@ -1030,24 +978,16 @@ describe("cf-code-editor cursor stability", () => {
       })()
     `);
 
-    // Wait for blur handler to flush content
-    await new Promise((r) => setTimeout(r, 200));
-
-    // Content should be saved to Cell
-    const cellValue = await piece.result.get(["content"]) as string;
-    assertEquals(
-      cellValue,
-      "Pre-blur content",
-      "Content should be flushed on blur",
-    );
+    // The blur handler flushes the pending content to the Cell.
+    await awaitCellContent("Pre-blur content");
   });
 
-  it("ADVERSARIAL: Special characters should not break hash comparison", async () => {
-    // Test with unicode, emoji, newlines - characters that might affect hashing
+  it("ADVERSARIAL: Special characters should not break echo detection", async () => {
+    // Test with unicode, emoji, newlines - characters that might affect the
+    // content comparison
     const page = shell.page();
 
-    await resetEditorState(page, piece);
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // Type content with special characters
@@ -1058,11 +998,8 @@ describe("cf-code-editor cursor stability", () => {
     assertEquals(cursorAfterTyping, specialContent.length);
 
     // Wait for debounce
-    await waitFor(
-      async () => await piece.result.get(["content"]) === specialContent,
-    );
-
-    await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
+    await awaitCellContent(specialContent);
+    await awaitEchoDelivered(page);
 
     // Cursor should not jump
     const cursorAfterEcho = await getCursorPosition(page);
@@ -1077,13 +1014,11 @@ describe("cf-code-editor cursor stability", () => {
     // Sending the same content repeatedly to Cell should not cause cursor jumps
     const page = shell.page();
 
-    await resetEditorState(page, piece);
+    await resetEditorState(page);
 
     // Set initial content
     await piece.result.set("Static content", ["content"]);
-    await waitFor(
-      async () => (await getEditorContent(page)) === "Static content",
-    );
+    await waitForEditorContent(page, "Static content");
 
     // Focus and position cursor in the middle
     await focusEditor(page);
@@ -1092,14 +1027,15 @@ describe("cf-code-editor cursor stability", () => {
     const initialCursor = await getCursorPosition(page);
     assertEquals(initialCursor, 7);
 
-    // Send same content 10 times rapidly
+    // Send same content 10 times in quick succession
     for (let i = 0; i < 10; i++) {
       await piece.result.set("Static content", ["content"]);
-      await new Promise((r) => setTimeout(r, 20));
     }
 
-    // Wait for any potential updates
-    await new Promise((r) => setTimeout(r, 200));
+    // A re-set to the same value commits no change, so there is no event to
+    // await; settle the page and verify nothing moved.
+    await waitForRuntimeSynced(page);
+    await awaitViewSettled(page);
 
     // Cursor should not have moved (identical content = no-op)
     const finalCursor = await getCursorPosition(page);
@@ -1111,24 +1047,18 @@ describe("cf-code-editor cursor stability", () => {
   });
 
   it("ADVERSARIAL: Typing exactly at debounce expiry should commit correctly", async () => {
-    // Type, wait EXACTLY until debounce expires, then type again.
+    // Type, wait until the first debounce commits, then type again.
     // Both inputs should be committed.
     const page = shell.page();
 
-    await resetEditorState(page, piece);
-
+    await resetEditorState(page);
     await focusEditor(page);
 
     // First typing burst
     await page.keyboard.type("First");
 
     // Wait for debounce to complete
-    await waitFor(
-      async () => await piece.result.get(["content"]) === "First",
-    );
-
-    // Verify Cell has first content
-    assertEquals(await piece.result.get(["content"]) as string, "First");
+    await awaitCellContent("First");
 
     // Immediately type more
     await page.keyboard.type("Second");
@@ -1137,11 +1067,8 @@ describe("cf-code-editor cursor stability", () => {
     assertEquals(cursorAfterSecond, 11); // "FirstSecond"
 
     // Wait for second debounce
-    await waitFor(
-      async () => await piece.result.get(["content"]) === "FirstSecond",
-    );
-
-    await new Promise((r) => setTimeout(r, DEBOUNCE_BUFFER));
+    await awaitCellContent("FirstSecond");
+    await awaitEchoDelivered(page);
 
     // Cursor should still be correct
     const finalCursor = await getCursorPosition(page);
@@ -1150,33 +1077,27 @@ describe("cf-code-editor cursor stability", () => {
 
   it("ADVERSARIAL: Rapid focus/blur cycles during typing should not corrupt content", async () => {
     // Focus, type, blur, focus, type - rapidly cycling while typing
-    // Should maintain content integrity
+    // Should maintain content integrity. Each blur flushes the pending edit.
     const page = shell.page();
 
-    await resetEditorState(page, piece);
+    await resetEditorState(page);
 
-    // Focus and type first part
+    // Focus and type first part, blur to flush
     await focusEditor(page);
     await page.keyboard.type("AAA");
-
-    // Blur (triggers immediate debounce)
     await page.evaluate(`document.body.click()`);
-    await new Promise((r) => setTimeout(r, 100));
+    await awaitCellContent("AAA");
 
-    // Focus and type second part
+    // Focus and type second part, blur to flush
     await focusEditor(page);
     await page.keyboard.type("BBB");
-
-    // Blur again
     await page.evaluate(`document.body.click()`);
-    await new Promise((r) => setTimeout(r, 100));
+    await awaitCellContent("AAABBB");
 
-    // Focus and type third part
+    // Focus and type third part, let the debounce commit it
     await focusEditor(page);
     await page.keyboard.type("CCC");
-
-    // Let final debounce complete
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + DEBOUNCE_BUFFER));
+    await awaitCellContent("AAABBBCCC");
 
     // All typed content should be preserved
     const content = await getEditorContent(page);
@@ -1185,10 +1106,6 @@ describe("cf-code-editor cursor stability", () => {
       "AAABBBCCC",
       "All typed content should be preserved after focus/blur cycles",
     );
-
-    // Cell should have same content
-    const cellValue = await piece.result.get(["content"]);
-    assertEquals(cellValue, "AAABBBCCC", "Cell should have all typed content");
   });
 
   it("ADVERSARIAL: External update between blur and debounce should apply correctly", async () => {
@@ -1196,7 +1113,7 @@ describe("cf-code-editor cursor stability", () => {
     // External update should apply since user is no longer typing
     const page = shell.page();
 
-    await resetEditorState(page, piece);
+    await resetEditorState(page);
 
     // Focus and type
     await focusEditor(page);
@@ -1226,25 +1143,12 @@ describe("cf-code-editor cursor stability", () => {
       })()
     `);
 
-    // Wait for blur's debounce to complete - use longer timeout since blur->commit path may vary
-    await waitFor(
-      async () => await piece.result.get(["content"]) === "UserContent",
-    );
+    // The blur flushes the typed content to the Cell.
+    await awaitCellContent("UserContent");
 
-    // Now send external update - should apply immediately
+    // Now send external update - should apply since no typing is in progress
     await piece.result.set("ExternalAfterBlur", ["content"]);
-
-    // Wait for sync
-    await waitFor(
-      async () => (await getEditorContent(page)) === "ExternalAfterBlur",
-    );
-
-    const content = await getEditorContent(page);
-    assertEquals(
-      content,
-      "ExternalAfterBlur",
-      "External update after blur should apply",
-    );
+    await waitForEditorContent(page, "ExternalAfterBlur");
   });
 
   /*
@@ -1253,7 +1157,7 @@ describe("cf-code-editor cursor stability", () => {
     // Type, disconnect component, reconnect, verify external updates work
     const page = shell.page();
 
-    await resetEditorState(page, piece);
+    await resetEditorState(page);
 
     // Focus and type
     await focusEditor(page);
@@ -1286,18 +1190,7 @@ describe("cf-code-editor cursor stability", () => {
 
     // Now external updates should apply (simulating reconnection)
     await piece.result.set("AfterReconnect", ["content"]);
-
-    // Wait for sync
-    await waitFor(
-      async () => (await getEditorContent(page)) === "AfterReconnect",
-    );
-
-    const content = await getEditorContent(page);
-    assertEquals(
-      content,
-      "AfterReconnect",
-      "External update should apply after canceling debounced writes",
-    );
+    await waitForEditorContent(page, "AfterReconnect");
   });
   */
 
@@ -1308,7 +1201,7 @@ describe("cf-code-editor cursor stability", () => {
     // but we can verify the value property change path works.
     const page = shell.page();
 
-    await resetEditorState(page, piece);
+    await resetEditorState(page);
 
     // Focus and type
     await focusEditor(page);
@@ -1339,8 +1232,10 @@ describe("cf-code-editor cursor stability", () => {
       })()
     `);
 
-    // Wait longer than debounce to ensure no pending write happens
-    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + 200));
+    // Wait out the debounce window: the canceled write must NOT fire, and a
+    // negative can only be observed by letting the window in which it would
+    // have fired elapse.
+    await new Promise((r) => setTimeout(r, DEBOUNCE_DELAY + DEBOUNCE_BUFFER));
 
     const cellValue = await piece.result.get(["content"]);
     assertEquals(
@@ -1351,39 +1246,9 @@ describe("cf-code-editor cursor stability", () => {
 
     // External update should still apply after cancellation
     await piece.result.set("AfterValueChange", ["content"]);
-    await waitFor(
-      async () => (await getEditorContent(page)) === "AfterValueChange",
-      { timeout: 1000 },
-    );
+    await waitForEditorContent(page, "AfterValueChange");
   });
 });
-
-/**
- * Reset editor state to empty for test isolation.
- * This is critical for adversarial tests that need clean state.
- */
-async function resetEditorState(
-  page: Page,
-  pieceController: PieceController,
-): Promise<void> {
-  // Clear editor using annotation to avoid triggering typing timestamp
-  await clearEditor(page);
-
-  // Also clear Cell
-  await pieceController.result.set("", ["content"]);
-
-  // Wait for both to be empty and synchronized
-  await waitFor(
-    async () => {
-      const editorContent = await getEditorContent(page);
-      const cellValue = await pieceController.result.get(["content"]);
-      return editorContent === "" && cellValue === "";
-    },
-  );
-
-  // Extra settling time for any pending subscription callbacks
-  await new Promise((r) => setTimeout(r, 300));
-}
 
 /**
  * Get current cursor position in the cf-code-editor
@@ -1512,7 +1377,8 @@ async function setCursorPosition(page: Page, position: number): Promise<void> {
 
 /**
  * Clear the editor content.
- * Sets the guard flag to prevent updateListener from triggering Cell updates.
+ * Uses the Cell sync annotation to prevent updateListener from scheduling
+ * Cell writes.
  */
 async function clearEditor(page: Page): Promise<void> {
   await page.evaluate(`
