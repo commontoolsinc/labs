@@ -1,9 +1,11 @@
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { verifySessionOpenAuthorization } from "@commonfabric/memory/v2/session-open-auth";
+import { MemoryWireAccountingAccumulator } from "@commonfabric/memory/v2/wire-accounting";
 import * as FS from "@std/fs";
 import env from "@/env.ts";
 import { memoryEngineStoreUrl } from "./memory-store-url.ts";
 import { identity } from "@/lib/identity.ts";
+import { isMemoryWireAccountingEnabled } from "./memory/memory-wire-accounting-policy.ts";
 
 const memoryAudience = identity.did();
 
@@ -26,8 +28,16 @@ if (env.DB_PATH) {
 export { memoryEngineStoreUrl };
 await FS.ensureDir(memoryEngineStoreUrl);
 
+export const memoryWireAccountingAccumulator = isMemoryWireAccountingEnabled({
+    token: env.CF_MEMORY_WIRE_ACCOUNTING_TOKEN,
+    env: env.ENV,
+  })
+  ? new MemoryWireAccountingAccumulator()
+  : undefined;
+
 export const memoryServer = new MemoryServer.Server({
   store: memoryEngineStoreUrl,
+  wireAccountingObserver: memoryWireAccountingAccumulator,
   authorizeSessionOpen,
   sessionOpenAuth: {
     audience: memoryAudience,
