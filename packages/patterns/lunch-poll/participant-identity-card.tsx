@@ -2,6 +2,7 @@ import {
   computed,
   Default,
   handler,
+  hasError,
   NAME,
   pattern,
   resultOf,
@@ -150,8 +151,12 @@ export default pattern<
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
 
-    const profileName = resultOf(profileNameWish.result);
-    const profileAvatar = resultOf(profileAvatarWish.result);
+    const profileName = hasError(profileNameWish.result)
+      ? ""
+      : resultOf(profileNameWish.result);
+    const profileAvatar = hasError(profileAvatarWish.result)
+      ? ""
+      : resultOf(profileAvatarWish.result);
     const boundJoin = joinAs({
       users,
       myName,
