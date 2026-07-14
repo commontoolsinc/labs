@@ -1,8 +1,12 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
   buildFilteredTestArgs,
+  createMemoryWireAccountingToken,
+  describeMemoryWireAccountingEnv,
   findIntegrationTestFiles,
   integrationTestDir,
+  MEMORY_WIRE_ACCOUNTING_TOKEN_ENV,
+  memoryWireAccountingEnvForServerRun,
   runFilteredIntegration,
   runPackageIntegration,
   selectIntegrationTestFiles,
@@ -163,6 +167,92 @@ Deno.test("buildFilteredTestArgs adds a junit path when a junit dir is given", (
       "--junit-path=out/junit/shell.xml",
       "./integration/a.test.ts",
     ],
+  );
+});
+
+Deno.test("createMemoryWireAccountingToken encodes high-entropy bytes without padding", () => {
+  const token = createMemoryWireAccountingToken(new Uint8Array(32).fill(255));
+  assertEquals(token.length, 43);
+  assertEquals(token.includes("="), false);
+  assertEquals(token.includes("+"), false);
+  assertEquals(token.includes("/"), false);
+});
+
+Deno.test("memoryWireAccountingEnvForServerRun propagates token and defaults unset ENV to development", () => {
+  const token = "secret-token-for-test";
+  const env = memoryWireAccountingEnvForServerRun(token, undefined);
+
+  assertEquals(env.serverEnv[MEMORY_WIRE_ACCOUNTING_TOKEN_ENV], token);
+  assertEquals(env.serverEnv.ENV, "development");
+  assertEquals(env.testEnv[MEMORY_WIRE_ACCOUNTING_TOKEN_ENV], token);
+  assertEquals(env.testEnv.ENV, undefined);
+});
+
+Deno.test("memoryWireAccountingEnvForServerRun defaults blank ENV to development", () => {
+  const env = memoryWireAccountingEnvForServerRun("secret-token", "  ");
+
+  assertEquals(env.serverEnv.ENV, "development");
+});
+
+Deno.test("memoryWireAccountingEnvForServerRun preserves allowed development ENV", () => {
+  const token = "secret-token-for-test";
+  const env = memoryWireAccountingEnvForServerRun(token, "development");
+
+  assertEquals(env.serverEnv[MEMORY_WIRE_ACCOUNTING_TOKEN_ENV], token);
+  assertEquals(env.serverEnv.ENV, "development");
+  assertEquals(env.testEnv[MEMORY_WIRE_ACCOUNTING_TOKEN_ENV], token);
+  assertEquals(env.testEnv.ENV, undefined);
+});
+
+Deno.test("memoryWireAccountingEnvForServerRun preserves allowed test ENV", () => {
+  const env = memoryWireAccountingEnvForServerRun("secret-token", "TEST");
+
+  assertEquals(env.serverEnv.ENV, "test");
+});
+
+Deno.test("memoryWireAccountingEnvForServerRun rejects explicit production ENV without exposing token", () => {
+  const token = "do-not-leak-this-token";
+  const error = assertThrows(
+    () => memoryWireAccountingEnvForServerRun(token, "production"),
+    Error,
+    'ENV="production"',
+  );
+
+  assert(!error.message.includes(token));
+});
+
+Deno.test("memoryWireAccountingEnvForServerRun rejects explicit staging ENV without exposing token", () => {
+  const token = "do-not-leak-this-token";
+  const error = assertThrows(
+    () => memoryWireAccountingEnvForServerRun(token, "staging"),
+    Error,
+    'ENV="staging"',
+  );
+
+  assert(!error.message.includes(token));
+});
+
+Deno.test("memoryWireAccountingEnvForServerRun rejects unknown explicit ENV without exposing token", () => {
+  const token = "do-not-leak-this-token";
+  const error = assertThrows(
+    () => memoryWireAccountingEnvForServerRun(token, "preview"),
+    Error,
+    'ENV="preview"',
+  );
+
+  assert(!error.message.includes(token));
+});
+
+Deno.test("describeMemoryWireAccountingEnv never exposes the bearer token", () => {
+  const token = "do-not-print-this-token";
+  const description = describeMemoryWireAccountingEnv({
+    [MEMORY_WIRE_ACCOUNTING_TOKEN_ENV]: token,
+  });
+
+  assertEquals(description.includes(token), false);
+  assertEquals(
+    description,
+    "Memory wire accounting token: configured (23 chars)",
   );
 });
 

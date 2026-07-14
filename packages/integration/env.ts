@@ -16,6 +16,13 @@ export const HEADLESS = envToBool(Deno.env.get("HEADLESS"));
 // Pipe browser console output to the test runner's console.
 export const PIPE_CONSOLE = envToBool(Deno.env.get("PIPE_CONSOLE"));
 
+// Bearer token used by server-backed integration runs to access the
+// diagnostic-only Memory websocket wire-accounting endpoints. Direct package
+// runs leave this unset and should skip accounting-only assertions.
+export const MEMORY_WIRE_ACCOUNTING_TOKEN = Deno.env.get(
+  "CF_MEMORY_WIRE_ACCOUNTING_TOKEN",
+) ?? "";
+
 // Some tests take a SPACE_NAME, targeting a specific space.
 // If not defined, uses a random UUID.
 export const SPACE_NAME = Deno.env.get("SPACE_NAME") ??

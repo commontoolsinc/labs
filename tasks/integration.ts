@@ -55,6 +55,56 @@ const HEADLESS_PACKAGES = [
   "patterns-reload",
 ];
 
+export const MEMORY_WIRE_ACCOUNTING_TOKEN_ENV =
+  "CF_MEMORY_WIRE_ACCOUNTING_TOKEN";
+const MEMORY_WIRE_ACCOUNTING_ALLOWED_ENVS = new Set(["development", "test"]);
+const MEMORY_WIRE_ACCOUNTING_DEFAULT_ENV = "development";
+
+export function createMemoryWireAccountingToken(
+  randomBytes = crypto.getRandomValues(new Uint8Array(32)),
+): string {
+  return btoa(String.fromCharCode(...randomBytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+export function memoryWireAccountingEnvForServerRun(
+  token: string,
+  currentEnv?: string,
+): { serverEnv: Record<string, string>; testEnv: Record<string, string> } {
+  const trimmedEnv = currentEnv?.trim();
+  const normalizedEnv = trimmedEnv?.toLowerCase();
+  const accountingEnv = normalizedEnv === undefined || normalizedEnv === ""
+    ? MEMORY_WIRE_ACCOUNTING_DEFAULT_ENV
+    : normalizedEnv;
+
+  if (!MEMORY_WIRE_ACCOUNTING_ALLOWED_ENVS.has(accountingEnv)) {
+    throw new Error(
+      `Memory wire accounting requires ENV to be unset, development, or test; got explicit ENV="${trimmedEnv}". Refusing to override it for integration server startup.`,
+    );
+  }
+
+  return {
+    serverEnv: {
+      [MEMORY_WIRE_ACCOUNTING_TOKEN_ENV]: token,
+      ENV: accountingEnv,
+    },
+    testEnv: {
+      [MEMORY_WIRE_ACCOUNTING_TOKEN_ENV]: token,
+    },
+  };
+}
+
+export function describeMemoryWireAccountingEnv(
+  env: Record<string, string>,
+): string {
+  const token = env[MEMORY_WIRE_ACCOUNTING_TOKEN_ENV];
+  return token === undefined
+    ? "Memory wire accounting token: unset"
+    : `Memory wire accounting token: configured (${token.length} chars)`;
+}
+
 async function runCommand(
   cmd: string[],
   options: {
@@ -491,6 +541,7 @@ export async function runPackageIntegration(
   rootDir: string,
   filter?: string,
   junitDir?: string,
+  inheritedEnv: Record<string, string> = {},
 ): Promise<boolean> {
   const packageDirName = pkg === "cli-fuse"
     ? "cli"
@@ -507,6 +558,7 @@ export async function runPackageIntegration(
   console.log(`${"=".repeat(60)}`);
 
   const env: Record<string, string> = {
+    ...inheritedEnv,
     LOG_LEVEL: "warn",
   };
 
@@ -742,6 +794,10 @@ async function main(): Promise<void> {
   // free one just before the servers start.
   let portOffset = cliPortOffset ?? envPortOffset ?? 0;
   let apiUrl = "";
+  const accountingToken = needsServer ? createMemoryWireAccountingToken() : "";
+  const accountingEnv = needsServer
+    ? memoryWireAccountingEnvForServerRun(accountingToken, Deno.env.get("ENV"))
+    : { serverEnv: {}, testEnv: {} };
 
   // A generated-offset run owns the servers it starts and stops them on the way
   // out, including after a failure. An explicit offset is left running.
@@ -772,10 +828,11 @@ async function main(): Promise<void> {
 
   try {
     if (needsServer) {
-      const serverEnv: Record<string, string> = {};
+      const serverEnv: Record<string, string> = { ...accountingEnv.serverEnv };
       if (packagesToRun.includes("patterns-reload")) {
         serverEnv.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE = "true";
       }
+      console.log(describeMemoryWireAccountingEnv(serverEnv));
 
       if (portOffsetWasSet) {
         // Reuse the requested offset, stopping anything already on its ports.
@@ -838,6 +895,7 @@ async function main(): Promise<void> {
         rootDir,
         nameFilter,
         junitDir,
+        accountingEnv.testEnv,
       );
       results.push({ pkg, success });
     }
