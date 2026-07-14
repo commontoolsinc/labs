@@ -2,6 +2,8 @@ import { assertEquals } from "@std/assert";
 import type {
   AsyncResult,
   AvailableResult,
+  CompileAndRunFunction,
+  CompileResult,
   DataUnavailableFor,
   DataUnavailableVariant,
   FetchBinaryFunction,
@@ -273,6 +275,44 @@ function directAsyncBuiltinTypecheck(
   void streamHasNoPublicStateWrapper;
 }
 
+function compileResultTypecheck(
+  compileAndRun: CompileAndRunFunction,
+  hasError: HasErrorFunction,
+  resultOf: ResultOfFunction,
+): void {
+  const request = compileAndRun<{ query: string }, Repo>({
+    files: [{ name: "/main.tsx", contents: "export default 1" }],
+    main: "/main.tsx",
+    input: { query: "fabric" },
+  });
+  const requestIsDirect: Equal<typeof request, CompileResult<Repo>> = true;
+  const result = resultOf(request);
+  const resultIsExact: Equal<typeof result, Repo> = true;
+  const hasNoStateWrapper: Equal<
+    "result" extends keyof typeof request ? true : false,
+    false
+  > = true;
+
+  if (hasError(request)) {
+    const diagnostics = request.error.diagnostics;
+    const diagnosticsAreTyped: Equal<
+      typeof diagnostics,
+      readonly {
+        line: number;
+        column: number;
+        message: string;
+        type: string;
+        file?: string;
+      }[]
+    > = true;
+    void diagnosticsAreTyped;
+  }
+
+  void requestIsDirect;
+  void resultIsExact;
+  void hasNoStateWrapper;
+}
+
 Deno.test("data-unavailability helper declarations preserve narrowing types", () => {
   assertEquals(typeof guardNarrowingTypecheck, "function");
   assertEquals(typeof asyncResultNarrowingTypecheck, "function");
@@ -280,4 +320,5 @@ Deno.test("data-unavailability helper declarations preserve narrowing types", ()
   assertEquals(typeof exhaustiveObservationTypecheck, "function");
   assertEquals(typeof modulePolicyTypecheck, "function");
   assertEquals(typeof directAsyncBuiltinTypecheck, "function");
+  assertEquals(typeof compileResultTypecheck, "function");
 });
