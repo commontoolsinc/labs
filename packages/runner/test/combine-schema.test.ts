@@ -3,6 +3,34 @@ import { expect } from "@std/expect";
 import { combineSchema } from "../src/traverse.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
+describe("combineSchema false handling", () => {
+  const falseSchemas = [
+    { name: "boolean false", schema: false },
+    { name: "object false schema", schema: { not: true } },
+  ] as const satisfies readonly { name: string; schema: JSONSchema }[];
+  const constrainedSchema = { type: "number" } as const satisfies JSONSchema;
+  const directions = [
+    {
+      name: "false schema is the parent",
+      combine: (falseSchema: JSONSchema) =>
+        combineSchema(falseSchema, constrainedSchema),
+    },
+    {
+      name: "false schema is the link",
+      combine: (falseSchema: JSONSchema) =>
+        combineSchema(constrainedSchema, falseSchema),
+    },
+  ] as const;
+
+  for (const testCase of falseSchemas) {
+    for (const direction of directions) {
+      it(`${testCase.name} absorbs the other schema when the ${direction.name}`, () => {
+        expect(direction.combine(testCase.schema)).toEqual(testCase.schema);
+      });
+    }
+  }
+});
+
 // combineSchema builds the pseudo-intersection of the schema a doc was
 // entered with and a schema found on a link inside it. For object schemas,
 // keys defined on only ONE side intersect against the other side's
@@ -13,105 +41,96 @@ import type { JSONSchema } from "../src/builder/types.ts";
 // author had written an explicitly closed object.
 
 describe("combineSchema additionalProperties handling", () => {
-  const openParent = {
+  const schemaWithOneSidedProperty = {
     type: "object",
     properties: {
       shared: { type: "string" },
-      parentOnly: { type: "number", asCell: ["cell"] },
+      oneSided: { type: "number", asCell: ["cell"] },
     },
   } as const satisfies JSONSchema;
 
-  it("treats absent additionalProperties as unconstrained, not false", () => {
-    // The link defines `shared` but says nothing about other keys and has
-    // NO additionalProperties: the parent-only key must not be blocked.
-    const link = {
-      type: "object",
-      properties: { shared: { type: "string" } },
-    } as const satisfies JSONSchema;
-
-    const merged = combineSchema(openParent, link) as {
-      properties: Record<string, unknown>;
-    };
-    expect(merged.properties.shared).toEqual({ type: "string" });
-    // Regression: this used to be `false` (key blocked as if the link had
-    // declared additionalProperties: false). The unconstrained side passes
-    // the defining side's subschema through, flags included.
-    expect(merged.properties.parentOnly).toEqual({
-      type: "number",
-      asCell: ["cell"],
-    });
-  });
-
-  it("still blocks one-sided keys under an EXPLICIT additionalProperties: false", () => {
-    const closedLink = {
-      type: "object",
-      properties: { shared: { type: "string" } },
-      additionalProperties: false,
-    } as const satisfies JSONSchema;
-
-    const merged = combineSchema(openParent, closedLink) as {
-      properties: Record<string, unknown>;
-      additionalProperties?: unknown;
-    };
-    // An author who explicitly closed the object still closes it: the
-    // absent-vs-false distinction is the entire fix.
-    expect(merged.properties.parentOnly).toBe(false);
-    expect(merged.additionalProperties).toBe(false);
-  });
-
-  it("keeps link-only keys when the parent has properties but no additionalProperties", () => {
-    // Mirror direction: keys defined only on the LINK side intersect
-    // against the parent's (absent) additionalProperties and survive.
-    const link = {
-      type: "object",
-      properties: {
-        shared: { type: "string" },
-        linkOnly: { type: "number" },
+  const additionalPropertiesCases: readonly {
+    name: string;
+    additionalProperties: JSONSchema | undefined;
+    expectedOneSidedProperty: JSONSchema;
+  }[] = [
+    {
+      name: "absent additionalProperties is unconstrained",
+      additionalProperties: undefined,
+      expectedOneSidedProperty: {
+        type: "number",
+        asCell: ["cell"],
       },
-    } as const satisfies JSONSchema;
-    const parent = {
-      type: "object",
-      properties: { shared: { type: "string" } },
-    } as const satisfies JSONSchema;
-
-    const merged = combineSchema(parent, link) as {
-      properties: Record<string, unknown>;
-    };
-    expect(merged.properties.linkOnly).toEqual({ type: "number" });
-  });
-
-  it("intersects one-sided keys against a defined additionalProperties subschema", () => {
-    // A real (non-boolean) additionalProperties on the other side still
-    // participates in the intersection for one-sided keys.
-    const link = {
-      type: "object",
-      properties: { shared: { type: "string" } },
+    },
+    {
+      name: "additionalProperties true is unconstrained",
+      additionalProperties: true,
+      expectedOneSidedProperty: {
+        type: "number",
+        asCell: ["cell"],
+      },
+    },
+    {
+      name: "additionalProperties false blocks the key",
+      additionalProperties: false,
+      expectedOneSidedProperty: false,
+    },
+    {
+      name: "an additionalProperties schema intersects with the key",
       additionalProperties: { type: "number" },
-    } as const satisfies JSONSchema;
+      expectedOneSidedProperty: {
+        type: "number",
+        asCell: ["cell"],
+      },
+    },
+  ];
 
-    const merged = combineSchema(openParent, link) as {
-      properties: Record<string, unknown>;
-    };
-    // parentOnly ({type:"number", asCell}) ∩ additionalProperties
-    // ({type:"number"}) keeps the key rather than dropping or blocking it.
-    expect(merged.properties.parentOnly).not.toBe(false);
-    expect(merged.properties.parentOnly).not.toBe(undefined);
-    expect((merged.properties.parentOnly as { type?: string }).type).toBe(
-      "number",
-    );
-  });
+  const directions = [
+    {
+      name: "schema with the one-sided key is the parent",
+      combine: (otherSchema: JSONSchema) =>
+        combineSchema(schemaWithOneSidedProperty, otherSchema),
+    },
+    {
+      name: "schema with the one-sided key is the link",
+      combine: (otherSchema: JSONSchema) =>
+        combineSchema(otherSchema, schemaWithOneSidedProperty),
+    },
+  ] as const;
 
-  it("a property-less, additionalProperties-less side stays fully permissive", () => {
-    // Neither properties nor additionalProperties: the true-schema branch —
-    // the other side's shape passes through (with this side's flags).
-    const anything = { type: "object" } as const satisfies JSONSchema;
-    const merged = combineSchema(anything, openParent) as {
-      properties: Record<string, unknown>;
-    };
-    expect(merged.properties.shared).toEqual({ type: "string" });
-    expect(merged.properties.parentOnly).toEqual({
-      type: "number",
-      asCell: ["cell"],
+  for (const testCase of additionalPropertiesCases) {
+    for (const direction of directions) {
+      it(`${testCase.name} when the ${direction.name}`, () => {
+        const otherSchema = {
+          type: "object",
+          properties: { shared: { type: "string" } },
+          ...(testCase.additionalProperties !== undefined && {
+            additionalProperties: testCase.additionalProperties,
+          }),
+        } satisfies JSONSchema;
+
+        const merged = direction.combine(otherSchema) as {
+          properties: Record<string, unknown>;
+        };
+
+        expect(merged.properties.shared).toEqual({ type: "string" });
+        expect(merged.properties.oneSided).toEqual(
+          testCase.expectedOneSidedProperty,
+        );
+      });
+    }
+  }
+
+  for (const direction of directions) {
+    it(`a property-less side stays permissive when the ${direction.name}`, () => {
+      const anything = { type: "object" } as const satisfies JSONSchema;
+      const merged = direction.combine(anything) as {
+        properties: Record<string, unknown>;
+      };
+
+      expect(merged.properties).toEqual(
+        schemaWithOneSidedProperty.properties,
+      );
     });
-  });
+  }
 });

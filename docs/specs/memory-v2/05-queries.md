@@ -344,6 +344,12 @@ This intersection is computed by `combineSchema`:
 
 ```
 combineSchema(parentSchema, linkSchema):
+  if parentSchema is false:
+    return parentSchema
+
+  if linkSchema is false:
+    return linkSchema
+
   if parentSchema is true/{}:
     return linkSchema  (parent accepts anything, use link's constraint)
 

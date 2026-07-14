@@ -2403,6 +2403,10 @@ function _mergeSchemaFlagsUncached(
  * There's a lot of things you can express with JSONSchema that aren't
  * going to be properly handled here, but make a best effort.
  *
+ * This operation is not generally commutative: parent and link schemas have
+ * distinct precedence rules. False schemas are the exception and absorb the
+ * other constraint regardless of their position.
+ *
  * We don't handle $refs in the schema, so it's quite possible to end up with
  * $ref links that can't be resolved.
  *
@@ -2425,7 +2429,11 @@ function _combineSchemaUncached(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
 ): JSONSchema {
-  if (ContextualFlowControl.isTrueSchema(parentSchema)) {
+  if (ContextualFlowControl.isFalseSchema(parentSchema)) {
+    return parentSchema;
+  } else if (ContextualFlowControl.isFalseSchema(linkSchema)) {
+    return linkSchema;
+  } else if (ContextualFlowControl.isTrueSchema(parentSchema)) {
     return mergeSchemaFlags(parentSchema, linkSchema);
   } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
     return mergeSchemaFlags(linkSchema, parentSchema);
