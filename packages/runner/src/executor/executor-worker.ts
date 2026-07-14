@@ -128,6 +128,16 @@ const publishExecutionMetrics = (): void => {
   });
 };
 
+let executionMetricsPublishQueued = false;
+const scheduleExecutionMetricsPublish = (): void => {
+  if (executionMetricsPublishQueued) return;
+  executionMetricsPublishQueued = true;
+  queueMicrotask(() => {
+    executionMetricsPublishQueued = false;
+    publishExecutionMetrics();
+  });
+};
+
 const denyExternalBuiltinFetch: typeof globalThis.fetch = () =>
   Promise.reject(
     new TypeError("external builtins are disabled in executor shadow mode"),
@@ -452,6 +462,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       placement: ExecutorActionTransactionPlacement,
     ) => {
       executionMetrics.actionTransactions[placement] += 1;
+      // Async actions can complete after their originating work item. Publish
+      // independently so the host does not need a later request to see them.
+      scheduleExecutionMetricsPublish();
     },
     onUnserved: (claim, sourceAction, diagnosticCode) => {
       releaseClaimedAttempt(
@@ -547,6 +560,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       (event as RuntimeTelemetryEvent).marker.type === "scheduler.run.complete"
     ) {
       executionMetrics.schedulerRuns += 1;
+      scheduleExecutionMetricsPublish();
     }
   };
   runtime.telemetry.addEventListener("telemetry", onRuntimeTelemetry);

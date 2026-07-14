@@ -25,7 +25,10 @@ import {
   StorageManager,
 } from "../src/storage/v2.ts";
 import { DenoSpaceExecutorFactory } from "../src/executor/deno-space-executor.ts";
-import { SharedExecutionPool } from "../src/executor/shared-execution-pool.ts";
+import {
+  type ExecutorExecutionMetricsSnapshot,
+  SharedExecutionPool,
+} from "../src/executor/shared-execution-pool.ts";
 import {
   ServerBuiltinEgressError,
   type ServerBuiltinFetchRequest,
@@ -2340,6 +2343,15 @@ Deno.test("claimed builtins use host broker while client sinks observe pending a
   const clientSinkCancels: (() => void)[] = [];
   const events: string[] = [];
   const brokerRequests: ServerBuiltinFetchRequest[] = [];
+  const fourAsyncRequestsPublished = Promise.withResolvers<
+    ExecutorExecutionMetricsSnapshot
+  >();
+  const completedBrokerRoundPublished = Promise.withResolvers<
+    ExecutorExecutionMetricsSnapshot
+  >();
+  let brokerRoundCompletionBaseline:
+    | ExecutorExecutionMetricsSnapshot
+    | undefined;
   let heldBrokerRound:
     | {
       requestCount: number;
@@ -2491,6 +2503,20 @@ Deno.test("claimed builtins use host broker while client sinks observe pending a
       onCrash(error) {
         events.push(`crash:${error}`);
       },
+      onExecutionMetrics(snapshot) {
+        if (snapshot.asyncRequests >= 4) {
+          fourAsyncRequestsPublished.resolve(snapshot);
+        }
+        const baseline = brokerRoundCompletionBaseline;
+        if (
+          baseline !== undefined &&
+          snapshot.schedulerRuns > baseline.schedulerRuns &&
+          snapshot.actionTransactions.authoritative >
+            baseline.actionTransactions.authoritative
+        ) {
+          completedBrokerRoundPublished.resolve(snapshot);
+        }
+      },
     });
 
     await awaitBarrier(claimed.promise, "builtin claim", events);
@@ -2634,11 +2660,17 @@ Deno.test("claimed builtins use host broker while client sinks observe pending a
         events,
       );
       assertExists(executor);
+      const startedRoundMetrics = await awaitBarrier(
+        fourAsyncRequestsPublished.promise,
+        "server async placement metrics",
+        events,
+      );
       assertEquals(
-        executor.executionMetrics?.().asyncRequests,
+        startedRoundMetrics.asyncRequests,
         4,
         "server async request placement must publish without another Worker request",
       );
+      brokerRoundCompletionBaseline = startedRoundMetrics;
       await awaitBarrier(
         executor.wake(),
         "executor wake while claimed broker work remains unsettled",
@@ -2653,10 +2685,27 @@ Deno.test("claimed builtins use host broker while client sinks observe pending a
       assertEquals(clientNetworkRequests, []);
       assertEquals(clientDerivedWrites(), []);
       releaseSecondBrokerRound.resolve();
-      await awaitBarrier(
-        clientResultsObserved.promise,
-        "client builtin result state",
-        events,
+      const [, completedRoundMetrics] = await Promise.all([
+        awaitBarrier(
+          clientResultsObserved.promise,
+          "client builtin result state",
+          events,
+        ),
+        awaitBarrier(
+          completedBrokerRoundPublished.promise,
+          "completed server placement metrics",
+          events,
+        ),
+      ]);
+      assertEquals(
+        completedRoundMetrics.schedulerRuns >
+          startedRoundMetrics.schedulerRuns,
+        true,
+      );
+      assertEquals(
+        completedRoundMetrics.actionTransactions.authoritative >
+          startedRoundMetrics.actionTransactions.authoritative,
+        true,
       );
     } finally {
       releaseSecondBrokerRound.resolve();

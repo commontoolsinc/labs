@@ -136,6 +136,8 @@ describe("runner execution demand export", () => {
       return response.promise;
     };
     const piece = await setupPiece(runtime, "execution-demand-active-timing");
+    // Keep a scalar baseline: each later call intentionally reads a fresh
+    // immutable timing snapshot rather than retaining this object.
     const before = getTimingStatsBreakdown()["execution.demand"]?.[
       "publish-active"
     ]?.count ?? 0;
