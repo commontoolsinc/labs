@@ -168,16 +168,15 @@ export default pattern(() => {
       { action: action_add_whitespace },
       { assertion: assert_still_three },
 
-      // SKIP: Sub-piece property mutation and removal fail intermittently on
-      // CI (GitHub Actions) but pass 100% locally. See PR #2955.
-      { action: action_update_notes, skip: true },
-      { assertion: assert_notes_updated, skip: true },
-      { action: action_remove_first, skip: true },
-      { assertion: assert_has_two_after_remove, skip: true },
-      { action: action_remove_first, skip: true },
-      { assertion: assert_has_one_after_remove, skip: true },
-      { action: action_remove_first, skip: true },
-      { assertion: assert_back_to_empty, skip: true },
+      // === Sub-piece property mutation and removal ===
+      { action: action_update_notes },
+      { assertion: assert_notes_updated },
+      { action: action_remove_first },
+      { assertion: assert_has_two_after_remove },
+      { action: action_remove_first },
+      { assertion: assert_has_one_after_remove },
+      { action: action_remove_first },
+      { assertion: assert_back_to_empty },
     ],
     cal,
   };
