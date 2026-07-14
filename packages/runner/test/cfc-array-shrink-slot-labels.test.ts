@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { URI } from "@commonfabric/memory/interface";
 
 const signer = await Identity.fromPassphrase("runner-cfc-shrink-slot-labels");
 const space = signer.did();
@@ -12,6 +13,10 @@ type StoredEntry = {
   label: { confidentiality?: string[]; integrity?: unknown[] };
   origin?: string;
   observes?: string;
+};
+
+type StoredDocument = {
+  cfc?: { labelMap?: { entries: StoredEntry[] } };
 };
 
 // An array-diff shrink truncates slots by writing `length` alone; without an
@@ -63,12 +68,11 @@ describe("CFC: array shrink clears truncated slots' link labels", () => {
   };
 
   const entriesOf = (id: string): StoredEntry[] => {
-    const replica = storageManager!.open(space).replica as unknown as {
-      getDocument(id: string): {
-        cfc?: { labelMap?: { entries: StoredEntry[] } };
-      } | undefined;
-    };
-    return replica!.getDocument(id)?.cfc?.labelMap?.entries ?? [];
+    const replica = storageManager!.open(space).replica;
+    const document = replica.getDocument(id as URI) as
+      | StoredDocument
+      | undefined;
+    return document?.cfc?.labelMap?.entries ?? [];
   };
 
   const linkConfidentialityAt = (id: string, slot: string): string[] =>

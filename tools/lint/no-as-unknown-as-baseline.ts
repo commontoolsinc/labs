@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-array-shrink-slot-labels.test.ts": [
-    "66:56:10q9jc",
-  ],
   "packages/runner/test/cfc-concept-floor.test.ts": [
     "212:28:g6bmj5",
   ],
