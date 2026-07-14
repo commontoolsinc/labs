@@ -57,8 +57,8 @@ describe("availability schema support coverage", () => {
       properties: {
         result: {
           anyOf: [
-            { type: "undefined" },
             { asCell: ["cell"] },
+            { type: "object" },
           ],
         },
         candidates: {

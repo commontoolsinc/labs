@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -408,7 +409,9 @@ describe("wish built-in", () => {
       return { missing };
     });
 
-    const resultCell = runtime.getCell<{ missing?: { error?: string } }>(
+    const resultCell = runtime.getCell<{
+      missing?: { result?: unknown; error?: string };
+    }>(
       space,
       "wish built-in missing target",
       undefined,
@@ -421,7 +424,17 @@ describe("wish built-in", () => {
     await result.pull();
 
     const missingResult = result.key("missing").get();
-    // Empty query returns an error object
+    expect(
+      isDataUnavailable(missingResult?.result) &&
+        missingResult.result.reason === "error",
+    ).toBe(true);
+    if (
+      isDataUnavailable(missingResult?.result) &&
+      missingResult.result.reason === "error"
+    ) {
+      expect(missingResult.result.error.message).toMatch(/no query/);
+    }
+    // Retained only for old compiled graphs; absent from the public WishState.
     expect(missingResult?.error).toMatch(/no query/);
   });
 
