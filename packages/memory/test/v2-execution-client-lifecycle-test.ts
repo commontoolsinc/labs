@@ -234,14 +234,6 @@ const withTimeout = async <T>(promise: Promise<T>, message: string) => {
   }
 };
 
-const waitForCondition = async (check: () => boolean): Promise<void> => {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (check()) return;
-    await new Promise((resolve) => realSetTimeout(resolve, 0));
-  }
-  throw new Error("condition did not become true");
-};
-
 Deno.test("client reconnect delivers an evicted successful settlement frontier exactly once", async () => {
   const server = new Server({
     ...testSessionOpenServerOptions,
@@ -270,9 +262,18 @@ Deno.test("client reconnect delivers an evicted successful settlement frontier e
     testSessionOpenAuthFactory,
   );
   const delivered: ActionSettlement[] = [];
+  const claimDelivered = Promise.withResolvers<void>();
+  const settlementDelivered = Promise.withResolvers<void>();
   const unsubscribe = observer.subscribeExecutionControl((event) => {
+    if (
+      event.type === "session.execution.claim.set" &&
+      event.claim.actionId === claimKey(CONTROL_SPACE).actionId
+    ) {
+      claimDelivered.resolve();
+    }
     if (event.type === "session.execution.settlement") {
       delivered.push(event.settlement);
+      settlementDelivered.resolve();
     }
   });
 
@@ -293,7 +294,11 @@ Deno.test("client reconnect delivers an evicted successful settlement frontier e
       lease,
       claimKey(CONTROL_SPACE),
     );
-    await waitForCondition(() => observer.executionClaims.length === 1);
+    await withTimeout(
+      claimDelivered.promise,
+      "observer did not receive the live execution claim",
+    );
+    assertEquals(observer.executionClaims, [live]);
 
     transport.disconnect();
     await withTimeout(
@@ -315,7 +320,7 @@ Deno.test("client reconnect delivers an evicted successful settlement frontier e
     transport.releaseReconnect();
 
     await withTimeout(
-      waitForCondition(() => delivered.length === 1),
+      settlementDelivered.promise,
       "evicted successful settlement frontier was not delivered",
     );
     assertEquals(delivered, [settlement]);

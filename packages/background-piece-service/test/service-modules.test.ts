@@ -980,6 +980,7 @@ describe("SpaceManager", () => {
       { callback: () => void; delayMs: number; cleared: boolean }
     >();
     const events: string[] = [];
+    const hardFenced = Promise.withResolvers<string>();
     const exclusion: LegacyBackgroundExclusion = {
       version: 1,
       space: TEST_DID,
@@ -1019,7 +1020,10 @@ describe("SpaceManager", () => {
           isReady: () => true,
           runPiece: () => Promise.resolve(),
           shutdown: () => Promise.resolve(),
-          terminateNow: (reason: string) => events.push(reason),
+          terminateNow: (reason: string) => {
+            events.push(reason);
+            hardFenced.resolve(reason);
+          },
         }) as never,
     });
 
@@ -1038,7 +1042,10 @@ describe("SpaceManager", () => {
     const expiry = activeTimers()[0];
     expiry.cleared = true;
     expiry.callback();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    assertEquals(
+      await hardFenced.promise,
+      "background exclusion expired locally",
+    );
     assertEquals(events, ["background exclusion expired locally"]);
     await manager.stop();
   });
