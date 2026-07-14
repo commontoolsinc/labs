@@ -65,8 +65,9 @@ interface Bench {
 }
 
 // runId -> { benchmark key -> timings }. A completed run's results never change,
-// so this is a permanent per-process cache; a run with no usable artifact caches
-// an empty map so it isn't retried every refresh.
+// so this is a permanent per-process cache. Empty maps are cached only after a
+// successful artifact lookup proves there is no usable benchmark JSON; transient
+// fetch/decompression failures are left uncached so the next refresh retries.
 const cache = new Map<number, Map<string, Stats>>();
 // Assembled by collect() for the /bench drill-down: each benchmark key with its
 // timings over the covered days (oldest -> newest).
@@ -245,19 +246,22 @@ async function fetchZip(artifactId: number, token: string): Promise<Uint8Array<A
   return new Uint8Array(await res.arrayBuffer());
 }
 
-// Populate the cache for one run (best-effort; caches empty on any failure so an
-// expired or missing artifact isn't retried every refresh).
+// Populate the cache for one run. Transient failures are intentionally not
+// cached, so a later refresh can retry the same immutable run.
 async function loadRun(runId: number, token: string): Promise<void> {
-  let metrics = new Map<string, Stats>();
   try {
     const arts = await github<{ artifacts?: Artifact[] }>(`repos/${REPO}/actions/runs/${runId}/artifacts`, token);
     const art = (arts.artifacts ?? []).find((a) => a.name === ARTIFACT && !a.expired);
+    let metrics = new Map<string, Stats>();
     if (art) {
       const json = await jsonFromZip(await fetchZip(art.id, token));
       if (json) metrics = benchMetrics(json);
     }
-  } catch { /* leave empty; the run is immutable so caching avoids refetching */ }
-  cache.set(runId, metrics);
+    cache.set(runId, metrics);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`benchmark run ${runId} unavailable:`, msg);
+  }
 }
 
 // The stats series (oldest -> newest) for one benchmark key across the given runs.

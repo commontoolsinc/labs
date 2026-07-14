@@ -133,22 +133,20 @@ export const ciDuration: Tile = {
     // Median window = the successful runs in the last DUR_MAX_AGE_HOURS, or the
     // most recent DUR_MIN_RUNS — whichever has more runs.
     const cutoff = Date.now() - DUR_MAX_AGE_HOURS * 3_600_000;
-    const inTimeCount = passed.filter((r) => Date.parse(r.run_started_at) >= cutoff).length;
-    const usingTime = inTimeCount >= DUR_MIN_RUNS; // time window wins when it has enough runs
-    // A count-based prefix (not the filter set itself) so the median runs are
-    // always the newest slice of passed — which is what the sparkline
-    // highlights. passed is created-at ordered, so a re-run can otherwise
-    // make the filter set non-contiguous with the front.
-    const window = passed.slice(0, usingTime ? inTimeCount : DUR_MIN_RUNS);
+    const timeWindow = passed.filter((r) => Date.parse(r.run_started_at) >= cutoff);
+    const usingTime = timeWindow.length >= DUR_MIN_RUNS; // time window wins when it has enough runs
+    const window = usingTime ? timeWindow : passed.slice(0, DUR_MIN_RUNS);
     const durs = window.map(durMins).sort((a, b) => a - b);
-    const medianMins = durs.length ? Math.round(durs[Math.floor(durs.length / 2)]) : 0;
-    // The sparkline spans every successful run (oldest -> newest). window is
-    // always the newest slice of passed, so the runs feeding the median are the
-    // trailing window.length points — drawn brighter over the dimmer long-run
-    // trend.
-    const series = [...passed].reverse().map(durMins);
+    const mid = durs.length >> 1;
+    const medianMins = durs.length ? Math.round(durs.length % 2 ? durs[mid] : (durs[mid - 1] + durs[mid]) / 2) : 0;
+    // A filtered time window can be non-contiguous in created order when a run
+    // starts late or is rerun. Plot that exact set so every highlighted point
+    // feeds the median; the count-based fallback still shows the longer trend.
+    const plottedRuns = usingTime ? window : passed;
+    const series = [...plottedRuns].reverse().map(durMins);
+    const highlightCount = window.length;
     // Tiny caption: how long the sparkline spans (oldest to newest run).
-    const times = passed.map((r) => Date.parse(r.run_started_at)).filter((t) => !Number.isNaN(t));
+    const times = plottedRuns.map((r) => Date.parse(r.run_started_at)).filter((t) => !Number.isNaN(t));
     const spanLabel = humanSpan(times.length >= 2 ? Math.max(...times) - Math.min(...times) : 0);
     const s: Status = window.length === 0
       ? "unknown"
@@ -156,11 +154,11 @@ export const ciDuration: Tile = {
     return {
       label: "ci duration",
       status: s,
-      value: `${medianMins}m`,
+      value: window.length === 0 ? "—" : `${medianMins}m`,
       sub: usingTime
         ? `median · ${window.length} passing runs in the last ${DUR_MAX_AGE_HOURS}h`
         : `median · last ${window.length} passing runs`,
-      extra: sparkline(series, "#727882", { count: window.length, color: "#c7ccd4" }, spanLabel, SPARK_FADE[s]),
+      extra: sparkline(series, "#727882", { count: highlightCount, color: "#c7ccd4" }, spanLabel, SPARK_FADE[s]),
       href: "/ci",
       hint: "gantt ↗",
     };

@@ -34,15 +34,18 @@ interface ActionsBilling {
 const actionsOf = (report: { usageItems?: UsageItem[] }): UsageItem[] =>
   (report.usageItems ?? []).filter((i) => String(i.product).toLowerCase() === "actions");
 const sumNet = (items: UsageItem[]): number => items.reduce((s, i) => s + (Number(i.netAmount) || 0), 0);
-// Billable spend per calendar day, chronological (one entry per day with data).
-const dailySeries = (items: UsageItem[]): number[] => {
+const dailyTotals = (items: UsageItem[]): Map<string, number> => {
   const byDay = new Map<string, number>();
   for (const i of items) {
     const day = i.date.slice(0, 10);
     byDay.set(day, (byDay.get(day) ?? 0) + (Number(i.netAmount) || 0));
   }
-  return [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([, v]) => v);
+  return byDay;
 };
+
+const dayKey = (t: number): string => new Date(t).toISOString().slice(0, 10);
+const calendarSeries = (byDay: Map<string, number>, start: number, count: number): number[] =>
+  Array.from({ length: count }, (_, i) => byDay.get(dayKey(start + i * 86_400_000)) ?? 0);
 
 const usagePath = (org: string, y: number, m: number) =>
   `organizations/${org}/settings/billing/usage?year=${y}&month=${m}`;
@@ -120,7 +123,7 @@ export const githubCiSpend: Tile = {
       }
       const items = actionsOf(report);
       const mtd = sumNet(items);
-      const coveredThis = dailySeries(items).length;
+      const coveredThis = now.getUTCDate();
       const daysInMonth = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
 
       // Daily billable spend keyed by calendar day, across this month plus enough
@@ -149,7 +152,10 @@ export const githubCiSpend: Tile = {
           const prev = await github<{ usageItems?: UsageItem[] }>(usagePath(org, py, pm + 1), token);
           const its = actionsOf(prev);
           addDays(its);
-          if (firstPrior) lastMonthDaily = dailySeries(its);
+          if (firstPrior) {
+            const prevDays = new Date(Date.UTC(py, pm + 1, 0)).getUTCDate();
+            lastMonthDaily = calendarSeries(dailyTotals(its), Date.UTC(py, pm, 1), prevDays);
+          }
         } catch { /* a prior month is unavailable — the window just covers less */ }
         remaining -= new Date(Date.UTC(py, pm + 1, 0)).getUTCDate();
         firstPrior = false;
