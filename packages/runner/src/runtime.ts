@@ -1425,7 +1425,7 @@ export class Runtime {
           // has never seen). Pull the named doc so the retry's write
           // carries its true version instead of re-asserting seq 0.
           const conflict = (error as {
-            conflict?: { space?: MemorySpace; of?: string };
+            conflict?: { space?: MemorySpace; of?: URI };
           }).conflict;
           if (
             conflict?.space !== undefined &&
@@ -1434,7 +1434,7 @@ export class Runtime {
           ) {
             try {
               await this.storageManager.open(conflict.space).sync(
-                conflict.of as unknown as URI,
+                conflict.of,
                 { path: [], schema: false },
               );
             } catch {

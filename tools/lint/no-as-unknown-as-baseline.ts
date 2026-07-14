@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/runtime.ts": [
-    "1424:28:tj3xcy",
-  ],
   "packages/runner/src/storage/extended-storage-transaction.ts": [
     "1045:24:o4irgj",
   ],
