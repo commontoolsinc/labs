@@ -5,8 +5,8 @@
 //
 // When a lift() callback returns a pattern instantiation that recursively
 // calls itself, the runtime crashes with {type: callback:error, message: null}.
-// In the builder path, this manifests as "Too many iterations" in the scheduler
-// because the lift action is re-triggered ~100 times per execute cycle, even
+// In the builder path, this manifests as a non-settling scheduler warning
+// because the lift action is re-triggered repeatedly, even
 // though the actual callback only runs a handful of times (the rest are
 // invalid-argument no-ops).
 
@@ -86,10 +86,10 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
     // simulating tail-call pagination (like FetchContactsPage in
     // google-contacts-importer.tsx).
     //
-    // BUG: Even with depth=1, the scheduler hits "Too many iterations: 101"
-    // on the derive action. The callback only runs ~7 times (3 recursive
-    // levels + base cases + a few reactive re-evaluations), but the action
-    // wrapper is re-triggered ~100 times with invalid arguments. This
+    // BUG: Even with depth=1, the scheduler reports the derive action as
+    // non-settling. The callback only runs ~7 times (3 recursive levels + base
+    // cases + a few reactive re-evaluations), but the action wrapper is
+    // re-triggered repeatedly with invalid arguments. This
     // indicates a reactive cycle where each sub-pattern creation dirties
     // the parent action.
 
@@ -154,8 +154,8 @@ describe("Pattern Runner - Derive returning pattern (CT-1316)", () => {
 
     // The callback should run a reasonable number of times.
     // 3 recursive levels + base case + a few reactive re-evaluations = ~7.
-    // This assertion passes, but the scheduler logs "Too many iterations: 101"
-    // because the action WRAPPER (not the callback) runs 101 times — most with
+    // This assertion passes, but the scheduler reports non-convergence because
+    // the action WRAPPER (not the callback) runs repeatedly — most runs have
     // invalid arguments that skip the callback.
     expect(deriveCallCount).toBeLessThan(20);
   });

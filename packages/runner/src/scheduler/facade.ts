@@ -1760,6 +1760,31 @@ export class Scheduler {
       type: "scheduler.non-settling",
       ...nonSettlingTelemetry,
     });
+    this.warnNonSettlingActions(settleResult.backoffActions);
+  }
+
+  private warnNonSettlingActions(actions: readonly Action[]): void {
+    const maxListedActions = 10;
+    const labels = actions.slice(0, maxListedActions).map((action) => {
+      const actionId = this.getActionId(action);
+      const info = getSchedulerActionTelemetryInfo(action);
+      const readableName = info?.moduleName ?? info?.patternName;
+      return readableName && readableName !== actionId
+        ? `${readableName} (${actionId})`
+        : actionId;
+    });
+    const omittedCount = actions.length - labels.length;
+    const actionList = labels.length > 0
+      ? labels.join(", ") +
+        (omittedCount > 0 ? `, and ${omittedCount} more` : "")
+      : "unknown";
+
+    logger.warn("scheduler-non-settling", () => [
+      "Reactive graph did not settle within a scheduler pass; " +
+      "retrying with backoff. Check for a reactive cycle or non-idempotent " +
+      `computation. Actions: ${actionList}. ` +
+      "Run commonfabric.detectNonIdempotent() for details.",
+    ]);
   }
 
   private recordExecuteEndTelemetry(): void {

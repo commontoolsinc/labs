@@ -4,8 +4,9 @@
  * The product bug: cf-tabs emitted `cf-change` on EVERY change to the bound
  * cell — including programmatic / cell-driven changes — so any `oncf-change`
  * handler that wrote the bound cell formed an unbreakable feedback loop
- * ("Too many iterations"). The fix emits `cf-change` ONLY for user gestures
- * (click / keyboard), while cell-driven changes still sync the selection.
+ * (reported by the scheduler as non-settling). The fix emits `cf-change` ONLY
+ * for user gestures (click / keyboard), while cell-driven changes still sync
+ * the selection.
  *
  * cf-tabs extends Lit's HTMLElement, which Deno's headless `deno test` runner
  * does not provide. We install a minimal DOM shim (the same "mock only the
@@ -342,7 +343,7 @@ describe("CFTabs cf-change emission contract (CT-1746)", () => {
  * cf-tabs writes the cell during `updateTabSelection()` — e.g. defaulting an
  * empty/unmatched cell to the first tab via `selectFirst()` → `setValue()` —
  * then each recompute re-mounts it, re-writes the cell, and re-triggers the
- * computed: a "Too many iterations" CPU-spin (the CT-1677 settle class).
+ * computed: a non-settling CPU-spin (the CT-1677 settle class).
  *
  * These tests pin the contract: mount and cell-driven sync produce ZERO cell
  * writes. The no-match fallback selects the first tab VISUALLY only for a

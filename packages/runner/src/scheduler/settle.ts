@@ -302,6 +302,7 @@ export async function runPullSchedulerSettleLoop(
   let settledEarly = false;
   let backoffApplied = false;
   let backoffActionCount = 0;
+  const backoffActions = new Set<Action>();
   let backoffUntil: number | undefined;
   const collectSettleStats = state.getCollectSettleStats();
   const passScopedDemand = new Set(initialSeeds);
@@ -353,6 +354,9 @@ export async function runPullSchedulerSettleLoop(
       if (budgetBackoff.applied) {
         backoffApplied = true;
         backoffActionCount += budgetBackoff.actionCount;
+        for (const action of budgetBackoff.actions) {
+          backoffActions.add(action);
+        }
         backoffUntil = minDefined(backoffUntil, budgetBackoff.backoffUntil);
         break;
       }
@@ -388,6 +392,9 @@ export async function runPullSchedulerSettleLoop(
     );
     backoffApplied = iterationBackoff.applied;
     backoffActionCount += iterationBackoff.actionCount;
+    for (const action of iterationBackoff.actions) {
+      backoffActions.add(action);
+    }
     backoffUntil = minDefined(backoffUntil, iterationBackoff.backoffUntil);
   }
 
@@ -407,6 +414,7 @@ export async function runPullSchedulerSettleLoop(
     maxSettleIterations,
     backoffApplied,
     backoffActionCount,
+    backoffActions: [...backoffActions],
     iterationsRun,
     settleDurationMs: performance.now() - settleStartTime,
     workSetSize: lastWorkSet.size,
@@ -565,6 +573,7 @@ function maybeApplyBudgetBackoff(
 ): {
   applied: boolean;
   actionCount: number;
+  actions: readonly Action[];
   backoffUntil?: number;
 } {
   const plan = planBudgetBackoff({
@@ -578,7 +587,7 @@ function maybeApplyBudgetBackoff(
     passScopedDemand,
   });
   if (plan.actions.length === 0) {
-    return { applied: false, actionCount: 0 };
+    return { applied: false, actionCount: 0, actions: [] };
   }
 
   logger.debug("schedule-backoff", () => [
@@ -595,6 +604,7 @@ function maybeApplyBudgetBackoff(
   return {
     applied: true,
     actionCount: plan.actions.length,
+    actions: plan.actions,
     ...(plan.backoffUntil !== undefined
       ? { backoffUntil: plan.backoffUntil }
       : {}),

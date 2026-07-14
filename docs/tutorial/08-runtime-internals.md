@@ -81,6 +81,9 @@ only strategy.)
 Cycles and pathologies are contained by per-pass iteration and per-node run
 budgets. A non-converging subgraph is deferred behind an escalating backoff
 gate while unrelated work continues; it cannot spin the runtime indefinitely.
+The scheduler emits one `Reactive graph did not settle` warning per episode,
+including the deferred action names and a pointer to
+`commonfabric.detectNonIdempotent()`.
 
 The dirtying machinery is also why *remote* changes feel local: a synced
 update from another user lands in the replica as a write notification, hits

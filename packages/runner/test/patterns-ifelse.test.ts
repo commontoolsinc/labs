@@ -187,7 +187,7 @@ describe("Pattern Runner - ifElse", () => {
     expect(piece.key("text").get()).toEqual("C");
   });
 
-  it("does not run the unselected branch's upstream writer", async () => {
+  it("does not pull the unselected writer on ifElse's first settle", async () => {
     // Regression guard for ifElse laziness: a branch fed by an upstream
     // computed must NOT run when the OTHER branch is selected. ifElse only
     // value-reads `condition` (the branches are opaque pass-through
@@ -226,6 +226,13 @@ describe("Pattern Runner - ifElse", () => {
       trueCell,
     );
     tx.commit();
+    expect(trueRuns).toBe(0);
+    expect(falseRuns).toBe(0);
+
+    // pull() starts the first settle while the ifElse node is `never-ran`.
+    // That is the exact path the regression affected: its declared-read
+    // closure used to pull both branch writers before ifElse's first action
+    // body selected a branch.
     await truePiece.pull();
 
     expect(truePiece.key("text").get()).toEqual("A7");
@@ -249,6 +256,8 @@ describe("Pattern Runner - ifElse", () => {
       falseCell,
     );
     tx.commit();
+    expect(trueRuns).toBe(0);
+    expect(falseRuns).toBe(0);
     await falsePiece.pull();
 
     expect(falsePiece.key("text").get()).toEqual("B9");

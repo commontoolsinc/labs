@@ -129,6 +129,8 @@ export type SchedulerSettleResult = {
   maxSettleIterations: number;
   backoffApplied: boolean;
   backoffActionCount: number;
+  /** Actions deferred by convergence backoff in this settle pass. */
+  backoffActions: readonly Action[];
   backoffUntil?: number;
   /** Iterations that actually ran work (excludes the final settled check). */
   iterationsRun: number;

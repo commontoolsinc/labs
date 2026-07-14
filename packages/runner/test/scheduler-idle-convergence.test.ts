@@ -13,6 +13,7 @@
 // consecutive backoff passes (CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES), so a
 // true cycle still resolves idle() via the escape valve.
 
+import { stub } from "@std/testing/mock";
 import {
   afterEach,
   beforeEach,
@@ -144,7 +145,13 @@ describe("idle convergence hold", () => {
       writes: [],
     }, { isEffect: true });
 
-    const r = await idleWithin(runtime, 5000);
+    const warn = stub(console, "warn", () => {});
+    let r: Awaited<ReturnType<typeof idleWithin>>;
+    try {
+      r = await idleWithin(runtime, 5000);
+    } finally {
+      warn.restore();
+    }
     runtime.telemetry.removeEventListener("telemetry", onTelemetry);
     step = TARGET; // belt-and-braces: stop churn before teardown
 
@@ -172,12 +179,12 @@ describe("idle convergence hold", () => {
 
     let step = 0;
     let stop = false;
-    const head: Action = (t) => {
+    const nonConvergingHead: Action = (t) => {
       step++;
       mid.withTx(t).send(step);
-      if (!stop) stale.markDirty(head); // never converges
+      if (!stop) stale.markDirty(nonConvergingHead); // never converges
     };
-    runtime.scheduler.subscribe(head, {
+    runtime.scheduler.subscribe(nonConvergingHead, {
       reads: [],
       shallowReads: [],
       writes: [addr(mid)],
@@ -192,9 +199,24 @@ describe("idle convergence hold", () => {
       writes: [addr(out)],
     }, { isEffect: true });
 
-    const r = await idleWithin(runtime, 6000);
-    stop = true; // let the subgraph settle so teardown is prompt
+    const warnings: unknown[][] = [];
+    const warn = stub(console, "warn", (...args: unknown[]) => {
+      warnings.push(args);
+    });
+    let r: Awaited<ReturnType<typeof idleWithin>>;
+    try {
+      r = await idleWithin(runtime, 6000);
+      stop = true; // let the subgraph settle so teardown is prompt
+    } finally {
+      warn.restore();
+    }
 
     expect(r.resolved).toBe(true);
+    const diagnostic = warnings
+      .map((args) => args.map(String).join(" "))
+      .filter((line) => line.includes("Reactive graph did not settle"));
+    expect(diagnostic).toHaveLength(1);
+    expect(diagnostic[0]).toContain("nonConvergingHead");
+    expect(diagnostic[0]).toContain("detectNonIdempotent");
   });
 });

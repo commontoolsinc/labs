@@ -119,7 +119,7 @@ export class CFTabs extends BaseElement {
       // cf-change indistinguishable from a user gesture, so any oncf-change
       // handler that writes the bound cell forms an unbreakable feedback loop
       // (cell write -> onChange -> cf-change -> handler -> cell write -> ...),
-      // which the scheduler aborts as "Too many iterations" (CT-1745, CT-1746).
+      // which the scheduler reports as non-settling (CT-1745, CT-1746).
       //
       // "cf-change" is emitted only from the user-gesture paths
       // (handleTabClick / handleKeydown via emitUserChange). Here we just keep
@@ -246,8 +246,8 @@ export class CFTabs extends BaseElement {
     // must NOT write the cell from here. cf-tabs is bound through `$value` and
     // may be instantiated inside a render `computed()` that reads the same
     // cell; writing the cell during mount/selection-sync would re-trigger that
-    // computed, re-mount cf-tabs, and write again — a non-settling "Too many
-    // iterations" spin (the CT-1677 settle class). So selection-sync stays a
+    // computed, re-mount cf-tabs, and write again — a non-settling scheduler
+    // loop (the CT-1677 settle class). So selection-sync stays a
     // pure read: the cell is committed only on a genuine user gesture
     // (handleTabClick / handleKeydown via emitUserChange). This mirrors
     // cf-input, which writes only on input events and never on bind. A consumer
