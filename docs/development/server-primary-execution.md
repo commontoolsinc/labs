@@ -83,11 +83,12 @@ metric labels. The current bounded-cardinality sources are:
 
 | Source | Signals |
 | --- | --- |
-| `/api/health/stats.serverExecutionPool` | active lanes/workers/demands and state counts; demand snapshots; Worker starts/stops; abrupt stops; lease losses/replacements; sponsor rotations; crashes; accepted-commit/index decisions; unrelated suppression; parked-wake attempts/starts; demand-empty hibernations |
-| `/api/health/stats.serverExecutionControl` | inactive-policy attempts; claims issued/reissued/revoked; accepted action attempts and exact claimed-action conflicts; committed/no-op/failed/unserved settlements; lease-fence and action-firewall rejects |
-| `/api/health/stats.timingStats["execution.pool"]` | Worker start, demand update, parked wake, hibernate, and settle latency |
-| `/api/health/stats.timingStats["execution.control"]` | `invalidation-settlement`: one host-local sample per published settlement, measured from the oldest exact durable source cause coalesced into that attempt |
+| `/api/health/stats.serverExecutionPool` | active lanes/workers/demands and state counts; demand snapshots; completed server scheduler runs; shadow/authoritative server action transactions; server async requests; Worker start attempts/live/aborted/failed outcomes and stops; abrupt stops; lease losses/replacements; sponsor rotations; crashes; accepted-commit/index decisions; unrelated suppression; parked-wake attempts/starts; demand-empty hibernations |
+| `/api/health/stats.serverExecutionControl` | inactive-policy attempts; claims issued/reissued/revoked; accepted action attempts and exact claimed-action conflicts; accepted-commit index lookups plus target/demanded-piece/match workload; committed/no-op/failed/unserved settlements; lease-fence and action-firewall rejects |
+| `/api/health/stats.timingStats["execution.pool"]` | aggregate Worker start plus live/aborted/failed start outcomes, demand update, parked wake, hibernate, and settle latency |
+| `/api/health/stats.timingStats["execution.control"]` | `stale-reader-lookup`: synchronous host writer-index lookup during accepted-commit handling; `invalidation-settlement`: one host-local sample per published settlement, measured from the oldest exact durable source cause coalesced into that attempt |
 | Memory host APIs | `listExecutionDemands`, `currentExecutionLease`, and `listExecutionClaims` for point-in-time lane authority |
+| `execution.demand` logger | client active-demand publication and empty-demand disposal round-trip time |
 | `execution.executor` logger | `execution-server-shadow-action-run`, `execution-server-authoritative-action-run` |
 | `storage.v2` logger | client-derived suppressed/upstream commits; overlay created/retained/dropped/divergence; `execution-overlay-held` timing |
 | `runtime.execution` logger | client/server async builtin starts by role |
@@ -118,6 +119,36 @@ source commits may correctly coalesce into one settlement at their latest
 basis; the fixture therefore requires exact route/drop counts and between one
 and N successful settlements for N events. This is test diagnostics, not output
 from `cf execution status`.
+
+The same fixture snapshots the host counters before and after every
+counterbalanced phase and logs its client and server deltas together. Treat the
+units independently:
+
+- a client scheduler run is one exact piece/action run in that browser;
+- a client derived transaction is either suppressed or sent upstream;
+- a server scheduler run is one completed Worker scheduler cycle;
+- a server action transaction is routed either shadow or authoritative;
+- a server async request is one supported builtin broker invocation; and
+- a settlement is one coalescible claimed attempt outcome.
+
+Do not manufacture a single "percent of execution moved" by dividing unlike
+units. Multiple clients may speculatively run the same action, one scheduler
+cycle may route multiple transactions, and one settlement may cover multiple
+source invalidations. Compare paired flag-off/flag-on deltas within a unit. The
+useful placement ratios are client suppression among client derived
+transactions and server authoritative routing among server action
+transactions. Phase 2 moves authoritative writes and effects; it deliberately
+leaves speculative browser computation in place until the separately gated
+Phase 3 optimization.
+
+The `execution.demand` active sample measures only the client's control-plane
+round trip that publishes its demand. The memory host consumes that snapshot
+and starts or updates its Worker asynchronously, so Worker startup is not
+hidden inside that client wait. Use the `execution.pool` start outcome samples
+and counters to distinguish live startup from cancellation or failure. The
+empty-demand sample is the corresponding client disposal round trip; Worker
+drain, settle, and hibernation continue asynchronously and have their own pool
+timings.
 
 Feed latency has no server timestamp in v1. The host's
 `execution.control/invalidation-settlement` sample joins process-local start

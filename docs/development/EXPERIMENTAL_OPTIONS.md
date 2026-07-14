@@ -160,7 +160,7 @@ propagate](#how-flags-propagate).
   connection. The planned end state is to graduate the protocol after the
   phased authority rollout, then remove the flag once every supported client
   obeys server-primary claims.
-- **Status on 2026-07-13.** Runtime, environment, browser-worker, background-
+- **Status on 2026-07-14.** Runtime, environment, browser-worker, background-
   worker, memory handshake, connection-owned client root demand, one shared
   fenced shadow Worker per active branch/space, durable legacy-background
   exclusion with a synchronously fenced host-local handoff, strict owner
@@ -169,7 +169,11 @@ propagate](#how-flags-propagate).
   overlays, claimed-builtin passivity, causal-actor gating, canonical
   permanent-builtin failure, failure drills, bounded pool/control health
   signals, and the local Phase 2 product-derived/literal rollout gates are also
-  implemented. The parked-worker claim-readiness failure is fixed with
+  implemented. Durable placement counters separate completed server scheduler
+  runs, shadow/authoritative action transactions, and server builtin requests;
+  client demand publication, Worker start outcomes, and accepted-commit index
+  lookup work have distinct wait-path telemetry. The parked-worker claim-
+  readiness failure is fixed with
   deterministic cold-wake and replacement coverage. The 500-event
   counterbalanced browser/CPU acceptance gate passes; see the
   [accepted Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-13.md).

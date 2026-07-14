@@ -1147,8 +1147,13 @@ owner CLI, runbook, bounded-cardinality health/latency signals,
 product-derived/literal multi-client fixtures, and deterministic
 authority/failure drills are present. The parked-worker claim-readiness
 failure is fixed with exact cold-wake, sponsor-preference, settle-watermark,
-and replacement coverage. The 500-event counterbalanced browser/CPU gate
-passes; the deployed-staging enable/disable drill remains pending.
+and replacement coverage. Durable placement counters now distinguish server
+scheduler cycles, shadow/authoritative action transactions, and builtin broker
+requests, while separate timings identify client demand publication, Worker
+start outcomes, and host stale-reader lookup. The counterbalanced rollout
+fixture records client and server deltas for every phase without conflating
+their different units. The 500-event counterbalanced browser/CPU gate passes;
+the deployed-staging enable/disable drill remains pending.
 
 **Deliverable:** perf fixtures, operational metrics, and an enable/disable
 runbook using serverPrimaryExecution plus optional executionPolicy.
@@ -1157,11 +1162,13 @@ runbook using serverPrimaryExecution plus optional executionPolicy.
 
 - active demands, workers, sponsor rotations, and fenced rejects;
 - per-action claims/revocations/unserved reasons;
-- client vs server action runs and derived commits;
+- client scheduler runs and suppressed/upstream derived commits, alongside
+  server scheduler runs and shadow/authoritative action transactions;
 - derived conflicts and divergence;
 - feed/settlement latency and overlays retained;
 - async requests by role;
-- hibernation/wake latency.
+- client demand publication, Worker start outcome, hibernation/wake, and
+  accepted-commit stale-reader lookup latency.
 
 **Success criteria:**
 
@@ -1194,6 +1201,12 @@ runbook using serverPrimaryExecution plus optional executionPolicy.
       explicitly in Phase 3. See the
       [accepted Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-13.md)
       and `server-primary-rollout-profile.test.ts`.
+- [x] The counterbalanced browser fixture reports per-phase client scheduler
+      runs, suppressed/upstream client transactions, completed server scheduler
+      runs, shadow/authoritative server transactions, server builtin requests,
+      and settlement outcomes. These remain separate units because client
+      speculation, scheduler batching, and settlement coalescing are not
+      one-to-one.
 
 ---
 
