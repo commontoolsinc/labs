@@ -23,6 +23,7 @@ import type {
   IsPending,
   IsPendingFunction,
   IsSyncing,
+  LLMDialogFunction,
   Module,
   ObserveAvailabilityFunction,
   PartialResultOfFunction,
@@ -375,6 +376,29 @@ function wishResultTypecheck(
   void hasNoDuplicateError;
 }
 
+function llmDialogResultTypecheck(
+  llmDialog: LLMDialogFunction,
+  resultOf: ResultOfFunction,
+): void {
+  const plain = llmDialog({ messages: [] });
+  const plainHasNoResult: Equal<
+    "result" extends keyof typeof plain ? true : false,
+    false
+  > = true;
+
+  const dialog = llmDialog<Repo>({ messages: [] });
+  const resultIsAsync: Equal<
+    typeof dialog.result,
+    AsyncResult<Repo>
+  > = true;
+  const result = resultOf(dialog.result);
+  const resultIsExact: Equal<typeof result, Repo> = true;
+
+  void plainHasNoResult;
+  void resultIsAsync;
+  void resultIsExact;
+}
+
 Deno.test("data-unavailability helper declarations preserve narrowing types", () => {
   assertEquals(typeof guardNarrowingTypecheck, "function");
   assertEquals(typeof asyncResultNarrowingTypecheck, "function");
@@ -385,4 +409,5 @@ Deno.test("data-unavailability helper declarations preserve narrowing types", ()
   assertEquals(typeof compileResultTypecheck, "function");
   assertEquals(typeof sqliteResultTypecheck, "function");
   assertEquals(typeof wishResultTypecheck, "function");
+  assertEquals(typeof llmDialogResultTypecheck, "function");
 });

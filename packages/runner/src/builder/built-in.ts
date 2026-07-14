@@ -1,4 +1,3 @@
-import { BuiltInLLMDialogState } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createNodeFactory, lift } from "./module.ts";
 import type {
@@ -36,6 +35,7 @@ import type {
   GenerateTextStreamFunction,
   InspectConfLabelResult,
   LatestCompleteFunction,
+  LLMDialogFunction,
   PatternToolFunction,
   PatternToolResult,
   SqliteDatabaseFunction,
@@ -139,9 +139,7 @@ export const llmDialog = createNodeFactory({
   implementation: "llmDialog",
   resultSchema: LLMDialogResultSchema,
   propagateInputIfc: false,
-}) as (
-  params: FactoryInput<BuiltInLLMParams>,
-) => Reactive<BuiltInLLMDialogState>;
+}) as LLMDialogFunction;
 
 /** @internal Raw persisted state factory for compatibility and runtime tests. */
 export const generateObjectState = createNodeFactory({

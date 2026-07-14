@@ -2047,7 +2047,6 @@ export interface BuiltInGenerateObjectStreamState<T> {
 
 export interface BuiltInLLMDialogState {
   pending: boolean;
-  result?: any;
   error?: string;
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
@@ -2055,6 +2054,10 @@ export interface BuiltInLLMDialogState {
   unpinAllCells: Stream<void>;
   flattenedTools: Record<string, any>;
   pinnedCells: Array<{ path: string; name: string }>;
+}
+
+export interface BuiltInLLMDialogResultState<T> extends BuiltInLLMDialogState {
+  result: AsyncResult<T>;
 }
 
 export type BuiltInGenerateObjectParams =
@@ -2406,9 +2409,22 @@ export type LLMFunction = (
   params: FactoryInput<BuiltInLLMParams>,
 ) => Reactive<BuiltInLLMState>;
 
-export type LLMDialogFunction = (
-  params: FactoryInput<BuiltInLLMParams>,
-) => Reactive<BuiltInLLMDialogState>;
+type BuiltInLLMDialogParamsWithoutResult =
+  & Omit<
+    BuiltInLLMParams,
+    "resultSchema"
+  >
+  & { resultSchema?: never };
+
+export interface LLMDialogFunction {
+  (
+    params: FactoryInput<BuiltInLLMDialogParamsWithoutResult>,
+  ): Reactive<BuiltInLLMDialogState>;
+
+  <T>(
+    params: FactoryInput<BuiltInLLMParams>,
+  ): Reactive<BuiltInLLMDialogResultState<T>>;
+}
 
 export type GenerateObjectFunction = <T = any>(
   params: FactoryInput<BuiltInGenerateObjectParams>,
