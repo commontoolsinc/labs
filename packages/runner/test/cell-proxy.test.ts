@@ -393,23 +393,31 @@ describe("createProxy", () => {
     expect(log.writes).toEqual([]);
   });
 
-  it.skip("should support mapping over a proxied array", () => {
+  it("should support mapping over a proxied array", async () => {
+    // Seed the cell in its own committed transaction so the transaction under
+    // test records only the reads done by map().
+    const setupTx = runtime.edit();
     const c = runtime.getCell<{ a: number[] }>(
       space,
       "should support mapping over a proxied array",
+      undefined,
+      setupTx,
     );
     c.set({ a: [1, 2, 3] });
-    const proxy = c.getAsQueryResult();
+    await setupTx.commit();
+
+    const proxy = c.withTx(tx).getAsQueryResult([], tx);
     const result = proxy.a.map((x: any) => x + 1);
     expect(result).toEqual([2, 3, 4]);
     const log = txToReactivityLog(tx);
-    expect(log.reads.map((r) => r.path)).toEqual([
-      [],
-      ["a"],
-      ["a", "0"],
-      ["a", "1"],
-      ["a", "2"],
-    ]);
+    const pathsRead = log.reads.map((r) => r.path.join("."));
+    // map() reads the whole array recursively, which covers every element;
+    // each element also gets a link-probe read.
+    expect(pathsRead).toContain("value.a");
+    expect(pathsRead).toContain("value.a.0./.link@1");
+    expect(pathsRead).toContain("value.a.1./.link@1");
+    expect(pathsRead).toContain("value.a.2./.link@1");
+    expect(log.writes).toEqual([]);
   });
 
   it.skip("should allow changing array lengths by writing length", () => {
