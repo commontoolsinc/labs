@@ -32,6 +32,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import { PENDING_RENDER_ATTRIBUTE } from "../pending-render.ts";
 import type {
   ChildNodeState,
   NodeState,
@@ -241,6 +242,7 @@ export class WorkerReconciler {
       // value when an ACL changes.
       let lastRootValue: unknown;
       let rootHasRendered = false;
+      let rootIsPending = false;
       const rootWatchedSpaces = new Set<string>();
       const renderRoot = (resolvedVnode: unknown) => {
         logger.debug("root-cell-update", () => ({ resolvedVnode }));
@@ -267,6 +269,7 @@ export class WorkerReconciler {
             this.rootRenderPolicy,
           )
         ) {
+          rootIsPending = false;
           this.reconcileIntoWrapper(
             ctx,
             wrapperState,
@@ -276,11 +279,39 @@ export class WorkerReconciler {
           this.rootChildId = wrapperState.currentChild?.nodeId ?? null;
           return;
         }
-        // Availability markers behave like suspense. Before the first usable
-        // value the wrapper remains empty; after one, keep its rendered tree
-        // until a usable replacement arrives. Policy checks deliberately run
-        // first so an unavailable update can never preserve newly-blocked data.
-        if (unavailable) return;
+        // Pending behaves like suspense. Before the first usable value the
+        // wrapper remains empty; after one, retain and mark its rendered tree.
+        // Other unavailable reasons render no content unless explicitly
+        // handled by the authored VDOM. Policy checks deliberately run first.
+        if (unavailable) {
+          if (resolvedVnode.reason === "pending") {
+            if (wrapperState.currentChild && !rootIsPending) {
+              this.queuePendingRenderState(
+                wrapperState.currentChild.nodeId,
+                true,
+              );
+              rootIsPending = true;
+            }
+            return;
+          }
+
+          rootIsPending = false;
+          this.reconcileIntoWrapper(
+            ctx,
+            wrapperState,
+            undefined,
+            this.rootRenderPolicy,
+          );
+          this.rootChildId = null;
+          return;
+        }
+        if (rootIsPending && wrapperState.currentChild) {
+          this.queuePendingRenderState(
+            wrapperState.currentChild.nodeId,
+            false,
+          );
+          rootIsPending = false;
+        }
         // Validate that the resolved value is a valid render node
         if (!this.isValidRenderNode(resolvedVnode)) {
           this.onError?.(
@@ -409,6 +440,23 @@ export class WorkerReconciler {
   private queueOps(ops: VDomOp[]): void {
     this.pendingOps.push(...ops);
     this.scheduleFlush();
+  }
+
+  private queuePendingRenderState(nodeId: number, pending: boolean): void {
+    this.queueOps([
+      pending
+        ? {
+          op: "set-prop",
+          nodeId,
+          key: PENDING_RENDER_ATTRIBUTE,
+          value: true,
+        }
+        : {
+          op: "remove-prop",
+          nodeId,
+          key: PENDING_RENDER_ATTRIBUTE,
+        },
+    ]);
   }
 
   /**
@@ -3476,6 +3524,21 @@ export class WorkerReconciler {
     };
 
     let currentCancel: Cancel | undefined;
+    let childIsPending = false;
+
+    const clearRenderedChild = () => {
+      if (childState.nodeId === -1) return;
+      if (currentCancel) {
+        currentCancel();
+        currentCancel = undefined;
+      }
+      this.cleanupNodeHandlers(childState);
+      this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
+      childState.nodeId = -1;
+      childState.elementState = undefined;
+      childState.isText = false;
+      childIsPending = false;
+    };
 
     // §4.9.3 Stage 2: on each render, watch the ACL docs of the spaces this
     // cell is labeled with, so a fail-closed over-block upgrades to an admit
@@ -3505,18 +3568,7 @@ export class WorkerReconciler {
       );
 
       if (!this.canRenderCellUnderPolicy(cell, policy)) {
-        if (!isInitialRender) {
-          if (currentCancel) {
-            currentCancel();
-            currentCancel = undefined;
-          }
-          this.cleanupNodeHandlers(childState);
-          this.queueOps([{ op: "remove-node", nodeId: childState.nodeId }]);
-        }
-
-        childState.nodeId = -1;
-        childState.elementState = undefined;
-        childState.isText = false;
+        clearRenderedChild();
 
         const blockedState = this.createBlockedPlaceholder(ctx, policy);
         childState.nodeId = blockedState.nodeId;
@@ -3537,10 +3589,25 @@ export class WorkerReconciler {
         return;
       }
 
-      // Keep the current child (or the initial empty slot) while its value is
-      // unavailable. As above, the cell-level policy gate runs before this so
-      // suspense never bypasses a confidentiality decision.
-      if (unavailable) return;
+      // Keep and mark the current child only while pending. Other unavailable
+      // reasons clear the child unless the authored VDOM observed them and
+      // rendered an explicit state. The policy gate above remains authoritative.
+      if (unavailable) {
+        if (resolvedChild.reason === "pending") {
+          if (childState.nodeId !== -1 && !childIsPending) {
+            this.queuePendingRenderState(childState.nodeId, true);
+            childIsPending = true;
+          }
+          return;
+        }
+        clearRenderedChild();
+        return;
+      }
+
+      if (childIsPending && childState.nodeId !== -1) {
+        this.queuePendingRenderState(childState.nodeId, false);
+        childIsPending = false;
+      }
 
       if (this.shouldBlockTextFromCell(resolvedChild, cell, policy)) {
         if (!isInitialRender) {

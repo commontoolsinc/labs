@@ -835,12 +835,14 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       );
       collector.clear();
 
-      childCell.set({
-        type: "vnode",
-        name: "button",
-        props: { id: "ready" },
-        children: ["Ready"],
-      } satisfies WorkerVNode);
+      childCell.set(
+        {
+          type: "vnode",
+          name: "button",
+          props: { id: "ready" },
+          children: ["Ready"],
+        } satisfies WorkerVNode,
+      );
       await new Promise((resolve) => setTimeout(resolve, 10));
       const readyChildCreate = collector.getOpsOfType("create-element")
         .find((op) => "tagName" in op && op.tagName === "button");
@@ -861,12 +863,14 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       assertEquals(collector.getOpsOfType("remove-node").length, 0);
       collector.clear();
 
-      childCell.set({
-        type: "vnode",
-        name: "button",
-        props: { id: "updated" },
-        children: ["Updated"],
-      } satisfies WorkerVNode);
+      childCell.set(
+        {
+          type: "vnode",
+          name: "button",
+          props: { id: "updated" },
+          children: ["Updated"],
+        } satisfies WorkerVNode,
+      );
       await new Promise((resolve) => setTimeout(resolve, 10));
       assertEquals(
         collector.getOpsOfType("remove-prop").some((op) =>
@@ -889,12 +893,14 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
       for (const unavailable of unavailableValues) {
         const collector = createOpsCollector();
-        const rootCell = new MockCell({
-          type: "vnode",
-          name: "div",
-          props: {},
-          children: ["Ready"],
-        } satisfies WorkerVNode);
+        const rootCell = new MockCell(
+          {
+            type: "vnode",
+            name: "div",
+            props: {},
+            children: ["Ready"],
+          } satisfies WorkerVNode,
+        );
         const reconciler = new WorkerReconciler({ onOps: collector.onOps });
 
         reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
