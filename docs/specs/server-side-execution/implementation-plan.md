@@ -3,13 +3,14 @@
 Companion to [README.md](./README.md). Read the design first; this plan turns
 it into reviewable, red-green work orders.
 
-Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
-and deterministic failure gates are locally validated, including the accepted
-500-event counterbalanced browser/CPU gate. A deployed flag-off/flag-on drill
-remains pending. Later background, feed, scoped, and handler work is
-outlined only. The design's terminal crash quarantine and hard pool resource
-caps are later operational hardening (G18), not additional Phase 0–2 work
-orders.
+Status: Phases 0–2 are implemented and the protocol now defaults on with an
+explicit-false deployment rollback. Every compatible eligible piece
+automatically participates when the flag is on. W2.4's product and deterministic
+failure gates are locally validated, including the accepted 500-event
+counterbalanced browser/CPU gate. A deployed flag-off/flag-on drill remains
+pending. Later background, feed, scoped, and handler work is outlined only. The
+design's terminal crash quarantine and hard pool resource caps are later
+operational hardening (G18), not additional Phase 0–2 work orders.
 
 Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
 its facade, commit-gated starts, cancellation semantics, bounded settle,
@@ -43,9 +44,11 @@ where server and clients knowingly duplicate authoritative work.
 - **The named seams are mandatory reading.** If symbols move, follow the
   current code and describe the delta; do not create parallel scheduler,
   identity, transaction, or serialization machinery.
-- **Flags default off.** Every experimental option is registered in
-  docs/development/EXPERIMENTAL_OPTIONS.md in the same change. Flag-off
-  behavior is proven by test.
+- **Flags start dark and graduate deliberately.** Every experimental option is
+  registered in docs/development/EXPERIMENTAL_OPTIONS.md in the same change.
+  The Phase 0–2 implementation work defaulted off; the follow-up graduation
+  defaults the completed protocol on while retaining tested explicit-false
+  rollback behavior.
 - **Preserve transaction boundaries.** Servability is decided for a whole
   action transaction. Never commit its space-scoped subset on the server and
   send scoped or foreign-space operations back to a client.
@@ -94,7 +97,8 @@ where server and clients knowingly duplicate authoritative work.
   including committed, no-op, failed, and unserved outcomes.
 - **ActionExecutionProvenance:** transaction metadata containing action
   identity, onBehalfOf, lease/claim generations, causedBy, and inputBasisSeq.
-- Runtime experimental option: serverPrimaryExecution, default false.
+- Runtime experimental option: serverPrimaryExecution, default true; explicitly
+  setting it false remains the deployment rollback path.
 - Existing scheduler option: persistentSchedulerState, default true; explicitly
   setting it false remains its independent scheduler-state rollback path.
 - Protocol capability: server-primary-execution-v1.
@@ -573,12 +577,13 @@ capability and both graduated sub-capabilities.
    server memory or duplicate retained-success delivery.
 6. Authorize demand using the session's existing READ access. Sponsor
    eligibility is a separate WRITE check in W1.1.
-7. Use `serverPrimaryExecution`, default off, as the only rollout authority
-   switch. With it off, start no execution pool and preserve client-primary
-   behavior. With it on, automatically claim every eligible action in every
-   active compatible space. Do not add a per-space authority document or CLI;
-   claims, actor identity, heartbeat, exception lists, and epochs remain
-   server control-plane state rather than mutable user data.
+7. Use `serverPrimaryExecution`, default on with an explicit-false rollback, as
+   the only rollout authority switch. With it off, start no execution pool and
+   preserve client-primary behavior. With it on, automatically claim every
+   eligible action in every active compatible space. Do not add a per-space
+   authority document or CLI; claims, actor identity, heartbeat, exception
+   lists, and epochs remain server control-plane state rather than mutable user
+   data.
 8. Gate all messages behind serverPrimaryExecution. Negotiate
    absent-false `serverPrimaryExecutionClaimRoutingV1` and
    `serverPrimaryExecutionBuiltinPassivityV1` sub-capabilities. Implemented

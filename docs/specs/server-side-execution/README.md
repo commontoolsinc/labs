@@ -1,11 +1,13 @@
 # Server-Primary Execution
 
-Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
-and deterministic failure gates are locally validated, including the accepted
-500-event counterbalanced browser/CPU gate. A deployed flag-off/flag-on drill
-remains pending. Phases 3+ remain design. Terminal crash quarantine and
-hard pool resource caps are later operational hardening tracked as G18, not
-part of the Phase 0–2 acceptance contract.
+Status: Phases 0–2 are implemented and the protocol now defaults on with an
+explicit-false deployment rollback. Every compatible eligible piece
+automatically participates when the flag is on. W2.4's product and deterministic
+failure gates are locally validated, including the accepted 500-event
+counterbalanced browser/CPU gate. A deployed flag-off/flag-on drill remains
+pending. Phases 3+ remain design. Terminal crash quarantine and hard pool
+resource caps are later operational hardening tracked as G18, not part of the
+Phase 0–2 acceptance contract.
 Author: design session
 2026-07-06; revised 2026-07-07 (doc-centric demand, SQLite-primary state,
 transient executor passes, reactive interpreter de-scoped); revised
@@ -15,7 +17,8 @@ producer lookup, scope-safe fallback, causal settlement acknowledgements,
 and server egress parity); revised 2026-07-12 after Phase 2 implementation and
 local rollout validation; revised 2026-07-13 after the parked-worker wake,
 causal-actor, permanent-builtin-failure, bounded-observability, and accepted
-500-event browser/CPU follow-ups.
+500-event browser/CPU follow-ups); revised 2026-07-14 for the default-on
+protocol graduation with explicit-false rollback.
 Completed work-order status is
 recorded inline; unimplemented phases remain design requirements rather than
 descriptions of current behavior. Operator procedure lives in the
@@ -1346,7 +1349,8 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   consolidation is deferred, but legacy-owned spaces are excluded immediately
   so a second server Worker cannot start.
 - **Phase 2 — positive B claims (implemented and locally validated,
-  default-off).** Add client overlay routing, ephemeral
+  default-on with explicit-false rollback).** Add client overlay routing,
+  ephemeral
   `ExecutionClaim`, `ActionSettlement.inputBasisSeq`, whole-action scope
   firewall, passive claimed builtins, and egress parity (G5/G10/G11). Measure
   conflict rate, multi-client action volume, divergence, revocations, and
