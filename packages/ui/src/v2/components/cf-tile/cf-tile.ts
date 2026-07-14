@@ -76,12 +76,36 @@ export class CFTile extends BaseElement {
       box-shadow: var(--tile-shadow);
     }
 
+    .tile:has(.tile-action:focus-visible) {
+      outline: 2px solid var(--ring);
+      outline-offset: 2px;
+      border-color: var(--accent);
+    }
+
     .tile-title {
       font-weight: bold;
       font-size: var(--cf-size-xl-font-size, 18px);
       color: var(--foreground);
       margin: 0 0 0.5rem 0;
       line-height: 1.25;
+    }
+
+    .tile-action {
+      appearance: none;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-weight: inherit;
+      line-height: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .tile-action:focus {
+      outline: none;
     }
 
     .tile-summary {
@@ -148,10 +172,21 @@ export class CFTile extends BaseElement {
         @click="${this.handleClick}"
       >
         <div class="tile-content">
-          <h3 class="tile-title">${this.item.title}</h3>
+          <h3 class="tile-title">
+            ${this.clickable
+              ? html`
+                <button type="button" class="tile-action">
+                  ${this.item.title}
+                </button>
+              `
+              : this.item.title}
+          </h3>
           ${this.summary
             ? html`
-              <details class="summary-details">
+              <details
+                class="summary-details"
+                @click="${(event: Event) => event.stopPropagation()}"
+              >
                 <summary>${this.summary}</summary>
               </details>
             `

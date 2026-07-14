@@ -135,6 +135,23 @@ export class CFTags extends BaseElement {
         min-width: 0;
       }
 
+      .tag-edit {
+        all: unset;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        min-width: 0;
+        color: inherit;
+        font: inherit;
+        line-height: inherit;
+        cursor: pointer;
+      }
+
+      .tag:has(.tag-edit:focus-visible) {
+        outline: 2px solid var(--cf-tag-ring);
+        outline-offset: 2px;
+      }
+
       .tag-input {
         background: transparent;
         border: none;
@@ -185,6 +202,7 @@ export class CFTags extends BaseElement {
         border: 1px dashed var(--cf-tag-border-color);
         border-radius: var(--cf-tag-border-radius);
         font-size: var(--cf-tag-font-size);
+        font-family: inherit;
         line-height: var(--cf-tag-line-height);
         color: var(--cf-tag-add-color);
         cursor: pointer;
@@ -202,6 +220,11 @@ export class CFTags extends BaseElement {
         border-color: var(--cf-tag-ring);
         color: var(--cf-tag-ring);
         background-color: var(--cf-tag-hover-background);
+      }
+
+      .add-tag:focus-visible {
+        outline: 2px solid var(--cf-tag-ring);
+        outline-offset: 2px;
       }
 
       .add-tag.active {
@@ -399,10 +422,7 @@ export class CFTags extends BaseElement {
     const isEditing = this.editingIndex === index;
 
     return html`
-      <div
-        class="tag ${isEditing ? "editing" : ""}"
-        @click="${(e: MouseEvent) => this.handleTagClick(index, e)}"
-      >
+      <div class="tag ${isEditing ? "editing" : ""}">
         ${isEditing
           ? html`
             <input
@@ -416,8 +436,20 @@ export class CFTags extends BaseElement {
             />
           `
           : html`
-            <span class="tag-text">${tag}</span>
-            ${!this.readonly
+            ${this.readonly
+              ? html`
+                <span class="tag-text">${tag}</span>
+              `
+              : html`
+                <button
+                  type="button"
+                  class="tag-edit"
+                  aria-label="Edit ${tag}"
+                  @click="${(e: MouseEvent) => this.handleTagClick(index, e)}"
+                >
+                  <span class="tag-text">${tag}</span>
+                </button>
+              `} ${!this.readonly
               ? html`
                 <button
                   type="button"
@@ -436,27 +468,28 @@ export class CFTags extends BaseElement {
   }
 
   private renderAddTag() {
-    return html`
-      <div
-        class="add-tag ${this.showingNewInput ? "active" : ""}"
-        @click="${this.handleAddTagClick}"
-      >
-        ${this.showingNewInput
-          ? html`
-            <input
-              id="new-tag-input"
-              class="add-tag-input"
-              placeholder="New tag"
-              .value="${this.newTagValue}"
-              @input="${this.handleNewTagInput}"
-              @keydown="${this.handleNewTagKeyDown}"
-              @blur="${this.handleNewTagBlur}"
-            />
-          `
-          : html`
-            + Add tag
-          `}
-      </div>
-    `;
+    return this.showingNewInput
+      ? html`
+        <div class="add-tag active">
+          <input
+            id="new-tag-input"
+            class="add-tag-input"
+            placeholder="New tag"
+            .value="${this.newTagValue}"
+            @input="${this.handleNewTagInput}"
+            @keydown="${this.handleNewTagKeyDown}"
+            @blur="${this.handleNewTagBlur}"
+          />
+        </div>
+      `
+      : html`
+        <button
+          type="button"
+          class="add-tag"
+          @click="${this.handleAddTagClick}"
+        >
+          + Add tag
+        </button>
+      `;
   }
 }

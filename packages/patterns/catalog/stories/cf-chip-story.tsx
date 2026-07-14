@@ -26,12 +26,13 @@ export default pattern<ChipStoryInput, ChipStoryOutput>(() => {
         <cf-chip label="Accent" color="accent" />
         <cf-chip label="Removable" removable />
         <cf-chip label="Interactive" interactive />
+        <cf-chip label="Interactive removable" interactive removable />
       </div>
     ),
     controls: (
       <div style={{ color: "#6b7280", fontSize: "13px", padding: "8px 12px" }}>
-        No interactive controls. Colors: neutral, primary, accent, danger.
-        Attributes: removable, interactive.
+        Interactive chips and remove controls are keyboard focusable. Colors:
+        neutral, primary, accent, danger. Attributes: removable, interactive.
       </div>
     ),
   };

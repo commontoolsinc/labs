@@ -99,45 +99,60 @@ export class CFMessageBeads extends BaseElement {
         }
       }
       .bead {
+        appearance: none;
         width: 6px;
         height: 6px;
+        margin: 0;
+        padding: 0;
+        border: 0;
         border-radius: 50%;
         cursor: pointer;
         flex-shrink: 0;
         transition: transform 100ms ease, box-shadow 100ms ease;
         animation: bead-in 250ms ease-out both;
       }
-      .bead:hover {
+      .bead:hover,
+      .bead:focus-visible {
         transform: scale(1.6);
+      }
+      .bead:focus-visible {
+        outline: 2px solid
+          var(--cf-theme-color-focus-ring, var(--cf-colors-primary-500, #4979fa));
+        outline-offset: 2px;
       }
       .bead.blue {
         background: #3b82f6;
       }
-      .bead.blue:hover {
+      .bead.blue:hover,
+      .bead.blue:focus-visible {
         box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
       }
       .bead.green {
         background: #22c55e;
       }
-      .bead.green:hover {
+      .bead.green:hover,
+      .bead.green:focus-visible {
         box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.3);
       }
       .bead.amber {
         background: #f59e0b;
       }
-      .bead.amber:hover {
+      .bead.amber:hover,
+      .bead.amber:focus-visible {
         box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
       }
       .bead.purple {
         background: #a855f7;
       }
-      .bead.purple:hover {
+      .bead.purple:hover,
+      .bead.purple:focus-visible {
         box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.3);
       }
       .bead.gray {
         background: #9ca3af;
       }
-      .bead.gray:hover {
+      .bead.gray:hover,
+      .bead.gray:focus-visible {
         box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.3);
       }
       .label {
@@ -303,19 +318,29 @@ export class CFMessageBeads extends BaseElement {
     });
   }
 
-  private _onBeadEnter = (e: MouseEvent, index: number) => {
+  private _showBeadTooltip(index: number, beadEl: HTMLElement): void {
     const msgs = this._messagesValue;
     if (!msgs?.[index]) return;
-    this.#showTooltip(msgs[index], e.currentTarget as HTMLElement);
+    this.#showTooltip(msgs[index], beadEl);
+  }
+
+  private _onBeadEnter = (e: MouseEvent, index: number) => {
+    this._showBeadTooltip(index, e.currentTarget as HTMLElement);
   };
 
-  private _onBeadClick = (_e: MouseEvent, index: number) => {
-    const msgs = this._messagesValue;
-    if (!msgs?.[index]) return;
-    // Future: show message detail on click
+  private _onBeadFocus = (e: FocusEvent, index: number) => {
+    this._showBeadTooltip(index, e.currentTarget as HTMLElement);
+  };
+
+  private _onBeadClick = (e: MouseEvent, index: number) => {
+    this._showBeadTooltip(index, e.currentTarget as HTMLElement);
   };
 
   private _onBeadLeave = () => {
+    this.#unmountTooltip();
+  };
+
+  private _onBeadBlur = () => {
     this.#unmountTooltip();
   };
 
@@ -341,14 +366,18 @@ export class CFMessageBeads extends BaseElement {
     const beads = msgs.map((msg, i) => {
       const color = classifyMessage(msg);
       return html`
-        <div
+        <button
+          type="button"
           class="bead ${color}"
           style="animation-delay: ${i * 30}ms"
+          aria-label="${beadLabel(msg)}"
           @mouseenter="${(e: MouseEvent) => this._onBeadEnter(e, i)}"
           @mouseleave="${this._onBeadLeave}"
+          @focus="${(e: FocusEvent) => this._onBeadFocus(e, i)}"
+          @blur="${this._onBeadBlur}"
           @click="${(e: MouseEvent) => this._onBeadClick(e, i)}"
         >
-        </div>
+        </button>
       `;
     });
 
@@ -363,8 +392,10 @@ export class CFMessageBeads extends BaseElement {
         `
         : html`
           <button
+            type="button"
             class="refine-btn"
             title="Refine"
+            aria-label="Refine messages"
             @click="${this._onRefineClick}"
           >
             +
