@@ -32,6 +32,7 @@ import type {
   SqliteQueryResult,
   UnavailableInputPolicy,
   UnavailableInputPolicyEntry,
+  WishState,
 } from "@commonfabric/api";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
@@ -357,6 +358,23 @@ function sqliteResultTypecheck(
   void hasNoStateWrapper;
 }
 
+function wishResultTypecheck(
+  state: WishState<Repo>,
+  resultOf: ResultOfFunction,
+): void {
+  const resultIsAsync: Equal<typeof state.result, AsyncResult<Repo>> = true;
+  const usable = resultOf(state.result);
+  const usableIsExact: Equal<typeof usable, Repo> = true;
+  const hasNoDuplicateError: Equal<
+    "error" extends keyof WishState<Repo> ? true : false,
+    false
+  > = true;
+
+  void resultIsAsync;
+  void usableIsExact;
+  void hasNoDuplicateError;
+}
+
 Deno.test("data-unavailability helper declarations preserve narrowing types", () => {
   assertEquals(typeof guardNarrowingTypecheck, "function");
   assertEquals(typeof asyncResultNarrowingTypecheck, "function");
@@ -366,4 +384,5 @@ Deno.test("data-unavailability helper declarations preserve narrowing types", ()
   assertEquals(typeof directAsyncBuiltinTypecheck, "function");
   assertEquals(typeof compileResultTypecheck, "function");
   assertEquals(typeof sqliteResultTypecheck, "function");
+  assertEquals(typeof wishResultTypecheck, "function");
 });
