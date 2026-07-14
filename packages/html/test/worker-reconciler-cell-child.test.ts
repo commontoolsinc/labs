@@ -926,6 +926,105 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   );
 
   await t.step(
+    "does not restore an errored root during a policy re-evaluation",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+      let reEvaluatePolicy: (() => void) | undefined;
+      const policyWatch = reconciler as unknown as {
+        watchCellMembership: (
+          cell: Cell<unknown>,
+          watched: Set<string>,
+          addCancel: (cancel: () => void) => void,
+          reEvaluate: () => void,
+        ) => void;
+      };
+      policyWatch.watchCellMembership = (
+        _cell,
+        _watched,
+        _addCancel,
+        reEvaluate,
+      ) => {
+        reEvaluatePolicy = reEvaluate;
+      };
+      const rootCell = new MockCell(
+        {
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: ["Ready"],
+        } satisfies WorkerVNode,
+      );
+
+      reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      rootCell.set(DataUnavailable.error(new Error("failed")));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      reEvaluatePolicy?.();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("create-element").length,
+        0,
+        "policy changes must re-evaluate the current error, not stale content",
+      );
+    },
+  );
+
+  await t.step(
+    "does not restore an errored child during a policy re-evaluation",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+      let reEvaluatePolicy: (() => void) | undefined;
+      const policyWatch = reconciler as unknown as {
+        watchCellMembership: (
+          cell: Cell<unknown>,
+          watched: Set<string>,
+          addCancel: (cancel: () => void) => void,
+          reEvaluate: () => void,
+        ) => void;
+      };
+      policyWatch.watchCellMembership = (
+        _cell,
+        _watched,
+        _addCancel,
+        reEvaluate,
+      ) => {
+        reEvaluatePolicy = reEvaluate;
+      };
+      const childCell = new MockCell(
+        {
+          type: "vnode",
+          name: "button",
+          props: {},
+          children: ["Ready"],
+        } satisfies WorkerVNode,
+      );
+
+      reconciler.mount({
+        type: "vnode",
+        name: "div",
+        props: {},
+        children: [childCell as unknown as WorkerRenderNode],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      childCell.set(DataUnavailable.error(new Error("failed")));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      collector.clear();
+
+      reEvaluatePolicy?.();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("create-element").length,
+        0,
+        "policy changes must re-evaluate the current error, not stale content",
+      );
+    },
+  );
+
+  await t.step(
     "updates same-shape slotted header cell VNode children",
     async () => {
       const collector = createOpsCollector();
