@@ -214,6 +214,49 @@ describe("checkAndUpdateDefaultPattern", () => {
     );
   });
 
+  it("reconciles a persisted root discovered after a creation race", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const existing = await controller.ensureDefaultPattern();
+    const rootLinkBefore = JSON.stringify(existing.getCell().getAsLink());
+    const originalGetDefaultPattern = manager.getDefaultPattern;
+    const originalGetSpaceCellContents = manager.getSpaceCellContents;
+    const originalCheck = controller.checkAndUpdateDefaultPattern;
+    let firstLookup = true;
+    let updateChecks = 0;
+
+    // Model the retry after another writer wins: the first pre-transaction
+    // lookup saw no root, while the transaction's double-check now sees one.
+    manager.getDefaultPattern = ((runIt?: boolean) => {
+      if (firstLookup) {
+        firstLookup = false;
+        return Promise.resolve(undefined);
+      }
+      return originalGetDefaultPattern.call(manager, runIt);
+    }) as typeof manager.getDefaultPattern;
+    manager.getSpaceCellContents = (() => ({
+      withTx: () => ({
+        key: (key: string) => {
+          expect(key).toBe("defaultPattern");
+          return { get: () => ({ get: () => ({}) }) };
+        },
+      }),
+    })) as unknown as typeof manager.getSpaceCellContents;
+    controller.checkAndUpdateDefaultPattern = ((root) => {
+      updateChecks++;
+      return originalCheck.call(controller, root);
+    }) as typeof controller.checkAndUpdateDefaultPattern;
+
+    try {
+      const raced = await controller.ensureDefaultPattern();
+      expect(JSON.stringify(raced.getCell().getAsLink())).toBe(rootLinkBefore);
+      expect(updateChecks).toBe(1);
+    } finally {
+      manager.getDefaultPattern = originalGetDefaultPattern;
+      manager.getSpaceCellContents = originalGetSpaceCellContents;
+      controller.checkAndUpdateDefaultPattern = originalCheck;
+    }
+  });
+
   it("skips and reports version skew when builds differ", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
@@ -283,13 +326,25 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(stub.identityFetches()).toBe(2);
   });
 
-  it("never throws when a fetch fails (space open is not broken)", async () => {
+  it("never throws when identity lookup fails or rejects unexpectedly", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
     const before = getPatternIdentityRef(piece.getCell())?.identity;
 
     stub.failIdentity(true);
     expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+
+    // The Runtime normally converts fetch failures to undefined. Also defend
+    // the controller boundary against an unexpected rejected lookup.
+    const originalCachedIdentity = runtime.cachedPatternIdentity;
+    runtime.cachedPatternIdentity = () =>
+      Promise.reject(new Error("unexpected identity lookup rejection"));
+    try {
+      expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    } finally {
+      runtime.cachedPatternIdentity = originalCachedIdentity;
+    }
+
     expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(before);
   });
 

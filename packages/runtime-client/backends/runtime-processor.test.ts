@@ -13,6 +13,7 @@ import {
   renderMembershipProviderFor,
   RuntimeProcessor,
   sanitizeForPostMessage,
+  shouldReconcileHomeRoot,
   versionSkewNotification,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
@@ -999,6 +1000,19 @@ describe("RuntimeProcessor blob upload IPC", () => {
 });
 
 describe("RuntimeProcessor home pattern IPC", () => {
+  it("reconciles the home root only when both update flags are enabled", () => {
+    expect(shouldReconcileHomeRoot({ experimental: {} })).toBe(false);
+    expect(shouldReconcileHomeRoot({
+      experimental: { systemPatternAutoUpdate: true },
+    })).toBe(false);
+    expect(shouldReconcileHomeRoot({
+      experimental: {
+        systemPatternAutoUpdate: true,
+        systemPatternAutoUpdateHome: true,
+      },
+    })).toBe(true);
+  });
+
   it("uses the default-pattern metadata fast path when the home pattern is already instantiated", async () => {
     const defaultPatternRef: CellRef = {
       id: "of:default-pattern-result" as CellRef["id"],

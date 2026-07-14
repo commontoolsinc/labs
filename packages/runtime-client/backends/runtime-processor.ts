@@ -189,6 +189,14 @@ export function postVersionSkew(info: VersionSkewInfo): void {
   self.postMessage(versionSkewNotification(info));
 }
 
+/** Whether the home root must take the reconcile-before-start path. */
+export function shouldReconcileHomeRoot(
+  runtime: Pick<Runtime, "experimental">,
+): boolean {
+  return runtime.experimental?.systemPatternAutoUpdate === true &&
+    runtime.experimental?.systemPatternAutoUpdateHome === true;
+}
+
 /**
  * Map host-decided `InitializationData` onto `runtimePresets.browserWorker`
  * params (CT-1814): the shared first-party posture (CFC pins,
@@ -1067,13 +1075,8 @@ export class RuntimeProcessor {
     // (Value is a Cell itself, and pattern metadata means it's instantiated)
     // We've followed all the links from "defaultPattern", so our cell should
     // be the result cell for the default pattern.
-    const reconcileHomeBeforeStart =
-      this.runtime.experimental?.systemPatternAutoUpdate === true &&
-      this.runtime.experimental?.systemPatternAutoUpdateHome === true;
-    if (
-      getMetaLink(defaultPatternCell, "pattern") &&
-      !reconcileHomeBeforeStart
-    ) {
+    const reconcileHome = shouldReconcileHomeRoot(this.runtime);
+    if (getMetaLink(defaultPatternCell, "pattern") && !reconcileHome) {
       await this.runtime.start(defaultPatternCell);
       await this.runtime.idle();
       return {
