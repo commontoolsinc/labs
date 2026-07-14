@@ -367,8 +367,12 @@ export function selectIntegrationTestFiles(
   fileNames: string[],
   filter: string,
 ): string[] {
-  return fileNames
-    .filter((name) => name.endsWith(".test.ts") && name.includes(filter))
+  const testFiles = fileNames
+    .filter((name) => name.endsWith(".test.ts"));
+  const exactName = filter.endsWith(".test.ts") ? filter : `${filter}.test.ts`;
+  if (testFiles.includes(exactName)) return [exactName];
+  return testFiles
+    .filter((name) => name.includes(filter))
     .sort();
 }
 

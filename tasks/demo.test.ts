@@ -124,6 +124,7 @@ Deno.test("resolveDemoTest requires exactly one file", async () => {
   try {
     const dir = `${root}/packages/patterns/integration`;
     await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeTextFile(`${dir}/demo.test.ts`, "");
     await Deno.writeTextFile(`${dir}/one-demo.test.ts`, "");
     await Deno.writeTextFile(`${dir}/two-demo.test.ts`, "");
     const base = parseDemoArgs(["patterns", "one-demo"]);
@@ -131,8 +132,12 @@ Deno.test("resolveDemoTest requires exactly one file", async () => {
       await resolveDemoTest(root, base.packageName, base.filters[0]),
       "one-demo.test.ts",
     );
+    assertEquals(
+      await resolveDemoTest(root, base.packageName, "demo.test.ts"),
+      "demo.test.ts",
+    );
     await assertRejects(
-      () => resolveDemoTest(root, base.packageName, "demo"),
+      () => resolveDemoTest(root, base.packageName, "emo"),
       Error,
       "ambiguous",
     );

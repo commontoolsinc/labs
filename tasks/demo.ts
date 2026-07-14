@@ -92,6 +92,8 @@ export async function resolveDemoTest(
     integrationDir,
     filter,
   );
+  const exactName = filter.endsWith(".test.ts") ? filter : `${filter}.test.ts`;
+  if (matches.includes(exactName)) return exactName;
   if (matches.length !== 1) {
     throw new Error(
       matches.length === 0
