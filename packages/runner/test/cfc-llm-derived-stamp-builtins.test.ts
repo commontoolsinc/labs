@@ -459,9 +459,9 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     });
 
     // Each item is its own document; read the model bytes' OWN persisted label.
-    const items = result.key("result").key("items") as unknown as Cell<any>;
-    const firstItem = items.key(0) as unknown as Cell<any>;
-    const secondItem = items.key(1) as unknown as Cell<any>;
+    const items = result.key("result").key("items");
+    const firstItem = items.key(0);
+    const secondItem = items.key(1);
 
     // Sanity: the items really do split into their own documents.
     expect(parseLink(firstItem.withTx().getRaw())?.id).toBeDefined();
@@ -565,14 +565,13 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       tree: { label: "root", children: [{ label: "leaf", children: [] }] },
     });
 
-    const tagged = result.key("result").key("tagged") as unknown as Cell<any>;
-    const taggedFirst = tagged.key(0) as unknown as Cell<any>;
-    const taggedSecond = tagged.key(1) as unknown as Cell<any>;
-    const treeChild =
-      ((result.key("result").key("tree") as unknown as Cell<any>)
-        .key("children") as unknown as Cell<any>).key(0) as unknown as Cell<
-          any
-        >;
+    const tagged = result.key("result").key("tagged");
+    const taggedFirst = tagged.key(0);
+    const taggedSecond = tagged.key(1);
+    const treeChild = result.key("result")
+      .key("tree")
+      .key("children")
+      .key(0);
 
     // Sanity: every asserted element really split into its own document.
     expect(parseLink(taggedFirst.withTx().getRaw())?.id).toBeDefined();

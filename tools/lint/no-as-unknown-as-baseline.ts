@@ -1,15 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-llm-derived-stamp-builtins.test.ts": [
-    "462:52:1n7u56b",
-    "463:35:1ul8g8n",
-    "464:36:vsz6ge",
-    "568:54:ied4ur",
-    "569:38:9x8q5p",
-    "570:39:1fdv138",
-    "573:57:1tq86nc",
-    "573:25:1yitlx9",
-    "572:41:pnjepr",
-  ],
   "packages/runner/test/cfc-policy-template.test.ts": [
     "44:34:1117z3v",
   ],
