@@ -1,5 +1,8 @@
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import {
+  DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -823,6 +826,45 @@ function traverseAndCellify(
 }
 
 const resultSchema = LLMDialogResultSchema;
+
+function beginPresentedResultTurn(
+  tx: IExtendedStorageTransaction,
+  result: Cell<any>,
+  userResultSchema: unknown,
+): void {
+  result.withTx(tx).key("error").set(undefined);
+  if (userResultSchema === undefined) return;
+
+  const presented = result.withTx(tx).key("result");
+  const raw = presented.getRaw();
+  if (isDataUnavailable(raw) && raw.reason === "error") {
+    presented.setRaw(DataUnavailable.pending());
+  }
+}
+
+function failPresentedResultTurn(
+  tx: IExtendedStorageTransaction,
+  result: Cell<any>,
+  pending: Cell<boolean>,
+  userResultSchema: unknown,
+  error: unknown,
+): void {
+  const message = error instanceof Error ? error.message : String(error);
+  result.withTx(tx).key("error").set(message);
+
+  if (userResultSchema !== undefined) {
+    const presented = result.withTx(tx).key("result");
+    const raw = presented.getRaw();
+    // A later failed turn must not erase the last successfully presented
+    // value. Before the first success, replace any unavailable state with the
+    // terminal error for this attempt.
+    if (raw === undefined || isDataUnavailable(raw)) {
+      presented.setRaw(DataUnavailable.error(new Error(message)));
+    }
+  }
+
+  pending.withTx(tx).set(false);
+}
 
 const internalSchema = internSchema(
   {
@@ -3034,6 +3076,8 @@ export function llmDialog(
       pinnedCells.sync(); // Kick off sync, no need to await
 
       const pending = result.key("pending");
+      const userResultSchema = inputs.withTx(tx).key("resultSchema").get();
+      const rawPresentedResult = result.withTx(tx).key("result").getRaw();
 
       // Write the stream markers and initialize pinnedCells as empty array.
       // This write might fail (since the original data wasn't loaded yet), but
@@ -3045,6 +3089,9 @@ export function llmDialog(
       // setRawUntyped to bypass T.
       result.setRawUntyped({
         ...result.getRaw(),
+        ...(userResultSchema !== undefined && rawPresentedResult === undefined
+          ? { result: DataUnavailable.pending() }
+          : {}),
         addMessage: { $stream: true },
         cancelGeneration: { $stream: true },
         pinCell: { $stream: true },
@@ -3071,6 +3118,11 @@ export function llmDialog(
 
           // Before starting request, set pending and append the new message.
           pending.withTx(tx).set(true);
+          beginPresentedResultTurn(
+            tx,
+            result,
+            inputs.withTx(tx).key("resultSchema").get(),
+          );
           inputs.key("messages").withTx(tx).push(
             {
               ...event,
@@ -3575,7 +3627,13 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             messagesCell.withTx(tx).push(
               errorMessage as Schema<typeof LLMMessageSchema>,
             );
-            pending.withTx(tx).set(false);
+            failPresentedResultTurn(
+              tx,
+              result,
+              pending,
+              userResultSchema,
+              "The model returned an empty or invalid response.",
+            );
           },
         );
         return;
@@ -3676,7 +3734,13 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
                 messagesCell.withTx(tx).push(
                   errorMessage as Schema<typeof LLMMessageSchema>,
                 );
-                pending.withTx(tx).set(false);
+                failPresentedResultTurn(
+                  tx,
+                  result,
+                  pending,
+                  userResultSchema,
+                  "Some tool calls failed to execute.",
+                );
               },
             );
             return;
@@ -3701,6 +3765,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
               // guarded by requestId to prevent stale writes from canceled requests.
               if (cellifiedResult !== undefined) {
                 result.withTx(tx).key("result").set(cellifiedResult);
+                result.withTx(tx).key("error").set(undefined);
               }
               const nextIndex = (messagesCell.withTx(tx).get() as
                 | readonly BuiltInLLMMessage[]
@@ -3772,6 +3837,20 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           }
         } catch (error: unknown) {
           console.error(error);
+          await safelyPerformUpdate(
+            runtime,
+            pending,
+            internal,
+            requestId,
+            (tx) =>
+              failPresentedResultTurn(
+                tx,
+                result,
+                pending,
+                userResultSchema,
+                error,
+              ),
+          );
         }
       } else {
         // No tool calls, just add the assistant message
@@ -3821,7 +3900,13 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
         messagesCell.withTx(tx).push(
           errorMessage as Schema<typeof LLMMessageSchema>,
         );
-        pending.withTx(tx).set(false);
+        failPresentedResultTurn(
+          tx,
+          result,
+          pending,
+          userResultSchema,
+          error,
+        );
       });
     });
 }

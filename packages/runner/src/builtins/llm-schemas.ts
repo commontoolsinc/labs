@@ -68,6 +68,7 @@ export const LLMDialogResultSchema = internSchema(
     properties: {
       pending: { type: "boolean", default: false },
       result: {},
+      error: { type: "string" },
       addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
       cancelGeneration: { asCell: ["stream"] },
       pinCell: {

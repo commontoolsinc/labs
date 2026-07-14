@@ -3,6 +3,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
+  DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import {
   addMockResponse,
   clearMockResponses,
   enableMockMode,
@@ -17,7 +21,10 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
+import {
+  LLMDialogResultSchema,
+  LLMMessageSchema,
+} from "../src/builtins/llm-schemas.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
 import { generateObjectState } from "../src/builder/built-in.ts";
@@ -68,6 +75,151 @@ describe("llmDialog", () => {
     await runtime.idle();
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  it("publishes pending only for dialogs with a presented result", async () => {
+    const presentedSchema = {
+      type: "object",
+      properties: { answer: { type: "number" } },
+      required: ["answer"],
+    } as const satisfies JSONSchema;
+    const withResultPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        return llmDialog({ messages, resultSchema: presentedSchema } as any);
+      },
+      false,
+      LLMDialogResultSchema,
+    );
+    const withoutResultPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        return llmDialog({ messages });
+      },
+      false,
+      LLMDialogResultSchema,
+    );
+
+    const withResult = runtime.run(
+      tx,
+      withResultPattern,
+      {},
+      runtime.getCell(space, "llmDialog-presented-result", undefined, tx),
+    );
+    const withoutResult = runtime.run(
+      tx,
+      withoutResultPattern,
+      {},
+      runtime.getCell(space, "llmDialog-control-only", undefined, tx),
+    );
+    await tx.commit();
+
+    await withResult.pull();
+    await withoutResult.pull();
+
+    expect(withResult.key("result").getRaw()).toBe(DataUnavailable.pending());
+    expect(withoutResult.key("result").getRaw()).toBeUndefined();
+  });
+
+  it("publishes an error result when the first presented-result turn fails", async () => {
+    const presentedSchema = {
+      type: "object",
+      properties: { answer: { type: "number" } },
+      required: ["answer"],
+    } as const satisfies JSONSchema;
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        return llmDialog({ messages, resultSchema: presentedSchema } as any);
+      },
+      false,
+      LLMDialogResultSchema,
+    );
+    const result = runtime.run(
+      tx,
+      testPattern,
+      {},
+      runtime.getCell(space, "llmDialog-first-result-error", undefined, tx),
+    );
+    await tx.commit();
+    await result.pull();
+
+    const addMessage = await result.key("addMessage").pull();
+    const settled = waitForDialogPendingFalse(result);
+    addMessage.send({ role: "user", content: "Present a result" });
+    await settled;
+
+    const unavailable = result.key("result").getRaw();
+    expect(isDataUnavailable(unavailable)).toBe(true);
+    if (isDataUnavailable(unavailable) && unavailable.reason === "error") {
+      expect(unavailable.error.message).toMatch(/no matching mock response/);
+    }
+    expect(result.key("error").get()).toMatch(/no matching mock response/);
+  });
+
+  it("preserves the last presented result across a later failed turn", async () => {
+    loadConversationFixture({
+      description: "Presented dialog result survives a later failed turn",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: { messagesContain: ["First turn"], messageCount: 1 },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "present-first-result",
+              toolName: "presentResult",
+              input: { answer: 42 },
+            }],
+            id: "present-first-result-response",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messagesContain: ["First turn"], messageCount: 3 },
+          response: {
+            role: "assistant",
+            content: "Presented.",
+            id: "present-first-result-finished",
+          },
+        },
+      ],
+    });
+
+    const presentedSchema = {
+      type: "object",
+      properties: { answer: { type: "number" } },
+      required: ["answer"],
+    } as const satisfies JSONSchema;
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        return llmDialog({ messages, resultSchema: presentedSchema } as any);
+      },
+      false,
+      LLMDialogResultSchema,
+    );
+    const result = runtime.run(
+      tx,
+      testPattern,
+      {},
+      runtime.getCell(space, "llmDialog-preserved-result", undefined, tx),
+    );
+    await tx.commit();
+    await result.pull();
+
+    const addMessage = await result.key("addMessage").pull();
+    const firstTurn = waitForDialogPendingFalse(result);
+    addMessage.send({ role: "user", content: "First turn" });
+    await firstTurn;
+    expect(result.key("result").get()).toEqual({ answer: 42 });
+
+    const secondTurn = waitForDialogPendingFalse(result);
+    addMessage.send({ role: "user", content: "Second turn" });
+    await secondTurn;
+    expect(result.key("result").get()).toEqual({ answer: 42 });
+    expect(result.key("error").get()).toMatch(/no matching mock response/);
   });
 
   it("should support a multi-turn conversation via addMessage", async () => {
@@ -2261,6 +2413,24 @@ function waitForMessages(result: any, expectedCount: number) {
       if (pending === false && messages?.length === expectedCount) {
         resolve();
       }
+    });
+  }).finally(() => {
+    clearTimeout(timeout);
+    cancel();
+  });
+}
+
+function waitForDialogPendingFalse(result: any) {
+  let cancel: () => void;
+  let timeout: ReturnType<typeof setTimeout>;
+  let sawPending = result.key("pending").get() === true;
+  return new Promise<void>((resolve, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error("Timeout waiting for llmDialog pending=false"));
+    }, 5000);
+    cancel = result.sink(({ pending }: any = {}) => {
+      if (pending === true) sawPending = true;
+      if (sawPending && pending === false) resolve();
     });
   }).finally(() => {
     clearTimeout(timeout);
