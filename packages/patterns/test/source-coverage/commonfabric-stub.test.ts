@@ -404,8 +404,8 @@ export function navigateTo(value: unknown): unknown {
   return value;
 }
 
-export function compileAndRun(): { pending: false; result: undefined } {
-  return { pending: false, result: undefined };
+export function compileAndRun<T = unknown>(): T | UnavailableResult {
+  return {} as T;
 }
 
 export function fetchProgram(): { files: never[]; main: string } {

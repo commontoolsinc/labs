@@ -37,8 +37,12 @@ export default pattern(() => {
     main: program.main,
     input: { value: 10 },
   }));
-  const { pending: compilePending, result, error: compileError } =
-    compileAndRun(compileParams);
+  const compileRequest = compileAndRun(compileParams);
+  const result = resultOf(compileRequest);
+  const compilePending = computed(() => isPending(compileRequest));
+  const compileError = computed(() =>
+    hasError(compileRequest) ? compileRequest.error.message : undefined
+  );
 
   return {
     [NAME]: "Fetch Program Test",

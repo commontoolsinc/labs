@@ -386,16 +386,12 @@ export const fetchAndRunPattern = pattern<FetchAndRunPatternInput>(
       input: args,
     }));
 
-    const { pending, result, error } = compileAndRun(compileParams);
+    const compileRequest = compileAndRun(compileParams);
+    const result = resultOf(compileRequest);
 
-    return ifElse(
-      computed(() => pending || (!result && !error)),
-      undefined,
-      {
-        cell: result,
-        error,
-      },
-    );
+    return hasError(compileRequest)
+      ? { error: compileRequest.error.message }
+      : { cell: result };
   },
 );
 
