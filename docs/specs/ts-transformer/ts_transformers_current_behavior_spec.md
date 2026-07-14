@@ -169,8 +169,7 @@ list — is the authoritative source. As of this writing it recognizes:
 - default generation calls `generateObject` and `generateText`, plus the
   advanced `generateObjectStream` and `generateTextStream` forms
 - availability predicates `isPending`, `hasError`, `isSyncing`, and
-  `hasSchemaMismatch`; the transparent aliases `resultOf` and
-  `observeAvailability`
+  `hasSchemaMismatch`; availability projection and observation aliases
 - the `runtime-call` family — tagged-call / function runtime origins: `str`,
   `llm`, `llmDialog`, `fetchBinary`, `fetchText`, `fetchJson`,
   `fetchJsonUnchecked`, `fetchProgram`, `streamData`, `compileAndRun`,

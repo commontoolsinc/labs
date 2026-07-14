@@ -34,11 +34,11 @@ Patterns explicitly observe unavailable states with type guards such as
 `hasError()`. A guard over an `AsyncResult<T>` is already type-correct inside
 an explicit `computed()` or `lift()`; the transformer uses the guard and
 visible union to emit the corresponding runner input policy. Ordinary fetch and
-generation code never needs `observeAvailability()`; it should retain and guard
-the original `AsyncResult<T>`. The cast is reserved for a legacy or encapsulated
-boundary which exposes only `T`, may carry a propagated unavailable value at
-runtime, and cannot yet be changed to expose the originating request or an
-honest availability union.
+generation code retains and guards the original `AsyncResult<T>`.
+`observeAvailability()` is an almost-never-needed compatibility escape hatch
+for a legacy or encapsulated boundary which exposes only `T`, may carry a
+propagated unavailable value at runtime, and cannot yet be changed to expose the
+originating request or an honest availability union.
 
 ## Goals
 
@@ -349,13 +349,7 @@ The computation accepts pending and error because both are visible union
 members and both have explicit guards. Syncing and schema mismatch still
 propagate at its outer boundary.
 
-Do not wrap `repoState` in `observeAvailability()`: its `AsyncResult<Repo>` type
-already exposes every unavailable state, and the guards provide the exact
-policy. Likewise, when a derived value and its originating request are both in
-scope, observe the request instead of recovering availability from the derived
-value.
-
-#### Rare escape hatch for a hidden propagated state
+#### Almost-never-needed legacy escape hatch
 
 An unavailable runtime value can cross a legacy or encapsulated reactive
 boundary whose static contract is only `T`. The originating `AsyncResult<T>`
@@ -367,7 +361,10 @@ run.
 
 `observeAvailability()` is a zero-node, identity cast used outside that
 boundary. It widens the TypeScript type and records the exact unavailable
-reasons accepted at that captured input path.
+reasons accepted at that captured input path. Almost no pattern should call it:
+it exists only for migration adapters where the static type is plain `T`, the
+originating request is inaccessible, and the upstream contract cannot yet be
+corrected.
 
 ```typescript
 // Shown for illustration only.
@@ -403,12 +400,9 @@ or schema-mismatch value is still propagated without invoking the callback. If
 the adapter owns the upstream contract, the preferred fix is to expose
 `AsyncResult<string>` (or the original request) and remove the cast.
 
-Do not use `observeAvailability()`:
-
-- on a direct `fetch*`, `generate*`, or advanced-stream result;
-- merely because code called `resultOf()` or derived another value while the
-  original request remains in scope; or
-- for ordinary consumers that only need to wait for usable data.
+It should be absent from ordinary request/result code: retain and guard the
+original `AsyncResult<T>`, or use `resultOf()` when the consumer only waits for
+usable data.
 
 Calling `observeAvailability(value)` without reasons accepts all four variants.
 That broad form is intended only for generic diagnostic or compatibility

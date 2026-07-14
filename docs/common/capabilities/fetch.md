@@ -137,11 +137,6 @@ narrow the request to the corresponding state. You do not need to handle every
 state: if a computation only consumes `resultOf(request)`, unavailability
 propagates through it and the computation runs once usable data exists.
 
-Do not wrap a fetch result in `observeAvailability()`. Fetch already returns an
-honest `AsyncResult<T>`, so guard the request directly. That helper is reserved
-for legacy or encapsulated boundaries which expose only a plain `T` while
-hiding an unavailable state propagated from an inaccessible upstream request.
-
 ### Migrating fallback-while-loading code
 
 `resultOf(request)` is a type projection, not a defaulting operator. Do not

@@ -93,12 +93,6 @@ narrow the request to the corresponding state. A computation that only uses
 `resultOf(request)` does not need guards: unavailability propagates until the
 result exists.
 
-Do not wrap a generation result in `observeAvailability()`. Generation already
-returns an honest `AsyncResult<T>`, so guard the request directly. That helper
-is reserved for legacy or encapsulated boundaries which expose only a plain
-`T` while hiding an unavailable state propagated from an inaccessible upstream
-request.
-
 ## Partial and metadata state
 
 Use `generateTextStream` or `generateObjectStream<T>` when a pattern needs
