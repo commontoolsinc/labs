@@ -40,9 +40,11 @@ const writerIdentity = (
 
 /**
  * Query durable writer identity before instantiation, then query the merged
- * live+durable view after the demanded piece has been instantiated. An index
- * miss therefore fails open by loading the piece root, while an existing
- * redirected target remains attributed to its current scheduler writer.
+ * live+durable view after the demanded piece has been instantiated. The pull
+ * demand already supplies the stable piece root; a durable action identity is
+ * never followed as a pointer to executable code. An index miss therefore
+ * fails open by loading that demanded root, while an existing redirected
+ * target remains attributed to its current scheduler writer.
  */
 export async function prepareExecutorDemandPiece(options: {
   runtime: Runtime;
@@ -77,9 +79,9 @@ export async function prepareExecutorDemandPiece(options: {
   const before = await lookup();
   await options.instantiate();
   const after = await lookup();
-  // A durable-only row for this piece was sufficient to locate its stable
-  // root before startup, but it may name an action from an older
-  // patternIdentity. Once the current pattern is instantiated, only its live
+  // A durable-only row for this piece may name an action from an older
+  // patternIdentity. The demand root, not that action id, selected the piece
+  // started above. Once its current pattern is instantiated, only live
   // registrations (live or live+durable) can identify this piece's executable
   // actions. Preserve durable-only candidates for other pieces: redirected
   // targets can legitimately be owned elsewhere.

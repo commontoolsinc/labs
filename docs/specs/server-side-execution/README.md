@@ -304,17 +304,21 @@ the named target/path lookup over the durable declared, current-known, and
 materializer rows written with scheduler observations. A live worker can also
 consult its registration-time static surface before the first run.
 
-The durable action id is a pre-instantiation locator, not an instruction to
-execute that exact historical action. Pattern updates keep the piece root and
-replace its `patternIdentity`; starting that root therefore loads the current
+The durable action id is not an instruction to execute that exact historical
+action, nor is it needed to find the demanded piece. Pull interest carries the
+stable piece-root entity id independently of scheduler metadata. The executor
+reconstructs that root cell directly and reads its current `patternIdentity`;
+it never follows `actionId` as a pointer to code. Pattern updates keep the piece
+root and replace its `patternIdentity`, so starting that root loads the current
 pattern, cancels the old registrations, and registers the current action ids.
 Exact-id snapshot matching makes observations for the previous pattern inert,
 so new actions without matching snapshots start fresh. After instantiation,
 live or live+durable registrations supersede durable-only rows for that same
 piece. Durable-only rows for another piece remain eligible because a redirected
-target may legitimately be owned by that other piece. Thus an old writer row
-can still locate the stable piece that must be started, but cannot remain that
-piece's executable candidate once its current graph is available.
+target may legitimately be owned by that other piece. Thus an old same-piece
+writer row may help diagnose why a target was considered writable, but cannot
+select either the piece or its executable action once the current graph is
+available.
 
 If a demanded piece has no usable writer row yet, the client interest already
 identifies the piece. The executor instantiates that piece, validates its

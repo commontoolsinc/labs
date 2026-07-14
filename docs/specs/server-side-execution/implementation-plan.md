@@ -838,6 +838,9 @@ only an action it can serve. Clients need not predict unsupported actions.
 - [x] Dynamic scope change after a claim revokes it and converges via client
       rerun without data loss.
 - [x] First-run index miss safely instantiates/discovers the piece.
+- [x] A pull demand's stable piece root loads its current `patternIdentity`;
+      stale same-piece action metadata neither selects the root nor survives as
+      an executable candidate after an action-id-changing pattern update.
 - [x] Pre-existing redirected output is served through writer-index identity,
       not creation source.
 - [x] No-op produces settlement and leaves no stuck overlay prerequisite.

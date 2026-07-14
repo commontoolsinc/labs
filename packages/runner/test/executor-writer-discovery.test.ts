@@ -57,6 +57,7 @@ function stubDurableWriters(
 function durableWriterFor(
   target: NormalizedFullLink,
   actionId: string,
+  pieceId = PIECE_ID,
 ): DurableSchedulerWriterCandidate {
   const address = toMemorySpaceAddress(target);
   const matchedWrite: SchedulerWriterMatch = {
@@ -71,7 +72,7 @@ function durableWriterFor(
   return {
     branch: "",
     ownerSpace: space,
-    pieceId: PIECE_ID,
+    pieceId,
     processGeneration: 0,
     actionId,
     executionContextKey: "space",
@@ -311,7 +312,7 @@ Deno.test("executor never falls back to a stale same-piece action after instanti
   }
 });
 
-Deno.test("pattern updates keep the piece root while rotating the executable action", async () => {
+Deno.test("a demanded piece root resolves its current action despite stale scheduler metadata", async () => {
   const env = createSchedulerTestRuntime(import.meta.url);
   try {
     const firstPattern = await env.runtime.patternManager.compilePattern(
@@ -341,7 +342,28 @@ Deno.test("pattern updates keep the piece root while rotating the executable act
 
     await env.runtime.runSynced(target, secondPattern, { value: 5 });
     assertEquals(await target.pull(), 50);
-    const second = await prepareExecutorDemandPiece({
+    const current = await prepareExecutorDemandPiece({
+      runtime: env.runtime,
+      branch: "",
+      pieceId,
+      target,
+      instantiate: () => env.runtime.start(target),
+    });
+
+    // Simulate a cold executor seeing the previous pattern's durable writer
+    // row. The pull demand still names this stable root, whose current
+    // patternIdentity names secondPattern. Restarting the root must register
+    // that pattern's action and discard the stale same-piece candidate.
+    env.runtime.runner.stop(target);
+    const staleActionId = first.writers[0]?.actionId;
+    if (staleActionId === undefined) {
+      throw new Error("initial pattern registered no writer action");
+    }
+    stubDurableWriters(
+      env.runtime,
+      [durableWriterFor(targetLink, staleActionId, pieceId)],
+    );
+    const restarted = await prepareExecutorDemandPiece({
       runtime: env.runtime,
       branch: "",
       pieceId,
@@ -350,13 +372,21 @@ Deno.test("pattern updates keep the piece root while rotating the executable act
     });
 
     assertEquals(first.writers.length, 1);
-    assertEquals(second.writers.length, 1);
+    assertEquals(current.writers.length, 1);
+    assertEquals(restarted.writers.length, 1);
     assertEquals(first.writers[0]?.pieceId, pieceId);
-    assertEquals(second.writers[0]?.pieceId, pieceId);
+    assertEquals(current.writers[0]?.pieceId, pieceId);
+    assertEquals(restarted.writers[0]?.pieceId, pieceId);
     assertStrictEquals(
-      second.writers[0]?.actionId !== first.writers[0]?.actionId,
+      current.writers[0]?.actionId !== first.writers[0]?.actionId,
       true,
     );
+    assertEquals(
+      restarted.writers[0]?.actionId,
+      current.writers[0]?.actionId,
+    );
+    assertStrictEquals(restarted.writers[0]?.source, "live");
+    assertEquals(await target.pull(), 50);
   } finally {
     await disposeSchedulerTestRuntime(env);
   }
