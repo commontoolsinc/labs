@@ -15,6 +15,7 @@ import { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -227,8 +228,43 @@ describe("plain-schema array traversal", () => {
       return nativeTrackReadPaths(address, paths, options);
     };
 
-    expect(cell.get().map(({ label }) => label)).toEqual(["First", "Second"]);
+    const rows = cell.get();
+    expect(rows.map(({ label }) => label)).toEqual(["First", "Second"]);
     expect(sourceBatches).toEqual([true, false]);
+
+    const batchedActivities = [...getTransactionReadActivities(tx)];
+    const sourceItemActivities = batchedActivities.filter((activity) =>
+      activity.id === sourceId && activity.path.length === 2
+    );
+    expect(
+      sourceItemActivities.map((activity) => ({
+        index: activity.path[1],
+        shallow: activity.nonRecursive === true,
+      })),
+    ).toEqual([
+      { index: "0", shallow: true },
+      { index: "1", shallow: true },
+      { index: "0", shallow: false },
+      { index: "1", shallow: false },
+    ]);
+
+    const targetIds = rows.map((row) =>
+      (row as Row & { [toCell](): Cell<Row> })[toCell]()
+        .getAsNormalizedFullLink().id
+    );
+    const targetSequence = batchedActivities
+      .filter((activity) => targetIds.includes(activity.id))
+      .map((activity) => activity.id)
+      .filter((id, index, ids) => index === 0 || id !== ids[index - 1]);
+    expect(targetSequence).toEqual(targetIds);
+    const firstTargetActivityIndex = batchedActivities.findIndex((activity) =>
+      targetIds.includes(activity.id)
+    );
+    expect(firstTargetActivityIndex).toBeGreaterThanOrEqual(0);
+    const lastSourceItemActivityIndex = batchedActivities.findLastIndex(
+      (activity) => activity.id === sourceId && activity.path.length === 2,
+    );
+    expect(lastSourceItemActivityIndex).toBeLessThan(firstTargetActivityIndex);
 
     const fallbackTx = runtime.edit();
     const fallbackCell = runtime.getCell<Row[]>(
@@ -317,6 +353,30 @@ describe("plain-schema array traversal", () => {
       tx,
     );
     expect(invalidStringItems.get()).toBeUndefined();
+  });
+
+  it("tracks every primitive-array index after an invalid item", async () => {
+    await seedRaw("invalid-primitive-tail", [[1, "still-read"]]);
+    const cell = runtime.getCell<string[][]>(
+      space,
+      "invalid-primitive-tail",
+      {
+        type: "array",
+        items: { type: "array", items: { type: "string" } },
+      },
+      tx,
+    );
+    const trackedDataPaths: string[][] = [];
+    const nativeTrackReadPaths = tx.trackReadPaths!.bind(tx);
+    tx.trackReadPaths = (address, paths, options) => {
+      if (address.id.startsWith("data:application/json")) {
+        trackedDataPaths.push(...paths.map((path) => [...path]));
+      }
+      return nativeTrackReadPaths(address, paths, options);
+    };
+
+    expect(cell.get()).toBeUndefined();
+    expect(trackedDataPaths).toContainEqual(["value", "1"]);
   });
 
   it("falls back when primitive arrays contain links", async () => {
@@ -408,7 +468,117 @@ describe("plain-schema array traversal", () => {
       { type: "array", items: { type: "object", properties: {} } },
       tx,
     );
-    expect(cell.get()).toBeUndefined();
+    const missingTargetKicks: string[] = [];
+    const originalEnsureLinkedDocLoaded = runtime.ensureLinkedDocLoaded;
+    runtime.ensureLinkedDocLoaded = (link, sourceSpace) => {
+      expect(sourceSpace).toBe(space);
+      expect(link.path).toEqual([]);
+      missingTargetKicks.push(link.id);
+    };
+    let value: readonly Record<string, never>[] | undefined;
+    try {
+      value = cell.get();
+    } finally {
+      runtime.ensureLinkedDocLoaded = originalEnsureLinkedDocLoaded;
+    }
+    expect(value).toBeUndefined();
+    expect(missingTargetKicks).toEqual([
+      missing.getAsNormalizedFullLink().id,
+    ]);
+  });
+
+  it("does not duplicate reads for a missing target in a batched array", async () => {
+    const missing = runtime.getCell(
+      space,
+      "batched-missing-linked-item",
+      undefined,
+      tx,
+    );
+    const present = runtime.getCell<{ label: string }>(
+      space,
+      "batched-present-linked-item",
+      undefined,
+      tx,
+    );
+    present.set({ label: "Present" });
+    runtime.getCell(
+      space,
+      "batched-missing-item-array",
+      undefined,
+      tx,
+    ).setRawUntyped([missing.getAsLink(), present.getAsLink()]);
+    await tx.commit();
+    tx = runtime.edit();
+
+    const schema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { label: { type: "string" } },
+      },
+    } as const satisfies JSONSchema;
+    const cell = runtime.getCell<{ label: string }[]>(
+      space,
+      "batched-missing-item-array",
+      schema,
+      tx,
+    );
+    const sourceId = cell.getAsNormalizedFullLink().id;
+    const nativeTrackReadPaths = tx.trackReadPaths!.bind(tx);
+    let sourceBatchCount = 0;
+    tx.trackReadPaths = (address, paths, options) => {
+      if (address.id === sourceId && paths.length === 2) sourceBatchCount++;
+      return nativeTrackReadPaths(address, paths, options);
+    };
+
+    const missingTargetKicks: string[] = [];
+    const originalEnsureLinkedDocLoaded = runtime.ensureLinkedDocLoaded;
+    runtime.ensureLinkedDocLoaded = (link, sourceSpace) => {
+      expect(sourceSpace).toBe(space);
+      expect(link.path).toEqual([]);
+      missingTargetKicks.push(link.id);
+    };
+    let value: readonly { label: string }[] | undefined;
+    try {
+      value = cell.get();
+    } finally {
+      runtime.ensureLinkedDocLoaded = originalEnsureLinkedDocLoaded;
+    }
+    expect(value).toBeUndefined();
+    expect(missingTargetKicks).toEqual([
+      missing.getAsNormalizedFullLink().id,
+    ]);
+    expect(sourceBatchCount).toBe(2);
+    const batchedActivities = [...getTransactionReadActivities(tx)];
+    expect(
+      batchedActivities.filter((activity) =>
+        activity.id === missing.getAsNormalizedFullLink().id
+      ),
+    ).toHaveLength(2);
+
+    const fallbackTx = runtime.edit();
+    const fallbackCell = runtime.getCell<{ label: string }[]>(
+      space,
+      "batched-missing-item-array",
+      schema,
+      new TransactionWrapper(fallbackTx),
+    );
+    expect(fallbackCell.get()).toBeUndefined();
+    const fallbackActivities = [...getTransactionReadActivities(fallbackTx)];
+    const withoutOrder = ({ journalIndex: _journalIndex, ...activity }: (
+      typeof batchedActivities
+    )[number]) => activity;
+    const byAddress = (
+      a: ReturnType<typeof withoutOrder>,
+      b: ReturnType<typeof withoutOrder>,
+    ) =>
+      `${a.id}\0${a.path.join("\0")}\0${a.nonRecursive === true}`.localeCompare(
+        `${b.id}\0${b.path.join("\0")}\0${b.nonRecursive === true}`,
+      );
+    expect(batchedActivities.map(withoutOrder).sort(byAddress)).toEqual(
+      fallbackActivities.map(withoutOrder).sort(byAddress),
+    );
+    fallbackTx.abort();
   });
 
   it("preserves object-item leaf and invalid-type handling", async () => {

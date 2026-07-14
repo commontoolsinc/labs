@@ -15,9 +15,10 @@ import {
 const deepFrozenCache = new WeakSet<object>();
 
 /**
- * Objects already proven to be both deeply frozen and valid Fabric values.
- * A successful proof is stable forever because every reachable container is
- * frozen, so repeated storage-boundary checks can answer by identity.
+ * Data-descriptor-only object graphs already proven to be both deeply frozen
+ * and valid Fabric values. Accessors and FabricInstance protocol values are
+ * deliberately excluded: Object.freeze() does not freeze their closed-over or
+ * private logical state, so their proof is not stable by root identity.
  */
 const deepFrozenFabricValueCache = new WeakSet<object>();
 
@@ -277,13 +278,19 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   // At this point, it's known to be a deep-frozen value with internal
   // structure, but we don't know if it's actually a `FabricValue`.
 
-  const seen = new Set();
+  const seen = new Set<object>();
+  let cacheableByIdentity = true;
   const checkValue = (item: unknown): boolean => {
-    if (item === null || (typeof item !== "object")) {
-      // It's a primitive.
+    if (typeof item === "function") return false;
+    if (item === null || typeof item !== "object") {
+      // It's a non-function primitive.
       return true;
     } else if (seen.has(item)) {
       return true;
+    } else if (!isDeepFrozen(item)) {
+      // Accessors may expose a different child after the root was cached by
+      // isDeepFrozen(). Recheck each currently observed object independently.
+      return false;
     }
 
     seen.add(item);
@@ -293,6 +300,10 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
       // references.
       return true;
     } else if (item instanceof FabricInstance) {
+      // Object.freeze() cannot prove that a FabricInstance's private logical
+      // contents will remain unchanged, so validate it but do not root-cache a
+      // graph that reaches one.
+      cacheableByIdentity = false;
       // `FabricInstance`s answer the deep-frozen question via their
       // `[IS_DEEP_FROZEN]` protocol member (the side-effect-free sibling of
       // `[DEEP_FREEZE]`), recursing through `checkValue`. Gating on
@@ -303,13 +314,29 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
     } else if (Array.isArray(item)) {
       // Arrays with enumerable named properties have no fabric representation.
       if (!isArrayWithOnlyIndexProperties(item)) return false;
-      for (let i = 0; i <= item.length; i++) {
-        if (i in item && !checkValue(item[i])) return false;
+      for (let i = 0; i < item.length; i++) {
+        if (!(i in item)) continue;
+        const descriptor = Object.getOwnPropertyDescriptor(item, i.toString());
+        if (
+          descriptor === undefined || descriptor.get !== undefined ||
+          descriptor.set !== undefined
+        ) {
+          cacheableByIdentity = false;
+        }
+        if (!checkValue(item[i])) return false;
       }
       return true;
     } else if (isPlainObject(item)) {
-      for (const v of Object.values(item)) {
-        if (!checkValue(v)) return false;
+      const record = item as Record<string, unknown>;
+      for (const key of Object.keys(record)) {
+        const descriptor = Object.getOwnPropertyDescriptor(record, key);
+        if (
+          descriptor === undefined || descriptor.get !== undefined ||
+          descriptor.set !== undefined
+        ) {
+          cacheableByIdentity = false;
+        }
+        if (!checkValue(record[key])) return false;
       }
       return true;
     } else {
@@ -320,6 +347,6 @@ export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   };
 
   const result = checkValue(value);
-  if (result) deepFrozenFabricValueCache.add(value);
+  if (result && cacheableByIdentity) deepFrozenFabricValueCache.add(value);
   return result;
 }

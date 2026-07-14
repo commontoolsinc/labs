@@ -1860,6 +1860,37 @@ const schemaFollowScopeCap = (schema: unknown): SchemaScope | undefined =>
   ContextualFlowControl.getSchemaScopeCap(schema as JSONSchema | undefined);
 
 /**
+ * Report a linked document that is absent from the local replica so the
+ * runtime can kick its asynchronous load. The read still resolves to
+ * undefined and remains a dependency; this only schedules convergence.
+ */
+function reportMissingLinkTarget(
+  context: TraversalContext,
+  link: NormalizedFullLink,
+  selector: SchemaPathSelector | undefined,
+  sourceSpace: MemorySpace,
+): void {
+  context.onMissingLinkTarget?.(
+    {
+      space: link.space,
+      id: link.id,
+      path: selector !== undefined
+        ? selector.path.slice(1) as readonly string[]
+        : link.path,
+      scope: link.scope,
+      ...(selector?.schema !== undefined || link.schema !== undefined
+        ? {
+          schema: (selector?.schema ?? link.schema) as
+            | JSONSchema
+            | undefined,
+        }
+        : {}),
+    } as NormalizedFullLink,
+    sourceSpace,
+  );
+}
+
+/**
  * Get a string to use as a key for the specified address
  *
  * @param address an IMemorySpaceAddress
@@ -2005,24 +2036,7 @@ function followPointer(
       // queries. The reported link carries the selector's target-rooted
       // path (minus its "value" prefix) and schema so the fetch covers the
       // shape this read needs.
-      context.onMissingLinkTarget?.(
-        {
-          space: link.space,
-          id: link.id,
-          path: selector !== undefined
-            ? selector.path.slice(1) as readonly string[]
-            : link.path,
-          scope: link.scope,
-          ...(selector?.schema !== undefined || link.schema !== undefined
-            ? {
-              schema: (selector?.schema ?? link.schema) as
-                | JSONSchema
-                | undefined,
-            }
-            : {}),
-        } as NormalizedFullLink,
-        doc.address.space,
-      );
+      reportMissingLinkTarget(context, link, selector, doc.address.space);
       // We include the path in the address, so that information is available,
       return [notFound(target), selector];
     } else if (error.name !== "NotFoundError") {
@@ -3493,21 +3507,21 @@ export class SchemaObjectTraverser<V extends FabricValue>
       const newLink = link ?? getNormalizedLink(doc.address, plan.schema);
       // Match traverseArrayWithSchema's structural and per-index reads.
       reads.paths.push(doc.address.path);
-      const valid = doc.value.every((item, index) => {
+      let valid = true;
+      doc.value.forEach((item, index) => {
         reads.paths.push(appendToPath(doc.address.path, index.toString()));
         if (getJsonType(item) === itemPlan.type) {
           newValue[index] = item;
-          return true;
-        }
-        if (itemPlan.type === "undefined") {
+        } else if (itemPlan.type === "undefined") {
           newValue[index] = undefined;
-          return true;
-        }
-        if (itemPlan.type === "null") {
+        } else if (itemPlan.type === "null") {
           newValue[index] = null;
-          return true;
+        } else {
+          // Keep visiting later indices after a failure: those reads are part
+          // of the scheduler/subscription surface even when the array result
+          // is invalid.
+          valid = false;
         }
-        return false;
       });
       return valid
         ? { ok: this.createPlainSchemaObject(newLink, newValue) }
@@ -3564,7 +3578,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   /**
    * Fast one-hop resolution for the ordinary schema-less links emitted by
    * cell.set(arrayOfObjects). Complex paths, scopes, link schemas, redirects,
-   * missing targets, and query traversal retain followPointer().
+   * transaction errors, and query traversal retain followPointer().
    */
   private plainArrayItemLinkTarget(
     doc: IMemorySpaceValueAttestation,
@@ -3610,11 +3624,36 @@ export class SchemaObjectTraverser<V extends FabricValue>
     const target = this.plainArrayItemLinkTarget(doc, selector);
     if (target === undefined) return undefined;
     const { ok, error } = this.tx.read(target, READ_NON_RECURSIVE);
-    if (error !== undefined || ok.value === undefined) return undefined;
+    if (error !== undefined) {
+      if (error.name !== "NotFoundError" || error.path.length !== 0) {
+        return undefined;
+      }
+      this.reportMissingPlainArrayItemLink(doc, selector, target);
+      return [{ address: target, value: undefined }, {
+        path: target.path,
+        schema: selector.schema,
+      }];
+    }
+    if (ok.value === undefined) return undefined;
     return [{ address: target, value: ok.value }, {
       path: target.path,
       schema: selector.schema,
     }];
+  }
+
+  private reportMissingPlainArrayItemLink(
+    doc: IMemorySpaceValueAttestation,
+    selector: SchemaPathSelector,
+    target: IMemorySpaceValueAddress,
+  ): void {
+    const link = parseLink(doc.value, doc.address);
+    if (link === undefined) return;
+    reportMissingLinkTarget(
+      this.context,
+      link,
+      { path: target.path, schema: selector.schema },
+      doc.address.space,
+    );
   }
 
   /**
@@ -3803,14 +3842,22 @@ export class SchemaObjectTraverser<V extends FabricValue>
           const preparedResult = preparedTarget === undefined
             ? undefined
             : this.tx.read(preparedTarget, READ_NON_RECURSIVE);
+          const preparedMissing = preparedResult?.error?.name ===
+              "NotFoundError" && preparedResult.error.path.length === 0;
           if (
             preparedTarget !== undefined &&
-            preparedResult?.ok !== undefined &&
-            preparedResult.ok.value !== undefined
+            (preparedResult?.ok?.value !== undefined || preparedMissing)
           ) {
+            if (preparedMissing) {
+              this.reportMissingPlainArrayItemLink(
+                curDoc,
+                curSelector,
+                preparedTarget,
+              );
+            }
             linkDoc = {
               address: preparedTarget,
-              value: preparedResult.ok.value,
+              value: preparedResult?.ok?.value,
             };
             linkSelector = {
               path: preparedTarget.path,

@@ -379,12 +379,13 @@ describe("deep-freeze", () => {
     it("does not revalidate an already-proven frozen Fabric value", () => {
       let childReads = 0;
       const child = Object.freeze({ value: 1 });
-      const value = Object.freeze({
-        get child() {
+      const value = new Proxy(Object.freeze({ child }), {
+        get(target, property, receiver) {
           childReads++;
-          return child;
+          return Reflect.get(target, property, receiver);
         },
       });
+      Object.freeze(value);
 
       expect(isDeepFrozenFabricValue(value)).toBe(true);
       const readsAfterProof = childReads;
@@ -392,6 +393,19 @@ describe("deep-freeze", () => {
 
       expect(isDeepFrozenFabricValue(value)).toBe(true);
       expect(childReads).toBe(readsAfterProof);
+    });
+
+    it("revalidates accessor-backed values whose result changes", () => {
+      let child: unknown = Object.freeze({ value: 1 });
+      const value = Object.freeze({
+        get child() {
+          return child;
+        },
+      });
+
+      expect(isDeepFrozenFabricValue(value)).toBe(true);
+      child = () => "not a Fabric value";
+      expect(isDeepFrozenFabricValue(value)).toBe(false);
     });
   });
 
