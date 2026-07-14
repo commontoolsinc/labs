@@ -2989,8 +2989,15 @@ export type HasSchemaMismatchFunction = (
 ) => value is HasSchemaMismatch;
 
 /**
- * Runtime identity cast which opts an outer computation boundary into
- * observing selected unavailable reasons.
+ * Compatibility cast for a statically plain reactive value which may carry a
+ * propagated unavailable marker from an inaccessible upstream request. It is
+ * a runtime identity which opts a later computation boundary into observing
+ * selected unavailable reasons.
+ *
+ * Do not use this on a direct fetch or generation result. Those APIs already
+ * expose `AsyncResult<T>`; retain and guard the original request instead. If
+ * the upstream boundary is under your control, prefer exposing an honest
+ * availability union there.
  */
 export interface ObserveAvailabilityFunction {
   <T>(value: T): T | DataUnavailableVariant;

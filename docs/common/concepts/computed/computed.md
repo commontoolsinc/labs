@@ -41,12 +41,36 @@ const label = computed(() =>
 ```
 
 The computation runs for the reasons it explicitly guards. Other unavailable
-states propagate without invoking its body. A derived value after `resultOf()`
-is statically just its usable type; if a later computation deliberately needs
-to inspect a propagated state from that plain value, call
-`observeAvailability(value, "error")` outside the later `computed()` boundary.
-Ordinary computations should omit that escape hatch and simply wait for usable
-data.
+states propagate without invoking its body. This is the normal fetch and
+generation pattern: do not wrap `repoRequest` in `observeAvailability()` because
+its `AsyncResult<Repo>` type already gives the transformer the union and guards
+it needs.
+
+`observeAvailability()` is a narrow compatibility escape hatch, not part of the
+normal request/result workflow. Use it only when all of these are true:
+
+- a reactive value is statically plain `T` but may carry an unavailable marker
+  propagated by an upstream computation;
+- the originating `AsyncResult` is hidden behind a legacy or encapsulated piece
+  boundary; and
+- that upstream contract cannot yet be changed to expose `AsyncResult<T>` or
+  the original request.
+
+```typescript
+// Shown for illustration only.
+// input.label comes from an older piece which exposes only `string`.
+const labelOrError = observeAvailability(input.label, "error");
+const displayLabel = computed(() =>
+  hasError(labelOrError)
+    ? `Unavailable: ${labelOrError.error.message}`
+    : labelOrError
+);
+```
+
+The call must be outside the `computed()` boundary it changes. If the original
+request is available, guard that request instead. If you own the upstream
+boundary, prefer fixing its type rather than recovering hidden availability
+downstream.
 
 ## When NOT to Use computed()
 

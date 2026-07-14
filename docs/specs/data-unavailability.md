@@ -33,9 +33,12 @@ failure becomes a `"schema-mismatch"` value instead of `undefined`.
 Patterns explicitly observe unavailable states with type guards such as
 `hasError()`. A guard over an `AsyncResult<T>` is already type-correct inside
 an explicit `computed()` or `lift()`; the transformer uses the guard and
-visible union to emit the corresponding runner input policy. The existing
-`observeAvailability()` cast remains an escape hatch when an unavailable
-runtime value has flowed through an API whose static type is only `T`.
+visible union to emit the corresponding runner input policy. Ordinary fetch and
+generation code never needs `observeAvailability()`; it should retain and guard
+the original `AsyncResult<T>`. The cast is reserved for a legacy or encapsulated
+boundary which exposes only `T`, may carry a propagated unavailable value at
+runtime, and cannot yet be changed to expose the originating request or an
+honest availability union.
 
 ## Goals
 
@@ -346,12 +349,21 @@ The computation accepts pending and error because both are visible union
 members and both have explicit guards. Syncing and schema mismatch still
 propagate at its outer boundary.
 
-A value may nevertheless be statically plain `T` while carrying an unavailable
-runtime value. This happens deliberately after `resultOf()` and can also happen
-after propagation through a computation whose ordinary result type is `T`.
-Widening only a guard expression inside another explicit computation is then
-too late: the outer computation would be skipped before its body could call the
-guard.
+Do not wrap `repoState` in `observeAvailability()`: its `AsyncResult<Repo>` type
+already exposes every unavailable state, and the guards provide the exact
+policy. Likewise, when a derived value and its originating request are both in
+scope, observe the request instead of recovering availability from the derived
+value.
+
+#### Rare escape hatch for a hidden propagated state
+
+An unavailable runtime value can cross a legacy or encapsulated reactive
+boundary whose static contract is only `T`. The originating `AsyncResult<T>`
+may be private to another piece or otherwise unavailable to the consumer. If
+that boundary cannot yet be corrected to expose an honest availability union,
+a later computation has no type-level indication that its plain input might be
+an unavailable marker. Its body would be skipped before a guard inside it could
+run.
 
 `observeAvailability()` is a zero-node, identity cast used outside that
 boundary. It widens the TypeScript type and records the exact unavailable
@@ -369,28 +381,39 @@ declare function observeAvailability<
 >(value: T, ...reasons: K[]): T | DataUnavailableFor<K>;
 ```
 
-For example, a computation can observe errors while continuing to wait for
-pending data:
+For example, this adapter receives a label from an older piece whose public
+contract cannot yet be changed. The label is statically `string`, the
+originating request is not exposed, and the linked value may carry a propagated
+error at runtime:
 
-```tsx
+```typescript
 // Shown for illustration only.
-const repoState = fetchJson<Repo>({ url });
-const repo = resultOf(repoState);
-const label = computed(() => repo.name.toUpperCase());
-const labelOrError = observeAvailability(label, "error");
+// input.label is linked from a legacy or encapsulated piece.
+const labelOrError = observeAvailability(input.label, "error");
 
-const content = computed(() =>
+const displayLabel = computed(() =>
   hasError(labelOrError)
-    ? <div>Error: {labelOrError.error.message}</div>
-    : <div>{labelOrError}</div>
+    ? `Unavailable: ${labelOrError.error.message}`
+    : labelOrError
 );
 ```
 
 Here the generated computation accepts `string | HasError`. A pending, syncing,
-or schema-mismatch value is still propagated without invoking the callback.
+or schema-mismatch value is still propagated without invoking the callback. If
+the adapter owns the upstream contract, the preferred fix is to expose
+`AsyncResult<string>` (or the original request) and remove the cast.
+
+Do not use `observeAvailability()`:
+
+- on a direct `fetch*`, `generate*`, or advanced-stream result;
+- merely because code called `resultOf()` or derived another value while the
+  original request remains in scope; or
+- for ordinary consumers that only need to wait for usable data.
 
 Calling `observeAvailability(value)` without reasons accepts all four variants.
-Callers should prefer a reason list when they only need selected states.
+That broad form is intended only for generic diagnostic or compatibility
+adapters. Callers should prefer a reason list when they only need selected
+states.
 
 `observeAvailability()` must be outside the explicit `computed()` or `lift()`
 whose boundary it changes. The transformer reports an authoring diagnostic if
