@@ -9,6 +9,10 @@ without introducing a wrapper class.
 The public types are `PatternFactory`, `ModuleFactory`, and `HandlerFactory`.
 Ordinary JavaScript functions are not serializable Fabric values.
 
+Factory slots require a constructed factory, not a plain arrow function. Wrap
+the callback in the matching `pattern(...)`, `lift(...)`, or `handler(...)`
+builder so the compiler can attach its serializable artifact and schemas.
+
 ## Passing and invoking factories
 
 Use the factory's normal call syntax. If the callee comes from a pattern input,
@@ -107,6 +111,17 @@ const tools = {
   },
 };
 ```
+
+`patternTool` and the `extraParams` entry in LLM tool maps have been removed.
+Put tool-specific state in an inline `pattern(...)` closure and pass the
+resulting factory directly (or use the `{ pattern, description }` metadata
+form above). Do not pass the captured values beside the factory.
+
+Factory-slot types compare the complete public input contract. In particular,
+`Default<>` is part of that contract: a factory declared with a bare
+`Default<"">` input is narrower than a slot accepting arbitrary `string`.
+Prefer the normal `string | Default<"">` spelling and make the factory and slot
+input types agree exactly.
 
 Mounted tools appear as `*.tool`. FUSE JSON projections use the tagged Fabric
 codec, not function source, a legacy `toJSON()` graph, or an implementation

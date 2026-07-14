@@ -334,6 +334,10 @@ describe("factory-aware graph and static walks", () => {
     }).collectLinkedCellSyncs;
     const fakeStorage = {
       collectLinkedCellSyncs,
+      trackPendingProviderSync: (
+        _address: unknown,
+        sync: () => Promise<unknown>,
+      ) => sync(),
       open: () => ({
         sync: (id: string) => {
           synced.push(id);

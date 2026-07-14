@@ -60,6 +60,7 @@ export default pattern<ParentInput>(({ system }) => ({
     assertEquals(diagnostics[0]!.line, 10);
     assertStringIncludes(diagnostics[0]!.message, "system.sandboxId");
     assertStringIncludes(diagnostics[0]!.message, "closure params");
+    assertEquals(diagnostics[0]!.message.includes("WP3.6"), false);
   },
 );
 
@@ -113,6 +114,11 @@ export default pattern<{ operation: Operation }>((input) => ({
       diagnostics[0]!.message,
       "operation input 'request.sandboxId'",
     );
+    assertStringIncludes(
+      diagnostics[0]!.message,
+      "invoke the factory directly",
+    );
+    assertEquals(diagnostics[0]!.message.includes("WP3.6"), false);
   },
 );
 

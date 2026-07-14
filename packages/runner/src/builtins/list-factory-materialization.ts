@@ -15,8 +15,8 @@ import { cfcLabelViewForCell } from "../cfc/label-view.ts";
 import {
   FactoryArtifactUnavailableError,
   materializeFactory,
+  prepareFactory,
 } from "../factory-materialization.ts";
-import { prepareFactoryWithReadinessRetries } from "../factory-input-preparation.ts";
 import { resolveLink } from "../link-resolution.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { Runtime } from "../runtime.ts";
@@ -132,7 +132,7 @@ function materializeSelection(
     );
   } catch (error) {
     if (!(error instanceof FactoryArtifactUnavailableError)) throw error;
-    const readiness = prepareFactoryWithReadinessRetries(
+    const readiness = prepareFactory(
       selection.raw,
       context,
     ).then(() => {

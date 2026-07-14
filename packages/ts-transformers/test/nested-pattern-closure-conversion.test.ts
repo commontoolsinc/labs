@@ -456,3 +456,28 @@ export default pattern(() => {
   assertStringIncludes(unrepresentable[0]!.message, "symbol");
   assertStringIncludes(unrepresentable[0]!.message, "Fabric schema");
 });
+
+Deno.test("nested patterns format schema-generator capture rejections as diagnostics", async () => {
+  const { diagnostics } = await validateSource(
+    `
+import { pattern } from "commonfabric";
+
+export default pattern(() => {
+  const lookup = new Map([["answer", 42]]);
+  return {
+    child: pattern(() => ({ answer: lookup.get("answer") })),
+  };
+});
+`,
+    { ...options, typeCheck: true },
+  );
+
+  const unrepresentable = diagnostics.filter((diagnostic) =>
+    diagnostic.type === "pattern-capture:unrepresentable-schema"
+  );
+  assertEquals(unrepresentable.length, 1);
+  assertEquals(unrepresentable[0]!.line, 8);
+  assertStringIncludes(unrepresentable[0]!.message, "lookup");
+  assertStringIncludes(unrepresentable[0]!.message, "Map");
+  assertStringIncludes(unrepresentable[0]!.message, "Fabric schema");
+});

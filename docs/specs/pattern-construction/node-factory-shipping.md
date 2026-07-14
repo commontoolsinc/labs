@@ -568,10 +568,22 @@ Publication preserves the memory system's optimistic local-commit contract:
    An absent or already-released predecessor is not an asynchronous gate: a
    warm unblocked commit enters the session's causal chain with the established
    commit timing, including conflict-response ownership during concurrent
-   shutdown.
+   shutdown. Existing wire prerequisites such as a scheduler-observation flush
+   reserve their turn before the dependent semantic commit, so causal ordering
+   cannot become a mutual wait when the semantic commit also carries a cold
+   factory preparation.
 5. The server applies the artifact ensures and the containing value atomically.
    A deterministic preparation or integrity failure rejects the containing
    commit and follows ordinary speculative-revert and dependent-commit rules.
+
+Consequently, a remote runtime cannot observe a canonical factory ref before
+the referenced artifact closure is durable in that value's space. A local
+runtime may observe its own speculative containing write while cold publication
+preparation is still running, but that same logical commit either publishes the
+artifact and value atomically or reverts the value; the revert is the input
+notification that re-drives consumers. There is no valid state where an
+artifact lands later, independently of an already-durable ref, so factory input
+preparation does not poll or sleep waiting for such an arrival.
 
 An artifact ensure is resolved against durable server state, not expressed as
 a compare-and-swap read of the destination cache document:
@@ -856,7 +868,13 @@ no-op is not a compatibility contract.
 Compilation or runtime fails clearly for:
 
 - a non-portable captured function;
-- a capture the schema generator cannot represent;
+- a capture the schema generator cannot represent, with the authored source
+  location and schema rejection instead of an internal stack trace;
+- removed `patternTool` or `extraParams` authoring, with guidance to pass an
+  inline `pattern(...)` closure directly;
+- a plain callback, wrong factory kind, or `Default<>`-narrowed factory used in
+  an incompatible factory slot, naming the factory constructor or contract
+  correction rather than only TypeScript's structural mismatch;
 - missing or extra closure params;
 - params that fail their trusted schema;
 - a second internal curry;
@@ -923,7 +941,15 @@ factories. Inferred lift/handler contracts are captured after capability
 shrinking so the containing schema equals the schemas actually injected at the
 builder call. If one semantic position can hold multiple exact contracts, its
 schema contains ordered alternatives rather than dropping or broadening any
-contract.
+contract. Scheduled preparation selects exactly one matching `oneOf`/`anyOf`
+factory alternative by kind and normalized public schemas; it never
+double-materializes one value through sibling contracts. Factory discovery
+through recursive schemas treats an in-progress cycle result as provisional,
+so mutual recursion cannot memoize a false negative before a later branch finds
+the factory leaf. Schema generation also keeps each carried public contract in
+one cycle-aware schema document: a recursive input or result terminates through
+that document's local `$defs` rather than recursively starting a fresh schema
+document for every nested factory occurrence.
 
 For schema-bearing builder overloads, type reconstruction is insufficient:
 JSON Schema keywords such as constraints, descriptions, defaults, and nested
@@ -1044,8 +1070,8 @@ is selected before A finishes loading, A may populate the trusted artifact
 cache but can never instantiate; completion is fenced by owner and selection
 generation, and the resumed attempt rereads the binding. A deterministic
 missing/forged/wrong-kind/schema failure fails the current generation closed
-but a later valid selection may recover. A transient source failure remains a
-pending/retry condition under the existing scheduler policy.
+but a later valid selection may recover. A source-load rejection also fails the
+current preparation attempt; a later selector/input change begins a fresh one.
 
 The stable output spot remains the cause/identity anchor, matching existing
 sub-pattern and list-builtin invariants. The binding and selected canonical
@@ -1083,16 +1109,22 @@ For a handler, bound context is reread per event and a context change alone
 does not run the handler or replace children produced by earlier events. A cold
 event is delayed/requeued with the same durable event intent: identity, origin
 lineage, commit/final callbacks, retry metadata, and deadline all remain
-attached. Readiness waiting is distinct from an authored handler attempt and
-does not consume the event's commit-retry budget, call its final callback, or
-mint a receipt. Transient artifact unavailability follows one shared bounded
-readiness retry/backoff policy regardless of the authored event's `retries`
-setting. The same policy applies to direct dynamic nodes and every list-factory
-coordinator; a list builtin may not terminate on the first transient
-`prepareFactory()` failure. Deterministic missing/forged/wrong-kind/schema
-failure is terminal and fail-closed. The enclosing handler stream subscription
-remains active so it can receive the event, but no handler body, normal success
-receipt/result graph,
+attached. Every queued intent also retains its original monotonic enqueue
+sequence; when several events park on shared cold readiness, reinsertion by that
+sequence preserves FIFO order rather than reversing promise-continuation order.
+Readiness waiting is distinct from an authored handler attempt and does not
+consume the event's commit-retry budget, call its final callback, or mint a
+receipt. One parked attempt performs one event-driven artifact preparation; it
+does not synthesize commit-style `readyToRetry` errors or use timer backoff
+around a read-only load. Missing/forged/wrong-kind/schema failure, or a
+source-load rejection, fails that attempt closed. Canonical publication's
+artifact-before-ref guarantee above prevents a durable ref from being stranded
+behind a later artifact-only arrival. A resumed list coordinator's separate row
+pre-sync is recoverable supervisor work: a transient row-sync rejection settles
+the parked attempt without recording the ready key, so the scheduler reruns the
+coordinator and starts a fresh pre-sync. The enclosing handler stream
+subscription remains active so it can receive the event, but no handler body,
+normal success receipt/result graph,
 or event-created child/action subscription is created before readiness. Owner
 teardown cancels preparation so a late load cannot resurrect either a lift
 attempt or handler event.

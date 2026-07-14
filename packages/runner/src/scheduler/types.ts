@@ -200,6 +200,8 @@ export type QueuedEvent = {
    * reads the instant of the event that actually dispatches.
    */
   time?: number;
+  /** Monotonic enqueue order, preserved across every retry/readiness park. */
+  readonly sequence: number;
   /** The transaction whose handler sent this event, when transactional. */
   readonly originTx?: IExtendedStorageTransaction;
   eventLink: NormalizedFullLink;

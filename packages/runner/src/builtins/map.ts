@@ -422,8 +422,22 @@ export function map(
           rowCells.map((rowCell) =>
             runtime.runner.syncCellsForPatternResume(rowCell, opPattern)
           ),
-        ).then(() => {
-          resumeRowsReadyKey = readyKey;
+        ).then(
+          () => {
+            resumeRowsReadyKey = readyKey;
+          },
+          (error) => {
+            // A row pre-sync failure is transient supervisor state, not a
+            // permanent failure of the map. Fulfill this readiness attempt so
+            // the scheduler re-invokes the coordinator; because the ready key
+            // is not recorded, that invocation starts a fresh pre-sync.
+            logger.warn(
+              "resume-rows",
+              "syncing resumed row patterns failed; retrying",
+              { error },
+            );
+          },
+        ).finally(() => {
           resumeRowsReadiness = undefined;
         });
         // The result binding was established in this transaction. It will be

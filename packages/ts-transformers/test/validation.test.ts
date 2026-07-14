@@ -3908,7 +3908,7 @@ Deno.test("Standalone Function Validation", async (t) => {
   );
 
   await t.step(
-    "lets the deprecated writer receive an ordinary pattern factory",
+    "points deprecated writer imports to inline pattern factories",
     async () => {
       const source =
         `      import { pattern, patternTool, computed, Cell } from "commonfabric";
@@ -3923,10 +3923,10 @@ Deno.test("Standalone Function Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
+      assertHasErrorType(errors, "factory-authoring:legacy-pattern-tool");
       assertEquals(
-        errors.length,
-        0,
-        "An ordinary pattern keeps its callback semantics at the legacy writer boundary",
+        errors.some((error) => error.message.includes("pattern(...)")),
+        true,
       );
     },
   );

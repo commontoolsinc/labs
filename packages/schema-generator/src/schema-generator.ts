@@ -101,6 +101,27 @@ export class SchemaGenerator implements ISchemaGenerator {
   }
 
   /**
+   * Generate one independently comparable factory contract schema. Nested
+   * factories reuse this document's cycle state so recursive contracts close
+   * over local $defs instead of starting an unbounded series of documents.
+   */
+  public generateFactoryContractSchema(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+  ): JSONSchemaMutable {
+    return this.generateSchemaInternal(
+      type,
+      checker,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+  }
+
+  /**
    * Internal unified implementation for schema generation.
    * Handles both normal and synthetic type node cases, with optional typeRegistry.
    */
@@ -112,6 +133,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     options?: { widenLiterals?: boolean },
     schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
+    factoryContractDocument = false,
   ): JSONSchemaMutable {
     // Create unified context with all state
     const cycles = this.getCycles(type, checker);
@@ -141,6 +163,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...(typeRegistry && { typeRegistry }),
       ...(options?.widenLiterals && { widenLiterals: true }),
       ...(schemaHints && { schemaHints }),
+      ...(factoryContractDocument && { factoryContractDocument: true }),
     };
 
     // Auto-detect: Should we use node-based or type-based analysis?

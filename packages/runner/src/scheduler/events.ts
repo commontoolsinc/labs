@@ -105,6 +105,7 @@ export interface SchedulerEventQueueState {
   readonly eventHandlers: readonly EventHandlerRegistration[];
   readonly eventQueue: QueuedEvent[];
   readonly backgroundTasks: Set<Promise<unknown>>;
+  readonly nextEventSequence: () => number;
   readonly loadPieceForEvent?: (
     runtime: Runtime,
     eventLink: NormalizedFullLink,
@@ -187,6 +188,7 @@ function findEventHandler(
 
 function readyQueuedEvent(args: {
   readonly id: string;
+  readonly sequence: number;
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
   readonly registration: EventHandlerRegistration;
@@ -198,6 +200,7 @@ function readyQueuedEvent(args: {
   return {
     id: args.id,
     time: args.time,
+    sequence: args.sequence,
     originTx: args.originTx,
     eventLink: args.eventLink,
     action: (tx) => args.registration.handler(tx, args.event),
@@ -264,6 +267,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly time?: number;
 }): void {
   const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
+  const sequence = state.nextEventSequence();
   const registration = findEventHandler(state.eventHandlers, args.eventLink);
 
   if (registration) {
@@ -302,8 +306,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         // into a log-flood amplifier; any telemetry added later must be
         // rate-limited.
         lastSameOrigin.event = args.event;
-        lastSameOrigin.action = (tx) =>
-          registration.handler(tx, args.event);
+        lastSameOrigin.action = (tx) => registration.handler(tx, args.event);
         // Last-wins takes the newest event's time too, so the dispatched
         // handler's clock reflects the event it actually runs. For a same-origin
         // handler flood every collapsed event already shares one frozen instant,
@@ -323,7 +326,12 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         return;
       }
     }
-    const queuedEvent = readyQueuedEvent({ ...args, id, registration });
+    const queuedEvent = readyQueuedEvent({
+      ...args,
+      id,
+      sequence,
+      registration,
+    });
     state.eventQueue.push(queuedEvent);
     if (args.originTx !== undefined) {
       state.recordLineageEvent(args.originTx, queuedEvent);
@@ -350,6 +358,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     const queuedEvent = readyQueuedEvent({
       ...args,
       id,
+      sequence,
       registration: unavailableRegistration,
     });
     queuedEvent.handlerLoadPending = true;
@@ -1049,6 +1058,7 @@ export async function dispatchQueuedEvent(state: {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
       time: queuedEvent.time,
+      sequence: queuedEvent.sequence,
       originTx: queuedEvent.originTx,
       action,
       eventLink: queuedEvent.eventLink,
@@ -1077,7 +1087,14 @@ export async function dispatchQueuedEvent(state: {
       ...queuedEvent,
       notBefore: undefined,
     };
-    state.eventQueue.unshift(requeued);
+    const insertionIndex = state.eventQueue.findIndex((candidate) =>
+      candidate.sequence > requeued.sequence
+    );
+    if (insertionIndex === -1) {
+      state.eventQueue.push(requeued);
+    } else {
+      state.eventQueue.splice(insertionIndex, 0, requeued);
+    }
     if (requeued.originTx !== undefined) {
       state.recordLineageEvent(requeued.originTx, requeued);
     }
@@ -1100,6 +1117,7 @@ export async function dispatchQueuedEvent(state: {
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
       time: queuedEvent.time,
+      sequence: queuedEvent.sequence,
       originTx: queuedEvent.originTx,
       action,
       eventLink: queuedEvent.eventLink,

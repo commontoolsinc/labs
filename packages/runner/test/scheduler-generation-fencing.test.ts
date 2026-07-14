@@ -16,7 +16,7 @@ import type {
   IExtendedStorageTransaction,
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
-import { watchReactiveActionCommit } from "../src/scheduler/action-run.ts";
+import { watchReactiveActionCommit } from "../src/scheduler/run.ts";
 
 describe("scheduler generation fencing", () => {
   let storageManager: SchedulerTestStorageManager;
@@ -132,13 +132,13 @@ describe("scheduler generation fencing", () => {
       pending: new Set(),
       commitPromise,
       resubscribe: () => {},
-      markDirectDirty: () => {
+      markInvalid: () => {
         requeues++;
       },
       queueExecution: () => {
         requeues++;
       },
-      restoreCfcTriggerReads: () => {},
+      restoreInvalidCauses: () => {},
       isActionGenerationCurrent: () => current,
     });
 

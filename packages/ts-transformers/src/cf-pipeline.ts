@@ -5,6 +5,7 @@ import {
   CfcPolicyAuthoringTransformer,
   CfcPolicyOfValidationTransformer,
   EmptyArrayOfValidationTransformer,
+  FactoryAuthoringValidationTransformer,
   FrameworkProvidedForwardingTransformer,
   FrameworkProvidedTransformer,
   HelperOwnedExpressionSiteLoweringTransformer,
@@ -48,6 +49,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "EmptyArrayOfValidationTransformer",
     create: (options) => new EmptyArrayOfValidationTransformer(options),
+  },
+  {
+    name: "FactoryAuthoringValidationTransformer",
+    create: (options) => new FactoryAuthoringValidationTransformer(options),
   },
   {
     name: "OpaqueGetValidationTransformer",

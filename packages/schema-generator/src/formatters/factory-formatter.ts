@@ -207,14 +207,15 @@ export class FactoryFormatter implements TypeFormatter {
     context: GenerationContext,
     detected: FactoryTypeInfo,
   ): JSONSchemaObjMutable {
-    const inputSchema = this.schemaGenerator.generateSchema(
-      detected.inputType,
-      context.typeChecker,
-    );
-    const outputSchema = this.schemaGenerator.generateSchema(
-      detected.outputType,
-      context.typeChecker,
-    );
+    const formatContractSchema = (type: ts.Type) =>
+      context.factoryContractDocument
+        ? this.schemaGenerator.formatChildType(type, context)
+        : this.schemaGenerator.generateFactoryContractSchema(
+          type,
+          context.typeChecker,
+        );
+    const inputSchema = formatContractSchema(detected.inputType);
+    const outputSchema = formatContractSchema(detected.outputType);
     return asFactorySchema(detected.kind, inputSchema, outputSchema);
   }
 }

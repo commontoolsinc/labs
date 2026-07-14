@@ -121,51 +121,52 @@ pipeline from `CFC_TRANSFORMER_STAGE_SPECS`. Every stage shares:
 
 The authoritative ordering lives in `CFC_TRANSFORMER_STAGE_SPECS` /
 `CFC_TRANSFORMER_STAGE_NAMES` in `src/cf-pipeline.ts`. Transformers always run
-in this order (26 stages):
+in this order (27 stages):
 
 1. `CastValidationTransformer`
 2. `EmptyArrayOfValidationTransformer`
-3. `OpaqueGetValidationTransformer`
-4. `PatternContextValidationTransformer`
-5. `MergeablePushValidationTransformer`
-6. `CfcPolicyAuthoringTransformer`
-7. `CfcPolicyOfValidationTransformer`
-8. `JsxExpressionSiteRouterTransformer`
-9. `AssertDiagnosticsTransformer`
-10. `FrameworkProvidedForwardingTransformer`
-11. `SymbolicFactoryCallTransformer`
-12. `LiftLoweringTransformer`
-13. `ClosureTransformer`
-14. `PatternOwnedExpressionSiteLoweringTransformer`
-15. `HelperOwnedExpressionSiteLoweringTransformer`
-16. `WriteAuthorizedByValidationTransformer`
-17. `PatternCallbackLoweringTransformer`
-18. `SchemaInjectionTransformer`
-19. `FrameworkProvidedTransformer`
-20. `BuilderCallHoistingTransformer`
-21. `SchemaGeneratorTransformer`
-22. `ReactiveVariableForTransformer`
-23. `ModuleScopeShadowingTransformer`
-24. `ModuleScopeCfDataTransformer`
-25. `PatternCoverageTransformer`
-26. `ModuleScopeFunctionHardeningTransformer`
+3. `FactoryAuthoringValidationTransformer`
+4. `OpaqueGetValidationTransformer`
+5. `PatternContextValidationTransformer`
+6. `MergeablePushValidationTransformer`
+7. `CfcPolicyAuthoringTransformer`
+8. `CfcPolicyOfValidationTransformer`
+9. `JsxExpressionSiteRouterTransformer`
+10. `AssertDiagnosticsTransformer`
+11. `FrameworkProvidedForwardingTransformer`
+12. `SymbolicFactoryCallTransformer`
+13. `LiftLoweringTransformer`
+14. `ClosureTransformer`
+15. `PatternOwnedExpressionSiteLoweringTransformer`
+16. `HelperOwnedExpressionSiteLoweringTransformer`
+17. `WriteAuthorizedByValidationTransformer`
+18. `PatternCallbackLoweringTransformer`
+19. `SchemaInjectionTransformer`
+20. `FrameworkProvidedTransformer`
+21. `BuilderCallHoistingTransformer`
+22. `SchemaGeneratorTransformer`
+23. `ReactiveVariableForTransformer`
+24. `ModuleScopeShadowingTransformer`
+25. `ModuleScopeCfDataTransformer`
+26. `PatternCoverageTransformer`
+27. `ModuleScopeFunctionHardeningTransformer`
 
 The order is behaviorally significant (invariant C-002). Two ordering facts
 worth calling out:
 
-- `BuilderCallHoistingTransformer` (stage 20) runs **after**
-  `SchemaInjectionTransformer` (stage 18) so each builder call it relocates to
+- `BuilderCallHoistingTransformer` (stage 21) runs **after**
+  `SchemaInjectionTransformer` (stage 19) so each builder call it relocates to
   module scope already carries its injected schemas — see CT-1644 and
   `packages/ts-transformers/docs/derive-to-lift-design.md`. This stage hoists
   `lift`, `handler`, and `pattern` builder calls. It absorbed and replaced the
   former separate `LiftHoistingTransformer` (which hoisted only `lift`); the
   even-older `BuilderCallbackHoistingTransformer` was deleted (#3864). Earlier
   spec revisions listing those two as distinct stages are obsolete.
-- `MergeablePushValidationTransformer` (stage 5; #4450/#4505) is
+- `MergeablePushValidationTransformer` (stage 6; #4450/#4505) is
   validation-only and is documented with the other validators (§6.9).
-- The final five stages (22–26) run last so they operate on fully lowered and
+- The final five stages (23–27) run last so they operate on fully lowered and
   schema-injected output; they are documented stage by stage in §13–§17.
-- `PatternCoverageTransformer` (stage 25) does no work unless pattern runtime
+- `PatternCoverageTransformer` (stage 26) does no work unless pattern runtime
   coverage is enabled. When enabled, it runs before
   `ModuleScopeFunctionHardeningTransformer` so coverage counters are added to
   authored bodies before hardening helpers are emitted (§16).
@@ -268,6 +269,29 @@ No error when:
 - array literal is non-empty
 - first argument is not an array literal
 - `.of()` has no first argument
+
+### 6.2.1 Factory authoring migration validation
+
+The early `FactoryAuthoringValidationTransformer` reports focused errors for
+removed or structurally noisy first-class-factory authoring mistakes:
+
+- **Error** `factory-authoring:legacy-pattern-tool` on a `patternTool` named
+  import from a Common Fabric module, pointing to a directly passed inline
+  `pattern(...)` closure;
+- **Error** `factory-authoring:legacy-extra-params` on an `extraParams` member
+  of an object-literal `tools` map passed directly to `generateText` or
+  `generateObject`, pointing to closure capture;
+- **Error** `factory-authoring:plain-function`,
+  `factory-authoring:wrong-kind`, or
+  `factory-authoring:default-input-slot` when an explicitly typed variable's
+  initializer is respectively a plain callback, a different factory kind, or
+  a `Default<>`-narrowed factory incompatible with that factory slot.
+
+The factory-slot check is intentionally syntax-focused. It does not eagerly ask
+the TypeScript checker for the contextual type of every expression, because
+doing so perturbs TypeScript's lazy union-member ordering and would make later
+schema emission order depend on this validation pass. Other contexts retain
+TypeScript's ordinary structural diagnostic.
 
 ### 6.3 Opaque `.get()` validation
 
@@ -1187,7 +1211,7 @@ Parameters Are a Capability Contract").
 
 ## 11. Builder Call Hoisting And `__cfReg` Registration
 
-`BuilderCallHoistingTransformer` (stage 20, **after** SchemaInjection) hoists
+`BuilderCallHoistingTransformer` (stage 21, **after** SchemaInjection) hoists
 every reactive *builder call* to module scope and emits a single trailing
 content-addressing registration. It is the sole module-scope hoisting phase; it
 absorbed the former `LiftHoistingTransformer` (lift-only) and replaced the

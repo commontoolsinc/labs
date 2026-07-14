@@ -8,6 +8,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { factoryContractFromSchema } from "./factory-contract.ts";
 import {
   FactoryArtifactUnavailableError,
+  factoryMatchesExpectedContract,
   type FactoryMaterializationContext,
   materializeFactory,
   prepareFactory,
@@ -26,55 +27,9 @@ export interface FactoryInputPreparationContext {
   readonly inputsCell: Cell<unknown>;
 }
 
-const MAX_FACTORY_READINESS_ATTEMPTS = 3;
-const FACTORY_READINESS_BACKOFF_MS = [5, 20] as const;
-
 function inputLinkAtPath(root: Cell<unknown>, path: readonly string[]) {
   const rootLink = root.getAsNormalizedFullLink();
   return { ...rootLink, path: [...rootLink.path, ...path] };
-}
-
-function retryReadinessOf(
-  error: unknown,
-): (() => Promise<unknown>) | undefined {
-  const readyToRetry = (error as { readyToRetry?: unknown } | null)
-    ?.readyToRetry;
-  return typeof readyToRetry === "function"
-    ? () => Promise.resolve(readyToRetry.call(error))
-    : undefined;
-}
-
-export async function prepareFactoryWithReadinessRetries(
-  value: unknown,
-  context: FactoryMaterializationContext,
-): Promise<void> {
-  for (let attempt = 0; attempt < MAX_FACTORY_READINESS_ATTEMPTS; attempt++) {
-    try {
-      await prepareFactory(value, context);
-      return;
-    } catch (error) {
-      const readyToRetry = retryReadinessOf(error);
-      if (
-        readyToRetry === undefined ||
-        attempt + 1 >= MAX_FACTORY_READINESS_ATTEMPTS
-      ) {
-        throw error;
-      }
-      // Readiness retry is runner-owned and independent from authored action
-      // or event retry settings. Await the source's explicit retry gate, then
-      // apply a small capped backoff so a repeatedly unavailable artifact
-      // cannot busy-loop the scheduler.
-      await readyToRetry();
-      await new Promise<void>((resolve) =>
-        setTimeout(
-          resolve,
-          FACTORY_READINESS_BACKOFF_MS[
-            Math.min(attempt, FACTORY_READINESS_BACKOFF_MS.length - 1)
-          ],
-        )
-      );
-    }
-  }
 }
 
 /**
@@ -257,33 +212,57 @@ export function materializeScheduledFactoryInputs(
     return resolved;
   };
   const factorySchemaMemo = new WeakMap<object, boolean>();
-  const schemaContainsFactory = (
+  const factorySchemaVisiting = new WeakSet<object>();
+  const inspectFactorySchema = (
     candidate: JSONSchema | undefined,
-  ): boolean => {
+  ): { contains: boolean; complete: boolean } => {
     const resolved = resolvedSchemaFor(candidate);
-    if (!isRecord(resolved)) return false;
+    if (!isRecord(resolved)) return { contains: false, complete: true };
     const cached = factorySchemaMemo.get(resolved);
-    if (cached !== undefined) return cached;
-    // Break recursive `$ref` cycles conservatively. Direct factory markers are
-    // checked before descending, and every non-recursive branch is still seen.
-    factorySchemaMemo.set(resolved, false);
+    if (cached !== undefined) return { contains: cached, complete: true };
+    if (factorySchemaVisiting.has(resolved)) {
+      // The answer for this edge is provisional. Its caller may still find a
+      // factory through a later branch, but must not memoize `false` based on
+      // this cycle break.
+      return { contains: false, complete: false };
+    }
     if ("asFactory" in resolved) {
       factorySchemaMemo.set(resolved, true);
-      return true;
+      return { contains: true, complete: true };
     }
-    const contains = (isRecord(resolved.properties) &&
-      Object.values(resolved.properties).some(schemaContainsFactory)) ||
-      schemaContainsFactory(resolved.items) ||
-      (Array.isArray(resolved.prefixItems) &&
-        resolved.prefixItems.some(schemaContainsFactory)) ||
-      schemaContainsFactory(resolved.additionalProperties) ||
-      (["allOf", "anyOf", "oneOf"] as const).some((compound) =>
-        Array.isArray(resolved[compound]) &&
-        resolved[compound].some(schemaContainsFactory)
-      );
-    factorySchemaMemo.set(resolved, contains);
-    return contains;
+    factorySchemaVisiting.add(resolved);
+    let complete = true;
+    const children: Array<JSONSchema | undefined> = [];
+    if (isRecord(resolved.properties)) {
+      children.push(...Object.values(resolved.properties));
+    }
+    children.push(resolved.items);
+    if (Array.isArray(resolved.prefixItems)) {
+      children.push(...resolved.prefixItems);
+    }
+    children.push(resolved.additionalProperties);
+    for (const compound of ["allOf", "anyOf", "oneOf"] as const) {
+      if (Array.isArray(resolved[compound])) {
+        children.push(...resolved[compound]);
+      }
+    }
+    try {
+      for (const child of children) {
+        const inspected = inspectFactorySchema(child);
+        if (inspected.contains) {
+          factorySchemaMemo.set(resolved, true);
+          return { contains: true, complete: true };
+        }
+        complete &&= inspected.complete;
+      }
+      if (complete) factorySchemaMemo.set(resolved, false);
+      return { contains: false, complete };
+    } finally {
+      factorySchemaVisiting.delete(resolved);
+    }
   };
+  const schemaContainsFactory = (candidate: JSONSchema | undefined): boolean =>
+    inspectFactorySchema(candidate).contains;
 
   const visit = (
     currentValue: unknown,
@@ -318,10 +297,7 @@ export function materializeScheduledFactoryInputs(
       } catch (error) {
         if (!(error instanceof FactoryArtifactUnavailableError)) throw error;
         readiness.push(() =>
-          prepareFactoryWithReadinessRetries(
-            currentValue,
-            materializationContext,
-          )
+          prepareFactory(currentValue, materializationContext).then(() => {})
         );
         return currentValue;
       }
@@ -418,14 +394,20 @@ export function materializeScheduledFactoryInputs(
         }
         if (
           compound !== "allOf" && isRecord(resolvedBranch) &&
-          "asFactory" in resolvedBranch &&
-          !isAdmittedFabricFactory(result)
+          "asFactory" in resolvedBranch
         ) {
-          // `asFactory` is a leaf alternative, not permission to inspect or
-          // reject the ordinary value selected by a sibling union branch.
-          continue;
+          const expected = factoryContractFromSchema(resolvedBranch)!;
+          if (
+            !isAdmittedFabricFactory(result) ||
+            !factoryMatchesExpectedContract(result, expected, context.runtime)
+          ) {
+            // `asFactory` is a leaf alternative, not permission to inspect or
+            // reject a value selected by a sibling union branch.
+            continue;
+          }
         }
         result = visit(result, branch, path);
+        if (compound !== "allOf") break;
       }
     }
     return result;

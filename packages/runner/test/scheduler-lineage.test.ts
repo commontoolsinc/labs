@@ -86,6 +86,7 @@ function queuedEvent(
   };
   return {
     id,
+    sequence: 0,
     originTx,
     eventLink,
     action: () => {},

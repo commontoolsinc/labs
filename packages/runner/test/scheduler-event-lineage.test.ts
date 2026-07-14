@@ -1093,15 +1093,15 @@ describe("scheduler event lineage", () => {
       );
       expect(handlerAttempts).toBe(1);
 
-      // The first failed attempt registered its cleanup before this stop. The
-      // retry registers a fresh deferred child after the group is cancelled;
-      // a latched group must cancel that late addition immediately.
+      // Stopping the owning pattern cancels the handler registration before
+      // its queued retry. The authored body must not run a second time, and
+      // the deferred child from the failed attempt stays canceled.
       local.runtime.runner.stop(rootCell);
       expect(local.runtime.runner.cancels.size).toBe(0);
 
       await local.runtime.idle();
 
-      expect(handlerAttempts).toBe(2);
+      expect(handlerAttempts).toBe(1);
       expect(childRuns).toBe(0);
       expect(local.runtime.runner.cancels.size).toBe(0);
     } finally {

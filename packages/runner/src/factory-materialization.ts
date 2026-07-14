@@ -170,6 +170,32 @@ function contractForTrustedFactory(
   }
 }
 
+function contractFromFactoryState(state: FactoryStateView): FactoryContract {
+  switch (state.kind) {
+    case "pattern":
+      return {
+        kind: "pattern",
+        argumentSchema: state.argumentSchema,
+        resultSchema: state.resultSchema,
+        frameworkProvidedPaths: [],
+      };
+    case "module":
+      return {
+        kind: "module",
+        argumentSchema: state.argumentSchema,
+        resultSchema: state.resultSchema,
+        frameworkProvidedPaths: [],
+      };
+    case "handler":
+      return {
+        kind: "handler",
+        contextSchema: state.contextSchema,
+        eventSchema: state.eventSchema,
+        frameworkProvidedPaths: [],
+      };
+  }
+}
+
 function schemaFields(kind: FactoryContract["kind"]): readonly string[] {
   switch (kind) {
     case "pattern":
@@ -240,6 +266,32 @@ function assertExpectedContract(
     throw new Error(
       "Factory materialization FrameworkProvided metadata mismatch",
     );
+  }
+}
+
+/**
+ * Test a union alternative without loading or executing the factory.
+ *
+ * Scheduled input preparation uses this only to select one compiler-owned
+ * `asFactory` branch. A decoded shell is compared from its carried canonical
+ * contract; a trusted live factory may additionally resolve schema-light
+ * ModuleRegistry metadata.
+ */
+export function factoryMatchesExpectedContract(
+  value: unknown,
+  expected: FactoryContract,
+  runtime: Runtime,
+): boolean {
+  if (!isAdmittedFabricFactory(value)) return false;
+  const inspected = inspectFactory(value);
+  const actual = inspected.trusted
+    ? contractForTrustedFactory(inspected.value, inspected.state, runtime)
+    : contractFromFactoryState(inspected.state);
+  try {
+    assertExpectedContract(actual, expected);
+    return true;
+  } catch {
+    return false;
   }
 }
 

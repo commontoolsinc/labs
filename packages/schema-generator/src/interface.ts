@@ -65,6 +65,8 @@ export interface GenerationContext {
   typeRegistry?: WeakMap<ts.Node, ts.Type>;
   /** Widen literal types to base types during schema generation */
   widenLiterals?: boolean;
+  /** Keep nested factory contracts in this standalone schema document. */
+  factoryContractDocument?: boolean;
   /** Schema hints for overriding default behavior (keyed by TypeNode) */
   schemaHints?: WeakMap<ts.Node, SchemaHint>;
   /** Override for array items schema, propagated from wrapper types */

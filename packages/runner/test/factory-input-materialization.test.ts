@@ -367,6 +367,34 @@ describe("scheduled Factory@1 input materialization", () => {
     }
   });
 
+  it("selects exactly one matching factory contract from a union", () => {
+    const selected = selectFactory("pattern", space, true);
+    const schema = {
+      anyOf: [
+        { asFactory: CONTRACTS.pattern },
+        { asFactory: CONTRACTS.handler },
+      ],
+    } as const satisfies JSONSchema;
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "factory-contract-union-input",
+        schema,
+        tx,
+      );
+      expect(
+        materializeScheduledFactoryInputs(selected.shell, schema, {
+          runtime,
+          tx,
+          inputsCell,
+        }),
+      ).toBe(selected.live);
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
   it("quietly skips unrelated embedded schemas while scanning for factories", () => {
     const ordinary = { manager: { fullUI: { type: "vnode" } } };
     const schema = {
@@ -437,6 +465,52 @@ describe("scheduled Factory@1 input materialization", () => {
           inputsCell,
         }),
       ).toBe(ordinary);
+    } finally {
+      tx.abort(new Error("test cleanup"));
+    }
+  });
+
+  it("does not cache a false factory result through mutual recursion", () => {
+    const selected = selectFactory("module", space, true);
+    const refA = { $ref: "#/$defs/A" } as const;
+    const refB = { $ref: "#/$defs/B" } as const;
+    const schema = {
+      type: "object",
+      properties: {
+        // Discovering A first traverses A -> B -> A before reaching A.factory.
+        // B must not retain the provisional false result from that cycle.
+        seed: refA,
+        payload: refB,
+      },
+      required: ["payload"],
+      $defs: {
+        A: {
+          type: "object",
+          properties: {
+            b: refB,
+            factory: { asFactory: CONTRACTS.module },
+          },
+        },
+        B: {
+          type: "object",
+          properties: { a: refA },
+        },
+      },
+    } as const satisfies JSONSchema;
+    const tx = runtime.edit();
+    try {
+      const inputsCell = runtime.getCell<unknown>(
+        space,
+        "mutually-recursive-factory-input",
+        schema,
+        tx,
+      );
+      const prepared = materializeScheduledFactoryInputs(
+        { payload: { a: { factory: selected.shell } } },
+        schema,
+        { runtime, tx, inputsCell },
+      ) as { payload: { a: { factory: unknown } } };
+      expect(prepared.payload.a.factory).toBe(selected.live);
     } finally {
       tx.abort(new Error("test cleanup"));
     }
@@ -1034,10 +1108,9 @@ describe("scheduled Factory@1 input materialization", () => {
     }
   });
 
-  it("uses a bounded transient readiness policy before retrying the callback", async () => {
+  it("surfaces one source-load failure without synthetic sleep retries", async () => {
     const selected = selectFactory("module", space, false);
     let loadAttempts = 0;
-    let retryGates = 0;
     runtime.patternManager.loadArtifactByIdentity = (
       identity,
       symbol,
@@ -1048,20 +1121,7 @@ describe("scheduled Factory@1 input materialization", () => {
         ...selected.ref,
         sourceSpace: space,
       });
-      if (loadAttempts < 3) {
-        const transient = Object.assign(
-          new Error(`transient factory load ${loadAttempts}`),
-          {
-            readyToRetry: () => {
-              retryGates++;
-              return Promise.resolve();
-            },
-          },
-        );
-        return Promise.reject(transient);
-      }
-      warmArtifacts.set(key(identity, symbol), selected.live);
-      return Promise.resolve(selected.live);
+      return Promise.reject(new Error("factory source load failed"));
     };
 
     const schema = factoryContainerSchema(selected.contract);
@@ -1085,61 +1145,10 @@ describe("scheduled Factory@1 input materialization", () => {
         retry = error as RetryWhenReady;
       }
 
-      await within(retry.readiness.then(() => undefined), "transient retries");
-      expect(loadAttempts).toBe(3);
-      expect(retryGates).toBe(2);
-      const prepared = materializeScheduledFactoryInputs(
-        { factory: selected.shell },
-        schema,
-        { runtime, tx, inputsCell },
-      ) as { factory: unknown };
-      expect(prepared.factory).toBe(selected.live);
-    } finally {
-      tx.abort(new Error("test cleanup"));
-    }
-  });
-
-  it("stops readiness after the bounded transient attempt limit", async () => {
-    const selected = selectFactory("module", space, false);
-    let loadAttempts = 0;
-    let retryGates = 0;
-    runtime.patternManager.loadArtifactByIdentity = () => {
-      loadAttempts++;
-      return Promise.reject(Object.assign(
-        new Error(`exhausted factory load ${loadAttempts}`),
-        {
-          readyToRetry: () => {
-            retryGates++;
-            return Promise.resolve();
-          },
-        },
-      ));
-    };
-
-    const schema = factoryContainerSchema(selected.contract);
-    const tx = runtime.edit();
-    try {
-      const inputsCell = runtime.getImmutableCell(
-        space,
-        { factory: selected.shell },
-        undefined,
-        tx,
-      );
-      let retry!: RetryWhenReady;
-      try {
-        materializeScheduledFactoryInputs(
-          { factory: selected.shell },
-          schema,
-          { runtime, tx, inputsCell },
-        );
-      } catch (error) {
-        retry = error as RetryWhenReady;
-      }
       await expect(retry.readiness).rejects.toThrow(
-        "exhausted factory load 3",
+        "factory source load failed",
       );
-      expect(loadAttempts).toBe(3);
-      expect(retryGates).toBe(2);
+      expect(loadAttempts).toBe(1);
     } finally {
       tx.abort(new Error("test cleanup"));
     }

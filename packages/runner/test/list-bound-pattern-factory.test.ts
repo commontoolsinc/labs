@@ -561,13 +561,18 @@ describe("bound PatternFactory list operations", () => {
       node,
     ) => node.id.startsWith("raw:map:"));
     expect(coordinator).toBeDefined();
-    const rowId = result.key("mapped").key(0).resolveAsCell()
-      .getAsNormalizedFullLink().id.toString();
-    expect(coordinator?.reads?.some((read) => read.includes(rowId)))
-      .toBe(false);
-    const elementId = element.getAsNormalizedFullLink().id.toString();
-    expect(coordinator?.reads?.some((read) => read.includes(elementId)))
-      .toBe(false);
+    const formatLink = (
+      link: ReturnType<typeof element.getAsNormalizedFullLink>,
+    ) =>
+      `${link.space}/${link.id}/${link.scope ?? "space"}/${
+        link.path.join("/")
+      }`;
+    const rowLink = result.key("mapped").key(0).resolveAsCell()
+      .getAsNormalizedFullLink();
+    expect(coordinator?.reads).not.toContain(formatLink(rowLink));
+    expect(coordinator?.reads).not.toContain(
+      formatLink(element.getAsNormalizedFullLink()),
+    );
 
     const coordinatorRuns = coordinator?.stats?.runCount;
     factor.withTx(tx).set(20);

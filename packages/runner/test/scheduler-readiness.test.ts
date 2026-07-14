@@ -359,6 +359,54 @@ describe("scheduler RetryWhenReady", () => {
     await durableIdle;
   });
 
+  it("preserves FIFO order when same-stream events share cold readiness", async () => {
+    const stream = runtime.getCell<number>(
+      space,
+      "readiness-event-fifo-stream",
+      undefined,
+      tx,
+    );
+    await tx.commit();
+    tx = runtime.edit();
+
+    const readiness = Promise.withResolvers<void>();
+    const bothParked = Promise.withResolvers<void>();
+    let ready = false;
+    let parkedCount = 0;
+    const processed: string[] = [];
+    runtime.scheduler.addEventHandler(
+      (_eventTx, event: string) => {
+        if (!ready) {
+          parkedCount++;
+          if (parkedCount === 2) bothParked.resolve();
+          throw new RetryWhenReady(readiness.promise);
+        }
+        processed.push(event);
+      },
+      stream.getAsNormalizedFullLink(),
+    );
+
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      "A",
+      false,
+    );
+    runtime.scheduler.queueEvent(
+      stream.getAsNormalizedFullLink(),
+      "B",
+      false,
+    );
+
+    await bothParked.promise;
+    await runtime.idle();
+    ready = true;
+    readiness.resolve();
+    await Promise.resolve();
+    await runtime.settled();
+
+    expect(processed).toEqual(["A", "B"]);
+  });
+
   it("fences a parked event after handler cancellation and settles its callback", async () => {
     const stream = runtime.getCell<number>(
       space,

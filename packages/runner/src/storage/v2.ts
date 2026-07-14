@@ -2513,27 +2513,20 @@ class SpaceReplica implements ISpaceReplica {
       operations: [],
       schedulerObservationBatch: entries.map((entry) => entry.commit),
     };
-    const promise = (async (): Promise<
-      Result<Unit, StorageTransactionRejected>
-    > => {
-      // Persistent scheduler state is an OPTIONAL capability negotiated at
-      // hello (memory/v2.ts `compatibleMemoryProtocolFlags`): peers with
-      // different scheduler flags must still share memory data. A server that
-      // did not advertise it strips scheduler payloads at `transact`, so this
-      // observation-only commit would arrive as zero operations and be
-      // TERMINALLY rejected ("memory v2 commit requires at least one
-      // operation") — and the flush-before-semantic-commit ordering in
-      // pushCommit would then spread that rejection to every subsequent
-      // semantic commit (event handlers drop their writes without retry;
-      // the whole session's writes starve). Fail closed instead: drop the
-      // observations — the feature degrades to flag-off semantics (resumes
-      // re-run fresh) while semantic traffic proceeds untouched.
-      const { client } = await this.sessionHandle();
-      if (client.serverFlags?.persistentSchedulerState !== true) {
-        return { ok: {} };
-      }
-      return await this.pushCommit(localSeq, [], commit, undefined);
-    })()
+    // Reserve this observation flush's wire turn synchronously. A following
+    // semantic commit awaits this promise as a prerequisite; deferring the
+    // reservation until after session negotiation would let that dependent
+    // commit reserve first and create a causal wait cycle.
+    const promise = this.pushCommit(
+      localSeq,
+      [],
+      commit,
+      undefined,
+      undefined,
+      undefined,
+      [],
+      true,
+    )
       .then((result) => {
         for (const entry of entries) {
           entry.pending.resolve(result);
@@ -2707,6 +2700,7 @@ class SpaceReplica implements ISpaceReplica {
       Result<Unit, StorageTransactionRejected>
     >,
     confirmationCallbacks: readonly (() => void)[] = [],
+    requiresPersistentSchedulerState = false,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     const predecessor = this.#wireSendTail;
     const turn = Promise.withResolvers<void>();
@@ -2815,7 +2809,24 @@ class SpaceReplica implements ISpaceReplica {
           };
         }
       }
-      const { session } = await this.sessionHandle();
+      const { client, session } = await this.sessionHandle();
+      // Persistent scheduler state is an OPTIONAL capability negotiated at
+      // hello. Servers that do not advertise it strip scheduler payloads, so
+      // an observation-only commit would otherwise become an invalid empty
+      // transaction. Release its already-reserved causal turn and degrade to
+      // flag-off semantics without blocking later semantic traffic.
+      if (
+        requiresPersistentSchedulerState &&
+        client.serverFlags?.persistentSchedulerState !== true
+      ) {
+        await releaseTurnInOrder();
+        telemetry?.submit({
+          type: "storage.push.complete",
+          id: pushOpId,
+          sessionId: session.sessionId,
+        });
+        return { ok: {} };
+      }
       if (predecessor !== undefined) await predecessor;
       const submitted = session.transact(submittedCommit);
       // Release the next localSeq as soon as this commit has entered the

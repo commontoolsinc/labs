@@ -141,6 +141,29 @@ describe("Schema: factory types", () => {
     )).toEqual(["pattern", "module"]);
   });
 
+  it("terminates when a factory result recursively contains the factory", async () => {
+    const code = `${FACTORY_DECLARATIONS}
+      interface RecursiveResult {
+        self: ModuleFactory<{ value: string }, RecursiveResult>;
+      }
+
+      interface SchemaRoot {
+        factory: ModuleFactory<{ value: string }, RecursiveResult>;
+      }
+    `;
+    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const resultSchema = (schema.properties?.factory as any).asFactory
+      .resultSchema;
+    expect(resultSchema.$ref).toBe("#/$defs/RecursiveResult");
+    expect(
+      resultSchema.$defs.RecursiveResult.properties.self.asFactory.resultSchema,
+    ).toEqual({ $ref: "#/$defs/RecursiveResult" });
+  });
+
   it("uses compiler-owned exact contracts for factories inside readonly tuples", async () => {
     const code = `${FACTORY_DECLARATIONS}
       type SchemaRoot = readonly [PatternFactory<{ stale: string }, any>];

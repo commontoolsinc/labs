@@ -284,10 +284,17 @@ describe("bound PatternFactory list operation cold resume", () => {
       const resumedRoot = runtime.getCellFromLink(rootLink);
       await resumedRoot.sync();
       const rowReadiness = Promise.withResolvers<void>();
+      const retryStarted = Promise.withResolvers<void>();
       const syncRow = runtime.runner.syncCellsForPatternResume.bind(
         runtime.runner,
       );
+      let syncAttempts = 0;
       runtime.runner.syncCellsForPatternResume = async (...args) => {
+        syncAttempts++;
+        if (syncAttempts === 1) {
+          throw new Error("injected transient resumed-row sync failure");
+        }
+        if (syncAttempts === 3) retryStarted.resolve();
         const synced = await syncRow(...args);
         await rowReadiness.promise;
         return synced;
@@ -301,14 +308,7 @@ describe("bound PatternFactory list operation cold resume", () => {
         runtime!.scheduler.getGraphSnapshot().nodes.find((node) =>
           node.id.startsWith("raw:map:")
         )?.stats?.runCount ?? 0;
-      await within(
-        (async () => {
-          while (mapRuns() === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 0));
-          }
-        })(),
-        "parked row readiness",
-      );
+      await within(retryStarted.promise, "resumed-row sync retry");
       const parkedRuns = mapRuns();
       const argument = runtime.getCellFromLink(
         getMetaLink(resumedRoot, "argument")!,

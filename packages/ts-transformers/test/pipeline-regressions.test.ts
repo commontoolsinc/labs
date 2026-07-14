@@ -237,6 +237,7 @@ Deno.test(
     assertEquals(CFC_TRANSFORMER_STAGE_NAMES, [
       "CastValidationTransformer",
       "EmptyArrayOfValidationTransformer",
+      "FactoryAuthoringValidationTransformer",
       "OpaqueGetValidationTransformer",
       "PatternContextValidationTransformer",
       "MergeablePushValidationTransformer",

@@ -231,7 +231,7 @@ function reportUnrepresentableCaptureSchemas(
           context.sourceFile,
         );
       } catch (error) {
-        if (!isMissingSchemaFormatterError(error)) throw error;
+        if (!(error instanceof Error)) throw error;
         found = true;
         const typeName = context.checker.typeToString(type);
         context.reportDiagnosticOnce({
@@ -241,7 +241,7 @@ function reportUnrepresentableCaptureSchemas(
             `Pattern closure capture \`${captureLabel(node.expression)}\` ` +
             `has type \`${typeName}\`, which cannot be represented by a ` +
             `Fabric schema. Capture only serializable data with a supported ` +
-            `schema type.`,
+            `schema type. ${error.message}`,
           node: node.expression,
         });
       }
@@ -253,11 +253,6 @@ function reportUnrepresentableCaptureSchemas(
 
   for (const node of captureTree.values()) visit(node);
   return found;
-}
-
-function isMissingSchemaFormatterError(error: unknown): error is Error {
-  return error instanceof Error &&
-    error.message.startsWith("No formatter found for type:");
 }
 
 function captureLabel(expression: ts.Expression): string {
@@ -307,7 +302,8 @@ function findFrameworkProvidedCaptureViolation(
           "' has a FrameworkProvided operation input '" +
           formatPath(factoryInputPath) +
           "'. Nested pattern closure params cannot carry trusted framework " +
-          "obligations before WP3.6.",
+          "obligations; invoke the factory directly so the runner can supply " +
+          "those trusted inputs.",
         node: sourceNode(capture.expression),
       };
     }
@@ -318,7 +314,8 @@ function findFrameworkProvidedCaptureViolation(
         message: "FrameworkProvided path '" +
           formatPath([...capturePath, ...directPath]) +
           "' cannot be moved into nested pattern closure params. Trusted " +
-          "forwarding metadata is unavailable until WP3.6.",
+          "framework values must remain public inputs or be forwarded by a " +
+          "direct factory invocation.",
         node: sourceNode(capture.expression),
       };
     }

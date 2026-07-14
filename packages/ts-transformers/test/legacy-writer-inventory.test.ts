@@ -25,6 +25,10 @@ Deno.test("removed legacy factory APIs and writers stay absent", async () => {
     "PatternToolFunction",
     "extraParams",
   ];
+  const migrationDiagnostic = join(
+    repoRoot,
+    "packages/ts-transformers/src/transformers/factory-authoring-validation.ts",
+  );
   const hits: string[] = [];
 
   for (const root of roots) {
@@ -32,6 +36,12 @@ Deno.test("removed legacy factory APIs and writers stay absent", async () => {
       if (path.endsWith(".test.ts") || path.endsWith("_test.ts")) continue;
       const source = await Deno.readTextFile(path);
       for (const token of forbidden) {
+        // The compiler names the two removed spellings only to provide a
+        // focused migration diagnostic; this is neither an API nor a writer.
+        if (
+          path === migrationDiagnostic &&
+          (token === "patternTool" || token === "extraParams")
+        ) continue;
         if (source.includes(token)) {
           hits.push(`${relative(repoRoot, path)}:${token}`);
         }

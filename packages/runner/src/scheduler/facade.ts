@@ -416,6 +416,7 @@ export class Scheduler {
   private eventQueue: QueuedEvent[] = [];
   private eventHandlers: EventHandlerRegistration[] = [];
   private eventHandlerGeneration = 0;
+  private eventSequence = 0;
   readonly lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason) => this.dropEvent(event, reason),
     queueExecution: () => this.queueExecution(),
@@ -2484,6 +2485,7 @@ export class Scheduler {
       eventHandlers: this.eventHandlers,
       eventQueue: this.eventQueue,
       backgroundTasks: this.backgroundTasks,
+      nextEventSequence: () => ++this.eventSequence,
       queueExecution: () => this.queueExecution(),
       recordLineageEvent: (originTx, queuedEvent) => {
         this.lineage.recordEvent(originTx, queuedEvent);
