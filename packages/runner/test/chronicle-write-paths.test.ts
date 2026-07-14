@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { FabricValue } from "@commonfabric/api";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import * as Chronicle from "../src/storage/transaction/chronicle.ts";
 
@@ -10,7 +11,7 @@ const space = signer.did();
 const seedDoc = async (
   storage: ReturnType<typeof StorageManager.emulate>,
   id: `${string}:${string}`,
-  value: unknown,
+  value: FabricValue,
 ) => {
   const replica = storage.open(space).replica;
   if (!replica.commitNative) {
@@ -21,8 +22,7 @@ const seedDoc = async (
       op: "set",
       id,
       type: "application/json",
-      // deno-lint-ignore no-explicit-any
-      value: value as any,
+      value,
     }],
   });
   return replica;

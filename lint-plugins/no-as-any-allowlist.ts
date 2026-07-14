@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/chronicle-write-paths.test.ts",
   "packages/runner/test/compile-cache-space-aware.test.ts",
   "packages/runner/test/computed-error.test.ts",
   "packages/runner/test/content-addressed-identity.test.ts",
