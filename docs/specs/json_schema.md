@@ -334,22 +334,37 @@ permissive than expected.
 A link can carry its own schema, and a reader accessing through it brings
 another (for example, reading one cell's field as a differently-typed cell).
 When both are object schemas we combine them: shared properties are combined
-recursively, and a property that only one side defines is kept — combined
-against the _other_ side's `additionalProperties`.
+recursively, and a property that only _one_ side defines is combined against the
+_other_ side's `additionalProperties`.
 
-Because an absent `additionalProperties` is open (see
-[Special Handling of additionalProperties](#special-handling-of-additionalproperties)),
-one side's silence about a property does **not** forbid it: the property keeps
-its own schema. Only an explicitly authored `additionalProperties: false` closes
-the object, so that a property the closed side lacks becomes an unsatisfiable
-`false` subschema. `undefined` (open) and `false` (closed) stay distinct here,
-the same as everywhere else.
+That combination must honor the three distinct states of `additionalProperties`
+(see
+[Special Handling of additionalProperties](#special-handling-of-additionalproperties)) —
+`false` forbids extras, `true` accepts and follows them, and an absent value
+**ignores** them (return the listed fields, neither follow nor reject the rest):
 
+- **The reader defines a field the link only ignores** (link lists `properties`
+  with no `additionalProperties`): the link does not _forbid_ the field, so the
+  reader's own schema wins and the field is kept. This is what lets a read heal
+  when the reader has evolved to know a field the link predates.
+- **The link defines a field the reader only ignores** (reader lists
+  `properties` with no `additionalProperties`): the reader never asked for it, so
+  the field is **dropped** — it is neither returned as a followed value nor
+  walked. The reader's projection decides what is traversed, which is what keeps
+  a `{ name }` read from descending into, say, a `friends` field the link
+  happens to carry (a visibility and a traversal-cost boundary).
+- **A side explicitly authored `additionalProperties: false`**: it forbids the
+  field, which combines to an unsatisfiable `false` subschema — a real closed
+  world, preserved.
+
+The distinction is load-bearing because these schemas double as queries.
 Defaulting an absent `additionalProperties` to `false` in this combination (as
-we once did, on the theory that "listing any properties means closed") would
-manufacture a restriction neither schema authored. Worse, combined with a
-`required` list that survives the merge, it produces a statically unsatisfiable
-field and the read voids permanently — no write can heal it. That inverts the
-design stance above: a derived schema may end up _more permissive_ than intended
-and that is acceptable (it still limits linked-cell and field access), but it
-must never be _more restrictive_ than either author wrote.
+we once did, on the theory that "listing any properties means closed")
+manufactured a restriction neither schema authored: combined with a `required`
+list that survives the merge, it produced a statically unsatisfiable field and
+the read voided permanently — no write could heal it. Defaulting it to `true`
+would err the other way, following and returning fields the reader never asked
+for. Neither is right; an absent value must stay _ignore_. This mirrors the
+design stance above — a derived schema may end up _more permissive_ than
+intended and that is acceptable (it still limits linked-cell and field access),
+but it must never be _more restrictive_ than either author wrote.

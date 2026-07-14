@@ -2293,34 +2293,33 @@ function _combineSchemaUncached(
         ? parentRequired
         : linkRequired;
       const mergedDefs = { ...linkDefs, ...parentDefs };
-      // Combine the two objects' properties below. A property that only one
-      // side defines is combined against the OTHER side's additionalProperties,
-      // which defaults to open (`true`) when absent — per JSON Schema, listing
-      // `properties` without `additionalProperties` does not close the object.
-      // An open default therefore preserves a one-sided property's own schema.
-      // An explicitly authored `additionalProperties: false` still closes the
-      // world: a property the closed side lacks combines to an unsatisfiable
-      // `false`. (`undefined` and `false` are not the same thing.) This
-      // previously defaulted to `properties === undefined`, i.e. closed-world
-      // `false` as soon as a side listed any properties, which turned a link
-      // that had simply never heard of a field into a permanent read void. See
-      // topic "combineSchema manufactures closed-world additionalProperties".
-      // For a property both sides define we use the combined defined schemas
-      // and don't pick up flags like asCell from additionalProperties.
-      const parentAdditionalProperties = parentSchema.additionalProperties ??
-        true;
-      const linkAdditionalProperties = linkSchema.additionalProperties ?? true;
+      // Our schemas double as queries, so an object's `additionalProperties` is
+      // three-valued (see traverseObjectWithSchema): `false` = forbid extras
+      // (fail/flag — the CFC visibility boundary), `true` = accept and walk any
+      // extra, and ABSENT (`undefined`, when `properties` is listed) = IGNORE
+      // extras: return the listed fields, tolerate but neither return nor walk
+      // the rest. Coercing that absent value to `false` was the original bug
+      // (turned a field a link never knew into a permanent read void); coercing
+      // it to `true` would over-walk fields the reader never asked for (the
+      // friends-of-friends explosion). So we keep each side's
+      // `additionalProperties` RAW below and honor `undefined` distinctly. The
+      // one exception is a side that lists NO `properties`: its shape is
+      // unknown, so an absent `additionalProperties` there means open (`true`) —
+      // walk what the other side exposes. Topic "combineSchema manufactures
+      // closed-world additionalProperties"; confirmed by seefeld + ubik2.
       if (
         parentSchema.properties === undefined &&
-        ContextualFlowControl.isTrueSchema(parentAdditionalProperties)
+        ContextualFlowControl.isTrueSchema(
+          parentSchema.additionalProperties ?? true,
+        )
       ) {
+        // Parent lists no properties (open/shapeless): keep the link's shape,
+        // defaulting parent's absent additionalProperties to open (`true`).
+        const parentOpen = parentSchema.additionalProperties ?? true;
         const additionalProperties =
           linkSchema.additionalProperties !== undefined
-            ? mergeSchemaFlags(
-              parentAdditionalProperties,
-              linkSchema.additionalProperties,
-            )
-            : parentAdditionalProperties;
+            ? mergeSchemaFlags(parentOpen, linkSchema.additionalProperties)
+            : parentOpen;
         // Need to keep the flags from parent schema here
         // We'll also be explicit about additionalProperties and required
         return mergeSchemaFlags(parentSchema, {
@@ -2331,13 +2330,17 @@ function _combineSchemaUncached(
         });
       } else if (
         linkSchema.properties === undefined &&
-        ContextualFlowControl.isTrueSchema(linkAdditionalProperties)
+        ContextualFlowControl.isTrueSchema(
+          linkSchema.additionalProperties ?? true,
+        )
       ) {
+        // Link lists no properties (open/shapeless): keep the parent's shape.
         if (parentSchema.additionalProperties !== undefined) {
+          const linkOpen = linkSchema.additionalProperties ?? true;
           return {
             ...parentSchemaRest,
             additionalProperties: mergeSchemaFlags(
-              linkAdditionalProperties,
+              linkOpen,
               parentSchema.additionalProperties,
             ),
             ...(required && { required }),
@@ -2363,8 +2366,19 @@ function _combineSchemaUncached(
               value,
             );
           } else {
+            // Link-only field: the reader never named it, so the reader's
+            // additionalProperties decides its fate. `undefined` means the
+            // reader IGNORES fields it didn't ask for — drop it, so we neither
+            // return nor walk it (the reader's projection wins; this is the
+            // CFC + traversal-cost boundary: a `{name}` reader must not descend
+            // into a `friends` field the link happens to carry). `false`
+            // forbids it (combines to an unsatisfiable schema); `true`/a schema
+            // accepts it.
+            if (parentSchema.additionalProperties === undefined) {
+              continue;
+            }
             mergedSchemaProperties[key] = combineSchema(
-              parentAdditionalProperties,
+              parentSchema.additionalProperties,
               value,
             );
           }
@@ -2378,10 +2392,17 @@ function _combineSchemaUncached(
           ) {
             continue; // already handled
           } else {
-            mergedSchemaProperties[key] = combineSchema(
-              value,
-              linkAdditionalProperties,
-            );
+            // Reader-only field: the link never named it, so the link's
+            // additionalProperties decides. `undefined` means the link merely
+            // IGNORES the field — it does not forbid it, so the reader's
+            // explicit interest wins and the field keeps the reader's own
+            // schema (this heals a read through an older link that predates the
+            // field). `false` forbids it (combines to unsatisfiable); a schema
+            // combines.
+            mergedSchemaProperties[key] =
+              linkSchema.additionalProperties === undefined
+                ? value
+                : combineSchema(value, linkSchema.additionalProperties);
           }
         }
       }
