@@ -11,7 +11,10 @@ import {
 import { entityRefToString } from "@commonfabric/data-model/cell-rep";
 import { defer } from "@commonfabric/utils/defer";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { validateAgainstSchema } from "@commonfabric/runner/cfc";
+import {
+  validateAgainstSchema,
+  validateSchemaValue,
+} from "@commonfabric/runner/cfc";
 import { PieceManager } from "../src/manager.ts";
 import { PieceController } from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
@@ -192,6 +195,44 @@ function compiledResultNarrowingProgram(
         "export default pattern<Input, Output>(({ input }) => ({",
         `  value: ${value},`,
         "}));",
+      ].join("\n"),
+    }],
+  };
+}
+
+function compiledOptionalPartialDefaultProgram(
+  version: 1 | 2,
+): RuntimeProgram {
+  const contents = version === 1
+    ? [
+      "import { pattern } from 'commonfabric';",
+      "interface Input { value: number; }",
+      "export default pattern<Input>(({ value }) => ({ value }));",
+    ]
+    : [
+      "import { Default, pattern } from 'commonfabric';",
+      "interface Options { attempts: number | Default<1>; name: string; }",
+      "interface Input { value: number; options?: Options; }",
+      "export default pattern<Input>(({ value }) => ({ value }));",
+    ];
+  return {
+    main: "/main.tsx",
+    files: [{ name: "/main.tsx", contents: contents.join("\n") }],
+  };
+}
+
+function compiledOptionalNumberFieldProgram(version: 1 | 2): RuntimeProgram {
+  const input = version === 1
+    ? "interface Input { value: number; }"
+    : "interface Input { value: number; mode?: number; }";
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        input,
+        "export default pattern<Input>(({ value }) => ({ value }));",
       ].join("\n"),
     }],
   };
@@ -412,6 +453,57 @@ describe("piece pull materialization", () => {
     expect(await controller.result.get()).toEqual({ doubled: 4 });
   });
 
+  it("does not hydrate an invalid partial default into an optional object", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledOptionalPartialDefaultProgram(1),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { value: 4 },
+      "optional-partial-default-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.setPattern(compiledOptionalPartialDefaultProgram(2));
+
+    const updatedPattern = await controller.getPattern();
+    const rawInput = (await controller.input.getCell()).getRaw();
+    expect(rawInput).toEqual({ value: 4 });
+    expect(validateSchemaValue(updatedPattern.argumentSchema, rawInput))
+      .toBeUndefined();
+  });
+
+  it("rejects an optional field update that conflicts with durable raw args", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledOptionalNumberFieldProgram(1),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { value: 4 },
+      "optional-field-conflict-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const inputCell = await controller.input.getCell();
+    await runtime.editWithRetry((tx) => {
+      inputCell.withTx(tx).setRawUntyped({
+        value: 4,
+        mode: "legacy-string",
+      });
+    });
+    const previousRef = getPatternIdentityRef(piece);
+
+    await expect(
+      controller.setPattern(compiledOptionalNumberFieldProgram(2)),
+    ).rejects.toThrow(/updated arguments do not match the candidate schema/);
+
+    expect(getPatternIdentityRef(piece)).toEqual(previousRef);
+    expect(inputCell.getRaw()).toEqual({ value: 4, mode: "legacy-string" });
+  });
+
   it("rejects a source update whose validated pattern identity became stale", async () => {
     const initialProgram = compiledResultNarrowingProgram("string | number");
     const stringProgram = compiledResultNarrowingProgram("string");
@@ -471,6 +563,170 @@ describe("piece pull materialization", () => {
       ).rejects.toThrow(/atomic pattern updates require starting the piece/);
     } finally {
       releaseCompile.resolve();
+      runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
+  it("rechecks the expected identity after a real commit-conflict retry", async () => {
+    const initialProgram = compiledMultiplierProgram("initial", 1);
+    const staleProgram = compiledMultiplierProgram("stale", 2);
+    const winnerProgram = compiledMultiplierProgram("winner", 10);
+    const initialPattern = await runtime.patternManager.compilePattern(
+      initialProgram,
+      { space: manager.getSpace() },
+    );
+    const stalePattern = await runtime.patternManager.compilePattern(
+      staleProgram,
+      { space: manager.getSpace() },
+    );
+    const winnerPattern = await runtime.patternManager.compilePattern(
+      winnerProgram,
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      initialPattern,
+      { input: 5 },
+      "commit-conflict-update-" + crypto.randomUUID(),
+      { start: false },
+    );
+    const controller = new PieceController(manager, piece);
+    const commitEntered = defer<void>();
+    const releaseCommit = defer<void>();
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    let interceptNextCommit = true;
+    runtime.editWithRetry =
+      ((action, maxRetries) =>
+        originalEditWithRetry((transaction) => {
+          const result = action(transaction);
+          if (interceptNextCommit) {
+            interceptNextCommit = false;
+            const originalCommit = transaction.commit.bind(transaction);
+            transaction.commit = async () => {
+              commitEntered.resolve();
+              await releaseCommit.promise;
+              return await originalCommit();
+            };
+          }
+          return result;
+        }, maxRetries)) as typeof runtime.editWithRetry;
+    const originalCompile = runtime.patternManager.compilePattern.bind(
+      runtime.patternManager,
+    );
+    runtime.patternManager.compilePattern = (async (program, options) => {
+      if (program === staleProgram) return stalePattern;
+      if (program === winnerProgram) return winnerPattern;
+      return await originalCompile(program, options);
+    }) as typeof runtime.patternManager.compilePattern;
+
+    try {
+      const staleUpdate = expect(controller.setPattern(staleProgram)).rejects
+        .toThrow(/pattern changed while the source update was compiling/);
+      await commitEntered.promise;
+      await controller.setPattern(winnerProgram);
+      releaseCommit.resolve();
+      await staleUpdate;
+
+      expect(getPatternIdentityRef(piece)).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+      expect(await controller.result.get()).toEqual({
+        version: "winner",
+        output: 50,
+      });
+    } finally {
+      releaseCommit.resolve();
+      runtime.editWithRetry = originalEditWithRetry;
+      runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
+  it("starts the current winner after a post-commit update race", async () => {
+    const initialProgram = compiledMultiplierProgram("initial", 1);
+    const firstProgram = compiledMultiplierProgram("first", 2);
+    const winnerProgram = compiledMultiplierProgram("winner", 10);
+    const initialPattern = await runtime.patternManager.compilePattern(
+      initialProgram,
+      { space: manager.getSpace() },
+    );
+    const firstPattern = await runtime.patternManager.compilePattern(
+      firstProgram,
+      { space: manager.getSpace() },
+    );
+    const winnerPattern = await runtime.patternManager.compilePattern(
+      winnerProgram,
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      initialPattern,
+      { input: 5 },
+      "post-commit-update-race-" + crypto.randomUUID(),
+      { start: false },
+    );
+    const controller = new PieceController(manager, piece);
+    const firstPostCommitSync = defer<void>();
+    const winnerPostCommitSync = defer<void>();
+    const releaseFirst = defer<void>();
+    const releaseWinner = defer<void>();
+    const runnerInternals = runtime.runner as unknown as {
+      syncCellsForRunningPattern(
+        resultCell: unknown,
+        pattern: Pattern,
+        inputs?: unknown,
+      ): Promise<boolean>;
+    };
+    const originalSync = runnerInternals.syncCellsForRunningPattern.bind(
+      runtime.runner,
+    );
+    const syncCounts = new Map<Pattern, number>();
+    runnerInternals.syncCellsForRunningPattern = async (
+      resultCell,
+      pattern,
+      inputs,
+    ) => {
+      const synced = await originalSync(resultCell, pattern, inputs);
+      const count = (syncCounts.get(pattern) ?? 0) + 1;
+      syncCounts.set(pattern, count);
+      if (count === 2 && pattern === firstPattern) {
+        firstPostCommitSync.resolve();
+        await releaseFirst.promise;
+      } else if (count === 2 && pattern === winnerPattern) {
+        winnerPostCommitSync.resolve();
+        await releaseWinner.promise;
+      }
+      return synced;
+    };
+    const originalCompile = runtime.patternManager.compilePattern.bind(
+      runtime.patternManager,
+    );
+    runtime.patternManager.compilePattern = (async (program, options) => {
+      if (program === firstProgram) return firstPattern;
+      if (program === winnerProgram) return winnerPattern;
+      return await originalCompile(program, options);
+    }) as typeof runtime.patternManager.compilePattern;
+
+    try {
+      const firstUpdate = controller.setPattern(firstProgram);
+      await firstPostCommitSync.promise;
+      const winnerUpdate = controller.setPattern(winnerProgram);
+      await winnerPostCommitSync.promise;
+
+      releaseFirst.resolve();
+      await firstUpdate;
+      releaseWinner.resolve();
+      await winnerUpdate;
+      await runtime.idle();
+
+      expect(getPatternIdentityRef(piece)).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+      expect(await controller.result.get()).toEqual({
+        version: "winner",
+        output: 50,
+      });
+    } finally {
+      releaseFirst.resolve();
+      releaseWinner.resolve();
+      runnerInternals.syncCellsForRunningPattern = originalSync;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });

@@ -8,10 +8,7 @@ import {
   type SchedulerActionSnapshotCursor,
 } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import {
-  toCompactDebugString,
-  toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -91,6 +88,7 @@ import {
   describePatternOrModule,
   extractDefaultValues,
   mergeObjects,
+  mergeSchemaDefaults,
   sanitizeDebugLabel,
   setRunnableName,
   validateAndCheckReactives,
@@ -103,6 +101,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
 } from "./cfc/types.ts";
+import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
@@ -116,6 +115,7 @@ import { SigilLink } from "./sigil-types.ts";
 export {
   extractDefaultValues,
   mergeObjects,
+  mergeSchemaDefaults,
   validateAndCheckReactives,
 } from "./runner-utils.ts";
 
@@ -854,7 +854,17 @@ export class Runner {
     pattern: Pattern,
   ): { identity: string; symbol: string } {
     const real = this.runtime.patternManager.getArtifactEntryRef(pattern);
-    if (real) return real;
+    if (real) {
+      // Artifact refs are process-global metadata on the pattern object, while
+      // the addressable artifact index is runtime-local. Re-associate a pattern
+      // handed to this runtime so a subsequent start-by-durable-identity can
+      // resolve it even when another runtime minted the ref first.
+      this.runtime.patternManager.associatePatternIdentity(
+        resolveOriginal(pattern) as Pattern,
+        real,
+      );
+      return real;
+    }
     // Keyless: a content-hash session pointer (structurally-identical patterns
     // share it — no churn). See PatternManager.ensureKeylessPatternIdentity.
     return this.runtime.patternManager.ensureKeylessPatternIdentity(pattern);
@@ -1114,10 +1124,21 @@ export class Runner {
       const previousArgument = previousArgumentCell.getRaw({
         meta: ignoreReadForScheduling,
       }) as T | undefined;
-      nextArgument = mergeObjects<T>(
+      nextArgument = mergeSchemaDefaults<T>(
         argument === undefined ? previousArgument : argument,
         defaults,
+        pattern.argumentSchema,
       );
+
+      const validationFailure = validateSchemaValue(
+        pattern.argumentSchema,
+        nextArgument,
+      );
+      if (validationFailure !== undefined) {
+        throw new Error(
+          `updated arguments do not match the candidate schema: ${validationFailure}`,
+        );
+      }
 
       const nextArgumentCell = previousArgumentCell.asSchema(
         pattern.argumentSchema,
@@ -2061,9 +2082,25 @@ export class Runner {
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
     let setupRes: ReturnType<typeof this.setupInternal> | undefined;
+    const assertExpectedPatternIdentity = (
+      cell: Cell<any>,
+    ): void => {
+      const expected = options?.expectedPatternIdentity;
+      if (!expected) return;
+      const current = getPatternIdentityRef(cell);
+      if (
+        current === undefined ||
+        patternIdentityKey(current) !== patternIdentityKey(expected)
+      ) {
+        throw new Error(
+          "piece pattern changed while the source update was compiling",
+        );
+      }
+    };
     if (givenTx) {
       // If tx is given, i.e. result cell was part of a tx that is still open,
       // caller manages retries
+      assertExpectedPatternIdentity(resultCell.withTx(givenTx));
       setupRes = this.setupInternal(
         givenTx,
         pattern,
@@ -2072,18 +2109,7 @@ export class Runner {
       );
     } else {
       const { error } = await this.runtime.editWithRetry((tx) => {
-        const expected = options?.expectedPatternIdentity;
-        if (expected) {
-          const current = getPatternIdentityRef(resultCell.withTx(tx));
-          if (
-            current === undefined ||
-            patternIdentityKey(current) !== patternIdentityKey(expected)
-          ) {
-            throw new Error(
-              "piece pattern changed while the source update was compiling",
-            );
-          }
-        }
+        assertExpectedPatternIdentity(resultCell.withTx(tx));
         setupRes = this.setupInternal(
           tx,
           pattern,
@@ -2113,32 +2139,19 @@ export class Runner {
     }
 
     if (setupRes?.needsStart) {
-      const tx = givenTx || this.runtime.edit();
-      this.startWithTx(tx, resultCell.withTx(tx), setupRes.pattern);
-      if (!givenTx) {
-        // Should be unnecessary as the start itself is read-only
-        // TODO(seefeld): Enforce this by adding a read-only flag for tx
-        this.runtime.prepareTxForCommit(tx);
-        await tx.commit().then(({ error }) => {
-          if (error) {
-            logger.error(
-              "tx-commit-error",
-              () => [
-                "Error committing transaction",
-                "\nError:",
-                toIndentedDebugString(error),
-                error.name === "ConflictError"
-                  ? [
-                    "\nConflict details:",
-                    toIndentedDebugString(error.conflict),
-                    "\nTransaction:",
-                    toIndentedDebugString(error.transaction),
-                  ]
-                  : [],
-              ],
-            );
-          }
-        });
+      if (givenTx) {
+        this.startWithTx(
+          givenTx,
+          resultCell.withTx(givenTx),
+          setupRes.pattern,
+        );
+      } else {
+        // The setup commit can be superseded while dependency sync is in
+        // flight. Resolve startup from the current durable pattern pointer so
+        // a stale caller can never instantiate its old candidate while
+        // recording a newer identity as current.
+        await resultCell.sync();
+        await this.start(resultCell);
       }
     }
 

@@ -14,7 +14,11 @@ import {
 } from "./builder/types.ts";
 import { isCellLink } from "./link-utils.ts";
 import { type SigilLink, type URI } from "./sigil-types.ts";
-import { resolveCfcSchemaRefs } from "./cfc/schema-refs.ts";
+import {
+  resolveCfcSchemaRefRoot,
+  resolveCfcSchemaRefs,
+} from "./cfc/schema-refs.ts";
+import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
 
 export function setRunnableName<T extends object & { src?: string }>(
   target: T,
@@ -174,6 +178,9 @@ function extractDefaultValuesInternal(
     ? resolveCfcSchemaRefs(schema, fullSchema)
     : schema;
   if (typeof resolved !== "object" || resolved === null) return undefined;
+  const resolvedRoot = schema.$ref
+    ? resolveCfcSchemaRefRoot(schema, fullSchema)
+    : fullSchema;
 
   const canonical = internSchema(resolved);
   if (activeSchemas.has(canonical)) return undefined;
@@ -199,7 +206,7 @@ function extractDefaultValuesInternal(
       ) {
         const value = extractDefaultValuesInternal(
           propSchema,
-          fullSchema,
+          resolvedRoot,
           activeSchemas,
         );
         if (value !== undefined) {
@@ -257,4 +264,74 @@ export function mergeObjects<T>(
   }
 
   return result as T;
+}
+
+/**
+ * Merge schema defaults into an existing argument while avoiding optional
+ * object defaults that would create an invalid partial value on their own.
+ */
+export function mergeSchemaDefaults<T>(
+  value: T | undefined,
+  defaults: Partial<T> | undefined,
+  schema: JSONSchema,
+): T {
+  return mergeSchemaDefaultsInternal(
+    value,
+    defaults,
+    schema,
+    schema,
+  ) as T;
+}
+
+function mergeSchemaDefaultsInternal(
+  value: unknown,
+  defaults: unknown,
+  schema: JSONSchema,
+  fullSchema: JSONSchema,
+): unknown {
+  if (defaults === undefined) return value;
+  if (
+    !isRecord(defaults) || Array.isArray(defaults) || isCellLink(defaults)
+  ) {
+    return value === undefined ? defaults : value;
+  }
+
+  const resolved = typeof schema === "object" && schema !== null && schema.$ref
+    ? resolveCfcSchemaRefs(schema, fullSchema)
+    : schema;
+  const resolvedRoot = typeof schema === "object" && schema !== null &&
+      schema.$ref
+    ? resolveCfcSchemaRefRoot(schema, fullSchema)
+    : fullSchema;
+  if (
+    typeof resolved !== "object" || resolved === null ||
+    resolved.type !== "object"
+  ) {
+    return mergeObjects(value as object | undefined, defaults);
+  }
+
+  const existing = isRecord(value) && !Array.isArray(value) &&
+      !isCellLink(value)
+    ? value
+    : {};
+  const result: Record<string, unknown> = { ...existing };
+  const required = new Set(resolved.required ?? []);
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    const existingValue = existing[key];
+    const propertySchema = resolved.properties?.[key] ??
+      resolved.additionalProperties ?? true;
+    const merged = mergeSchemaDefaultsInternal(
+      existingValue,
+      defaultValue,
+      propertySchema,
+      resolvedRoot,
+    );
+    if (
+      existingValue !== undefined || required.has(key) ||
+      validateSchemaValue(propertySchema, merged, resolvedRoot) === undefined
+    ) {
+      result[key] = merged;
+    }
+  }
+  return result;
 }

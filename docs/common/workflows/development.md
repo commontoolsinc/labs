@@ -27,6 +27,10 @@ deno task cf piece link ... editor-id/items viewer-id/items
   before updating the piece. Existing fields must keep compatible types; new
   fields must be optional or have defaults. Input unions may be widened and
   result unions may be narrowed, including Common Fabric schema types such as
-  `undefined`. Concurrent updates are applied atomically; a stale update fails
-  instead of overwriting a newer source.
+  `undefined`. For open argument objects, the piece's durable arguments are
+  also validated against newly named fields before the update commits.
+  This migrates the piece's current state; clients holding an older argument
+  link must refresh it before writing again so they use the updated schema.
+  Concurrent updates are applied atomically; a stale update fails instead of
+  overwriting a newer source.
 - Test one feature at a time

@@ -7,7 +7,10 @@ import {
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { uniqueCfcAtoms } from "./observation.ts";
-import { resolveCfcSchemaRefs } from "./schema-refs.ts";
+import {
+  resolveCfcSchemaRefRoot,
+  resolveCfcSchemaRefs,
+} from "./schema-refs.ts";
 import {
   DEFAULT_EXCHANGE_FUEL,
   evaluateExchangeRules,
@@ -456,6 +459,8 @@ const typeMatches = (value: unknown, type: string): boolean => {
       return typeof value === "boolean";
     case "null":
       return value === null;
+    case "undefined":
+      return value === undefined;
     case "array":
       return Array.isArray(value);
     case "object":
@@ -465,10 +470,33 @@ const typeMatches = (value: unknown, type: string): boolean => {
   }
 };
 
+interface SchemaValidationOptions {
+  strictConstraints: boolean;
+  implicitAdditionalPropertiesOpen: boolean;
+}
+
+const SANITIZATION_VALIDATION: SchemaValidationOptions = {
+  strictConstraints: false,
+  implicitAdditionalPropertiesOpen: false,
+};
+
+const VALUE_VALIDATION: SchemaValidationOptions = {
+  strictConstraints: true,
+  implicitAdditionalPropertiesOpen: true,
+};
+
+export const validateSchemaValue = (
+  schema: JSONSchema,
+  value: unknown,
+  fullSchema: JSONSchema = schema,
+): string | undefined =>
+  validateAgainstSchema(schema, value, fullSchema, VALUE_VALIDATION);
+
 export const validateAgainstSchema = (
   schema: JSONSchema,
   value: unknown,
   fullSchema: JSONSchema = schema,
+  options: SchemaValidationOptions = SANITIZATION_VALIDATION,
 ): string | undefined => {
   if (schema === true) return undefined;
   if (schema === false) return "schema rejects all values";
@@ -476,25 +504,34 @@ export const validateAgainstSchema = (
   const resolved = resolveSchemaForValidation(schema, fullSchema);
   if (resolved !== schema) {
     // Keep the original root as `fullSchema` so nested $refs in the resolved
-    // branch can still find sibling $defs entries.
-    return validateAgainstSchema(resolved, value, fullSchema);
+    // branch can still find sibling $defs entries, except when an embedded
+    // external ref deliberately changes the owning root.
+    const resolvedRoot = typeof resolved === "object" && resolved !== null
+      ? resolveCfcSchemaRefRoot(schema, fullSchema)
+      : fullSchema;
+    return validateAgainstSchema(resolved, value, resolvedRoot, options);
   }
 
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf) {
-      const failure = validateAgainstSchema(branch, value, fullSchema);
+      const failure = validateAgainstSchema(
+        branch,
+        value,
+        fullSchema,
+        options,
+      );
       if (failure !== undefined) return failure;
     }
   }
   if (Array.isArray(schema.anyOf)) {
     const ok = schema.anyOf.some((branch) =>
-      validateAgainstSchema(branch, value, fullSchema) === undefined
+      validateAgainstSchema(branch, value, fullSchema, options) === undefined
     );
     if (!ok) return "value does not match anyOf";
   }
   if (Array.isArray(schema.oneOf)) {
     const matches = schema.oneOf.filter((branch) =>
-      validateAgainstSchema(branch, value, fullSchema) === undefined
+      validateAgainstSchema(branch, value, fullSchema, options) === undefined
     ).length;
     if (matches !== 1) {
       return "value does not match exactly one oneOf branch";
@@ -522,6 +559,16 @@ export const validateAgainstSchema = (
     return `value does not match type ${types.join("|")}`;
   }
 
+  if (options.strictConstraints) {
+    const failure = validateStrictSchemaConstraints(
+      schema,
+      value,
+      fullSchema,
+      options,
+    );
+    if (failure !== undefined) return failure;
+  }
+
   // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this path
   // today, but will in the not-too-distant future; at that point this guard-less
   // `isRecord`-walk fails (a `FabricPrimitive` is decomposed, a `FabricInstance`
@@ -534,22 +581,46 @@ export const validateAgainstSchema = (
     }
     for (const [key, child] of Object.entries(schema.properties ?? {})) {
       if (key in value) {
-        const failure = validateAgainstSchema(child, value[key], fullSchema);
+        const failure = validateAgainstSchema(
+          child,
+          value[key],
+          fullSchema,
+          options,
+        );
         if (failure !== undefined) return `${key}: ${failure}`;
       }
     }
-    if (cfcObjectSchemaIsClosed(schema)) {
+    const closesAdditionalProperties = options
+        .implicitAdditionalPropertiesOpen
+      ? schema.additionalProperties === false
+      : cfcObjectSchemaIsClosed(schema);
+    if (closesAdditionalProperties) {
       const known = new Set(Object.keys(schema.properties ?? {}));
-      const extra = Object.keys(value).find((key) => !known.has(key));
+      const patterns = options.strictConstraints
+        ? Object.keys(schema.patternProperties ?? {}).map((pattern) =>
+          new RegExp(pattern)
+        )
+        : [];
+      const extra = Object.keys(value).find((key) =>
+        !known.has(key) && !patterns.some((pattern) => pattern.test(key))
+      );
       if (extra !== undefined) return `additional property ${extra}`;
     } else if (typeof schema.additionalProperties === "object") {
       const known = new Set(Object.keys(schema.properties ?? {}));
+      const patterns = options.strictConstraints
+        ? Object.keys(schema.patternProperties ?? {}).map((pattern) =>
+          new RegExp(pattern)
+        )
+        : [];
       for (const key of Object.keys(value)) {
-        if (!known.has(key)) {
+        if (
+          !known.has(key) && !patterns.some((pattern) => pattern.test(key))
+        ) {
           const failure = validateAgainstSchema(
             schema.additionalProperties,
             value[key],
             fullSchema,
+            options,
           );
           if (failure !== undefined) return `${key}: ${failure}`;
         }
@@ -557,12 +628,16 @@ export const validateAgainstSchema = (
     }
   }
 
-  if (Array.isArray(value) && typeof schema.items === "object") {
+  if (
+    !options.strictConstraints && Array.isArray(value) &&
+    typeof schema.items === "object"
+  ) {
     for (let index = 0; index < value.length; index++) {
       const failure = validateAgainstSchema(
         schema.items,
         value[index],
         fullSchema,
+        options,
       );
       if (failure !== undefined) return `${index}: ${failure}`;
     }
@@ -570,3 +645,261 @@ export const validateAgainstSchema = (
 
   return undefined;
 };
+
+function validateStrictSchemaConstraints(
+  schema: Exclude<JSONSchema, boolean>,
+  value: unknown,
+  fullSchema: JSONSchema,
+  options: SchemaValidationOptions,
+): string | undefined {
+  if (
+    schema.not !== undefined &&
+    validateAgainstSchema(schema.not, value, fullSchema, options) === undefined
+  ) {
+    return "value matches disallowed not schema";
+  }
+  if (schema.if !== undefined) {
+    const conditionMatches = validateAgainstSchema(
+      schema.if,
+      value,
+      fullSchema,
+      options,
+    ) === undefined;
+    const selected = conditionMatches ? schema.then : schema.else;
+    if (selected !== undefined) {
+      const failure = validateAgainstSchema(
+        selected,
+        value,
+        fullSchema,
+        options,
+      );
+      if (failure !== undefined) return failure;
+    }
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (schema.minimum !== undefined && value < schema.minimum) {
+      return `value is below minimum ${schema.minimum}`;
+    }
+    if (
+      schema.exclusiveMinimum !== undefined &&
+      value <= schema.exclusiveMinimum
+    ) {
+      return `value is not above exclusiveMinimum ${schema.exclusiveMinimum}`;
+    }
+    if (schema.maximum !== undefined && value > schema.maximum) {
+      return `value is above maximum ${schema.maximum}`;
+    }
+    if (
+      schema.exclusiveMaximum !== undefined &&
+      value >= schema.exclusiveMaximum
+    ) {
+      return `value is not below exclusiveMaximum ${schema.exclusiveMaximum}`;
+    }
+    if (schema.multipleOf !== undefined) {
+      const quotient = value / schema.multipleOf;
+      const tolerance = Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;
+      if (
+        schema.multipleOf <= 0 ||
+        Math.abs(quotient - Math.round(quotient)) > tolerance
+      ) {
+        return `value is not a multiple of ${schema.multipleOf}`;
+      }
+    }
+  }
+
+  if (typeof value === "string") {
+    const length = [...value].length;
+    if (schema.minLength !== undefined && length < schema.minLength) {
+      return `value is shorter than minLength ${schema.minLength}`;
+    }
+    if (schema.maxLength !== undefined && length > schema.maxLength) {
+      return `value is longer than maxLength ${schema.maxLength}`;
+    }
+    if (schema.pattern !== undefined) {
+      let pattern: RegExp;
+      try {
+        pattern = new RegExp(schema.pattern);
+      } catch {
+        return `schema has invalid pattern ${schema.pattern}`;
+      }
+      if (!pattern.test(value)) return `value does not match pattern`;
+    }
+    if (
+      schema.format !== undefined && !valueMatchesFormat(value, schema.format)
+    ) {
+      return `value does not match format ${schema.format}`;
+    }
+  }
+
+  if (Array.isArray(value)) {
+    if (schema.minItems !== undefined && value.length < schema.minItems) {
+      return `array has fewer than minItems ${schema.minItems}`;
+    }
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) {
+      return `array has more than maxItems ${schema.maxItems}`;
+    }
+    if (schema.uniqueItems === true) {
+      for (let index = 0; index < value.length; index++) {
+        if (
+          value.slice(0, index).some((entry) => deepEqual(entry, value[index]))
+        ) {
+          return "array items are not unique";
+        }
+      }
+    }
+    for (let index = 0; index < (schema.prefixItems?.length ?? 0); index++) {
+      if (index >= value.length) break;
+      const failure = validateAgainstSchema(
+        schema.prefixItems![index],
+        value[index],
+        fullSchema,
+        options,
+      );
+      if (failure !== undefined) return `${index}: ${failure}`;
+    }
+    if (schema.items !== undefined) {
+      const start = schema.prefixItems?.length ?? 0;
+      for (let index = start; index < value.length; index++) {
+        const failure = validateAgainstSchema(
+          schema.items,
+          value[index],
+          fullSchema,
+          options,
+        );
+        if (failure !== undefined) return `${index}: ${failure}`;
+      }
+    }
+    if (schema.contains !== undefined) {
+      const matches = value.filter((entry) =>
+        validateAgainstSchema(
+          schema.contains!,
+          entry,
+          fullSchema,
+          options,
+        ) === undefined
+      ).length;
+      const minimum = schema.minContains ?? 1;
+      if (matches < minimum) return `array has fewer than ${minimum} matches`;
+      if (schema.maxContains !== undefined && matches > schema.maxContains) {
+        return `array has more than ${schema.maxContains} matches`;
+      }
+    }
+  }
+
+  if (isRecord(value) && !Array.isArray(value)) {
+    const propertyCount = Object.keys(value).length;
+    if (
+      schema.minProperties !== undefined &&
+      propertyCount < schema.minProperties
+    ) {
+      return `object has fewer than minProperties ${schema.minProperties}`;
+    }
+    if (
+      schema.maxProperties !== undefined &&
+      propertyCount > schema.maxProperties
+    ) {
+      return `object has more than maxProperties ${schema.maxProperties}`;
+    }
+    for (
+      const [key, dependencies] of Object.entries(
+        schema.dependentRequired ?? {},
+      )
+    ) {
+      if (key in value) {
+        const missing = dependencies.find((dependency) =>
+          !(dependency in value)
+        );
+        if (missing !== undefined) {
+          return `${key}: missing dependent property ${missing}`;
+        }
+      }
+    }
+    for (
+      const [key, dependentSchema] of Object.entries(
+        schema.dependentSchemas ?? {},
+      )
+    ) {
+      if (key in value) {
+        const failure = validateAgainstSchema(
+          dependentSchema,
+          value,
+          fullSchema,
+          options,
+        );
+        if (failure !== undefined) return `${key}: ${failure}`;
+      }
+    }
+    if (schema.propertyNames !== undefined) {
+      for (const key of Object.keys(value)) {
+        const failure = validateAgainstSchema(
+          schema.propertyNames,
+          key,
+          fullSchema,
+          options,
+        );
+        if (failure !== undefined) return `${key}: ${failure}`;
+      }
+    }
+    for (
+      const [source, childSchema] of Object.entries(
+        schema.patternProperties ?? {},
+      )
+    ) {
+      let pattern: RegExp;
+      try {
+        pattern = new RegExp(source);
+      } catch {
+        return `schema has invalid property pattern ${source}`;
+      }
+      for (const [key, child] of Object.entries(value)) {
+        if (pattern.test(key)) {
+          const failure = validateAgainstSchema(
+            childSchema,
+            child,
+            fullSchema,
+            options,
+          );
+          if (failure !== undefined) return `${key}: ${failure}`;
+        }
+      }
+    }
+  }
+
+  if (
+    schema.contentEncoding !== undefined ||
+    schema.contentMediaType !== undefined ||
+    schema.contentSchema !== undefined
+  ) {
+    return "content validation is not supported";
+  }
+  return undefined;
+}
+
+function valueMatchesFormat(value: string, format: string): boolean {
+  switch (format) {
+    case "email":
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    case "uri":
+      try {
+        new URL(value);
+        return true;
+      } catch {
+        return false;
+      }
+    case "date": {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+      if (!match) return false;
+      const date = new Date(`${value}T00:00:00.000Z`);
+      return !Number.isNaN(date.valueOf()) &&
+        date.toISOString().slice(0, 10) === value;
+    }
+    case "date-time":
+      return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
+        .test(
+          value,
+        ) && !Number.isNaN(Date.parse(value));
+    default:
+      return false;
+  }
+}

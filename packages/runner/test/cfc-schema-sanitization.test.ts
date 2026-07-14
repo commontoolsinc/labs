@@ -7,10 +7,12 @@ import {
   INJECTION_SAFE_ATOM,
   isPrimitiveJsonValue,
   isPromptInjectionMaterialRiskAtom,
+  resolveCfcSchemaRefRoot,
   resolveSchemaForValidation,
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
   validateAndSanitizeSchemaValueWithOpaqueLinks,
+  validateSchemaValue,
 } from "../src/cfc/mod.ts";
 
 const promptRisk = {
@@ -71,6 +73,8 @@ describe("cfc schema sanitization", () => {
       .toEqual({ type: "integer" });
     expect(resolveSchemaForValidation({ $ref: "#/$defs/Missing" }, fullSchema))
       .toBe(false);
+    expect(resolveCfcSchemaRefRoot({ $ref: "#/$defs/Missing" }, fullSchema))
+      .toBe(fullSchema);
     expect(resolveSchemaForValidation({ type: "string" }, fullSchema))
       .toEqual({ type: "string" });
   });
@@ -213,6 +217,9 @@ describe("cfc schema sanitization", () => {
       ],
     }, {})).toBe("missing required property name");
     expect(validateAgainstSchema({
+      allOf: [{ type: "number" }, { minimum: 0 }],
+    }, 1)).toBeUndefined();
+    expect(validateAgainstSchema({
       anyOf: [{ type: "string" }, { type: "number" }],
     }, false)).toBe("value does not match anyOf");
     expect(validateAgainstSchema({
@@ -245,9 +252,168 @@ describe("cfc schema sanitization", () => {
       "extra: value does not match type number",
     );
     expect(validateAgainstSchema({
+      type: "object",
+      properties: { title: { type: "string" } },
+      additionalProperties: { type: "number" },
+    }, { title: "ok", extra: 1 })).toBeUndefined();
+    expect(validateAgainstSchema({
       type: "array",
       items: { type: "string" },
     }, ["ok", 2])).toBe("1: value does not match type string");
+    expect(validateAgainstSchema({
+      type: "array",
+      items: { type: "string" },
+    }, ["ok"])).toBeUndefined();
+  });
+
+  it("strictly validates Common Fabric values for schema migrations", () => {
+    expect(validateSchemaValue({ type: "undefined" }, undefined))
+      .toBeUndefined();
+    expect(validateSchemaValue({ type: "undefined" }, "not undefined"))
+      .toContain("type undefined");
+    expect(validateSchemaValue({
+      type: "object",
+      properties: { known: { type: "number" } },
+    }, { known: 1, extra: true })).toBeUndefined();
+    expect(validateSchemaValue({
+      type: "object",
+      properties: { known: { type: "number" } },
+      additionalProperties: false,
+    }, { known: 1, extra: true })).toContain("additional property extra");
+
+    const validSchema: JSONSchema = {
+      type: "object",
+      minProperties: 3,
+      maxProperties: 3,
+      required: ["count", "label", "items"],
+      properties: {
+        count: {
+          type: "number",
+          minimum: 10,
+          exclusiveMinimum: 9,
+          maximum: 20,
+          exclusiveMaximum: 21,
+          multipleOf: 2,
+        },
+        label: {
+          type: "string",
+          minLength: 3,
+          maxLength: 20,
+          pattern: "^[a-z@.]+$",
+          format: "email",
+        },
+        items: {
+          type: "array",
+          minItems: 2,
+          maxItems: 3,
+          uniqueItems: true,
+          prefixItems: [{ type: "string" }],
+          items: { type: "number" },
+          contains: { type: "number", minimum: 10 },
+          minContains: 1,
+          maxContains: 2,
+        },
+      },
+      dependentRequired: { count: ["label"] },
+      dependentSchemas: { count: { required: ["items"] } },
+      propertyNames: { pattern: "^[a-z]+$" },
+      patternProperties: { "^lab": { type: "string" } },
+    };
+    expect(validateSchemaValue(validSchema, {
+      count: 12,
+      label: "a@b.co",
+      items: ["first", 12],
+    })).toBeUndefined();
+  });
+
+  it("reports every strict migration constraint it cannot satisfy", () => {
+    const invalid: [JSONSchema, unknown, string][] = [
+      [{ not: { type: "number" } }, 1, "not schema"],
+      [{ if: { type: "number" }, then: { minimum: 2 } }, 1, "minimum"],
+      [{ if: { type: "number" }, else: { minLength: 2 } }, "x", "minLength"],
+      [{ minimum: 2 }, 1, "minimum"],
+      [{ exclusiveMinimum: 1 }, 1, "exclusiveMinimum"],
+      [{ maximum: 1 }, 2, "maximum"],
+      [{ exclusiveMaximum: 2 }, 2, "exclusiveMaximum"],
+      [{ multipleOf: 2 }, 3, "multiple"],
+      [{ multipleOf: 0 }, 0, "multiple"],
+      [{ minLength: 2 }, "x", "minLength"],
+      [{ maxLength: 1 }, "xy", "maxLength"],
+      [{ pattern: "[" }, "x", "invalid pattern"],
+      [{ pattern: "^x$" }, "y", "pattern"],
+      [{ format: "email" }, "invalid", "format email"],
+      [{ minItems: 2 }, [1], "minItems"],
+      [{ maxItems: 1 }, [1, 2], "maxItems"],
+      [{ uniqueItems: true }, [1, 1], "not unique"],
+      [{ prefixItems: [{ type: "string" }] }, [1], "0:"],
+      [{ items: { type: "number" } }, ["x"], "0:"],
+      [{ contains: { type: "number" } }, ["x"], "fewer than 1"],
+      [
+        {
+          contains: { type: "number" },
+          maxContains: 1,
+        },
+        [1, 2],
+        "more than 1",
+      ],
+      [{ minProperties: 2 }, { one: 1 }, "minProperties"],
+      [{ maxProperties: 1 }, { one: 1, two: 2 }, "maxProperties"],
+      [
+        {
+          dependentRequired: { one: ["two"] },
+        },
+        { one: 1 },
+        "dependent property two",
+      ],
+      [
+        {
+          dependentSchemas: { one: { required: ["two"] } },
+        },
+        { one: 1 },
+        "missing required property two",
+      ],
+      [{ propertyNames: { pattern: "^[a-z]+$" } }, { "BAD!": 1 }, "BAD!"],
+      [
+        { patternProperties: { "[": { type: "number" } } },
+        { x: 1 },
+        "invalid property pattern",
+      ],
+      [{ patternProperties: { "^x": { type: "number" } } }, { x: "bad" }, "x:"],
+      [{ contentEncoding: "base64" }, "encoded", "not supported"],
+      [{ contentMediaType: "application/json" }, "encoded", "not supported"],
+      [{ contentSchema: { type: "object" } }, "encoded", "not supported"],
+    ];
+    for (const [schema, value, message] of invalid) {
+      expect(validateSchemaValue(schema, value)).toContain(message);
+    }
+    expect(validateSchemaValue({
+      prefixItems: [{ type: "string" }, { type: "number" }],
+    }, ["only-present-item"])).toBeUndefined();
+  });
+
+  it("validates the schema formats generated by Common Fabric", () => {
+    const valid: [string, string][] = [
+      ["email", "a@b.co"],
+      ["uri", "https://example.com/path"],
+      ["date", "2026-07-14"],
+      ["date-time", "2026-07-14T12:34:56Z"],
+    ];
+    for (const [format, value] of valid) {
+      expect(validateSchemaValue({ type: "string", format }, value))
+        .toBeUndefined();
+    }
+    for (
+      const [format, value] of [
+        ["uri", "not a uri"],
+        ["date", "not a date"],
+        ["date", "2026-02-30"],
+        ["date-time", "not a timestamp"],
+        ["custom", "value"],
+      ]
+    ) {
+      expect(validateSchemaValue({ type: "string", format }, value))
+        .toContain(`format ${format}`);
+    }
   });
 });
 
@@ -324,7 +490,12 @@ describe("schema-based prompt injection sanitization compatibility", () => {
 
     const sanitized = schemaWithInjectionSafeAnnotations(
       schema,
-      [...flatRisks, ...orRisks],
+      [
+        ...flatRisks,
+        ...orRisks,
+        "prompt-injection-risk",
+        { anyOf: ["prompt-injection-risk", keep(100)] },
+      ],
     ) as any;
 
     const remaining: unknown[] = sanitized.properties.action.ifc
@@ -341,7 +512,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     );
     expect(hasMaterialRiskAnywhere).toBe(false);
     // The retained (non-risk) alternatives survive.
-    expect(remaining.length).toBe(40);
+    expect(remaining.length).toBe(41);
   });
 
   it("marks a whole closed object when every readable child is instruction-inert", () => {

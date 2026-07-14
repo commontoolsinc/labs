@@ -6,7 +6,7 @@ import {
 } from "@commonfabric/runner";
 import {
   resolveCfcSchemaRefs,
-  validateAgainstSchema,
+  validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 
@@ -65,9 +65,10 @@ const SEMANTIC_EXTENSION_KEYS = [
  * Reject a piece update unless its argument and result schemas preserve the
  * contracts of the currently running pattern.
  *
- * Arguments are contravariant: every value accepted by the old pattern must
- * still be accepted by the new pattern. Results are covariant: every value the
- * new pattern can produce must still be accepted by the old result schema.
+ * Arguments are contravariant and results are covariant. Open argument objects
+ * may still gain optional/defaulted named fields as the piece-evolution policy;
+ * the runner validates the piece's merged durable arguments against the new
+ * schema transactionally before committing such an update.
  */
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
@@ -120,7 +121,7 @@ function schemaSubsetIssue(
   if (source === undefined || target === undefined) {
     return `${path}: cannot resolve a local schema reference`;
   }
-  if (deepEqual(source, target)) return undefined;
+  if (schemasResolveEqually(source, target, context)) return undefined;
 
   if (source === false || target === true) return undefined;
   if (source === true) {
@@ -172,7 +173,13 @@ function schemaSubsetIssue(
     }
 
     for (const key of COMPLEX_CONSTRAINT_KEYS) {
-      if (!deepEqual(source[key], target[key])) {
+      if (
+        !schemasResolveEqually(
+          { [key]: source[key] },
+          { [key]: target[key] },
+          context,
+        )
+      ) {
         return `${path}: ${key} changed in a way compatibility checking cannot prove safe`;
       }
     }
@@ -227,6 +234,26 @@ function objectSubsetIssue(
       ) {
         return `${path}.${property}: newly required argument field has no default`;
       }
+    }
+
+    const previousAdditional = source.additionalProperties ?? true;
+    for (const property of Object.keys(candidateProperties)) {
+      // Open objects remain evolvable by adding optional/defaulted fields.
+      // A typed index signature is different: it promised that every unknown
+      // property accepted values of that type, including this newly named one.
+      if (
+        property in previousProperties ||
+        typeof previousAdditional === "boolean"
+      ) {
+        continue;
+      }
+      const issue = schemaSubsetIssue(
+        previousAdditional,
+        targetProperties[property],
+        `${path}.${property}`,
+        context,
+      );
+      if (issue) return issue;
     }
   } else {
     for (const property of targetRequired) {
@@ -479,6 +506,85 @@ function schemaTypes(schema: SchemaObject): readonly string[] | undefined {
   return typeof schema.type === "string" ? [schema.type] : schema.type;
 }
 
+function schemasResolveEqually(
+  source: unknown,
+  target: unknown,
+  context: CompatibilityContext,
+): boolean {
+  if (!deepEqual(source, target)) return false;
+
+  const refs = new Set<string>();
+  collectSchemaReferences(source, refs, new WeakSet());
+  for (const ref of refs) {
+    const sourceResolved = resolveCfcSchemaRefs(
+      { $ref: ref },
+      context.sourceRoot,
+    );
+    const targetResolved = resolveCfcSchemaRefs(
+      { $ref: ref },
+      context.targetRoot,
+    );
+    if (
+      sourceResolved === undefined || targetResolved === undefined ||
+      !deepEqual(sourceResolved, targetResolved)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function collectSchemaReferences(
+  value: unknown,
+  refs: Set<string>,
+  seen: WeakSet<object>,
+): void {
+  if (value === null || typeof value !== "object" || seen.has(value)) return;
+  seen.add(value);
+  const record = value as Record<string, unknown>;
+  if (typeof record.$ref === "string") refs.add(record.$ref);
+
+  for (
+    const key of [
+      "additionalProperties",
+      "contains",
+      "contentSchema",
+      "else",
+      "if",
+      "items",
+      "not",
+      "propertyNames",
+      "then",
+    ]
+  ) {
+    collectSchemaReferences(record[key], refs, seen);
+  }
+  for (const key of ["allOf", "anyOf", "oneOf", "prefixItems"]) {
+    const children = record[key];
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        collectSchemaReferences(child, refs, seen);
+      }
+    }
+  }
+  for (
+    const key of [
+      "$defs",
+      "definitions",
+      "dependentSchemas",
+      "patternProperties",
+      "properties",
+    ]
+  ) {
+    const children = record[key];
+    if (children !== null && typeof children === "object") {
+      for (const child of Object.values(children)) {
+        collectSchemaReferences(child, refs, seen);
+      }
+    }
+  }
+}
+
 function declaresObjectShape(schema: SchemaObject): boolean {
   return schemaTypes(schema)?.includes("object") === true ||
     schema.properties !== undefined || schema.required !== undefined ||
@@ -497,7 +603,7 @@ function schemaProvidesValidDefault(
   if (schema === undefined) return false;
   const value = extractDefaultValues(schema, fullSchema);
   return value !== undefined &&
-    validateAgainstSchema(schema, value, fullSchema) === undefined;
+    validateSchemaValue(schema, value, fullSchema) === undefined;
 }
 
 function resolveSchema(

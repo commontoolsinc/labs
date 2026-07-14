@@ -402,6 +402,28 @@ export const resolveCfcSchemaRef = (
   return result;
 };
 
+/** Return the owning schema root after following a ref chain. */
+export const resolveCfcSchemaRefRoot = (
+  schema: JSONSchema,
+  fullSchema: JSONSchema,
+): JSONSchema => {
+  let current = schema;
+  let root = fullSchema;
+  const seenRefs = new Set<string>();
+  while (
+    isRecord(current) && typeof current.$ref === "string" &&
+    !seenRefs.has(current.$ref)
+  ) {
+    const ref = current.$ref;
+    seenRefs.add(ref);
+    const next = resolveCfcSchemaRef(root, ref);
+    if (next === undefined) break;
+    if (isEmbeddedCfcSchemaRef(ref)) root = next;
+    current = next;
+  }
+  return root;
+};
+
 const resolveCfcSchemaRefUncached = (
   fullSchema: JSONSchema,
   schemaRef: string,

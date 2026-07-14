@@ -114,6 +114,30 @@ describe("piece schema compatibility", () => {
       .toThrow(/argument\.value/);
   });
 
+  it("checks changed definitions below unchanged inline containers", () => {
+    const withNestedRef = (type: "number" | "string") =>
+      pattern(
+        {
+          type: "object",
+          properties: {
+            container: {
+              type: "object",
+              properties: { value: { $ref: "#/$defs/Value" } },
+            },
+          },
+          $defs: { Value: { type } },
+        },
+        oldPattern.resultSchema,
+      );
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        withNestedRef("number"),
+        withNestedRef("string"),
+      )
+    ).toThrow(/argument\.container\.value/);
+  });
+
   it("resolves chained references and preserves reference siblings", () => {
     const previous = pattern(
       {
@@ -264,6 +288,26 @@ describe("piece schema compatibility", () => {
     expect(() => assertPatternSchemasBackwardCompatible(oldPattern, candidate))
       .toThrow(
         /argument\.options: newly required argument field has no default/,
+      );
+  });
+
+  it("rejects required defaults that violate scalar constraints", () => {
+    const candidate = pattern(
+      {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+          format: { type: "string" },
+          retries: { type: "number", minimum: 10, default: 0 },
+        },
+        required: ["value", "retries"],
+      },
+      oldPattern.resultSchema,
+    );
+
+    expect(() => assertPatternSchemasBackwardCompatible(oldPattern, candidate))
+      .toThrow(
+        /argument\.retries: newly required argument field has no default/,
       );
   });
 
@@ -514,6 +558,73 @@ describe("piece schema compatibility", () => {
     );
   });
 
+  it("checks referenced definitions inside unchanged complex constraints", () => {
+    const withComplexRef = (
+      valueType: "number" | "string",
+      description: string,
+    ) =>
+      pattern(
+        {
+          type: "object",
+          properties: {
+            value: {
+              allOf: [{ $ref: "#/$defs/Value" }],
+            },
+          },
+          $defs: { Value: { type: valueType } },
+          description,
+        },
+        oldPattern.resultSchema,
+      );
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        withComplexRef("number", "previous"),
+        withComplexRef("string", "candidate"),
+      )
+    ).toThrow(/argument\.value: allOf changed/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        withComplexRef("number", "previous"),
+        withComplexRef("number", "candidate"),
+      )
+    ).not.toThrow();
+  });
+
+  it("does not interpret literal data named $ref as a schema reference", () => {
+    const literalRef = { $ref: "#not-a-schema-reference" };
+    const previous = pattern(
+      {
+        type: "object",
+        properties: {
+          value: {
+            type: "object",
+            default: literalRef,
+            enum: [literalRef],
+          },
+        },
+      },
+      oldPattern.resultSchema,
+    );
+    const candidate = pattern(
+      {
+        type: "object",
+        properties: {
+          value: {
+            type: "object",
+            default: literalRef,
+            enum: [literalRef],
+          },
+          added: { type: "string" },
+        },
+      },
+      oldPattern.resultSchema,
+    );
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
+      .not.toThrow();
+  });
+
   it("checks arrays and widened type arrays", () => {
     const previous = pattern(
       {
@@ -573,6 +684,21 @@ describe("piece schema compatibility", () => {
       )
     ).toThrow(/argument\.value/);
 
+    const argumentAnyOf = pattern(
+      {
+        type: "object",
+        properties: {
+          value: {
+            anyOf: [{ type: "undefined" }, { type: "string" }],
+          },
+        },
+      },
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(argumentPrevious, argumentAnyOf)
+    ).not.toThrow();
+
     const resultPrevious = pattern(
       oldPattern.argumentSchema,
       {
@@ -593,6 +719,21 @@ describe("piece schema compatibility", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(resultNarrowed, resultPrevious)
     ).toThrow(/result\.value/);
+
+    const resultAnyOf = pattern(
+      oldPattern.argumentSchema,
+      {
+        type: "object",
+        properties: {
+          value: {
+            anyOf: [{ type: "string" }, { type: "undefined" }],
+          },
+        },
+      },
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(resultAnyOf, resultNarrowed)
+    ).not.toThrow();
   });
 
   it("preserves required result guarantees and defaults new required results", () => {
@@ -681,6 +822,62 @@ describe("piece schema compatibility", () => {
         pattern(schema(false), oldPattern.resultSchema),
         pattern(schema({ type: "number" }), oldPattern.resultSchema),
       )
+    ).not.toThrow();
+  });
+
+  it("checks new argument fields against prior additionalProperties", () => {
+    const argumentSchema = (
+      additionalProperties: JSONSchema,
+      addedProperty?: JSONSchema,
+    ): JSONSchema => ({
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        ...(addedProperty === undefined ? {} : { label: addedProperty }),
+      },
+      additionalProperties,
+    });
+    const previousOpen = pattern(
+      argumentSchema(true),
+      oldPattern.resultSchema,
+    );
+    const candidateOpen = pattern(
+      argumentSchema(true, { type: "string" }),
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previousOpen, candidateOpen)
+    ).not.toThrow();
+
+    const previousTyped = pattern(
+      argumentSchema({ type: "number" }),
+      oldPattern.resultSchema,
+    );
+    const incompatibleTyped = pattern(
+      argumentSchema({ type: "number" }, { type: "string" }),
+      oldPattern.resultSchema,
+    );
+    const compatibleTyped = pattern(
+      argumentSchema({ type: "number" }, { type: "number" }),
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previousTyped, incompatibleTyped)
+    ).toThrow(/argument\.label/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previousTyped, compatibleTyped)
+    ).not.toThrow();
+
+    const previousClosed = pattern(
+      argumentSchema(false),
+      oldPattern.resultSchema,
+    );
+    const candidateClosed = pattern(
+      argumentSchema(false, { type: "string" }),
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(previousClosed, candidateClosed)
     ).not.toThrow();
   });
 

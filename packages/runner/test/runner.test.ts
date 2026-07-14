@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -10,7 +11,12 @@ import {
   type Pattern,
 } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
+import {
+  extractDefaultValues,
+  getPatternIdentityRef,
+  mergeObjects,
+  mergeSchemaDefaults,
+} from "../src/runner.ts";
 import {
   type ICommitNotification,
   type IExtendedStorageTransaction,
@@ -1781,6 +1787,55 @@ describe("setup/start", () => {
     cellValue = await resultCell.pull();
     expect(cellValue).toEqual({ output: 8 });
   });
+
+  it("checks an expected pattern identity on transaction-bound cells", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      resultSchema: {
+        type: "object",
+        properties: { input: { type: "number" } },
+      },
+      result: { input: { $alias: { cell: "argument", path: ["input"] } } },
+      derivedInternalCells: [],
+      nodes: [],
+    };
+    const trusted = trustExecutable(runtime, pattern);
+    const resultCell = runtime.getCell(space, "tx-bound-expected-identity");
+    await runtime.runSynced(resultCell, trusted, { input: 1 });
+    runtime.runner.stop(resultCell);
+    const boundTx = runtime.edit();
+    const currentIdentity = getPatternIdentityRef(resultCell);
+    expect(currentIdentity).toBeDefined();
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell.withTx(boundTx),
+        trusted,
+        { input: 2 },
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:stale",
+            symbol: "default",
+          },
+        },
+      )).rejects.toThrow(
+        /pattern changed while the source update was compiling/,
+      );
+
+      await runtime.runSynced(
+        resultCell.withTx(boundTx),
+        trusted,
+        { input: 2 },
+        { expectedPatternIdentity: currentIdentity! },
+      );
+      expect(runtime.runner.cancels.size).toBe(1);
+    } finally {
+      await boundTx.commit();
+    }
+  });
 });
 
 describe("runner utils", () => {
@@ -1860,6 +1915,21 @@ describe("runner utils", () => {
       expect(extractDefaultValues({ $ref: "#/$defs/Missing" }))
         .toBeUndefined();
     });
+
+    it("keeps the owning root while traversing embedded schema refs", () => {
+      const warn = stub(console, "warn", () => {});
+      try {
+        expect(extractDefaultValues({
+          type: "object",
+          properties: {
+            $UI: { $ref: "https://commonfabric.org/schemas/vnode.json" },
+          },
+        })).toBeUndefined();
+        expect(warn.calls).toHaveLength(0);
+      } finally {
+        warn.restore();
+      }
+    });
   });
 
   describe("mergeObjects", () => {
@@ -1914,6 +1984,63 @@ describe("runner utils", () => {
         a: { $alias: { path: [] } },
         b: { c: testCell.getAsLink() },
       });
+    });
+  });
+
+  describe("mergeSchemaDefaults", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        options: { $ref: "#/$defs/Options" },
+        requiredOptions: { $ref: "#/$defs/Options" },
+      },
+      required: ["requiredOptions"],
+      $defs: {
+        Options: {
+          type: "object",
+          properties: {
+            attempts: { type: "number", default: 1 },
+            name: { type: "string" },
+          },
+          required: ["name"],
+        },
+      },
+    };
+    const defaults = {
+      options: { attempts: 1 },
+      requiredOptions: { attempts: 1 },
+    };
+
+    it("skips invalid optional partial objects but retains required defaults", () => {
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
+        {},
+        defaults,
+        schema,
+      )).toEqual({
+        requiredOptions: { attempts: 1 },
+      });
+    });
+
+    it("merges nested defaults when existing values complete the object", () => {
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
+        {
+          options: { name: "safe" },
+          requiredOptions: { name: "required" },
+        },
+        defaults,
+        schema,
+      )).toEqual({
+        options: { name: "safe", attempts: 1 },
+        requiredOptions: { name: "required", attempts: 1 },
+      });
+    });
+
+    it("falls back to ordinary object merging for non-object schemas", () => {
+      expect(mergeSchemaDefaults<Record<string, unknown>>(
+        { existing: true },
+        { added: true },
+        true,
+      )).toEqual({ existing: true, added: true });
     });
   });
 
