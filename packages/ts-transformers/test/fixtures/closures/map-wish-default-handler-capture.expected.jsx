@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Default, handler, NAME, pattern, UI, wish, Writable, } from "commonfabric";
+import { Default, handler, NAME, pattern, resultOf, UI, wish, Writable, } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -118,12 +118,12 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     }
 } as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: map-wish-default-handler-capture
-// Verifies: wish<Default<Array<T>, []>>().result maps still lower to mapWithPattern with handler captures
-//   wish<Default<Item[], []>>(...).result!.map(fn) -> mapWithPattern(pattern(...), { items: items })
+// Verifies: resultOf(wish<Default<Array<T>, []>>().result) maps still lower to mapWithPattern with handler captures
+//   resultOf(wish<Default<Item[], []>>(...).result).map(fn) -> mapWithPattern(pattern(...), { items: items })
 //   removeItem({ items, item })                    -> captures both the reactive array and the current element
 // Context: The array comes from wish().result rather than a pattern param or a local cell
 export default pattern((_) => {
-    const __cf_destructure_1 = wish<Default<Item[], [
+    const itemsWish = wish<Default<Item[], [
     ]>>({ query: "#items" }, {
         type: "array",
         items: {
@@ -144,7 +144,8 @@ export default pattern((_) => {
                 required: ["name", "value"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema), items = __cf_destructure_1.key("result").for("items", true);
+    } as const satisfies __cfHelpers.JSONSchema).for("itemsWish", true);
+    const items = resultOf(itemsWish.key("result"));
     return {
         [NAME]: "Test",
         [UI]: (<ul>

@@ -7,7 +7,7 @@ function __cfHardenFn(fn: Function) {
     return fn;
 }
 import { __cfHelpers } from "commonfabric";
-import { Default, computed, lift, pattern, wish } from "commonfabric";
+import { Default, computed, lift, pattern, resultOf, wish } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -194,14 +194,14 @@ const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema);
 const __cfLift_8 = __cfHelpers.lift(() => {
-    const foo = wish<Default<string[], [
+    const foo = resultOf(wish<Default<string[], [
     ]>>({ query: "#items" }, {
         type: "array",
         items: {
             type: "string"
         },
         "default": []
-    } as const satisfies __cfHelpers.JSONSchema).result!;
+    } as const satisfies __cfHelpers.JSONSchema).result);
     return foo.mapWithPattern(__cfPattern_3, {});
 }, false, undefined, { completeSchedulerScopeSummary: true });
 const __cfLift_9 = __cfHelpers.lift<{
@@ -422,7 +422,8 @@ const __cfLift_16 = __cfHelpers.lift<{
 // lowering sites
 //   const foo = computed(() => inner); foo.map(fn)        -> foo.mapWithPattern(...)
 //   const foo = passthrough(inner); foo.map(fn)           -> foo.mapWithPattern(...)
-//   const foo = wish<Default<T[], []>>(...).result!; map  -> foo.mapWithPattern(...)
+//   const foo = resultOf(wish<Default<T[], []>>(...).result); map
+//                                                   -> foo.mapWithPattern(...)
 //   const filtered = foo.filter(fn); filtered.map(fn)     -> filterWithPattern(...).mapWithPattern(...)
 //   const filtered = foo.filter(fn); filtered.map(item => item.toUpperCase())
 //                                                   -> receiver-method body still lowers to a lift-applied computation

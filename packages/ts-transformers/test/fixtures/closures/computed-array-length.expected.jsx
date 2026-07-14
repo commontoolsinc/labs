@@ -17,7 +17,7 @@ import { __cfHelpers } from "commonfabric";
  * The fix ensures the schema is { type: "array", items: { not: true } }
  * rather than { type: "object", properties: { length: { type: "number" } } }
  */
-import { computed, NAME, pattern, UI, wish } from "commonfabric";
+import { computed, NAME, pattern, resultOf, UI, wish } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
@@ -120,7 +120,7 @@ const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
 // Context: Regression test ensuring array .length produces the correct schema
 //   shape rather than an object schema with a length property.
 export default pattern(() => {
-    const __cf_destructure_1 = wish<{
+    const piecesWish = wish<{
         allPieces: Piece[];
     }>({ query: "/" }, {
         type: "object",
@@ -147,7 +147,8 @@ export default pattern(() => {
                 required: ["id", "name"]
             }
         }
-    } as const satisfies __cfHelpers.JSONSchema), allPieces = __cf_destructure_1.key("result", "allPieces").for("allPieces", true);
+    } as const satisfies __cfHelpers.JSONSchema).for("piecesWish", true);
+    const __cf_destructure_1 = resultOf(piecesWish.key("result")), allPieces = __cf_destructure_1.key("allPieces").for("allPieces", true);
     return {
         [NAME]: __cfLift_1({ allPieces: {
                 length: allPieces.key("length")

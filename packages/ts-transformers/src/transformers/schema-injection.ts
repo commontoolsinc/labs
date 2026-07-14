@@ -39,6 +39,7 @@ import {
   type SchemaHints,
   TransformationContext,
   type TypeRegistry,
+  isCommonFabricSymbol,
 } from "../core/mod.ts";
 import { analyzeFunctionCapabilities } from "../policy/mod.ts";
 import {
@@ -840,9 +841,40 @@ function inferSchemaContextualType(
  * `wish()`'s injected schema is both the lookup schema and the runtime schema
  * of each candidate, so injecting the enclosing WishState would recursively
  * turn its output into `WishState<WishState<T>>`. The state exposes `T` as its
- * `result` property plus `undefined`; remove only that availability sentinel
- * (preserving an authored `null` or other union members).
+ * `result` property plus the concrete unavailable variants; remove only those
+ * Common Fabric control types (preserving an authored `undefined`, `null`, or
+ * other union member).
  */
+const WISH_UNAVAILABLE_TYPE_NAMES = new Set([
+  "DataUnavailable",
+  "DataUnavailableVariant",
+  "IsPending",
+  "HasError",
+  "IsSyncing",
+  "HasSchemaMismatch",
+]);
+
+function isWishUnavailableType(
+  type: ts.Type,
+  seen: Set<ts.Type> = new Set(),
+): boolean {
+  if (seen.has(type)) return false;
+  seen.add(type);
+  const symbols = [type.aliasSymbol, type.getSymbol()].filter(
+    (symbol): symbol is ts.Symbol => !!symbol,
+  );
+  if (
+    symbols.some((symbol) =>
+      WISH_UNAVAILABLE_TYPE_NAMES.has(symbol.getName()) &&
+      isCommonFabricSymbol(symbol)
+    )
+  ) {
+    return true;
+  }
+  return type.isIntersection() &&
+    type.types.some((member) => isWishUnavailableType(member, seen));
+}
+
 function inferWishResultContextualType(
   node: ts.Expression,
   checker: ts.TypeChecker,
@@ -854,14 +886,10 @@ function inferWishResultContextualType(
   if (!resultProperty) return contextualType;
 
   const resultType = checker.getTypeOfSymbolAtLocation(resultProperty, node);
-  if (!resultType.isUnion()) {
-    return (resultType.flags & ts.TypeFlags.Undefined) !== 0
-      ? undefined
-      : resultType;
-  }
+  if (!resultType.isUnion()) return resultType;
 
   const availableMembers = resultType.types.filter(
-    (member) => (member.flags & ts.TypeFlags.Undefined) === 0,
+    (member) => !isWishUnavailableType(member),
   );
   if (availableMembers.length === 0) return undefined;
   if (availableMembers.length === 1) return availableMembers[0];
