@@ -7,6 +7,10 @@ import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Writable } from "@commonfabric/api";
+import {
+  createFactoryShell,
+  isAdmittedFabricFactory,
+} from "@commonfabric/data-model/fabric-factory";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
@@ -814,6 +818,82 @@ describe("Cell commit callbacks", () => {
         ).toBe(true);
         expect(resolvedLink.path).toEqual([]);
         expect(resolved.get()).toEqualIgnoringSymbols({ name: "first" });
+      });
+
+      it("resolves persisted array objects containing factories", async () => {
+        const ref = {
+          identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          symbol: "resolved-array-factory",
+        } as const;
+        const factory = createFactoryShell({ kind: "module", ref });
+        const arrayCell = runtime.getCell<Array<{ factory: unknown }>>(
+          space,
+          "resolve-array-factory-object",
+          {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                factory: {
+                  asFactory: {
+                    kind: "module",
+                    argumentSchema: true,
+                    resultSchema: true,
+                  },
+                },
+              },
+            },
+          },
+          tx,
+        );
+        // Seed the storage layer directly to model a cold runtime reading a
+        // value that was durably published elsewhere. The ordinary Cell writer
+        // correctly refuses to create such a value without publication proof.
+        tx.writeValueOrThrow(
+          arrayCell.getAsNormalizedFullLink(),
+          [{ factory }],
+        );
+        await tx.commit();
+        tx = runtime.edit();
+        const persistedArrayCell = runtime.getCell<
+          Array<{ factory: unknown }>
+        >(
+          space,
+          "resolve-array-factory-object",
+          {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                factory: {
+                  asFactory: {
+                    kind: "module",
+                    argumentSchema: true,
+                    resultSchema: true,
+                  },
+                },
+              },
+            },
+          },
+          tx,
+        );
+
+        const resolved = persistedArrayCell.key(0).resolveAsCell();
+        expect(
+          resolved.getAsNormalizedFullLink().id.startsWith(
+            FABRIC_VALUE_DATA_URI_PREFIX,
+          ),
+        ).toBe(true);
+        expect(() =>
+          runtime.assertFactoryArtifactsPublishableForWrite(factory, space)
+        ).toThrow("not available in space");
+        const value = resolved.getWithoutFactoryMaterialization() as {
+          factory: unknown;
+        };
+        expect(isAdmittedFabricFactory(value.factory)).toBe(true);
+        expect(() => (value.factory as () => void)()).toThrow(
+          "factory requires runner materialization",
+        );
       });
 
       it("resolves array element links to the target cell", () => {

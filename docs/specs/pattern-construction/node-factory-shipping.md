@@ -666,11 +666,12 @@ writers switch. Once expanded into a containing document write, nested factories
 follow the same speculative-local, causally gated publication protocol as every
 other by-value write.
 
-Query traversal may construct a transient data-URI address from a value already
-read inside a persisted containing Cell. That internal address is derived from
-the containing Cell's full source-space address and is not a canonical durable
-writer, so constructing it does not repeat destination-availability proof. It
-grants neither artifact availability nor execution authority. If the value is
+Read-derived traversal, including query traversal and `resolveAsCell()`, may
+construct a transient data-URI address from a value already read inside a
+persisted containing Cell. That internal address is derived from the containing
+Cell's full source-space address and is not a canonical durable writer, so
+constructing it does not repeat destination-availability proof. It grants
+neither artifact availability nor execution authority. If the value is
 subsequently written, data-URI expansion restores the containing value before
 the ordinary codec-state walk, source verification, and atomic publication
 proof; no transient address creates a durable publication bypass.
@@ -729,13 +730,18 @@ All Fabric-aware walks use the factory state accessor or a shared codec-state
 visitor. Builder traversal, alias conversion, CFC inspection, deep freeze,
 clone, equality, hashing, serialization, IPC detection, and destination-artifact
 publication must not each invent a different view of factory state. Registered
-codec-backed Fabric instances recurse through their encoded state. Walks that
-change that state, including data-URI normalization and inlining and live
-factory-state write preparation, reconstruct the same registered instance type
-through its codec rather than flattening its enumerable properties. This
+codec-backed Fabric instances with implemented container state recurse through
+their encoded state. Walks that change that state, including data-URI
+normalization and inlining and live factory-state write preparation, reconstruct
+the same registered instance type through its codec rather than flattening its
+enumerable properties. In-process reconstruction also preserves local
+codec-external diagnostics such as `ProblematicValue.error`, even though those
+diagnostics are intentionally absent from the round-tripped wire state. This
 context-free reconstruction cannot materialize a decoded factory shell. Actual
 Cells and links remain atomic references whose own source-space provenance is
-preserved.
+preserved. A registered instance whose codec is deliberately unimplemented also
+remains atomic during ancillary graph transforms; the canonical writer still
+rejects it at the codec boundary, so this is not an admission of that value.
 
 Every canonical by-value write route uses this traversal, including direct Cell
 and stream writes, normal result/output binding, writable query-result proxies,

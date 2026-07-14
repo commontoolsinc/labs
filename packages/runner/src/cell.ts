@@ -158,6 +158,8 @@ import { MetaField } from "@commonfabric/api";
 import {
   createFactoryTraversalContext,
   type FactoryTraversalContext,
+  hasTraversableFabricInstanceState,
+  mapFabricInstanceStateForTraversal,
   mapFactoryForTraversal,
 } from "./builder/factory-traversal.ts";
 ensureNotRenderThread();
@@ -3362,13 +3364,34 @@ export function prepareFactoryStatesForWrite(
 
   // Cells/results and link records are converted only when they occur inside
   // hidden factory state above. Everywhere else the established cell write
-  // path remains authoritative. Codec-backed Fabric values are atomic too.
+  // path remains authoritative. Codec-backed Fabric instances expose only
+  // their registered codec state to this preparation walk.
   if (
-    isCellResultForDereferencing(value) || isCell(value) || isCellLink(value) ||
-    value instanceof FabricSpecialObject || !isRecord(value)
+    isCellResultForDereferencing(value) || isCell(value) || isCellLink(value)
   ) {
     return value;
   }
+
+  if (hasTraversableFabricInstanceState(value)) {
+    const prior = seen.get(value);
+    if (prior !== undefined) return prior;
+    seen.set(value, value);
+    const prepared = mapFabricInstanceStateForTraversal(
+      value,
+      (state) =>
+        prepareFactoryStatesForWrite(
+          state,
+          factoryContext,
+          seen,
+        ) as FabricValue,
+    );
+    seen.set(value, prepared);
+    return prepared;
+  }
+
+  // Fabric primitives are immutable leaves. Ordinary non-record values remain
+  // under the established write-boundary conversion.
+  if (value instanceof FabricSpecialObject || !isRecord(value)) return value;
 
   const object = value as object;
   const prior = seen.get(object);

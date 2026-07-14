@@ -10,6 +10,7 @@ import type {
 } from "@commonfabric/memory/interface";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { createFactoryShell } from "@commonfabric/data-model/fabric-factory";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
@@ -443,6 +444,60 @@ describe("SchemaObjectTraverser missing value handling", () => {
 });
 
 describe("SchemaObjectTraverser array traversal", () => {
+  it("traverses persisted inline objects containing factories", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-factory-array" as URI;
+    const docEntity = docUri as Entity;
+    const factory = createFactoryShell({
+      kind: "module",
+      ref: {
+        identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        symbol: "array-factory",
+      },
+    });
+    const docValue = [{ factory }];
+    const docRevision: Revision<State> = {
+      the: type,
+      of: docEntity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docEntity }),
+      since: 1,
+    };
+    store.set(`${docRevision.of}/${docRevision.the}`, docRevision);
+
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schema: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            factory: {
+              asFactory: {
+                kind: "module",
+                argumentSchema: true,
+                resultSchema: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const result = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value: docValue,
+    });
+
+    expect(result).toHaveProperty("ok");
+  });
+
   it("uses prefixItems schemas for indexed items", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;

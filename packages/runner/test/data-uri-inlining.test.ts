@@ -17,6 +17,12 @@ import {
   factoryStateOf,
   isAdmittedFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
+import {
+  FabricMap,
+  FabricSet,
+  ProblematicValue,
+  UnknownValue,
+} from "@commonfabric/data-model/fabric-instances";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -99,6 +105,63 @@ describe("data URI inlining", () => {
     it("returns a link-free record holding NaN by reference", () => {
       const value = { x: NaN };
       expect(findAndInlineDataUriLinks(value)).toBe(value);
+    });
+
+    it("inlines factory state nested in codec-backed values", () => {
+      const nestedURI = createDataCellURI("captured value");
+      const factory = createFactoryShell({
+        kind: "pattern",
+        ref: {
+          identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          symbol: "wrapped-factory",
+        },
+        argumentSchema: true,
+        resultSchema: true,
+        paramsSchema: true,
+        params: {
+          captured: {
+            "/": {
+              [LINK_V1_TAG]: { id: nestedURI, path: [] },
+            },
+          },
+        },
+      });
+      const values = [
+        new UnknownValue("FutureValue@1", { factory }),
+        new ProblematicValue("BrokenValue@1", { factory }, "broken"),
+      ];
+
+      for (const value of values) {
+        const inlined = findAndInlineDataURILinks(value) as
+          | UnknownValue
+          | ProblematicValue;
+        expect(inlined).not.toBe(value);
+        expect(inlined.constructor).toBe(value.constructor);
+        if (inlined instanceof ProblematicValue) {
+          expect(inlined.error).toBe("broken");
+        }
+        const nested = inlined.state as { factory: unknown };
+        expect(isAdmittedFabricFactory(nested.factory)).toBe(true);
+        const state = factoryStateOf(nested.factory);
+        if (state.kind !== "pattern") {
+          throw new Error("expected pattern factory state");
+        }
+        expect(state.params).toEqual({ captured: "captured value" });
+        expect(() => (nested.factory as () => void)()).toThrow(
+          "factory requires runner materialization",
+        );
+      }
+    });
+
+    it("keeps unimplemented codec instances atomic", () => {
+      const values = [
+        new FabricMap(new Map([["key", "value"]])),
+        new FabricSet(new Set(["value"])),
+      ];
+
+      for (const value of values) {
+        expect(findAndInlineDataURILinks(value)).toBe(value);
+      }
     });
 
     it("should inline simple data URI links", () => {

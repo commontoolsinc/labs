@@ -31,6 +31,12 @@ import {
   factoryStateOf,
   isAdmittedFabricFactory,
 } from "@commonfabric/data-model/fabric-factory";
+import {
+  FabricMap,
+  FabricSet,
+  ProblematicValue,
+  UnknownValue,
+} from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { type AliasBinding, LINK_V1_TAG } from "../src/sigil-types.ts";
@@ -1551,6 +1557,62 @@ describe("link-utils", () => {
 
     it("rejects arbitrary functions at the canonical data URI boundary", () => {
       expect(() => createDataCellURI({ invalid: () => undefined })).toThrow();
+    });
+
+    it("requires availability proof for factories in codec-backed state", () => {
+      const factory = createFactoryShell({
+        kind: "handler",
+        ref: {
+          identity: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          symbol: "nested-handler",
+        },
+      });
+      const values = [
+        new UnknownValue("FutureValue@1", { factory }),
+        new ProblematicValue("BrokenValue@1", { factory }, "broken"),
+      ];
+
+      for (const value of values) {
+        expect(() => createDataCellURI(value)).toThrow(
+          "artifact-space availability proof",
+        );
+
+        const checked: unknown[] = [];
+        const uri = createDataCellURI(value, undefined, {
+          assertFactoryAvailable: (candidate) => checked.push(candidate),
+        });
+        expect(checked).toEqual([factory]);
+
+        const decoded = getJSONFromDataURI(uri) as {
+          value: UnknownValue | ProblematicValue;
+        };
+        const nested = decoded.value.state as { factory: unknown };
+        expect(isAdmittedFabricFactory(nested.factory)).toBe(true);
+        expect(() => (nested.factory as () => void)()).toThrow(
+          "factory requires runner materialization",
+        );
+      }
+    });
+
+    it("rejects arbitrary functions nested in codec-backed state", () => {
+      expect(() =>
+        createDataCellURI(
+          new UnknownValue("FutureValue@1", {
+            invalid: () => undefined,
+          }),
+        )
+      ).toThrow();
+    });
+
+    it("rejects unimplemented codec instances at the canonical URI boundary", () => {
+      const values = [
+        new FabricMap(new Map([["key", "value"]])),
+        new FabricSet(new Set(["value"])),
+      ];
+
+      for (const value of values) {
+        expect(() => createDataCellURI(value)).toThrow("not yet implemented");
+      }
     });
 
     it("should throw on circular data", () => {

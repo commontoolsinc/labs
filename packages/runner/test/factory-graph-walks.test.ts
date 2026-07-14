@@ -6,15 +6,26 @@ import {
   factoryStateOf,
   type LivePatternFactoryState,
 } from "@commonfabric/data-model/fabric-factory";
+import {
+  FabricMap,
+  FabricSet,
+  ProblematicValue,
+  UnknownValue,
+} from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
-import { convertCellsToLinks, recursivelyAddIDIfNeeded } from "../src/cell.ts";
+import {
+  convertCellsToLinks,
+  prepareFactoryStatesForWrite,
+  recursivelyAddIDIfNeeded,
+} from "../src/cell.ts";
 import { applyInputIfcToOutput } from "../src/builder/node-utils.ts";
 import { toJSONWithLegacyAliases } from "../src/builder/json-utils.ts";
 import { traverseValue } from "../src/builder/traverse-utils.ts";
 import {
   deriveFactoryStateCopy,
   getArtifactEntryRef,
+  setDurableArtifactEntryRef,
 } from "../src/builder/pattern-metadata.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { reactive } from "../src/builder/reactive.ts";
@@ -139,6 +150,48 @@ describe("factory-aware graph and static walks", () => {
     expect(params.source).toEqual(source.getAsLink());
     expect(params.bytes).toBe(bytes);
     expect(state.spaceSelector).toEqual(source.getAsLink());
+  });
+
+  it("prepares live factory state nested in codec-backed values", () => {
+    const source = runtime.getCell<string>(
+      space,
+      "codec-backed-factory-hidden-cell",
+      undefined,
+      tx,
+    );
+    const factory = bindPattern({ source });
+    setDurableArtifactEntryRef(factory, REF);
+    const values = [
+      new UnknownValue("FutureValue@1", { factory }),
+      new ProblematicValue("BrokenValue@1", { factory }, "broken"),
+    ];
+
+    for (const value of values) {
+      const prepared = prepareFactoryStatesForWrite(value) as
+        | UnknownValue
+        | ProblematicValue;
+      expect(prepared).not.toBe(value);
+      expect(prepared.constructor).toBe(value.constructor);
+      if (prepared instanceof ProblematicValue) {
+        expect(prepared.error).toBe("broken");
+      }
+      const nested = prepared.state as { factory: unknown };
+      const state = factoryStateOf(
+        nested.factory,
+      ) as LivePatternFactoryState;
+      expect(state.params).toEqual({ source: source.getAsLink() });
+    }
+  });
+
+  it("keeps unimplemented codec instances atomic during write preparation", () => {
+    const values = [
+      new FabricMap(new Map([["key", "value"]])),
+      new FabricSet(new Set(["value"])),
+    ];
+
+    for (const value of values) {
+      expect(prepareFactoryStatesForWrite(value)).toBe(value);
+    }
   });
 
   it("records scoped internal cells for durable factory capture binding", () => {

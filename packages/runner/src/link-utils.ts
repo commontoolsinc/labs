@@ -2,7 +2,10 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isRecord } from "@commonfabric/utils/types";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
 import { deepFreeze, isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
+import {
+  FabricSpecialObject,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   factoryStateOf,
   isAdmittedFabricFactory,
@@ -60,6 +63,8 @@ import { ignoreReadForScheduling } from "./scheduler.ts";
 import { createRef } from "./create-ref.ts";
 import {
   createFactoryTraversalContext,
+  hasTraversableFabricInstanceState,
+  mapFabricInstanceStateForTraversal,
   mapFactoryForTraversal,
 } from "./builder/factory-traversal.ts";
 
@@ -378,6 +383,15 @@ function findAndInlineDataURILinksInner(
       }
     }
     return next ?? value;
+  } else if (hasTraversableFabricInstanceState(value)) {
+    return mapFabricInstanceStateForTraversal(
+      value,
+      (state) =>
+        findAndInlineDataURILinksInner(
+          state,
+          factoryContext,
+        ) as FabricValue,
+    );
   } else if (value instanceof FabricSpecialObject) {
     return value;
   } else if (isRecord(value)) {
@@ -405,11 +419,57 @@ export interface CreateDataCellURIOptions {
   readonly assertFactoryAvailable?: (factory: unknown) => void;
 }
 
+const READ_DERIVED_FACTORY_AVAILABILITY = Symbol(
+  "read-derived-factory-availability",
+);
+
+type FactoryAvailability =
+  | CreateDataCellURIOptions["assertFactoryAvailable"]
+  | typeof READ_DERIVED_FACTORY_AVAILABILITY;
+
 /** Create the canonical inline Fabric document used by durable cell links. */
 export function createDataCellURI(
   data: any,
   base?: Cell | NormalizedLink,
   options: CreateDataCellURIOptions = {},
+): URI {
+  return createDataCellURIWithAvailability(
+    data,
+    base,
+    options.assertFactoryAvailable,
+  );
+}
+
+/**
+ * Create a transient data-URI address derived from an already-persisted cell.
+ *
+ * This address is query machinery, not a durable authored value. Any later
+ * write expands it back into the containing document and passes through the
+ * ordinary durable factory-publication proof.
+ *
+ * @internal
+ */
+export function createReadDerivedDataCellURI(
+  data: any,
+  base: Cell | NormalizedFullLink,
+): URI {
+  const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
+  if (baseLink.id === undefined || baseLink.space === undefined) {
+    throw new Error(
+      "Read-derived data URI requires a containing cell's full address",
+    );
+  }
+  return createDataCellURIWithAvailability(
+    data,
+    baseLink,
+    READ_DERIVED_FACTORY_AVAILABILITY,
+  );
+}
+
+function createDataCellURIWithAvailability(
+  data: any,
+  base: Cell | NormalizedLink | undefined,
+  factoryAvailability: FactoryAvailability,
 ): URI {
   const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
   const factoryContext = createFactoryTraversalContext();
@@ -434,12 +494,14 @@ export function createDataCellURI(
         );
       }
       if (!checkedFactories.has(value)) {
-        if (!options.assertFactoryAvailable) {
+        if (factoryAvailability === undefined) {
           throw new Error(
             "Cannot create durable data URI containing Factory@1 without artifact-space availability proof",
           );
         }
-        options.assertFactoryAvailable(value);
+        if (factoryAvailability !== READ_DERIVED_FACTORY_AVAILABILITY) {
+          factoryAvailability(value);
+        }
         checkedFactories.add(value);
       }
       return mapFactoryForTraversal(
@@ -447,6 +509,25 @@ export function createDataCellURI(
         (nested) => traverseAndAddBaseIdToRelativeLinks(nested, seen),
         factoryContext,
       );
+    }
+    if (hasTraversableFabricInstanceState(value)) {
+      if (seen.has(value)) {
+        throw new Error(`Cycle detected when creating data URI`);
+      }
+      seen.add(value);
+      try {
+        return mapFabricInstanceStateForTraversal(
+          value,
+          (state) =>
+            traverseAndAddBaseIdToRelativeLinks(
+              state,
+              seen,
+              insideLegacyPatternGraph,
+            ) as FabricValue,
+        );
+      } finally {
+        seen.delete(value);
+      }
     }
     if (value instanceof FabricSpecialObject) return value;
     if (!isRecord(value)) return value;

@@ -5,6 +5,21 @@ import {
   isAdmittedFabricFactory,
   mapFactoryStateValues,
 } from "@commonfabric/data-model/fabric-factory";
+import {
+  codecOf,
+  EMPTY_RECONSTRUCTION_CONTEXT,
+} from "@commonfabric/data-model/codec-common";
+import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import {
+  FabricLink,
+  FabricMap,
+  FabricSet,
+  ProblematicValue,
+} from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricInstance,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 
 import {
   deriveFactoryStateCopy,
@@ -21,6 +36,66 @@ export function createFactoryTraversalContext(): FactoryTraversalContext {
     memo: new WeakMap<object, unknown>(),
     active: new WeakSet<object>(),
   };
+}
+
+/**
+ * Whether a Fabric instance owns recursively traversable codec state.
+ *
+ * Links remain atomic references. FabricMap and FabricSet remain atomic here
+ * because their registered codecs deliberately throw until those value kinds
+ * are implemented; the canonical writer still rejects them at its codec
+ * boundary.
+ */
+export function hasTraversableFabricInstanceState(
+  value: unknown,
+): value is FabricInstance {
+  return value instanceof FabricInstance &&
+    !(value instanceof FabricLink) &&
+    !(value instanceof FabricMap) &&
+    !(value instanceof FabricSet);
+}
+
+/**
+ * Traverse the codec-owned state of a Fabric instance and reconstruct the
+ * same protocol value when that state changes.
+ *
+ * This is intentionally separate from ordinary object enumeration: codec
+ * state may live in private slots, and the context-free reconstruction path
+ * must not acquire runner authority while rebuilding an inert wire value.
+ */
+export function mapFabricInstanceStateForTraversal<T extends FabricInstance>(
+  value: T,
+  mapState: (state: FabricValue) => FabricValue,
+): T {
+  const codec = codecOf(value);
+  const state = codec.encode(value as FabricValue);
+  const mappedState = mapState(state);
+  if (Object.is(mappedState, state)) return value;
+
+  const mapped = codec.decode(
+    codec.tagForValue(value as FabricValue),
+    mappedState,
+    EMPTY_RECONSTRUCTION_CONTEXT,
+  );
+  if (!(mapped instanceof FabricInstance) || codecOf(mapped) !== codec) {
+    throw new Error("Codec traversal changed the Fabric instance type");
+  }
+
+  // `ProblematicValue.error` is local diagnostic metadata, intentionally not
+  // part of the round-tripped wire state. In-process graph transforms must not
+  // erase it, so retain it after codec-owned state reconstruction. Re-freezing
+  // the replacement preserves the context-free decode's canonical form and
+  // cannot materialize any nested factory shell.
+  if (value instanceof ProblematicValue && mapped instanceof ProblematicValue) {
+    return deepFreeze(
+      new ProblematicValue(
+        mapped.wireTypeTag,
+        mapped.state,
+        value.error,
+      ),
+    ) as unknown as T;
+  }
+  return mapped as T;
 }
 
 function factoryKey(value: unknown): object {
