@@ -24,6 +24,8 @@ import * as path from "@std/path";
 import { ensureDirSync } from "@std/fs";
 import { ConsoleMethod } from "./console.ts";
 
+type ConsoleTailEntry = { t: number; method: string; text: string };
+
 // To handle `console` events from `Page`, logging to outer context:
 //
 // ```ts
@@ -118,15 +120,15 @@ export class Page extends EventTarget {
     const methods: string[] = Object.values(ConsoleMethod);
 
     await this.evaluate((trueConsoleKey: string, methods: string[]) => {
+      type ConsoleTailGlobal = typeof globalThis & {
+        __cfConsoleTail?: ConsoleTailEntry[];
+      };
       // @ts-ignore: this code is stringified and sent to browser context
       // If console has already been stubbed for this document, abort.
       if (globalThis[trueConsoleKey]) {
         return;
       }
-      const tail: Array<{ t: number; method: string; text: string }> =
-        ((globalThis as unknown as {
-          __cfConsoleTail?: Array<{ t: number; method: string; text: string }>;
-        }).__cfConsoleTail ??= []);
+      const tail = ((globalThis as ConsoleTailGlobal).__cfConsoleTail ??= []);
       const TAIL_LIMIT = 300;
       const trueConsole = globalThis.console;
       const newConsole = Object.create(null);
