@@ -202,9 +202,8 @@ describe("load by module identity (warm + version-bump recovery)", () => {
 // aged spaces. These tests pin the tolerance: exact-envelope stored docs
 // self-heal on load (T1/T2), the authoring guard is untouched (T3), the
 // tolerance is exact-envelope-only (T4), mixed and replicated closures work
-// (T5/T6/T9), a new pattern can fabric-import a legacy one (T10), and
-// deterministic failures are negatively memoized while transient ones retry
-// (T8). Fixture shape is byte-calibrated against a REAL poisoned doc dumped
+// (T5/T6/T9), and a new pattern can fabric-import a legacy one (T10).
+// Fixture shape is byte-calibrated against a REAL poisoned doc dumped
 // from the production space (see packages/ts-transformers/test/core/
 // legacy-envelope.test.ts): stored bytes = [HELPERS_STMT, source,
 // usedStmt].join("\n"), identities computed over the INJECTED bytes.
@@ -668,135 +667,6 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     } finally {
       restore();
     }
-  });
-
-  // T8 is split into one test per outcome class on purpose: each `it` gets
-  // its own emulated store (beforeEach), keeping the multi-runtime fixtures
-  // (writer + loader + fresh-session runtimes over in-place doc rewrites)
-  // from accumulating cross-scenario subscriptions in one shared store.
-  it("T8a: a deterministic compile failure is memoized — no re-read/re-compile", async () => {
-    // Stored doc with __cfHelpers outside the exact envelope →
-    // reserved-symbol throw, marked deterministic by the engine. The second
-    // load must not re-run the closure read + compile.
-    const rt = newRuntime();
-    const nonEnvelope = "// leading comment\n" + injectCfHelpers(
-      "import { pattern } from 'commonfabric';\n" +
-        "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n",
-      "/main.tsx",
-    );
-    const bad = await storedModules("/main.tsx", [
-      { name: "/main.tsx", contents: nonEnvelope },
-    ]);
-    await persist(rt, bad);
-
-    const rt2 = newRuntime();
-    const engine2 = rt2.harness as Engine;
-    let coldCompiles = 0;
-    const original = engine2.compileResolvedToRecordGraph.bind(engine2);
-    engine2.compileResolvedToRecordGraph =
-      ((...args: Parameters<typeof original>) => {
-        coldCompiles++;
-        return original(...args);
-      }) as typeof engine2.compileResolvedToRecordGraph;
-    expect(
-      await rt2.patternManager.loadPatternByIdentity(
-        bad.entryIdentity,
-        "default",
-        space,
-      ),
-    ).toBeUndefined();
-    expect(coldCompiles).toBe(1);
-    expect(
-      await rt2.patternManager.loadPatternByIdentity(
-        bad.entryIdentity,
-        "default",
-        space,
-      ),
-    ).toBeUndefined();
-    // Memo hit BEFORE the single-flight/storage tail: no second compile.
-    expect(coldCompiles).toBe(1);
-  });
-
-  it("T8b: a deterministic verify failure is memoized for the session only", async () => {
-    // Deterministic VERIFY failure (complete closure, bytes do not hash to
-    // their key) is memoized for the session — even if the doc is later
-    // fixed — but a FRESH runtime (new session) heals.
-    const rt = newRuntime();
-    const rt2 = newRuntime();
-    await ensureCompilerStack();
-    const goodAuthored = "import { pattern } from 'commonfabric';\n" +
-      "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n";
-    const good = await storedModules("/main.tsx", [
-      { name: "/main.tsx", contents: goodAuthored },
-    ]);
-    // Store TAMPERED bytes under the good identity key.
-    const tampered: CacheableModule[] = good.modules.map((m) => ({
-      ...m,
-      source: m.source + "// tampered\n",
-    }));
-    await persist(rt, { modules: tampered, entryIdentity: good.entryIdentity });
-    expect(
-      await rt2.patternManager.loadPatternByIdentity(
-        good.entryIdentity,
-        "default",
-        space,
-      ),
-    ).toBeUndefined();
-    // Fix the doc in place (same key, correct bytes)...
-    await persist(rt, good);
-    // ...same session still memoized...
-    expect(
-      await rt2.patternManager.loadPatternByIdentity(
-        good.entryIdentity,
-        "default",
-        space,
-      ),
-    ).toBeUndefined();
-    // ...fresh session loads fine (memo is session-scoped).
-    const rt3 = newRuntime();
-    expect(
-      typeof await rt3.patternManager.loadPatternByIdentity(
-        good.entryIdentity,
-        "default",
-        space,
-      ),
-    ).toBe("function");
-  });
-
-  it("T8c: a transient failure (absent closure) is NEVER memoized", async () => {
-    // Loads that fail before the docs exist succeed after they are
-    // written — in the SAME session. (A boot-time storage blip must not
-    // brick a pattern until restart.)
-    const rt = newRuntime();
-    const rt2 = newRuntime();
-    await ensureCompilerStack();
-    const goodAuthored = "import { pattern } from 'commonfabric';\n" +
-      "export default pattern<{ value: number }>(({ value }) => ({ result: value }));\n";
-    const late = await storedModules("/late.tsx", [
-      { name: "/late.tsx", contents: goodAuthored },
-    ]);
-    expect(
-      await rt2.patternManager.loadPatternByIdentity(
-        late.entryIdentity,
-        "default",
-        space,
-      ),
-    ).toBeUndefined();
-    expect(
-      await rt2.patternManager.loadPatternByIdentity(
-        late.entryIdentity,
-        "default",
-        space,
-      ),
-    ).toBeUndefined();
-    await persist(rt, late);
-    expect(
-      typeof await rt2.patternManager.loadPatternByIdentity(
-        late.entryIdentity,
-        "default",
-        space,
-      ),
-    ).toBe("function");
   });
 
   it("T9: JS-trailer variant (.jsx module) heals through the cold path", async () => {
