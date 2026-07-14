@@ -148,6 +148,7 @@ is access to intermediate output:
 const request = generateTextStream({ prompt });
 const text = resultOf(request);
 const partialRequest = partialResultOf(request);
+const partialText = resultOf(partialRequest);
 ```
 
 - [ ] Make the stream call return its final `AsyncResult<T>` directly.
@@ -273,6 +274,13 @@ const { addMessage, pending, result: rawResult } = llmDialog({
   resultSchema: toSchema<ResearchResult>(),
 });
 const result = computed(() => rawResult as ResearchResult | undefined);
+
+return (
+  <>
+    <cf-autostart onstart={startResearch({ addMessage })} />
+    <ResearchView result={result} pendingTurn={pending} />
+  </>
+);
 ```
 
 Proposed use:
@@ -280,16 +288,25 @@ Proposed use:
 ```typescript
 // Shown for illustration only.
 const dialog = llmDialog<ResearchResult>({ messages });
+const { addMessage, pending } = dialog;
 const resultRequest = presentedResultOf(dialog);
 const result = resultOf(resultRequest);
 
-return hasError(resultRequest)
-  ? <div>{resultRequest.error.message}</div>
-  : <ResearchView result={result} pendingTurn={dialog.pending} />;
+return (
+  <>
+    <cf-autostart onstart={startResearch({ addMessage })} />
+    {hasError(resultRequest)
+      ? <div>{resultRequest.error.message}</div>
+      : <ResearchView result={result} pendingTurn={pending} />}
+  </>
+);
 ```
 
 `presentedResultOf()` is a zero-node associated projection, analogous to
-`partialResultOf()`. `dialog.pending` remains independent turn activity.
+`partialResultOf()`. `addMessage`, `pending`, cancellation, pins, and the other
+dialog controls remain on the dialog object unchanged. Only the presented data
+channel moves behind the typed projection; `pending` remains independent turn
+activity.
 
 - [ ] Add a typed dialog overload and transformer schema injection for its
       presented result.
@@ -312,13 +329,17 @@ conflating them with the dialog's multi-turn lifecycle.
 
 ## A6 — `streamData`
 
-Use the same direct-final-plus-partial shape as LLM streams:
+Use the same direct-final-plus-partial shape as LLM streams. The direct request
+is analogous to fetch: it is pending while the stream is open, and
+`resultOf(request)` is the final state of a cleanly closed stream. The partial
+projection is the additional live view:
 
 ```typescript
 // Shown for illustration only.
 const request = streamData<Event>({ url });
-const finalEvent = resultOf(request);
-const currentEventRequest = partialResultOf(request);
+const closedState = resultOf(request);
+const partialRequest = partialResultOf(request);
+const currentState = resultOf(partialRequest);
 ```
 
 - [ ] Specify initial connect, first event, successive events, clean end,
