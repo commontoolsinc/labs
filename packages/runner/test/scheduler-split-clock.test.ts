@@ -9,8 +9,17 @@ import {
   isRunnableSchedulingSeed,
   type PullSchedulingState,
 } from "../src/scheduler/work-oracle.ts";
-import type { SchedulerNode } from "../src/scheduler/node-record.ts";
-import type { QueuedEvent } from "../src/scheduler/types.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
+import { SchedulerMaterializers } from "../src/scheduler/materializers.ts";
+import {
+  NodeRegistry,
+  type SchedulerNode,
+} from "../src/scheduler/node-record.ts";
+import type {
+  Action,
+  EventHandler,
+  QueuedEvent,
+} from "../src/scheduler/types.ts";
 
 // F11: a readiness/parked decision must read `performance.now()` once. When the
 // head-event park check is evaluated twice with two different clock reads, an
@@ -31,6 +40,80 @@ describe("split-clock readiness decisions", () => {
     performance.now = () => sequence[Math.min(i++, sequence.length - 1)];
   }
 
+  const testEventLink: NormalizedFullLink = {
+    id: "of:scheduler-split-clock-test",
+    path: [],
+    scope: "space",
+    space: "did:key:scheduler-split-clock-test",
+  };
+  const noopAction: Action = () => {};
+  const noopHandler: EventHandler = () => {};
+
+  function queuedEventAt(notBefore: number): QueuedEvent {
+    return {
+      id: "scheduler-split-clock-test",
+      eventLink: testEventLink,
+      action: noopAction,
+      handler: noopHandler,
+      event: {},
+      retry: false,
+      notBefore,
+    };
+  }
+
+  function pullSchedulingState(
+    overrides: Partial<PullSchedulingState> = {},
+  ): PullSchedulingState {
+    const nodes = new NodeRegistry();
+    const effects = nodes.effects;
+    const isDemandedPullComputation = () => false;
+    const isThrottled = () => false;
+    return {
+      nodes,
+      pending: new Set<Action>(),
+      effects,
+      materializerIndex: new SchedulerMaterializers(effects),
+      pendingPullRunnableState: {
+        effects,
+        isDemandedPullComputation,
+        shouldRunFirstPullComputationInDemandContext: () => false,
+      },
+      dirtyPullRunnableState: {
+        effects,
+        isDemandedPullComputation,
+        isThrottled,
+      },
+      dirtyPullRunnableStateWithDebounce: {
+        effects,
+        isDemandedPullComputation,
+        isThrottled,
+        isDebouncedComputationWaiting: () => false,
+      },
+      isLiveAction: () => false,
+      hasActiveDebounceTimer: () => false,
+      getNextEligibleRunTime: () => undefined,
+      isConvergenceHoldActive: () => false,
+      isConvergenceBackoffDeferred: () => false,
+      hasPendingInitialRehydrations: () => false,
+      ...overrides,
+    };
+  }
+
+  function schedulerNode(action: Action): SchedulerNode {
+    return {
+      action,
+      ordinal: 0,
+      kind: "computation",
+      status: "never-ran",
+      declaredReads: [],
+      invalidCauses: [],
+      liveRefs: 0,
+      provisionalDemand: false,
+      gate: { backoffStreak: 0, convergenceHoldPasses: 0 },
+      passRuns: 0,
+    };
+  }
+
   it("does not resolve idle for an event straddled between two clock reads", () => {
     const NOT_BEFORE = 150;
     // A buggy two-read decision sees 100 (parked) then 200 (ready) → neither.
@@ -40,10 +123,10 @@ describe("split-clock readiness decisions", () => {
     const state = {
       // assessPullWork short-circuits on the rehydration barrier before it
       // reads the clock, so the only clock reads come from the park check.
-      pullScheduling: {
+      pullScheduling: pullSchedulingState({
         hasPendingInitialRehydrations: () => true,
-      } as unknown as PullSchedulingState,
-      eventQueue: [{ notBefore: NOT_BEFORE } as unknown as QueuedEvent],
+      }),
+      eventQueue: [queuedEventAt(NOT_BEFORE)],
       idlePromises: [() => {
         idleResolved = true;
       }],
@@ -71,7 +154,7 @@ describe("split-clock readiness decisions", () => {
     let idleResolved = false;
     let holdResets = 0;
     const state = {
-      pullScheduling: {} as PullSchedulingState,
+      pullScheduling: pullSchedulingState(),
       eventQueue: [],
       idlePromises: [() => {
         idleResolved = true;
@@ -102,7 +185,7 @@ describe("split-clock readiness decisions", () => {
     let idleResolved = false;
     let holdResets = 0;
     const state = {
-      pullScheduling: {} as PullSchedulingState,
+      pullScheduling: pullSchedulingState(),
       eventQueue: [],
       idlePromises: [() => {
         idleResolved = true;
@@ -131,7 +214,7 @@ describe("split-clock readiness decisions", () => {
     let idleResolved = false;
     let holdResets = 0;
     const state = {
-      pullScheduling: {} as PullSchedulingState,
+      pullScheduling: pullSchedulingState(),
       eventQueue: [],
       idlePromises: [() => {
         idleResolved = true;
@@ -157,20 +240,11 @@ describe("split-clock readiness decisions", () => {
   it("isRunnableSchedulingSeed honors the passed clock instead of re-reading", () => {
     const ELIGIBLE_AT = 1000;
     const action = () => {};
-    const record = {
-      action,
-      status: "never-ran",
-    } as unknown as SchedulerNode;
-    const state = {
+    const record = schedulerNode(action);
+    const state = pullSchedulingState({
       isLiveAction: () => true,
-      pending: new Set(),
-      hasActiveDebounceTimer: () => false,
       getNextEligibleRunTime: () => ELIGIBLE_AT,
-      dirtyPullRunnableStateWithDebounce: {
-        isThrottled: () => false,
-        isDebouncedComputationWaiting: () => false,
-      },
-    } as unknown as PullSchedulingState;
+    });
 
     // The internal clock reads PAST the gate; the caller's captured clock reads
     // BEFORE it. A single-clock assessment must use the passed value and treat

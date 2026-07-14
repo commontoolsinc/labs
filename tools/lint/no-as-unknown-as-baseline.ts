@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/scheduler-split-clock.test.ts": [
-    "45:8:ryv8rw",
-    "46:45:bxgs5p",
-    "163:6:1i68lu0",
-    "173:6:j8dtuc",
-  ],
   "packages/runner/test/storage-sigil-topology-refresh.bench.ts": [
     "109:46:19gxezt",
   ],
