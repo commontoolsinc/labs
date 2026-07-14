@@ -124,8 +124,14 @@ export class CFTabs extends BaseElement {
       // "cf-change" is emitted only from the user-gesture paths
       // (handleTabClick / handleKeydown via emitUserChange). Here we just keep
       // the visual selection in sync with the cell.
+      //
+      // Sync from the DELIVERED value, not a getValue() re-read: with a PLAIN
+      // string binding there is no backing store for a user click's setValue
+      // to write, so getValue() still returns the stale bound literal here —
+      // re-reading it made the click-time sync a silent no-op (the
+      // "one-behind" highlight bug; see updated() for the second half).
       this._lastKnownValue = newValue;
-      this.updateTabSelection();
+      this.updateTabSelection(newValue);
     },
   });
 
@@ -181,9 +187,22 @@ export class CFTabs extends BaseElement {
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
 
-    // Always check if the cell value changed (handles both property changes
-    // and external cell updates that trigger requestUpdate via sink)
     const currentValue = this._cellController.getValue();
+    if (changedProperties.has("value")) {
+      // The consumer explicitly re-rendered the `value` prop — ALWAYS re-sync,
+      // even when currentValue equals _lastKnownValue. With a plain string
+      // binding, a user click updates only internal state (there is no cell to
+      // write), so the consumer's next render typically carries the SAME
+      // string the click produced; the old `!==` guard read that as a no-op
+      // while the DOM children had just been re-rendered unselected, stranding
+      // the highlight one state behind on every tap (dynamic tabs re-created
+      // inside a render computed with a plain `value`).
+      this._lastKnownValue = currentValue;
+      this.updateTabSelection();
+      return;
+    }
+    // Other updates (requestUpdate via the cell sink, orientation, …): keep
+    // the change detection so unrelated updates don't repaint selection.
     if (currentValue !== this._lastKnownValue) {
       this._lastKnownValue = currentValue;
       this.updateTabSelection();
@@ -208,10 +227,17 @@ export class CFTabs extends BaseElement {
 
   private _pendingRetry: number | null = null;
 
-  private updateTabSelection(): void {
+  // `valueOverride` carries an authoritative just-delivered value (a user
+  // click or a cell delivery via the controller's onChange). It matters for
+  // PLAIN string bindings, where a click's setValue has no backing store to
+  // write — a getValue() re-read here would return the stale bound literal
+  // and silently no-op the sync.
+  private updateTabSelection(valueOverride?: string): void {
     const tabs = this.getTabs();
     const panels = this.getTabPanels();
-    const currentValue = this._cellController.getValue();
+    const currentValue = valueOverride !== undefined
+      ? valueOverride
+      : this._cellController.getValue();
 
     // When tabs exist in DOM but the VDOM framework hasn't set their properties yet,
     // defer selection until the next frame when properties will be available.
@@ -222,7 +248,7 @@ export class CFTabs extends BaseElement {
       }
       this._pendingRetry = requestAnimationFrame(() => {
         this._pendingRetry = null;
-        this.updateTabSelection();
+        this.updateTabSelection(valueOverride);
       });
       return;
     }
@@ -303,7 +329,13 @@ export class CFTabs extends BaseElement {
     this.updateTabSelection();
   };
 
-  private _tabListSlotListenerSetup = false;
+  // The cf-tab-list element whose internal slot currently carries our
+  // slotchange listener. Tracked by ELEMENT (not a one-shot boolean): a VDOM
+  // consumer that re-renders its tab list re-CREATES the cf-tab-list element,
+  // and a listener left on the discarded element observes nothing — cf-tabs
+  // then never hears about the replacement tabs (part of the plain-value
+  // "one-behind" highlight bug).
+  private _tabListWithSlotListener: Element | null = null;
 
   /**
    * Sets up a slotchange listener on cf-tab-list's internal slot.
@@ -312,12 +344,10 @@ export class CFTabs extends BaseElement {
    * tabs are actually added to the DOM.
    */
   private setupTabListSlotListener(): void {
-    if (this._tabListSlotListenerSetup) return;
-
     const tabList = this.querySelector("cf-tab-list") as
       | (Element & { updateComplete?: Promise<boolean> })
       | null;
-    if (!tabList) return;
+    if (!tabList || tabList === this._tabListWithSlotListener) return;
 
     // Wait for cf-tab-list to have its shadow DOM ready
     const tabListSlot = tabList.shadowRoot?.querySelector("slot");
@@ -329,7 +359,7 @@ export class CFTabs extends BaseElement {
       return;
     }
 
-    this._tabListSlotListenerSetup = true;
+    this._tabListWithSlotListener = tabList;
 
     tabListSlot.addEventListener("slotchange", () => {
       this.updateTabSelection();
