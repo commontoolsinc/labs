@@ -25,6 +25,8 @@ import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
+import { assert } from "@std/assert";
+import type { MemoryWireAccountingReport } from "@commonfabric/memory/v2/wire-accounting";
 import {
   initializePiecesController,
   PiecesController,
@@ -39,9 +41,15 @@ import {
   waitForRuntimeIdle,
   waitForText,
 } from "./cfc-browser-helpers.ts";
+import {
+  analyzeLunchPollWireAccounting,
+  formatLunchPollWireAccounting,
+  validateLunchPollWireAccounting,
+} from "./lunch-poll-wire-accounting.ts";
 
-const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
+const { API_URL, FRONTEND_URL, MEMORY_WIRE_ACCOUNTING_TOKEN, SPACE_NAME } = env;
 const PROPAGATION_TIMEOUT = 60_000;
+const WIRE_ACCOUNTING_PATH = "api/storage/memory/wire-accounting";
 
 const HOST = "Alice";
 const GUEST = "Bob";
@@ -73,6 +81,86 @@ const voteSwatchVoters = (page: Page): Promise<string[]> =>
     walk(document);
     return [...names];
   });
+
+function wireAccountingUrl(action: "start" | "stop"): URL {
+  return new URL(`${WIRE_ACCOUNTING_PATH}/${action}`, API_URL);
+}
+
+async function accountingRequest(
+  action: "start" | "stop",
+): Promise<Response> {
+  return await fetch(wireAccountingUrl(action), {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${MEMORY_WIRE_ACCOUNTING_TOKEN}`,
+    },
+  });
+}
+
+async function accountingErrorMessage(
+  response: Response,
+  action: "start" | "stop",
+): Promise<string> {
+  const body = await response.text().catch(() => "");
+  const bodySuffix = body.trim().length === 0
+    ? ""
+    : ` body=${body.trim().slice(0, 200)}`;
+  return `Memory wire-accounting ${action} failed with HTTP ${response.status}.${bodySuffix}`;
+}
+
+async function startMemoryWireAccounting(): Promise<boolean> {
+  if (MEMORY_WIRE_ACCOUNTING_TOKEN === "") {
+    console.log(
+      "Memory wire-accounting token was not provided by the root integration runner; running Lunch Poll behavior and skipping accounting assertions.",
+    );
+    return false;
+  }
+
+  const response = await accountingRequest("start");
+  if (response.status === 404) {
+    await response.body?.cancel();
+    throw new Error(
+      "Memory wire-accounting route was expected but unavailable. Ensure the root integration runner started Toolshed with CF_MEMORY_WIRE_ACCOUNTING_TOKEN and ENV=development or ENV=test.",
+    );
+  }
+  if (!response.ok) {
+    throw new Error(await accountingErrorMessage(response, "start"));
+  }
+  await response.body?.cancel();
+  return true;
+}
+
+async function stopMemoryWireAccounting(): Promise<MemoryWireAccountingReport> {
+  const response = await accountingRequest("stop");
+  if (!response.ok) {
+    throw new Error(await accountingErrorMessage(response, "stop"));
+  }
+
+  const payload: unknown = await response.json().catch((cause) => {
+    throw new Error("Memory wire-accounting stop returned invalid JSON", {
+      cause,
+    });
+  });
+  if (!isMemoryWireAccountingReport(payload)) {
+    throw new Error(
+      "Memory wire-accounting stop returned a JSON payload with an unexpected schema",
+    );
+  }
+  return payload;
+}
+
+function isMemoryWireAccountingReport(
+  payload: unknown,
+): payload is MemoryWireAccountingReport {
+  if (payload === null || typeof payload !== "object") return false;
+  const object = payload as Record<string, unknown>;
+  return typeof object.totals === "object" && object.totals !== null &&
+    Array.isArray(object.byDirection) &&
+    Array.isArray(object.byConnection) &&
+    Array.isArray(object.byMetadataKind) &&
+    Array.isArray(object.byClassification) &&
+    Array.isArray(object.records);
+}
 
 describe("lunch poll: two users vote on a shared option", () => {
   const hostShell = new ShellIntegration({
@@ -139,8 +227,12 @@ describe("lunch poll: two users vote on a shared option", () => {
     const view = { spaceName: SPACE_NAME, pieceId };
     const hostPage = hostShell.page();
     const guestPage = guestShell.page();
+    let accountingStarted = false;
+    let accountingStopped = false;
 
     try {
+      accountingStarted = await startMemoryWireAccounting();
+
       await timer.run(
         "navigate + login both",
         () =>
@@ -289,7 +381,34 @@ describe("lunch poll: two users vote on a shared option", () => {
             }),
           ]),
       );
+      await timer.run(
+        "final runtimes idle for accounting",
+        () =>
+          Promise.all([
+            waitForRuntimeIdle(hostPage, { timeout: PROPAGATION_TIMEOUT }),
+            waitForRuntimeIdle(guestPage, { timeout: PROPAGATION_TIMEOUT }),
+          ]),
+      );
+
+      if (accountingStarted) {
+        const report = await stopMemoryWireAccounting();
+        accountingStopped = true;
+        const analysis = analyzeLunchPollWireAccounting(report);
+        console.log(formatLunchPollWireAccounting(analysis));
+        const errors = validateLunchPollWireAccounting(analysis);
+        assert(
+          errors.length === 0,
+          `Memory wire-accounting invariants failed:\n${errors.join("\n")}`,
+        );
+      }
     } finally {
+      if (accountingStarted && !accountingStopped) {
+        await stopMemoryWireAccounting().catch((error) => {
+          console.error(
+            `Failed to stop Memory wire-accounting during cleanup: ${error}`,
+          );
+        });
+      }
       logStepTimings("lunch-poll vote", timer);
       for (
         const [page, label] of [[hostPage, HOST], [guestPage, GUEST]] as const
