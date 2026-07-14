@@ -1,15 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-cross-space-integrity.test.ts": [
-    "64:38:1n7cv82",
-    "242:26:1x3ca4o",
-    "308:21:1x3ca4o",
-    "309:23:1x3ca4o",
-    "439:8:11y5d8i",
-    "544:37:mvavvx",
-    "622:27:1x3ca4o",
-    "683:39:18m3df7",
-    "684:28:192di7d",
-  ],
   "packages/runner/test/cfc-declared-monotonicity.test.ts": [
     "124:60:1y3k8n",
   ],

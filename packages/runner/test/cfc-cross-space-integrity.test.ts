@@ -55,15 +55,19 @@ type PersistedDoc = {
   value?: unknown;
   cfc?: { labelMap?: { entries: LabelMapEntry[] } };
 } | undefined;
+type GeoSourceDoc = { lat: string; secret: string };
+type NestedSourceDoc = {
+  foo: { bar: string; secret: string };
+  baz: string;
+  secret: string;
+};
 
 const readDoc = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
   space: MemorySpace,
-  id: string,
+  id: URI,
 ): PersistedDoc =>
-  (storageManager.open(space).replica as unknown as {
-    getDocument(id: string): PersistedDoc;
-  }).getDocument(id);
+  storageManager.open(space).replica.getDocument(id) as PersistedDoc;
 
 const entriesFor = (doc: PersistedDoc, path: string[]): LabelMapEntry[] =>
   (doc?.cfc?.labelMap?.entries ?? []).filter((e) =>
@@ -228,7 +232,7 @@ describe("CFC cross-space integrity", () => {
       }]);
 
       const tx = runtime.edit();
-      const src = runtime.getCell(spaceA, "s1c-src", undefined, tx);
+      const src = runtime.getCell<string>(spaceA, "s1c-src", undefined, tx);
       const sink = runtime.getCell(
         spaceB,
         "s1c-sink",
@@ -239,7 +243,7 @@ describe("CFC cross-space integrity", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      sink.set({ ref: src as unknown as string });
+      sink.set({ ref: src });
       tx.prepareCfc();
       expect((await tx.commit()).error).toBeUndefined();
 
@@ -289,7 +293,7 @@ describe("CFC cross-space integrity", () => {
       }]);
 
       const tx = runtime.edit();
-      const src = runtime.getCell(spaceA, "s1d-src", undefined, tx);
+      const src = runtime.getCell<string>(spaceA, "s1d-src", undefined, tx);
       const sink = runtime.getCell(
         spaceB,
         "s1d-sink",
@@ -305,8 +309,8 @@ describe("CFC cross-space integrity", () => {
       );
       // Both fields hold the SAME cross-space link; exactCopyOf verifies it.
       sink.set({
-        reading: src as unknown as string,
-        confirmed: src as unknown as string,
+        reading: src,
+        confirmed: src,
       });
       tx.prepareCfc();
       expect((await tx.commit()).error).toBeUndefined();
@@ -436,7 +440,7 @@ describe("CFC cross-space integrity", () => {
           },
         },
         required: ["field"],
-      } as unknown as JSONSchema, tx);
+      } as JSONSchema, tx);
       cell.set({ field: "x" });
       tx.prepareCfc();
       const result = await tx.commit();
@@ -530,7 +534,12 @@ describe("CFC cross-space integrity", () => {
 
       // Space B links ONLY the `lat` sub-path.
       const tx = runtime.edit();
-      const src = runtime.getCell(spaceA, "s3b-src", undefined, tx);
+      const src = runtime.getCell<GeoSourceDoc>(
+        spaceA,
+        "s3b-src",
+        undefined,
+        tx,
+      );
       const sink = runtime.getCell(
         spaceB,
         "s3b-sink",
@@ -541,7 +550,7 @@ describe("CFC cross-space integrity", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      sink.set({ lat: src.key("lat") as unknown as string });
+      sink.set({ lat: src.key("lat") });
       tx.prepareCfc();
       expect((await tx.commit()).error).toBeUndefined();
 
@@ -597,7 +606,12 @@ describe("CFC cross-space integrity", () => {
       );
 
       const tx = runtime.edit();
-      const src = runtime.getCell(spaceA, "s3d-src", undefined, tx);
+      const src = runtime.getCell<NestedSourceDoc>(
+        spaceA,
+        "s3d-src",
+        undefined,
+        tx,
+      );
       // Destination schema declares ONLY foo.bar and baz.
       const sink = runtime.getCell(
         spaceB,
@@ -619,7 +633,7 @@ describe("CFC cross-space integrity", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      sink.set({ data: src as unknown as string });
+      sink.set({ data: src });
       tx.prepareCfc();
       expect((await tx.commit()).error).toBeUndefined();
 
@@ -667,7 +681,12 @@ describe("CFC cross-space integrity", () => {
       );
 
       const tx = runtime.edit();
-      const src = runtime.getCell(spaceA, "s3e-src", undefined, tx);
+      const src = runtime.getCell<NestedSourceDoc>(
+        spaceA,
+        "s3e-src",
+        undefined,
+        tx,
+      );
       const sink = runtime.getCell(
         spaceB,
         "s3e-sink",
@@ -680,8 +699,8 @@ describe("CFC cross-space integrity", () => {
       );
       // Link ONLY the chosen leaves.
       sink.set({
-        bar: src.key("foo").key("bar") as unknown as string,
-        baz: src.key("baz") as unknown as string,
+        bar: src.key("foo").key("bar"),
+        baz: src.key("baz"),
       });
       tx.prepareCfc();
       expect((await tx.commit()).error).toBeUndefined();
