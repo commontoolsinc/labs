@@ -142,6 +142,12 @@ export const EnvSchema = z.object({
   ).optional(),
   MEMORY_URL: z.string().default("http://localhost:8000"),
 
+  // Diagnostic-only Memory v2 websocket wire-accounting endpoint token.
+  // Empty/unset disables the endpoint and avoids constructing an observer.
+  // The route also fail-closes unless ENV is explicitly development or test.
+  // Never log this value or return it in an HTTP response.
+  CF_MEMORY_WIRE_ACCOUNTING_TOKEN: z.string().default(""),
+
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
 
