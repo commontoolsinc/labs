@@ -28,6 +28,16 @@ Deno.test("selectIntegrationTestFiles matches a single file by name", () => {
   ]);
 });
 
+Deno.test("selectIntegrationTestFiles prefers an exact filename match", () => {
+  const files = ["counter.test.ts", "nested-counter.test.ts"];
+  assertEquals(selectIntegrationTestFiles(files, "counter"), [
+    "counter.test.ts",
+  ]);
+  assertEquals(selectIntegrationTestFiles(files, "counter.test.ts"), [
+    "counter.test.ts",
+  ]);
+});
+
 Deno.test("selectIntegrationTestFiles returns empty when nothing matches", () => {
   assertEquals(
     selectIntegrationTestFiles(["counter.test.ts"], "nonexistent"),
