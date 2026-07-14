@@ -4,8 +4,9 @@ This plan covers two follow-ups to the
 [`DataUnavailable` specification](../specs/data-unavailability.md): the pending
 renderer continuity behavior and the staged migration of the remaining
 asynchronous APIs. The renderer portion, `latestComplete()`, direct streaming
-generation results, direct compilation results, structured SQLite queries, and
-availability-aware Wish results are implemented; the later API stages remain.
+generation results, direct compilation results, structured SQLite queries,
+availability-aware Wish results, and typed dialog results are implemented; the
+later API stages remain.
 
 The complementary `latestComplete()` helper is now implemented and specified in
 the [DataUnavailable spec](../specs/data-unavailability.md#latestcomplete-snapshot-helper).
@@ -15,7 +16,7 @@ unavailability; `latestComplete()` retains a coherent prior value.
 ## Status
 
 - Pending renderer continuity: implemented and tested.
-- Remaining asynchronous API migration: A1-A4 complete; A5 is next.
+- Remaining asynchronous API migration: A1-A5 complete; A6 is next.
 
 Keep this file live while any API stage remains. When all stages are complete,
 update the DataUnavailable spec and archive this plan under
@@ -332,19 +333,19 @@ return (
 remain on the dialog object unchanged. `pending` remains independent turn
 activity; `.result` is the availability-aware presented data channel.
 
-- [ ] Add a typed dialog overload and transformer schema injection for its
+- [x] Add a typed dialog overload and transformer schema injection for its
       `result: AsyncResult<T>` channel.
-- [ ] Do not manufacture a perpetual pending result for dialogs which do not
+- [x] Do not manufacture a perpetual pending result for dialogs which do not
       declare or use `presentResult`; their public type omits that channel even
       if legacy raw state remains readable internally.
-- [ ] Before the first presentation, expose pending while a turn can still
+- [x] Before the first presentation, expose pending while a turn can still
       produce it and error when that attempt fails terminally.
-- [ ] After a successful presentation, preserve that result across later active
+- [x] After a successful presentation, preserve that result across later active
       turns. The independent turn-activity flag and last-turn failure remain
       explicit rather than overwriting usable presented data.
-- [ ] Preserve message append/cancel streams, pins, flattened tools, tool-call
+- [x] Preserve message append/cancel streams, pins, flattened tools, tool-call
       availability handling, queueing, and CFC attribution.
-- [ ] Migrate unsafe `as T | undefined` result casts to
+- [x] Migrate unsafe `as T | undefined` result casts to
       `resultOf(dialog.result)`.
 
 **A5 exit:** structured dialog results are typed and availability-aware without

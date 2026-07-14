@@ -115,6 +115,41 @@ its partial channel then remains pending while the final object resolves.
 The runtime retains legacy persisted generation state internally, but the
 public streaming API does not expose its sibling state fields or metadata.
 
+## llmDialog\<T\>
+
+Use `llmDialog<T>()` for a multi-turn conversation whose model can publish a
+structured result with `presentResult`. The transformer derives that tool's
+schema from `T`; do not add `resultSchema` manually.
+
+```typescript
+// Shown for illustration only.
+const dialog = llmDialog<ResearchResult>({
+  messages,
+  tools: { search: patternTool(search) },
+});
+const result = resultOf(dialog.result);
+
+return (
+  <>
+    <cf-message-beads $messages={messages} pending={dialog.pending} />
+    {hasError(dialog.result)
+      ? <p>{dialog.result.error.message}</p>
+      : <ResearchView result={result} />}
+  </>
+);
+```
+
+`dialog.pending` reports whether a turn is active. It is independent of
+`dialog.result`: after `presentResult` succeeds, later turns keep the last
+successful result even while pending or if that turn fails. The separate
+`dialog.error` field reports the most recent failed turn. Before the first
+presentation, `dialog.result` is pending; a terminal failure changes it to an
+error availability value.
+
+Calling `llmDialog({ messages })` without a result type creates a control-only
+dialog. It has `addMessage`, `pending`, cancellation, pinning, and tool state,
+but no public `result` channel and no perpetual result-pending marker.
+
 As with fetch, `resultOf(request) ?? previousValue` is not a
 fallback-while-loading mechanism: an unavailable marker remains present at
 runtime. Keep the request for explicit status UI, or retain a last successful

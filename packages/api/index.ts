@@ -2014,6 +2014,8 @@ export interface BuiltInLLMParams {
    * When provided, injects a `presentResult` built-in tool that the LLM can call
    * to present a structured result matching this schema. The result is stored on the
    * dialog state's `result` field. Can be called multiple times (overwrites previous).
+   * Pattern code should normally use `llmDialog<T>()`; the transformer injects
+   * this schema from `T`.
    */
   resultSchema?: JSONSchema;
   /**

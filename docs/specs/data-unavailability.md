@@ -777,8 +777,14 @@ use does not currently justify public metadata projections; a future metadata
 use should add a narrowly named zero-node helper instead of restoring `.result`
 and sibling state fields.
 
-`llmDialog` remains stateful and is outside this direct-result migration. Its
-implemented cancellation stream is unchanged.
+`llmDialog` remains a multi-channel state object. A typed
+`llmDialog<T>()` adds `result: AsyncResult<T>` and an inferred `presentResult`
+tool schema. That result is pending before the first presentation and becomes
+an error if the first producing turn fails terminally. Once a value has been
+presented, later active or failed turns retain it; `pending` and `error` report
+the independent turn lifecycle. An untyped control-only dialog has no public
+result channel and does not manufacture a result marker. Cancellation, message,
+pinning, flattened-tool, queueing, and CFC behavior are unchanged.
 
 Legacy persisted generation state may contain `{ pending: false, error }`
 without explicit result or partial markers. Internal state schemas continue to
