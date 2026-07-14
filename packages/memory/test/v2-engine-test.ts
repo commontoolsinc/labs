@@ -214,6 +214,63 @@ Deno.test("memory v2 engine reserves sync schema reference strings", async () =>
       );
     }
 
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "entity:reserved-sync-schema-ref-hidden-by-set",
+              value: toEntityDocument({
+                $alias: {
+                  id: "of:target",
+                  path: [],
+                  schema: reservedRef,
+                },
+              }),
+            }, {
+              op: "set",
+              id: "entity:reserved-sync-schema-ref-hidden-by-set",
+              value: toEntityDocument({ safe: true }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved sync schema reference",
+    );
+    assertEquals(
+      read(engine, { id: "entity:reserved-sync-schema-ref-hidden-by-set" }),
+      null,
+    );
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+                value: reservedRef,
+              }],
+            }, {
+              op: "delete",
+              id,
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved sync schema reference",
+    );
+
     assertEquals(
       read(engine, { id }),
       toEntityDocument({

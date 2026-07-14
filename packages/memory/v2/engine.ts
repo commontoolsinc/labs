@@ -5966,13 +5966,9 @@ const validateStoredSyncSchemaRefs = (
   branch: BranchName,
   revisions: readonly AppliedRevision[],
 ): void => {
-  const candidates = new Set<string>();
-  const finalRevisions = new Map<string, AppliedRevision>();
+  const candidates: AppliedRevision[] = [];
 
   for (const revision of revisions) {
-    const scopeKey = revision.scopeKey ?? DEFAULT_SCOPE_KEY;
-    const key = revisionKey(branch, revision.id, scopeKey);
-    finalRevisions.set(key, revision);
     if (
       (revision.op === "set" &&
         findSyncSchemaRef(revision.document) !== undefined) ||
@@ -5980,15 +5976,11 @@ const validateStoredSyncSchemaRefs = (
         (containsSyncSchemaRefString(revision.patches) ||
           revision.patches?.some((patch) => patch.op === "move") === true))
     ) {
-      candidates.add(key);
+      candidates.push(revision);
     }
   }
 
-  for (const key of candidates) {
-    const revision = finalRevisions.get(key);
-    if (revision === undefined || revision.op === "delete") {
-      continue;
-    }
+  for (const revision of candidates) {
     const scopeKey = revision.scopeKey ?? DEFAULT_SCOPE_KEY;
     let document: EntityDocument | undefined;
     if (revision.op === "set") {
