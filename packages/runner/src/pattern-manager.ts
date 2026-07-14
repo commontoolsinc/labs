@@ -40,6 +40,10 @@ import {
   writeSourceDocs,
 } from "./compilation-cache/cell-cache.ts";
 import {
+  isDeterministicCompileFailure,
+  markDeterministicCompileFailure,
+} from "./harness/compile-failure.ts";
+import {
   isFabricImportSpecifier,
   parseFabricRef,
   pinnedIdentity,
@@ -144,6 +148,16 @@ export class PatternManager {
     string,
     Promise<Pattern | undefined>
   >();
+  // Session-local negative memo for compile failures that are deterministic
+  // over a fully loaded, Merkle-verified source closure. Verification failure,
+  // absent/incomplete storage, resolution, and evaluation remain retryable.
+  // Keyed by `${space}\0${entryIdentity}` and runtimeVersion so a version bump
+  // re-opens the attempt. Bounded FIFO to cap memory.
+  private coldLoadNegativeMemo = new Map<
+    string,
+    { runtimeVersion: string | undefined }
+  >();
+  private static readonly COLD_LOAD_NEGATIVE_MEMO_MAX = 512;
   // Content-hash → { compiled pattern, the space its closure was first written
   // into }. The space is tracked so a cross-space cache hit can replicate the
   // source/compiled closure into the requested space (see compileOrGetPattern):
@@ -866,8 +880,22 @@ export class PatternManager {
       this.esmCacheStats.byIdentityHits++;
       return live;
     }
-    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
+    // Check before single-flight: follower retries re-enter from the top and
+    // should observe a deterministic failure recorded by the leader.
     const key = `${space}\0${entryIdentity}`;
+    if (this.coldLoadNegativeMemo.size > 0) {
+      const negative = this.coldLoadNegativeMemo.get(key);
+      if (negative !== undefined) {
+        if (
+          negative.runtimeVersion === await getCompileCacheRuntimeVersion()
+        ) {
+          return undefined;
+        }
+        // A version change re-opens the identity and discards stale state.
+        this.coldLoadNegativeMemo.delete(key);
+      }
+    }
+    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
     const pending = this.inProgressByIdentityLoads.get(key);
     if (pending === undefined) {
       const load = this.loadPatternByIdentityFromStorage(
@@ -985,6 +1013,32 @@ export class PatternManager {
     }
   }
 
+  /** Record one deterministic compile failure for this session/version. */
+  private memoizeColdLoadFailure(
+    space: MemorySpace,
+    entryIdentity: string,
+    runtimeVersion: string | undefined,
+    reason: string,
+  ): void {
+    if (
+      this.coldLoadNegativeMemo.size >=
+        PatternManager.COLD_LOAD_NEGATIVE_MEMO_MAX
+    ) {
+      const oldest = this.coldLoadNegativeMemo.keys().next().value;
+      if (oldest !== undefined) this.coldLoadNegativeMemo.delete(oldest);
+    }
+    this.coldLoadNegativeMemo.set(`${space}\0${entryIdentity}`, {
+      runtimeVersion,
+    });
+    logger.error("load-pattern-by-identity-negative-memo", () => [
+      `entry=${entryIdentity}`,
+      `space=${space}`,
+      `runtimeVersion=${runtimeVersion}`,
+      `reason=${reason}`,
+      "further loads are suppressed for this runtime session/version",
+    ]);
+  }
+
   /**
    * Runtime-version-bump recovery for a content-addressed pattern reference:
    * recompile from the verified source closure, letting fabric imports refetch
@@ -1025,8 +1079,10 @@ export class PatternManager {
         { fabricImports: { space } },
       );
       if (compiled.entryIdentity !== entryIdentity) {
-        throw new Error(
-          `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
+        throw markDeterministicCompileFailure(
+          new Error(
+            `source closure recompiled to ${compiled.entryIdentity}, expected ${entryIdentity}`,
+          ),
         );
       }
       const cachedModules: CachedCompiledModule[] = compiled.modules.map(
@@ -1073,6 +1129,17 @@ export class PatternManager {
         `symbol=${symbol}`,
         String(error),
       ]);
+      // Only engine/local failures explicitly classified after source-closure
+      // verification are memoized. Resolution and evaluation errors carry no
+      // marker and are retried on the next call.
+      if (isDeterministicCompileFailure(error)) {
+        this.memoizeColdLoadFailure(
+          space,
+          entryIdentity,
+          cacheOpts?.runtimeVersion,
+          String(error),
+        );
+      }
       return undefined;
     }
   }

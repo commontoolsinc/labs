@@ -40,6 +40,7 @@ import {
   pretransformProgramForModules,
   transformInjectHelperModule,
 } from "./pretransform.ts";
+import { markDeterministicCompileFailure } from "./compile-failure.ts";
 import {
   type ModuleImportEdges,
   resolveModuleImports,
@@ -95,6 +96,15 @@ import { isFabricImportSpecifier } from "../sandbox/fabric-import-specifier.ts";
 import { validateCfcPolicyArtifactManifest } from "../cfc/policy.ts";
 
 const logger = getLogger("engine");
+
+/** Run one pure compile step, classifying only its synchronous failures. */
+function deterministicCompileStep<T>(step: () => T): T {
+  try {
+    return step();
+  } catch (error) {
+    throw markDeterministicCompileFailure(error);
+  }
+}
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -740,10 +750,13 @@ export class Engine extends EventTarget implements Harness {
     // stored bytes are exactly what their identities were computed over, so
     // the identity check below still holds, and the successful compile
     // writes back under the current runtimeVersion (self-heal on load).
-    const injectedInput = transformInjectHelperModule({
-      main: entryFilename,
-      files: resolvedFiles,
-    }, { tolerateStoredLegacyEnvelope: true });
+    // This pretransform is pure compute over the verified stored bytes.
+    const injectedInput = deterministicCompileStep(() =>
+      transformInjectHelperModule({
+        main: entryFilename,
+        files: resolvedFiles,
+      }, { tolerateStoredLegacyEnvelope: true })
+    );
     const engineResolver = new EngineProgramResolver(
       { main: entryFilename, files: injectedInput.files },
       this.ctRuntime.staticCache,
@@ -756,6 +769,8 @@ export class Engine extends EventTarget implements Harness {
       })
       : undefined;
     const resolver = fabricResolver ?? engineResolver;
+    // Resolution may perform storage/network I/O for fabric mounts. Its
+    // failures are intentionally left unmarked and therefore retryable.
     const resolvedProgram = await this.resolve(resolver);
     const mounts = fabricResolver?.mounts() ?? [];
     const specifierAliases = fabricResolver?.specifierAliases() ?? new Map();
@@ -764,7 +779,9 @@ export class Engine extends EventTarget implements Harness {
     // compilation (authored entry modules were injected before resolve above).
     const resolvedForCompile = {
       ...resolvedProgram,
-      files: injectMountSources(resolvedProgramFiles),
+      files: deterministicCompileStep(() =>
+        injectMountSources(resolvedProgramFiles)
+      ),
     };
     const moduleFiles = resolvedProgramFiles.filter((f) =>
       !f.name.endsWith(".d.ts")
@@ -787,25 +804,29 @@ export class Engine extends EventTarget implements Harness {
       mounts,
     );
 
-    const emitted = compiler.compileToModules(resolvedForCompile, {
-      runtimeModules: Engine.runtimeModuleNames(),
-      specifierAliases,
-      beforeTransformers: (program) => {
-        const pipeline = new (compilerStack()
-          .CommonFabricTransformerPipeline)({
-          moduleIdentities: identityByPath,
-        });
-        return {
-          factories: pipeline.toFactories(program),
-          getDiagnostics: () => pipeline.getDiagnostics(),
-          getPolicyManifests: () => pipeline.getPolicyManifests(),
-        };
-      },
-    });
+    const emitted = deterministicCompileStep(() =>
+      compiler.compileToModules(resolvedForCompile, {
+        runtimeModules: Engine.runtimeModuleNames(),
+        specifierAliases,
+        beforeTransformers: (program) => {
+          const pipeline = new (compilerStack()
+            .CommonFabricTransformerPipeline)({
+            moduleIdentities: identityByPath,
+          });
+          return {
+            factories: pipeline.toFactories(program),
+            getDiagnostics: () => pipeline.getDiagnostics(),
+            getPolicyManifests: () => pipeline.getPolicyManifests(),
+          };
+        },
+      })
+    );
     for (const file of moduleFiles) {
       if (!emitted.has(file.name)) {
-        throw new Error(
-          `Recompile from source produced no body for '${file.name}'`,
+        throw markDeterministicCompileFailure(
+          new Error(
+            `Recompile from source produced no body for '${file.name}'`,
+          ),
         );
       }
     }
@@ -837,13 +858,13 @@ export class Engine extends EventTarget implements Harness {
         imports,
       };
     });
+    const entryIdentity = identityByPath.get(entryFilename)!;
     for (const module of modules) {
       this.ctRuntime.registerCfcPolicyManifests(
         undefined,
         module.policyManifests ?? [],
       );
     }
-    const entryIdentity = identityByPath.get(entryFilename)!;
     return { modules, entryIdentity };
   }
 
