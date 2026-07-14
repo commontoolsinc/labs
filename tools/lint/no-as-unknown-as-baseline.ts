@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-policy-template.test.ts": [
-    "44:34:1117z3v",
-  ],
   "packages/runner/test/cfc-policy.test.ts": [
     "180:26:1tw68qx",
     "189:40:tpx0md",

@@ -40,8 +40,7 @@ const manifestBody = () => ({
 });
 
 type MutableRecord = Record<string, unknown>;
-const mutableBody = (): MutableRecord =>
-  structuredClone(manifestBody()) as unknown as MutableRecord;
+const mutableBody = (): MutableRecord => structuredClone(manifestBody());
 const mutableTemplate = (body: MutableRecord): MutableRecord =>
   body.template as MutableRecord;
 const mutableRule = (body: MutableRecord): MutableRecord =>
