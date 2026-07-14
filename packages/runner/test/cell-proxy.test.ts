@@ -328,22 +328,24 @@ describe("createProxy", () => {
     expect(names).toEqual(["first", "second", "third"]);
   });
 
-  it.skip("should support pop() and only read the popped element", () => {
+  it("should support pop() and only read the popped element", () => {
     const c = runtime.getCell<{ a: number[] }>(
       space,
       "should support pop() and only read the popped element",
+      undefined,
+      tx,
     );
     c.set({ a: [] as number[] });
-    const proxy = c.getAsQueryResult();
+    const proxy = c.getAsQueryResult([], tx, true);
     proxy.a = [1, 2, 3];
     const result = proxy.a.pop();
     const log = txToReactivityLog(tx);
     const pathsRead = log.reads.map((r) => r.path.join("."));
-    expect(pathsRead).toContain("a.2");
+    expect(pathsRead).toContain("value.a.2");
     // TODO(seefeld): diffAndUpdate could be more optimal here, right now it'll
     // mark as read the whole array since it isn't aware of the pop operation.
-    // expect(pathsRead).not.toContain("a.0");
-    // expect(pathsRead).not.toContain("a.1");
+    // expect(pathsRead).not.toContain("value.a.0");
+    // expect(pathsRead).not.toContain("value.a.1");
     expect(result).toEqual(3);
     expect(proxy.a).toEqual([1, 2]);
   });
