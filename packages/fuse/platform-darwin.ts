@@ -16,10 +16,24 @@ import {
 
 // --- Library paths ---
 
-const LIBFUSE_PATHS = [
-  "/usr/local/lib/libfuse-t.dylib", // FUSE-T (kext-less, NFS v4 based)
-  "/usr/local/lib/libfuse.2.dylib", // macFUSE (kernel extension)
-];
+/**
+ * Candidate libfuse locations, in preference order. FUSE-T's installer
+ * supports two layouts: the root install symlinks the library into
+ * /usr/local/lib, and the per-user install (running the installer's
+ * postinstall as a non-root user) places it under
+ * ~/.fuse-t/usr/local/lib. macFUSE installs into /usr/local/lib only.
+ */
+export function libfusePaths(
+  env: { get(name: string): string | undefined } = Deno.env,
+): string[] {
+  const paths = ["/usr/local/lib/libfuse-t.dylib"];
+  const home = env.get("HOME");
+  if (home) {
+    paths.push(`${home}/.fuse-t/usr/local/lib/libfuse-t.dylib`);
+  }
+  paths.push("/usr/local/lib/libfuse.2.dylib"); // macFUSE (kernel extension)
+  return paths;
+}
 
 // --- Darwin-specific FFI symbols (FUSE v2) ---
 
@@ -173,7 +187,7 @@ const darwinPlatform: FusePlatform = {
     if (fullLib) return fullLib as unknown as FuseLib;
 
     const errors: string[] = [];
-    for (const path of LIBFUSE_PATHS) {
+    for (const path of libfusePaths()) {
       try {
         fullLib = Deno.dlopen(path, DARWIN_SYMBOLS);
         console.log(`Loaded ${path}`);

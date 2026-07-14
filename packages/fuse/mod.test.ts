@@ -13,7 +13,7 @@ import {
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
-import darwinPlatform from "./platform-darwin.ts";
+import darwinPlatform, { libfusePaths } from "./platform-darwin.ts";
 import linuxPlatform from "./platform-linux.ts";
 import { EACCES, EINVAL, EROFS } from "./platform.ts";
 
@@ -307,4 +307,22 @@ Deno.test("root space lookup decodes request names and replies with canonical na
     spaceName: "home",
     directoryName: "home",
   });
+});
+
+Deno.test("libfuse search includes the FUSE-T per-user install location", () => {
+  assertEquals(
+    libfusePaths(env({ HOME: "/Users/alice" })),
+    [
+      "/usr/local/lib/libfuse-t.dylib",
+      "/Users/alice/.fuse-t/usr/local/lib/libfuse-t.dylib",
+      "/usr/local/lib/libfuse.2.dylib",
+    ],
+  );
+  assertEquals(
+    libfusePaths(env({})),
+    [
+      "/usr/local/lib/libfuse-t.dylib",
+      "/usr/local/lib/libfuse.2.dylib",
+    ],
+  );
 });
