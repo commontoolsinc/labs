@@ -2492,6 +2492,136 @@ describe("anyOf optimization integration", () => {
   });
 });
 
+describe("link schema path narrowing", () => {
+  const SPACE = "did:null:null";
+  const TYPE = "application/json" as const;
+
+  function putDoc(
+    store: Map<string, Revision<State>>,
+    id: URI,
+    value: unknown,
+  ) {
+    const entity = id as Entity;
+    store.set(`${entity}/${TYPE}`, {
+      the: TYPE,
+      of: entity,
+      is: { value },
+      cause: hashOf({ the: TYPE, of: entity }),
+      since: 1,
+    } as Revision<State>);
+  }
+
+  function makeLink(
+    targetId: URI,
+    path: string[],
+    schema: JSONSchema,
+  ) {
+    return {
+      "/": {
+        [LINK_V1_TAG]: { id: targetId, path, schema },
+      },
+    };
+  }
+
+  const cases: Array<{
+    name: string;
+    targetPath: string[];
+    targetValue: unknown;
+    selectorPath: string[];
+    selectorSchema: JSONSchema;
+    linkSchema: JSONSchema;
+    expected: unknown;
+  }> = [
+    {
+      name: "narrows an object link schema to the selected property",
+      targetPath: [],
+      targetValue: { label: "Numbers", values: [1, 2, 3] },
+      selectorPath: ["label"],
+      selectorSchema: { type: "string" },
+      linkSchema: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          values: { type: "array", items: { type: "number" } },
+        },
+        required: ["label", "values"],
+      },
+      expected: "Numbers",
+    },
+    {
+      name: "narrows an array link schema to the selected element",
+      targetPath: [],
+      targetValue: [7, 8],
+      selectorPath: ["0"],
+      selectorSchema: { type: "number" },
+      linkSchema: { type: "array", items: { type: "number" } },
+      expected: 7,
+    },
+    {
+      name: "does not apply the link destination path to its schema",
+      targetPath: ["payload"],
+      targetValue: { payload: { label: "Nested" } },
+      selectorPath: ["label"],
+      selectorSchema: { type: "string" },
+      linkSchema: {
+        type: "object",
+        properties: { label: { type: "string" } },
+        required: ["label"],
+      },
+      expected: "Nested",
+    },
+    {
+      name: "drops an array link schema for its synthetic length property",
+      targetPath: [],
+      targetValue: [7, 8],
+      selectorPath: ["length"],
+      selectorSchema: { type: "number" },
+      linkSchema: { type: "array", items: { type: "number" } },
+      expected: 2,
+    },
+    {
+      name: "preserves a false link schema at the exact link path",
+      targetPath: [],
+      targetValue: "Rejected",
+      selectorPath: [],
+      selectorSchema: { type: "string" },
+      linkSchema: false,
+      expected: undefined,
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(testCase.name, () => {
+      const store = new Map<string, Revision<State>>();
+      const rootUri = `of:link-schema-root-${testCase.name}` as URI;
+      const targetUri = `of:link-schema-target-${testCase.name}` as URI;
+      const rootValue = makeLink(
+        targetUri,
+        testCase.targetPath,
+        testCase.linkSchema,
+      );
+      putDoc(store, rootUri, rootValue);
+      putDoc(store, targetUri, testCase.targetValue);
+
+      const traverser = getTraverser(store, {
+        path: ["value", ...testCase.selectorPath],
+        schema: testCase.selectorSchema,
+      });
+      const { ok: result } = traverser.traverse({
+        address: {
+          space: SPACE,
+          id: rootUri,
+          type: TYPE,
+          path: ["value"],
+        },
+        value: rootValue,
+      });
+
+      expect(result).toEqual(testCase.expected);
+    });
+  }
+});
+
 describe("anyOf fast-reject reactivity invariants (traverseCells)", () => {
   // These tests verify that the fast-reject optimization does NOT break
   // reactivity. When traverseCells=true (the default), the schemaTracker

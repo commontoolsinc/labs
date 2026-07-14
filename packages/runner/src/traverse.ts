@@ -226,7 +226,26 @@ function narrowAndCombineSelectorForLink(
     if (cached !== undefined) return cached;
   }
   const narrowed = narrowSchema(docPath, selector, targetPath, cfc);
-  narrowed.schema = combineOptionalSchema(narrowed.schema, linkSchema);
+  // A link schema describes the value at the link's target path. If the
+  // selector continues below the source link, narrow the link schema by that
+  // source-relative suffix before combining it with the selector schema.
+  // `targetPath` already accounts for the link's destination path, so applying
+  // that path to the link schema here would narrow it twice.
+  const linkSchemaPath = selector.path.length > docPath.length &&
+      pathStartsWith(selector.path, docPath)
+    ? selector.path.slice(docPath.length)
+    : [];
+  const narrowedLinkSchema = linkSchema !== undefined &&
+      linkSchemaPath.length > 0
+    // Match resolveLink(): if the link schema does not describe the remaining
+    // path (for example, an array's synthetic `length` property), the link
+    // stops contributing a schema rather than rejecting the traversal.
+    ? cfc.getSchemaAtPath(linkSchema, linkSchemaPath)
+    : linkSchema;
+  narrowed.schema = combineOptionalSchema(
+    narrowed.schema,
+    narrowedLinkSchema,
+  );
   const interned = internPathSelector(narrowed);
   if (key !== undefined) {
     if (_linkHopSelectorCache.size >= INTERN_CACHE_MAX) {
