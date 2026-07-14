@@ -841,7 +841,7 @@ describe("asCell with schema", () => {
     expect(value.context.alias.get().value).toBe(100);
   });
 
-  it.skip("should handle nested references", () => {
+  it("should handle nested references", () => {
     // Create a chain of references
     const innerCell = runtime.getCell<{ value: number }>(
       space,
@@ -903,17 +903,18 @@ describe("asCell with schema", () => {
     expect(isCell(value.context.nested)).toBe(true);
     expect(value.context.nested.get().value).toBe(42);
 
-    // Check that 4 unique documents were read (by entity ID)
+    // Check that exactly the 4 documents in the chain were read (by entity
+    // ID; journal read paths are rooted at the document facet, so cells are
+    // matched by document id rather than by full link equality).
     const log = txToReactivityLog(tx);
     const readEntityIds = new Set(log.reads.map((r) => r.id));
     expect(readEntityIds.size).toBe(4);
-
-    // Verify each cell was read using equals()
-    const readCells = log.reads.map((r) => runtime.getCellFromLink(r));
-    expect(readCells.some((c2) => c2.equals(cell))).toBe(true);
-    expect(readCells.some((c2) => c2.equals(ref3Cell))).toBe(true);
-    expect(readCells.some((c2) => c2.equals(ref2Cell))).toBe(true);
-    expect(readCells.some((c2) => c2.equals(innerCell))).toBe(true);
+    expect(readEntityIds.has(cell.getAsNormalizedFullLink().id)).toBe(true);
+    expect(readEntityIds.has(ref3Cell.getAsNormalizedFullLink().id)).toBe(true);
+    expect(readEntityIds.has(ref2Cell.getAsNormalizedFullLink().id)).toBe(true);
+    expect(readEntityIds.has(innerCell.getAsNormalizedFullLink().id)).toBe(
+      true,
+    );
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });
