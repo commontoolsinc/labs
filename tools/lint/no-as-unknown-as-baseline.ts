@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/memory/v2/engine.ts": [
-    "1020:15:1etu03n",
-  ],
   "packages/patterns/integration/cfc-browser-helpers.ts": [
     "81:32:13c6qjm",
   ],

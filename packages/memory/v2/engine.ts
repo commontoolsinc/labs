@@ -927,7 +927,9 @@ const isSchedulerRecord = (
 ): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-const isSchedulerObservationAddress = (value: unknown): boolean =>
+const isSchedulerObservationAddress = (
+  value: unknown,
+): value is SchedulerObservationAddress =>
   isSchedulerRecord(value) &&
   !("scopeKey" in value) &&
   !("scope_key" in value) &&
@@ -940,16 +942,20 @@ const isSchedulerObservationAddress = (value: unknown): boolean =>
   Array.isArray(value.path) &&
   value.path.every((part) => typeof part === "string");
 
-const isSchedulerAddressArray = (value: unknown): boolean =>
+const isSchedulerAddressArray = (
+  value: unknown,
+): value is SchedulerObservationAddress[] =>
   Array.isArray(value) && value.every(isSchedulerObservationAddress);
 
 const isCompleteActionScopeSummary = (
   value: unknown,
   implementationFingerprint: unknown,
   runtimeFingerprint: unknown,
-): boolean =>
+): value is CompleteActionScopeSummary =>
   isSchedulerRecord(value) && value.version === 1 && value.complete === true &&
+  typeof value.implementationFingerprint === "string" &&
   value.implementationFingerprint === implementationFingerprint &&
+  typeof value.runtimeFingerprint === "string" &&
   value.runtimeFingerprint === runtimeFingerprint &&
   isSchedulerObservationAddress(value.piece) &&
   isSchedulerAddressArray(value.reads) &&
@@ -957,67 +963,76 @@ const isCompleteActionScopeSummary = (
   isSchedulerAddressArray(value.materializerWriteEnvelopes) &&
   isSchedulerAddressArray(value.directOutputs);
 
+const isSchedulerActionOptions = (
+  value: unknown,
+): value is NonNullable<SchedulerActionObservation["actionOptions"]> =>
+  isSchedulerRecord(value) &&
+  (value.debounceMs === undefined ||
+    (typeof value.debounceMs === "number" &&
+      Number.isFinite(value.debounceMs) &&
+      value.debounceMs >= 0)) &&
+  (value.noDebounce === undefined ||
+    typeof value.noDebounce === "boolean") &&
+  (value.throttleMs === undefined ||
+    (typeof value.throttleMs === "number" &&
+      Number.isFinite(value.throttleMs) &&
+      value.throttleMs >= 0));
+
+const isSchedulerActionObservation = (
+  value: unknown,
+): value is SchedulerActionObservation =>
+  isSchedulerRecord(value) &&
+  !("executionContextKey" in value) &&
+  !("execution_context_key" in value) &&
+  (value.version === 1 || value.version === 2) &&
+  (value.ownerSpace === undefined || typeof value.ownerSpace === "string") &&
+  typeof value.branch === "string" &&
+  typeof value.pieceId === "string" &&
+  typeof value.actionId === "string" &&
+  typeof value.processGeneration === "number" &&
+  Number.isSafeInteger(value.processGeneration) &&
+  value.processGeneration >= 0 &&
+  (value.actionKind === "computation" || value.actionKind === "effect" ||
+    value.actionKind === "event-handler") &&
+  typeof value.implementationFingerprint === "string" &&
+  typeof value.runtimeFingerprint === "string" &&
+  (value.completeActionScopeSummary === undefined ||
+    (value.version === 2 &&
+      isCompleteActionScopeSummary(
+        value.completeActionScopeSummary,
+        value.implementationFingerprint,
+        value.runtimeFingerprint,
+      ))) &&
+  typeof value.observedAtSeq === "number" &&
+  Number.isSafeInteger(value.observedAtSeq) &&
+  value.observedAtSeq >= 0 &&
+  (value.observedAtLocalSeq === undefined ||
+    (typeof value.observedAtLocalSeq === "number" &&
+      Number.isSafeInteger(value.observedAtLocalSeq) &&
+      value.observedAtLocalSeq >= 0)) &&
+  (value.transactionKind === "dependency-collection" ||
+    value.transactionKind === "action-run" ||
+    value.transactionKind === "event-preflight") &&
+  isSchedulerAddressArray(value.reads) &&
+  isSchedulerAddressArray(value.shallowReads) &&
+  isSchedulerAddressArray(value.actualChangedWrites) &&
+  isSchedulerAddressArray(value.currentKnownWrites) &&
+  (value.declaredWrites === undefined
+    ? value.version === 2
+    : isSchedulerAddressArray(value.declaredWrites)) &&
+  isSchedulerAddressArray(value.materializerWriteEnvelopes) &&
+  (value.ignoredSchedulingWrites === undefined ||
+    isSchedulerAddressArray(value.ignoredSchedulingWrites)) &&
+  (value.actionOptions === undefined ||
+    isSchedulerActionOptions(value.actionOptions)) &&
+  (value.status === "success" || value.status === "failed") &&
+  (value.errorFingerprint === undefined ||
+    typeof value.errorFingerprint === "string");
+
 export const schedulerObservationFromValue = (
   value: unknown,
 ): SchedulerActionObservation | undefined => {
-  if (
-    !isSchedulerRecord(value) ||
-    "executionContextKey" in value ||
-    "execution_context_key" in value ||
-    (value.version !== 1 && value.version !== 2) ||
-    (value.ownerSpace !== undefined && typeof value.ownerSpace !== "string") ||
-    typeof value.branch !== "string" || typeof value.pieceId !== "string" ||
-    typeof value.actionId !== "string" ||
-    !Number.isSafeInteger(value.processGeneration) ||
-    Number(value.processGeneration) < 0 ||
-    (value.actionKind !== "computation" && value.actionKind !== "effect" &&
-      value.actionKind !== "event-handler") ||
-    typeof value.implementationFingerprint !== "string" ||
-    typeof value.runtimeFingerprint !== "string" ||
-    (value.completeActionScopeSummary !== undefined &&
-      (value.version !== 2 ||
-        !isCompleteActionScopeSummary(
-          value.completeActionScopeSummary,
-          value.implementationFingerprint,
-          value.runtimeFingerprint,
-        ))) ||
-    !Number.isSafeInteger(value.observedAtSeq) ||
-    Number(value.observedAtSeq) < 0 ||
-    (value.observedAtLocalSeq !== undefined &&
-      (!Number.isSafeInteger(value.observedAtLocalSeq) ||
-        Number(value.observedAtLocalSeq) < 0)) ||
-    (value.transactionKind !== "dependency-collection" &&
-      value.transactionKind !== "action-run" &&
-      value.transactionKind !== "event-preflight") ||
-    !isSchedulerAddressArray(value.reads) ||
-    !isSchedulerAddressArray(value.shallowReads) ||
-    !isSchedulerAddressArray(value.actualChangedWrites) ||
-    !isSchedulerAddressArray(value.currentKnownWrites) ||
-    (value.declaredWrites === undefined
-      ? value.version === 1
-      : !isSchedulerAddressArray(value.declaredWrites)) ||
-    !isSchedulerAddressArray(value.materializerWriteEnvelopes) ||
-    (value.ignoredSchedulingWrites !== undefined &&
-      !isSchedulerAddressArray(value.ignoredSchedulingWrites)) ||
-    (value.actionOptions !== undefined &&
-      (!isSchedulerRecord(value.actionOptions) ||
-        (value.actionOptions.debounceMs !== undefined &&
-          (typeof value.actionOptions.debounceMs !== "number" ||
-            !Number.isFinite(value.actionOptions.debounceMs) ||
-            value.actionOptions.debounceMs < 0)) ||
-        (value.actionOptions.noDebounce !== undefined &&
-          typeof value.actionOptions.noDebounce !== "boolean") ||
-        (value.actionOptions.throttleMs !== undefined &&
-          (typeof value.actionOptions.throttleMs !== "number" ||
-            !Number.isFinite(value.actionOptions.throttleMs) ||
-            value.actionOptions.throttleMs < 0)))) ||
-    (value.status !== "success" && value.status !== "failed") ||
-    (value.errorFingerprint !== undefined &&
-      typeof value.errorFingerprint !== "string")
-  ) {
-    return undefined;
-  }
-  return value as unknown as SchedulerActionObservation;
+  return isSchedulerActionObservation(value) ? value : undefined;
 };
 
 export interface SchedulerObservationSnapshot {
