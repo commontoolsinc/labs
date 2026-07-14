@@ -10,7 +10,9 @@ import {
 import type {
   BuiltInLLMMessage,
   BuiltInLLMTool,
+  Cell,
   JSONSchema,
+  Stream,
 } from "@commonfabric/api";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -135,11 +137,104 @@ const RESULT_SCHEMA = {
 } as const satisfies JSONSchema;
 
 type SentEmail = { route: string; recipient: string; subject: string };
+type SendMailAck = {
+  ok: true;
+  route: string;
+  recipient: string;
+  subject: string;
+};
+type SendMailEvent = {
+  recipient: string;
+  subject: string;
+  body: string | Record<string, unknown>;
+  result: Cell<SendMailAck>;
+};
+type SendMailState = {
+  emails: Cell<SentEmail[]>;
+  route: string;
+};
+type BriefingBody = string | Record<string, unknown>;
+type BriefingResult = {
+  title: string;
+  source: string;
+  body: BriefingBody;
+};
+type BriefingEvent = { result: Cell<BriefingResult> };
+type BriefingState = BriefingResult;
+type DirectCommandResult = {
+  command: string;
+  recipientHandle: string;
+};
+type DirectCommandEvent = { result: Cell<DirectCommandResult> };
+type DirectCommandState = DirectCommandResult;
+type DemoResult = {
+  addMessage: Stream<BuiltInLLMMessage>;
+  pending: boolean;
+  messages: BuiltInLLMMessage[];
+  emails: SentEmail[];
+};
+type ToolResultOutput = { type: string; value?: unknown };
+type ToolResultPart = {
+  type: "tool-result";
+  output: ToolResultOutput;
+};
+type ToolCallPart = {
+  type: "tool-call";
+  toolName: string;
+  input: Record<string, unknown>;
+};
 
 // Same widening the demo uses (packages/patterns/cfc/prompt-injection/
 // tools.ts PromptInjectionTool): a dialog tool that also declares its LLM
 // inputSchema.
 type DemoTool = BuiltInLLMTool & { inputSchema?: JSONSchema };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isToolResultPart(value: unknown): value is ToolResultPart {
+  return isRecord(value) &&
+    value.type === "tool-result" &&
+    isRecord(value.output) &&
+    typeof value.output.type === "string";
+}
+
+function isToolCallPart(value: unknown): value is ToolCallPart {
+  return isRecord(value) &&
+    value.type === "tool-call" &&
+    typeof value.toolName === "string" &&
+    isRecord(value.input);
+}
+
+function contentPart(message: BuiltInLLMMessage, index: number): unknown {
+  if (!Array.isArray(message.content)) {
+    throw new Error("Expected message content parts.");
+  }
+  return message.content[index];
+}
+
+function expectToolResultPart(
+  message: BuiltInLLMMessage,
+  index: number,
+): ToolResultPart {
+  const part = contentPart(message, index);
+  if (!isToolResultPart(part)) {
+    throw new Error("Expected a tool-result content part.");
+  }
+  return part;
+}
+
+function expectToolCallPart(
+  message: BuiltInLLMMessage,
+  index: number,
+): ToolCallPart {
+  const part = contentPart(message, index);
+  if (!isToolCallPart(part)) {
+    throw new Error("Expected a tool-call content part.");
+  }
+  return part;
+}
 
 // One demo agent (the unsafe raw reader or the safe direct-command path),
 // wired like main.tsx: logEmail-shaped sendMail + readRawBriefing tools on a
@@ -150,7 +245,7 @@ type DemoTool = BuiltInLLMTool & { inputSchema?: JSONSchema };
 // the safe agent sees).
 async function setupDemoAgent(
   route: string,
-  briefingBody: string | Record<string, unknown>,
+  briefingBody: BriefingBody,
 ) {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
@@ -231,7 +326,10 @@ async function setupDemoAgent(
       },
       required: ["emails", "route"],
     },
-    ({ recipient, subject, result }: any, { emails, route }: any) => {
+    (
+      { recipient, subject, result }: SendMailEvent,
+      { emails, route }: SendMailState,
+    ) => {
       emails.push({ route, recipient, subject });
       result.set({ ok: true, route, recipient, subject });
     },
@@ -262,7 +360,10 @@ async function setupDemoAgent(
       },
       required: ["title", "source", "body"],
     },
-    ({ result }: any, { title, source, body }: any) => {
+    (
+      { result }: BriefingEvent,
+      { title, source, body }: BriefingState,
+    ) => {
       result.set({ title, source, body });
     },
   );
@@ -287,7 +388,10 @@ async function setupDemoAgent(
       },
       required: ["command", "recipientHandle"],
     },
-    ({ result }: any, { command, recipientHandle }: any) => {
+    (
+      { result }: DirectCommandEvent,
+      { command, recipientHandle }: DirectCommandState,
+    ) => {
       result.set({ command, recipientHandle });
     },
   );
@@ -347,7 +451,7 @@ async function setupDemoAgent(
     RESULT_SCHEMA,
   );
 
-  const resultCell = runtime.getCell(
+  const resultCell = runtime.getCell<DemoResult>(
     space,
     `cfc-agent-demo-${route}`,
     RESULT_SCHEMA,
@@ -368,7 +472,7 @@ async function setupDemoAgent(
   return { result, recipientHandle, linkPath, dispose };
 }
 
-function waitForMessages(result: any, expectedCount: number) {
+function waitForMessages(result: Cell<DemoResult>, expectedCount: number) {
   let cancel: () => void;
   let timeout: ReturnType<typeof setTimeout>;
   return new Promise<void>((resolve, reject) => {
@@ -379,7 +483,7 @@ function waitForMessages(result: any, expectedCount: number) {
         ),
       );
     }, 5000);
-    cancel = result.sink(({ pending, messages }: any = {}) => {
+    cancel = result.sink(({ pending, messages }) => {
       if (pending === false && messages?.length === expectedCount) {
         resolve();
       }
@@ -459,11 +563,14 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
 
       // Refusal surface: the sendMail tool-result is an error the model can
       // read (the loop continued to the final assistant message above).
-      const messages = (await t.result.key("messages").pull()) as any[];
+      const messages = await t.result.key("messages").pull();
       const denial = messages[4];
       expect(denial.role).toBe("tool");
-      const output = denial.content[0].output;
+      const output = expectToolResultPart(denial, 0).output;
       expect(output.type).toBe("error-text");
+      if (typeof output.value !== "string") {
+        throw new Error("Expected error-text output to contain a string.");
+      }
       expect(output.value).toContain("Tool call denied");
       expect(output.value).toContain("requires integrity");
       expect(messages[5].role).toBe("assistant");
@@ -553,14 +660,15 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
       // getDirectCommand tool result (message 2) carries the opaque handle,
       // and the model's sendMail call (message 5) echoes it. If the runtime
       // stopped surfacing the handle, this fails.
-      const messages = (await t.result.key("messages").pull()) as any[];
+      const messages = await t.result.key("messages").pull();
       const commandResult = messages[2];
       expect(commandResult.role).toBe("tool");
       expect(JSON.stringify(commandResult.content)).toContain(t.linkPath);
       const sendCall = messages[5];
       expect(sendCall.role).toBe("assistant");
-      expect(sendCall.content[0].toolName).toBe("sendMail");
-      expect(sendCall.content[0].input.recipient).toBe(t.recipientHandle);
+      const sendCallPart = expectToolCallPart(sendCall, 0);
+      expect(sendCallPart.toolName).toBe("sendMail");
+      expect(sendCallPart.input.recipient).toBe(t.recipientHandle);
 
       // The direct-command send SUCCEEDED — the floor is satisfied by the
       // referenced cell's kernel-bound integrity, so the gate does not block
@@ -576,7 +684,7 @@ describe("CFC agent prompt-injection demo (end-to-end via mock)", () => {
       // error.
       const ack = messages[6];
       expect(ack.role).toBe("tool");
-      expect(ack.content[0].output.type).not.toBe("error-text");
+      expect(expectToolResultPart(ack, 0).output.type).not.toBe("error-text");
     } finally {
       await t.dispose();
     }
