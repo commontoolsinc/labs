@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/oncommit-race.test.ts": [
-    "115:35:wvkj30",
-  ],
   "packages/runner/test/pending-commit-durability.test.ts": [
     "49:25:1y1onvv",
   ],

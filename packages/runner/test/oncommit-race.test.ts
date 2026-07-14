@@ -15,6 +15,34 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 const signer = await Identity.fromPassphrase("test oncommit race");
 const space = signer.did();
 
+type TransactMessage = { requestId: string };
+type TestMemoryServer = {
+  transact(message: TransactMessage): Promise<unknown>;
+};
+
+function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isTestMemoryServer(value: unknown): value is TestMemoryServer {
+  return isRecord(value) && typeof value.transact === "function";
+}
+
+function emulatedServer(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+): TestMemoryServer {
+  const serverMethod = Reflect.get(storageManager, "server");
+  if (typeof serverMethod !== "function") {
+    throw new TypeError("Expected emulated storage manager server method");
+  }
+
+  const server = serverMethod.call(storageManager);
+  if (!isTestMemoryServer(server)) {
+    throw new TypeError("Expected emulated memory server");
+  }
+  return server;
+}
+
 describe("onCommit callback final outcome", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -112,17 +140,13 @@ describe("onCommit callback final outcome", () => {
     // a genuinely retryable failure, unlike a local abort. The scheduler retries
     // within the backpressure window and the second attempt lands. onCommit must
     // still fire exactly once, for the winning attempt, not once per attempt.
-    const server = (storageManager as unknown as {
-      server(): {
-        transact: (m: { requestId: string }) => Promise<unknown>;
-      };
-    }).server();
+    const server = emulatedServer(storageManager);
     const originalTransact = server.transact.bind(server);
     // Reject every commit until the handler has run a second time, so the
     // handler's own first commit is the one that conflicts (rejecting only "the
     // next transact" can hit an unrelated observation commit instead). Once the
     // retry re-runs the handler, its commit lands.
-    server.transact = (message: { requestId: string }) => {
+    server.transact = (message) => {
       if (attempts < 2) {
         return Promise.resolve({
           type: "response",
