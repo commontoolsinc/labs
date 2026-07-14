@@ -735,7 +735,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   });
 
   await t.step(
-    "holds the last usable root while its Cell is unavailable",
+    "marks the last usable root stale while its Cell is pending",
     async () => {
       const collector = createOpsCollector();
       const errors: Error[] = [];
@@ -765,12 +765,25 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         ),
         true,
       );
+      const readyRootCreate = collector.getOpsOfType("create-element")
+        .find((op) => "tagName" in op && op.tagName === "div");
+      const readyRootId = readyRootCreate && "nodeId" in readyRootCreate
+        ? readyRootCreate.nodeId
+        : undefined;
       collector.clear();
 
-      rootCell.set(DataUnavailable.error(new Error("temporarily unavailable")));
+      rootCell.set(DataUnavailable.pending());
       await new Promise((resolve) => setTimeout(resolve, 10));
-      assertEquals(collector.getOps().length, 0);
+      assertEquals(
+        collector.getOpsOfType("set-prop").some((op) =>
+          "nodeId" in op && op.nodeId === readyRootId && "key" in op &&
+          op.key === "data-cf-pending" && "value" in op && op.value === true
+        ),
+        true,
+      );
+      assertEquals(collector.getOpsOfType("remove-node").length, 0);
       assertEquals(errors, []);
+      collector.clear();
 
       rootCell.set(
         {
@@ -782,6 +795,13 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       );
       await new Promise((resolve) => setTimeout(resolve, 10));
       assertEquals(
+        collector.getOpsOfType("remove-prop").some((op) =>
+          "nodeId" in op && op.nodeId === readyRootId && "key" in op &&
+          op.key === "data-cf-pending"
+        ),
+        true,
+      );
+      assertEquals(
         collector.getOpsOfType("set-prop").some((op) =>
           "key" in op && op.key === "id" && "value" in op &&
           op.value === "updated"
@@ -792,7 +812,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   );
 
   await t.step(
-    "holds the last usable child while its Cell is unavailable",
+    "marks the last usable child stale while its Cell is pending",
     async () => {
       const collector = createOpsCollector();
       const childCell = new MockCell(DataUnavailable.pending());
@@ -815,32 +835,87 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       );
       collector.clear();
 
-      childCell.set("Ready");
+      childCell.set({
+        type: "vnode",
+        name: "button",
+        props: { id: "ready" },
+        children: ["Ready"],
+      } satisfies WorkerVNode);
       await new Promise((resolve) => setTimeout(resolve, 10));
-      assertEquals(
-        collector.getOpsOfType("create-text").some((op) =>
-          "text" in op && op.text === "Ready"
-        ),
-        true,
-      );
+      const readyChildCreate = collector.getOpsOfType("create-element")
+        .find((op) => "tagName" in op && op.tagName === "button");
+      const readyChildId = readyChildCreate && "nodeId" in readyChildCreate
+        ? readyChildCreate.nodeId
+        : undefined;
       collector.clear();
 
-      childCell.set(DataUnavailable.syncing());
+      childCell.set(DataUnavailable.pending());
       await new Promise((resolve) => setTimeout(resolve, 10));
       assertEquals(
-        collector.getOps().length,
-        0,
-        "unavailability preserves the existing child",
-      );
-
-      childCell.set("Updated");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      assertEquals(
-        collector.getOpsOfType("update-text").some((op) =>
-          "text" in op && op.text === "Updated"
+        collector.getOpsOfType("set-prop").some((op) =>
+          "nodeId" in op && op.nodeId === readyChildId && "key" in op &&
+          op.key === "data-cf-pending" && "value" in op && op.value === true
         ),
         true,
       );
+      assertEquals(collector.getOpsOfType("remove-node").length, 0);
+      collector.clear();
+
+      childCell.set({
+        type: "vnode",
+        name: "button",
+        props: { id: "updated" },
+        children: ["Updated"],
+      } satisfies WorkerVNode);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(
+        collector.getOpsOfType("remove-prop").some((op) =>
+          "nodeId" in op && op.nodeId === readyChildId && "key" in op &&
+          op.key === "data-cf-pending"
+        ),
+        true,
+      );
+    },
+  );
+
+  await t.step(
+    "clears roots for non-pending unavailable reasons",
+    async () => {
+      const unavailableValues = [
+        DataUnavailable.error(new Error("failed")),
+        DataUnavailable.syncing(),
+        DataUnavailable.schemaMismatch(),
+      ];
+
+      for (const unavailable of unavailableValues) {
+        const collector = createOpsCollector();
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "div",
+          props: {},
+          children: ["Ready"],
+        } satisfies WorkerVNode);
+        const reconciler = new WorkerReconciler({ onOps: collector.onOps });
+
+        reconciler.mount(rootCell as unknown as Cell<WorkerRenderNode>);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const rootCreate = collector.getOpsOfType("create-element")
+          .find((op) => "tagName" in op && op.tagName === "div");
+        const rootId = rootCreate && "nodeId" in rootCreate
+          ? rootCreate.nodeId
+          : undefined;
+        collector.clear();
+
+        rootCell.set(unavailable);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        assertEquals(
+          collector.getOpsOfType("remove-node").some((op) =>
+            "nodeId" in op && op.nodeId === rootId
+          ),
+          true,
+          `expected ${unavailable.reason} to clear the root`,
+        );
+      }
     },
   );
 

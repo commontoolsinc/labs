@@ -219,6 +219,46 @@ Deno.test("DomApplicator - create elements", async (t) => {
     assertEquals((applicator.getNode(3) as any).textContent, "Hello");
   });
 
+  await t.step("makes pending elements stale and inert", () => {
+    const doc = createMockDocument();
+    const applicator = createDomApplicator({
+      document: doc,
+      runtimeClient: createMockRuntimeClient(),
+      onEvent: () => {},
+    });
+
+    applicator.applyBatch({
+      batchId: 1,
+      ops: [
+        { op: "create-element", nodeId: 1, tagName: "button" },
+        {
+          op: "set-prop",
+          nodeId: 1,
+          key: "data-cf-pending",
+          value: true,
+        },
+      ],
+    });
+
+    const button = applicator.getNode(1) as any;
+    assertEquals(button.getAttribute("data-cf-pending"), "true");
+    assertEquals(button.getAttribute("inert"), "");
+    assertEquals(button.getAttribute("aria-busy"), "true");
+
+    applicator.applyBatch({
+      batchId: 2,
+      ops: [{
+        op: "remove-prop",
+        nodeId: 1,
+        key: "data-cf-pending",
+      }],
+    });
+
+    assertEquals(button.getAttribute("data-cf-pending"), null);
+    assertEquals(button.getAttribute("inert"), null);
+    assertEquals(button.getAttribute("aria-busy"), null);
+  });
+
   await t.step("updates text nodes without DOM globals", () => {
     const doc = createMockDocument();
     const applicator = createDomApplicator({

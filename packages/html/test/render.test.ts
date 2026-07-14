@@ -1157,9 +1157,9 @@ describe("children rendering", () => {
   // after initial render) requires a runtime with CellHandles, which is covered
   // by integration tests in packages/generated-patterns/integration/.
 
-  it("preserves the last usable child while a legacy-rendered CellHandle is unavailable", async () => {
+  it("marks only a pending legacy child stale and inert", async () => {
     const { renderOptions, document } = mock;
-    const child = reactiveChild<string | DataUnavailable>(
+    const child = reactiveChild<VNode | DataUnavailable>(
       DataUnavailable.pending(),
     );
     const vnode = {
@@ -1174,14 +1174,36 @@ describe("children rendering", () => {
     const div = parent.getElementsByTagName("div")[0]!;
     assert.equal(div.innerHTML, "");
 
-    await child.set("Ready");
-    assert.equal(div.innerHTML, "Ready");
+    await child.set({
+      type: "vnode",
+      name: "button",
+      props: { id: "ready" },
+      children: ["Ready"],
+    });
+    let button = div.getElementsByTagName("button")[0]!;
+    assert.equal(button.textContent, "Ready");
 
-    await child.set(DataUnavailable.schemaMismatch());
-    assert.equal(div.innerHTML, "Ready");
+    await child.set(DataUnavailable.pending());
+    button = div.getElementsByTagName("button")[0]!;
+    assert.equal(button.textContent, "Ready");
+    assert.equal(button.getAttribute("data-cf-pending"), "true");
+    assert.equal(button.getAttribute("inert"), "");
+    assert.equal(button.getAttribute("aria-busy"), "true");
 
-    await child.set("Updated");
-    assert.equal(div.innerHTML, "Updated");
+    await child.set({
+      type: "vnode",
+      name: "button",
+      props: { id: "updated" },
+      children: ["Updated"],
+    });
+    button = div.getElementsByTagName("button")[0]!;
+    assert.equal(button.textContent, "Updated");
+    assert.equal(button.getAttribute("data-cf-pending"), null);
+    assert.equal(button.getAttribute("inert"), null);
+    assert.equal(button.getAttribute("aria-busy"), null);
+
+    await child.set(DataUnavailable.error(new Error("failed")));
+    assert.equal(div.innerHTML, "");
     cancel();
   });
 
