@@ -3,9 +3,13 @@ import { expect } from "@std/expect";
 
 import type {
   Attributes,
+  Context,
   Meter,
   Span,
+  SpanContext,
   SpanOptions,
+  SpanStatus,
+  TimeInput,
   Tracer,
 } from "@opentelemetry/api";
 import {
@@ -14,6 +18,7 @@ import {
 } from "../src/telemetry-otel-bridge.ts";
 import {
   RuntimeTelemetryEvent,
+  type RuntimeTelemetryMarker,
   type RuntimeTelemetryMarkerResult,
 } from "../src/telemetry.ts";
 
@@ -33,7 +38,7 @@ interface SpanRecord {
   name: string;
   attributes: Attributes;
   setAttributes: Attributes;
-  status?: { code: number; message?: string };
+  status?: SpanStatus;
   ended: boolean;
   startTime?: number;
   endTime?: number;
@@ -45,53 +50,273 @@ function makeRecordingMeter(): { meter: Meter; calls: InstrumentCall[] } {
     (instrument: string) => (value: number, attributes?: Attributes) => {
       calls.push({ instrument, value, attributes });
     };
-  const meter = {
+  const meter: Meter = {
+    createGauge: (name: string) => ({ record: record(name) }),
     createCounter: (name: string) => ({ add: record(name) }),
     createUpDownCounter: (name: string) => ({ add: record(name) }),
     createHistogram: (name: string) => ({ record: record(name) }),
-  } as unknown as Meter;
+    createObservableGauge: () => ({
+      addCallback() {},
+      removeCallback() {},
+    }),
+    createObservableCounter: () => ({
+      addCallback() {},
+      removeCallback() {},
+    }),
+    createObservableUpDownCounter: () => ({
+      addCallback() {},
+      removeCallback() {},
+    }),
+    addBatchObservableCallback() {},
+    removeBatchObservableCallback() {},
+  };
   return { meter, calls };
+}
+
+const testSpanContext: SpanContext = {
+  traceId: "00000000000000000000000000000001",
+  spanId: "0000000000000001",
+  traceFlags: 0,
+};
+
+function timeInputToNumber(time: TimeInput | undefined): number | undefined {
+  if (typeof time === "number") return time;
+  if (time instanceof Date) return time.getTime();
+  if (Array.isArray(time)) return time[0] * 1000 + time[1] / 1_000_000;
+  return undefined;
+}
+
+function makeRecordingSpan(rec: SpanRecord): Span {
+  const span: Span = {
+    spanContext: () => testSpanContext,
+    setAttribute(key, value) {
+      rec.setAttributes[key] = value;
+      return this;
+    },
+    setAttributes(attributes) {
+      Object.assign(rec.setAttributes, attributes);
+      return this;
+    },
+    addEvent() {
+      return this;
+    },
+    addLink() {
+      return this;
+    },
+    addLinks() {
+      return this;
+    },
+    setStatus(status) {
+      rec.status = status;
+      return this;
+    },
+    updateName(name) {
+      rec.name = name;
+      return this;
+    },
+    end(endTime) {
+      rec.ended = true;
+      rec.endTime = timeInputToNumber(endTime);
+    },
+    isRecording: () => true,
+    recordException() {},
+  };
+  return span;
+}
+
+function unsupportedStartActiveSpan<F extends (span: Span) => unknown>(
+  name: string,
+  fn: F,
+): ReturnType<F>;
+function unsupportedStartActiveSpan<F extends (span: Span) => unknown>(
+  name: string,
+  options: SpanOptions,
+  fn: F,
+): ReturnType<F>;
+function unsupportedStartActiveSpan<F extends (span: Span) => unknown>(
+  name: string,
+  options: SpanOptions,
+  context: Context,
+  fn: F,
+): ReturnType<F>;
+function unsupportedStartActiveSpan(): never {
+  throw new Error("startActiveSpan is not supported by this test fake");
 }
 
 function makeRecordingTracer(): { tracer: Tracer; spans: SpanRecord[] } {
   const spans: SpanRecord[] = [];
-  const tracer = {
+  const tracer: Tracer = {
     startSpan(name: string, options?: SpanOptions): Span {
       const rec: SpanRecord = {
         name,
-        attributes: (options?.attributes ?? {}) as Attributes,
+        attributes: options?.attributes ?? {},
         setAttributes: {},
         ended: false,
-        startTime: options?.startTime as number | undefined,
+        startTime: timeInputToNumber(options?.startTime),
       };
       spans.push(rec);
-      return {
-        setAttribute(key: string, value: unknown) {
-          rec.setAttributes[key] = value as Attributes[string];
-          return this;
-        },
-        setStatus(status: { code: number; message?: string }) {
-          rec.status = status;
-          return this;
-        },
-        end(endTime?: number) {
-          rec.ended = true;
-          rec.endTime = endTime as number | undefined;
-        },
-      } as unknown as Span;
+      return makeRecordingSpan(rec);
     },
-  } as unknown as Tracer;
+    startActiveSpan: unsupportedStartActiveSpan,
+  };
   return { tracer, spans };
 }
 
-function marker(
-  partial: Record<string, unknown>,
+type MarkerInput<T extends RuntimeTelemetryMarker["type"]> =
+  & { type: T }
+  & Partial<Extract<RuntimeTelemetryMarker, { type: T }>>;
+type PreflightMarker = Extract<
+  RuntimeTelemetryMarker,
+  { type: "scheduler.event.preflight" }
+>;
+type PreflightMarkerInput =
+  & { type: "scheduler.event.preflight" }
+  & Partial<Omit<PreflightMarker, "type" | "stats">>
+  & { stats?: Partial<PreflightMarker["stats"]> };
+type TestRuntimeTelemetryMarkerInput =
+  | PreflightMarkerInput
+  | {
+    [
+      Type in Exclude<
+        RuntimeTelemetryMarker["type"],
+        "scheduler.event.preflight"
+      >
+    ]: MarkerInput<Type>;
+  }[Exclude<RuntimeTelemetryMarker["type"], "scheduler.event.preflight">];
+
+function withTimeStamp(
+  marker: RuntimeTelemetryMarker,
 ): RuntimeTelemetryMarkerResult {
+  return { ...marker, timeStamp: 0 };
+}
+
+function defaultPreflightStats(): PreflightMarker["stats"] {
   return {
-    id: "m-1",
-    timestamp: 0,
-    ...partial,
-  } as unknown as RuntimeTelemetryMarkerResult;
+    visitCount: 0,
+    dirtyInputCount: 0,
+    resultTrueCount: 0,
+    workSetAddCount: 0,
+    reverseDependencyActionCount: 0,
+    reverseDependencyEdgeCount: 0,
+    logReadCount: 0,
+    logShallowReadCount: 0,
+    writerCandidateCount: 0,
+    writerOverlapCount: 0,
+    directWriterCount: 0,
+  };
+}
+
+function marker(
+  input: TestRuntimeTelemetryMarkerInput,
+): RuntimeTelemetryMarkerResult {
+  switch (input.type) {
+    case "scheduler.run":
+      return withTimeStamp({ actionId: "action-1", ...input });
+    case "scheduler.run.complete":
+      return withTimeStamp({
+        actionId: "action-1",
+        durationMs: 0,
+        ...input,
+      });
+    case "scheduler.settle":
+      return withTimeStamp({
+        durationMs: 0,
+        iterations: 0,
+        settledEarly: false,
+        seedCount: 0,
+        workSetSize: 0,
+        ...input,
+      });
+    case "cell.update":
+      return withTimeStamp({
+        change: {
+          address: { id: "memory:test", path: [] },
+          before: undefined,
+          after: undefined,
+        },
+        ...input,
+      });
+    case "scheduler.invocation":
+      return withTimeStamp({ handlerId: "handler-1", ...input });
+    case "scheduler.event.commit":
+      return withTimeStamp({
+        handlerId: "handler-1",
+        readCount: 0,
+        writeCount: 0,
+        changedWriteCount: 0,
+        writes: [],
+        ...input,
+      });
+    case "scheduler.event.preflight":
+      return withTimeStamp({
+        handlerId: "handler-1",
+        readCount: 0,
+        shallowReadCount: 0,
+        dirtySizeBefore: 0,
+        pendingSizeBefore: 0,
+        dirtyDependencyCount: 0,
+        hasDirtyDependencies: false,
+        skipped: false,
+        populateMs: 0,
+        txToLogMs: 0,
+        depCommitMs: 0,
+        collectMs: 0,
+        scheduleMs: 0,
+        ...input,
+        stats: { ...defaultPreflightStats(), ...input.stats },
+      });
+    case "storage.push.start":
+      return withTimeStamp({
+        id: "m-1",
+        operation: "send",
+        ...input,
+      });
+    case "storage.push.complete":
+      return withTimeStamp({ id: "m-1", ...input });
+    case "storage.push.error":
+      return withTimeStamp({ id: "m-1", error: "error", ...input });
+    case "storage.pull.start":
+      return withTimeStamp({
+        id: "m-1",
+        operation: "sync",
+        ...input,
+      });
+    case "storage.pull.complete":
+      return withTimeStamp({ id: "m-1", ...input });
+    case "storage.pull.error":
+      return withTimeStamp({ id: "m-1", error: "error", ...input });
+    case "storage.connection.update":
+      return withTimeStamp({ status: "ok", attempt: 0, ...input });
+    case "storage.subscription.add":
+      return withTimeStamp({ id: "sub-1", ...input });
+    case "storage.subscription.remove":
+      return withTimeStamp({ id: "sub-1", ...input });
+    case "scheduler.graph.snapshot":
+      return withTimeStamp({
+        graph: { nodes: [], edges: [], timestamp: 0 },
+        ...input,
+      });
+    case "scheduler.subscribe":
+      return withTimeStamp({
+        actionId: "action-1",
+        isEffect: false,
+        ...input,
+      });
+    case "scheduler.dependencies.update":
+      return withTimeStamp({
+        actionId: "action-1",
+        reads: [],
+        writes: [],
+        ...input,
+      });
+    case "scheduler.non-settling":
+      return withTimeStamp({
+        busyTime: 0,
+        windowDuration: 0,
+        busyRatio: 0,
+        ...input,
+      });
+  }
 }
 
 describe("createRuntimeTelemetryOtelBridge", () => {
@@ -149,14 +374,16 @@ describe("createRuntimeTelemetryOtelBridge", () => {
       type: "scheduler.event.commit",
       changedWriteCount: 2,
       retryAttempt: 3,
-      terminal: "completed",
+      terminal: "convergence",
     }));
     expect(meterCalls.map((c) => c.instrument)).toEqual([
       "ct.scheduler.commits",
       "ct.scheduler.commit.changed_writes",
       "ct.scheduler.commit.retries",
     ]);
-    expect(meterCalls[0].attributes?.["ct.commit.terminal"]).toBe("completed");
+    expect(meterCalls[0].attributes?.["ct.commit.terminal"]).toBe(
+      "convergence",
+    );
   });
 
   it("records every preflight phase and a retroactive span", () => {
@@ -172,7 +399,7 @@ describe("createRuntimeTelemetryOtelBridge", () => {
       shallowReadCount: 6,
       dirtyDependencyCount: 7,
       stats: {
-        maxDepth: 2,
+        visitCount: 2,
         workSetAddCount: 8,
         reverseDependencyEdgeCount: 9,
       },
@@ -241,7 +468,7 @@ describe("createRuntimeTelemetryOtelBridge", () => {
     bridge.handleMarker(marker({ type: "storage.subscription.remove" }));
     bridge.handleMarker(marker({
       type: "storage.connection.update",
-      status: "connected",
+      status: "ok",
       attempt: 2,
     }));
     expect(meterCalls).toEqual([
@@ -251,7 +478,7 @@ describe("createRuntimeTelemetryOtelBridge", () => {
         instrument: "ct.storage.connection.updates",
         value: 1,
         attributes: {
-          "ct.connection.status": "connected",
+          "ct.connection.status": "ok",
           "ct.connection.attempt": 2,
         },
       },

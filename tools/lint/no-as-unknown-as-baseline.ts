@@ -1,10 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/telemetry-otel-bridge.test.ts": [
-    "52:4:odh5cc",
-    "83:4:104x6pt",
-    "81:8:1nldzr4",
-    "94:4:tw3jkq",
-  ],
   "packages/runner/test/transaction-inspection.test.ts": [
     "64:6:tr52io",
     "181:8:10ejp4k",
