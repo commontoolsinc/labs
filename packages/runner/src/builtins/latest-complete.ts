@@ -5,13 +5,14 @@ import {
   isDataUnavailable,
 } from "@commonfabric/data-model/fabric-instances";
 
-import type { JSONSchema } from "../builder/types.ts";
+import type { CellScope, JSONSchema } from "../builder/types.ts";
 import { type Cell, getCellWithStatus } from "../cell.ts";
 import { selectDataUnavailable } from "../data-unavailability.ts";
 import { toMemorySpaceAddress } from "../link-types.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { Runtime } from "../runtime.ts";
 import type { Action } from "../scheduler.ts";
+import { narrowestScope } from "../scope.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { toThrowable } from "../storage/interface.ts";
 import {
@@ -35,7 +36,7 @@ const priorSnapshotReadMeta = {
 
 /**
  * Retain one whole, schema-materialized snapshot while the current input is
- * unavailable. The output binding itself is the only persisted snapshot.
+ * unavailable. Its one scoped result cell is the persisted snapshot.
  */
 export function latestComplete(
   inputsCell: Cell<LatestCompleteInputs>,
@@ -55,37 +56,14 @@ export function latestComplete(
 
   let outputInitialized: boolean | undefined;
   let result: Cell<unknown> | undefined;
+  let resultScope: CellScope | undefined;
 
   return (tx: IExtendedStorageTransaction) => {
+    tx.resetNarrowestReadScope();
     const inputs = inputsCell.withTx(tx);
     const schema = inputs.key("schema").get() as JSONSchema | undefined;
     if (schema === undefined) {
       throw new TypeError("latestComplete requires a generated schema");
-    }
-
-    if (result === undefined) {
-      const base = runtime.getCell<unknown>(
-        parentCell.space,
-        { latestComplete: cause },
-        schema,
-        tx,
-      );
-      result = scopedCell(runtime, tx, base, outputBinding.scope);
-      result.sync();
-    }
-    sendResult(tx, result);
-
-    if (outputInitialized === undefined) {
-      const prior = tx.read(
-        toMemorySpaceAddress(result.getAsNormalizedFullLink()),
-        {
-          meta: priorSnapshotReadMeta,
-        },
-      );
-      if (prior.error !== undefined && prior.error.name !== "NotFoundError") {
-        throw toThrowable(prior.error);
-      }
-      outputInitialized = prior.ok !== undefined;
     }
 
     const source = inputs.key("value").asSchema(schema);
@@ -109,6 +87,37 @@ export function latestComplete(
         complete = true;
         snapshot = cloneIfNecessary(status.ok, { frozen: false });
       }
+    }
+
+    const outputScope = narrowestScope([
+      outputBinding.scope,
+      tx.getNarrowestReadScope(),
+    ]);
+    if (result === undefined || resultScope !== outputScope) {
+      const base = runtime.getCell<unknown>(
+        parentCell.space,
+        { latestComplete: cause },
+        schema,
+        tx,
+      );
+      result = scopedCell(runtime, tx, base, outputScope);
+      result.sync();
+      resultScope = outputScope;
+      outputInitialized = undefined;
+    }
+    sendResult(tx, result);
+
+    if (outputInitialized === undefined) {
+      const prior = tx.read(
+        toMemorySpaceAddress(result.getAsNormalizedFullLink()),
+        {
+          meta: priorSnapshotReadMeta,
+        },
+      );
+      if (prior.error !== undefined && prior.error.name !== "NotFoundError") {
+        throw toThrowable(prior.error);
+      }
+      outputInitialized = prior.ok !== undefined;
     }
 
     if (complete) {
