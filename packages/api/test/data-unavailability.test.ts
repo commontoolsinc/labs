@@ -27,6 +27,9 @@ import type {
   ObserveAvailabilityFunction,
   PartialResultOfFunction,
   ResultOfFunction,
+  SqliteDb,
+  SqliteQueryFunction,
+  SqliteQueryResult,
   UnavailableInputPolicy,
   UnavailableInputPolicyEntry,
 } from "@commonfabric/api";
@@ -313,6 +316,47 @@ function compileResultTypecheck(
   void hasNoStateWrapper;
 }
 
+function sqliteResultTypecheck(
+  sqliteQuery: SqliteQueryFunction,
+  db: SqliteDb,
+  resultOf: ResultOfFunction,
+): void {
+  type Row = { id: number; title: string };
+  type Expected = SqliteQueryResult<Row> | DataUnavailableVariant;
+
+  const freeRequest = sqliteQuery<Row>({
+    db,
+    sql: "SELECT id, title FROM notes",
+    readClearance: true,
+  });
+  const methodRequest = db.query<Row>(
+    "SELECT id, title FROM notes",
+    { readClearance: true },
+  );
+  const freeIsDirect: Equal<typeof freeRequest, Expected> = true;
+  const methodIsDirect: Equal<typeof methodRequest, Expected> = true;
+  const freeResult = resultOf(freeRequest);
+  const methodResult = resultOf(methodRequest);
+  const freeResultIsExact: Equal<
+    typeof freeResult,
+    SqliteQueryResult<Row>
+  > = true;
+  const methodResultIsExact: Equal<
+    typeof methodResult,
+    SqliteQueryResult<Row>
+  > = true;
+  const hasNoStateWrapper: Equal<
+    "result" extends keyof typeof freeRequest ? true : false,
+    false
+  > = true;
+
+  void freeIsDirect;
+  void methodIsDirect;
+  void freeResultIsExact;
+  void methodResultIsExact;
+  void hasNoStateWrapper;
+}
+
 Deno.test("data-unavailability helper declarations preserve narrowing types", () => {
   assertEquals(typeof guardNarrowingTypecheck, "function");
   assertEquals(typeof asyncResultNarrowingTypecheck, "function");
@@ -321,4 +365,5 @@ Deno.test("data-unavailability helper declarations preserve narrowing types", ()
   assertEquals(typeof modulePolicyTypecheck, "function");
   assertEquals(typeof directAsyncBuiltinTypecheck, "function");
   assertEquals(typeof compileResultTypecheck, "function");
+  assertEquals(typeof sqliteResultTypecheck, "function");
 });
