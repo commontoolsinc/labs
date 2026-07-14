@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/patterns/integration/cfc-browser-helpers.ts": [
-    "81:32:13c6qjm",
-  ],
   "packages/runner/test/cfc-trust.test.ts": [
     "306:52:trmbk9",
     "311:10:30l9v3",

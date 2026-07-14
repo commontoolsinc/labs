@@ -78,9 +78,15 @@ const activeSpaceRootReady = (
   const app = (globalThis as typeof globalThis & {
     app?: { element?: () => unknown };
   }).app;
-  const root = app?.element?.() as unknown as
-    | (HTMLElement & { getRuntimeSpaceDID(): string | undefined })
-    | undefined;
+  type RuntimeRootElement = HTMLElement & {
+    getRuntimeSpaceDID(): string | undefined;
+  };
+  const rootValue = app?.element?.();
+  const root = rootValue instanceof HTMLElement &&
+      typeof (rootValue as { getRuntimeSpaceDID?: unknown })
+          .getRuntimeSpaceDID === "function"
+    ? rootValue as RuntimeRootElement
+    : undefined;
   const appView = root?.shadowRoot?.querySelector("x-app-view") as
     | (HTMLElement & {
       space?: string;
