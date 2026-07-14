@@ -804,11 +804,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.narrowestReadScope = scope;
   }
 
-  private recordReadScope(address: IMemorySpaceAddress): void {
+  private recordReadScope(address: Pick<IMemorySpaceAddress, "scope">): void {
     const scope = normalizeCellScope(address.scope);
     if (scopeRank(scope) > scopeRank(this.narrowestReadScope)) {
       this.narrowestReadScope = scope;
     }
+  }
+
+  private prepareRead(address: Pick<IMemorySpaceAddress, "scope">): void {
+    if (this.#cfcState.prepare.status === "prepared") {
+      this.invalidateCfc("read-after-prepare");
+    }
+    this.recordReadScope(address);
   }
 
   getCachedReadResult(
@@ -1463,11 +1470,30 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): Result<IAttestation, ReadError> {
     options = this.#withAmbientReadMeta(options);
-    if (this.#cfcState.prepare.status === "prepared") {
-      this.invalidateCfc("read-after-prepare");
-    }
-    this.recordReadScope(address);
+    this.prepareRead(address);
     return this.tx.read(address, options);
+  }
+
+  trackReadPaths(
+    address: Omit<IMemorySpaceAddress, "path">,
+    paths: readonly (readonly string[])[],
+    options?: Omit<IReadOptions, "trackReadWithoutLoad">,
+  ): Result<Unit, ReadError> {
+    if (paths.length === 0) return { ok: {} };
+    const readOptions = this.#withAmbientReadMeta(options);
+    this.prepareRead(address);
+    if (this.tx.trackReadPaths) {
+      return this.tx.trackReadPaths(address, paths, readOptions);
+    }
+
+    for (const path of paths) {
+      const result = this.tx.read({ ...address, path }, {
+        ...readOptions,
+        trackReadWithoutLoad: true,
+      });
+      if (result.error) return result;
+    }
+    return { ok: {} };
   }
 
   readOrThrow(
@@ -1475,10 +1501,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): Immutable<FabricValue> {
     options = this.#withAmbientReadMeta(options);
-    if (this.#cfcState.prepare.status === "prepared") {
-      this.invalidateCfc("read-after-prepare");
-    }
-    this.recordReadScope(address);
+    this.prepareRead(address);
     const readResult = this.tx.read(address, options);
     if (
       readResult.error &&

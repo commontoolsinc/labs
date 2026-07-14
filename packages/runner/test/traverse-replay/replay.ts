@@ -179,25 +179,47 @@ export class FixtureObjectManager implements ObjectStorageManager {
   }
 }
 
-/** Wrap a tx so each read/readOrThrow appends a descriptor to `log`. */
+/** Wrap a tx so each read/readOrThrow/trackReadPaths appends to `log`. */
 function wrapTxWithReadLog(
   tx: IExtendedStorageTransaction,
   log: Set<string>,
 ): IExtendedStorageTransaction {
+  const recordRead = (
+    address: IMemorySpaceAddress,
+    options: IReadOptions | undefined,
+    trackReadWithoutLoad = options?.trackReadWithoutLoad === true,
+  ) => {
+    const flags = `${options?.nonRecursive ? "n" : ""}${
+      trackReadWithoutLoad ? "t" : ""
+    }${options?.meta !== undefined ? "m" : ""}`;
+    log.add(
+      `${address.space}|${address.scope ?? "space"}|${compactId(address.id)}|${
+        JSON.stringify(address.path)
+      }|${flags}`,
+    );
+  };
+
   return new Proxy(tx, {
     get(target, prop) {
       if (prop === "read" || prop === "readOrThrow") {
         return (address: IMemorySpaceAddress, options?: IReadOptions) => {
-          const flags = `${options?.nonRecursive ? "n" : ""}${
-            options?.trackReadWithoutLoad ? "t" : ""
-          }${options?.meta !== undefined ? "m" : ""}`;
-          log.add(
-            `${address.space}|${address.scope ?? "space"}|${
-              compactId(address.id)
-            }|${JSON.stringify(address.path)}|${flags}`,
-          );
+          recordRead(address, options);
           // deno-lint-ignore no-explicit-any
           return (target as any)[prop](address, options);
+        };
+      }
+      if (prop === "trackReadPaths") {
+        const trackReadPaths = target.trackReadPaths;
+        if (trackReadPaths === undefined) return undefined;
+        return (
+          address: Omit<IMemorySpaceAddress, "path">,
+          paths: readonly (readonly string[])[],
+          options?: Omit<IReadOptions, "trackReadWithoutLoad">,
+        ) => {
+          for (const path of paths) {
+            recordRead({ ...address, path }, options, true);
+          }
+          return trackReadPaths.call(target, address, paths, options);
         };
       }
       // deno-lint-ignore no-explicit-any

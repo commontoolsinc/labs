@@ -80,7 +80,8 @@ export function fixtureDocKey(
 
 const DEFAULT_MAX_INVOCATIONS = 20_000;
 
-class TraverseCaptureRecorder {
+/** @internal Exported for focused capture tests. */
+export class TraverseCaptureRecorder {
   private docs = new Map<string, FabricValue>();
   private invocations: TraverseFixtureInvocation[] = [];
   private selectors: SchemaPathSelector[] = [];
@@ -206,8 +207,9 @@ class TraverseCaptureRecorder {
   }
 
   /**
-   * Wrap a transaction so every read/readOrThrow first snapshots the target
-   * doc into the corpus. All other members delegate to the original tx.
+   * Wrap a transaction so every read/readOrThrow/trackReadPaths first
+   * snapshots the target doc into the corpus. All other members delegate to
+   * the original tx.
    */
   wrapTx(tx: IExtendedStorageTransaction): IExtendedStorageTransaction {
     // deno-lint-ignore no-this-alias
@@ -219,6 +221,22 @@ class TraverseCaptureRecorder {
             recorder.captureDoc(target, address);
             // deno-lint-ignore no-explicit-any
             return (target as any)[prop](address, options);
+          };
+        }
+        if (prop === "trackReadPaths" && target.trackReadPaths !== undefined) {
+          return (
+            address: Omit<IMemorySpaceAddress, "path">,
+            paths: readonly (readonly string[])[],
+            options?: Omit<IReadOptions, "trackReadWithoutLoad">,
+          ) => {
+            const firstPath = paths[0];
+            if (firstPath !== undefined) {
+              recorder.captureDoc(target, {
+                ...address,
+                path: [...firstPath],
+              });
+            }
+            return target.trackReadPaths!(address, paths, options);
           };
         }
         // deno-lint-ignore no-explicit-any
