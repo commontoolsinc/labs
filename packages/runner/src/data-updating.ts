@@ -882,10 +882,14 @@ export function normalizeAndDiff(
       // (slotRequiredByParent, threaded one hop by the object branch; direct
       // slot writes — cell.key().set(), bound handler cells — have no parent
       // in view and keep the warn). This approximates but is NOT identical to
-      // "the read would reject": the B2 element grace means array-element
-      // reads degrade rather than void, and rejection is ultimately judged
-      // against each READER's combined schema — the warn is a write-site
-      // lint, not a proof. Undefined-tolerant, defaulted, or optional slots
+      // "the read would reject": the B2 element grace (and its
+      // generation-skew extension, #4668) means array-element reads degrade
+      // rather than void, and rejection is ultimately judged against each
+      // READER's combined schema — the warn is a write-site lint, not a
+      // proof. The degrades make this warn MORE load-bearing, not less: a
+      // reader cannot distinguish an unresolvable narrower-scoped link from
+      // an old-generation absent target (both resolve to undefined), so this
+      // write-site diagnostic is where a scope mistake self-identifies. Undefined-tolerant, defaulted, or optional slots
       // degrade harmlessly per reader, which is a legitimate pattern and also
       // what the runtime's own scoped-link writes (.asScope() results,
       // navigateTo result cells, updateArgument setup wiring, cold-resume
