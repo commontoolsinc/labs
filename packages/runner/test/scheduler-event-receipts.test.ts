@@ -18,6 +18,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { resolveLink } from "../src/link-resolution.ts";
+import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
@@ -168,9 +169,13 @@ function resolvedStreamLink(streamCell: Cell<unknown>, runtime: Runtime) {
 
 async function processNextQueuedEvent(runtime: Runtime): Promise<void> {
   const scheduler = runtime.scheduler as unknown as {
-    processExecuteEventPhase(): Promise<Set<unknown>>;
+    eventQueue: Array<Parameters<typeof dispatchQueuedEvent>[1]>;
+    eventExecutionState: Parameters<typeof dispatchQueuedEvent>[0];
   };
-  await scheduler.processExecuteEventPhase();
+  const queuedEvent = scheduler.eventQueue[0];
+  if (queuedEvent !== undefined) {
+    await dispatchQueuedEvent(scheduler.eventExecutionState, queuedEvent);
+  }
 }
 
 describe("scheduler event receipts", () => {
@@ -426,10 +431,10 @@ describe("scheduler event receipts", () => {
         false,
         { eventId },
       );
-      // Drive the second dispatch directly while the first storage commit is
-      // gated. Letting the scheduler's settle tick race this test made the
-      // overlap platform-dependent: a cold replica can park that tick behind
-      // the speculative first write even though event commits are detached.
+      // Dispatch the queued delivery directly while the first storage commit
+      // is gated. This ownership regression needs the two commit callbacks in
+      // a fixed order; scheduler preflight may legitimately settle or park the
+      // second delivery after it observes the speculative first write.
       await processNextQueuedEvent(runtime);
       expect(handlerInvocations).toBe(2);
 
