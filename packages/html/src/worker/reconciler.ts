@@ -240,23 +240,21 @@ export class WorkerReconciler {
       // a later grant re-renders (and a revoke re-blocks), mirroring
       // renderCellChild. `renderRoot` is re-invoked with the last resolved
       // value when an ACL changes.
-      let lastRootValue: unknown;
-      let rootHasRendered = false;
+      let currentRootValue: unknown;
+      let rootHasResolvedValue = false;
       let rootIsPending = false;
       const rootWatchedSpaces = new Set<string>();
       const renderRoot = (resolvedVnode: unknown) => {
         logger.debug("root-cell-update", () => ({ resolvedVnode }));
         const unavailable = isDataUnavailable(resolvedVnode);
-        if (!unavailable) {
-          lastRootValue = resolvedVnode;
-          rootHasRendered = true;
-        }
+        currentRootValue = resolvedVnode;
+        rootHasResolvedValue = true;
         this.watchCellMembership(
           vnode as Cell<unknown>,
           rootWatchedSpaces,
           addCancel,
           () => {
-            if (rootHasRendered) renderRoot(lastRootValue);
+            if (rootHasResolvedValue) renderRoot(currentRootValue);
           },
         );
         // The mounted cell is an egress like any descendant cell: gate its
@@ -3559,7 +3557,10 @@ export class WorkerReconciler {
       ) {
         return;
       }
-      if (!unavailable) childState.currentValue = resolvedChild;
+      // Policy changes must re-evaluate the value which is current now,
+      // including an unavailable marker. Keeping only the last usable value
+      // would let an ACL update resurrect content already cleared by an error.
+      childState.currentValue = resolvedChild;
       this.watchCellMembership(
         cell,
         watchedSpaces,
