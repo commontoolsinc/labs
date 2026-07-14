@@ -96,19 +96,25 @@ jobs:
       - name: Evaluate publish policy
         id: decision
         env:
-          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          ACTOR_ID: ${{ github.actor_id }}
           BUILD_RESULT: ${{ needs.dashboard_build.result }}
           PUSH_BRANCH: ${{ vars.PUSH_BRANCH }}
+          PUBLISHER_ACTOR_IDS: ${{ vars.DASHBOARD_PUBLISHER_ACTOR_IDS }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           TEST_RESULT: ${{ needs.dashboard_tests.result }}
         shell: bash
         run: |
           allowed=false
+          member=false
+
+          if [[ ",${PUBLISHER_ACTOR_IDS}," == *",${ACTOR_ID},"* ]]; then
+            member=true
+          fi
 
           if [[ "$BUILD_RESULT" == "success" ]]; then
             if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" && "$TEST_RESULT" == "success" ]]; then
               allowed=true
-            elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && ("$AUTHOR_ASSOCIATION" == "MEMBER" || "$AUTHOR_ASSOCIATION" == "OWNER") ]]; then
+            elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$member" == "true" ]]; then
               if [[ "$TEST_RESULT" == "success" || ("$PUSH_BRANCH" == "true" && "$RUN_ATTEMPT" -gt 1) ]]; then
                 allowed=true
               fi
