@@ -38,6 +38,7 @@ import type {
   CellScope,
   JSONObject,
   JSONSchema,
+  JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
 import {
@@ -2404,8 +2405,9 @@ function _mergeSchemaFlagsUncached(
  * going to be properly handled here, but make a best effort.
  *
  * This operation is not generally commutative: parent and link schemas have
- * distinct precedence rules. False schemas are the exception and absorb the
- * other constraint regardless of their position.
+ * distinct precedence rules. False schemas absorb the other constraint, and
+ * schemas with provably disjoint primitive types combine to false in either
+ * order.
  *
  * We don't handle $refs in the schema, so it's quite possible to end up with
  * $ref links that can't be resolved.
@@ -2425,6 +2427,39 @@ export function combineSchema(
   return internSet(_combineSchemaCache, key, result);
 }
 
+const primitiveSchemaTypes = new Set<JSONSchemaTypes>([
+  "string",
+  "integer",
+  "number",
+  "boolean",
+  "null",
+  "undefined",
+]);
+
+function schemaPrimitiveTypesAreDisjoint(
+  parentType: JSONSchemaObj["type"],
+  linkType: JSONSchemaObj["type"],
+): boolean {
+  if (parentType === undefined || linkType === undefined) return false;
+
+  const parentTypes = Array.isArray(parentType) ? parentType : [parentType];
+  const linkTypes = Array.isArray(linkType) ? linkType : [linkType];
+  if (
+    !parentTypes.every((type) => primitiveSchemaTypes.has(type)) ||
+    !linkTypes.every((type) => primitiveSchemaTypes.has(type))
+  ) {
+    return false;
+  }
+
+  return !parentTypes.some((parent) =>
+    linkTypes.some((link) =>
+      parent === link ||
+      (parent === "number" && link === "integer") ||
+      (parent === "integer" && link === "number")
+    )
+  );
+}
+
 function _combineSchemaUncached(
   parentSchema: JSONSchema,
   linkSchema: JSONSchema,
@@ -2438,9 +2473,11 @@ function _combineSchemaUncached(
   } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
     return mergeSchemaFlags(linkSchema, parentSchema);
   } else if (isRecord(linkSchema) && isRecord(parentSchema)) {
+    if (
+      schemaPrimitiveTypesAreDisjoint(parentSchema.type, linkSchema.type)
+    ) return false;
     if (linkSchema.type === "object" && parentSchema.type === "object") {
-      // If both schemas have required properties, only include those that are
-      // in both lists
+      // A property required by either intersected schema remains required.
       const {
         required: parentRequired,
         $defs: parentDefs,
@@ -2448,11 +2485,9 @@ function _combineSchemaUncached(
       } = parentSchema;
       const { required: linkRequired, $defs: linkDefs, ...linkSchemaRest } =
         linkSchema;
-      const required = parentRequired && linkRequired
-        ? parentRequired.filter((item) => linkRequired.includes(item))
-        : parentRequired
-        ? parentRequired
-        : linkRequired;
+      const required = parentRequired || linkRequired
+        ? [...new Set([...(parentRequired ?? []), ...(linkRequired ?? [])])]
+        : undefined;
       const mergedDefs = { ...linkDefs, ...parentDefs };
       // When combining these object types, if they both have properties,
       // we only want to include any properties that they both have.

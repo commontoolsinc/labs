@@ -3,6 +3,79 @@ import { expect } from "@std/expect";
 import { combineSchema } from "../src/traverse.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
+describe("combineSchema type handling", () => {
+  const disjointCases: readonly {
+    name: string;
+    a: JSONSchema;
+    b: JSONSchema;
+  }[] = [
+    {
+      name: "disjoint primitive types",
+      a: { type: "string" },
+      b: { type: "number" },
+    },
+    {
+      name: "a type union with no shared member is false",
+      a: { type: ["string", "number"] },
+      b: { type: "boolean" },
+    },
+  ];
+  const directions = [
+    { name: "a is the parent", combine: combineSchema },
+    {
+      name: "b is the parent",
+      combine: (a: JSONSchema, b: JSONSchema) => combineSchema(b, a),
+    },
+  ] as const;
+
+  for (const testCase of disjointCases) {
+    for (const direction of directions) {
+      it(`${testCase.name} when ${direction.name}`, () => {
+        expect(direction.combine(testCase.a, testCase.b)).toBe(false);
+      });
+    }
+  }
+
+  const compatibleCases: readonly {
+    name: string;
+    a: JSONSchema;
+    b: JSONSchema;
+  }[] = [
+    {
+      name: "number and integer can overlap",
+      a: { type: "number" },
+      b: { type: "integer" },
+    },
+    {
+      name: "a type union can overlap one member",
+      a: { type: ["string", "number"] },
+      b: { type: "number" },
+    },
+    {
+      name: "unknown can overlap another type",
+      a: { type: "unknown" },
+      b: { type: "string" },
+    },
+    {
+      name: "a union containing unknown can overlap another type",
+      a: { type: ["unknown", "string"] },
+      b: { type: "boolean" },
+    },
+    {
+      name: "a structural type mismatch",
+      a: { type: "object" },
+      b: { type: "array" },
+    },
+  ];
+
+  for (const testCase of compatibleCases) {
+    it(`${testCase.name} while retaining parent precedence`, () => {
+      expect(combineSchema(testCase.a, testCase.b)).toEqual(testCase.a);
+      expect(combineSchema(testCase.b, testCase.a)).toEqual(testCase.b);
+    });
+  }
+});
+
 describe("combineSchema false handling", () => {
   const falseSchemas = [
     { name: "boolean false", schema: false },
@@ -26,6 +99,68 @@ describe("combineSchema false handling", () => {
     for (const direction of directions) {
       it(`${testCase.name} absorbs the other schema when the ${direction.name}`, () => {
         expect(direction.combine(testCase.schema)).toEqual(testCase.schema);
+      });
+    }
+  }
+});
+
+describe("combineSchema required handling", () => {
+  const cases = [
+    {
+      name: "disjoint required properties",
+      parentRequired: ["parentOnly"],
+      linkRequired: ["linkOnly"],
+      expected: ["parentOnly", "linkOnly"],
+      expectedReversed: ["linkOnly", "parentOnly"],
+    },
+    {
+      name: "overlapping required properties",
+      parentRequired: ["parentOnly", "shared"],
+      linkRequired: ["shared", "linkOnly"],
+      expected: ["parentOnly", "shared", "linkOnly"],
+      expectedReversed: ["shared", "linkOnly", "parentOnly"],
+    },
+    {
+      name: "required properties on only one side",
+      parentRequired: ["parentOnly"],
+      linkRequired: undefined,
+      expected: ["parentOnly"],
+      expectedReversed: ["parentOnly"],
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    for (const reverse of [false, true]) {
+      const direction = reverse ? "link is the parent" : "parent stays first";
+      it(`${testCase.name} when the ${direction}`, () => {
+        const parent = {
+          type: "object",
+          properties: {
+            shared: { type: "string" },
+            parentOnly: { type: "string" },
+          },
+          ...(testCase.parentRequired !== undefined && {
+            required: testCase.parentRequired,
+          }),
+        } as const satisfies JSONSchema;
+        const link = {
+          type: "object",
+          properties: {
+            shared: { type: "string" },
+            linkOnly: { type: "string" },
+          },
+          ...(testCase.linkRequired !== undefined && {
+            required: testCase.linkRequired,
+          }),
+        } as const satisfies JSONSchema;
+
+        const merged = (reverse
+          ? combineSchema(link, parent)
+          : combineSchema(parent, link)) as { required?: readonly string[] };
+        const expected = reverse
+          ? testCase.expectedReversed
+          : testCase.expected;
+        expect(merged.required).toEqual(expected);
       });
     }
   }

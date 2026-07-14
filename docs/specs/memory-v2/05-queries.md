@@ -356,7 +356,14 @@ combineSchema(parentSchema, linkSchema):
   if linkSchema is true/{}:
     return parentSchema  (link accepts anything, use parent's constraint)
 
+  compare primitive parentSchema.type and linkSchema.type:
+    let unknown, structural types, or an absent type use legacy precedence
+    if their possible primitive types cannot overlap, return false
+
   if both are type:"object":
+    // A property required by either input remains required.
+    required = union(parentSchema.required, linkSchema.required)
+
     // Intersect properties: for shared property keys, recurse combineSchema.
     // For properties only in one schema, combine with the other's
     // additionalProperties.
