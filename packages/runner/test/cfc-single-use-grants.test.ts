@@ -66,6 +66,20 @@ const baseInput = {
   grantedAt: 1000,
 };
 
+type GrantResolverTx = Parameters<typeof createTxCfcGrantResolver>[0];
+
+const grantResolverTx = (tx: unknown): GrantResolverTx => tx as GrantResolverTx;
+
+const serverForEmulatedManager = (
+  manager: EmulatedStorageManager,
+): MemoryV2Server.Server => {
+  const server = Reflect.get(manager, "server");
+  if (typeof server !== "function") {
+    throw new Error("emulated storage manager server is not available");
+  }
+  return Reflect.apply(server, manager, []) as MemoryV2Server.Server;
+};
+
 describe("CFC single-use grants (§2.2 single-use releases)", () => {
   // ---------------------------------------------------------------------------
   // Item 1: the `singleUse` field.
@@ -768,7 +782,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
           { ...baseInput, singleUse: true },
           ALICE,
         );
-        const stubTx = {
+        const stubTx = grantResolverTx({
           readOrThrow: (address: { id: string }) =>
             address.id === grantValue.id ? grantValue.value : undefined,
           recordCfcConsultedGrant: () => {},
@@ -776,7 +790,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
           writeOrThrow: (address: unknown, value: unknown) =>
             writes.push([address, value]),
           // no markCreateOnly
-        } as unknown as Parameters<typeof createTxCfcGrantResolver>[0];
+        });
         const resolver = createTxCfcGrantResolver(stubTx);
         expect(
           resolver({
@@ -949,9 +963,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
               as: signer,
               memoryHost: new URL("memory://"),
             } satisfies StorageManagerOptions,
-            () =>
-              (base as unknown as { server(): MemoryV2Server.Server })
-                .server(),
+            () => serverForEmulatedManager(base),
           );
         }
         // The server belongs to the base manager; EmulatedStorageManager's
