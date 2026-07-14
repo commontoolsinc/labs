@@ -99,6 +99,9 @@ When adding runtime features, consider adding integration tests to `packages/run
   coverage for authored patterns) and how both feed the coverage-debt gate.
 - [CI_PERFORMANCE.md](CI_PERFORMANCE.md) — the CI wall-time policy, and the
   coverage-debt baseline and ratchet markers that gate a pull request.
+- [BENCHMARKS.md](BENCHMARKS.md) — how `*.bench.ts` files run in CI, how the
+  team ops dashboard charts their trends, and the naming and stdout
+  constraints a bench file must satisfy.
 - [LLM_TESTING.md](LLM_TESTING.md) — testing patterns and server routes that
   call the LLM, including the test-environment guard and conversation fixtures.
 - [UI_TESTING.md](UI_TESTING.md) — testing shadow DOM components in browser
