@@ -1,0 +1,248 @@
+name: Dashboard Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile.dashboard"
+      - "packages/dashboard/**"
+      - "scripts/ci-gantt.ts"
+      - "deno.jsonc"
+      - "deno.lock"
+      - ".dockerignore"
+      - ".github/actions/deno-setup/**"
+      - ".github/actions/deno-install/**"
+      - ".github/workflows/dashboard-image.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile.dashboard"
+      - "packages/dashboard/**"
+      - "scripts/ci-gantt.ts"
+      - "deno.jsonc"
+      - "deno.lock"
+      - ".dockerignore"
+      - ".github/actions/deno-setup/**"
+      - ".github/actions/deno-install/**"
+      - ".github/workflows/dashboard-image.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: us-central1-docker.pkg.dev/commontools-core/containers/dev-dashboard
+  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  dashboard_tests:
+    name: Dashboard tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: Install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: Test dashboard
+        working-directory: packages/dashboard
+        run: deno task test
+
+  dashboard_build:
+    name: Dashboard image build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Build dashboard image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: Dockerfile.dashboard
+          platforms: linux/amd64
+          push: false
+          tags: ${{ env.IMAGE }}:${{ env.SOURCE_SHA }}
+          cache-from: type=gha,scope=dashboard-${{ env.SOURCE_SHA }}
+          cache-to: type=gha,mode=max,scope=dashboard-${{ env.SOURCE_SHA }}
+
+  publish_authorization:
+    name: Authorize dashboard image publish
+    needs: [dashboard_tests, dashboard_build]
+    if: ${{ !cancelled() }}
+    outputs:
+      allowed: ${{ steps.decision.outputs.allowed }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate publish policy
+        id: decision
+        env:
+          ACTOR_ID: ${{ github.actor_id }}
+          BUILD_RESULT: ${{ needs.dashboard_build.result }}
+          PUSH_BRANCH: ${{ vars.PUSH_BRANCH }}
+          PUBLISHER_ACTOR_IDS: ${{ vars.DASHBOARD_PUBLISHER_ACTOR_IDS }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          TEST_RESULT: ${{ needs.dashboard_tests.result }}
+        shell: bash
+        run: |
+          allowed=false
+          member=false
+
+          if [[ ",${PUBLISHER_ACTOR_IDS}," == *",${ACTOR_ID},"* ]]; then
+            member=true
+          fi
+
+          if [[ "$BUILD_RESULT" == "success" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" && "$TEST_RESULT" == "success" ]]; then
+              allowed=true
+            elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$member" == "true" ]]; then
+              if [[ "$TEST_RESULT" == "success" || ("$PUSH_BRANCH" == "true" && "$RUN_ATTEMPT" -gt 1) ]]; then
+                allowed=true
+              fi
+            fi
+          fi
+
+          echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish dashboard image
+    needs: [dashboard_tests, dashboard_build, publish_authorization]
+    if: ${{ needs.publish_authorization.outputs.allowed == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout source commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: commontools-core
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+
+      - name: Login to Artifact Registry
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: us-central1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Resolve existing immutable image
+        id: existing
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        shell: bash
+        run: |
+          result=$(curl --silent --show-error --output /dev/null --head \
+            --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+            --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            --write-out '%header{docker-content-digest}\n%{http_code}' \
+            "https://us-central1-docker.pkg.dev/v2/commontools-core/containers/dev-dashboard/manifests/${SOURCE_SHA}")
+          digest=${result%%$'\n'*}
+          status=${result##*$'\n'}
+
+          case "$status" in
+            200)
+              [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "digest=$digest" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Artifact Registry manifest lookup failed with HTTP $status" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Select image tags
+        id: image
+        shell: bash
+        run: |
+          tags="${IMAGE}:${SOURCE_SHA}"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            tags="${tags}"$'\n'"${IMAGE}:latest"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push dashboard image
+        id: build
+        if: ${{ steps.existing.outputs.exists != 'true' }}
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: Dockerfile.dashboard
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.tags }}
+          cache-from: type=gha,scope=dashboard-${{ env.SOURCE_SHA }}
+
+      - name: Promote existing image to latest
+        if: >-
+          ${{
+            github.event_name == 'push' &&
+            github.ref == 'refs/heads/main' &&
+            steps.existing.outputs.exists == 'true'
+          }}
+        env:
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+        run: docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}@${EXISTING_DIGEST}"
+
+      - name: Resolve published digest
+        id: result
+        env:
+          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
+        shell: bash
+        run: |
+          digest="${BUILT_DIGEST:-$EXISTING_DIGEST}"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Report immutable image reference
+        env:
+          DIGEST: ${{ steps.result.outputs.digest }}
+        run: |
+          {
+            echo "### Dashboard image published"
+            echo
+            echo "- Tag: \`${IMAGE}:${SOURCE_SHA}\`"
+            echo "- Digest: \`${IMAGE}@${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -406,32 +406,47 @@ its embedded tsnet).
    The GitHub token is fine-grained, read-only (repo `commontoolsinc/labs`, Actions: read).
    For the github-ci-spend tile it must additionally carry org billing read.
 
-**Build, push, deploy** — two commands:
+**Build, push, deploy**
+
+`.github/workflows/dashboard-image.yml` runs only when the dashboard image,
+dashboard package, Gantt drill-down, Deno dependency metadata, or the workflow
+itself changes. Pull requests always run the dashboard tests and an amd64 image
+build without cloud credentials.
+
+For organization-member pull requests, a passing dashboard test and image build
+publish the source commit as `dev-dashboard:<full-sha>`. A controlled rerun may
+override a failed dashboard test by temporarily setting the repository Actions
+variable `PUSH_BRANCH=true`; the image build must still pass, the rerun must have
+`github.run_attempt > 1`, and GCP independently verifies the actor's numeric org
+membership ID. Reset `PUSH_BRANCH=false` immediately after testing. Main-branch
+pushes publish both the immutable SHA tag and `latest`. Once a SHA tag exists,
+reruns reuse its digest instead of rebuilding or moving the tag.
+
+The publish job authenticates with GitHub OIDC and GCP Workload Identity
+Federation. It emits the immutable `sha256:` image reference in the workflow
+summary; no service-account JSON key is used.
+
+Manual build fallback:
 
 ```bash
-# labs repo: build the amd64 image, push it under the commit SHA and :latest
 SHA=$(git rev-parse HEAD)
 IMG=us-central1-docker.pkg.dev/commontools-core/containers/dev-dashboard
-docker build --platform=linux/amd64 -f Dockerfile.dashboard -t "$IMG:$SHA" -t "$IMG:latest" . \
-  && docker push "$IMG:$SHA" && docker push "$IMG:latest"
-
-# infra repo: sync tile secrets, apply manifests, pin the SHA, wait for the rollout
-cd ../infra/k8s && make apply-dev-dashboard-stage IMAGE="$IMG:$SHA"
+docker build --platform=linux/amd64 -f Dockerfile.dashboard -t "$IMG:$SHA" .
+docker push "$IMG:$SHA"
 ```
 
-`make apply-dev-dashboard-stage` ensures the namespace, syncs the dev-dashboard
-ExternalSecrets, applies `manifests/dev-dashboard/` with the app image pinned to
-`IMAGE`, and waits for the rollout. (`IMAGE` is required; the `:latest` in the
-manifest is only the bootstrap default that `apply-all.sh` uses.) The node then
-appears in the Tailscale console as `tag:dashboard`; open
+Copy the published digest from the workflow summary into the infra stage
+overlay's `images[].digest`, commit that immutable pin, then run
+`make apply-dev-dashboard-stage` from `infra/k8s`. The node then appears in the
+Tailscale console as `tag:dashboard`; open
 `https://dashboard.<tailnet>.ts.net/`. (The sidecar image is already pinned by
 `@sha256` digest in `03-deployment.yaml`, matching golink.)
 
 **Gated tiles** stay gray until wired: add the Secret Manager *value* (the
 container already exists from `tofu apply`), uncomment the ExternalSecret in
 `dashboard-secrets.yaml` and the env block in `03-deployment.yaml`, then re-run
-`make apply-dev-dashboard-stage IMAGE="$IMG:$SHA"`. So you can deploy green and
-light tiles up one at a time.
+`make apply-dev-dashboard-stage`. So you can deploy green and light tiles up one
+at a time.
 
 Every backend is reached over its REST API, so the image carries no cloud CLI.
 The GitHub tiles use `GH_TOKEN`; the cloud-spend tile queries BigQuery as the
