@@ -20,6 +20,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
+import { generateObjectState } from "../src/builder/built-in.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -39,9 +40,7 @@ describe("llmDialog", () => {
   >["commonfabric"]["patternTool"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
-  let generateObject: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateObjectStream"];
+  let generateObject: typeof generateObjectState;
 
   beforeEach(() => {
     clearMockResponses();
@@ -60,8 +59,8 @@ describe("llmDialog", () => {
       Writable,
       handler,
       patternTool,
-      generateObjectStream: generateObject,
     } = commonfabric);
+    generateObject = generateObjectState;
   });
 
   afterEach(async () => {

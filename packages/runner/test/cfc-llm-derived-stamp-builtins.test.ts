@@ -8,6 +8,7 @@ import {
   clearMockResponses,
   enableMockMode,
 } from "@commonfabric/llm/client";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -88,7 +89,12 @@ function waitForPendingToBecomeFalse(result: Cell<any>) {
     const tick = async () => {
       await liveResult.sync();
       const pending = liveResult.key("pending").get() as unknown;
-      if (pending === false) {
+      const directResult = liveResult.key("result").resolveAsCell().getRaw();
+      if (
+        pending === false ||
+        (pending === undefined && directResult !== undefined &&
+          !isDataUnavailable(directResult))
+      ) {
         resolve();
         return;
       }
@@ -276,9 +282,13 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       { role: "assistant", content: "text reply", id: "d1b-gt-1" },
     );
 
-    const testPattern = builder.pattern(() =>
-      builder.generateTextStream({ prompt: testPrompt })
-    );
+    const testPattern = builder.pattern(() => {
+      const request = builder.generateTextStream({ prompt: testPrompt });
+      return {
+        result: request,
+        partial: builder.partialResultOf(request),
+      };
+    });
     const resultCell = runtime.getCell(
       space,
       "d1b-generateText-result",
@@ -317,9 +327,12 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       },
     );
 
-    const testPattern = builder.pattern(() =>
-      builder.generateObjectStream({ prompt: testPrompt, schema: objectSchema })
-    );
+    const testPattern = builder.pattern(() => ({
+      result: builder.generateObjectStream({
+        prompt: testPrompt,
+        schema: objectSchema,
+      }),
+    }));
     const resultCell = runtime.getCell(
       space,
       "d1b-generateObject-direct-result",
@@ -367,8 +380,8 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     );
 
     const dummyPattern = builder.pattern(() => ({}), { type: "object" });
-    const testPattern = builder.pattern(() =>
-      builder.generateObjectStream({
+    const testPattern = builder.pattern(() => ({
+      result: builder.generateObjectStream({
         prompt: testPrompt,
         schema: objectSchema,
         tools: {
@@ -377,8 +390,8 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
             pattern: dummyPattern,
           },
         },
-      })
-    );
+      }),
+    }));
     const resultCell = runtime.getCell(
       space,
       "d1b-generateObject-tools-result",
@@ -435,13 +448,13 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       },
     );
 
-    const testPattern = builder.pattern(() =>
-      builder.generateObjectStream({
+    const testPattern = builder.pattern(() => ({
+      result: builder.generateObjectStream({
         prompt: testPrompt,
         schema: objectSchema,
         schemaSanitizePromptInjection: true,
-      })
-    );
+      }),
+    }));
     const resultCell = runtime.getCell(
       space,
       "d1b-generateObject-child-doc-result",
@@ -541,13 +554,13 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       },
     );
 
-    const testPattern = builder.pattern(() =>
-      builder.generateObjectStream({
+    const testPattern = builder.pattern(() => ({
+      result: builder.generateObjectStream({
         prompt: testPrompt,
         schema: objectSchema,
         schemaSanitizePromptInjection: true,
-      })
-    );
+      }),
+    }));
     const resultCell = runtime.getCell(
       space,
       "d1b-generateObject-compound-recursive-result",
@@ -668,12 +681,12 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     );
 
     try {
-      const testPattern = commonfabric.pattern(() =>
-        commonfabric.generateObjectStream({
+      const testPattern = commonfabric.pattern(() => ({
+        result: commonfabric.generateObjectStream({
           prompt: testPrompt,
           schema: objectSchema,
-        })
-      );
+        }),
+      }));
       const resultCell = disabledRuntime.getCell(
         space,
         "d1b-generateObject-disabled-result",

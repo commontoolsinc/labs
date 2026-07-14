@@ -7,6 +7,7 @@ import {
   isPending,
   NAME,
   navigateTo,
+  partialResultOf,
   pattern,
   resultOf,
   SELF,
@@ -372,17 +373,18 @@ const ChatNote = pattern<Input, Output>(
       messages: llmMessages,
       model: model,
     });
-    const llmResult = resultOf(llmResponse.result);
+    const llmResult = resultOf(llmResponse);
+    const llmPartial = resultOf(partialResultOf(llmResponse));
 
     // Track content before AI insertion point for streaming display
     const beforeAIInsert = new Writable<string>("");
 
     // Watch for LLM streaming partial updates
     // Side-effect-only reactive computation: tracks its reactive reads
-    // (isGenerating, llmResponse.partial, beforeAIInsert) automatically.
+    // (isGenerating, llmPartial, beforeAIInsert) automatically.
     computed(() => {
       const generating = isGenerating.get();
-      const partial = llmResponse.partial;
+      const partial = llmPartial;
       const prefix = beforeAIInsert.get();
       if (generating && partial && prefix) {
         content.set(prefix + partial);
@@ -393,12 +395,12 @@ const ChatNote = pattern<Input, Output>(
     // Side-effect-only reactive computation; reactive reads tracked automatically.
     computed(() => {
       const generating = isGenerating.get();
-      const pending = isPending(llmResponse.result);
+      const pending = isPending(llmResponse);
       const result = llmResult;
       // A terminal stream error must release the local generation latch. The
       // request inputs are cleared as well so a later Generate action creates
       // a fresh request instead of remaining attached to the failed one.
-      if (hasError(llmResponse.result)) {
+      if (hasError(llmResponse)) {
         if (generating) {
           isGenerating.set(false);
           llmMessages.set([]);
@@ -434,7 +436,7 @@ const ChatNote = pattern<Input, Output>(
     });
 
     // Generation state display (reactive expression auto-wraps at use sites)
-    const showGenerating = isGenerating.get() && isPending(llmResponse.result);
+    const showGenerating = isGenerating.get() && isPending(llmResponse);
 
     // Can generate when there's content and not already generating
     // Optimized to avoid splitting entire content on every keystroke

@@ -37,13 +37,12 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["request"]
 } as const satisfies __cfHelpers.JSONSchema, true as const satisfies __cfHelpers.JSONSchema);
 // FIXTURE: pattern-opaque-destructure-temporary-root-names
-// Verifies: destructured opaque temporaries preserve generated root suffixes
-//   const { result } = generateObjectStream(...) uses the synthesized
-//   __cf_destructure_* binding consistently before resultOf() projects it.
+// Verifies: a direct opaque stream result remains a stable reactive root before
+//   resultOf() projects its usable value.
 export default pattern((__cf_pattern_input) => {
     const messages = __cf_pattern_input.key("messages");
     const preview = __cfLift_1({ messages: messages }).for("preview", true);
-    const __cf_destructure_1 = generateObjectStream({
+    const request = generateObjectStream({
         prompt: preview,
         schema: {
             type: "object",
@@ -52,7 +51,7 @@ export default pattern((__cf_pattern_input) => {
             },
             required: ["title"],
         },
-    }), request = __cf_destructure_1.key("result").for("request", true);
+    }).for("request", true);
     const result = resultOf(request);
     return <div>{__cfLift_2({ request: request })}</div>;
 }, {

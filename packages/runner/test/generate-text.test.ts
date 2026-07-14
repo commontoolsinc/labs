@@ -14,6 +14,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { generateTextState } from "../src/builder/built-in.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -26,9 +27,7 @@ describe("generateText", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
-  let generateText: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateTextStream"];
+  let generateText: typeof generateTextState;
 
   let dummyPattern: any;
 
@@ -42,7 +41,8 @@ describe("generateText", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateTextStream: generateText } = commonfabric);
+    ({ pattern } = commonfabric);
+    generateText = generateTextState;
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
@@ -308,9 +308,7 @@ describe("generateText with queue", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
-  let generateText: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateTextStream"];
+  let generateText: typeof generateTextState;
 
   beforeEach(() => {
     clearMockResponses();
@@ -322,7 +320,8 @@ describe("generateText with queue", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateTextStream: generateText } = commonfabric);
+    ({ pattern } = commonfabric);
+    generateText = generateTextState;
   });
 
   afterEach(async () => {

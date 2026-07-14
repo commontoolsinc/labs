@@ -10,7 +10,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import {
+  DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   addMockObjectResponse,
@@ -36,6 +39,7 @@ import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { getMetaLink, parseLink } from "../src/link-utils.ts";
+import { generateObjectState } from "../src/builder/built-in.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -55,9 +59,7 @@ describe("generateObject with tools", () => {
   let patternTool: ReturnType<
     typeof createBuilder
   >["commonfabric"]["patternTool"];
-  let generateObject: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateObjectStream"];
+  let generateObject: typeof generateObjectState;
   let dummyPattern: any;
 
   beforeEach(() => {
@@ -72,13 +74,13 @@ describe("generateObject with tools", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     ({
       pattern,
-      generateObjectStream: generateObject,
       handler,
       Cell,
       lift,
       patternTool,
       str,
     } = commonfabric);
+    generateObject = generateObjectState;
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 
@@ -2032,7 +2034,7 @@ describe("generateObject with tools", () => {
 
       const liveResult = generatedResult.withTx();
       await liveResult.sync();
-      const resolvedResult = liveResult.key("result").resolveAsCell();
+      const resolvedResult = liveResult.resolveAsCell();
       expect(resolvedResult.get()).toEqual({
         action: "reject",
         approved: false,
@@ -2316,7 +2318,12 @@ function waitForPendingToBecomeFalse(result: Cell<any>) {
     const tick = async () => {
       await liveResult.sync();
       const pending = liveResult.key("pending").get() as unknown;
-      if (pending === false) {
+      const directResult = liveResult.resolveAsCell().getRaw();
+      if (
+        pending === false ||
+        (pending === undefined && directResult !== undefined &&
+          !isDataUnavailable(directResult))
+      ) {
         resolve();
         return;
       }

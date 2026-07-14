@@ -2,7 +2,9 @@ import {
   computed,
   generateTextStream,
   ifElse,
+  isPending,
   pattern,
+  resultOf,
   UI,
 } from "commonfabric";
 
@@ -16,13 +18,14 @@ import {
 //   ifElse(cond, {data}, undefined)   → ifElse(schema, schema, schema, schema, lift(...)(...), {data}, undefined)
 // Context: undefined is a VALUE argument, not a missing argument
 export default pattern<Record<string, never>>(() => {
-  const { pending, result } = generateTextStream({
+  const request = generateTextStream({
     prompt: "load data",
   });
+  const result = resultOf(request);
 
   // Pattern 1: undefined as ifTrue (waiting state returns nothing)
   const output1 = ifElse(
-    computed(() => pending || !result),
+    isPending(request),
     undefined,
     { result }
   );

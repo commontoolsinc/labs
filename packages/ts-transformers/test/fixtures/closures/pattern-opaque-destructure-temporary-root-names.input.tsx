@@ -6,12 +6,11 @@ import {
 } from "commonfabric";
 
 // FIXTURE: pattern-opaque-destructure-temporary-root-names
-// Verifies: destructured opaque temporaries preserve generated root suffixes
-//   const { result } = generateObjectStream(...) uses the synthesized
-//   __cf_destructure_* binding consistently before resultOf() projects it.
+// Verifies: a direct opaque stream result remains a stable reactive root before
+//   resultOf() projects its usable value.
 export default pattern<{ messages: string[] }>(({ messages }) => {
   const preview = computed(() => messages[0] ?? "");
-  const { result: request } = generateObjectStream({
+  const request = generateObjectStream({
     prompt: preview,
     schema: {
       type: "object",

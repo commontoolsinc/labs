@@ -24,6 +24,10 @@ import { Runtime } from "../src/runtime.ts";
 import type { Cell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  generateObjectState,
+  generateTextState,
+} from "../src/builder/built-in.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -33,12 +37,8 @@ describe("LLM pattern smoke tests", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
-  let generateText: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateTextStream"];
-  let generateObject: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateObjectStream"];
+  let generateText: typeof generateTextState;
+  let generateObject: typeof generateObjectState;
   let dummyPattern: any;
 
   beforeEach(() => {
@@ -54,9 +54,9 @@ describe("LLM pattern smoke tests", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     ({
       pattern,
-      generateTextStream: generateText,
-      generateObjectStream: generateObject,
     } = commonfabric);
+    generateText = generateTextState;
+    generateObject = generateObjectState;
     dummyPattern = pattern(() => ({}), { type: "object" });
   });
 

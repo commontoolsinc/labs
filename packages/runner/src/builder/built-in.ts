@@ -136,7 +136,8 @@ export const llmDialog = createNodeFactory({
   params: FactoryInput<BuiltInLLMParams>,
 ) => Reactive<BuiltInLLMDialogState>;
 
-const generateObjectState = createNodeFactory({
+/** @internal Raw persisted state factory for compatibility and runtime tests. */
+export const generateObjectState = createNodeFactory({
   type: "ref",
   implementation: "generateObject",
 }) as <T = any>(
@@ -154,7 +155,8 @@ export const generateObjectStream = (<T = any>(
   return associatePartialResult<T, string>(state.result, state.partial);
 }) as GenerateObjectStreamFunction;
 
-const generateTextState = createNodeFactory({
+/** @internal Raw persisted state factory for compatibility and runtime tests. */
+export const generateTextState = createNodeFactory({
   type: "ref",
   implementation: "generateText",
 }) as (

@@ -27,6 +27,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { join } from "@std/path";
+import { generateObjectState } from "../src/builder/built-in.ts";
 
 const signer = await Identity.fromPassphrase("test operator fixtures");
 const space = signer.did();
@@ -56,9 +57,7 @@ describe("conversation fixtures", () => {
     typeof createBuilder
   >["commonfabric"]["patternTool"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
-  let generateObject: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateObjectStream"];
+  let generateObject: typeof generateObjectState;
   let llmDialog: ReturnType<typeof createBuilder>["commonfabric"]["llmDialog"];
 
   beforeEach(() => {
@@ -73,11 +72,11 @@ describe("conversation fixtures", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     ({
       pattern,
-      generateObjectStream: generateObject,
       llmDialog,
       Cell,
       patternTool,
     } = commonfabric);
+    generateObject = generateObjectState;
   });
 
   afterEach(async () => {

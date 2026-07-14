@@ -322,28 +322,20 @@ export function generateText(
 
 export function generateObjectStream<T>(
   _params: Record<string, unknown>,
-): { pending: boolean; result: T | UnavailableResult; error?: string } {
-  return { pending: false, result: {} as T };
+): T | UnavailableResult {
+  return {} as T;
 }
 
 export function generateTextStream(
   _params: Record<string, unknown>,
-): {
-  pending: boolean;
-  result: string | UnavailableResult;
-  partial?: string;
-  error?: string;
-} {
-  return {
-    pending: generateTextResult.pending,
-    result: currentGenerateTextValue(),
-    partial: typeof generateTextResult.result === "string"
-      ? generateTextResult.result
-      : undefined,
-    error: generateTextResult.error
-      ? String(generateTextResult.error)
-      : undefined,
-  };
+): string | UnavailableResult {
+  return currentGenerateTextValue();
+}
+
+export function partialResultOf(
+  _value: unknown,
+): string | UnavailableResult {
+  return currentGenerateTextValue();
 }
 
 export function llmDialog<T>(

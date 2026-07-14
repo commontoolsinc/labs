@@ -43,6 +43,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { generateObjectState } from "../src/builder/built-in.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -101,9 +102,7 @@ describe("auto-provided sandboxId", () => {
   let patternTool: ReturnType<
     typeof createBuilder
   >["commonfabric"]["patternTool"];
-  let generateObject: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateObjectStream"];
+  let generateObject: typeof generateObjectState;
 
   beforeEach(() => {
     enableMockMode();
@@ -118,8 +117,8 @@ describe("auto-provided sandboxId", () => {
     ({
       pattern,
       patternTool,
-      generateObjectStream: generateObject,
     } = commonfabric);
+    generateObject = generateObjectState;
   });
 
   afterEach(async () => {

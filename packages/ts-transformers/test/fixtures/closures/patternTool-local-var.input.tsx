@@ -1,4 +1,4 @@
-import { computed, generateTextStream, pattern, patternTool, type PatternToolResult, Writable } from "commonfabric";
+import { computed, generateTextStream, isPending, pattern, patternTool, type PatternToolResult, resultOf, Writable } from "commonfabric";
 
 const content = new Writable("Hello world");
 
@@ -20,8 +20,8 @@ export default pattern<Record<string, never>, Output>(() => {
         prompt: computed(() => content),
       });
       return computed(() => {
-        if (genResult.pending) return undefined;
-        return genResult.result;
+        if (isPending(genResult)) return undefined;
+        return resultOf(genResult);
       });
     }),
     { content },

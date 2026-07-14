@@ -236,14 +236,13 @@ ${snippets}
 Extract the writing style patterns from these emails.`;
     });
 
-    const styleState = generateObjectStream<EmailStyle>({
+    const styleRequest = generateObjectStream<EmailStyle>({
       prompt: analysisPrompt as any,
       schema: STYLE_SCHEMA,
       system:
         "You are an expert linguist analyzing email writing patterns. Extract consistent style patterns across all provided emails. Be specific and use examples from the actual text.",
       model: "anthropic:claude-sonnet-4-5",
     });
-    const styleRequest = styleState.result;
     const styleResult = resultOf(styleRequest);
 
     // Auto-save LLM result to persistent Writable
@@ -265,7 +264,7 @@ Extract the writing style patterns from these emails.`;
       return null;
     });
 
-    const isAnalyzing = styleState.pending;
+    const isAnalyzing = isPending(styleRequest);
 
     // Whether a style has been extracted yet
     const hasStyle = !!savedStyle.get();
