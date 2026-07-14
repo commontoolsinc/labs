@@ -1,7 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/src/builtins/filter.ts": [
-    "193:16:1029mof",
-  ],
   "packages/runner/src/builtins/flatmap.ts": [
     "194:16:1029mof",
   ],
