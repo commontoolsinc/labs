@@ -1,11 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  type CfcLabelView,
   cfcLabelViewForCell,
   cfcLabelViewFromMetadata,
 } from "../src/cfc/label-view.ts";
 import {
   redactSigilCfcLabelViewsForDisplay,
+  setLinkCfcLabelView,
   stripSigilCfcLabelViews,
 } from "../src/cfc/link-label-view.ts";
 import type { CfcMetadata } from "../src/cfc/types.ts";
@@ -16,8 +18,18 @@ import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type FactoryInput, UI } from "../src/builder/types.ts";
+import { UI } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
+
+type CollectionPatternHelpers = {
+  mapWithPattern(op: unknown, params: Record<string, unknown>): unknown;
+};
+
+type LabelRenderInput = {
+  element: unknown;
+  index: number;
+  array: unknown;
+};
 
 describe("CFC label view helpers", () => {
   it("collects labels that apply to a logical value path", () => {
@@ -301,19 +313,19 @@ describe("CFC label view helpers", () => {
       cfcEnforcementMode: "disabled",
     });
     try {
-      const view = {
+      const view: CfcLabelView = {
         version: 1,
         entries: [{
           path: [],
           label: { integrity: ["carried-through-sigil"] },
         }],
-      } as const;
+      };
       const cell = runtime.getCell(
         signer.did(),
         "cfc-label-view-carried-sigil",
       );
-      const link = cell.getAsLink() as any;
-      link["/"][LINK_V1_TAG].cfcLabelView = view;
+      const link = cell.getAsLink();
+      setLinkCfcLabelView(link, view);
 
       const recovered = runtime.getCellFromLink(link);
       expect(cfcLabelViewForCell(recovered)).toEqual(view);
@@ -1122,17 +1134,24 @@ describe("CFC label view helpers", () => {
 
       const { commonfabric } = createTrustedBuilder(runtime);
       const { pattern } = commonfabric;
+      const collectionItems = (items: unknown): CollectionPatternHelpers =>
+        items as CollectionPatternHelpers;
+      const renderItem = (
+        item: unknown,
+        _index: number,
+        _array: unknown,
+      ) => ({
+        [UI]: {
+          type: "vnode" as const,
+          name: "cf-cfc-label",
+          props: { value: item },
+          children: [],
+        },
+      });
       const renderLabels = pattern<{ items: unknown[] }>(({ items }) => {
-        const rendered = (items as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((item: any) => ({
-              [UI]: {
-                type: "vnode" as const,
-                name: "cf-cfc-label",
-                props: { value: item },
-                children: [],
-              },
-            })) as any)(element, index, array)
+        const rendered = collectionItems(items).mapWithPattern(
+          pattern(({ element, index, array }: LabelRenderInput) =>
+            renderItem(element, index, array)
           ),
           {},
         );
