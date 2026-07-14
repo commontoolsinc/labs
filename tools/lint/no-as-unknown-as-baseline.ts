@@ -1,9 +1,4 @@
 export const noAsUnknownAsBaselineEntries = {
-  "packages/runner/test/cfc-grant-records.test.ts": [
-    "1195:8:ibeg04",
-    "1275:10:1hw721k",
-    "1316:38:qy10vz",
-  ],
   "packages/runner/test/cfc-label-metadata-persist.test.ts": [
     "78:62:1r82iq7",
     "316:64:30mg0f",

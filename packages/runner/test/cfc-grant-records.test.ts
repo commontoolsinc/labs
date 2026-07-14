@@ -24,7 +24,6 @@ import {
   verifyCfcGrantDocument,
 } from "../src/cfc/grants.ts";
 import { TransactionWrapper } from "../src/storage/extended-storage-transaction.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../src/cfc/sink-request.ts";
 import { createFrozenRequestSnapshot } from "../src/cfc/request-snapshot.ts";
 import { preparedDigestFor } from "../src/cfc/canonical.ts";
@@ -1184,23 +1183,36 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       });
     });
 
-    it("fails closed (and records nothing) when the read throws", () => {
-      const consulted: unknown[] = [];
-      const throwingTx = {
-        readOrThrow: () => {
-          throw new Error("replica unavailable");
-        },
-        recordCfcConsultedGrant: (entry: unknown) => consulted.push(entry),
-        noteCfcDiagnostic: () => {},
-      } as unknown as IExtendedStorageTransaction;
-      const resolver = createTxCfcGrantResolver(throwingTx);
-      expect(
-        resolver({
-          kind: "ShareGrant",
-          fields: { owner: ALICE, resource: PHOTO_REF },
-        }),
-      ).toEqual([]);
-      expect(consulted).toEqual([]);
+    it("fails closed (and records nothing) when the read throws", async () => {
+      await withRuntime({}, (runtime) => {
+        const consulted: unknown[] = [];
+        const tx = runtime.edit();
+        const throwingTx = new Proxy(tx, {
+          get(target, prop, receiver) {
+            if (prop === "readOrThrow") {
+              return () => {
+                throw new Error("replica unavailable");
+              };
+            }
+            if (prop === "recordCfcConsultedGrant") {
+              return (entry: unknown) => consulted.push(entry);
+            }
+            if (prop === "noteCfcDiagnostic") {
+              return () => {};
+            }
+            return Reflect.get(target, prop, receiver);
+          },
+        });
+        const resolver = createTxCfcGrantResolver(throwingTx);
+        expect(
+          resolver({
+            kind: "ShareGrant",
+            fields: { owner: ALICE, resource: PHOTO_REF },
+          }),
+        ).toEqual([]);
+        expect(consulted).toEqual([]);
+        tx.abort();
+      });
     });
 
     it("notes a diagnostic for a malformed stored document", async () => {
@@ -1271,8 +1283,8 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     it("a non-array policyState never fires", () => {
       const rule = shareRule({
         preCondition: {
-          policyState: "ShareGrant",
-        } as unknown as ExchangeRule["preCondition"],
+          policyState: "ShareGrant" as never,
+        },
       });
       const result = evaluateExchangeRules(
         { confidentiality: [userAlice] },
@@ -1313,7 +1325,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       const result = evaluateExchangeRules(
         { confidentiality: [userAlice] },
         snapshot([shareRule()]),
-        { grantResolver: () => "junk" as unknown as readonly unknown[] },
+        { grantResolver: () => "junk" as never },
       );
       expect(result.firings).toEqual([]);
     });
