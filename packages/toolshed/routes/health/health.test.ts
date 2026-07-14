@@ -28,6 +28,9 @@ const poolMetrics = {
     backoff: 0,
   },
   demandSnapshots: 3,
+  workerStartAttempts: 1,
+  workerStartAborts: 0,
+  workerStartFailures: 0,
   workersStarted: 1,
   workersStopped: 0,
   abruptStops: 0,
@@ -57,6 +60,10 @@ const controlMetrics = {
   settlementsUnserved: 0,
   leaseFenceRejects: 0,
   actionFirewallRejects: 0,
+  acceptedCommitIndexLookups: 5,
+  acceptedCommitIndexTargets: 8,
+  acceptedCommitIndexDemandedPieces: 2,
+  acceptedCommitIndexMatches: 4,
 };
 
 Deno.test("health routes", async (t) => {

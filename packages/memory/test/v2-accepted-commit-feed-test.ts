@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 import * as MemoryClient from "../v2/client.ts";
 import { type AcceptedCommitEvent, Server } from "../v2/server.ts";
 import { type ClientCommit, toDocumentPath } from "../v2.ts";
@@ -354,6 +355,10 @@ Deno.test("memory v2 accepted-commit feed selects only stale demanded scheduler 
         status: "success",
       },
     });
+    const statsBefore = { ...server.executionStats };
+    const lookupTimingBefore = getTimingStatsBreakdown()["execution.control"]?.[
+      "stale-reader-lookup"
+    ]?.count ?? 0;
     await session.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
@@ -363,6 +368,31 @@ Deno.test("memory v2 accepted-commit feed selects only stale demanded scheduler 
         value: { value: { changed: true } },
       }],
     });
+
+    assertEquals(
+      server.executionStats.acceptedCommitIndexLookups,
+      statsBefore.acceptedCommitIndexLookups + 1,
+    );
+    assertEquals(
+      server.executionStats.acceptedCommitIndexTargets,
+      statsBefore.acceptedCommitIndexTargets + 1,
+    );
+    assertEquals(
+      server.executionStats.acceptedCommitIndexDemandedPieces,
+      statsBefore.acceptedCommitIndexDemandedPieces + 1,
+    );
+    assertEquals(
+      server.executionStats.acceptedCommitIndexMatches,
+      statsBefore.acceptedCommitIndexMatches + 1,
+    );
+    assertEquals(
+      getTimingStatsBreakdown()["execution.control"]?.[
+        "stale-reader-lookup"
+      ]?.count,
+      lookupTimingBefore + 1,
+    );
+    const lookupsAfterDemandedWrite = server.executionStats
+      .acceptedCommitIndexLookups;
 
     const writeEvent = events.at(-1)!;
     assertEquals(
@@ -393,6 +423,10 @@ Deno.test("memory v2 accepted-commit feed selects only stale demanded scheduler 
       }],
     });
     assertEquals(events.at(-1)?.staleDemandedReaders, []);
+    assertEquals(
+      server.executionStats.acceptedCommitIndexLookups,
+      lookupsAfterDemandedWrite,
+    );
   } finally {
     await client.close();
     await server.close();

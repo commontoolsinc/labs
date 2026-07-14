@@ -1422,6 +1422,10 @@ export class Server {
     settlementsUnserved: 0,
     leaseFenceRejects: 0,
     actionFirewallRejects: 0,
+    acceptedCommitIndexLookups: 0,
+    acceptedCommitIndexTargets: 0,
+    acceptedCommitIndexDemandedPieces: 0,
+    acceptedCommitIndexMatches: 0,
   };
 
   /** space → (principal key → capability). Invalidated whenever a commit
@@ -3812,23 +3816,42 @@ export class Server {
       ),
     ];
     const engine = this.#openedEngines.get(event.space);
-    const staleDemandedReaders = Object.freeze(
-      engine === undefined || demandedSchedulerPieceIds.length === 0 ||
-        event.commit.schedulerDirtiedReaders === undefined
-        ? []
-        : Engine.staleReadersForTargets(engine, {
-          branch: event.commit.branch,
-          ownerSpace: event.space,
-          targets: event.commit.schedulerDirtiedReaders.map((reader) =>
-            reader.read
-          ),
-          demandedSchedulerPieceIds,
-          // Phase 1 claims only provably shared, space-scoped actions. Scoped
-          // rows remain client-primary until delegated contexts arrive.
-          applicableExecutionContextKeys: ["space"],
-          dirtySeq: event.commit.seq,
-        }).map((reader) => Object.freeze({ ...reader })),
+    const dirtyTargets = event.commit.schedulerDirtiedReaders?.map((reader) =>
+      reader.read
     );
+    let staleDemandedReaders: readonly Engine.SchedulerActionState[] = Object
+      .freeze([]);
+    if (
+      engine !== undefined && demandedSchedulerPieceIds.length > 0 &&
+      dirtyTargets !== undefined
+    ) {
+      const lookupStartedAt = performance.now();
+      this.executionStats.acceptedCommitIndexLookups += 1;
+      this.executionStats.acceptedCommitIndexTargets += dirtyTargets.length;
+      this.executionStats.acceptedCommitIndexDemandedPieces +=
+        demandedSchedulerPieceIds.length;
+      try {
+        staleDemandedReaders = Object.freeze(
+          Engine.staleReadersForTargets(engine, {
+            branch: event.commit.branch,
+            ownerSpace: event.space,
+            targets: dirtyTargets,
+            demandedSchedulerPieceIds,
+            // Phase 1 claims only provably shared, space-scoped actions. Scoped
+            // rows remain client-primary until delegated contexts arrive.
+            applicableExecutionContextKeys: ["space"],
+            dirtySeq: event.commit.seq,
+          }).map((reader) => Object.freeze({ ...reader })),
+        );
+        this.executionStats.acceptedCommitIndexMatches +=
+          staleDemandedReaders.length;
+      } finally {
+        executionControlLogger.time(
+          lookupStartedAt,
+          "stale-reader-lookup",
+        );
+      }
+    }
     this.#recordExecutionInvalidations(
       event.space,
       staleDemandedReaders,

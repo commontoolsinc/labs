@@ -24,6 +24,9 @@ export const ServerExecutionPoolMetricsSchema = z.object({
     backoff: nonNegativeIntegerSchema,
   }).strict(),
   demandSnapshots: nonNegativeIntegerSchema,
+  workerStartAttempts: nonNegativeIntegerSchema,
+  workerStartAborts: nonNegativeIntegerSchema,
+  workerStartFailures: nonNegativeIntegerSchema,
   workersStarted: nonNegativeIntegerSchema,
   workersStopped: nonNegativeIntegerSchema,
   abruptStops: nonNegativeIntegerSchema,
@@ -53,6 +56,10 @@ export const ServerExecutionControlMetricsSchema = z.object({
   settlementsUnserved: nonNegativeIntegerSchema,
   leaseFenceRejects: nonNegativeIntegerSchema,
   actionFirewallRejects: nonNegativeIntegerSchema,
+  acceptedCommitIndexLookups: nonNegativeIntegerSchema,
+  acceptedCommitIndexTargets: nonNegativeIntegerSchema,
+  acceptedCommitIndexDemandedPieces: nonNegativeIntegerSchema,
+  acceptedCommitIndexMatches: nonNegativeIntegerSchema,
 }).strict();
 
 export const HealthStatsResponseSchema = z.object({

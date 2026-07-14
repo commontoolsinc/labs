@@ -17,6 +17,10 @@ export type ServerExecutionControlMetrics = Readonly<{
   settlementsUnserved: number;
   leaseFenceRejects: number;
   actionFirewallRejects: number;
+  acceptedCommitIndexLookups: number;
+  acceptedCommitIndexTargets: number;
+  acceptedCommitIndexDemandedPieces: number;
+  acceptedCommitIndexMatches: number;
 }>;
 export type ServerExecutionControlMetricsProvider = () =>
   | ServerExecutionControlMetrics

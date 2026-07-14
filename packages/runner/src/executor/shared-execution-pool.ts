@@ -100,6 +100,13 @@ export interface ExecutionPoolMetricsSnapshot {
   readonly activeDemands: number;
   readonly states: Readonly<Record<SpaceExecutionSnapshot["state"], number>>;
   readonly demandSnapshots: number;
+  /** Worker factory calls begun, including attempts still in flight. */
+  readonly workerStartAttempts: number;
+  /** Starts cancelled by pool lifecycle or a superseding demand snapshot. */
+  readonly workerStartAborts: number;
+  /** Starts rejected for reasons other than pool cancellation. */
+  readonly workerStartFailures: number;
+  /** Worker generations that reached the live state. */
   readonly workersStarted: number;
   readonly workersStopped: number;
   readonly abruptStops: number;
@@ -188,6 +195,9 @@ export class SharedExecutionPool {
   readonly #tasks = new Set<Promise<void>>();
   readonly #metrics = {
     demandSnapshots: 0,
+    workerStartAttempts: 0,
+    workerStartAborts: 0,
+    workerStartFailures: 0,
     workersStarted: 0,
     workersStopped: 0,
     abruptStops: 0,
@@ -573,6 +583,8 @@ export class SharedExecutionPool {
     const startupAbort = new AbortController();
     slot.startupAbort = startupAbort;
     const workerStartedAt = performance.now();
+    this.#metrics.workerStartAttempts++;
+    let startOutcome: "live" | "aborted" | "failed" = "failed";
     try {
       const executor = await this.#factory.start({
         space: slot.space,
@@ -594,14 +606,19 @@ export class SharedExecutionPool {
         },
       });
       if (slot.startupAbort === startupAbort) slot.startupAbort = null;
-      this.#metrics.workersStarted++;
-      if (slot.generationToken !== token || this.#closed) {
+      if (
+        startupAbort.signal.aborted || slot.generationToken !== token ||
+        this.#closed
+      ) {
+        startOutcome = "aborted";
         await executor.stop();
         return;
       }
       slot.executor = executor;
       slot.pieces = nextPieces;
       slot.state = "live";
+      startOutcome = "live";
+      this.#metrics.workersStarted++;
       if (wakingFromAcceptedCommit) {
         this.#metrics.parkedWakeStarts++;
         // Fixed-key duration from the first coalesced relevant notification
@@ -615,6 +632,7 @@ export class SharedExecutionPool {
       }
     } catch (error) {
       if (slot.startupAbort === startupAbort) slot.startupAbort = null;
+      startOutcome = startupAbort.signal.aborted ? "aborted" : "failed";
       slot.crashToken = token;
       await this.#shutdown(slot, true);
       console.warn(
@@ -623,7 +641,13 @@ export class SharedExecutionPool {
       );
       this.#scheduleCrashRetry(slot);
     } finally {
+      if (startOutcome === "aborted") {
+        this.#metrics.workerStartAborts++;
+      } else if (startOutcome === "failed") {
+        this.#metrics.workerStartFailures++;
+      }
       logger.time(workerStartedAt, "worker-start");
+      logger.time(workerStartedAt, `worker-start-${startOutcome}`);
     }
   }
 

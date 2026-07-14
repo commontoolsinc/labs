@@ -717,6 +717,7 @@ Deno.test("shared execution pool unions ten client references into one worker", 
   pool.start();
   const timingBefore = getTimingStatsBreakdown()["execution.pool"] ?? {};
   const hibernateBefore = timingBefore.hibernate?.count ?? 0;
+  const liveStartBefore = timingBefore["worker-start-live"]?.count ?? 0;
 
   try {
     const demands = Array.from(
@@ -747,6 +748,9 @@ Deno.test("shared execution pool unions ten client references into one worker", 
         backoff: 0,
       },
       demandSnapshots: 1,
+      workerStartAttempts: 1,
+      workerStartAborts: 0,
+      workerStartFailures: 0,
       workersStarted: 1,
       workersStopped: 0,
       abruptStops: 0,
@@ -786,6 +790,9 @@ Deno.test("shared execution pool unions ten client references into one worker", 
         backoff: 0,
       },
       demandSnapshots: 3,
+      workerStartAttempts: 1,
+      workerStartAborts: 0,
+      workerStartFailures: 0,
       workersStarted: 1,
       workersStopped: 1,
       abruptStops: 0,
@@ -803,6 +810,11 @@ Deno.test("shared execution pool unions ten client references into one worker", 
     assertEquals(
       getTimingStatsBreakdown()["execution.pool"]?.hibernate?.count,
       hibernateBefore + 1,
+    );
+    assertEquals(
+      getTimingStatsBreakdown()["execution.pool"]?.["worker-start-live"]
+        ?.count,
+      liveStartBefore + 1,
     );
   } finally {
     await pool.close();
@@ -1413,6 +1425,8 @@ Deno.test("closing the pool aborts a Worker generation still starting", async ()
   };
   const pool = new SharedExecutionPool({ control, factory });
   pool.start();
+  const timingBefore = getTimingStatsBreakdown()["execution.pool"] ?? {};
+  const abortedBefore = timingBefore["worker-start-aborted"]?.count ?? 0;
 
   const demandUpdate = control.emit(1, [demand(1, ["piece:a"])]);
   await started.promise;
@@ -1422,4 +1436,50 @@ Deno.test("closing the pool aborts a Worker generation still starting", async ()
   assertEquals(startupAborted, true);
   assertEquals(control.finished, 1);
   assertEquals(pool.metrics().activeLanes, 0);
+  assertEquals(pool.metrics().workerStartAttempts, 1);
+  assertEquals(pool.metrics().workerStartAborts, 1);
+  assertEquals(pool.metrics().workerStartFailures, 0);
+  assertEquals(pool.metrics().workersStarted, 0);
+  assertEquals(
+    getTimingStatsBreakdown()["execution.pool"]?.["worker-start-aborted"]
+      ?.count,
+    abortedBefore + 1,
+  );
+});
+
+Deno.test("shared execution pool counts a non-abort Worker start failure", async () => {
+  const control = new FakeExecutionControl();
+  const timers = new ManualTimers();
+  const factory: SpaceExecutorFactory = {
+    start(): Promise<SpaceExecutor> {
+      return Promise.reject(new Error("synthetic Worker boot failure"));
+    },
+  };
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  pool.start();
+  const timingBefore = getTimingStatsBreakdown()["execution.pool"] ?? {};
+  const failedBefore = timingBefore["worker-start-failed"]?.count ?? 0;
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+
+    assertEquals(pool.metrics().workerStartAttempts, 1);
+    assertEquals(pool.metrics().workerStartAborts, 0);
+    assertEquals(pool.metrics().workerStartFailures, 1);
+    assertEquals(pool.metrics().workersStarted, 0);
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "backoff");
+    assertEquals(
+      getTimingStatsBreakdown()["execution.pool"]?.["worker-start-failed"]
+        ?.count,
+      failedBefore + 1,
+    );
+  } finally {
+    await pool.close();
+  }
 });
