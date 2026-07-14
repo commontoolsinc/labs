@@ -13,6 +13,11 @@ You can see its output for any file with:
 deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
 ```
 
+The emitted output is dense; pipe it into `deno task cf view` for a less-like,
+syntax-aware pager that colours builders, schemas, closures, and type positions
+and lets you navigate the structure tree. `AGENTS.md` tells you to inspect this
+emitted output directly rather than infer transformer behavior from source.
+
 ---
 
 ## The four packages and their jobs
@@ -41,7 +46,17 @@ flowchart LR
   during emit, and produces one CommonJS module body plus a source map per
   source file. It carries none of the Common Fabric transformer logic — that
   pipeline is injected by the caller (its only Common-Fabric-specific detail is
-  the default JSX factory, `h` / `__cfHelpers.h.fragment`).
+  the default JSX factory, `h` / `__cfHelpers.h.fragment`). Load-bearing compiler
+  options: `module: CommonJS`, `sourceMap: true` with `inlineSources: false`
+  (maps resolve stack frames to `cf:module/<id>`), `declaration: false` (TS's
+  declaration emit chokes on the `CELL_BRAND` unique symbols, so declaration
+  checking runs through the checker instead), `noResolve: true`, and during
+  multi-file compile `skipLibCheck: true` so the trimmed virtual `.d.ts` libs
+  aren't type-checked. A runtime-only specifier with no source (e.g.
+  `commonfabric`) is resolved to `<name>.d.ts`. The three `ProgramResolver`s
+  differ concretely: `InMemoryProgram` is a `Record<string,string>` map;
+  `FileSystemProgramResolver` is Deno-only, requires absolute specifiers, and
+  refuses imports outside its root; `HttpProgramResolver` fetches over HTTP.
 - **`ts-transformers`** is the TypeScript AST transformer pipeline. It rewrites
   natural reactive TypeScript into explicit, schema-annotated runtime form.
 - **`schema-generator`** walks a TypeScript type into a JSON Schema object,
@@ -150,6 +165,14 @@ used at the call site as
 via `__cfReg({ __cfPattern_1 })`. The closure capture (`discount`) is made
 explicit as a parameter with its own schema.
 
+`__cfHelpers` is the single, un-shadowable binding every synthetic call routes
+through. A one-line prelude (`import { __cfHelpers } from "commonfabric";`) is
+injected before the transformers run; at runtime it is literally the whole
+`commonfabric` builder object aliased onto itself
+(`commonfabric.__cfHelpers = commonfabric`), so `__cfHelpers.lift`, `.pattern`,
+`.h.fragment` resolve to the real builder. Most stages extend a
+`HelpersOnlyTransformer` whose filter skips any file without that injected import.
+
 ---
 
 ## Type to JSON Schema
@@ -178,9 +201,15 @@ The wrapper-type vocabulary — the authored spellings (`Cell`, `Writable`,
 kind (`Writable` collapses to `Cell`; `Reactive` stays `Reactive`) — is
 canonicalized once in
 `schema-generator/src/typescript/wrapper-names.ts` and consumed by both
-`schema-generator` and `ts-transformers`. There is an auto-detection fork: when
-the resolved type is `any` but a concrete synthetic type node exists, the
-generator walks the node instead of the type.
+`schema-generator` and `ts-transformers`. Each wrapper is emitted into the
+schema's `asCell` array with a brand from `cell-brand.ts`: `Cell`→`"cell"`,
+`ReadonlyCell`→`"readonly"`, `WriteonlyCell`→`"writeonly"`,
+`ComparableCell`→`"comparable"`, `OpaqueCell`/`Reactive`→`"opaque"`,
+`Stream`→`"stream"`, `SqliteDb`→`"sqlite"` (and `Cell<Stream<T>>` is rejected).
+There is an auto-detection fork: when the resolved type is `any` but a concrete
+synthetic type node exists, the generator walks the node instead of the type; and
+every named type is hoisted into `$defs` and referenced by `$ref`, with an
+identity-based depth-first pre-pass detecting cycles.
 
 ---
 

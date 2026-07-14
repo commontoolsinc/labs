@@ -74,8 +74,20 @@ Two facts that catch people out:
   a function transiently, but nothing function-valued crosses the wire). This is
   why the reconciler can live in a worker at all.
 - **The reconciler enforces CFC render policy.** It can replace blocked content
-  with a `cf-cfc-blocked` placeholder. If UI content "disappears," suspect the
-  flow-control policy before suspecting a render bug.
+  with a `cf-cfc-blocked` placeholder (`CFC_BLOCKED_PLACEHOLDER_TAG`, carrying
+  `data-cfc-blocked-reason`). If UI content "disappears," suspect the flow-control
+  policy before suspecting a render bug.
+
+The `VDomOp` vocabulary (`vdom-ops.ts`) is a 12-member discriminated union:
+`create-element` (optionally carrying a `space` for cross-space transclusion),
+`create-text`, `update-text`, `set-prop`, `remove-prop`, `set-attrs` (a bulk
+initial-render optimization), `set-event` (carries an integer `handlerId`, not a
+function), `remove-event`, `set-binding` (carries a `cellRef` for a `$`-bound
+prop, not a value), `insert-child`, `move-child`, and `remove-node`. Ops are
+collected into a `VDomBatch { batchId, ops, rootId? }` and applied in order.
+Children are keyed by `generateKey`, which `JSON.stringify`s the VNode with any
+`Cell` replaced by its normalized link so the key is identical on both threads,
+appending an occurrence suffix to disambiguate structurally-identical siblings.
 
 On the component side, a `cf-*` element binds to a cell through a
 `CellController` (a Lit reactive controller). The controller subscribes via the
@@ -83,8 +95,18 @@ main-thread `CellHandle.subscribe()` and calls `requestUpdate()` on change;
 writing back calls `cellHandle.set(v)`, which sends a `CellSet` request over IPC
 to the worker, and the worker applies it in a transaction
 (`runtime.edit()` → `withTx(tx).set(v)` → `tx.commit()`). Debounce and blur
-timing for inputs live on the controller. The runtime and the current space
-arrive through Lit context (`runtimeContext`, `spaceContext`).
+timing for inputs live on the controller (default `debounce` 300 ms). The runtime
+and the current space arrive through Lit context (`runtimeContext`,
+`spaceContext`).
+
+`ui` holds ~110 `cf-*` component directories under `v2/components/`; `v2/core/`
+holds the controllers (`base-element.ts`, `cell-controller.ts` with typed
+subclasses, `input-timing-controller.ts`, `mention-controller.ts`,
+`form-field-controller.ts`, drag/debug/menu helpers), and `v2/styles/variables.ts`
+holds the design tokens (`--cf-colors-*` base palette, `--cf-theme-*` semantic
+contract). The authoritative, type-checked component catalog is not in `ui` — it
+is a Common Fabric pattern at `packages/patterns/catalog/catalog.tsx`, with a
+story file per component under `catalog/stories/`.
 
 ---
 
@@ -112,13 +134,20 @@ sequenceDiagram
     Host->>Guest: Update [key, value] / Effect / LLMResponse
 ```
 
-The outer frame validates the message origin against the known host origin. The
-host side registers a single `IframeContextHandler` whose methods
+The outer frame validates the message origin against the known host origin
+(`e.source === HOST_WINDOW && e.origin === HOST_ORIGIN`). The host side registers
+a single `IframeContextHandler` whose methods
 (`read`/`write`/`subscribe`/`onLLMRequest`/`onPerform`) wire guest requests to
-the real reactive runtime. The README documents the deliberately accepted
-security gaps (for example, a hardcoded-CDN allowlist and anchors with
-`target=_blank` are both exfiltration vectors, and `document.baseURI` leaks the
-parent URL into the iframe).
+the real reactive runtime. Why two frames: the CSP (`default-src 'none'`, then
+per-directive allowances — `script-src` re-enables the host origin plus
+`'unsafe-inline'` and three hardcoded CDNs `unpkg.com`/`cdn.tailwindcss.com`/
+`esm.sh`) is set on the outer `srcdoc` so it propagates into the inner guest
+`srcdoc` across browsers, which the per-element `csp` attribute doesn't do
+reliably. The two iframes carry different `sandbox` attribute sets. Health
+checking is compiled off (`HEALTH_CHECKING_ENABLED = false`). The README
+documents the deliberately accepted security gaps (a hardcoded-CDN allowlist and
+anchors with `target=_blank` are both exfiltration vectors, and `document.baseURI`
+leaks the parent URL into the iframe).
 
 ---
 
@@ -145,9 +174,21 @@ flowchart TB
     appview <--> nav
 ```
 
-The view files are large (`SchedulerGraphView` and `DebuggerView` are each over
-3000 lines) because the shell ships its own debugging and scheduler-visualization
-tools.
+`views/index.ts` registers eight views — `RootView` (`x-root-view`), `AppView`,
+`BodyView`, `HeaderView`, `LoginView`, `QuickJumpView`, `ACLView`, `DebuggerView`
+— and `DebuggerView` pulls in `SchedulerGraphView` and `SchedulerSourceView`.
+Those last two are large (each over 3000 lines) because the shell ships its own
+scheduler-visualization and debugging tools. State changes go through a
+three-variant `Command` union (`set-view` / `set-identity` / `set-config`) applied
+by `applyCommand`, which clones the state and mutates the copy (immutable update);
+`AppState.config` holds four boolean toggles. URL↔view mapping is pure
+(`urlToAppView` / `appViewToUrlPath`, with an `.embed/` prefix for embed mode),
+and navigation is a `globalThis` CustomEvent surface (`cf-navigate`,
+`cf-replace-navigation`, `cf-open-external`, `cf-update-page-title`).
+
+`RuntimeInternals` (in `lib-shell`) bundles one identity's resources: a single
+`RuntimeClient` over one Web Worker serving all of that identity's spaces, with no
+bound "current space" (default worker URL `/scripts/worker-runtime.js`).
 
 ---
 

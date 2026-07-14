@@ -53,6 +53,42 @@ server-side. New readers find this confusing until they see both wirings in
 
 ---
 
+## Environment and configuration
+
+Everything is driven by a single Zod `EnvSchema` in `env.ts`. The variables a
+newcomer trips on:
+
+- **Storage location is two mutually-exclusive modes.** `MEMORY_DIR` (a directory
+  of one SQLite file per space, the default `./cache/memory/`) versus `DB_PATH`
+  (one absolute-path SQLite file, for clustering; the schema rejects a
+  non-absolute value). `MEMORY_URL` (default `http://localhost:8000`) is the URL
+  toolshed's own runtime connects back through.
+- **A provider is registered by the mere presence of its key.** The LLM keys are
+  all `CFTS_AI_LLM_*` (`ANTHROPIC`, `OPENAI`, `GROQ`, plus AWS/Google-Vertex and a
+  few declared-but-currently-unwired ones like `CEREBRAS`/`PERPLEXITY`/`XAI`).
+  `CFTS_AI_GATEWAY_URL` is a Tailscale-only gateway with clean fallback.
+- **Access control.** `MEMORY_ACL_MODE` is `off` / `observe` / `enforce` (default
+  `enforce`); `MEMORY_SERVICE_DIDS` is a comma-separated list of DIDs granted an
+  implicit OWNER on every space — this is how the background service authorizes
+  itself.
+- `SANDBOX_SERVICE_URL` (external code-exec), `SHELL_URL` (dev-proxy target),
+  and the OTEL block (`OTEL_ENABLED`, endpoint default `http://localhost:4318`,
+  sampler config) round it out. A `boolFlag()` helper treats only `"true"`/`"1"`
+  as true, on purpose — `z.coerce.boolean()` would turn the string `"false"` into
+  `true`.
+
+The server framework glue lives in `lib/`: `create-app.ts` builds the
+`OpenAPIHono` app and serves an OpenAPI spec at `/doc` and a Scalar reference UI
+at `/reference`; `identity.ts` builds the server's signer `Identity` (from the
+`IDENTITY` keyfile, else a passphrase, else `"implicit trust"` in development),
+whose DID signs storage auth and is surfaced at `/api/meta`; `otel.ts` exports
+spans (with an OpenInference processor) to a collector that fans LLM spans to
+Phoenix and all spans to SigNoz. The two middlewares are the pino request logger
+(a per-request `reqId`) and an OpenTelemetry middleware that reads an inbound
+W3C `traceparent` so a request span links to the browser's trace.
+
+---
+
 ## The HTTP and WebSocket request lifecycle
 
 ```mermaid
@@ -130,11 +166,26 @@ flowchart LR
     cache -->|miss| find --> stream --> prov --> ndjson --> client
 ```
 
+Concrete mechanics: `findModel` is a plain `MODELS[name]` lookup (aliases are
+extra keys pointing at the same `ModelConfig`), and the `default` alias resolves
+through `DEFAULT_MODEL_CANDIDATES` (`gateway:claude-sonnet-4-6` →
+`anthropic:claude-sonnet-4-6` → `anthropic:claude-sonnet-4-5`). `loadGatewayModels`
+fetches `${gateway}/v1/models` with a 3-second timeout, forces an HTTP/1.1 client
+(to dodge a Deno HTTP/2 SSE bug), and falls back cleanly off-Tailscale. The disk
+cache keys on the SHA-256 of the request JSON (after stripping the `cache`/
+`metadata` fields), and the two endpoints have *opposite* defaults: `generateText`
+caches only when `cache === true` and there are no live model tools, while
+`generateObject` caches unless `cache === false`. Responses carry an
+`x-cf-llm-trace-id` header, and `/api/ai/llm/feedback` posts human annotations to
+Phoenix.
+
 The `llm` package itself is purely the consumer: `LLMClient.sendRequest`
 POSTs to the endpoint and reassembles the streamed events. It also holds shared
-prompt templates and a mock/fixture system that blocks live calls under test.
-The `llm → runner` import cycle is a single line — `prompts/json-import.ts`
-imports `createJsonSchema` from `runner`.
+prompt templates (`json-gen`, `json-import`, `pattern-fix`, `pattern-guide`,
+`piece-describe`, `piece-suggestions`) and a mock/fixture system that blocks live
+calls when `CI === "true"` or `ENV === "test"` (its mock entries are one-time-use,
+spliced out on match). The `llm → runner` import cycle is a single line —
+`prompts/json-import.ts` imports `createJsonSchema` from `runner`.
 
 ---
 
@@ -159,10 +210,23 @@ flowchart TB
     back -.-> cell
 ```
 
-The registered-pieces list is typed as `BGPieceEntry` (`schema.ts`), fetched via
-`getBGPieces`, and watched with `piecesCell.sink(...)`. Isolation is strict: one
-worker per space, and a terminal worker error disables the whole space and
-recreates the worker. The default rerun interval is 60 seconds.
+The registered-pieces list is typed as `BGPieceEntry` (`schema.ts`, fields
+`space`/`pieceId`/`integration`/`createdAt`/`disabledAt`/`lastRun`/`status`),
+fetched via `getBGPieces` and watched with `piecesCell.sink(...)`. That registry
+cell is synced with a privileged confidentiality label (`ifc: { confidentiality:
+["secret"] }`) at the fixed cause `BG_CELL_CAUSE` in `BG_SYSTEM_SPACE_ID`.
+Concrete scheduler constants: each `SpaceManager` runs at most one piece at a
+time from a timestamp-sorted queue polled every 100 ms (`pollingIntervalMs`),
+reruns a piece every 60 s (`rerunIntervalMs`), applies linear backoff
+(`rerunIntervalMs · (failureCount + 1)`), and disables a piece on its third
+consecutive failure. The `WorkerController` uses `msgId`-keyed IPC with a per-task
+timeout that production sets to 10 minutes. To fire a piece the worker resolves
+the cell by id, loads it with schema `{ bgUpdater: { asCell: ["stream"] } }`, and
+does `updater.withTx(tx).send({}); tx.commit()` then awaits `runtime.idle()`.
+Isolation is strict: one worker per space, and a terminal worker error disables
+the whole space and recreates the worker. A one-time `deno task add-admin-piece`
+(casting `bgAdmin.tsx` into the system space) is required before any piece is
+polled.
 
 ---
 
@@ -170,13 +234,27 @@ recreates the worker. The default rerun interval is 60 seconds.
 
 - **The provider abstraction is in the wrong-feeling place.** It is in
   `toolshed/routes/ai/llm/models.ts`, not in the `llm` package. Look there.
-- **OAuth providers are auto-wired from descriptors at startup.** Providers with
-  missing credentials are silently skipped, and the shared
-  `/api/integrations/bg` route attaches to whichever provider has credentials
+- **OAuth providers are auto-wired from descriptors at startup.** The
+  `DESCRIPTORS` array is, in order, Google, Airtable, GitHub, Notion, Linear,
+  Spotify, Discord, Strava (plus Plaid and a webhook-style Discord route that are
+  wired manually because their flows are non-standard). Providers with missing
+  credentials are silently skipped (`Promise.allSettled`, so one failure doesn't
+  block the rest), and the shared `/api/integrations/bg` route — which registers a
+  piece for background updating — attaches to whichever descriptor has credentials
   first. Non-obvious when an endpoint "isn't there."
-- **The shell route's headers are deliberately non-isolating.** The COOP/COEP
-  headers are set the way they are as defense-in-depth for the SES-sandboxed
-  patterns. Do not "fix" them without understanding why.
+- **The shell route's headers are deliberately non-isolating.** Concretely
+  `Cross-Origin-Opener-Policy: same-origin-allow-popups` and
+  `Cross-Origin-Embedder-Policy: unsafe-none`, set *after* the handler so they
+  override upstream — the goal is to keep `crossOriginIsolated === false` so
+  SES-sandboxed patterns get no `SharedArrayBuffer` or high-resolution timer.
+  The shell route is tri-state: `COMPILED` present → serve the static frontend;
+  else `SHELL_URL` set → proxy the dev server; else 404. Do not "fix" the headers
+  without understanding why.
+- **The new ingest and telemetry routes are gated and fail-safe.**
+  `/api/ingest/:id` requires a `Bearer` token (uniform 401 for any failure),
+  caps the body at 1 MB, and parses only after the token verifies;
+  `/api/telemetry/*` proxies browser OTLP to the collector and is fail-open (204
+  when disabled, 413 over 1 MB, otherwise a fire-and-forget 202 — never 5xx).
 - **`background-piece-service` carries the most TODOs in this group**, several
   about the scheduler being approximate: space managers should watch their own
   pieces, a terminal error cannot always be attributed to a specific piece (so a
@@ -198,9 +276,14 @@ recreates the worker. The default rerun interval is 60 seconds.
 
 ## Entry points and ports
 
-- `toolshed` — entry `index.ts` (`deno task dev` or `production`). Built into a
-  single binary by `Dockerfile.toolshed` at the repo root; a `COMPILED` sentinel
-  file switches the shell route from dev-proxy to static serving.
+- `toolshed` — entry `index.ts` (`deno task dev` or `production`).
+  `tasks/build-binaries.ts` compiles two binaries — `dist/toolshed` and
+  `dist/bg-piece-service` — and writes the `COMPILED` sentinel as JSON
+  (`{commitSha, builtAt}`), `--include`d into the toolshed binary and read at
+  `/api/meta`. `Dockerfile.toolshed` pins Deno 2.8.1 and does a 15-second "warm
+  run" so the `@db/sqlite` FFI library is baked into the image (no GitHub egress
+  on first DB open). The `COMPILED` file's presence also switches the shell route
+  from dev-proxy to static serving.
 - `background-piece-service` (`@commonfabric/background-piece`) — entry
   `src/main.ts` (`deno task start`). It now ships its own tests, so unlike
   `vendor-astral` it is no longer in the test runner's disabled list.
