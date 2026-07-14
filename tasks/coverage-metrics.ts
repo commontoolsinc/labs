@@ -1,6 +1,10 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run
 import * as path from "@std/path";
-import { normalizeLcovInstancePaths } from "./write-coverage-lcov.ts";
+import {
+  collectCoverageProfileFiles,
+  normalizeLcovInstancePaths,
+  removeUnusableCoverageProfiles,
+} from "./write-coverage-lcov.ts";
 
 export const COVERAGE_PROFILE_ARTIFACT_PREFIX = "coverage-profile-";
 export const COVERAGE_METRIC_PREFIX = "coverage-debt:";
@@ -327,6 +331,15 @@ export async function lcovFromCoverageProfile(
   const tmpDir = await Deno.makeTempDir({ prefix: "coverage-lcov-" });
   const outputPath = path.join(tmpDir, "coverage.lcov");
   try {
+    const profileFiles = await collectCoverageProfileFiles(coverageProfileDir);
+    if (profileFiles.length === 0) return "";
+
+    await removeUnusableCoverageProfiles(profileFiles);
+    const remainingProfileFiles = await collectCoverageProfileFiles(
+      coverageProfileDir,
+    );
+    if (remainingProfileFiles.length === 0) return "";
+
     const result = await new Deno.Command(Deno.execPath(), {
       args: [
         "coverage",
@@ -340,6 +353,7 @@ export async function lcovFromCoverageProfile(
 
     if (!result.success) {
       const stderr = new TextDecoder().decode(result.stderr);
+      if (stderr.includes("No covered files included in the report")) return "";
       throw new Error(`deno coverage failed: ${stderr.trim()}`);
     }
 

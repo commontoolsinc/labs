@@ -3,8 +3,9 @@ import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
+import type { Cell as ApiCell } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { Frame, JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -15,13 +16,42 @@ import { FabricEpochNsec } from "@commonfabric/data-model/fabric-primitives";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+type SchemaBearingCell = { schema?: JSONSchema };
+type SchemaBearingConstructor =
+  & (new (value?: string, schema?: JSONSchema) => SchemaBearingCell)
+  & {
+    perUser: {
+      of(value?: string, schema?: JSONSchema): SchemaBearingCell;
+    };
+  };
+type ArrayReactiveCell = ApiCell<number[]> & {
+  map(fn: () => number): unknown;
+  filter(fn: () => boolean): unknown;
+  flatMap(fn: () => number[]): unknown;
+};
+type CircularObject = {
+  a: number;
+  self?: CircularObject;
+};
+type NestedCircularObject = {
+  level1: {
+    level2: {
+      value: number;
+      backRef?: NestedCircularObject["level1"];
+    };
+  };
+};
+type CircularArray = Array<number | CircularArray>;
+type TestSpace = NonNullable<Frame["space"]>;
+const nullAsObject = null as unknown as object;
+
 /**
  * Helper to run code within a lift/pattern context (inHandler: false)
  * In this context, cells need explicit causes to create links
  */
 function withinLiftContext<T>(
   runtime: Runtime,
-  space: string,
+  space: TestSpace,
   tx: IExtendedStorageTransaction,
   fn: () => T,
 ): T {
@@ -32,10 +62,9 @@ function withinLiftContext<T>(
     cause: { test: "lift context" },
     generatedIdCounter: 0,
     inHandler: false, // Lift/pattern context
-    unsafe_binding: { space, tx },
-  };
+  } satisfies Partial<Frame>;
 
-  pushFrame(frame as any);
+  pushFrame(frame);
   try {
     return fn();
   } finally {
@@ -49,7 +78,7 @@ function withinLiftContext<T>(
  */
 function withinHandlerContext<T>(
   runtime: Runtime,
-  space: string,
+  space: TestSpace,
   tx: IExtendedStorageTransaction,
   fn: () => T,
 ): T {
@@ -60,10 +89,9 @@ function withinHandlerContext<T>(
     cause: { test: "handler context" },
     generatedIdCounter: 0,
     inHandler: true, // Handler context - allows cells to create links
-    unsafe_binding: { space, tx },
-  };
+  } satisfies Partial<Frame>;
 
-  pushFrame(frame as any);
+  pushFrame(frame);
   try {
     return fn();
   } finally {
@@ -109,7 +137,7 @@ describe("Cell Static Methods", () => {
     it("should create cells for every cell constructor", () => {
       withinHandlerContext(runtime, space, tx, () => {
         const { commonfabric } = createTrustedBuilder(runtime);
-        const constructors = [
+        const constructors: SchemaBearingConstructor[] = [
           commonfabric.Cell,
           commonfabric.Writable,
           commonfabric.OpaqueCell,
@@ -117,10 +145,10 @@ describe("Cell Static Methods", () => {
           commonfabric.ComparableCell,
           commonfabric.ReadonlyCell,
           commonfabric.WriteonlyCell,
-        ] as Array<new (value?: string, schema?: JSONSchema) => any>;
+        ] satisfies SchemaBearingConstructor[];
 
         for (const constructor of constructors) {
-          const cell = new constructor("Ada", { type: "string" }) as any;
+          const cell = new constructor("Ada", { type: "string" });
           expect(cell.schema).toEqual({
             type: "string",
             default: "Ada",
@@ -134,7 +162,7 @@ describe("Cell Static Methods", () => {
         const { commonfabric } = createTrustedBuilder(runtime);
         const cell = new commonfabric.Writable.perUser("Ada", {
           type: "string",
-        }) as any;
+        });
 
         expect(cell.schema).toEqual({
           type: "string",
@@ -146,7 +174,7 @@ describe("Cell Static Methods", () => {
 
     it("should support constructor results chained with .for()", () => {
       withinLiftContext(runtime, space, tx, () => {
-        const cell = new Cell("Ada", { type: "string" }).for("name") as any;
+        const cell = new Cell("Ada", { type: "string" }).for("name");
 
         expect(cell.get()).toBe("Ada");
         expect(cell.getAsNormalizedFullLink()).toBeDefined();
@@ -231,7 +259,7 @@ describe("Cell Static Methods", () => {
 
     it("rejects direct array callback helpers", () => {
       withinHandlerContext(runtime, space, tx, () => {
-        const cell = Cell.of([1, 2, 3]) as any;
+        const cell = Cell.of([1, 2, 3]) as ArrayReactiveCell;
 
         expect(() => cell.map(() => 1)).toThrow("Reactive.map(fn)");
         expect(() => cell.filter(() => true)).toThrow(
@@ -368,7 +396,7 @@ describe("Cell Static Methods", () => {
     it("should create scoped cells with defaults for every cell constructor", () => {
       withinHandlerContext(runtime, space, tx, () => {
         const { commonfabric } = createTrustedBuilder(runtime);
-        const constructors = [
+        const constructors: SchemaBearingConstructor[] = [
           commonfabric.Cell,
           commonfabric.Writable,
           commonfabric.OpaqueCell,
@@ -381,7 +409,7 @@ describe("Cell Static Methods", () => {
         for (const constructor of constructors) {
           const cell = constructor.perUser.of("Ada", {
             type: "string",
-          }) as any;
+          });
           expect(cell.schema).toEqual({
             type: "string",
             scope: "user",
@@ -393,7 +421,7 @@ describe("Cell Static Methods", () => {
 
     it("should create scoped cells with causes", () => {
       withinLiftContext(runtime, space, tx, () => {
-        const cell = Cell.perSession.for<string>("draft") as any;
+        const cell = Cell.perSession.for<string>("draft");
         expect(cell).toBeDefined();
         expect(cell.schema).toEqual({ scope: "session" });
       });
@@ -405,7 +433,7 @@ describe("Cell Static Methods", () => {
         const cell = commonfabric.Writable.of("Ada", {
           type: "string",
           scope: "user",
-        } as JSONSchema).for("contextual", true) as any;
+        } as JSONSchema).for("contextual", true);
 
         expect(cell.getAsNormalizedFullLink().scope).toBe("user");
       });
@@ -492,8 +520,8 @@ describe("Cell Static Methods", () => {
         undefined,
         tx,
       );
-      expect(Cell.equals(cell, null as any)).toBe(false);
-      expect(Cell.equals(null as any, cell)).toBe(false);
+      expect(Cell.equals(cell, nullAsObject)).toBe(false);
+      expect(Cell.equals(nullAsObject, cell)).toBe(false);
       expect(Cell.equals(undefined, undefined)).toBe(false);
     });
 
@@ -668,8 +696,8 @@ describe("Cell Static Methods", () => {
         undefined,
         tx,
       );
-      expect(Cell.equalLinks(cell, null as any)).toBe(false);
-      expect(Cell.equalLinks(null as any, cell)).toBe(false);
+      expect(Cell.equalLinks(cell, nullAsObject)).toBe(false);
+      expect(Cell.equalLinks(nullAsObject, cell)).toBe(false);
       expect(Cell.equalLinks(undefined, undefined)).toBe(false);
     });
 
@@ -814,7 +842,7 @@ describe("Cell Static Methods", () => {
 
     it("should throw when given a circular reference", () => {
       withinHandlerContext(runtime, space, tx, () => {
-        const circular: any = { a: 1 };
+        const circular: CircularObject = { a: 1 };
         circular.self = circular;
         expect(() => Cell.of(circular)).toThrow(
           /Cell\.of\(\) does not accept circular references.*Cycle detected.*path 'self'/,
@@ -824,7 +852,9 @@ describe("Cell Static Methods", () => {
 
     it("should throw when given a deeply nested circular reference", () => {
       withinHandlerContext(runtime, space, tx, () => {
-        const obj: any = { level1: { level2: { value: 1 } } };
+        const obj: NestedCircularObject = {
+          level1: { level2: { value: 1 } },
+        };
         obj.level1.level2.backRef = obj.level1;
         expect(() => Cell.of(obj)).toThrow(
           /Cell\.of\(\) does not accept circular references.*Cycle detected/,
@@ -834,7 +864,7 @@ describe("Cell Static Methods", () => {
 
     it("should throw when given circular reference in arrays", () => {
       withinHandlerContext(runtime, space, tx, () => {
-        const arr: any[] = [1, 2, 3];
+        const arr: CircularArray = [1, 2, 3];
         arr.push(arr);
         expect(() => Cell.of(arr)).toThrow(
           /Cell\.of\(\) does not accept circular references.*Cycle detected.*path '3'/,

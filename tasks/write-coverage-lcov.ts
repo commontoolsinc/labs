@@ -19,7 +19,9 @@ export function normalizeLcovInstancePaths(lcov: string): string {
   ).join("\n");
 }
 
-async function collectCoverageProfileFiles(dir: string): Promise<string[]> {
+export async function collectCoverageProfileFiles(
+  dir: string,
+): Promise<string[]> {
   const files: string[] = [];
   try {
     for await (const entry of Deno.readDir(dir)) {
@@ -38,13 +40,64 @@ async function collectCoverageProfileFiles(dir: string): Promise<string[]> {
   return files;
 }
 
-async function removeEmptyCoverageProfiles(files: string[]): Promise<number> {
-  let removed = 0;
+export type RemovedCoverageProfiles = {
+  empty: number;
+  invalid: number;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isCoverageRange(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.startOffset === "number" &&
+    typeof value.endOffset === "number" &&
+    typeof value.count === "number";
+}
+
+function isCoverageFunction(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.functionName === "string" &&
+    Array.isArray(value.ranges) &&
+    value.ranges.every(isCoverageRange) &&
+    typeof value.isBlockCoverage === "boolean";
+}
+
+export function isCoverageProfile(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.scriptId === "string" &&
+    typeof value.url === "string" &&
+    Array.isArray(value.functions) &&
+    value.functions.every(isCoverageFunction);
+}
+
+export async function removeUnusableCoverageProfiles(
+  files: string[],
+): Promise<RemovedCoverageProfiles> {
+  const removed = { empty: 0, invalid: 0 };
   for (const file of files) {
     const info = await Deno.stat(file);
-    if (info.size > 0) continue;
+    if (info.size === 0) {
+      await Deno.remove(file);
+      removed.empty++;
+      continue;
+    }
+
+    try {
+      const profile = JSON.parse(await Deno.readTextFile(file));
+      if (isCoverageProfile(profile)) continue;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        await Deno.remove(file);
+        removed.invalid++;
+        continue;
+      }
+      throw error;
+    }
+
     await Deno.remove(file);
-    removed++;
+    removed.invalid++;
   }
   return removed;
 }
@@ -76,10 +129,15 @@ async function main(): Promise<void> {
     return;
   }
 
-  const removedEmptyProfiles = await removeEmptyCoverageProfiles(profileFiles);
-  if (removedEmptyProfiles > 0) {
+  const removedProfiles = await removeUnusableCoverageProfiles(profileFiles);
+  if (removedProfiles.empty > 0) {
     console.warn(
-      `Removed ${removedEmptyProfiles} empty coverage profile file(s) from ${profileDir}.`,
+      `Removed ${removedProfiles.empty} empty coverage profile file(s) from ${profileDir}.`,
+    );
+  }
+  if (removedProfiles.invalid > 0) {
+    console.warn(
+      `Removed ${removedProfiles.invalid} invalid coverage profile file(s) from ${profileDir}.`,
     );
   }
 

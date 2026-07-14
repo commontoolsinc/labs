@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/cell-static-methods.test.ts",
   "packages/runner/test/cfc-agent-prompt-injection-demo.test.ts",
   "packages/runner/test/cfc-agent-tool-input-integrity.test.ts",
   "packages/runner/test/cfc-authoring-observe.test.ts",

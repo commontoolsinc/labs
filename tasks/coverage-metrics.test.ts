@@ -6,6 +6,7 @@ import {
   collectUncoveredLinesForFiles,
   countTrackedSourceLines,
   countUncoveredProfileLines,
+  lcovFromCoverageProfile,
   metricGroupFor,
   parseLcov,
   shouldTrackSourceFile,
@@ -176,6 +177,18 @@ Deno.test("collectCoverageDebtMetricsFromLcov computes debt from compact reports
     );
   } finally {
     await Deno.remove(rootDir, { recursive: true });
+  }
+});
+
+Deno.test("lcovFromCoverageProfile returns empty LCOV when cleanup removes every profile", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "coverage-profile-empty-" });
+  try {
+    await Deno.writeTextFile(path.join(dir, "empty.json"), "");
+    await Deno.writeTextFile(path.join(dir, "invalid.json"), "{}");
+
+    assertEquals(await lcovFromCoverageProfile(dir), "");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
   }
 });
 
