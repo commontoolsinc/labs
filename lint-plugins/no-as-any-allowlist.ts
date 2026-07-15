@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/frozen-proxy-target.test.ts",
   "packages/runner/test/generate-object-tools.test.ts",
   "packages/runner/test/home-add-favorite.test.ts",
   "packages/runner/test/inspace-child-owner-seed.test.ts",

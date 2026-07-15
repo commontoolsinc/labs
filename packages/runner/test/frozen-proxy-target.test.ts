@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { FabricValue } from "@commonfabric/api";
 import { Runtime } from "../src/runtime.ts";
 import { createQueryResultProxy } from "../src/query-result-proxy.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -26,15 +27,15 @@ const space = signer.did();
  * Helper: write a value into a cell via the normal `Cell.set()` path, then return a
  * NormalizedFullLink for reading it back through the proxy after commit.
  */
-function writeCell(
+function writeCell<T extends FabricValue>(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
   cellName: string,
-  value: unknown,
+  value: T,
 ): NormalizedFullLink {
-  const cell = runtime.getCell(space, cellName, undefined, tx);
+  const cell = runtime.getCell<T>(space, cellName, undefined, tx);
   const link = cell.getAsNormalizedFullLink();
-  cell.set(value as any);
+  cell.set(value);
   return link;
 }
 
@@ -190,7 +191,9 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
 
     tx = await commitAndReopen(runtime, tx);
 
-    const proxy = createQueryResultProxy<any>(
+    const proxy = createQueryResultProxy<{
+      level1: { level2: { link: string } };
+    }>(
       runtime,
       tx,
       outerLink,
@@ -209,14 +212,14 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       undefined,
       tx,
     );
-    cell1.set(10 as any);
+    cell1.set(10);
     const cell2 = runtime.getCell<number>(
       space,
       "arr-target-2",
       undefined,
       tx,
     );
-    cell2.set(20 as any);
+    cell2.set(20);
 
     // Write frozen array of links.
     const arrLink = writeCell(
@@ -394,7 +397,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       undefined,
       tx,
     );
-    targetCell.set("resolved" as any);
+    targetCell.set("resolved");
 
     // Write a frozen object with a link in the "kept" branch.
     writeCell(
@@ -412,7 +415,7 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
     // Now overwrite the "changed" branch with an unfrozen direct value.
     // This simulates structural sharing after a write: "kept" stays frozen,
     // "changed" is a new unfrozen object.
-    const cell = runtime.getCell<any>(
+    const cell = runtime.getCell<unknown>(
       space,
       "mixed-freeze-state",
       undefined,
@@ -424,7 +427,10 @@ describe("frozen proxy target: proxy wrapping and trap behavior", () => {
       { value: "direct" },
     );
 
-    const proxy = createQueryResultProxy<any>(
+    const proxy = createQueryResultProxy<{
+      kept: { link: string };
+      changed: { value: string };
+    }>(
       runtime,
       tx,
       link,
