@@ -1334,7 +1334,18 @@ function normalizeObservedCapabilityUsage(
   const identityPaths = Array.from(state.rawIdentityPaths)
     .map(decodePath)
     .filter((identityPath) => {
-      if (state.wildcard) {
+      // A wildcard means unknown reads/writes exist somewhere under this
+      // root — it must keep suppressing identityOnly (and the scope proofs
+      // gated on it), but it must NOT erase identity/comparable markings of
+      // non-overlapping paths. Closure captures share one synthetic root
+      // state, so blanket erasure here degraded an equals()-only [SELF]
+      // capture to a full-value self-demand that can never satisfy — the
+      // consuming node then silently never ran (the #4714 no-fire family).
+      // The overlap check below already removes identity paths that any
+      // tracked value access covers; a wildcarded root additionally treats
+      // the identity path itself as value-read only when it overlaps a
+      // recorded access.
+      if (identityPath.length === 0 && state.wildcard) {
         return false;
       }
       if (identityPath.length === 0 && state.hasNonIdentityRootUse) {
