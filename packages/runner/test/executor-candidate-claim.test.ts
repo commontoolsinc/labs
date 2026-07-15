@@ -569,7 +569,7 @@ Deno.test("canonical unserved attempts revoke the exact test-only claim", async 
   }
 });
 
-Deno.test("demand shrink revokes stale claims so re-added roots can reclaim", async () => {
+Deno.test("demand shrink releases stale claims so re-added roots can reclaim", async () => {
   const { worker, server, crashes, executor } = await startExecutor({
     routing: true,
   });
@@ -578,11 +578,19 @@ Deno.test("demand shrink revokes stale claims so re-added roots can reclaim", as
     await flushClaimControl();
     assertEquals(server.claimRequests.length, 1);
 
+    // Shrinking away the claim's root stops its action in the Worker; the
+    // scheduler-unregister hook posts the exact release, which the host turns
+    // into the server revoke.
     await executor.setDemand(["space:of:other-piece"]);
+    assertEquals(server.revoked, []);
+    worker.invalidated(CLAIM, "action-unregistered");
+    await flushClaimControl();
     assertEquals(server.revoked, [CLAIM]);
 
+    // Re-adding the root re-instantiates its actions; the fresh candidate
+    // reclaims without any lane-wide reset.
     await executor.setDemand([CLAIM_KEY.pieceId, "space:of:other-piece"]);
-    worker.candidate(CLAIM_KEY, { demandGeneration: 1 });
+    worker.candidate(CLAIM_KEY);
     await flushClaimControl();
     assertEquals(server.claimRequests.length, 2);
     assertEquals(crashes, []);
@@ -919,12 +927,48 @@ Deno.test("demand shrink does not wait for claimed action settlement", async () 
   try {
     await flushClaimControl();
     assertEquals(changed, true);
+    // The host no longer resets lane authority on shrink; the Worker releases
+    // exactly the claims of actions the stopped roots retired.
+    assertEquals(server.revoked, []);
+    assertEquals(
+      worker.messages.filter((message) =>
+        (message as { type?: string }).type === "set-demand"
+      ).map((message) => (message as { resetClaims?: boolean }).resetClaims),
+      [undefined],
+    );
+    worker.invalidated(CLAIM, "action-unregistered");
+    await flushClaimControl();
     assertEquals(server.revoked, [CLAIM]);
   } finally {
     if (!changed) worker.acknowledgeLatestClaimedRun();
     await changing;
     await flushClaimControl();
     await executor.stop({ abrupt: true });
+  }
+});
+
+Deno.test("an ordinary demand shrink leaves sibling claims live", async () => {
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+  });
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+
+    // Grow, then shrink away the sibling; the claim's own piece stays
+    // demanded, so its incarnation must survive the shrink untouched.
+    await executor.setDemand([CLAIM_KEY.pieceId, "space:of:sibling"]);
+    await executor.setDemand([CLAIM_KEY.pieceId]);
+    await flushClaimControl();
+    assertEquals(server.revoked, []);
+    assertEquals(crashes, []);
+
+    // The claim is still live host-side: its exact release revokes it once.
+    worker.invalidated(CLAIM, "action-unregistered");
+    await flushClaimControl();
+    assertEquals(server.revoked, [CLAIM]);
+  } finally {
+    await executor.stop();
   }
 });
 

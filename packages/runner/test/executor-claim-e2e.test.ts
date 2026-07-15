@@ -1871,6 +1871,241 @@ Deno.test("explicit claim routing commits a real pure computation under its spon
   }
 });
 
+Deno.test("an ordinary demand shrink releases only the removed root's claims", async () => {
+  const principal = await Identity.fromPassphrase(
+    `executor shrink e2e ${crypto.randomUUID()}`,
+  );
+  const space = principal.did();
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-executor-shrink-e2e" },
+    protocolFlags: FLAGS,
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  const authorize: MemoryClient.SessionOpenAuthFactory = (
+    _space,
+    _session,
+    context,
+  ) => ({
+    invocation: {
+      aud: context.audience,
+      challenge: context.challenge.value,
+    },
+    authorization: { principal: space },
+  });
+  const seedStorage = LoopbackStorageManager.connectTo(server, FLAGS, {
+    as: principal,
+  });
+  const seedRuntime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: seedStorage,
+    experimental: {
+      persistentSchedulerState: true,
+      serverPrimaryExecution: true,
+    },
+  });
+  let executor: Awaited<ReturnType<DenoSpaceExecutorFactory["start"]>> | null =
+    null;
+  let observerClient: MemoryClient.Client | null = null;
+  let unsubscribeControl = () => {};
+  const events: string[] = [];
+  try {
+    const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
+      space,
+    });
+    const seed = async (name: string, value: number) => {
+      const tx = seedRuntime.edit();
+      const input = seedRuntime.getCell<number>(
+        space,
+        `executor-shrink-input-${name}`,
+        undefined,
+        tx,
+      );
+      input.set(value);
+      const result = seedRuntime.getCell<number>(
+        space,
+        `executor-shrink-result-${name}`,
+        undefined,
+        tx,
+      );
+      const handle = seedRuntime.run(tx, compiled, { value: input }, result);
+      assertEquals((await tx.commit()).error, undefined);
+      assertEquals(await handle.pull(), value * 2);
+      return { input, result };
+    };
+    const pieceA = await seed("a", 5);
+    const pieceB = await seed("b", 6);
+    await seedRuntime.settled();
+    await seedRuntime.storageManager.synced();
+    await seedRuntime.dispose();
+
+    observerClient = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: FLAGS,
+    });
+    const observer = await observerClient.mount(space, {}, authorize);
+    await observer.setExecutionDemand("", [
+      pieceA.result.sourceURI,
+      pieceB.result.sourceURI,
+    ]);
+    // Settlements are ordered against the session's data feed; watch both
+    // roots so the control events can deliver.
+    await observer.watchSet([{
+      id: "executor-shrink-e2e-a",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: pieceA.result.sourceURI,
+          selector: { path: [], schema: true },
+        }],
+      },
+    }, {
+      id: "executor-shrink-e2e-b",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: pieceB.result.sourceURI,
+          selector: { path: [], schema: true },
+        }],
+      },
+    }]);
+    const lease = await server.acquireExecutionLease(space, "");
+    assertExists(lease);
+
+    const claims = new Map<string, ExecutionClaim>();
+    const revokes: Array<{ pieceId: string; claimGeneration: number }> = [];
+    const settlements: ActionSettlement[] = [];
+    const bothClaimed = Promise.withResolvers<void>();
+    const revokedB = Promise.withResolvers<void>();
+    const pieceIdA = `space:${pieceA.result.sourceURI}`;
+    const pieceIdB = `space:${pieceB.result.sourceURI}`;
+    unsubscribeControl = observer.subscribeExecutionControl((event) => {
+      events.push(event.type);
+      if (event.type === "session.execution.claim.set") {
+        claims.set(event.claim.pieceId, event.claim);
+        if (claims.has(pieceIdA) && claims.has(pieceIdB)) {
+          bothClaimed.resolve();
+        }
+      }
+      if (event.type === "session.execution.claim.revoke") {
+        revokes.push({
+          pieceId: event.claim.pieceId,
+          claimGeneration: event.claimGeneration,
+        });
+        if (event.claim.pieceId === pieceIdB) revokedB.resolve();
+      }
+      if (event.type === "session.execution.settlement") {
+        settlements.push(event.settlement);
+      }
+    });
+
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      patternApiUrl: new URL("https://toolshed.example/"),
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+    });
+    executor = await factory.start({
+      space,
+      branch: "",
+      lease,
+      pieces: [pieceA.result.sourceURI, pieceB.result.sourceURI],
+      onCrash(error) {
+        events.push(`crash:${error}`);
+      },
+    });
+    // One source invalidation per piece drives discovery to exact claims.
+    await observer.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: pieceA.input.sourceURI,
+        value: { value: 7 },
+      }],
+    });
+    await observer.transact({
+      localSeq: 3,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: pieceB.input.sourceURI,
+        value: { value: 8 },
+      }],
+    });
+    await awaitBarrier(bothClaimed.promise, "both pieces claimed", events);
+    const claimA = claims.get(pieceIdA)!;
+
+    // Shrink away piece B. The Worker's scheduler-unregister hook must
+    // release exactly B's claim; A's incarnation survives untouched.
+    await executor.setDemand([pieceA.result.sourceURI]);
+    await awaitBarrier(revokedB.promise, "shrink releases B's claim", events);
+    assertEquals(
+      revokes.filter((revoke) => revoke.pieceId === pieceIdA),
+      [],
+    );
+    assertEquals(server.listExecutionClaims(space), [claimA]);
+    assertEquals(
+      server.listExecutionClaims(space)[0]!.claimGeneration,
+      claimA.claimGeneration,
+    );
+    assertEquals(events.filter((event) => event.startsWith("crash:")), []);
+
+    // A's authority is uninterrupted: the next source invalidation settles
+    // under the same claim incarnation without a reclaim.
+    const settledA = Promise.withResolvers<ActionSettlement>();
+    let sourceSeqA = Number.POSITIVE_INFINITY;
+    const unsubscribeSettled = observer.subscribeExecutionControl((event) => {
+      if (
+        event.type === "session.execution.settlement" &&
+        event.settlement.claim.pieceId === pieceIdA &&
+        event.settlement.inputBasisSeq >= sourceSeqA
+      ) {
+        settledA.resolve(event.settlement);
+      }
+    });
+    try {
+      const source = await observer.transact({
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: pieceA.input.sourceURI,
+          value: { value: 9 },
+        }],
+      });
+      sourceSeqA = source.seq;
+      const settlement = await awaitBarrier(
+        settledA.promise,
+        "post-shrink settlement for A",
+        events,
+      );
+      assertEquals(
+        settlement.outcome === "committed" || settlement.outcome === "no-op",
+        true,
+      );
+      assertEquals(settlement.claim.claimGeneration, claimA.claimGeneration);
+      assertEquals(settlement.claim.leaseGeneration, claimA.leaseGeneration);
+    } finally {
+      unsubscribeSettled();
+    }
+    assertEquals(events.filter((event) => event.startsWith("crash:")), []);
+  } finally {
+    unsubscribeControl();
+    await executor?.stop();
+    await seedStorage.close();
+    await observerClient?.close();
+    await server.close();
+  }
+});
+
 Deno.test("shared execution pool releases and restores server authority with demand", async () => {
   await exercisePoolDemandRestart();
 });

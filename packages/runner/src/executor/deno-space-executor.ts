@@ -414,18 +414,16 @@ class DenoSpaceExecutor implements SpaceExecutor {
   async setDemand(pieces: readonly string[]): Promise<void> {
     const next = new Set(pieces);
     await this.#serializeCandidateAdmission(async () => {
-      const shrunk = [...this.#demandedPieces].some((piece) =>
-        !next.has(piece)
-      );
-      if (shrunk) {
-        this.#demandGeneration++;
-        await this.#claimControl;
-        this.#revokeClaims();
-      }
+      // A shrink is surgical: the Worker stops only the removed roots, and
+      // the scheduler-unregister hook releases exactly the claims of actions
+      // those roots retired. Claims for surviving pieces (including children
+      // shared with other roots) keep their incarnation, so ordinary
+      // navigation no longer resets the lane's authority. A claim landing on
+      // an action a concurrent shrink already stopped settles as one
+      // claim-scoped release rather than a lane failure.
       await this.#request("set-demand", {
         pieces: [...next],
         demandGeneration: this.#demandGeneration,
-        resetClaims: shrunk,
       });
       this.#demandedPieces.clear();
       for (const piece of next) this.#demandedPieces.add(piece);

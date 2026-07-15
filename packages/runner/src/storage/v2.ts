@@ -908,6 +908,7 @@ export class StorageManager implements IStorageManager {
   #executionActionKeys = new WeakMap<object, ActionClaimKey>();
   readonly #executionActionsByKey = new Map<string, Set<object>>();
   readonly #clientExecutionEffects = new WeakMap<object, number>();
+  #executionActionUnregisterHook: ((action: object) => void) | undefined;
   #spaceIdentities = new Map<MemorySpace, Signer>();
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -1023,6 +1024,19 @@ export class StorageManager implements IStorageManager {
   unregisterExecutionAction(action: object): void {
     this.removeExecutionAction(action);
     this.#clientExecutionEffects.delete(action);
+    this.#executionActionUnregisterHook?.(action);
+  }
+
+  /**
+   * Observe scheduler action unregistration. The executor Worker uses this to
+   * release the exact claim of an action stopped by a demand change, so a
+   * shrink only surrenders authority the scheduler actually retired; an action
+   * kept live by another demand root never reaches this hook.
+   */
+  setExecutionActionUnregisterHook(
+    hook: ((action: object) => void) | undefined,
+  ): void {
+    this.#executionActionUnregisterHook = hook;
   }
 
   private removeExecutionAction(action: object): void {

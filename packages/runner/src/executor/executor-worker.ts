@@ -542,6 +542,30 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       }
     },
   });
+  // A demand shrink stops removed roots; the scheduler unregisters exactly
+  // the actions those roots no longer keep live (an action shared with a
+  // surviving root stays registered). Release each retired action's exact
+  // claim so a shrink surrenders only its own authority instead of resetting
+  // the lane, and drop its candidate-index entries so a racing host claim
+  // cannot target the dead action.
+  storage.setExecutionActionUnregisterHook((unregistered) => {
+    if (stopped) return;
+    const claim = claimsByAction.get(unregistered);
+    if (claim !== undefined) {
+      releaseClaimedAttempt(
+        "invalidated-claim",
+        claim,
+        unregistered,
+        "action-unregistered",
+      );
+    }
+    for (const [key, action] of candidateActions) {
+      if (action === unregistered) candidateActions.delete(key);
+    }
+    for (const [key, action] of actionsBySchedulerIdentity) {
+      if (action === unregistered) actionsBySchedulerIdentity.delete(key);
+    }
+  });
   builtinBroker = createServerBuiltinBrokerClient({
     port: request.builtinBrokerPort,
     claimForRequest: () => {
@@ -662,6 +686,10 @@ type StartedClaimedAction = {
   finalSettlement: Promise<void>;
 };
 
+/** The claimed action was unregistered (typically by a demand shrink) between
+ * candidate emission and claim activation. Claim-scoped, not lane-fatal. */
+class ClaimedActionGoneError extends Error {}
+
 const startClaimedAction = async (
   claim: ExecutionClaim,
 ): Promise<StartedClaimedAction> => {
@@ -670,7 +698,9 @@ const startClaimedAction = async (
   }
   const action = candidateActions.get(claimKey(claim));
   if (action === undefined) {
-    throw new Error("claimed executor action is no longer live");
+    throw new ClaimedActionGoneError(
+      "claimed executor action is no longer live",
+    );
   }
   const attempt = claimedAttempts.start(claim, action);
   try {
@@ -763,7 +793,23 @@ const handle = async (request: WorkerRequest): Promise<void> => {
     if (request.claim === undefined) {
       throw new Error("claimed executor rerun has no claim");
     }
-    const started = await enqueue(() => startClaimedAction(request.claim!));
+    let started: StartedClaimedAction;
+    try {
+      started = await enqueue(() => startClaimedAction(request.claim!));
+    } catch (error) {
+      if (error instanceof ClaimedActionGoneError) {
+        // A claim can land while a demand shrink stops its action. Release
+        // that exact claim instead of failing the whole lane.
+        worker.postMessage({
+          type: "invalidated-claim",
+          claim: request.claim,
+          diagnosticCode: "action-unregistered",
+        });
+        worker.postMessage({ type: "complete", requestId: request.requestId });
+        return;
+      }
+      throw error;
+    }
     worker.postMessage({ type: "complete", requestId: request.requestId });
     // Do not await this on `work` or the request/control handler: a conflict,
     // broker call, or delayed settlement must not starve renewal, demand

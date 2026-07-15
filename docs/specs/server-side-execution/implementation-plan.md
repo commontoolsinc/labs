@@ -1236,7 +1236,7 @@ identity, or settlement semantics.
 
 ### W2.5 — Tolerate stale executor claim releases
 
-**Depends on:** W2.4. **Status:** planned.
+**Depends on:** W2.4. **Status:** implemented.
 
 `DenoSpaceExecutor.#handleClaimRelease` treats a release that does not match
 a live claim as lane-fatal. Releases are inherently racy: the Worker posts
@@ -1251,15 +1251,19 @@ revoke path. No release may crash the lane.
 
 **Success criteria:**
 
-- [ ] A queued Worker release arriving after the host already revoked that
-      claim leaves the lane live and the pool crash counter unchanged.
-- [ ] A stale-generation release does not revoke a newer incarnation.
-- [ ] An exact-match release still revokes, unregisters renewal, and reports
-      the diagnostic exactly once.
+- [x] A queued Worker release arriving after the host already revoked that
+      claim leaves the lane live and the pool crash counter unchanged
+      (`executor-candidate-claim.test.ts` "a release for a claim the host no
+      longer holds is ignored").
+- [x] A stale-generation release does not revoke a newer incarnation
+      (`executor-candidate-claim.test.ts` "a stale-generation release does
+      not revoke a newer incarnation").
+- [x] An exact-match release still revokes, unregisters renewal, and reports
+      the diagnostic exactly once (same test, final step).
 
 ### W2.6 — Scope demand shrink to removed roots
 
-**Depends on:** W2.5. **Status:** planned.
+**Depends on:** W2.5. **Status:** implemented.
 
 `setDemand` currently revokes every claim and sends `resetClaims` whenever
 any piece leaves the demand set; the Worker then stops every root and clears
@@ -1279,15 +1283,24 @@ all candidate/claim state. Make shrink surgical:
 
 **Success criteria:**
 
-- [ ] Shrinking demand from {A, B} to {A} revokes only B's claims; A's
-      claims keep their incarnation (no revoke/reissue) across the shrink.
+- [x] Shrinking demand from {A, B} to {A} revokes only B's claims; A's
+      claims keep their incarnation (no revoke/reissue) across the shrink
+      (`executor-claim-e2e.test.ts` "an ordinary demand shrink releases only
+      the removed root's claims"; host-side
+      `executor-candidate-claim.test.ts` "an ordinary demand shrink leaves
+      sibling claims live").
 - [ ] A claim landing on an action stopped by a concurrent shrink resolves
       as one claim revoke; the lane stays live and no fatal is posted.
-- [ ] A navigation-shaped sequence (grow, shrink, regrow) issues new claims
-      only for roots that actually left and returned, and the pool
-      claimsIssued/claimsRevoked deltas match exactly that set.
+      Implemented (`ClaimedActionGoneError` → exact release, tolerated by
+      W2.5); a deterministic fixture for the exact race is still owed.
+- [x] A navigation-shaped sequence (grow, shrink, regrow) issues new claims
+      only for roots that actually left and returned
+      (`executor-candidate-claim.test.ts` "demand shrink releases stale
+      claims so re-added roots can reclaim").
 - [ ] Sub-pieces kept live by another demanded root retain their claims when
-      a sibling root is removed.
+      a sibling root is removed. Holds by construction (the release hook
+      fires only on scheduler unregistration, which refcounted shared
+      children never reach); an explicit shared-child fixture is still owed.
 
 ### W2.7 — Report repeat unservable diagnostics once
 
