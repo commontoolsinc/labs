@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import app from "../../../app.ts";
-import { memoryServer } from "../memory.ts";
+import { memory, memoryServer } from "../memory.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   decodeMemoryBoundary,
@@ -1340,5 +1340,5 @@ serialTest(
 // graph, so this instance is owned by this file alone. Closing it here releases
 // those handles.
 serialTest("memory websocket server releases its resources", async () => {
-  await memoryServer.close();
+  await memory.close();
 });

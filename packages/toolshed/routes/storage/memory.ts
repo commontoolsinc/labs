@@ -1,6 +1,9 @@
 import * as MemoryServer from "@commonfabric/memory/v2/server";
+import { setRequestSchemaCasConfig } from "@commonfabric/memory/v2";
 import { verifySessionOpenAuthorization } from "@commonfabric/memory/v2/session-open-auth";
 import { MemoryWireAccountingAccumulator } from "@commonfabric/memory/v2/wire-accounting";
+import { openSchemaStore } from "@commonfabric/memory/v2/schema-store";
+import { resolveSchemaStoreUrl } from "@commonfabric/memory/v2/storage-path";
 import * as FS from "@std/fs";
 import env from "@/env.ts";
 import { memoryEngineStoreUrl } from "./memory-store-url.ts";
@@ -28,6 +31,15 @@ if (env.DB_PATH) {
 export { memoryEngineStoreUrl };
 await FS.ensureDir(memoryEngineStoreUrl);
 
+// One store serves every space and every MemoryServer connection. The limits
+// bound untrusted schema-definition ingestion while allowing normal schemas.
+export const memorySchemaStore = await openSchemaStore({
+  url: resolveSchemaStoreUrl(memoryEngineStoreUrl),
+  maxSchemaBytes: 256 * 1024,
+  maxEntries: 100_000,
+  maxTotalBytes: 64 * 1024 * 1024,
+});
+
 export const memoryWireAccountingAccumulator = isMemoryWireAccountingEnabled({
     token: env.CF_MEMORY_WIRE_ACCOUNTING_TOKEN,
     env: env.ENV,
@@ -35,8 +47,13 @@ export const memoryWireAccountingAccumulator = isMemoryWireAccountingEnabled({
   ? new MemoryWireAccountingAccumulator()
   : undefined;
 
+if (env.CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED !== undefined) {
+  setRequestSchemaCasConfig(env.CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED);
+}
+
 export const memoryServer = new MemoryServer.Server({
   store: memoryEngineStoreUrl,
+  schemaStore: memorySchemaStore,
   wireAccountingObserver: memoryWireAccountingAccumulator,
   authorizeSessionOpen,
   sessionOpenAuth: {
@@ -50,11 +67,19 @@ export const memoryServer = new MemoryServer.Server({
       .filter((did) => did.length > 0),
   },
 });
+let memorySchemaStoreClosed = false;
 export const memory = {
   async close(): Promise<
     { ok: Record<PropertyKey, never> } | { error: unknown }
   > {
-    await memoryServer.close();
+    try {
+      await memoryServer.close();
+    } finally {
+      if (!memorySchemaStoreClosed) {
+        memorySchemaStore.close();
+        memorySchemaStoreClosed = true;
+      }
+    }
     return { ok: {} };
   },
 };

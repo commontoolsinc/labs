@@ -1,11 +1,16 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import env from "@/env.ts";
 import app from "@/app.ts";
+import { memory as memoryProvider } from "@/routes/storage/memory.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
+
+afterAll(async () => {
+  await memoryProvider.close();
+});
 
 // Smoke tests: confirm each route is mounted and its first-line validation
 // returns a sensible error. These deliberately hit only the fast-fail paths

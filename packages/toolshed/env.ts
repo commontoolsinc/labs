@@ -147,6 +147,9 @@ export const EnvSchema = z.object({
   // The route also fail-closes unless ENV is explicitly development or test.
   // Never log this value or return it in an HTTP response.
   CF_MEMORY_WIRE_ACCOUNTING_TOKEN: z.string().default(""),
+  // Diagnostic startup override for paired request-schema CAS accounting runs.
+  // Unset/default preserves the Memory package default.
+  CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED: flagValue(),
 
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),

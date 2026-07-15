@@ -50,6 +50,21 @@ Deno.test("MEMORY_ACL_MODE defaults to enforce and accepts rollout overrides", (
   assertEquals(aclMode("enforce"), "enforce");
 });
 
+Deno.test("CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED preserves tri-state values", () => {
+  const requestSchemaCasEnabled = (value: string | undefined) =>
+    EnvSchema.parse(
+      value === undefined
+        ? {}
+        : { CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED: value },
+    ).CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED;
+
+  assertEquals(requestSchemaCasEnabled(undefined), undefined);
+  assertEquals(requestSchemaCasEnabled("default"), undefined);
+  assertEquals(requestSchemaCasEnabled("false"), false);
+  assertEquals(requestSchemaCasEnabled("true"), true);
+  assertEquals(requestSchemaCasEnabled("1"), true);
+});
+
 // The EXPERIMENTAL_* → ExperimentalOptions mapping (including its tri-state
 // unset/true/false fidelity) now lives in the runner's canonical
 // `experimentalOptionsFromEnv` / `EXPERIMENTAL_ENV_VARS` (CT-1814), shared by

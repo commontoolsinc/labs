@@ -1,6 +1,7 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import env from "@/env.ts";
+import { memory as memoryProvider } from "@/routes/storage/memory.ts";
 import { sha256 } from "@/lib/sha2.ts";
 import { linkRefPayloadToString } from "@commonfabric/runner/shared";
 import {
@@ -14,6 +15,10 @@ import {
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
+
+afterAll(async () => {
+  await memoryProvider.close();
+});
 
 describe("Webhook Utilities", () => {
   describe("generateWebhookId", () => {

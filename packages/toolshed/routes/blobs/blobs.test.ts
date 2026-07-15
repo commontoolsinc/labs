@@ -2,8 +2,11 @@ import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import createApp from "@/lib/create-app.ts";
 import router from "./blobs.index.ts";
-import memory from "@/routes/storage/memory/memory.index.ts";
-import { memoryServer } from "@/routes/storage/memory.ts";
+import memoryRouter from "@/routes/storage/memory/memory.index.ts";
+import {
+  memory as memoryProvider,
+  memoryServer,
+} from "@/routes/storage/memory.ts";
 import env from "@/env.ts";
 import { Identity } from "@commonfabric/identity";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
@@ -20,7 +23,7 @@ if (env.ENV !== "test") {
 }
 
 const app = createApp()
-  .route("/", memory)
+  .route("/", memoryRouter)
   .route("/", router);
 
 const encodeBlobPayload = (payload: { type: string; body: FabricBytes }) =>
@@ -43,12 +46,11 @@ describe("Blob Routes", () => {
   });
 
   afterAll(async () => {
-    // The toolshed `memoryServer` is a module-level singleton constructed when
-    // memory.ts is imported. Deno isolates each test file's module graph, so
-    // this instance is owned by this file alone. Closing it releases its SQLite
-    // handles, engine map, and refresh timer.
+    // The Toolshed Memory provider owns both module-level SQLite singletons.
+    // Deno isolates each test file's module graph, so this file closes its
+    // provider after the HTTP server stops.
     await server.shutdown();
-    await memoryServer.close();
+    await memoryProvider.close();
   });
 
   const bootstrapHomeSpace = async (identity: Identity) => {

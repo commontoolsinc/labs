@@ -32,7 +32,9 @@ Deno.env.set("MEMORY_DUMP_DIDS", allowed.did());
 const { createTestApp } = await import("@/lib/create-app.ts");
 const { default: dumpRouter } = await import("./memory-dump.index.ts");
 // The store the server uses; seed the fixture exactly where the route reads.
-const { memoryEngineStoreUrl } = await import("@/routes/storage/memory.ts");
+const { memory: memoryProvider, memoryEngineStoreUrl } = await import(
+  "@/routes/storage/memory.ts"
+);
 const app = createTestApp(dumpRouter);
 
 {
@@ -55,6 +57,7 @@ function sign(path: string, signer: Identity): Promise<Headers> {
 }
 
 afterAll(async () => {
+  await memoryProvider.close();
   await Deno.remove(tmp, { recursive: true }).catch(() => {});
 });
 
