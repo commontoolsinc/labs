@@ -1,11 +1,16 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
-import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
+import type {
+  BuiltInLLMMessage,
+  BuiltInLLMToolCallPart,
+  JSONSchema,
+} from "commonfabric";
 import {
   llmDialogTestHelpers,
   llmToolExecutionHelpers,
 } from "../src/builtins/llm-dialog.ts";
 import { schemaWithInjectionSafeAnnotations } from "../src/cfc/schema-sanitization.ts";
+import type { Cell } from "../src/cell.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 const {
@@ -32,11 +37,87 @@ const {
   toolAllowsObservedConfidentiality,
 } = llmDialogTestHelpers;
 
-function makeDocumentationCell(params: {
-  id: string;
-  space: string;
-  path?: string[];
+type ToolResultPartForTest = {
+  type: "tool-result";
+  toolCallId: string;
+  toolName: string;
+  output: unknown;
+};
+
+type TestCell<T = unknown> = {
+  get: () => T;
+  getRaw?: () => unknown;
+  getMetaRaw?: () => unknown;
+  getAsNormalizedFullLink?: () => NormalizedFullLink;
+  resolveAsCell?: () => Cell<unknown>;
+  asSchemaFromLinks?: () => Cell<unknown>;
+  asSchema?: (schema?: JSONSchema) => Cell<unknown>;
+  key?: (name: string) => TestCell<unknown>;
+  pull?: () => Promise<void>;
+  withTx?: (tx: unknown) => TestCell<T> & { set?: (next: T) => void };
+  set?: (next: T) => void;
+  runtime?: unknown;
   schema?: unknown;
+};
+
+type ToolCatalogInput = Parameters<typeof buildToolCatalog>[0];
+type CellifyRuntime = Parameters<typeof traverseAndCellify>[0];
+type DocumentationRuntime = Parameters<
+  typeof buildAvailableCellsDocumentation
+>[0];
+type DocumentationPinnedCells = Parameters<
+  typeof buildAvailableCellsDocumentation
+>[3];
+type ExecutionRuntime = Parameters<typeof executeToolCalls>[0];
+type ExecutionPinnedCells = NonNullable<
+  Parameters<typeof executeToolCalls>[4]
+>;
+
+function cast<T>(value: unknown): T {
+  return value as T;
+}
+
+function asCell<T>(cell: TestCell<T>): Cell<T> {
+  return cast<Cell<T>>(cell);
+}
+
+function asSchema(value: unknown): JSONSchema {
+  return cast<JSONSchema>(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function valueAt(
+  value: unknown,
+  path: readonly (string | number)[],
+): unknown {
+  let current = value;
+  for (const segment of path) {
+    if (typeof segment === "number") {
+      if (!Array.isArray(current)) return undefined;
+      current = current[segment];
+      continue;
+    }
+
+    if (!isRecord(current)) return undefined;
+    current = current[segment];
+  }
+  return current;
+}
+
+function toolResultPart(value: unknown): ToolResultPartForTest {
+  assert(isRecord(value));
+  assertEquals(value.type, "tool-result");
+  return cast<ToolResultPartForTest>(value);
+}
+
+function makeDocumentationCell(params: {
+  id: `${string}:${string}`;
+  space: `did:${string}:${string}`;
+  path?: string[];
+  schema?: JSONSchema;
   value?: unknown;
   rawValue?: unknown;
   nested?: unknown;
@@ -44,27 +125,27 @@ function makeDocumentationCell(params: {
   const link = {
     id: params.id,
     space: params.space,
-    scope: "space",
+    scope: "space" as const,
     path: params.path ?? [],
     schema: params.schema,
   };
-  const cell: any = {
+  const cell: TestCell<unknown> = {
     runtime: {},
     schema: params.schema,
     get: () => params.value,
     getRaw: () => params.rawValue ?? params.value,
     getMetaRaw: () => undefined,
     getAsNormalizedFullLink: () => link,
-    resolveAsCell: () => cell,
-    asSchemaFromLinks: () => cell,
-    asSchema: () => cell,
+    resolveAsCell: () => asCell(cell),
+    asSchemaFromLinks: () => asCell(cell),
+    asSchema: () => asCell(cell),
     key: () => ({ getRaw: () => undefined, get: () => undefined }),
     pull: () => Promise.resolve(),
   };
   if (params.nested !== undefined) {
     cell.get = () => params.nested;
   }
-  return cell;
+  return asCell(cell);
 }
 
 Deno.test("parseTargetString recognizes handle format", () => {
@@ -234,7 +315,7 @@ Deno.test("createToolResultMessages converts execution results into tool message
     toolName: "demo",
     output: { type: "json", value: { ok: true } },
   });
-  const failurePart = messages[1].content?.[0] as any;
+  const failurePart = toolResultPart(messages[1].content?.[0]);
   assertEquals(failurePart.type, "tool-result");
   assertEquals(failurePart.toolCallId, "call-2");
   assertEquals(failurePart.toolName, "failing");
@@ -306,7 +387,7 @@ Deno.test("createToolResultMessages handles null result with explicit null", () 
   }]);
 
   assertEquals(messages.length, 1);
-  const outputPart = messages[0].content?.[0] as any;
+  const outputPart = toolResultPart(messages[0].content?.[0]);
   assertEquals(outputPart.output, { type: "json", value: null });
 });
 
@@ -511,24 +592,24 @@ Deno.test("traverseAndCellify converts LLM-friendly links inside strings and obj
     "/of:bafyreihqwsfjfvsr6zbmwhk7fo4hcxqaihmqqzv3ohfyv5gfdjt5jnzqai/path";
 
   const direct = traverseAndCellify(
-    runtime as any,
+    cast<CellifyRuntime>(runtime),
     "did:test:cellify",
     JSON.stringify({ "@link": target }),
-  ) as any;
+  );
   const nested = traverseAndCellify(
-    runtime as any,
+    cast<CellifyRuntime>(runtime),
     "did:test:cellify",
     {
       keep: "value",
       list: [{ "@link": target }],
       malformed: '{"@link":',
     },
-  ) as any;
+  );
 
-  assertEquals(direct.kind, "cell");
-  assertEquals(nested.keep, "value");
-  assertEquals(nested.list[0].kind, "cell");
-  assertEquals(nested.malformed, '{"@link":');
+  assertEquals(valueAt(direct, ["kind"]), "cell");
+  assertEquals(valueAt(nested, ["keep"]), "value");
+  assertEquals(valueAt(nested, ["list", 0, "kind"]), "cell");
+  assertEquals(valueAt(nested, ["malformed"]), '{"@link":');
   assertEquals(parsedLinks.length, 2);
 });
 
@@ -593,7 +674,7 @@ Deno.test("buildToolCatalog normalizes dynamic legacy tools", () => {
     },
   };
 
-  const catalog = buildToolCatalog(toolsCell as any, false);
+  const catalog = buildToolCatalog(cast<ToolCatalogInput>(toolsCell), false);
 
   assertEquals(Object.keys(catalog.llmTools).sort(), [
     "booleanSchema",
@@ -605,20 +686,25 @@ Deno.test("buildToolCatalog normalizes dynamic legacy tools", () => {
     "uses a parent schema",
   );
   assertEquals(
-    (catalog.llmTools.fromInputSchema.inputSchema as any).properties,
+    valueAt(catalog.llmTools.fromInputSchema.inputSchema, ["properties"]),
     { value: { type: "number" } },
   );
   assertEquals(
-    (catalog.llmTools.fromInputSchema.inputSchema as any).required,
+    valueAt(catalog.llmTools.fromInputSchema.inputSchema, ["required"]),
     ["value"],
   );
   assertEquals(
-    (catalog.llmTools.fromChildPattern.inputSchema as any).properties.prompt
-      .type,
+    valueAt(catalog.llmTools.fromChildPattern.inputSchema, [
+      "properties",
+      "prompt",
+      "type",
+    ]),
     "string",
   );
   assertEquals(
-    (catalog.llmTools.booleanSchema.inputSchema as any).additionalProperties,
+    valueAt(catalog.llmTools.booleanSchema.inputSchema, [
+      "additionalProperties",
+    ]),
     {},
   );
   assertEquals(
@@ -633,7 +719,7 @@ Deno.test("buildToolCatalog adds built-in tools by default", () => {
     key: () => ({ get: () => undefined }),
   };
 
-  const catalog = buildToolCatalog(toolsCell as any);
+  const catalog = buildToolCatalog(cast<ToolCatalogInput>(toolsCell));
 
   assert("read" in catalog.llmTools);
   assert("invoke" in catalog.llmTools);
@@ -680,13 +766,13 @@ Deno.test("buildAvailableCellsDocumentation documents context and pinned cells",
   };
 
   const docs = buildAvailableCellsDocumentation(
-    runtime as any,
+    cast<DocumentationRuntime>(runtime),
     space,
     {
       Project: outerCell,
       NotACell: { title: "ignored" },
     },
-    pinnedCells as any,
+    cast<DocumentationPinnedCells>(pinnedCells),
   );
 
   assert(docs.includes("# Available Cells"));
@@ -698,10 +784,10 @@ Deno.test("buildAvailableCellsDocumentation documents context and pinned cells",
   assert(docs.includes("title"));
 
   const empty = buildAvailableCellsDocumentationWithObservation(
-    runtime as any,
+    cast<DocumentationRuntime>(runtime),
     space,
     undefined,
-    { get: () => [] } as any,
+    cast<DocumentationPinnedCells>(asCell({ get: () => [] })),
   );
   assertEquals(empty, { docs: "", observedConfidentiality: [] });
 });
@@ -712,7 +798,7 @@ Deno.test("executeToolCalls wraps denied, present-result, pin, and error results
     get: () => undefined,
     key: () => ({ get: () => undefined }),
   };
-  const catalog = buildToolCatalog(emptyToolsCell as any);
+  const catalog = buildToolCatalog(cast<ToolCatalogInput>(emptyToolsCell));
   catalog.llmTools.secretTool = {
     description: "secret",
     inputSchema: {
@@ -755,9 +841,9 @@ Deno.test("executeToolCalls wraps denied, present-result, pin, and error results
   };
   try {
     const results = await executeToolCalls(
-      runtime as any,
+      cast<ExecutionRuntime>(runtime),
       space,
-      catalog as any,
+      catalog,
       [
         {
           type: "tool-call",
@@ -829,7 +915,7 @@ Deno.test("executeToolCalls wraps denied, present-result, pin, and error results
           input: {},
         },
       ],
-      pinnedCells as any,
+      cast<ExecutionPinnedCells>(pinnedCells),
       ["internal"],
     );
 
@@ -928,23 +1014,22 @@ Deno.test("toolAllowsObservedConfidentiality permits tools within maxConfidentia
   assertEquals(allowed, true);
 });
 
-// Tests for simplifySchemaForContext
-// Note: We cast schemas to `any` to avoid strict type checking on `type` field literals
-
 Deno.test("simplifySchemaForContext preserves asCell stream marker", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       events: { asCell: ["stream"], type: "string" },
     },
   };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.events?.asCell, ["stream"]);
-  assertEquals(result.properties?.events?.type, "string");
+  const result = simplifySchemaForContext(schema);
+  assertEquals(valueAt(result, ["properties", "events", "asCell"]), [
+    "stream",
+  ]);
+  assertEquals(valueAt(result, ["properties", "events", "type"]), "string");
 });
 
 Deno.test("simplifySchemaForContext preserves asCell marker with nested properties", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       user: {
@@ -958,26 +1043,39 @@ Deno.test("simplifySchemaForContext preserves asCell marker with nested properti
       },
     },
   };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.user?.asCell, ["cell"]);
-  assertEquals(result.properties?.user?.properties?.name?.type, "string");
-  assertEquals(result.properties?.user?.properties?.age?.type, "number");
-  assertEquals(result.properties?.user?.required, ["name", "age"]);
+  const result = simplifySchemaForContext(schema);
+  assertEquals(valueAt(result, ["properties", "user", "asCell"]), ["cell"]);
+  assertEquals(
+    valueAt(result, ["properties", "user", "properties", "name", "type"]),
+    "string",
+  );
+  assertEquals(
+    valueAt(result, ["properties", "user", "properties", "age", "type"]),
+    "number",
+  );
+  assertEquals(valueAt(result, ["properties", "user", "required"]), [
+    "name",
+    "age",
+  ]);
 });
 
 Deno.test("simplifySchemaForContext preserves small enums", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       status: { type: "string", enum: ["open", "closed", "pending"] },
     },
   };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.status?.enum, ["open", "closed", "pending"]);
+  const result = simplifySchemaForContext(schema);
+  assertEquals(valueAt(result, ["properties", "status", "enum"]), [
+    "open",
+    "closed",
+    "pending",
+  ]);
 });
 
 Deno.test("simplifySchemaForContext truncates large enums", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       country: {
@@ -986,26 +1084,28 @@ Deno.test("simplifySchemaForContext truncates large enums", () => {
       },
     },
   };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.country?.enum?.length, 11); // 10 + "..."
-  assertEquals(result.properties?.country?.enum?.[10], "...");
+  const result = simplifySchemaForContext(schema);
+  const truncatedEnum = valueAt(result, ["properties", "country", "enum"]);
+  assert(Array.isArray(truncatedEnum));
+  assertEquals(truncatedEnum.length, 11);
+  assertEquals(truncatedEnum[10], "...");
 });
 
 Deno.test("simplifySchemaForContext removes $defs and $ref", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     $defs: { Foo: { type: "string" } },
     type: "object",
     properties: {
       foo: { $ref: "#/$defs/Foo" },
     },
   };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.$defs, undefined);
-  assertEquals(result.properties?.foo?.$ref, undefined);
+  const result = simplifySchemaForContext(schema);
+  assertEquals(valueAt(result, ["$defs"]), undefined);
+  assertEquals(valueAt(result, ["properties", "foo", "$ref"]), undefined);
 });
 
 Deno.test("simplifySchemaForContext skips $-prefixed properties", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       $UI: { type: "object" },
@@ -1013,14 +1113,14 @@ Deno.test("simplifySchemaForContext skips $-prefixed properties", () => {
       name: { type: "string" },
     },
   };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.$UI, undefined);
-  assertEquals(result.properties?.$TYPE, undefined);
-  assertEquals(result.properties?.name?.type, "string");
+  const result = simplifySchemaForContext(schema);
+  assertEquals(valueAt(result, ["properties", "$UI"]), undefined);
+  assertEquals(valueAt(result, ["properties", "$TYPE"]), undefined);
+  assertEquals(valueAt(result, ["properties", "name", "type"]), "string");
 });
 
 Deno.test("simplifySchemaForContext limits recursion depth", () => {
-  const deepSchema: any = {
+  const deepSchema: JSONSchema = {
     type: "object",
     properties: {
       a: {
@@ -1031,7 +1131,7 @@ Deno.test("simplifySchemaForContext limits recursion depth", () => {
             properties: {
               c: {
                 type: "object",
-                asCell: ["stream"], // wrapper marker to verify it's preserved at depth limit
+                asCell: ["stream"],
                 properties: {
                   d: { type: "string", description: "deep field" },
                 },
@@ -1042,18 +1142,15 @@ Deno.test("simplifySchemaForContext limits recursion depth", () => {
       },
     },
   };
-  const result = simplifySchemaForContext(deepSchema) as any;
-  // At depth 3, we should get minimal schema (just type and wrapper markers)
-  // depth 0: root -> depth 1: a -> depth 2: b -> depth 3: c (hits maxDepth)
-  const deep = result.properties?.a?.properties?.b?.properties?.c;
-  // At max depth, only type and wrapper markers are preserved, properties are dropped
-  assertEquals(deep?.type, "object");
-  assertEquals(deep?.asCell, ["stream"]);
-  assertEquals(deep?.properties, undefined); // nested properties dropped at max depth
+  const result = simplifySchemaForContext(deepSchema);
+  const deepPath = ["properties", "a", "properties", "b", "properties", "c"];
+  assertEquals(valueAt(result, [...deepPath, "type"]), "object");
+  assertEquals(valueAt(result, [...deepPath, "asCell"]), ["stream"]);
+  assertEquals(valueAt(result, [...deepPath, "properties"]), undefined);
 });
 
 Deno.test("simplifySchemaForContext preserves required array", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       name: { type: "string" },
@@ -1061,12 +1158,12 @@ Deno.test("simplifySchemaForContext preserves required array", () => {
     },
     required: ["name"],
   };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.required, ["name"]);
+  const result = simplifySchemaForContext(schema);
+  assertEquals(valueAt(result, ["required"]), ["name"]);
 });
 
 Deno.test("simplifySchemaForContext preserves items schema for arrays", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "array",
     items: {
       type: "object",
@@ -1077,15 +1174,17 @@ Deno.test("simplifySchemaForContext preserves items schema for arrays", () => {
       required: ["id"],
     },
   };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.items?.type, "object");
-  assertEquals(result.items?.properties?.id?.type, "number");
-  assertEquals(result.items?.required, ["id"]);
+  const result = simplifySchemaForContext(schema);
+  assertEquals(valueAt(result, ["items", "type"]), "object");
+  assertEquals(
+    valueAt(result, ["items", "properties", "id", "type"]),
+    "number",
+  );
+  assertEquals(valueAt(result, ["items", "required"]), ["id"]);
 });
 
 Deno.test("simplifySchemaForContext handles Stream with nested detail structure", () => {
-  // This is the exact case from the bug report: Stream<{ detail: { value: string }}>
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       editContent: {
@@ -1102,61 +1201,76 @@ Deno.test("simplifySchemaForContext handles Stream with nested detail structure"
       },
     },
   };
-  const result = simplifySchemaForContext(schema) as any;
-  assertEquals(result.properties?.editContent?.asCell, ["stream"]);
-  assertEquals(result.properties?.editContent?.type, "object");
+  const result = simplifySchemaForContext(schema);
+  assertEquals(valueAt(result, ["properties", "editContent", "asCell"]), [
+    "stream",
+  ]);
   assertEquals(
-    result.properties?.editContent?.properties?.detail?.properties?.value?.type,
+    valueAt(result, ["properties", "editContent", "type"]),
+    "object",
+  );
+  assertEquals(
+    valueAt(result, [
+      "properties",
+      "editContent",
+      "properties",
+      "detail",
+      "properties",
+      "value",
+      "type",
+    ]),
     "string",
   );
 });
 
 Deno.test("simplifySchemaForContext handles primitive and composed schemas", () => {
-  assertEquals(simplifySchemaForContext("plain" as any), "plain" as any);
+  assertEquals<unknown>(simplifySchemaForContext(asSchema("plain")), "plain");
 
   const result = simplifySchemaForContext({
     type: "object",
     description: "choice",
-    anyOf: [{ type: "string" }, "literal" as any],
+    anyOf: [{ type: "string" }, asSchema("literal")],
     oneOf: [{ type: "number" }],
     allOf: [{ type: "object", properties: { id: { type: "string" } } }],
-  } as any) as any;
+  });
 
-  assertEquals(result.description, "choice");
-  assertEquals(result.anyOf, [{ type: "string" }, "literal"]);
-  assertEquals(result.oneOf, [{ type: "number" }]);
-  assertEquals(result.allOf?.[0]?.properties?.id?.type, "string");
+  assertEquals(valueAt(result, ["description"]), "choice");
+  assertEquals(valueAt(result, ["anyOf"]), [{ type: "string" }, "literal"]);
+  assertEquals(valueAt(result, ["oneOf"]), [{ type: "number" }]);
+  assertEquals(
+    valueAt(result, ["allOf", 0, "properties", "id", "type"]),
+    "string",
+  );
 });
 
-// Tests for resolveRefsForLLM
-
 Deno.test("resolveRefsForLLM converts boolean true schema to empty object", () => {
-  const result = resolveRefsForLLM(true as any);
+  const result = resolveRefsForLLM(true);
   assertEquals(result, {});
 });
 
 Deno.test("resolveRefsForLLM converts boolean false schema to permissive object", () => {
-  const result = resolveRefsForLLM(false as any);
-  // false schemas are mapped to a permissive object instead of { not: true }
-  // since LLMs don't handle JSON Schema `not` well
+  const result = resolveRefsForLLM(false);
   assertEquals(result, { type: "object", properties: {} });
 });
 
 Deno.test("resolveRefsForLLM converts boolean sub-schemas in properties to objects", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       anything: true,
       nothing: false,
     },
   };
-  const result = resolveRefsForLLM(schema) as any;
-  assertEquals(result.properties?.anything, {});
-  assertEquals(result.properties?.nothing, { type: "object", properties: {} });
+  const result = resolveRefsForLLM(schema);
+  assertEquals(valueAt(result, ["properties", "anything"]), {});
+  assertEquals(valueAt(result, ["properties", "nothing"]), {
+    type: "object",
+    properties: {},
+  });
 });
 
 Deno.test("resolveRefsForLLM resolves simple $ref", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     $defs: {
       Name: { type: "string" },
@@ -1165,13 +1279,13 @@ Deno.test("resolveRefsForLLM resolves simple $ref", () => {
       name: { $ref: "#/$defs/Name" },
     },
   };
-  const result = resolveRefsForLLM(schema) as any;
-  assertEquals(result.properties?.name, { type: "string" });
-  assertEquals(result.$defs, undefined);
+  const result = resolveRefsForLLM(schema);
+  assertEquals(valueAt(result, ["properties", "name"]), { type: "string" });
+  assertEquals(valueAt(result, ["$defs"]), undefined);
 });
 
 Deno.test("resolveRefsForLLM resolves nested $ref chains", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     $defs: {
       Inner: { type: "number" },
@@ -1186,14 +1300,17 @@ Deno.test("resolveRefsForLLM resolves nested $ref chains", () => {
       data: { $ref: "#/$defs/Outer" },
     },
   };
-  const result = resolveRefsForLLM(schema) as any;
-  assertEquals(result.properties?.data?.type, "object");
-  assertEquals(result.properties?.data?.properties?.value, { type: "number" });
-  assertEquals(result.$defs, undefined);
+  const result = resolveRefsForLLM(schema);
+  assertEquals(valueAt(result, ["properties", "data", "type"]), "object");
+  assertEquals(
+    valueAt(result, ["properties", "data", "properties", "value"]),
+    { type: "number" },
+  );
+  assertEquals(valueAt(result, ["$defs"]), undefined);
 });
 
 Deno.test("resolveRefsForLLM truncates circular $ref", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     $defs: {
       Node: {
@@ -1208,16 +1325,16 @@ Deno.test("resolveRefsForLLM truncates circular $ref", () => {
       root: { $ref: "#/$defs/Node" },
     },
   };
-  const result = resolveRefsForLLM(schema) as any;
-  // First level should be resolved
-  assertEquals(result.properties?.root?.type, "object");
-  assertEquals(result.properties?.root?.properties?.value, { type: "string" });
-  // Circular reference should be truncated
-  assertEquals(result.properties?.root?.properties?.child, {
+  const result = resolveRefsForLLM(schema);
+  assertEquals(valueAt(result, ["properties", "root", "type"]), "object");
+  assertEquals(valueAt(result, ["properties", "root", "properties", "value"]), {
+    type: "string",
+  });
+  assertEquals(valueAt(result, ["properties", "root", "properties", "child"]), {
     type: "object",
     additionalProperties: true,
   });
-  assertEquals(result.$defs, undefined);
+  assertEquals(valueAt(result, ["$defs"]), undefined);
 });
 
 Deno.test("resolveRefsForLLM truncates unresolved $ref", () => {
@@ -1226,16 +1343,16 @@ Deno.test("resolveRefsForLLM truncates unresolved $ref", () => {
     properties: {
       missing: { $ref: "#/$defs/Missing" },
     },
-  } as any) as any;
+  });
 
-  assertEquals(result.properties?.missing, {
+  assertEquals(valueAt(result, ["properties", "missing"]), {
     type: "object",
     additionalProperties: true,
   });
 });
 
 Deno.test("resolveRefsForLLM passes through schema with no $ref unchanged", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       name: { type: "string" },
@@ -1243,15 +1360,15 @@ Deno.test("resolveRefsForLLM passes through schema with no $ref unchanged", () =
     },
     required: ["name"],
   };
-  const result = resolveRefsForLLM(schema) as any;
-  assertEquals(result.type, "object");
-  assertEquals(result.properties?.name, { type: "string" });
-  assertEquals(result.properties?.age, { type: "number" });
-  assertEquals(result.required, ["name"]);
+  const result = resolveRefsForLLM(schema);
+  assertEquals(valueAt(result, ["type"]), "object");
+  assertEquals(valueAt(result, ["properties", "name"]), { type: "string" });
+  assertEquals(valueAt(result, ["properties", "age"]), { type: "number" });
+  assertEquals(valueAt(result, ["required"]), ["name"]);
 });
 
 Deno.test("resolveRefsForLLM preserves sibling properties alongside $ref", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     $defs: {
       Items: { type: "array", items: { type: "string" } },
@@ -1260,14 +1377,16 @@ Deno.test("resolveRefsForLLM preserves sibling properties alongside $ref", () =>
       list: { $ref: "#/$defs/Items", default: [] },
     },
   };
-  const result = resolveRefsForLLM(schema) as any;
-  assertEquals(result.properties?.list?.type, "array");
-  assertEquals(result.properties?.list?.default, []);
-  assertEquals(result.properties?.list?.items, { type: "string" });
+  const result = resolveRefsForLLM(schema);
+  assertEquals(valueAt(result, ["properties", "list", "type"]), "array");
+  assertEquals(valueAt(result, ["properties", "list", "default"]), []);
+  assertEquals(valueAt(result, ["properties", "list", "items"]), {
+    type: "string",
+  });
 });
 
 Deno.test("resolveRefsForLLM handles mutually recursive types", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     $defs: {
       A: {
@@ -1283,25 +1402,32 @@ Deno.test("resolveRefsForLLM handles mutually recursive types", () => {
       start: { $ref: "#/$defs/A" },
     },
   };
-  const result = resolveRefsForLLM(schema) as any;
-  assertEquals(result.properties?.start?.type, "object");
-  // A resolved -> B resolved -> A is circular, truncated
-  assertEquals(result.properties?.start?.properties?.b?.type, "object");
+  const result = resolveRefsForLLM(schema);
+  assertEquals(valueAt(result, ["properties", "start", "type"]), "object");
   assertEquals(
-    result.properties?.start?.properties?.b?.properties?.a,
+    valueAt(result, ["properties", "start", "properties", "b", "type"]),
+    "object",
+  );
+  assertEquals(
+    valueAt(result, [
+      "properties",
+      "start",
+      "properties",
+      "b",
+      "properties",
+      "a",
+    ]),
     { type: "object", additionalProperties: true },
   );
 });
 
-// Tests for prepareSchemaForLLM
-
 Deno.test("prepareSchemaForLLM returns primitive schemas unchanged", () => {
-  assertEquals(prepareSchemaForLLM("plain" as any), "plain" as any);
-  assertEquals(prepareSchemaForLLM(null as any), null as any);
+  assertEquals<unknown>(prepareSchemaForLLM(asSchema("plain")), "plain");
+  assertEquals<unknown>(prepareSchemaForLLM(asSchema(null)), null);
 });
 
 Deno.test("prepareSchemaForLLM strips internal markers and resolves $ref", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     $defs: {
       Item: { type: "string" },
@@ -1312,19 +1438,16 @@ Deno.test("prepareSchemaForLLM strips internal markers and resolves $ref", () =>
       hidden: { type: "object", asCell: ["opaque"] },
     },
   };
-  const result = prepareSchemaForLLM(schema) as any;
-  // asCell, asStream, asOpaque should be stripped
-  assertEquals(result.properties?.data?.asCell, undefined);
-  assertEquals(result.properties?.stream?.asCell, undefined);
-  assertEquals(result.properties?.hidden?.asCell, undefined);
-  // $ref should be resolved
-  assertEquals(result.properties?.data?.type, "string");
-  assertEquals(result.$defs, undefined);
+  const result = prepareSchemaForLLM(schema);
+  assertEquals(valueAt(result, ["properties", "data", "asCell"]), undefined);
+  assertEquals(valueAt(result, ["properties", "stream", "asCell"]), undefined);
+  assertEquals(valueAt(result, ["properties", "hidden", "asCell"]), undefined);
+  assertEquals(valueAt(result, ["properties", "data", "type"]), "string");
+  assertEquals(valueAt(result, ["$defs"]), undefined);
 });
 
 Deno.test("prepareSchemaForLLM handles recursive TodoItem schema", () => {
-  // This mirrors the writable-recursive-todoitem.expected.json fixture
-  const schema: any = {
+  const schema: JSONSchema = {
     $defs: {
       AnonymousType_1: {
         items: { $ref: "#/$defs/TodoItem" },
@@ -1350,32 +1473,51 @@ Deno.test("prepareSchemaForLLM handles recursive TodoItem schema", () => {
     required: ["todos"],
     type: "object",
   };
-  const result = prepareSchemaForLLM(schema) as any;
+  const result = prepareSchemaForLLM(schema);
 
-  // No $defs or $ref in output
-  assertEquals(result.$defs, undefined);
+  assertEquals(valueAt(result, ["$defs"]), undefined);
   assertEquals(JSON.stringify(result).includes("$ref"), false);
-
-  // No internal markers
   assertEquals(JSON.stringify(result).includes("asCell"), false);
-
-  // Structure should be resolved
-  assertEquals(result.type, "object");
-  assertEquals(result.properties?.todos?.type, "array");
-  assertEquals(result.properties?.todos?.default, []);
-
-  // The items of todos should be resolved TodoItem objects
-  const todoItem = result.properties?.todos?.items;
-  assertEquals(todoItem?.type, "object");
-  assertEquals(todoItem?.properties?.title?.type, "string");
-  assertEquals(todoItem?.properties?.done?.type, "boolean");
-
-  // The nested items field (recursive) should be truncated
-  // since TodoItem -> AnonymousType_1 -> TodoItem is circular.
-  // When a circular $ref is detected, it's replaced with a permissive object.
-  const nestedItems = todoItem?.properties?.items;
-  assertEquals(nestedItems, {
-    type: "object",
-    additionalProperties: true,
-  });
+  assertEquals(valueAt(result, ["type"]), "object");
+  assertEquals(valueAt(result, ["properties", "todos", "type"]), "array");
+  assertEquals(valueAt(result, ["properties", "todos", "default"]), []);
+  assertEquals(
+    valueAt(result, ["properties", "todos", "items", "type"]),
+    "object",
+  );
+  assertEquals(
+    valueAt(result, [
+      "properties",
+      "todos",
+      "items",
+      "properties",
+      "title",
+      "type",
+    ]),
+    "string",
+  );
+  assertEquals(
+    valueAt(result, [
+      "properties",
+      "todos",
+      "items",
+      "properties",
+      "done",
+      "type",
+    ]),
+    "boolean",
+  );
+  assertEquals(
+    valueAt(result, [
+      "properties",
+      "todos",
+      "items",
+      "properties",
+      "items",
+    ]),
+    {
+      type: "object",
+      additionalProperties: true,
+    },
+  );
 });
