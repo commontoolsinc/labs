@@ -490,6 +490,31 @@ Deno.test(
 );
 
 Deno.test(
+  "Capability analysis: a root-scoped wildcard still erases element identity paths",
+  () => {
+    // The CT-1639 removal idiom: a dynamic element access through a
+    // whole-root alias means the unknown access can value-read any element,
+    // so element identity markings must not survive it — surviving markings
+    // would degrade the elements' emitted schema to opaque comparable refs
+    // and break value round-trips (caught by CI on the first, blanket
+    // relaxation of this filter).
+    const fn = parseFirstCallback(
+      `const fn = (input, key) => {
+        const cur = input;
+        const target = cur[key];
+        const idx = input.findIndex((el) => equals(target, el));
+        return idx;
+      };`,
+    );
+    const summary = analyzeFunctionCapabilities(fn);
+    const input = getPaths(summary, "input");
+
+    assertEquals(input.wildcard, true);
+    assertEquals(input.identityPaths.length, 0);
+  },
+);
+
+Deno.test(
   "Capability analysis: wildcard still erases the root-length identity path",
   () => {
     // The whole-root comparison overlaps whatever the wildcard may read, so
