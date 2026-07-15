@@ -61,6 +61,16 @@ describe("CFRender", () => {
       'span[style*="display"][style*="contents"]',
     );
   });
+
+  it("dims the first rendered elements through nested transparent wrappers", () => {
+    const styles = stylesText();
+    expect(styles).toContain(
+      '[data-cf-pending="true"]\n      :not(:is(cf-fragment, span[style*="display"][style*="contents"]))',
+    );
+    expect(styles).toContain(
+      ':not(:is(cf-fragment, span[style*="display"][style*="contents"])[data-cf-pending="true"]\n        :not(',
+    );
+  });
 });
 
 describe("CFRender variant handling", () => {
