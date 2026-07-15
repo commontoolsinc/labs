@@ -1,22 +1,15 @@
 import { assertEquals } from "@std/assert";
-import type {
-  ExecutionRoutingActionDiagnostics,
-  ExecutionRoutingDiagnostics,
-} from "@commonfabric/runner/shared";
-import {
-  type ActionClaimKey,
-  type ExecutionClaim,
-  toInputBasisSeq,
-} from "@commonfabric/memory/v2";
 import {
   isRoutingMeasurementBaselineReady,
   isRoutingMeasurementResultReady,
+  type RoutingMeasurementAction,
+  type RoutingMeasurementDiagnostics,
   routingMeasurementProblemActions,
 } from "./server-execution-measurement-helpers.ts";
 
 const SPACE = "did:key:z6Mk-measurement" as const;
 
-const key: ActionClaimKey = {
+const key = {
   space: SPACE,
   branch: "",
   contextKey: "space",
@@ -27,7 +20,7 @@ const key: ActionClaimKey = {
   runtimeFingerprint: "runtime:test",
 };
 
-const claim: ExecutionClaim = {
+const claim = {
   ...key,
   leaseGeneration: 1,
   claimGeneration: 2,
@@ -35,11 +28,10 @@ const claim: ExecutionClaim = {
 };
 
 const action = (
-  overrides: Partial<ExecutionRoutingActionDiagnostics> = {},
-): ExecutionRoutingActionDiagnostics => ({
+  overrides: Partial<RoutingMeasurementAction> = {},
+): RoutingMeasurementAction => ({
   key,
   liveClaim: claim,
-  upstreamRoutes: 0,
   claimedOverlayRoutes: 0,
   settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
   basisCoveredOverlayDrops: 0,
@@ -51,20 +43,12 @@ const action = (
 });
 
 const diagnostics = (
-  actions: readonly ExecutionRoutingActionDiagnostics[],
-): ExecutionRoutingDiagnostics => ({
-  space: SPACE,
-  branch: key.branch,
-  executionFeedSeq: 4,
-  executionAppliedSeq: 3,
+  actions: readonly RoutingMeasurementAction[],
+): RoutingMeasurementDiagnostics => ({
   snapshotRequired: false,
   claims: [claim],
   actions,
   branchTotals: {
-    upstreamRoutes: actions.reduce(
-      (sum, action) => sum + action.upstreamRoutes,
-      0,
-    ),
     claimedOverlayRoutes: actions.reduce(
       (sum, action) => sum + action.claimedOverlayRoutes,
       0,
@@ -78,15 +62,6 @@ const diagnostics = (
       }),
       { committed: 0, noOp: 0, failed: 0, unserved: 0 },
     ),
-    basisCoveredOverlayDrops: actions.reduce(
-      (sum, action) => sum + action.basisCoveredOverlayDrops,
-      0,
-    ),
-    nonAuthoritativeOverlayDrops: actions.reduce(
-      (sum, action) => sum + action.nonAuthoritativeOverlayDrops,
-      0,
-    ),
-    settlementDiagnostics: {},
   },
   truncatedActionRecords: 0,
 });
@@ -128,9 +103,6 @@ Deno.test("measurement completion accepts a settled mix of served and unserved a
     claimedOverlayRoutes: 1,
     settlements: { committed: 0, noOp: 0, failed: 0, unserved: 1 },
     lastSettlement: {
-      branch: key.branch,
-      claim: { ...claim, actionId: "action:fallback" },
-      inputBasisSeq: toInputBasisSeq(1),
       outcome: "unserved",
       diagnosticCode: "dynamic-read-outside-static-surface",
     },
@@ -165,9 +137,6 @@ Deno.test("measurement diagnostics retain bounded action identity and fallback r
       claimedOverlayRoutes: 1,
       settlements: { committed: 0, noOp: 0, failed: 0, unserved: 1 },
       lastSettlement: {
-        branch: key.branch,
-        claim: fallbackClaim,
-        inputBasisSeq: toInputBasisSeq(1),
         outcome: "unserved",
         diagnosticCode: "dynamic-read-outside-static-surface",
       },
