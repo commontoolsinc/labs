@@ -1969,6 +1969,7 @@ class SpaceReplica implements ISpaceReplica {
   #executionClaimRouting = false;
   #executionBuiltinPassivity = false;
   #executionSnapshotRequired = false;
+  #executionWatchHandoffComplete = false;
   #sessionHandle?: Promise<ReplicaSessionHandle>;
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
@@ -2722,8 +2723,15 @@ class SpaceReplica implements ISpaceReplica {
         return { error: toConnectionError(new Error("memory replica closed")) };
       }
 
+      const firstExecutionWatch = !this.#executionWatchHandoffComplete;
+      if (firstExecutionWatch) {
+        this.handoffClientExecutionControlToFirstWatch(session);
+      }
       this.#watchView = view;
       this.applySessionSync(sync, type);
+      if (firstExecutionWatch) {
+        this.#executionWatchHandoffComplete = true;
+      }
       if (this.#updatePromises.size === 0) {
         this.#subscribedWatchView = view;
         const updates = this.consumeUpdates(view.subscribeSync())
@@ -4227,6 +4235,29 @@ class SpaceReplica implements ISpaceReplica {
     for (const claim of handle.session.executionClaims ?? []) {
       this.#executionClaims.set(actionClaimMapKey(claim), claim);
     }
+  }
+
+  /**
+   * SpaceSession owns execution control before its first WatchView exists. A
+   * claim can advance there after session initialization but before
+   * watchAddSync returns, so no view event exists for SpaceReplica to consume.
+   * Once watchAddSync has created the view, atomically adopt the session's
+   * current cursor and claims before applying the returned incremental batch.
+   * Later watch additions must stay incremental: reseeding them could erase
+   * already-applied settlements or speculative overlays.
+   */
+  private handoffClientExecutionControlToFirstWatch(
+    session: ReplicaSessionHandle["session"],
+  ): void {
+    if (!this.#executionClaimRouting) return;
+    const executionFeedSeq = session.executionFeedSeq ?? 0;
+    if (executionFeedSeq < this.#executionFeedSeq) return;
+    this.#executionFeedSeq = executionFeedSeq;
+    this.#executionClaims.clear();
+    for (const claim of session.executionClaims ?? []) {
+      this.#executionClaims.set(actionClaimMapKey(claim), claim);
+    }
+    this.#executionSnapshotRequired = false;
   }
 
   private executionRoutingDiagnosticRecord(

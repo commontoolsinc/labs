@@ -241,6 +241,8 @@ class OverlaySessionFactory implements SessionFactory {
   readonly commits: ClientCommit[] = [];
   readonly view = new PushView();
   claims: ExecutionClaim[] = [claim];
+  executionFeedSeq = 0;
+  onWatchAdd?: () => SessionSync;
   onTransact?: (
     commit: ClientCommit,
     attempt: number,
@@ -273,12 +275,16 @@ class OverlaySessionFactory implements SessionFactory {
     _signer?: Signer,
   ): Promise<ReplicaSessionHandle> {
     const executionClaims = () => [...this.claims];
+    const executionFeedSeq = () => this.executionFeedSeq;
     const session = {
       sessionId: "session:client-overlay",
       sessionToken: undefined,
       serverSeq: 0,
       get executionClaims() {
         return executionClaims();
+      },
+      get executionFeedSeq() {
+        return executionFeedSeq();
       },
       transact: async (commit: ClientCommit): Promise<AppliedCommit> => {
         this.commits.push(structuredClone(commit));
@@ -295,14 +301,15 @@ class OverlaySessionFactory implements SessionFactory {
       watchAddSync: () =>
         Promise.resolve({
           view: this.view,
-          sync: emptySync({
-            execution: {
-              fromFeedSeq: 0,
-              toFeedSeq: 1,
-              snapshot: { claims: [...this.claims] },
-              events: [],
-            },
-          }),
+          sync: this.onWatchAdd?.() ??
+            emptySync({
+              execution: {
+                fromFeedSeq: 0,
+                toFeedSeq: 1,
+                snapshot: { claims: [...this.claims] },
+                events: [],
+              },
+            }),
         }),
     } as unknown as ReplicaSession;
     return Promise.resolve({
@@ -348,6 +355,38 @@ function notificationCondition(
   if (check()) observed.resolve();
   return observed.promise.finally(() => storage.unsubscribe(subscription));
 }
+
+Deno.test("first watch adopts execution control that arrived before its view existed", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  factory.claims = [];
+  factory.executionFeedSeq = 1;
+  factory.onWatchAdd = () => {
+    // Model a claim delivered to SpaceSession after SpaceReplica seeded its
+    // initial cursor, but before watchAddSync created the first WatchView.
+    factory.claims = [claim];
+    factory.executionFeedSeq = 3;
+    return emptySync({
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [],
+      },
+    });
+  };
+  const storage = OverlayStorageManager.connect(factory);
+  const query = { space: SPACE, branch: "", pieceId: claim.pieceId };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    const diagnostics = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(diagnostics.executionFeedSeq, 3);
+    assertEquals(diagnostics.snapshotRequired, false);
+    assertEquals(diagnostics.claims, [claim]);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
 
 async function writeClaimedOutput(
   storage: StorageManager,
