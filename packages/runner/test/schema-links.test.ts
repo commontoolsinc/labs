@@ -6,21 +6,39 @@ import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { createCell, isCell } from "../src/cell.ts";
+import { type Cell, createCell, isCell } from "../src/cell.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
 import { areLinksSame, createDataCellURI } from "../src/link-utils.ts";
-import { toCell } from "../src/back-to-cell.ts";
+import { type BackToCellInternals, toCell } from "../src/back-to-cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { CellResult } from "../src/query-result-proxy.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 const signer2 = await Identity.fromPassphrase("test operator 2");
 const space2 = signer2.did();
+
+function expectBackToCell(
+  value: unknown,
+): asserts value is BackToCellInternals {
+  expect(typeof value === "object" && value !== null).toBe(true);
+  expect(toCellAccessor(value)).toBeDefined();
+}
+
+function toCellAccessor(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return undefined;
+  return (value as Partial<BackToCellInternals>)[toCell];
+}
+
+function getCellFromResult(value: unknown): Cell<unknown> {
+  expectBackToCell(value);
+  const cell = value[toCell]();
+  expect(isCell(cell)).toBe(true);
+  return cell;
+}
 
 describe("Schema - Link Resolution", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -71,7 +89,7 @@ describe("Schema - Link Resolution", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      source.set({ current: sessionCell as any });
+      source.set({ current: sessionCell });
 
       const cappedSchema = {
         type: "object",
@@ -133,7 +151,7 @@ describe("Schema - Link Resolution", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      source.set({ current: sessionCell as any });
+      source.set({ current: sessionCell });
 
       const cappedSchema = {
         type: "object",
@@ -195,7 +213,7 @@ describe("Schema - Link Resolution", () => {
       });
 
       const itemValue = listCell.key("items").key(0).get();
-      const linkedCell = (itemValue as any)[toCell]();
+      const linkedCell = getCellFromResult(itemValue);
 
       const itemCell = listCell.key("items").key(0);
 
@@ -208,14 +226,14 @@ describe("Schema - Link Resolution", () => {
 
       // Both the cell key version and the toCell version of items should have the same path
       // since there is no link
-      const itemsCell = (result.items as any)[toCell]();
+      const itemsCell = getCellFromResult(result.items);
       expect(listCell.key("items").getAsNormalizedFullLink().path).toEqual([
         "items",
       ]);
       expect(itemsCell.getAsNormalizedFullLink().path).toEqual(["items"]);
 
       // Convert items back to cells and check their links
-      const itemCells = result.items.map((item: any) => item[toCell]());
+      const itemCells = result.items.map(getCellFromResult);
       const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
 
       // Verify the links point to unique documents (empty path)
@@ -267,7 +285,7 @@ describe("Schema - Link Resolution", () => {
       const result = listCell.get();
 
       // Convert items back to cells and check their links
-      const itemCells = result.items.map((item: any) => item[toCell]());
+      const itemCells = result.items.map(getCellFromResult);
       const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
 
       // Plain objects now also get ids assigned
@@ -320,7 +338,7 @@ describe("Schema - Link Resolution", () => {
 
       // Get initial state and verify nested documents
       const initialData = todoCell.get();
-      const initialCells = initialData.todos.map((item: any) => item[toCell]());
+      const initialCells = initialData.todos.map(getCellFromResult);
       const initialLinks = initialCells.map((cell) =>
         cell.getAsNormalizedFullLink()
       );
@@ -347,7 +365,7 @@ describe("Schema - Link Resolution", () => {
       expect(updated.todos).toHaveLength(2);
 
       // Verify the remaining items still point to their original documents
-      const remainingCells = updated.todos.map((item: any) => item[toCell]());
+      const remainingCells = updated.todos.map(getCellFromResult);
       const remainingLinks = remainingCells.map((cell) =>
         cell.getAsNormalizedFullLink()
       );
@@ -398,7 +416,7 @@ describe("Schema - Link Resolution", () => {
       });
 
       const result = mixedCell.get();
-      const cells = result.items.map((item: any) => item[toCell]());
+      const cells = result.items.map(getCellFromResult);
       const links = cells.map((cell) => cell.getAsNormalizedFullLink());
 
       // Nested documents have empty paths
@@ -457,9 +475,7 @@ describe("Schema - Link Resolution", () => {
 
       // Get references before reordering
       const beforeReorder = listCell.get();
-      const beforeCells = beforeReorder.items.map((item: any) =>
-        item[toCell]()
-      );
+      const beforeCells = beforeReorder.items.map(getCellFromResult);
       const beforeLinks = beforeCells.map((cell) =>
         cell.getAsNormalizedFullLink()
       );
@@ -482,7 +498,7 @@ describe("Schema - Link Resolution", () => {
 
       // Get state after reordering
       const afterReorder = listCell.get();
-      const afterCells = afterReorder.items.map((item: any) => item[toCell]());
+      const afterCells = afterReorder.items.map(getCellFromResult);
       const afterLinks = afterCells.map((cell) =>
         cell.getAsNormalizedFullLink()
       );
@@ -501,7 +517,9 @@ describe("Schema - Link Resolution", () => {
     it("should handle array element resolution via proxy (TypeScript generics)", () => {
       // This test uses TypeScript generics instead of JSON schema
       // to test the proxy code path
-      const listCell = runtime.getCell<{ items: any[] }>(
+      const listCell = runtime.getCell<{
+        items: Array<{ [ID]?: string; name: string; value: number }>;
+      }>(
         space,
         "array-proxy-test",
         undefined,
@@ -520,7 +538,7 @@ describe("Schema - Link Resolution", () => {
       const result = listCell.get();
 
       // Convert items back to cells and check their links
-      const itemCells = result.items.map((item: any) => item[toCell]());
+      const itemCells = result.items.map(getCellFromResult);
       const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
 
       // Verify the links point to unique documents (empty path)
@@ -539,7 +557,7 @@ describe("Schema - Link Resolution", () => {
       expect(updated.items).toHaveLength(1);
 
       // Verify the remaining item still points to its original document
-      const remainingCell = updated.items[0][toCell]();
+      const remainingCell = getCellFromResult(updated.items[0]);
       const remainingLink = remainingCell.getAsNormalizedFullLink();
       expect(remainingLink.path).toEqual([]);
       expect(remainingLink.id).toBe(links[1].id);
@@ -565,17 +583,17 @@ describe("Schema - Link Resolution", () => {
       const obj = cell.get();
 
       // Verify the object has toCell
-      expect((obj as any)[toCell]).toBeDefined();
-      expect(typeof (obj as any)[toCell]).toBe("function");
+      expect(toCellAccessor(obj)).toBeDefined();
+      expect(typeof toCellAccessor(obj)).toBe("function");
 
       // Spread the object
       const spread = { ...obj };
 
       // The spread object should NOT have toCell
-      expect((spread as any)[toCell]).toBeUndefined();
+      expect(toCellAccessor(spread)).toBeUndefined();
 
       // The original object should still have toCell
-      expect((obj as any)[toCell]).toBeDefined();
+      expect(toCellAccessor(obj)).toBeDefined();
     });
 
     it("should not copy toCell when modifying object with spread", () => {
@@ -599,10 +617,10 @@ describe("Schema - Link Resolution", () => {
       const modified = { ...obj, value: 100 };
 
       // The modified object should not have toCell
-      expect((modified as any)[toCell]).toBeUndefined();
+      expect(toCellAccessor(modified)).toBeUndefined();
 
       // The original should still have toCell pointing to the correct cell
-      const originalCell = (obj as any)[toCell]();
+      const originalCell = getCellFromResult(obj);
       expect(isCell(originalCell)).toBe(true);
       expect(originalCell.get()).toEqual({ name: "original", value: 42 });
     });
@@ -627,7 +645,7 @@ describe("Schema - Link Resolution", () => {
       // toCell should not appear in Object.keys
       const keys = Object.keys(obj);
       expect(keys).toEqual(["name", "value"]);
-      expect(keys).not.toContain(toCell);
+      expect(keys).not.toContain(toCell.toString());
     });
 
     it("should not enumerate toCell in for...in loop", () => {
@@ -654,7 +672,7 @@ describe("Schema - Link Resolution", () => {
       }
 
       expect(keys).toEqual(["name", "value"]);
-      expect(keys).not.toContain(toCell as any);
+      expect(keys).not.toContain(toCell.toString());
     });
   });
 
@@ -686,7 +704,7 @@ describe("Schema - Link Resolution", () => {
       item2.set({ name: "Item 2", value: 20 });
 
       // Create the array in space B with links to the items
-      const arrayInSpaceB = runtime.getCell<any[]>(
+      const arrayInSpaceB = runtime.getCell<FabricValue[]>(
         space2,
         "cross-space-array",
         undefined,
@@ -700,7 +718,7 @@ describe("Schema - Link Resolution", () => {
       tx2.commit();
 
       // Create an alias in space A that points to the array in space B
-      const aliasInSpaceA = runtime.getCell<any>(
+      const aliasInSpaceA = runtime.getCell<FabricValue>(
         space,
         "cross-space-alias",
         undefined,
@@ -732,8 +750,8 @@ describe("Schema - Link Resolution", () => {
       expect(result[1].value).toBe(20);
 
       // Verify the links point to space B (the correct space)
-      const cell0 = (result[0] as any)[toCell]();
-      const cell1 = (result[1] as any)[toCell]();
+      const cell0 = getCellFromResult(result[0]);
+      const cell1 = getCellFromResult(result[1]);
 
       const link0 = cell0.getAsNormalizedFullLink();
       const link1 = cell1.getAsNormalizedFullLink();
@@ -752,7 +770,7 @@ describe("Schema - Link Resolution", () => {
 
       // Create an array in space B with inline objects (no explicit IDs)
       const tx2 = runtime.edit();
-      const arrayInSpaceB = runtime.getCell<any[]>(
+      const arrayInSpaceB = runtime.getCell<FabricValue[]>(
         space2,
         "cross-space-inline-array",
         undefined,
@@ -766,7 +784,7 @@ describe("Schema - Link Resolution", () => {
       tx2.commit();
 
       // Create an alias in space A
-      const aliasInSpaceA = runtime.getCell<any>(
+      const aliasInSpaceA = runtime.getCell<FabricValue>(
         space,
         "cross-space-inline-alias",
         undefined,
@@ -795,8 +813,8 @@ describe("Schema - Link Resolution", () => {
       expect(result[1].name).toBe("Inline 2");
 
       // Verify the links point to space B
-      const cell0 = (result[0] as any)[toCell]();
-      const cell1 = (result[1] as any)[toCell]();
+      const cell0 = getCellFromResult(result[0]);
+      const cell1 = getCellFromResult(result[1]);
 
       const link0 = cell0.getAsNormalizedFullLink();
       const link1 = cell1.getAsNormalizedFullLink();
@@ -872,7 +890,9 @@ describe("Schema - Link Resolution", () => {
         required: ["$ctx"],
       } as const satisfies JSONSchema;
 
-      const result = inputs.asSchema(handlerSchema).get() as any;
+      const result = inputs.asSchema<{
+        $ctx: { add: Cell<{ value: number }> };
+      }>(handlerSchema).get();
 
       expect(result).toBeDefined();
       expect(result.$ctx).toBeDefined();
@@ -896,7 +916,7 @@ describe("Schema - Link Resolution", () => {
       data.set({ test: "foo" });
 
       // second: regular link to data
-      const second = runtime.getCell<any>(
+      const second = runtime.getCell<FabricValue>(
         space,
         "redirect-test-second",
         undefined,
@@ -905,7 +925,7 @@ describe("Schema - Link Resolution", () => {
       second.setRaw(data.getAsLink());
 
       // first: regular link to second (first non-redirect in chain)
-      const first = runtime.getCell<any>(
+      const first = runtime.getCell<FabricValue>(
         space,
         "redirect-test-first",
         undefined,
@@ -914,7 +934,7 @@ describe("Schema - Link Resolution", () => {
       first.setRaw(second.getAsLink());
 
       // redir: redirect link to first
-      const redir = runtime.getCell<any>(
+      const redir = runtime.getCell<FabricValue>(
         space,
         "redirect-test-redir",
         undefined,
@@ -923,7 +943,7 @@ describe("Schema - Link Resolution", () => {
       redir.setRaw(first.getAsWriteRedirectLink());
 
       // start: redirect link to redir (entry point for query)
-      const start = runtime.getCell<any>(
+      const start = runtime.getCell<FabricValue>(
         space,
         "redirect-test-start",
         undefined,
@@ -944,7 +964,7 @@ describe("Schema - Link Resolution", () => {
       expect(result).toEqualIgnoringSymbols({ test: "foo" });
 
       // toCell() returns the first non-redirect cell (`first`)
-      const cellFromResult = (result as any)[toCell]();
+      const cellFromResult = getCellFromResult(result);
       expect(isCell(cellFromResult)).toBe(true);
       const cellFromResultLink = cellFromResult.getAsNormalizedFullLink();
       const firstLink = first.getAsNormalizedFullLink();
@@ -970,7 +990,7 @@ describe("Schema - Link Resolution", () => {
       data.set({ test: { foo: "bar" } });
 
       // second: regular link to data
-      const second = runtime.getCell<any>(
+      const second = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-second",
         undefined,
@@ -979,7 +999,7 @@ describe("Schema - Link Resolution", () => {
       second.setRaw(data.getAsLink());
 
       // first: regular link to second (first non-redirect in chain)
-      const first = runtime.getCell<any>(
+      const first = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-first",
         undefined,
@@ -988,7 +1008,7 @@ describe("Schema - Link Resolution", () => {
       first.setRaw(second.getAsLink());
 
       // redir: redirect link to first
-      const redir = runtime.getCell<any>(
+      const redir = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-redir",
         undefined,
@@ -997,7 +1017,7 @@ describe("Schema - Link Resolution", () => {
       redir.setRaw(first.getAsWriteRedirectLink());
 
       // inner: redirect link to redir (entry point for query)
-      const inner = runtime.getCell<any>(
+      const inner = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-inner",
         undefined,
@@ -1006,7 +1026,7 @@ describe("Schema - Link Resolution", () => {
       inner.setRaw(redir.getAsWriteRedirectLink());
 
       // outer: redirect link to redir (entry point for query)
-      const outer = runtime.getCell<any>(
+      const outer = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-outer",
         undefined,
@@ -1076,7 +1096,7 @@ describe("Schema - Link Resolution", () => {
 
       expect(resultCellLink.id).toBe(outerCellLink.id);
       // resultContents was returned from outer.get(), so its toCell() returns outer
-      const resultContentsToCell = (resultContents as any)[toCell]();
+      const resultContentsToCell = getCellFromResult(resultContents);
       expect(resultContentsToCell.getAsNormalizedFullLink().id).toBe(
         outerLink.id,
       );
@@ -1087,7 +1107,7 @@ describe("Schema - Link Resolution", () => {
       // resultInnerContents was returned from outer's inner.get(), and
       // inner->redir->first are all writeRedirect, so its toCell() returns
       // the first cell.
-      const resultContentsInnerToCell = (resultInnerContents as any)[toCell]();
+      const resultContentsInnerToCell = getCellFromResult(resultInnerContents);
       const resultContentsInnerToCellLink = resultContentsInnerToCell
         .getAsNormalizedFullLink();
       expect(resultContentsInnerToCellLink.id).toBe(firstCellLink.id);
@@ -1115,7 +1135,7 @@ describe("Schema - Link Resolution", () => {
       //   (resultInnerContents as CellResult<unknown>)[toCell]();
 
       // Round trip through the get/toCell chain.
-      const innerCellLink2 = (inner.get() as any)[toCell]()
+      const innerCellLink2 = getCellFromResult(inner.get())
         .getAsNormalizedFullLink();
       expect(innerCellLink2.id).toBe(dataCellLink.id);
       expect(innerCellLink2.path).toEqual([]);
@@ -1137,7 +1157,7 @@ describe("Schema - Link Resolution", () => {
       );
       data.set({ test: { foo: "bar" } });
 
-      const second = runtime.getCell<any>(
+      const second = runtime.getCell<FabricValue>(
         space,
         "redirect-test-opaque-second",
         undefined,
@@ -1145,7 +1165,7 @@ describe("Schema - Link Resolution", () => {
       );
       second.setRaw(data.getAsLink());
 
-      const first = runtime.getCell<any>(
+      const first = runtime.getCell<FabricValue>(
         space,
         "redirect-test-opaque-first",
         undefined,
@@ -1153,7 +1173,7 @@ describe("Schema - Link Resolution", () => {
       );
       first.setRaw(second.getAsLink());
 
-      const redir = runtime.getCell<any>(
+      const redir = runtime.getCell<FabricValue>(
         space,
         "redirect-test-opaque-redir",
         undefined,
@@ -1161,7 +1181,7 @@ describe("Schema - Link Resolution", () => {
       );
       redir.setRaw(first.getAsWriteRedirectLink());
 
-      const start = runtime.getCell<any>(
+      const start = runtime.getCell<FabricValue>(
         space,
         "redirect-test-opaque-start",
         undefined,
@@ -1213,7 +1233,7 @@ describe("Schema - Link Resolution", () => {
       );
       data.set({ test: { foo: "bar" } });
 
-      const second = runtime.getCell<any>(
+      const second = runtime.getCell<FabricValue>(
         space,
         "redirect-test-opaque-diff-second",
         undefined,
@@ -1221,7 +1241,7 @@ describe("Schema - Link Resolution", () => {
       );
       second.setRaw(data.getAsLink());
 
-      const first = runtime.getCell<any>(
+      const first = runtime.getCell<FabricValue>(
         space,
         "redirect-test-opaque-diff-first",
         undefined,
@@ -1229,7 +1249,7 @@ describe("Schema - Link Resolution", () => {
       );
       first.setRaw(second.getAsLink());
 
-      const redir = runtime.getCell<any>(
+      const redir = runtime.getCell<FabricValue>(
         space,
         "redirect-test-opaque-diff-redir",
         undefined,
@@ -1237,7 +1257,7 @@ describe("Schema - Link Resolution", () => {
       );
       redir.setRaw(first.getAsWriteRedirectLink());
 
-      const start = runtime.getCell<any>(
+      const start = runtime.getCell<FabricValue>(
         space,
         "redirect-test-opaque-diff-start",
         undefined,
@@ -1361,7 +1381,7 @@ describe("Schema - Link Resolution", () => {
       );
 
       const cellAContents = cellA.get();
-      const cellALink = (cellAContents as CellResult<any>)[toCell]()
+      const cellALink = getCellFromResult(cellAContents)
         .getAsNormalizedFullLink();
       expect(cellALink.id).toBe(cellDLink.id);
       expect(cellALink.path).toEqual(["baz", "bar"]);
@@ -1430,13 +1450,12 @@ describe("Schema - Link Resolution", () => {
       // A.foo.bar[toCell] should be B[label.bar] (carries the remaining "bar" down to B)
       // A.foo.bar.baz[toCell] should be C[value.baz]
       const cellAContents = cellA.get();
-      const cellAFooLink = (cellAContents.foo as CellResult<any>)[toCell]()
+      const cellAFooLink = getCellFromResult(cellAContents.foo)
         .getAsNormalizedFullLink();
       expect(cellAFooLink.id).toBe(cellBLink.id);
       expect(cellAFooLink.path).toEqual(["label"]);
 
-      const cellAFooBarLink = (cellAContents.foo.bar as CellResult<any>)
-        [toCell]()
+      const cellAFooBarLink = getCellFromResult(cellAContents.foo.bar)
         .getAsNormalizedFullLink();
 
       expect(cellAContents.foo.bar).toEqualIgnoringSymbols({
@@ -1457,8 +1476,7 @@ describe("Schema - Link Resolution", () => {
         text: "dummy",
       });
 
-      const cellAFooBarBazLink = (cellAContents.foo.bar.baz as CellResult<any>)
-        [toCell]()
+      const cellAFooBarBazLink = getCellFromResult(cellAContents.foo.bar.baz)
         .getAsNormalizedFullLink();
       expect(cellAFooBarBazLink.id).toBe(cellDLink.id);
       expect(cellAFooBarBazLink.path).toEqual(["value", "baz"]);
@@ -1563,13 +1581,12 @@ describe("Schema - Link Resolution", () => {
       // A.foo.bar[toCell] should be B[label.bar] (carries the remaining "bar" down to B)
       // A.foo.bar.baz[toCell] should be C[value.baz]
       const cellAContents = cellA.get();
-      const cellAFooLink = (cellAContents.foo as CellResult<any>)[toCell]()
+      const cellAFooLink = getCellFromResult(cellAContents.foo)
         .getAsNormalizedFullLink();
       expect(cellAFooLink.id).toBe(cellBLink.id);
       expect(cellAFooLink.path).toEqual(["label"]);
 
-      const cellAFooBarLink = (cellAContents.foo.bar as CellResult<any>)
-        [toCell]()
+      const cellAFooBarLink = getCellFromResult(cellAContents.foo.bar)
         .getAsNormalizedFullLink();
 
       expect(cellAContents.foo.bar).toEqualIgnoringSymbols({
@@ -1586,8 +1603,7 @@ describe("Schema - Link Resolution", () => {
         text: "dummy",
       });
 
-      const cellAFooBarBazLink = (cellAContents.foo.bar.baz as CellResult<any>)
-        [toCell]()
+      const cellAFooBarBazLink = getCellFromResult(cellAContents.foo.bar.baz)
         .getAsNormalizedFullLink();
       expect(cellAFooBarBazLink.id).toBe(cellDLink.id);
       expect(cellAFooBarBazLink.path).toEqual(["value", "baz"]);
@@ -1670,7 +1686,7 @@ describe("Schema - Link Resolution", () => {
       );
 
       const cellAContents = cellA.get();
-      const cellALink = (cellAContents as CellResult<any>)[toCell]()
+      const cellALink = getCellFromResult(cellAContents)
         .getAsNormalizedFullLink();
       expect(cellALink.id).toBe(cellDLink.id);
       expect(cellALink.path).toEqual(["baz", "bar"]);
@@ -1771,7 +1787,7 @@ describe("Schema - Link Resolution", () => {
       data.set({ test: { foo: "bar" } });
 
       // second: regular link to data
-      const second = runtime.getCell<any>(
+      const second = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-second",
         undefined,
@@ -1780,7 +1796,7 @@ describe("Schema - Link Resolution", () => {
       second.setRaw(data.getAsLink());
 
       // first: regular link to second (first non-redirect in chain)
-      const first = runtime.getCell<any>(
+      const first = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-first",
         undefined,
@@ -1789,7 +1805,7 @@ describe("Schema - Link Resolution", () => {
       first.setRaw(second.getAsLink());
 
       // redir: redirect link to first
-      const redir = runtime.getCell<any>(
+      const redir = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-redir",
         undefined,
@@ -1798,7 +1814,7 @@ describe("Schema - Link Resolution", () => {
       redir.setRaw(first.getAsWriteRedirectLink());
 
       // inner: redirect link to redir (entry point for query)
-      const inner = runtime.getCell<any>(
+      const inner = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-inner",
         undefined,
@@ -1807,7 +1823,7 @@ describe("Schema - Link Resolution", () => {
       inner.setRaw(redir.getAsWriteRedirectLink());
 
       // outer: redirect link to redir (entry point for query)
-      const outer = runtime.getCell<any>(
+      const outer = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-outer",
         undefined,
@@ -1874,7 +1890,7 @@ describe("Schema - Link Resolution", () => {
 
       expect(resultCellLink.id).toBe(outerCellLink.id);
       // resultContents was returned from outer.get(), so its toCell() returns outer
-      const resultContentsToCell = (resultContents as any)[toCell]();
+      const resultContentsToCell = getCellFromResult(resultContents);
       expect(resultContentsToCell.getAsNormalizedFullLink().id).toBe(
         outerLink.id,
       );
@@ -1891,7 +1907,7 @@ describe("Schema - Link Resolution", () => {
       // resultInnerContents was returned from outer's inner.get(), and
       // inner->redir->first are all writeRedirect, so its toCell() returns
       // the first cell.
-      const resultContentsInnerToCell = (resultInnerContents as any)[toCell]();
+      const resultContentsInnerToCell = getCellFromResult(resultInnerContents);
       const resultContentsInnerToCellLink = resultContentsInnerToCell
         .getAsNormalizedFullLink();
       expect(resultContentsInnerToCellLink.id).toBe(firstCellLink.id);
@@ -1919,7 +1935,7 @@ describe("Schema - Link Resolution", () => {
       //   (resultInnerContents as CellResult<unknown>)[toCell]();
 
       // Round trip through the get/toCell chain.
-      const innerCellLink2 = (inner.get() as any)[toCell]()
+      const innerCellLink2 = getCellFromResult(inner.get())
         .getAsNormalizedFullLink();
       expect(innerCellLink2.id).toBe(dataCellLink.id);
       expect(innerCellLink2.path).toEqual([]);
@@ -1942,7 +1958,7 @@ describe("Schema - Link Resolution", () => {
       data.set({ test: { foo: "bar" } });
 
       // second: regular link to data
-      const second = runtime.getCell<any>(
+      const second = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-second", // #vlqu
         undefined,
@@ -1951,7 +1967,7 @@ describe("Schema - Link Resolution", () => {
       second.setRaw(data.getAsLink());
 
       // first: regular link to second (first non-redirect in chain)
-      const first = runtime.getCell<any>(
+      const first = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-first", // #y2ga
         undefined,
@@ -1960,7 +1976,7 @@ describe("Schema - Link Resolution", () => {
       first.setRaw(second.getAsLink());
 
       // redir: redirect link to first
-      const redir = runtime.getCell<any>(
+      const redir = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-redir", // #nz6y
         undefined,
@@ -1969,7 +1985,7 @@ describe("Schema - Link Resolution", () => {
       redir.setRaw(first.getAsWriteRedirectLink());
 
       // inner: redirect link to redir (entry point for query)
-      const inner = runtime.getCell<any>(
+      const inner = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-inner", // #hj3u
         undefined,
@@ -1978,7 +1994,7 @@ describe("Schema - Link Resolution", () => {
       inner.setRaw(redir.getAsWriteRedirectLink());
 
       // outer: redirect link to redir (entry point for query)
-      const outer = runtime.getCell<any>(
+      const outer = runtime.getCell<FabricValue>(
         space,
         "redirect-test-ascell-outer", // #4xxy
         undefined,
@@ -2045,7 +2061,7 @@ describe("Schema - Link Resolution", () => {
 
       expect(resultCellLink.id).toBe(outerCellLink.id);
       // resultContents was returned from outer.get(), so its toCell() returns outer
-      const resultContentsToCell = (resultContents as any)[toCell]();
+      const resultContentsToCell = getCellFromResult(resultContents);
       expect(resultContentsToCell.getAsNormalizedFullLink().id).toBe(
         outerLink.id,
       );
@@ -2059,7 +2075,7 @@ describe("Schema - Link Resolution", () => {
       // resultInnerContents was returned from outer's inner.get(), and
       // inner->redir->first are all writeRedirect, so its toCell() returns
       // the first cell.
-      const resultContentsItem0ToCell = (resultItem0Contents as any)[toCell]();
+      const resultContentsItem0ToCell = getCellFromResult(resultItem0Contents);
       const resultContentsItem0ToCellLink = resultContentsItem0ToCell
         .getAsNormalizedFullLink();
       expect(resultContentsItem0ToCellLink.id).toBe(firstCellLink.id);
@@ -2087,7 +2103,7 @@ describe("Schema - Link Resolution", () => {
       //   (resultInnerContents as CellResult<unknown>)[toCell]();
 
       // Round trip through the get/toCell chain.
-      const item0CellLink2 = (inner.get() as any)[toCell]()
+      const item0CellLink2 = getCellFromResult(inner.get())
         .getAsNormalizedFullLink();
       expect(item0CellLink2.id).toBe(dataCellLink.id);
       expect(item0CellLink2.path).toEqual([]);
