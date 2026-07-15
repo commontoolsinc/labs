@@ -282,12 +282,16 @@ export class AvailabilityAnalysisTransformer extends HelpersOnlyTransformer {
           const rootDeclaration = rootSymbol?.valueDeclaration ??
             rootSymbol?.declarations?.[0];
           const functionBody = nearestFunctionBody(node);
+          const rootReactiveContext = rootDeclaration
+            ? context.getReactiveContext(rootDeclaration)
+            : undefined;
           const aliasInitializer = getStableConstAliasInitializer(
             rootSymbol,
             context.factory,
           );
           if (
             rootDeclaration && functionBody &&
+            rootReactiveContext?.kind === "compute" &&
             nodeIsWithin(rootDeclaration, functionBody) &&
             (!aliasInitializer ||
               !parseAvailabilityCaptureExpression(aliasInitializer))
