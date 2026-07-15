@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/llm-dialog-cell-schema.test.ts",
   "packages/runner/test/llm-dialog-helpers.test.ts",
   "packages/runner/test/llm-dialog.test.ts",
   "packages/runner/test/load-by-identity.test.ts",
