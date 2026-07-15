@@ -44,6 +44,7 @@ import {
 import {
   analyzeLunchPollWireAccounting,
   formatLunchPollWireAccounting,
+  isMemoryWireAccountingReport,
   validateLunchPollWireAccounting,
 } from "./lunch-poll-wire-accounting.ts";
 
@@ -110,12 +111,11 @@ async function accountingErrorMessage(
   return `Memory wire-accounting ${action} failed with HTTP ${response.status}.${bodySuffix}`;
 }
 
-async function startMemoryWireAccounting(): Promise<boolean> {
+async function startMemoryWireAccounting(): Promise<void> {
   if (MEMORY_WIRE_ACCOUNTING_TOKEN === "") {
-    console.log(
-      "Memory wire-accounting token was not provided by the root integration runner; running Lunch Poll behavior and skipping accounting assertions.",
+    throw new Error(
+      "Lunch Poll wire-accounting measurement requires the root integration runner. Run `deno task integration patterns lunch-poll-vote`; do not invoke this test file directly.",
     );
-    return false;
   }
 
   const response = await accountingRequest("start");
@@ -129,7 +129,6 @@ async function startMemoryWireAccounting(): Promise<boolean> {
     throw new Error(await accountingErrorMessage(response, "start"));
   }
   await response.body?.cancel();
-  return true;
 }
 
 async function stopMemoryWireAccounting(): Promise<MemoryWireAccountingReport> {
@@ -149,19 +148,6 @@ async function stopMemoryWireAccounting(): Promise<MemoryWireAccountingReport> {
     );
   }
   return payload;
-}
-
-function isMemoryWireAccountingReport(
-  payload: unknown,
-): payload is MemoryWireAccountingReport {
-  if (payload === null || typeof payload !== "object") return false;
-  const object = payload as Record<string, unknown>;
-  return typeof object.totals === "object" && object.totals !== null &&
-    Array.isArray(object.byDirection) &&
-    Array.isArray(object.byConnection) &&
-    Array.isArray(object.byMetadataKind) &&
-    Array.isArray(object.byClassification) &&
-    Array.isArray(object.records);
 }
 
 describe("lunch poll: two users vote on a shared option", () => {
@@ -233,7 +219,8 @@ describe("lunch poll: two users vote on a shared option", () => {
     let accountingStopped = false;
 
     try {
-      accountingStarted = await startMemoryWireAccounting();
+      await startMemoryWireAccounting();
+      accountingStarted = true;
 
       await timer.run(
         "navigate + login both",

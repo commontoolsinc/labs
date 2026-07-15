@@ -6,8 +6,24 @@ import type {
 import {
   analyzeLunchPollWireAccounting,
   formatLunchPollWireAccounting,
+  isMemoryWireAccountingReport,
   validateLunchPollWireAccounting,
 } from "./lunch-poll-wire-accounting.ts";
+
+const semanticBytes = (bytes: number) => ({
+  encoding: bytes,
+  identity: 0,
+  sequence: 0,
+  sessionControl: 0,
+  authCapability: 0,
+  schema: 0,
+  documentValue: 0,
+  patchOperation: 0,
+  queryWatch: 0,
+  sqliteScheduler: 0,
+  error: 0,
+  uncategorized: 0,
+});
 
 const emptyReport = (
   records: MemoryWireAccountingRecord[] = [],
@@ -22,15 +38,67 @@ const emptyReport = (
 
 const record = (
   overrides: Partial<MemoryWireAccountingRecord>,
-): MemoryWireAccountingRecord => ({
-  direction: "outbound",
-  connectionId: "browser-a",
-  metadata: { kind: "browser" },
-  classification: "server.session/effect.sync",
-  baselineBytes: 100,
-  actualBytes: 50,
-  ...overrides,
-});
+): MemoryWireAccountingRecord => {
+  const value = {
+    direction: "outbound" as const,
+    connectionId: "browser-a",
+    metadata: { kind: "browser" },
+    classification: "server.session/effect.sync",
+    baselineBytes: 100,
+    actualBytes: 50,
+    ...overrides,
+  };
+  return {
+    ...value,
+    baselineSemanticBytes: overrides.baselineSemanticBytes ??
+      semanticBytes(value.baselineBytes),
+    actualSemanticBytes: overrides.actualSemanticBytes ??
+      semanticBytes(value.actualBytes),
+  };
+};
+
+const validRecords = (
+  requestSchemaCasEnabled = true,
+): MemoryWireAccountingRecord[] => [
+  record({
+    direction: "inbound",
+    connectionId: "browser-a",
+    classification: "client.graph.query",
+    baselineBytes: 100,
+    actualBytes: requestSchemaCasEnabled ? 80 : 100,
+  }),
+  record({
+    direction: "inbound",
+    connectionId: "browser-b",
+    classification: "client.session.watch.add",
+    baselineBytes: 100,
+    actualBytes: requestSchemaCasEnabled ? 80 : 100,
+  }),
+  record({
+    direction: "inbound",
+    connectionId: "browser-c",
+    classification: "client.transact",
+    baselineBytes: 180,
+    actualBytes: requestSchemaCasEnabled ? 120 : 180,
+  }),
+  record({
+    connectionId: "browser-d",
+    classification: "server.hello.ok",
+    baselineBytes: 20,
+    actualBytes: 20,
+  }),
+  record({
+    connectionId: "browser-e",
+    baselineBytes: 1_000,
+    actualBytes: 400,
+  }),
+  record({
+    connectionId: "browser-f",
+    classification: "server.response.watch.sync",
+    baselineBytes: 500,
+    actualBytes: 250,
+  }),
+];
 
 Deno.test("analyzeLunchPollWireAccounting handles no browser records", () => {
   const analysis = analyzeLunchPollWireAccounting(emptyReport());
@@ -170,78 +238,15 @@ Deno.test("analyzeLunchPollWireAccounting cross-tabs protocol classes and semant
 });
 
 Deno.test("validateLunchPollWireAccounting accepts browser sync savings invariants", () => {
-  const analysis = analyzeLunchPollWireAccounting(emptyReport([
-    record({
-      direction: "inbound",
-      connectionId: "browser-a",
-      classification: "client.graph.query",
-      baselineBytes: 100,
-      actualBytes: 120,
-    }),
-    record({
-      direction: "inbound",
-      connectionId: "browser-b",
-      classification: "client.transact",
-      baselineBytes: 180,
-      actualBytes: 80,
-    }),
-    record({
-      direction: "outbound",
-      connectionId: "browser-a",
-      classification: "server.hello.ok",
-      baselineBytes: 20,
-      actualBytes: 20,
-    }),
-    record({
-      direction: "outbound",
-      connectionId: "browser-a",
-      classification: "server.session/effect.sync",
-      baselineBytes: 1_000,
-      actualBytes: 400,
-    }),
-    record({
-      direction: "outbound",
-      connectionId: "browser-b",
-      classification: "server.response.watch.sync",
-      baselineBytes: 500,
-      actualBytes: 250,
-    }),
-  ]));
+  const analysis = analyzeLunchPollWireAccounting(emptyReport(validRecords()));
 
   assertEquals(validateLunchPollWireAccounting(analysis), []);
 });
 
 Deno.test("validateLunchPollWireAccounting accepts inline request schemas when CAS is disabled", () => {
-  const analysis = analyzeLunchPollWireAccounting(emptyReport([
-    record({
-      direction: "inbound",
-      connectionId: "browser-a",
-      classification: "client.graph.query",
-      baselineBytes: 100,
-      actualBytes: 100,
-    }),
-    record({
-      direction: "inbound",
-      connectionId: "browser-b",
-      classification: "client.transact",
-      baselineBytes: 180,
-      actualBytes: 180,
-    }),
-    record({
-      direction: "outbound",
-      connectionId: "browser-a",
-      classification: "server.session/effect.sync",
-      baselineBytes: 1_000,
-      actualBytes: 400,
-    }),
-    record({
-      direction: "outbound",
-      connectionId: "browser-b",
-      classification: "server.response.watch.sync",
-      baselineBytes: 500,
-      actualBytes: 250,
-    }),
-  ]));
+  const analysis = analyzeLunchPollWireAccounting(
+    emptyReport(validRecords(false)),
+  );
 
   assertEquals(
     validateLunchPollWireAccounting(analysis, {
@@ -277,12 +282,120 @@ Deno.test("validateLunchPollWireAccounting reports invariant failures", () => {
   ]));
   const errors = validateLunchPollWireAccounting(analysis);
 
-  assert(errors.some((error) => error.includes("at least two distinct")));
+  assert(errors.some((error) => error.includes("expected 6 distinct")));
   assert(errors.some((error) => error.includes("inbound client.watch")));
   assert(
     errors.some((error) => error.includes("outbound non-sync server.hello.ok")),
   );
   assert(errors.some((error) => error.includes("at least 15.0% savings")));
+});
+
+Deno.test("isMemoryWireAccountingReport rejects malformed record evidence", () => {
+  const malformed = {
+    ...emptyReport(),
+    records: [{
+      direction: "inbound",
+      connectionId: "browser-a",
+      classification: "client.graph.query",
+      baselineBytes: Number.NaN,
+      actualBytes: 10,
+      baselineSemanticBytes: semanticBytes(10),
+      actualSemanticBytes: semanticBytes(10),
+    }],
+  };
+
+  assert(!isMemoryWireAccountingReport(malformed));
+  assert(
+    !isMemoryWireAccountingReport({
+      ...emptyReport(),
+      records: [{
+        ...malformed.records[0],
+        baselineBytes: 10.5,
+      }],
+    }),
+  );
+  assert(
+    !isMemoryWireAccountingReport({
+      ...emptyReport(),
+      records: [{
+        direction: "inbound",
+        connectionId: "browser-a",
+        classification: "client.graph.query",
+        baselineBytes: 10,
+        actualBytes: 10,
+        baselineSemanticBytes: semanticBytes(10),
+      }],
+    }),
+  );
+});
+
+Deno.test("validateLunchPollWireAccounting requires the stable request classes", () => {
+  const records = validRecords();
+  records[0] = record({
+    ...records[0],
+    classification: "client.session.watch.set",
+  });
+  const errors = validateLunchPollWireAccounting(
+    analyzeLunchPollWireAccounting(emptyReport(records)),
+  );
+
+  assert(
+    errors.some((error) => error.includes("client.graph.query")),
+  );
+});
+
+Deno.test("validateLunchPollWireAccounting conserves baseline semantic bytes", () => {
+  const records = validRecords();
+  records[0] = record({
+    ...records[0],
+    baselineSemanticBytes: semanticBytes(99),
+  });
+  const errors = validateLunchPollWireAccounting(
+    analyzeLunchPollWireAccounting(emptyReport(records)),
+  );
+
+  assert(
+    errors.some((error) => error.includes("baseline semantic bytes differ")),
+  );
+});
+
+Deno.test("validateLunchPollWireAccounting enforces request-CAS and overall savings floors", () => {
+  const requestSavingsRecords = validRecords().map((item) => {
+    if (item.direction !== "inbound") return item;
+    const actualBytes = item.baselineBytes - 5;
+    return record({
+      ...item,
+      actualBytes,
+      actualSemanticBytes: semanticBytes(actualBytes),
+    });
+  });
+  const requestSavingsErrors = validateLunchPollWireAccounting(
+    analyzeLunchPollWireAccounting(emptyReport(requestSavingsRecords)),
+  );
+  assert(
+    requestSavingsErrors.some((error) =>
+      error.includes("request-schema-CAS inbound")
+    ),
+  );
+
+  const overallSavingsRecords = [
+    ...validRecords(),
+    record({
+      direction: "inbound",
+      connectionId: "browser-a",
+      classification: "client.session.watch.set",
+      baselineBytes: 10_000,
+      actualBytes: 10_000,
+    }),
+  ];
+  const overallSavingsErrors = validateLunchPollWireAccounting(
+    analyzeLunchPollWireAccounting(emptyReport(overallSavingsRecords)),
+  );
+  assert(
+    overallSavingsErrors.some((error) =>
+      error.includes("overall browser-byte")
+    ),
+  );
 });
 
 Deno.test("formatLunchPollWireAccounting prints the headline and per-class table", () => {
@@ -318,6 +431,8 @@ Deno.test("formatLunchPollWireAccounting prints the headline and per-class table
       "inbound | client.watch | 1 | 10 | 10 | 0 | 0.0%",
       "outbound | server.session/effect.sync | 2 | 150 | 70 | 80 | 53.3%",
       "direction | classification | category | actual bytes | % of protocol class | % of all traffic",
+      "inbound | client.watch | encoding | 10 | 100.0% | 12.5%",
+      "outbound | server.session/effect.sync | encoding | 70 | 100.0% | 87.5%",
       "category | scope | candidate bytes | candidates | repeats (connection) | repeat bytes (connection) | reference cost (connection) | net savings (connection)",
     ].join("\n"),
   );

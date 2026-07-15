@@ -3,6 +3,7 @@ import type {
   MemoryWireAccountingReport,
   MemoryWireCandidate,
   MemoryWireCandidateScope,
+  MemoryWireSemanticBytes,
   MemoryWireSemanticCategory,
 } from "@commonfabric/memory/v2/wire-accounting";
 
@@ -54,10 +55,39 @@ export type LunchPollWireCandidateRow = {
 const CACHE_REFERENCE_BYTES = 12;
 
 const SYNC_CLASSIFICATION_SUFFIX = ".sync";
-// First measured real Lunch Poll browser run saved 22.9% on sync-bearing
-// outbound Memory text payload bytes; keep the floor below that observed value
+// Fresh cold/warm Lunch Poll browser runs saved 22.6-22.7% on sync-bearing
+// outbound Memory text payload bytes; keep the floor below that observed range
 // while still requiring a substantial schema-compression win.
 const MIN_SYNC_OUTBOUND_SAVED_PERCENT = 15;
+const MIN_REQUEST_SCHEMA_CAS_SAVED_PERCENT = 10;
+const MIN_OVERALL_SAVED_PERCENT = 10;
+const EXPECTED_BROWSER_CONNECTIONS = 6;
+const EXPECTED_REQUEST_CLASSES = new Set([
+  "client.graph.query",
+  "client.session.watch.add",
+  "client.transact",
+]);
+const SEMANTIC_CATEGORIES: readonly MemoryWireSemanticCategory[] = [
+  "encoding",
+  "identity",
+  "sequence",
+  "sessionControl",
+  "authCapability",
+  "schema",
+  "documentValue",
+  "patchOperation",
+  "queryWatch",
+  "sqliteScheduler",
+  "error",
+  "uncategorized",
+];
+const CANDIDATE_SCOPES: readonly MemoryWireCandidateScope[] = [
+  "alreadyContentAddressed",
+  "immutableInternable",
+  "identityInternable",
+  "seqAddressedRepeatMeasurable",
+  "contextualControl",
+];
 
 function savedPercent(baselineBytes: number, actualBytes: number): number {
   if (baselineBytes === 0) return 0;
@@ -84,6 +114,87 @@ function browserRecords(
   report: MemoryWireAccountingReport,
 ): MemoryWireAccountingRecord[] {
   return report.records.filter((record) => record.metadata?.kind === "browser");
+}
+
+export function isMemoryWireAccountingReport(
+  payload: unknown,
+): payload is MemoryWireAccountingReport {
+  if (!isRecord(payload)) return false;
+  return isTotals(payload.totals) &&
+    isRows(payload.byDirection) &&
+    isRows(payload.byConnection) &&
+    isRows(payload.byMetadataKind) &&
+    isRows(payload.byClassification) &&
+    Array.isArray(payload.records) &&
+    payload.records.every(isWireAccountingRecord) &&
+    (payload.truncated === undefined ||
+      (isRecord(payload.truncated) &&
+        typeof payload.truncated.reason === "string"));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function isTotals(value: unknown): boolean {
+  return isRecord(value) &&
+    isByteCount(value.baselineBytes) &&
+    isByteCount(value.actualBytes) &&
+    isByteCount(value.frames) &&
+    isByteCount(value.connections);
+}
+
+function isRows(value: unknown): boolean {
+  return Array.isArray(value) &&
+    value.every((row) =>
+      isRecord(row) && typeof row.key === "string" && isTotals(row)
+    );
+}
+
+function isWireAccountingRecord(
+  value: unknown,
+): value is MemoryWireAccountingRecord {
+  if (!isRecord(value)) return false;
+  return (value.direction === "inbound" || value.direction === "outbound") &&
+    typeof value.connectionId === "string" && value.connectionId.length > 0 &&
+    typeof value.classification === "string" &&
+    value.classification.length > 0 &&
+    (value.metadata === undefined ||
+      (isRecord(value.metadata) &&
+        (value.metadata.kind === undefined ||
+          typeof value.metadata.kind === "string"))) &&
+    isByteCount(value.baselineBytes) &&
+    isByteCount(value.actualBytes) &&
+    isSemanticBytes(value.baselineSemanticBytes) &&
+    isSemanticBytes(value.actualSemanticBytes) &&
+    isCandidates(value.baselineCandidates) &&
+    isCandidates(value.actualCandidates);
+}
+
+function isByteCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isSemanticBytes(value: unknown): value is MemoryWireSemanticBytes {
+  if (!isRecord(value)) return false;
+  return Object.keys(value).length === SEMANTIC_CATEGORIES.length &&
+    SEMANTIC_CATEGORIES.every((category) => isByteCount(value[category]));
+}
+
+function isCandidates(value: unknown): boolean {
+  return value === undefined ||
+    (Array.isArray(value) && value.every((candidate) =>
+      isRecord(candidate) &&
+      SEMANTIC_CATEGORIES.includes(
+        candidate.category as MemoryWireSemanticCategory,
+      ) &&
+      CANDIDATE_SCOPES.includes(
+        candidate.scope as MemoryWireCandidateScope,
+      ) &&
+      typeof candidate.fingerprint === "string" &&
+      candidate.fingerprint.length > 0 &&
+      isByteCount(candidate.encodedBytes)
+    ));
 }
 
 export function analyzeLunchPollWireAccounting(
@@ -321,10 +432,23 @@ export function validateLunchPollWireAccounting(
   if (analysis.records.length === 0) {
     errors.push("expected at least one browser Memory websocket frame");
   }
-  if (connectionIds.size < 2) {
+  if (connectionIds.size !== EXPECTED_BROWSER_CONNECTIONS) {
     errors.push(
-      `expected at least two distinct browser Memory connections, got ${connectionIds.size}`,
+      `expected ${EXPECTED_BROWSER_CONNECTIONS} distinct browser Memory connections for the two-browser Lunch Poll workload, got ${connectionIds.size}`,
     );
+  }
+
+  const observedRequestClasses = new Set(
+    analysis.records
+      .filter((record) => record.direction === "inbound")
+      .map((record) => record.classification),
+  );
+  for (const classification of EXPECTED_REQUEST_CLASSES) {
+    if (!observedRequestClasses.has(classification)) {
+      errors.push(
+        `expected inbound browser traffic for ${classification}`,
+      );
+    }
   }
 
   const baselineConnections = new Set(
@@ -346,16 +470,8 @@ export function validateLunchPollWireAccounting(
   }
 
   for (const record of analysis.records) {
+    validateRecordEvidence(record, errors);
     if (record.actualSemanticBytes !== undefined) {
-      const semanticBytes = Object.values(record.actualSemanticBytes).reduce(
-        (sum, bytes) => sum + bytes,
-        0,
-      );
-      if (semanticBytes !== record.actualBytes) {
-        errors.push(
-          `actual semantic bytes differ for ${record.classification}: semantic=${semanticBytes} actual=${record.actualBytes}`,
-        );
-      }
       const candidateBytes = (record.actualCandidates ?? []).reduce(
         (sum, candidate) => sum + candidate.encodedBytes,
         0,
@@ -414,6 +530,21 @@ export function validateLunchPollWireAccounting(
       `expected request-schema-CAS-capable inbound browser aggregate bytes to remain inline when disabled: baseline=${inboundRequestSchemaCasBaseline} actual=${inboundRequestSchemaCasActual}`,
     );
   }
+  if (requestSchemaCasEnabled && inboundRequestSchemaCasBaseline > 0) {
+    const requestSchemaCasSavedPercent = savedPercent(
+      inboundRequestSchemaCasBaseline,
+      inboundRequestSchemaCasActual,
+    );
+    if (requestSchemaCasSavedPercent < MIN_REQUEST_SCHEMA_CAS_SAVED_PERCENT) {
+      errors.push(
+        `expected at least ${
+          formatPercent(MIN_REQUEST_SCHEMA_CAS_SAVED_PERCENT)
+        } savings on request-schema-CAS inbound browser bytes, got ${
+          formatPercent(requestSchemaCasSavedPercent)
+        }`,
+      );
+    }
+  }
 
   const outboundSyncRecords = analysis.records.filter(isOutboundSync);
   const savedOutboundSyncRecords = outboundSyncRecords.filter((record) =>
@@ -459,8 +590,79 @@ export function validateLunchPollWireAccounting(
       `expected overall browser actual bytes to be less than baseline: baseline=${analysis.totals.baselineBytes} actual=${analysis.totals.actualBytes}`,
     );
   }
+  if (analysis.totals.baselineBytes > 0) {
+    const overallSavedPercent = savedPercent(
+      analysis.totals.baselineBytes,
+      analysis.totals.actualBytes,
+    );
+    if (overallSavedPercent < MIN_OVERALL_SAVED_PERCENT) {
+      errors.push(
+        `expected at least ${
+          formatPercent(MIN_OVERALL_SAVED_PERCENT)
+        } overall browser-byte savings, got ${
+          formatPercent(overallSavedPercent)
+        }`,
+      );
+    }
+  }
 
   return errors;
+}
+
+function validateRecordEvidence(
+  record: MemoryWireAccountingRecord,
+  errors: string[],
+): void {
+  if (!isByteCount(record.baselineBytes) || !isByteCount(record.actualBytes)) {
+    errors.push(
+      `invalid byte count for ${record.classification} on ${record.connectionId}`,
+    );
+    return;
+  }
+  if (
+    !isCandidates(record.baselineCandidates) ||
+    !isCandidates(record.actualCandidates)
+  ) {
+    errors.push(
+      `invalid candidate evidence for ${record.classification}`,
+    );
+  }
+  validateSemanticEvidence(
+    "baseline",
+    record.baselineSemanticBytes,
+    record.baselineBytes,
+    record.classification,
+    errors,
+  );
+  validateSemanticEvidence(
+    "actual",
+    record.actualSemanticBytes,
+    record.actualBytes,
+    record.classification,
+    errors,
+  );
+}
+
+function validateSemanticEvidence(
+  label: "baseline" | "actual",
+  semanticBytes: MemoryWireSemanticBytes | undefined,
+  bytes: number,
+  classification: string,
+  errors: string[],
+): void {
+  if (!isSemanticBytes(semanticBytes)) {
+    errors.push(`invalid ${label} semantic map for ${classification}`);
+    return;
+  }
+  const semanticTotal = Object.values(semanticBytes).reduce(
+    (sum, categoryBytes) => sum + categoryBytes,
+    0,
+  );
+  if (semanticTotal !== bytes) {
+    errors.push(
+      `${label} semantic bytes differ for ${classification}: semantic=${semanticTotal} ${label}=${bytes}`,
+    );
+  }
 }
 
 export function formatLunchPollWireAccounting(
