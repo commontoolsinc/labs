@@ -18,8 +18,17 @@ import {
   enableMockMode,
   loadConversationFixture,
 } from "@commonfabric/llm/client";
-import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
-import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
+import type {
+  BuiltInLLMMessage,
+  BuiltInLLMTool,
+  BuiltInLLMToolResultPart,
+} from "@commonfabric/api";
+import type {
+  Cell,
+  JSONSchema,
+  PatternFactory,
+  Reactive,
+} from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
@@ -41,6 +50,60 @@ const space = signer.did();
 
 // Enable mock mode once for all tests
 enableMockMode();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isToolResultPart(value: unknown): value is BuiltInLLMToolResultPart {
+  return isRecord(value) &&
+    value.type === "tool-result" &&
+    typeof value.toolName === "string" &&
+    isRecord(value.output);
+}
+
+function toolResultValue(
+  message: BuiltInLLMMessage | undefined,
+  toolName?: string,
+): unknown {
+  const content = message?.content;
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  const part = content.find((part): part is BuiltInLLMToolResultPart =>
+    isToolResultPart(part) &&
+    (toolName === undefined || part.toolName === toolName)
+  );
+  return part?.output.value;
+}
+
+function recordField(value: unknown, field: string): unknown {
+  return isRecord(value) ? value[field] : undefined;
+}
+
+type LegacyMapItemInput<T> = {
+  element: T;
+  index: number;
+  array: T[];
+};
+
+type LegacyMapInput<T> = {
+  mapWithPattern<S>(
+    op: PatternFactory<LegacyMapItemInput<T>, S>,
+    params: Record<string, unknown>,
+  ): Reactive<S[]>;
+};
+
+function hasLegacyMapInput<T>(value: unknown): value is LegacyMapInput<T> {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null
+  ) {
+    return false;
+  }
+  return typeof Reflect.get(value, "mapWithPattern") === "function";
+}
 
 describe("generateObject with tools", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -830,17 +893,19 @@ describe("generateObject with tools", () => {
           { label: "Item C", value: "c" },
         ]);
 
-        const listItems = pattern<
-          { items: Array<{ label: string; value: string }> },
-          { result: Array<{ label: string; value: string }> }
-        >(
+        type Item = { label: string; value: string };
+
+        const listItems = pattern<{ items: Item[] }, { result: Item[] }>(
           ({ items }) => {
-            const result = (items as any).mapWithPattern(
-              pattern(({ element, index, array }: FactoryInput<any>) =>
-                (((item: any) => ({
-                  label: item.label,
-                  value: item.value,
-                })) as any)(element, index, array)
+            if (!hasLegacyMapInput<Item>(items)) {
+              throw new Error("Expected a list value with mapWithPattern");
+            }
+            const result = items.mapWithPattern(
+              pattern<LegacyMapItemInput<Item>, Item>(
+                ({ element }) => ({
+                  label: element.label,
+                  value: element.value,
+                }),
               ),
               {},
             );
@@ -1059,10 +1124,10 @@ describe("generateObject with tools", () => {
         const toolMessage = req.messages.find((message) =>
           message.role === "tool"
         ) as BuiltInLLMMessage | undefined;
-        const content = Array.isArray(toolMessage?.content)
-          ? toolMessage.content[0] as any
-          : undefined;
-        toolResultLocation = content?.output?.value?.["@resultLocation"];
+        toolResultLocation = recordField(
+          toolResultValue(toolMessage),
+          "@resultLocation",
+        );
         return toolResultLocation !== undefined;
       },
       {
@@ -1732,7 +1797,7 @@ describe("generateObject with tools", () => {
               childHelperTool,
             ) as unknown as BuiltInLLMTool,
           },
-        } as any).result;
+        }).result;
       },
       {
         type: "object",
@@ -1841,14 +1906,14 @@ describe("generateObject with tools", () => {
           prompt: testPrompt,
           schema: resultSchema,
           observationMaxConfidentiality: ["internal"],
-          context: { dossier: dossier as any },
+          context: { dossier },
           tools: {
             dummy: {
               description: "Force the tool-calling path",
               pattern: dummyPattern,
             },
           },
-        } as any);
+        });
       },
     );
 
@@ -1917,8 +1982,8 @@ describe("generateObject with tools", () => {
           prompt: testPrompt,
           schema: resultSchema,
           observationMaxConfidentiality: ["internal"],
-          context: { dossier: dossier as any },
-        } as any);
+          context: { dossier },
+        });
       },
     );
 
@@ -2000,10 +2065,10 @@ describe("generateObject with tools", () => {
       return commonfabric.generateObject({
         prompt: "schema-sanitize-generateObject",
         schema: resultSchema,
-        context: { briefing: briefing as any },
+        context: { briefing },
         observationMaxConfidentiality: [promptRisk, promptInfluence],
         schemaSanitizePromptInjection: true,
-      } as any);
+      });
     });
 
     try {
@@ -2144,12 +2209,10 @@ describe("generateObject with tools", () => {
         const toolMessage = req.messages.find((message) =>
           message.role === "tool"
         );
-        const toolPart = Array.isArray(toolMessage?.content)
-          ? toolMessage.content.find((part: any) =>
-            part?.type === "tool-result" && part.toolName === "delegate"
-          ) as any
-          : undefined;
-        capturedDelegateResult = toolPart?.output?.value?.result;
+        capturedDelegateResult = recordField(
+          toolResultValue(toolMessage, "delegate"),
+          "result",
+        );
         return capturedDelegateResult !== undefined &&
           req.tools?.["presentResult"] !== undefined;
       },
@@ -2201,7 +2264,7 @@ describe("generateObject with tools", () => {
           schema: parsedResultSchema,
           observationMaxConfidentiality,
           schemaSanitizePromptInjection,
-        } as any);
+        });
         return response.result;
       },
       {
@@ -2295,7 +2358,7 @@ function patternOutputCell(resultCell: Cell<any>, testPattern: any): Cell<any> {
     return liveResultCell;
   }
   return path.reduce(
-    (cell: Cell<any>, segment: PropertyKey) => cell.key(segment as any),
+    (cell: Cell<any>, segment: PropertyKey) => cell.key(segment),
     parentResultCell.withTx(),
   );
 }
