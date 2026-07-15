@@ -7,12 +7,12 @@ import {
   isFabricPlainObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { uniqueCfcAtoms } from "./observation.ts";
 import {
   cfcSchemaChildRoot,
-  isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
@@ -51,6 +51,12 @@ type AnnotationResult = {
   schema: JSONSchema;
   instructionInert: boolean;
 };
+
+interface AnnotationRefVisit {
+  root: object;
+  ref: string;
+  parent?: AnnotationRefVisit;
+}
 
 const asTypeArray = (type: unknown): string[] =>
   Array.isArray(type)
@@ -213,7 +219,8 @@ const primitiveTypeIsInstructionInert = (
       type === "number" ||
       type === "integer" ||
       type === "boolean" ||
-      type === "null"
+      type === "null" ||
+      type === "undefined"
     );
 };
 
@@ -248,39 +255,48 @@ const annotateSchema = (
   schema: JSONSchema,
   observedConfidentiality: readonly unknown[],
   fullSchema: JSONSchema,
-  visitedRefs: ReadonlySet<string> = new Set(),
+  visitedRef?: AnnotationRefVisit,
 ): AnnotationResult => {
   if (typeof schema === "boolean") {
     return { schema, instructionInert: false };
   }
 
-  // $ref cycle guard: resolveSchemaRefs only detects cycles within a single
-  // call, but annotateSchema recurses across resolutions. Track the chain of
-  // refs visited in this annotation pass and break the cycle by returning
-  // the unresolved ref schema (still tainted with observed confidentiality
-  // if present, but not recursed into again).
-  const directRef = typeof schema.$ref === "string" ? schema.$ref : undefined;
-  if (directRef !== undefined && visitedRefs.has(directRef)) {
-    return {
-      schema: observedConfidentiality.length > 0
-        ? mergeIfc({ ...schema }, {
-          observedConfidentiality,
-          instructionInert: false,
-        }) as JSONSchema
-        : schema,
-      instructionInert: false,
-    };
-  }
-  const nextVisited: ReadonlySet<string> = directRef !== undefined
-    ? new Set([...visitedRefs, directRef])
-    : visitedRefs;
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
 
-  const resolved = resolveSchemaForValidation(schema, fullSchema);
+  // $ref cycle guard: resolveSchemaRefs only detects cycles within a single
+  // call, but annotateSchema recurses across resolutions. A local ref string
+  // is only meaningful together with its owning root.
+  const directRef = typeof schema.$ref === "string" ? schema.$ref : undefined;
+  let cursor = visitedRef;
+  while (directRef !== undefined && cursor !== undefined) {
+    if (cursor.root === rootKey && cursor.ref === directRef) {
+      return {
+        schema: observedConfidentiality.length > 0
+          ? mergeIfc({ ...schema }, {
+            observedConfidentiality,
+            instructionInert: false,
+          }) as JSONSchema
+          : schema,
+        instructionInert: false,
+      };
+    }
+    cursor = cursor.parent;
+  }
+  const nextVisited = directRef !== undefined
+    ? { root: rootKey, ref: directRef, parent: visitedRef }
+    : visitedRef;
+
+  const resolved = resolveSchemaForValidation(schema, schemaRoot);
   if (resolved !== schema) {
+    const resolvedRoot = cfcSchemaChildRoot(
+      resolved,
+      resolveCfcSchemaRefRoot(schema, schemaRoot),
+    );
     const annotated = annotateSchema(
       resolved,
       observedConfidentiality,
-      resolved,
+      resolvedRoot,
       nextVisited,
     );
     return {
@@ -315,7 +331,7 @@ const annotateSchema = (
       ...(schema.allOf ?? []),
     ];
     const annotatedBranches = branches.map((branch) =>
-      annotateSchema(branch, observedConfidentiality, fullSchema, nextVisited)
+      annotateSchema(branch, observedConfidentiality, schemaRoot, nextVisited)
     );
     const instructionInert = annotatedBranches.length > 0 &&
       annotatedBranches.every((branch) => branch.instructionInert);
@@ -357,7 +373,7 @@ const annotateSchema = (
       const annotated = annotateSchema(
         child,
         observedConfidentiality,
-        fullSchema,
+        schemaRoot,
         nextVisited,
       );
       annotatedProperties[key] = annotated.schema;
@@ -390,7 +406,7 @@ const annotateSchema = (
     const child = annotateSchema(
       schema.items,
       observedConfidentiality,
-      fullSchema,
+      schemaRoot,
       nextVisited,
     );
     const instructionInert = child.instructionInert;
@@ -628,11 +644,22 @@ interface SchemaDefinitionContext {
 export const validateSchemaDefinition = (
   schema: JSONSchema,
   fullSchema: JSONSchema = schema,
-): string | undefined =>
-  validateSchemaDefinitionInternal(schema, fullSchema, "$", {
+): string | undefined => {
+  // Compatibility later interns schemas for root-aware identity tracking.
+  // Prove that normalization is safe up front so malformed literal payloads,
+  // typed arrays, and raw object-identity cycles become ordinary validation
+  // diagnostics instead of escaping as hash/freeze errors.
+  try {
+    deepFrozenCloneAndInternSchema(schema);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `$: schema cannot be normalized: ${message}`;
+  }
+  return validateSchemaDefinitionInternal(schema, fullSchema, "$", {
     activeByRoot: new WeakMap(),
     activeRefsByRoot: new WeakMap(),
   });
+};
 
 const validateSchemaDefinitionInternal = (
   schema: JSONSchema,
@@ -672,9 +699,10 @@ const validateSchemaDefinitionInternal = (
         activeRefs.delete(schema.$ref);
         return `${path}: cannot resolve schema reference ${schema.$ref}`;
       }
-      const resolvedRoot = isEmbeddedCfcSchemaRef(schema.$ref)
-        ? resolved
-        : schemaRoot;
+      const resolvedRoot = cfcSchemaChildRoot(
+        resolved,
+        resolveCfcSchemaRefRoot(schema, schemaRoot),
+      );
       const issue = validateSchemaDefinitionInternal(
         resolved,
         resolvedRoot,
@@ -852,7 +880,11 @@ const validateSchemaDefinitionInternal = (
 interface SchemaValidationOptions {
   strictConstraints: boolean;
   implicitAdditionalPropertiesOpen: boolean;
-  acceptOpaqueValue?: (value: unknown) => boolean;
+  acceptOpaqueValue?: (
+    value: unknown,
+    schema: JSONSchema,
+    fullSchema: JSONSchema,
+  ) => boolean;
 }
 
 export interface SchemaValueValidationOptions {
@@ -861,7 +893,11 @@ export interface SchemaValueValidationOptions {
    * already proven by canonical traversal, without treating the handle object
    * itself as the schema's underlying value.
    */
-  acceptOpaqueValue?: (value: unknown) => boolean;
+  acceptOpaqueValue?: (
+    value: unknown,
+    schema: JSONSchema,
+    fullSchema: JSONSchema,
+  ) => boolean;
 }
 
 const SANITIZATION_VALIDATION: SchemaValidationOptions = {
@@ -875,6 +911,10 @@ const VALUE_VALIDATION: SchemaValidationOptions = {
 };
 
 interface SchemaValidationContext {
+  activeByRoot: WeakMap<object, SchemaRootValidationActivity>;
+}
+
+interface SchemaRootValidationActivity {
   activeObjectValues: WeakMap<object, WeakSet<object>>;
   activePrimitiveValues: WeakMap<object, Set<string>>;
 }
@@ -903,56 +943,67 @@ const atValidationPath = (
 });
 
 const createSchemaValidationContext = (): SchemaValidationContext => ({
-  activeObjectValues: new WeakMap(),
-  activePrimitiveValues: new WeakMap(),
+  activeByRoot: new WeakMap(),
 });
 
 const primitiveValidationKey = (value: unknown): string =>
   `${typeof value}:${String(value)}`;
 
 const markSchemaValueActive = (
+  root: object,
   schema: object,
   value: unknown,
   context: SchemaValidationContext,
 ): boolean => {
+  let activity = context.activeByRoot.get(root);
+  if (!activity) {
+    activity = {
+      activeObjectValues: new WeakMap(),
+      activePrimitiveValues: new WeakMap(),
+    };
+    context.activeByRoot.set(root, activity);
+  }
   if (
     (typeof value === "object" && value !== null) ||
     typeof value === "function"
   ) {
     const objectValue = value as object;
-    let active = context.activeObjectValues.get(schema);
+    let active = activity.activeObjectValues.get(schema);
     if (active?.has(objectValue)) return false;
     if (!active) {
       active = new WeakSet();
-      context.activeObjectValues.set(schema, active);
+      activity.activeObjectValues.set(schema, active);
     }
     active.add(objectValue);
     return true;
   }
   const key = primitiveValidationKey(value);
-  let active = context.activePrimitiveValues.get(schema);
+  let active = activity.activePrimitiveValues.get(schema);
   if (active?.has(key)) return false;
   if (!active) {
     active = new Set();
-    context.activePrimitiveValues.set(schema, active);
+    activity.activePrimitiveValues.set(schema, active);
   }
   active.add(key);
   return true;
 };
 
 const unmarkSchemaValueActive = (
+  root: object,
   schema: object,
   value: unknown,
   context: SchemaValidationContext,
 ): void => {
+  const activity = context.activeByRoot.get(root);
+  if (!activity) return;
   if (
     (typeof value === "object" && value !== null) ||
     typeof value === "function"
   ) {
-    context.activeObjectValues.get(schema)?.delete(value as object);
+    activity.activeObjectValues.get(schema)?.delete(value as object);
     return;
   }
-  context.activePrimitiveValues.get(schema)?.delete(
+  activity.activePrimitiveValues.get(schema)?.delete(
     primitiveValidationKey(value),
   );
 };
@@ -998,7 +1049,8 @@ const validateAgainstSchemaInternal = (
     return indeterminate("schema must be an object or boolean");
   }
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
-  if (!markSchemaValueActive(schema, value, context)) {
+  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  if (!markSchemaValueActive(rootKey, schema, value, context)) {
     return indeterminate("recursive schema validation made no progress");
   }
 
@@ -1024,7 +1076,9 @@ const validateAgainstSchemaInternal = (
         context,
       );
     }
-    if (options.acceptOpaqueValue?.(value)) return undefined;
+    if (options.acceptOpaqueValue?.(value, schema, schemaRoot)) {
+      return undefined;
+    }
 
     if (Array.isArray(schema.allOf)) {
       for (const branch of schema.allOf) {
@@ -1099,24 +1153,6 @@ const validateAgainstSchemaInternal = (
       return indeterminate(typeDefinitionIssue);
     }
     const types = asTypeArray(schema.type);
-    const unknownType = options.strictConstraints
-      ? types.find((type) =>
-        ![
-          "unknown",
-          "string",
-          "number",
-          "integer",
-          "boolean",
-          "null",
-          "undefined",
-          "array",
-          "object",
-        ].includes(type)
-      )
-      : undefined;
-    if (unknownType !== undefined) {
-      return indeterminate(`unsupported schema type ${unknownType}`);
-    }
     if (
       types.length > 0 &&
       !types.some((type) => typeMatches(value, type, options.strictConstraints))
@@ -1213,7 +1249,7 @@ const validateAgainstSchemaInternal = (
 
     return undefined;
   } finally {
-    unmarkSchemaValueActive(schema, value, context);
+    unmarkSchemaValueActive(rootKey, schema, value, context);
   }
 };
 
@@ -1307,18 +1343,11 @@ function validateStrictSchemaConstraints(
       return mismatch(`value is longer than maxLength ${schema.maxLength}`);
     }
     if (schema.pattern !== undefined) {
-      let pattern: RegExp;
-      try {
-        pattern = new RegExp(schema.pattern);
-      } catch {
-        return indeterminate(`schema has invalid pattern ${schema.pattern}`);
-      }
+      // strictConstraintDefinitionIssue() compiled this expression above.
+      const pattern = new RegExp(schema.pattern);
       if (!pattern.test(value)) return mismatch(`value does not match pattern`);
     }
     if (schema.format !== undefined) {
-      if (!SUPPORTED_SCHEMA_FORMATS.has(schema.format)) {
-        return indeterminate(`schema has unsupported format ${schema.format}`);
-      }
       if (!valueMatchesFormat(value, schema.format)) {
         return mismatch(`value does not match format ${schema.format}`);
       }
@@ -1472,12 +1501,8 @@ function validateStrictSchemaConstraints(
         schema.patternProperties ?? {},
       )
     ) {
-      let pattern: RegExp;
-      try {
-        pattern = new RegExp(source);
-      } catch {
-        return indeterminate(`schema has invalid property pattern ${source}`);
-      }
+      // strictConstraintDefinitionIssue() compiled this expression above.
+      const pattern = new RegExp(source);
       for (const [key, child] of Object.entries(value)) {
         if (pattern.test(key)) {
           const failure = validateAgainstSchemaInternal(

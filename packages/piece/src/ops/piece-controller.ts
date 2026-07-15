@@ -1,12 +1,16 @@
 import {
   Cell,
   type CellPath,
+  extractDefaultValues,
   getPatternIdentityRef,
+  mergeSchemaDefaults,
   NAME,
   type Pattern,
   resolveCellPath,
   type RuntimeProgram,
+  schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
+import { validateSchemaValue } from "@commonfabric/runner/cfc";
 import { pieceId, PieceManager } from "../manager.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { compileProgram } from "./utils.ts";
@@ -40,17 +44,56 @@ class PiecePropIo implements PieceCellIo {
 
   async set(value: unknown, path?: CellPath) {
     const manager = this.#cc.manager();
-    const targetCell = await this.#getTargetCell();
+    let committedTargetCell: Cell<unknown> | undefined;
 
-    await manager.runtime.editWithRetry((tx) => {
+    const { error } = await manager.runtime.editWithRetry((tx) => {
+      // Resolve the target from the piece metadata inside every retry. A
+      // concurrent setsrc may replace the argument link/schema after this
+      // write starts; reusing a cell captured before the retry would then
+      // write through the superseded contract.
+      const piece = this.#cc.getCell().withTx(tx);
+      const targetCell = this.#type === "input"
+        ? manager.getArgument(piece)
+        : manager.getResult(piece);
+      committedTargetCell = targetCell;
+
       // Build the path with transaction context
       let txCell = targetCell.withTx(tx);
       for (const segment of (path ?? [])) {
         txCell = txCell.key(segment as keyof unknown) as Cell<unknown>;
       }
 
-      txCell.set(value);
+      const schema = targetCell.getAsNormalizedFullLink().schema ?? true;
+      const nextValue = (path?.length ?? 0) === 0 && this.#type === "input"
+        ? mergeSchemaDefaults<Record<string, unknown>>(
+          value as Record<string, unknown> | undefined,
+          extractDefaultValues(schema),
+          schema,
+        )
+        : value;
+      txCell.set(nextValue);
+
+      if (this.#type === "input") {
+        const materialized = targetCell.asSchema(undefined).withTx(tx).get();
+        const issue = validateSchemaValue(
+          schema,
+          materialized,
+          schema,
+          { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+        );
+        if (issue !== undefined) {
+          throw new Error(`updated input does not match its schema: ${issue}`);
+        }
+      }
     });
+    if (error) {
+      if ("reason" in error && error.reason instanceof Error) {
+        throw error.reason;
+      }
+      throw error;
+    }
+
+    const targetCell = committedTargetCell ?? await this.#getTargetCell();
 
     if (this.#type === "input") {
       await manager.getResult(this.#cc.getCell()).pull();
@@ -105,19 +148,43 @@ export class PieceController<T = unknown> {
   async setInput(input: object): Promise<void> {
     const mutationVersion = ++this.#mutationVersion;
     await this.#runMutation(mutationVersion, async () => {
-      const pattern = await this.getPattern();
-      // Use setup/start so we can update inputs without forcing reschedule
-      return await execute(
-        this.#manager,
-        this.id,
-        pattern,
-        input,
-        { start: true },
-      ) as Cell<T>;
+      while (true) {
+        const { pattern, ref } = await this.#loadCurrentPattern();
+        try {
+          // Use setup/start so we can update inputs without forcing reschedule.
+          // The identity guard prevents a concurrent setsrc from being
+          // overwritten by this already-loaded pattern.
+          return await execute(
+            this.#manager,
+            this.id,
+            pattern,
+            input,
+            { start: true, expectedPatternIdentity: ref },
+          ) as Cell<T>;
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.includes(
+              "piece pattern changed while the source update was compiling",
+            )
+          ) {
+            throw error;
+          }
+          // Reload and reapply the input against the durable winner.
+        }
+      }
     });
   }
 
   async getPattern(): Promise<Pattern> {
+    return (await this.#loadCurrentPattern()).pattern;
+  }
+
+  async #loadCurrentPattern(): Promise<{
+    pattern: Pattern;
+    ref: { identity: string; symbol: string };
+  }> {
+    await this.#cell.sync();
     const ref = getPatternIdentityRef(this.#cell);
     if (!ref) throw new Error("piece missing pattern identity");
     const runtime = this.#manager.runtime;
@@ -131,7 +198,7 @@ export class PieceController<T = unknown> {
         `could not load pattern ${ref.identity}#${ref.symbol}`,
       );
     }
-    return pattern;
+    return { pattern, ref };
   }
 
   /**
@@ -174,19 +241,8 @@ export class PieceController<T = unknown> {
   async setPattern(program: RuntimeProgram): Promise<void> {
     const mutationVersion = ++this.#mutationVersion;
     await this.#runMutation(mutationVersion, async () => {
-      const previousRef = getPatternIdentityRef(this.#cell);
-      if (!previousRef) throw new Error("piece missing pattern identity");
-      const previousPattern = await this.#manager.runtime.patternManager
-        .loadPatternByIdentity(
-          previousRef.identity,
-          previousRef.symbol,
-          this.#manager.getSpace(),
-        );
-      if (!previousPattern) {
-        throw new Error(
-          `could not load pattern ${previousRef.identity}#${previousRef.symbol}`,
-        );
-      }
+      const { pattern: previousPattern, ref: previousRef } = await this
+        .#loadCurrentPattern();
       const pattern = await compileProgram(this.#manager, program);
       assertPatternSchemasBackwardCompatible(previousPattern, pattern);
       return await execute(this.#manager, this.id, pattern, undefined, {

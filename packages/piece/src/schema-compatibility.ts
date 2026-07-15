@@ -3,6 +3,7 @@ import {
   extractDefaultValues,
   type JSONSchema,
   type Pattern,
+  schemaHasDefaultValue,
 } from "@commonfabric/runner";
 import {
   cfcSchemaChildRoot,
@@ -296,9 +297,6 @@ function objectSubsetIssue(
         previousPatternProperties,
         property,
       );
-      if (typeof matchedPatterns === "string") {
-        return `${path}: ${matchedPatterns}`;
-      }
       for (const patternSchema of matchedPatterns) {
         const issue = schemaSubsetIssue(
           patternSchema,
@@ -350,9 +348,6 @@ function objectSubsetIssue(
         previousPatternProperties,
         property,
       );
-      if (typeof matchedPatterns === "string") {
-        return `${path}: ${matchedPatterns}`;
-      }
       for (const patternSchema of matchedPatterns) {
         const issue = schemaSubsetIssue(
           sourceProperties[property],
@@ -398,15 +393,11 @@ function objectSubsetIssue(
 function matchingPatternPropertySchemas(
   patternProperties: Record<string, JSONSchema> | undefined,
   property: string,
-): JSONSchema[] | string {
+): JSONSchema[] {
   const matches: JSONSchema[] = [];
   for (const [source, schema] of Object.entries(patternProperties ?? {})) {
-    let pattern: RegExp;
-    try {
-      pattern = new RegExp(source);
-    } catch {
-      return `invalid patternProperties expression ${source}`;
-    }
+    // Schema preflight has already compiled every patternProperties key.
+    const pattern = new RegExp(source);
     if (pattern.test(property)) matches.push(schema);
   }
   return matches;
@@ -712,7 +703,7 @@ function schemaProvidesValidDefault(
 ): boolean {
   if (schema === undefined) return false;
   const value = extractDefaultValues(schema, fullSchema);
-  return value !== undefined &&
+  return schemaHasDefaultValue(schema, fullSchema) &&
     validateSchemaValue(schema, value, fullSchema) === undefined;
 }
 

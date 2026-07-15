@@ -124,6 +124,33 @@ describe("piece schema compatibility", () => {
       .not.toThrow();
   });
 
+  it("does not borrow an outer default for a referenced definition body", () => {
+    const previous = pattern(
+      { type: "object", properties: {} },
+      oldPattern.resultSchema,
+    );
+    const candidate = pattern(
+      {
+        type: "object",
+        properties: { item: { $ref: "#/$defs/Entry" } },
+        required: ["item"],
+        $defs: {
+          Entry: {
+            type: "object",
+            properties: { value: { $ref: "#/$defs/Value" } },
+            required: ["value"],
+            $defs: { Value: { type: "string" } },
+          },
+          Value: { type: "number", default: 1 },
+        },
+      },
+      oldPattern.resultSchema,
+    );
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
+      .toThrow(/argument\.item.*no default/);
+  });
+
   it("keeps embedded ref roots while comparing unchanged native schemas", () => {
     const vnode = {
       $ref: "https://commonfabric.org/schemas/vnode.json",
@@ -836,6 +863,23 @@ describe("piece schema compatibility", () => {
     );
     expect(() =>
       assertPatternSchemasBackwardCompatible(argumentPrevious, argumentAnyOf)
+    ).not.toThrow();
+
+    const requiredUndefinedDefault = pattern(
+      {
+        type: "object",
+        properties: {
+          value: { type: "undefined", default: undefined },
+        },
+        required: ["value"],
+      },
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object", properties: {} }, oldPattern.resultSchema),
+        requiredUndefinedDefault,
+      )
     ).not.toThrow();
 
     const resultPrevious = pattern(

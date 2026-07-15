@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPatternIdentityRef,
+  KeepAsCell,
   NAME,
   Pattern,
   Runtime,
@@ -365,6 +366,25 @@ describe("piece pull materialization", () => {
     expect(manager.getResult(piece).get()).toEqual({ output: 14 });
   });
 
+  it("validates path-based input writes against the current schema", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.input.set(7, ["input"]);
+    expect(await controller.input.get()).toEqual({ input: 7 });
+    expect(await controller.result.get()).toEqual({ output: 14 });
+
+    await expect(controller.input.set("invalid", ["input"])).rejects.toThrow(
+      /updated input does not match its schema/,
+    );
+    expect(await controller.input.get()).toEqual({ input: 7 });
+  });
+
   it("materializes piece results before runWithPattern returns", async () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),
@@ -706,6 +726,170 @@ describe("piece pull materialization", () => {
 
     expect(getPatternIdentityRef(piece)).toEqual(previousRef);
     expect(inputCell.getRaw()).toEqual({ value: 4, mode: "legacy-string" });
+  });
+
+  it("does not accept a linked stream as an optional scalar during migration", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledOptionalNumberFieldProgram(1),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { value: 4 },
+      "optional-field-stream-conflict-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const inputCell = await controller.input.getCell();
+    const stream = runtime.getCell(
+      manager.getSpace(),
+      "optional-field-stream-" + crypto.randomUUID(),
+      { type: "number", asCell: ["stream"] },
+    );
+    await runtime.editWithRetry((tx) => {
+      stream.withTx(tx).setRawUntyped({ $stream: true });
+      inputCell.withTx(tx).key("mode").setRawUntyped(
+        stream.getAsLink({
+          base: inputCell,
+          includeSchema: true,
+          keepAsCell: KeepAsCell.OnlyStream,
+        }),
+      );
+    });
+    const rawBefore = inputCell.getRaw();
+    const previousRef = getPatternIdentityRef(piece);
+
+    await expect(
+      controller.setPattern(compiledOptionalNumberFieldProgram(2)),
+    ).rejects.toThrow(/updated arguments do not match the candidate schema/);
+
+    expect(getPatternIdentityRef(piece)).toEqual(previousRef);
+    expect(inputCell.getRaw()).toEqual(rawBefore);
+  });
+
+  it("reapplies setInput against a concurrently installed pattern", async () => {
+    const initialProgram = compiledMultiplierProgram("initial", 2);
+    const winnerProgram = compiledMultiplierProgram("winner", 10);
+    const initialPattern = await runtime.patternManager.compilePattern(
+      initialProgram,
+      { space: manager.getSpace() },
+    );
+    const winnerPattern = await runtime.patternManager.compilePattern(
+      winnerProgram,
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      initialPattern,
+      { input: 5 },
+      "set-input-pattern-race-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const oldInputEntered = defer<void>();
+    const releaseOldInput = defer<void>();
+    const originalRunWithPattern = manager.runWithPattern;
+    manager.runWithPattern = async (pattern, pieceId, inputs, options) => {
+      if (
+        pattern === initialPattern &&
+        (inputs as { input?: number } | undefined)?.input === 7
+      ) {
+        oldInputEntered.resolve();
+        await releaseOldInput.promise;
+      }
+      return await originalRunWithPattern.call(
+        manager,
+        pattern,
+        pieceId,
+        inputs,
+        options,
+      );
+    };
+    const originalCompile = runtime.patternManager.compilePattern.bind(
+      runtime.patternManager,
+    );
+    runtime.patternManager.compilePattern = (async (program, options) => {
+      if (program === winnerProgram) return winnerPattern;
+      return await originalCompile(program, options);
+    }) as typeof runtime.patternManager.compilePattern;
+
+    try {
+      const inputUpdate = controller.setInput({ input: 7 });
+      await oldInputEntered.promise;
+      await controller.setPattern(winnerProgram);
+      releaseOldInput.resolve();
+      await inputUpdate;
+
+      expect(getPatternIdentityRef(piece)).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+      expect(await controller.input.get()).toEqual({ input: 7 });
+      expect(await controller.result.get()).toEqual({
+        version: "winner",
+        output: 70,
+      });
+    } finally {
+      releaseOldInput.resolve();
+      manager.runWithPattern = originalRunWithPattern;
+      runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
+  it("re-resolves input schema and defaults after a commit retry", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledSchemaEvolutionProgram(1),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { value: 4 },
+      "piece-prop-schema-race-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const commitEntered = defer<void>();
+    const releaseCommit = defer<void>();
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    let interceptNextCommit = true;
+    runtime.editWithRetry =
+      ((action, maxRetries) =>
+        originalEditWithRetry((transaction) => {
+          const result = action(transaction);
+          if (interceptNextCommit) {
+            interceptNextCommit = false;
+            const originalCommit = transaction.commit.bind(transaction);
+            transaction.commit = async () => {
+              commitEntered.resolve();
+              await releaseCommit.promise;
+              return await originalCommit();
+            };
+          }
+          return result;
+        }, maxRetries)) as typeof runtime.editWithRetry;
+
+    try {
+      const inputUpdate = controller.input.set({ value: 9 });
+      await commitEntered.promise;
+      await controller.setPattern(compiledSchemaEvolutionProgram(2));
+      releaseCommit.resolve();
+      await inputUpdate;
+
+      const currentPattern = await controller.getPattern();
+      const rawInput = (await controller.input.getCell()).getRaw();
+      expect(rawInput).toEqual({
+        value: 9,
+        retries: 0,
+        options: { attempts: 1 },
+      });
+      expect(validateSchemaValue(currentPattern.argumentSchema, rawInput))
+        .toBeUndefined();
+      expect(await controller.result.get()).toEqual({
+        doubled: 9,
+        summary: "updated",
+      });
+    } finally {
+      releaseCommit.resolve();
+      runtime.editWithRetry = originalEditWithRetry;
+    }
   });
 
   it("rejects a source update whose validated pattern identity became stale", async () => {

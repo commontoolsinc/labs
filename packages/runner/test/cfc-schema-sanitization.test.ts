@@ -181,6 +181,31 @@ describe("cfc schema sanitization", () => {
     expect(annotated.properties.list.items.ifc.addIntegrity).toContainEqual(
       INJECTION_SAFE_ATOM,
     );
+
+    const extended = schemaWithInjectionSafeAnnotations({
+      type: ["number", "undefined"],
+    }, observed) as any;
+    expect(extended.ifc.addIntegrity).toContainEqual(INJECTION_SAFE_ATOM);
+  });
+
+  it("uses child-local definitions while annotating nested refs", () => {
+    const annotated = schemaWithInjectionSafeAnnotations({
+      type: "object",
+      properties: {
+        nested: {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/Value" } },
+          $defs: { Value: { type: "string" } },
+        },
+      },
+      $defs: { Value: { type: "number" } },
+    }, [promptRisk]) as any;
+    const valueIfc = annotated.properties.nested.properties.value.ifc;
+
+    expect(valueIfc.addIntegrity ?? []).not.toContainEqual(
+      INJECTION_SAFE_ATOM,
+    );
+    expect(valueIfc.confidentiality).toContainEqual(promptRisk);
   });
 
   it("annotates oneOf, allOf, empty objects, and not schemas", () => {
@@ -303,6 +328,27 @@ describe("cfc schema sanitization", () => {
     expect(validateSchemaValue({ type: "custom" } as any, "value"))
       .toContain("unsupported schema type custom");
 
+    const opaque = Object.create(null);
+    const onlyWhenAuthorized = (_value: unknown, schema: JSONSchema) =>
+      typeof schema === "object" && Array.isArray(schema.asCell);
+    const plainUnion: JSONSchema = { type: ["number", "undefined"] };
+    expect(validateSchemaValue(
+      plainUnion,
+      opaque,
+      plainUnion,
+      { acceptOpaqueValue: onlyWhenAuthorized },
+    )).toContain("type number|undefined");
+    const cellUnion: JSONSchema = {
+      type: ["number", "undefined"],
+      asCell: ["cell"],
+    };
+    expect(validateSchemaValue(
+      cellUnion,
+      opaque,
+      cellUnion,
+      { acceptOpaqueValue: onlyWhenAuthorized },
+    )).toBeUndefined();
+
     expect(validateSchemaValue({
       type: "object",
       properties: { toString: { type: "number" as const } },
@@ -422,6 +468,28 @@ describe("cfc schema sanitization", () => {
       },
     };
     expect(validateSchemaDefinition(localOnlyDefinition)).toBeUndefined();
+  });
+
+  it("keeps referenced definition bodies in their child-local scope", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { item: { $ref: "#/$defs/Entry" } },
+      $defs: {
+        Entry: {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/Value" } },
+          required: ["value"],
+          $defs: { Value: { type: "string" } },
+        },
+        Value: { type: "number" },
+      },
+    };
+
+    expect(validateSchemaDefinition(schema)).toBeUndefined();
+    expect(validateSchemaValue(schema, { item: { value: "local" } }))
+      .toBeUndefined();
+    expect(validateSchemaValue(schema, { item: { value: 1 } }))
+      .toContain("value does not match type string");
   });
 
   it("rejects sparse schema keyword arrays without rejecting sparse values", () => {
@@ -547,6 +615,46 @@ describe("cfc schema sanitization", () => {
       value: 1,
       next: { value: 2 },
     })).toBeUndefined();
+  });
+
+  it("tracks recursive validation separately for each definition root", () => {
+    const shared = { $ref: "#/$defs/V" } as const;
+    const child = {
+      $defs: { V: { type: "string" } },
+      allOf: [shared],
+    } as const;
+    const schema: JSONSchema = {
+      $defs: { V: { allOf: [child] } },
+      allOf: [shared],
+    };
+
+    expect(validateSchemaDefinition(schema)).toBeUndefined();
+    expect(validateSchemaValue(schema, "x")).toBeUndefined();
+    expect(validateSchemaValue(schema, 1)).toContain("type string");
+  });
+
+  it("reports malformed referenced schemas and literal payloads", () => {
+    const cyclic: any = {
+      type: "object",
+      properties: {},
+    };
+    cyclic.properties.self = cyclic;
+    const malformed: JSONSchema[] = [
+      {
+        $ref: "#/$defs/X",
+        $defs: { X: null },
+      } as unknown as JSONSchema,
+      { const: Symbol("unique") } as unknown as JSONSchema,
+      { enum: [new Map()] } as unknown as JSONSchema,
+      { default: () => {} } as unknown as JSONSchema,
+      { default: new Uint8Array([1]) } as unknown as JSONSchema,
+      cyclic,
+    ];
+
+    for (const schema of malformed) {
+      expect(() => validateSchemaDefinition(schema)).not.toThrow();
+      expect(validateSchemaDefinition(schema)).toBeDefined();
+    }
   });
 
   it("does not treat indeterminate recursive branches as ordinary mismatches", () => {

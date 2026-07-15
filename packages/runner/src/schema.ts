@@ -53,7 +53,10 @@ import {
 } from "./cfc/label-view-state.ts";
 import type { CfcAddress } from "./cfc/types.ts";
 import { isCellScope } from "./scope.ts";
-import { cfcSchemaChildRoot } from "./cfc/schema-refs.ts";
+import {
+  cfcSchemaChildRoot,
+  resolveCfcSchemaRefRoot,
+} from "./cfc/schema-refs.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -465,6 +468,10 @@ export function resolveSchemaForValue(
 // is shallow-only.
 const _hasIfcCache = new WeakMap<JSONSchemaObj, boolean>();
 
+interface SchemaHasIfcContext {
+  seenByRoot: WeakMap<object, WeakSet<object>>;
+}
+
 export function schemaHasIfc(
   schema: JSONSchema | undefined,
   seen: Set<JSONSchema> = new Set(),
@@ -482,7 +489,17 @@ export function schemaHasIfc(
     const cached = _hasIfcCache.get(schema);
     if (cached !== undefined) return cached;
   }
-  const result = _schemaHasIfcUncached(schema, seen, fullSchema);
+  const context: SchemaHasIfcContext = { seenByRoot: new WeakMap() };
+  if (seen.size > 0) {
+    const initialRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
+    const rootKey = isRecord(initialRoot) ? initialRoot : schema;
+    const initialSeen = new WeakSet<object>();
+    for (const item of seen) {
+      if (isRecord(item)) initialSeen.add(item);
+    }
+    context.seenByRoot.set(rootKey, initialSeen);
+  }
+  const result = _schemaHasIfcUncached(schema, fullSchema, context);
   // Populate only under a deep-frozen guard. See the invariant comment
   // above `_hasIfcCache`.
   if (isTopLevel && isDeepFrozen(schema)) {
@@ -493,15 +510,19 @@ export function schemaHasIfc(
 
 function _schemaHasIfcUncached(
   schema: JSONSchemaObj,
-  seen: Set<JSONSchema>,
   fullSchema: JSONSchema | undefined,
+  context: SchemaHasIfcContext,
 ): boolean {
-  if (seen.has(schema)) {
-    return false;
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
+  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  let seen = context.seenByRoot.get(rootKey);
+  if (seen?.has(schema)) return false;
+  if (!seen) {
+    seen = new WeakSet();
+    context.seenByRoot.set(rootKey, seen);
   }
   seen.add(schema);
 
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
   const resolved = typeof schema.$ref === "string"
     ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
     : schema;
@@ -510,7 +531,9 @@ function _schemaHasIfcUncached(
   }
   const childFullSchema = cfcSchemaChildRoot(
     resolved,
-    schemaRoot,
+    typeof schema.$ref === "string"
+      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
+      : schemaRoot,
   );
   if (resolved.ifc !== undefined) {
     return true;
@@ -521,26 +544,38 @@ function _schemaHasIfcUncached(
     ...(resolved.oneOf ?? []),
     ...(resolved.allOf ?? []),
   ];
-  if (compound.some((item) => schemaHasIfc(item, seen, childFullSchema))) {
+  if (
+    compound.some((item) =>
+      isRecord(item) &&
+      _schemaHasIfcUncached(item, childFullSchema, context)
+    )
+  ) {
     return true;
   }
   if (
     resolved.properties !== undefined &&
     Object.values(resolved.properties).some((item) =>
-      schemaHasIfc(item, seen, childFullSchema)
+      isRecord(item) &&
+      _schemaHasIfcUncached(item, childFullSchema, context)
     )
   ) {
     return true;
   }
   if (
     typeof resolved.additionalProperties === "object" &&
-    schemaHasIfc(resolved.additionalProperties, seen, childFullSchema)
+    isRecord(resolved.additionalProperties) &&
+    _schemaHasIfcUncached(
+      resolved.additionalProperties,
+      childFullSchema,
+      context,
+    )
   ) {
     return true;
   }
   if (
     typeof resolved.items === "object" &&
-    schemaHasIfc(resolved.items, seen, childFullSchema)
+    isRecord(resolved.items) &&
+    _schemaHasIfcUncached(resolved.items, childFullSchema, context)
   ) {
     return true;
   }

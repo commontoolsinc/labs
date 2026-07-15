@@ -438,7 +438,8 @@ export const resolveCfcSchemaRefRoot = (
     refsForRoot.add(ref);
     const next = resolveCfcSchemaRef(root, ref);
     if (next === undefined) break;
-    if (isEmbeddedCfcSchemaRef(ref)) root = next;
+    const inheritedRoot = isEmbeddedCfcSchemaRef(ref) ? next : root;
+    root = cfcSchemaChildRoot(next, inheritedRoot);
     current = next;
   }
   return root;
@@ -482,10 +483,10 @@ const resolveCfcSchemaRefUncached = (
     }
     schemaCursor = schemaCursor[pathToDef[i]];
   }
-  if (typeof schemaCursor === "object") {
+  if (isRecord(schemaCursor)) {
     const schemaRefs = new Set<string>();
-    findCfcSchemaRefs(schemaCursor as JSONSchema, schemaRefs);
-    if (schemaRefs.size > 0) {
+    findCfcSchemaRefs(schemaCursor, schemaRefs);
+    if (schemaRefs.size > 0 && schemaCursor.$defs === undefined) {
       schemaCursor = {
         ...schemaCursor,
         ...(isRecord(fullSchema) && fullSchema.$defs &&
@@ -562,16 +563,18 @@ const resolveCfcSchemaRefsUncached = (
     if (resolved === undefined) {
       return undefined;
     }
-    if (Object.hasOwn(embeddedSchemas, $ref)) {
-      fullSchema = resolved;
-    }
+    const inheritedRoot = Object.hasOwn(embeddedSchemas, $ref)
+      ? resolved
+      : fullSchema;
+    const resolvedRoot = cfcSchemaChildRoot(resolved, inheritedRoot);
     if (Object.keys(rest).length > 0) {
       if (isRecord(resolved)) {
+        const definitions = resolved.$defs ??
+          (isRecord(resolvedRoot) ? resolvedRoot.$defs : undefined);
         schemaObj = {
           ...resolved,
           ...rest,
-          ...(isRecord(fullSchema) && fullSchema.$defs &&
-            { $defs: fullSchema.$defs }),
+          ...(definitions !== undefined && { $defs: definitions }),
         } as JSONSchemaObj;
       } else {
         schemaObj = {
@@ -579,10 +582,12 @@ const resolveCfcSchemaRefsUncached = (
           ...rest,
         } as JSONSchemaObj;
       }
+      fullSchema = cfcSchemaChildRoot(schemaObj, resolvedRoot);
     } else if (typeof resolved === "boolean") {
       return resolved;
     } else {
       schemaObj = resolved;
+      fullSchema = resolvedRoot;
     }
   }
 };

@@ -9,6 +9,7 @@ import {
   findCfcSchemaRefs,
   pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,
+  resolveCfcSchemaRefs,
   selectReferencedCfcSchemaDefs,
 } from "../src/cfc/schema-refs.ts";
 
@@ -195,6 +196,57 @@ describe("ContextualFlowControl.schemaAtPath", () => {
         type: "array",
         items: { type: "number" },
       });
+  });
+
+  it("uses each anyOf branch's local definitions", () => {
+    const cfc = new ContextualFlowControl();
+    const schema = deepFreeze({
+      anyOf: [
+        {
+          $ref: "#/$defs/Obj",
+          $defs: {
+            Obj: {
+              type: "object",
+              properties: { a: { type: "string" } },
+              additionalProperties: false,
+            },
+          },
+        },
+        {
+          $ref: "#/$defs/Obj",
+          $defs: {
+            Obj: {
+              type: "object",
+              properties: { b: { type: "number" } },
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+      $defs: { Obj: { type: "null" } },
+    } as JSONSchemaObj);
+
+    expect(cfc.schemaAtPath(schema, ["a"], undefined, true, false)).toEqual({
+      type: "string",
+    });
+    expect(cfc.schemaAtPath(schema, ["b"], undefined, true, false)).toEqual({
+      type: "number",
+    });
+  });
+
+  it("descends through object and array type unions containing undefined", () => {
+    const cfc = new ContextualFlowControl();
+    const objectSchema = deepFreeze({
+      type: ["object", "undefined"],
+      properties: { x: { type: "string" } },
+    } as JSONSchemaObj);
+    const arraySchema = deepFreeze({
+      type: ["array", "undefined"],
+      items: { type: "number" },
+    } as JSONSchemaObj);
+
+    expect(cfc.schemaAtPath(objectSchema, ["x"])).toEqual({ type: "string" });
+    expect(cfc.schemaAtPath(arraySchema, ["0"])).toEqual({ type: "number" });
   });
 
   it("drops definitions that the derived schema cannot reach", () => {
@@ -492,6 +544,37 @@ describe("CFC schema reference discovery", () => {
     }
   });
 
+  it("preserves child-local definitions on a referenced definition body", () => {
+    const entry: JSONSchema = {
+      type: "object",
+      properties: { value: { $ref: "#/$defs/Value" } },
+      $defs: { Value: { type: "string", default: "local" } },
+    };
+    const schema: JSONSchema = {
+      $defs: {
+        Entry: entry,
+        Value: { type: "number", default: 1 },
+      },
+    };
+
+    expect(resolveCfcSchemaRef(schema, "#/$defs/Entry")).toEqual(entry);
+  });
+
+  it("switches roots across chained child-local references", () => {
+    const schema: JSONSchemaObj = {
+      $ref: "#/$defs/Entry",
+      $defs: {
+        Entry: {
+          $ref: "#/$defs/Value",
+          $defs: { Value: { type: "string" } },
+        },
+        Value: { type: "number" },
+      },
+    };
+
+    expect(resolveCfcSchemaRefs(schema)).toMatchObject({ type: "string" });
+  });
+
   it("preserves nested definition scope boundaries while pruning", () => {
     const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {
@@ -543,6 +626,30 @@ describe("schemaHasIfc", () => {
               ifc: {
                 confidentiality: [cfcAtom.resource("NestedSecret")],
               },
+            },
+          },
+        },
+      },
+    };
+
+    expect(schemaHasIfc(schema)).toBe(true);
+  });
+
+  it("tracks shared refs separately for each local definition root", () => {
+    const shared = { $ref: "#/$defs/V" } as const;
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        clean: {
+          allOf: [shared],
+          $defs: { V: { type: "string" } },
+        },
+        tainted: {
+          allOf: [shared],
+          $defs: {
+            V: {
+              type: "string",
+              ifc: { confidentiality: [cfcAtom.resource("Secret")] },
             },
           },
         },

@@ -89,6 +89,7 @@ import {
   extractDefaultValues,
   mergeSchemaDefaults,
   sanitizeDebugLabel,
+  schemaAcceptsOpaqueCellValue,
   setRunnableName,
   validateAndCheckReactives,
 } from "./runner-utils.ts";
@@ -115,6 +116,8 @@ export {
   extractDefaultValues,
   mergeObjects,
   mergeSchemaDefaults,
+  schemaAcceptsOpaqueCellValue,
+  schemaHasDefaultValue,
   validateAndCheckReactives,
 } from "./runner-utils.ts";
 
@@ -1172,7 +1175,7 @@ export class Runner {
         pattern.argumentSchema,
         validationArgument,
         pattern.argumentSchema,
-        { acceptOpaqueValue: isCell },
+        { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
       );
       if (validationFailure !== undefined) {
         throw new Error(

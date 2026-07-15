@@ -2,9 +2,11 @@ import {
   type FabricValue,
   isFabricPlainObject,
   shallowMutableClone,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   isModule,
@@ -13,6 +15,8 @@ import {
   type Module,
   type Pattern,
 } from "./builder/types.ts";
+import { isCell, isStream } from "./cell.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { isCellLink } from "./link-utils.ts";
 import { type SigilLink, type URI } from "./sigil-types.ts";
 import {
@@ -21,6 +25,32 @@ import {
   resolveCfcSchemaRefs,
 } from "./cfc/schema-refs.ts";
 import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
+
+const schemaDefaultValueEqual = (left: unknown, right: unknown): boolean => {
+  try {
+    return valueEqual(left as FabricValue, right as FabricValue);
+  } catch {
+    if (Object.is(left, right)) return true;
+    try {
+      return deepEqual(left, right);
+    } catch {
+      return false;
+    }
+  }
+};
+
+/** Whether an opaque Cell materialization matches this schema's wrapper. */
+export const schemaAcceptsOpaqueCellValue = (
+  value: unknown,
+  schema: JSONSchema,
+): boolean => {
+  if (!isCell(value)) return false;
+  const expectedKind = ContextualFlowControl.getAsCellKind(
+    ContextualFlowControl.getAsCellValues(schema).at(0),
+  );
+  return expectedKind !== undefined &&
+    (expectedKind === "stream") === isStream(value);
+};
 
 export function setRunnableName<T extends object & { src?: string }>(
   target: T,
@@ -166,21 +196,41 @@ export function extractDefaultValues(
   schema: JSONSchema,
   fullSchema: JSONSchema = schema,
 ): FabricValue {
-  return extractDefaultValuesInternal(schema, fullSchema, new WeakMap());
+  const extracted = extractDefaultValuesInternal(
+    schema,
+    fullSchema,
+    new WeakMap(),
+  );
+  return extracted === NO_SCHEMA_DEFAULT ? undefined : extracted;
 }
+
+/** Whether extraction found a default, including an explicit `undefined`. */
+export function schemaHasDefaultValue(
+  schema: JSONSchema,
+  fullSchema: JSONSchema = schema,
+): boolean {
+  return extractDefaultValuesInternal(schema, fullSchema, new WeakMap()) !==
+    NO_SCHEMA_DEFAULT;
+}
+
+const NO_SCHEMA_DEFAULT = Symbol("no-schema-default");
 
 function extractDefaultValuesInternal(
   schema: JSONSchema,
   fullSchema: JSONSchema,
   activeSchemasByRoot: WeakMap<object, WeakSet<object>>,
-): FabricValue {
-  if (typeof schema !== "object" || schema === null) return undefined;
+): FabricValue | typeof NO_SCHEMA_DEFAULT {
+  if (typeof schema !== "object" || schema === null) {
+    return NO_SCHEMA_DEFAULT;
+  }
 
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const resolved = schema.$ref
     ? resolveCfcSchemaRefs(schema, schemaRoot)
     : schema;
-  if (typeof resolved !== "object" || resolved === null) return undefined;
+  if (typeof resolved !== "object" || resolved === null) {
+    return NO_SCHEMA_DEFAULT;
+  }
   const resolvedRoot = cfcSchemaChildRoot(
     resolved,
     schema.$ref ? resolveCfcSchemaRefRoot(schema, schemaRoot) : schemaRoot,
@@ -191,7 +241,7 @@ function extractDefaultValuesInternal(
     ? resolvedRoot
     : canonical;
   let activeSchemas = activeSchemasByRoot.get(rootKey);
-  if (activeSchemas?.has(canonical)) return undefined;
+  if (activeSchemas?.has(canonical)) return NO_SCHEMA_DEFAULT;
   if (!activeSchemas) {
     activeSchemas = new WeakSet();
     activeSchemasByRoot.set(rootKey, activeSchemas);
@@ -200,9 +250,19 @@ function extractDefaultValuesInternal(
 
   try {
     if (
-      canonical.type === "object" && canonical.properties &&
+      (canonical.type === "object" ||
+        Array.isArray(canonical.type) && canonical.type.includes("object")) &&
+      canonical.properties &&
       isRecord(canonical.properties)
     ) {
+      if (
+        Object.hasOwn(canonical, "default") &&
+        !isRecord(canonical.default)
+      ) {
+        return canonical.default;
+      }
+      const hasObjectDefault = Object.hasOwn(canonical, "default") &&
+        isRecord(canonical.default);
       // Mutable top-level copy of the schema default, so injecting top-level
       // property defaults below doesn't mutate the schema's own default object.
       // Only top-level keys are written here, and the result is normalized
@@ -221,7 +281,7 @@ function extractDefaultValuesInternal(
           resolvedRoot,
           activeSchemasByRoot,
         );
-        if (value !== undefined) {
+        if (value !== NO_SCHEMA_DEFAULT) {
           obj[propKey] = value;
         }
       }
@@ -232,10 +292,33 @@ function extractDefaultValuesInternal(
       // deep-frozen result wherever the schema's own defaults are already frozen
       // -- which a downstream `cloneIfNecessary(_, { frozen: true })` can then
       // reuse by identity instead of re-cloning.
-      return Object.keys(obj).length > 0 ? Object.freeze(obj) : undefined;
+      return Object.keys(obj).length > 0 || hasObjectDefault
+        ? Object.freeze(obj)
+        : NO_SCHEMA_DEFAULT;
     }
 
-    return canonical.default;
+    const alternatives = canonical.anyOf ?? canonical.oneOf;
+    if (Array.isArray(alternatives)) {
+      if (Object.hasOwn(canonical, "default")) return canonical.default;
+      const defaults = alternatives.flatMap((branch) => {
+        const value = extractDefaultValuesInternal(
+          branch,
+          resolvedRoot,
+          activeSchemasByRoot,
+        );
+        return value === NO_SCHEMA_DEFAULT ? [] : [value];
+      });
+      if (
+        defaults.length > 0 &&
+        defaults.every((value) => schemaDefaultValueEqual(value, defaults[0]))
+      ) {
+        return defaults[0];
+      }
+    }
+
+    return Object.hasOwn(canonical, "default")
+      ? canonical.default
+      : NO_SCHEMA_DEFAULT;
   } finally {
     activeSchemas.delete(canonical);
   }
@@ -293,7 +376,7 @@ export function mergeObjects<T>(
  */
 export function mergeSchemaDefaults<T>(
   value: T | undefined,
-  defaults: Partial<T> | undefined,
+  defaults: unknown,
   schema: JSONSchema,
   options: { mergeMaterializedLinks?: boolean } = {},
 ): T {
@@ -315,6 +398,91 @@ function mergeSchemaDefaultsInternal(
   valuePresent: boolean,
   mergeMaterializedLinks: boolean,
 ): unknown {
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const resolved = typeof schema === "object" && schema !== null && schema.$ref
+    ? resolveCfcSchemaRefs(schema, schemaRoot)
+    : schema;
+  const resolvedRoot = cfcSchemaChildRoot(
+    resolved ?? schema,
+    typeof schema === "object" && schema !== null && schema.$ref
+      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
+      : schemaRoot,
+  );
+
+  if (
+    valuePresent && isFabricPlainObject(value as FabricValue) &&
+    typeof resolved === "object" && resolved !== null &&
+    (Array.isArray(resolved.anyOf) || Array.isArray(resolved.oneOf))
+  ) {
+    const {
+      anyOf,
+      oneOf,
+      default: _unionDefault,
+      ...baseSchema
+    } = resolved;
+    const baseDefaults = extractDefaultValues(baseSchema, resolvedRoot);
+    const candidates: unknown[] = [];
+    for (const branch of [...(anyOf ?? []), ...(oneOf ?? [])]) {
+      let candidate = value;
+      if (baseDefaults !== undefined) {
+        candidate = mergeSchemaDefaultsInternal(
+          candidate,
+          baseDefaults,
+          baseSchema,
+          resolvedRoot,
+          true,
+          mergeMaterializedLinks,
+        );
+      }
+      const branchDefaults = extractDefaultValues(branch, resolvedRoot);
+      if (branchDefaults !== undefined) {
+        candidate = mergeSchemaDefaultsInternal(
+          candidate,
+          branchDefaults,
+          branch,
+          resolvedRoot,
+          true,
+          mergeMaterializedLinks,
+        );
+      }
+      if (
+        validateSchemaValue(branch, candidate, resolvedRoot) === undefined &&
+        validateSchemaValue(resolved, candidate, resolvedRoot) === undefined
+      ) {
+        candidates.push(candidate);
+      }
+    }
+    if (
+      candidates.length > 0 &&
+      candidates.every((candidate) =>
+        schemaDefaultValueEqual(candidate, candidates[0])
+      )
+    ) {
+      return candidates[0];
+    }
+    return value;
+  }
+
+  if (
+    valuePresent && isFabricPlainObject(value as FabricValue) &&
+    typeof resolved === "object" && resolved !== null &&
+    Array.isArray(resolved.type) && resolved.type.includes("object")
+  ) {
+    const { default: _unionDefault, ...objectSchema } = resolved;
+    const objectDefaults = extractDefaultValues(
+      { ...objectSchema, type: "object" },
+      resolvedRoot,
+    );
+    return objectDefaults === undefined ? value : mergeSchemaDefaultsInternal(
+      value,
+      objectDefaults,
+      { ...objectSchema, type: "object" },
+      resolvedRoot,
+      true,
+      mergeMaterializedLinks,
+    );
+  }
+
   if (defaults === undefined) return value;
   if (
     !isFabricPlainObject(defaults) || isCellLink(defaults)
@@ -332,16 +500,6 @@ function mergeSchemaDefaultsInternal(
     return value;
   }
 
-  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
-  const resolved = typeof schema === "object" && schema !== null && schema.$ref
-    ? resolveCfcSchemaRefs(schema, schemaRoot)
-    : schema;
-  const resolvedRoot = cfcSchemaChildRoot(
-    resolved ?? schema,
-    typeof schema === "object" && schema !== null && schema.$ref
-      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
-      : schemaRoot,
-  );
   const existing = valuePresent ? value as Record<string, unknown> : {};
   const result: Record<string, unknown> = { ...existing };
   // Object-shaped unions (including Common Fabric's non-standard
