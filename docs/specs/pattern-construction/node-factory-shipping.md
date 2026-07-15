@@ -890,6 +890,18 @@ pairing supplies concrete generic arguments and named-type identity. Canonical
 source lookup may recover non-generic local or exported declarations, but it
 must never substitute an uninstantiated generic declaration such as `Box<T>`
 for an authored `Box<string>`.
+A detached synthetic node only adds structure when it still carries every
+syntax-only obligation needed by that structure. In particular, an inferred
+CFC alias that retains `ownerPrincipal` or a `TrustedActionWrite` UI contract
+but has already erased a `WriteAuthorizedBy<..., typeof binding>` query becomes
+metadata-only: it must not attach a new array or object shape that shadows the
+destination cell's complete trusted schema. An unrelated descendant `typeof`
+query or a writer claim on a sibling path does not satisfy the missing writer
+obligation. The same rule applies to compiler-qualified
+`__cfHelpers.TrustedActionWrite` and `__cfHelpers.WriteAuthorizedBy` nodes.
+`Default` syntax and an explicit writer-binding query at the obligation's own
+alias argument remain eligible; partial trusted metadata never becomes
+authoritative merely because an exact semantic type is paired with the node.
 
 The helper is part of the first argument expression. It does not add a fourth
 argument to `pattern()` and is not author-facing API. The public callback type

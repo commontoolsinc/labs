@@ -33,6 +33,11 @@ import { containsFactoryType } from "./factory-formatter.ts";
 
 type WrapperKind = CellWrapperKind;
 const CFC_ALIAS_NAMES: ReadonlySet<string> = new Set(CFC_CANONICAL_ALIAS_NAMES);
+const CFC_WRITER_ALIAS_NAMES: ReadonlySet<string> = new Set([
+  "WriteAuthorizedBy",
+  "TrustedActionWrite",
+  "TrustedActionWriteWithIntegrity",
+]);
 const SCOPE_WRAPPER_SCOPES: Readonly<Record<string, SchemaScope>> = {
   PerSpace: "space",
   PerUser: "user",
@@ -472,10 +477,16 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    const innerSchema = this.schemaGenerator.formatChildType(
+    let innerSchema = this.schemaGenerator.formatChildType(
       innerType,
       childContext,
       innerTypeNode,
+    );
+    innerSchema = this.fallbackForIncompleteWriterSchema(
+      innerType,
+      innerTypeNode,
+      innerSchema,
+      childContext,
     );
 
     if (wrapperKind === "Stream") {
@@ -671,11 +682,27 @@ export class CommonFabricFormatter implements TypeFormatter {
       }
     }
 
-    const innerSchema = this.schemaGenerator.formatChildType(
+    let innerSchema = this.schemaGenerator.formatChildType(
       innerType,
       childContext,
       shouldPassTypeNode ? innerTypeNode : undefined,
     );
+
+    // TypeScript erases `typeof binding` to the binding's structural type when
+    // it reconstructs an inferred return annotation. A synthetic CFC alias can
+    // therefore retain trusted companion metadata while losing one or more
+    // writer identities. Keep the metadata-only fallback whenever a writer
+    // alias's own binding argument is no longer an explicit `typeof` query:
+    // adding the synthetic node's object/array shape would shadow the
+    // destination cell's complete trusted schema.
+    if (shouldPassTypeNode && innerTypeNode) {
+      innerSchema = this.fallbackForIncompleteWriterSchema(
+        innerType,
+        innerTypeNode,
+        innerSchema,
+        childContext,
+      );
+    }
 
     // Stream<T>: can also reflect inner Cell-ness
     if (wrapperKind === "Stream") {
@@ -801,6 +828,153 @@ export class CommonFabricFormatter implements TypeFormatter {
       return false;
     }
     return this.isUnusableInnerType(numericIndex);
+  }
+
+  private hasIncompleteWriterIdentityObligation(
+    type: ts.Type,
+    node: ts.TypeNode,
+    context: GenerationContext,
+  ): boolean {
+    if (
+      this.nodeHasIncompleteWriterIdentityObligation(
+        node,
+        context,
+      )
+    ) {
+      return true;
+    }
+    const resolved = this.resolveCfcAliasInstantiation(
+      type as TypeWithInternals,
+      { ...context, typeNode: node },
+    );
+    if (!resolved) return false;
+    if (CFC_WRITER_ALIAS_NAMES.has(resolved.aliasName)) {
+      return !this.writerBindingNodeIsComplete(resolved.aliasArgNodes?.[1]);
+    }
+    return (resolved.aliasArgNodes ?? []).some((argument) =>
+      this.nodeHasIncompleteWriterIdentityObligation(argument, context)
+    );
+  }
+
+  private writerAliasName(
+    typeName: ts.EntityName,
+  ): string | undefined {
+    if (ts.isIdentifier(typeName)) {
+      return CFC_WRITER_ALIAS_NAMES.has(typeName.text)
+        ? typeName.text
+        : undefined;
+    }
+    if (
+      ts.isIdentifier(typeName.left) &&
+      typeName.left.text === "__cfHelpers" &&
+      CFC_WRITER_ALIAS_NAMES.has(typeName.right.text)
+    ) {
+      return typeName.right.text;
+    }
+    return undefined;
+  }
+
+  private writerBindingNodeIsComplete(
+    node: ts.TypeNode | undefined,
+  ): boolean {
+    return !!node && ts.isTypeQueryNode(node) &&
+      ts.isIdentifier(node.exprName);
+  }
+
+  private nodeHasIncompleteWriterIdentityObligation(
+    node: ts.Node,
+    context: GenerationContext,
+    visitedAliases: ReadonlySet<ts.TypeAliasDeclaration> = new Set(),
+  ): boolean {
+    if (ts.isTypeReferenceNode(node)) {
+      if (this.writerAliasName(node.typeName)) {
+        return !this.writerBindingNodeIsComplete(node.typeArguments?.[1]);
+      }
+
+      if (
+        (node.typeArguments ?? []).some((argument) =>
+          this.nodeHasIncompleteWriterIdentityObligation(
+            argument,
+            context,
+            visitedAliases,
+          )
+        )
+      ) {
+        return true;
+      }
+
+      if (ts.isIdentifier(node.typeName)) {
+        const declaration = this.getTypeAliasDeclarationForSymbol(
+          context.typeChecker.getSymbolAtLocation(node.typeName),
+          context,
+        );
+        if (declaration && !visitedAliases.has(declaration)) {
+          const paramNodeMap = new Map<string, ts.TypeNode>();
+          for (
+            let index = 0;
+            index < (declaration.typeParameters?.length ?? 0);
+            index++
+          ) {
+            const name = declaration.typeParameters?.[index]?.name.text;
+            const argument = node.typeArguments?.[index];
+            if (name && argument) {
+              paramNodeMap.set(name, argument);
+            }
+          }
+          const nextVisited = new Set(visitedAliases);
+          nextVisited.add(declaration);
+          return this.nodeHasIncompleteWriterIdentityObligation(
+            this.substituteTypeNode(declaration.type, paramNodeMap),
+            context,
+            nextVisited,
+          );
+        }
+      }
+    }
+
+    let incomplete = false;
+    node.forEachChild((child) => {
+      if (!incomplete) {
+        incomplete = this.nodeHasIncompleteWriterIdentityObligation(
+          child,
+          context,
+          visitedAliases,
+        );
+      }
+    });
+    return incomplete;
+  }
+
+  private fallbackForIncompleteWriterSchema(
+    type: ts.Type,
+    node: ts.TypeNode,
+    schema: JSONSchemaMutable,
+    context: GenerationContext,
+  ): JSONSchemaMutable {
+    if (
+      !this.isSyntheticWrapperNode(node) ||
+      !this.hasIncompleteWriterIdentityObligation(
+        type,
+        node,
+        context,
+      )
+    ) {
+      return schema;
+    }
+    const semanticSchema = this.schemaGenerator.formatChildType(
+      type,
+      context,
+      undefined,
+    );
+    const semanticIfc = isRecord(semanticSchema) &&
+        isRecord(semanticSchema.ifc)
+      ? semanticSchema.ifc
+      : undefined;
+    const nodeIfc = isRecord(schema) && isRecord(schema.ifc)
+      ? schema.ifc
+      : undefined;
+    const ifc = semanticIfc ?? nodeIfc;
+    return ifc ? { ifc: { ...ifc } } : {};
   }
 
   /**
