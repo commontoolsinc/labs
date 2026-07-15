@@ -213,21 +213,20 @@ starts, so it was replaced):
   recompute is irrelevant to lane authority: any principal's accepted
   source commit may invalidate a session-lane action, and the recompute
   runs under the lane's own grant.
-- **Scoped-lane builtin egress is a decision, not an inheritance.** Naively
-  applying §B.5's causal-actor rule against the lane grant's session would
-  re-import the rejected causal-origin shape for the builtin subset: a
-  session-context `generateText` over shared poll data, invalidated by
-  another principal's vote, would settle unserved on every foreign-caused
-  recompute — a permanent claim-churn generator. v1 therefore **statically
-  excludes builtins with cross-session-reachable inputs (any shared
-  space- or user-scoped read surface) from scoped-lane claims**; they stay
-  client-primary. This is a named, narrow carve-out (egress only —
-  pure derivations are unaffected, so §1's no-carve-out thesis holds for
-  integrity), chosen because the alternative — executing egress under
-  Alice's lane grant when Bob's commit caused the recompute — weakens
-  §B.5's confused-deputy protection and must not be adopted without CFC
-  owners explicitly signing off. Relaxing the carve-out on the argument
-  that the lane grant is the consent boundary is Open question 6.
+- **Scoped-lane builtin egress follows client-equivalent semantics**
+  (resolved by spec-owner review, 2026-07-15). A session-context builtin —
+  Alice's `generateText` over shared poll data — is Alice's own standing
+  side-effect that re-fires in reaction to anyone's data change. That is
+  exactly what her client does today: Bob votes, Alice's browser reruns
+  the builtin under Alice's identity while her app is open. A session lane
+  reproduces those semantics with the same exposure window (the lane
+  exists only while her session is connected), so foreign-caused
+  recomputes perform egress under the lane grant with no causal-origin
+  check. §B.5's causal-actor/sponsor-match rule remains where the
+  confused-deputy risk actually lives: the **space lane**, whose executing
+  identity is an unrelated volunteer sponsor. The one genuine extension is
+  offline user-lane egress under standing delegated keys (firing with no
+  session open) — that consent question rides Open question 1.
 - **Per-lane fencing.** Each lane grant carries a monotonic **lane
   generation**, host-internal — not a wire-protocol field on claims (§2's
   protocol-shape promise stands; claim incarnations already fence
@@ -279,28 +278,30 @@ starts, so it was replaced):
   the data-widening path — handlers and lifts writing into passed-in cells
   do not change the target's scope. Two consequences:
 
-  - **Lane-admissible writes are the output-link path only.** A lane's
-    writes to instances broader than the lane are admissible only as a
-    scoped link (declared scope at or narrower than the lane) in a
-    declared output/link slot. An action whose write surface includes
-    narrow-derived *value* writes to broader instances is **excluded from
-    scoped-lane claims and stays client-authoritative**: N session lanes
-    performing the same broad value write would be competing authoritative
-    writers — the race this design exists to end. This is a real,
-    spec-sanctioned carve-out (unlike pure derivations); shrinking it
-    means evolving scoped-cell semantics, which is Open question 7 for
-    that spec's owners. Primary enforcement lives in the runner's
-    output-scoping step (which already decides instance placement and
-    link emission); the execution firewall remains the scope-resolution
-    backstop and gains the link-shape check for broader-instance lane
-    writes.
+  - **Lane broad writes are identical across lanes by construction**
+    (resolved by spec-owner review, 2026-07-15). When a lane computation's
+    output lands in a broader instance, what the runtime's output-scoping
+    step actually writes is a **self-redirect link naming only the scope**
+    — never the user DID or session id; the reading runtime context
+    supplies those. Every lane therefore writes the byte-identical link
+    value at the identical address. Concurrent lanes racing on it are
+    convergent identical writers, not competing ones: the second lane's
+    diff elides the unchanged write, and a same-instant race retries into
+    a no-op. True narrow-to-wide **value** widening is the handler path —
+    and handlers run once per event at their origin, are unservable in v1,
+    and move via Phase 5 events later, so they are never lane-recomputed.
+    No lift carve-out is needed. Primary enforcement stays in the runner's
+    output-scoping step; the execution firewall keeps the link-shape check
+    on broader-instance lane writes as the backstop — a lane commit
+    carrying a broad *value* write indicates output-scoping failed and is
+    rejected.
   - **Wake soundness, restated.** Parked-lane wake skip is sound because
     *lane-authored* writes are so constrained: a lane's commits touch its
-    own scoped instances plus output links, never broad values. The
-    sanctioned narrow-to-wide value writes happen client-side (handlers,
-    excluded lifts), land as ordinary broad commits, and wake broader
-    lanes through the normal accepted-commit index — no scoped-lane wake
-    is involved, so skipping it loses nothing.
+    own scoped instances plus scope-naming output links whose values never
+    vary per lane. Handler-authored narrow-to-wide value writes land as
+    ordinary broad commits from their origin and wake broader lanes
+    through the normal accepted-commit index — no scoped-lane wake is
+    involved, so skipping it loses nothing.
 - **User lanes follow principal liveness** (any connected session of the
   principal) in v1; with delegated keys they may also serve wake-on-commit
   while offline, which is precisely the async-durability win PerUser state
@@ -455,7 +456,7 @@ Interactions:
 
 | Surface | Change |
 | --- | --- |
-| `packages/runner/src/scheduler/servability.ts` | context-rank classification instead of space-only rejection: `non-space-*-scope` reasons become lane-selection outcomes; narrow-derived value writes to broader instances stay client-authoritative (§4); cross-space reads stay inadmissible until C3, cross-space writes until C4 |
+| `packages/runner/src/scheduler/servability.ts` | context-rank classification instead of space-only rejection: `non-space-*-scope` reasons become lane-selection outcomes; broader-instance lane writes are validated as scope-naming links (§4); cross-space reads stay inadmissible until C3, cross-space writes until C4 |
 | `packages/runner/src/executor/executor-worker.ts` | one Runtime per lane (session/user lanes constructed on demand inside the same Worker), lane-keyed candidate/claim maps; acting context threaded to the provider. **The Worker replica must be re-keyed by effective scope key** — the client replica keys documents by declared scope because a client is single-session; a multi-lane replica holding two sessions' instances of one id collides otherwise. This re-keying (doc map, pending versions, overlays, unresolvable-read rebase, provider sync frames, lane-tagged read resolution) is the intra-Worker confidentiality boundary and is load-bearing, not a refactor detail |
 | `packages/runner/src/storage/v2-host-provider.ts` | `actingContext` on commits; host validation against claim contextKey + the live lane grant (per-lane generation); scoped point queries under the acting principal |
 | `packages/memory/v2/server.ts` / `engine.ts` | claims/settlements/wake queries keyed by contextKey (schema already carries it); lane grants with per-lane generations and host-side drain on session death; context-scoped control-event delivery (§2); the `context-lattice-claims-v1` subcapability gate on lane opening (§6); session-lane demand derivation; foreign-readers index and vector basis (C3) |
@@ -522,23 +523,21 @@ Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
    session lanes at the cost of a per-group lease/fencing design and
    shared-cache loss. The C2 latency gate (§4) decides whether this
    question must be answered before or after first enablement.
-6. **Scoped-lane builtin egress relaxation.** §3 excludes builtins with
-   cross-session-reachable inputs from scoped-lane claims in v1. The
-   candidate relaxation — the lane grant as the consent boundary, so a
-   foreign-caused recompute may perform egress under the lane's authority —
-   weakens §B.5's confused-deputy protection (another principal's commit
-   triggering egress under this session's identity) and requires CFC
-   owners to decide it explicitly.
-7. **Narrow-to-wide value writes.** Scoped-cell semantics sanction
-   narrow-derived value writes into broader cells (handlers, lifts into
-   passed-in cells) as *the* data-widening path; §4 excludes such actions
-   from scoped-lane claims to avoid competing authoritative broad writers.
-   Shrinking that carve-out means evolving scoped-cell semantics (for
-   example, mandatory link-widening for lift side writes, keeping value
-   widening handler-only — handlers move server-side in Phase 5 anyway).
-   That is a decision for the scoped-cell spec's owners, with pattern
-   migration cost on the table; this design only requires that whatever
-   rule holds is enforceable at the runner output-scoping step.
+6. **Resolved (spec-owner review, 2026-07-15) — scoped-lane builtin
+   egress.** Foreign-caused recomputes perform egress under the lane
+   grant: a scoped builtin is the user's own standing side-effect reacting
+   to anyone's data, exactly as their client executes it today, with the
+   same session-connected exposure window (§3). §B.5's causal-actor rule
+   is confined to the space lane, whose executing identity is an unrelated
+   volunteer sponsor. The offline extension (standing keys firing with no
+   session open) is consent territory and rides Open question 1.
+7. **Resolved (spec-owner review, 2026-07-15) — narrow-to-wide writes need
+   no carve-out.** Lift output widening is a scope-naming self-redirect
+   link, identical across lanes by construction (links never encode the
+   DID or session id), so concurrent lanes converge rather than compete
+   (§4). Value widening is the handler path, which is per-event at its
+   origin and never lane-recomputed. No scoped-cell semantics change is
+   required.
 
 ## 9. Parent-document edits owed by this design
 
