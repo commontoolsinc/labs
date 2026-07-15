@@ -1020,6 +1020,87 @@ describe("piece pull materialization", () => {
     }
   });
 
+  it("keeps a committed newer schema after its post-commit failure", async () => {
+    const initialProgram = compiledResultNarrowingProgram(
+      "string | number | boolean",
+    );
+    const firstProgram = compiledResultNarrowingProgram("string | number");
+    const winnerProgram = compiledResultNarrowingProgram("number");
+    const initialPattern = await runtime.patternManager.compilePattern(
+      initialProgram,
+      { space: manager.getSpace() },
+    );
+    const firstPattern = await runtime.patternManager.compilePattern(
+      firstProgram,
+      { space: manager.getSpace() },
+    );
+    const winnerPattern = await runtime.patternManager.compilePattern(
+      winnerProgram,
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      initialPattern,
+      { input: 5 },
+      "controller-post-commit-failure-" + crypto.randomUUID(),
+      { start: false },
+    );
+    const controller = new PieceController(manager, piece);
+    const firstRunReturned = defer<void>();
+    const releaseFirstRun = defer<void>();
+    const originalRunWithPattern = manager.runWithPattern;
+    manager.runWithPattern = async (
+      pattern,
+      pieceId,
+      inputs,
+      options,
+    ) => {
+      const cell = await originalRunWithPattern.call(
+        manager,
+        pattern,
+        pieceId,
+        inputs,
+        options,
+      );
+      if (pattern === firstPattern) {
+        firstRunReturned.resolve();
+        await releaseFirstRun.promise;
+      } else if (pattern === winnerPattern) {
+        throw new Error("injected post-commit failure");
+      }
+      return cell;
+    };
+    const originalCompile = runtime.patternManager.compilePattern.bind(
+      runtime.patternManager,
+    );
+    runtime.patternManager.compilePattern = (async (program, options) => {
+      if (program === firstProgram) return firstPattern;
+      if (program === winnerProgram) return winnerPattern;
+      return await originalCompile(program, options);
+    }) as typeof runtime.patternManager.compilePattern;
+
+    try {
+      const firstUpdate = controller.setPattern(firstProgram);
+      await firstRunReturned.promise;
+      await expect(controller.setPattern(winnerProgram)).rejects.toThrow(
+        /injected post-commit failure/,
+      );
+      expect(getPatternIdentityRef(piece)).toEqual(
+        runtime.patternManager.getArtifactEntryRef(winnerPattern),
+      );
+
+      releaseFirstRun.resolve();
+      await firstUpdate;
+
+      expect(controller.getCell().getAsNormalizedFullLink().schema).toEqual(
+        winnerPattern.resultSchema,
+      );
+    } finally {
+      releaseFirstRun.resolve();
+      manager.runWithPattern = originalRunWithPattern;
+      runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
   it("rechecks the durable identity after loading the winner's schema", async () => {
     const initialPattern = await runtime.patternManager.compilePattern(
       compiledResultNarrowingProgram("string | number | boolean"),

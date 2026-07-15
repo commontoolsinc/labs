@@ -93,6 +93,22 @@ export const cfcSchemaToObject = (schema?: JSONSchema): JSONSchemaObj =>
     ? { not: true }
     : schema;
 
+/**
+ * Return the local-ref root for a schema child. In CFC schemas a subtree that
+ * declares its own `$defs` starts a new `#/...` scope; otherwise local refs
+ * continue to resolve against the inherited document root. Ref resolution may
+ * attach the inherited `$defs` object to a standalone resolved view; sharing
+ * that exact definitions object does not create another scope.
+ */
+export const cfcSchemaChildRoot = (
+  schema: JSONSchema,
+  inheritedRoot: JSONSchema,
+): JSONSchema =>
+  isRecord(schema) && isRecord(schema.$defs) &&
+    !(isRecord(inheritedRoot) && schema.$defs === inheritedRoot.$defs)
+    ? schema
+    : inheritedRoot;
+
 export const cfcSchemaIsInternalKey = (key: string): boolean =>
   key === "ifc" || key === "asCell" || key === "asStream" ||
   key === "scope";

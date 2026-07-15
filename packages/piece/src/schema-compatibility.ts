@@ -5,6 +5,7 @@ import {
   type Pattern,
 } from "@commonfabric/runner";
 import {
+  cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
   validateSchemaDefinition,
@@ -23,8 +24,13 @@ interface CompatibilityContext {
   sourceRoot: JSONSchema;
   targetRoot: JSONSchema;
   role: SchemaRole;
-  activePairs: WeakMap<object, WeakSet<object>>;
+  activePairs: ActivePairsByRoot;
 }
+
+type ActivePairsByRoot = WeakMap<
+  object,
+  WeakMap<object, WeakMap<object, WeakSet<object>>>
+>;
 
 const ANNOTATION_KEYS = new Set([
   "$comment",
@@ -178,8 +184,8 @@ function schemaSubsetIssue(
     return `${path}: the candidate schema rejects values accepted previously`;
   }
 
-  if (pairIsActive(source, target, context.activePairs)) return undefined;
-  markPairActive(source, target, context.activePairs);
+  if (pairIsActive(source, target, context)) return undefined;
+  markPairActive(source, target, context);
   try {
     const sourceAlternatives = schemaAlternatives(source);
     const targetAlternatives = schemaAlternatives(target);
@@ -241,7 +247,7 @@ function schemaSubsetIssue(
 
     return unknownKeywordIssue(source, target, path);
   } finally {
-    unmarkPairActive(source, target, context.activePairs);
+    unmarkPairActive(source, target, context);
   }
 }
 
@@ -714,33 +720,54 @@ function resolveSchema(
   schema: JSONSchema,
   root: JSONSchema,
 ): { schema: JSONSchema | undefined; root: JSONSchema } {
+  const schemaRoot = cfcSchemaChildRoot(schema, root);
   const hasRef = typeof schema === "object" && schema !== null &&
     typeof schema.$ref === "string";
-  const owningRoot = hasRef ? resolveCfcSchemaRefRoot(schema, root) : root;
-  const resolved = hasRef ? resolveCfcSchemaRefs(schema, root) : schema;
+  const owningRoot = hasRef
+    ? resolveCfcSchemaRefRoot(schema, schemaRoot)
+    : schemaRoot;
+  const resolved = hasRef ? resolveCfcSchemaRefs(schema, schemaRoot) : schema;
   return {
     schema: resolved === undefined ? undefined : internSchema(resolved),
-    root: owningRoot,
+    root: resolved === undefined
+      ? owningRoot
+      : cfcSchemaChildRoot(resolved, owningRoot),
   };
 }
 
 function pairIsActive(
   source: object,
   target: object,
-  activePairs: WeakMap<object, WeakSet<object>>,
+  context: CompatibilityContext,
 ): boolean {
-  return activePairs.get(source)?.has(target) === true;
+  const sourceRoot = compatibilityRootKey(context.sourceRoot, source);
+  const targetRoot = compatibilityRootKey(context.targetRoot, target);
+  return context.activePairs.get(sourceRoot)?.get(targetRoot)?.get(source)?.has(
+    target,
+  ) === true;
 }
 
 function markPairActive(
   source: object,
   target: object,
-  activePairs: WeakMap<object, WeakSet<object>>,
+  context: CompatibilityContext,
 ): void {
-  let targets = activePairs.get(source);
+  const sourceRoot = compatibilityRootKey(context.sourceRoot, source);
+  const targetRoot = compatibilityRootKey(context.targetRoot, target);
+  let byTargetRoot = context.activePairs.get(sourceRoot);
+  if (!byTargetRoot) {
+    byTargetRoot = new WeakMap();
+    context.activePairs.set(sourceRoot, byTargetRoot);
+  }
+  let bySource = byTargetRoot.get(targetRoot);
+  if (!bySource) {
+    bySource = new WeakMap();
+    byTargetRoot.set(targetRoot, bySource);
+  }
+  let targets = bySource.get(source);
   if (!targets) {
     targets = new WeakSet();
-    activePairs.set(source, targets);
+    bySource.set(source, targets);
   }
   targets.add(target);
 }
@@ -748,9 +775,20 @@ function markPairActive(
 function unmarkPairActive(
   source: object,
   target: object,
-  activePairs: WeakMap<object, WeakSet<object>>,
+  context: CompatibilityContext,
 ): void {
-  activePairs.get(source)?.delete(target);
+  const sourceRoot = compatibilityRootKey(context.sourceRoot, source);
+  const targetRoot = compatibilityRootKey(context.targetRoot, target);
+  context.activePairs.get(sourceRoot)?.get(targetRoot)?.get(source)?.delete(
+    target,
+  );
+}
+
+function compatibilityRootKey(
+  root: JSONSchema,
+  fallback: object,
+): object {
+  return typeof root === "object" && root !== null ? root : fallback;
 }
 
 function unknownKeywordIssue(

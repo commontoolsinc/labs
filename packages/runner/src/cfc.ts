@@ -13,6 +13,7 @@ import { isSchemaScope } from "./scope.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
+  cfcSchemaChildRoot,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,
@@ -198,15 +199,6 @@ const schemaAtPathKey = (
 // Class for handling cfc rules.
 // The spec's confidentiality model is based on structured atoms.
 export class ContextualFlowControl {
-  private static childFullSchema(
-    schema: JSONSchema,
-    fallback: JSONSchema,
-  ): JSONSchema {
-    // Once a subtree carries its own $defs, that subtree becomes the root for
-    // resolving deeper local $refs. Otherwise keep the inherited root schema.
-    return isRecord(schema) && isRecord(schema.$defs) ? schema : fallback;
-  }
-
   static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
     return uniqueCfcAtoms(atoms);
   }
@@ -270,7 +262,7 @@ export class ContextualFlowControl {
             ContextualFlowControl.joinSchema(
               joined,
               branch as JSONSchema,
-              ContextualFlowControl.childFullSchema(
+              cfcSchemaChildRoot(
                 branch as JSONSchema,
                 fullSchema,
               ),
@@ -289,7 +281,7 @@ export class ContextualFlowControl {
           ContextualFlowControl.joinSchema(
             joined,
             item,
-            ContextualFlowControl.childFullSchema(item, fullSchema),
+            cfcSchemaChildRoot(item, fullSchema),
             cycleTracker,
           );
         }
@@ -300,7 +292,7 @@ export class ContextualFlowControl {
         ContextualFlowControl.joinSchema(
           joined,
           value,
-          ContextualFlowControl.childFullSchema(value, fullSchema),
+          cfcSchemaChildRoot(value, fullSchema),
           cycleTracker,
         );
       }
@@ -312,7 +304,7 @@ export class ContextualFlowControl {
       ContextualFlowControl.joinSchema(
         joined,
         schema.additionalProperties,
-        ContextualFlowControl.childFullSchema(
+        cfcSchemaChildRoot(
           schema.additionalProperties,
           fullSchema,
         ),
@@ -323,7 +315,7 @@ export class ContextualFlowControl {
       ContextualFlowControl.joinSchema(
         joined,
         schema.items,
-        ContextualFlowControl.childFullSchema(schema.items, fullSchema),
+        cfcSchemaChildRoot(schema.items, fullSchema),
         cycleTracker,
       );
     } else if (schema.$ref) {

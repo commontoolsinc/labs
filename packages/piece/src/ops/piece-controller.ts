@@ -76,7 +76,7 @@ export class PieceController<T = unknown> {
   #cell: Cell<T>;
   #manager: PieceManager;
   #mutationVersion = 0;
-  #failedMutationVersions = new Set<number>();
+  #latestSuccessfulMutationVersion = 0;
   readonly id: string;
 
   input: PieceCellIo;
@@ -202,19 +202,25 @@ export class PieceController<T = unknown> {
   ): Promise<void> {
     try {
       const cell = await operation();
-      if (mutationVersion === this.#mutationVersion) this.#cell = cell;
-      for (const failed of this.#failedMutationVersions) {
-        if (failed <= mutationVersion) {
-          this.#failedMutationVersions.delete(failed);
-        }
+      this.#latestSuccessfulMutationVersion = Math.max(
+        this.#latestSuccessfulMutationVersion,
+        mutationVersion,
+      );
+      if (mutationVersion === this.#mutationVersion) {
+        this.#cell = cell;
+      } else if (
+        this.#latestSuccessfulMutationVersion === mutationVersion
+      ) {
+        // A newer mutation may have committed while this one was doing
+        // post-commit work. If no newer mutation succeeded, reconcile from
+        // durable identity instead of installing this now-stale schema view.
+        await this.#refreshCellSchema(this.#mutationVersion);
       }
     } catch (error) {
-      this.#failedMutationVersions.add(mutationVersion);
-      const previousVersion = this.#mutationVersion;
-      while (this.#failedMutationVersions.delete(this.#mutationVersion)) {
-        this.#mutationVersion--;
-      }
-      if (this.#mutationVersion !== previousVersion) {
+      // A rejection is not evidence that setup did not commit: syncPattern()
+      // and result pull both run after the atomic setup. Keep mutation versions
+      // monotonic and reload the schema attached to the durable winner.
+      if (this.#latestSuccessfulMutationVersion <= mutationVersion) {
         await this.#refreshCellSchema(this.#mutationVersion);
       }
       throw error;

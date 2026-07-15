@@ -16,6 +16,7 @@ import {
 import { isCellLink } from "./link-utils.ts";
 import { type SigilLink, type URI } from "./sigil-types.ts";
 import {
+  cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
 } from "./cfc/schema-refs.ts";
@@ -165,26 +166,36 @@ export function extractDefaultValues(
   schema: JSONSchema,
   fullSchema: JSONSchema = schema,
 ): FabricValue {
-  return extractDefaultValuesInternal(schema, fullSchema, new WeakSet());
+  return extractDefaultValuesInternal(schema, fullSchema, new WeakMap());
 }
 
 function extractDefaultValuesInternal(
   schema: JSONSchema,
   fullSchema: JSONSchema,
-  activeSchemas: WeakSet<object>,
+  activeSchemasByRoot: WeakMap<object, WeakSet<object>>,
 ): FabricValue {
   if (typeof schema !== "object" || schema === null) return undefined;
 
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const resolved = schema.$ref
-    ? resolveCfcSchemaRefs(schema, fullSchema)
+    ? resolveCfcSchemaRefs(schema, schemaRoot)
     : schema;
   if (typeof resolved !== "object" || resolved === null) return undefined;
-  const resolvedRoot = schema.$ref
-    ? resolveCfcSchemaRefRoot(schema, fullSchema)
-    : fullSchema;
+  const resolvedRoot = cfcSchemaChildRoot(
+    resolved,
+    schema.$ref ? resolveCfcSchemaRefRoot(schema, schemaRoot) : schemaRoot,
+  );
 
   const canonical = internSchema(resolved);
-  if (activeSchemas.has(canonical)) return undefined;
+  const rootKey = typeof resolvedRoot === "object" && resolvedRoot !== null
+    ? resolvedRoot
+    : canonical;
+  let activeSchemas = activeSchemasByRoot.get(rootKey);
+  if (activeSchemas?.has(canonical)) return undefined;
+  if (!activeSchemas) {
+    activeSchemas = new WeakSet();
+    activeSchemasByRoot.set(rootKey, activeSchemas);
+  }
   activeSchemas.add(canonical);
 
   try {
@@ -208,7 +219,7 @@ function extractDefaultValuesInternal(
         const value = extractDefaultValuesInternal(
           propSchema,
           resolvedRoot,
-          activeSchemas,
+          activeSchemasByRoot,
         );
         if (value !== undefined) {
           obj[propKey] = value;
@@ -321,30 +332,35 @@ function mergeSchemaDefaultsInternal(
     return value;
   }
 
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const resolved = typeof schema === "object" && schema !== null && schema.$ref
-    ? resolveCfcSchemaRefs(schema, fullSchema)
+    ? resolveCfcSchemaRefs(schema, schemaRoot)
     : schema;
-  const resolvedRoot = typeof schema === "object" && schema !== null &&
-      schema.$ref
-    ? resolveCfcSchemaRefRoot(schema, fullSchema)
-    : fullSchema;
-  if (
-    typeof resolved !== "object" || resolved === null ||
-    resolved.type !== "object"
-  ) {
-    return mergeObjects(value as object | undefined, defaults);
-  }
-
+  const resolvedRoot = cfcSchemaChildRoot(
+    resolved ?? schema,
+    typeof schema === "object" && schema !== null && schema.$ref
+      ? resolveCfcSchemaRefRoot(schema, schemaRoot)
+      : schemaRoot,
+  );
   const existing = valuePresent ? value as Record<string, unknown> : {};
   const result: Record<string, unknown> = { ...existing };
-  const required = new Set(resolved.required ?? []);
+  // Object-shaped unions (including Common Fabric's non-standard
+  // `type: ["object", "undefined"]`) still need presence-aware merging. A
+  // generic merge cannot distinguish an absent property from an own property
+  // whose durable value is explicitly undefined.
+  const objectSchema = typeof resolved === "object" && resolved !== null &&
+      (resolved.type === undefined || resolved.type === "object" ||
+        (Array.isArray(resolved.type) && resolved.type.includes("object")))
+    ? resolved
+    : undefined;
+  const required = new Set(objectSchema?.required ?? []);
   for (const [key, defaultValue] of Object.entries(defaults)) {
     const hasExistingValue = Object.hasOwn(existing, key);
     const existingValue = existing[key];
-    const propertySchema = resolved.properties !== undefined &&
-        Object.hasOwn(resolved.properties, key)
-      ? resolved.properties[key]
-      : resolved.additionalProperties ?? true;
+    const propertySchema = objectSchema?.properties !== undefined &&
+        Object.hasOwn(objectSchema.properties, key)
+      ? objectSchema.properties[key]
+      : objectSchema?.additionalProperties ?? true;
     const merged = mergeSchemaDefaultsInternal(
       existingValue,
       defaultValue,

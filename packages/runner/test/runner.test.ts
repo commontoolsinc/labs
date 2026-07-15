@@ -1930,6 +1930,28 @@ describe("runner utils", () => {
         warn.restore();
       }
     });
+
+    it("uses nested child-local definitions for defaults", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          nested: {
+            type: "object",
+            properties: { value: { $ref: "#/$defs/Value" } },
+            $defs: {
+              Value: { type: "string", default: "local" },
+            },
+          },
+        },
+        $defs: {
+          Value: { type: "number", default: 1 },
+        },
+      };
+
+      expect(extractDefaultValues(schema)).toEqual({
+        nested: { value: "local" },
+      });
+    });
   });
 
   describe("mergeObjects", () => {
@@ -2050,6 +2072,63 @@ describe("runner utils", () => {
 
       expect(Object.hasOwn(value, "value")).toBe(true);
       expect(value.value).toBeUndefined();
+    });
+
+    it("preserves explicitly present undefined values in object type unions", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        { value: undefined },
+        { value: "fallback" },
+        {
+          type: ["object", "undefined"],
+          properties: {
+            value: { type: ["string", "undefined"] },
+          },
+        },
+      );
+
+      expect(Object.hasOwn(value, "value")).toBe(true);
+      expect(value.value).toBeUndefined();
+    });
+
+    it("preserves explicitly present undefined values in anyOf objects", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        { value: undefined },
+        { value: "fallback" },
+        {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                value: { type: ["string", "undefined"] },
+              },
+            },
+            { type: "undefined" },
+          ],
+        },
+      );
+
+      expect(Object.hasOwn(value, "value")).toBe(true);
+      expect(value.value).toBeUndefined();
+    });
+
+    it("validates nested defaults against child-local definitions", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        { nested: {} },
+        { nested: { value: "local" } },
+        {
+          type: "object",
+          properties: {
+            nested: {
+              type: "object",
+              properties: { value: { $ref: "#/$defs/Value" } },
+              $defs: { Value: { type: "string" } },
+            },
+          },
+          $defs: { Value: { type: "number" } },
+        },
+      );
+
+      expect(value).toEqual({ nested: { value: "local" } });
     });
 
     it("does not treat inherited names as existing argument values", () => {

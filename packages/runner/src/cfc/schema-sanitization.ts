@@ -11,6 +11,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { uniqueCfcAtoms } from "./observation.ts";
 import {
+  cfcSchemaChildRoot,
   isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefRoot,
@@ -510,6 +511,13 @@ const SUPPORTED_SCHEMA_FORMATS = new Set([
   "date-time",
 ]);
 
+const isDenseArray = (value: readonly unknown[]): boolean => {
+  for (let index = 0; index < value.length; index++) {
+    if (!Object.hasOwn(value, index)) return false;
+  }
+  return true;
+};
+
 const schemaTypeDefinitionIssue = (type: unknown): string | undefined => {
   if (type === undefined) return undefined;
   const types = typeof type === "string"
@@ -519,6 +527,9 @@ const schemaTypeDefinitionIssue = (type: unknown): string | undefined => {
     : undefined;
   if (types === undefined || types.length === 0) {
     return "schema type must be a non-empty string or string array";
+  }
+  if (!isDenseArray(types)) {
+    return "schema type array must not contain holes";
   }
   if (!types.every((entry) => typeof entry === "string")) {
     return "schema type array contains a non-string entry";
@@ -634,7 +645,8 @@ const validateSchemaDefinitionInternal = (
     return `${path}: schema must be an object or boolean`;
   }
 
-  const rootKey = isRecord(fullSchema) ? fullSchema : schema;
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
   let active = context.activeByRoot.get(rootKey);
   if (active?.has(schema)) return undefined;
   if (!active) {
@@ -655,14 +667,14 @@ const validateSchemaDefinitionInternal = (
         context.activeRefsByRoot.set(rootKey, activeRefs);
       }
       activeRefs.add(schema.$ref);
-      const resolved = resolveCfcSchemaRef(fullSchema, schema.$ref);
+      const resolved = resolveCfcSchemaRef(schemaRoot, schema.$ref);
       if (resolved === undefined) {
         activeRefs.delete(schema.$ref);
         return `${path}: cannot resolve schema reference ${schema.$ref}`;
       }
       const resolvedRoot = isEmbeddedCfcSchemaRef(schema.$ref)
         ? resolved
-        : fullSchema;
+        : schemaRoot;
       const issue = validateSchemaDefinitionInternal(
         resolved,
         resolvedRoot,
@@ -698,6 +710,7 @@ const validateSchemaDefinitionInternal = (
     if (schema.required !== undefined) {
       if (
         !Array.isArray(schema.required) ||
+        !isDenseArray(schema.required) ||
         !schema.required.every((entry) => typeof entry === "string") ||
         new Set(schema.required).size !== schema.required.length
       ) {
@@ -715,6 +728,7 @@ const validateSchemaDefinitionInternal = (
       ) {
         if (
           !Array.isArray(dependencies) ||
+          !isDenseArray(dependencies) ||
           !dependencies.every((entry) => typeof entry === "string") ||
           new Set(dependencies).size !== dependencies.length
         ) {
@@ -729,7 +743,10 @@ const validateSchemaDefinitionInternal = (
       return `${path}.uniqueItems: must be a boolean`;
     }
     if (schema.enum !== undefined) {
-      if (!Array.isArray(schema.enum) || schema.enum.length === 0) {
+      if (
+        !Array.isArray(schema.enum) || schema.enum.length === 0 ||
+        !isDenseArray(schema.enum)
+      ) {
         return `${path}.enum: must be a non-empty array`;
       }
       for (let index = 0; index < schema.enum.length; index++) {
@@ -746,13 +763,16 @@ const validateSchemaDefinitionInternal = (
     for (const key of ["allOf", "anyOf", "oneOf"] as const) {
       const children = schema[key];
       if (children === undefined) continue;
-      if (!Array.isArray(children) || children.length === 0) {
+      if (
+        !Array.isArray(children) || children.length === 0 ||
+        !isDenseArray(children)
+      ) {
         return `${path}.${key}: must be a non-empty schema array`;
       }
       for (let index = 0; index < children.length; index++) {
         const issue = validateSchemaDefinitionInternal(
           children[index],
-          fullSchema,
+          schemaRoot,
           `${path}.${key}[${index}]`,
           context,
         );
@@ -760,13 +780,16 @@ const validateSchemaDefinitionInternal = (
       }
     }
     if (schema.prefixItems !== undefined) {
-      if (!Array.isArray(schema.prefixItems)) {
+      if (
+        !Array.isArray(schema.prefixItems) ||
+        !isDenseArray(schema.prefixItems)
+      ) {
         return `${path}.prefixItems: must be a schema array`;
       }
       for (let index = 0; index < schema.prefixItems.length; index++) {
         const issue = validateSchemaDefinitionInternal(
           schema.prefixItems[index],
-          fullSchema,
+          schemaRoot,
           `${path}.prefixItems[${index}]`,
           context,
         );
@@ -791,7 +814,7 @@ const validateSchemaDefinitionInternal = (
       if (child === undefined) continue;
       const issue = validateSchemaDefinitionInternal(
         child,
-        fullSchema,
+        schemaRoot,
         `${path}.${key}`,
         context,
       );
@@ -812,7 +835,7 @@ const validateSchemaDefinitionInternal = (
       for (const [name, child] of Object.entries(children)) {
         const issue = validateSchemaDefinitionInternal(
           child,
-          fullSchema,
+          schemaRoot,
           `${path}.${key}.${name}`,
           context,
         );
@@ -971,13 +994,17 @@ const validateAgainstSchemaInternal = (
 ): SchemaValidationFailure | undefined => {
   if (schema === true) return undefined;
   if (schema === false) return mismatch("schema rejects all values");
+  if (!isRecord(schema) || Array.isArray(schema)) {
+    return indeterminate("schema must be an object or boolean");
+  }
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   if (!markSchemaValueActive(schema, value, context)) {
     return indeterminate("recursive schema validation made no progress");
   }
 
   try {
     const resolved = typeof schema.$ref === "string"
-      ? resolveCfcSchemaRefs(schema, fullSchema)
+      ? resolveCfcSchemaRefs(schema, schemaRoot)
       : schema;
     if (resolved === undefined) {
       return indeterminate(`cannot resolve schema reference ${schema.$ref}`);
@@ -987,8 +1014,8 @@ const validateAgainstSchemaInternal = (
       // branch can still find sibling $defs entries, except when an embedded
       // external ref deliberately changes the owning root.
       const resolvedRoot = typeof resolved === "object" && resolved !== null
-        ? resolveCfcSchemaRefRoot(schema, fullSchema)
-        : fullSchema;
+        ? resolveCfcSchemaRefRoot(schema, schemaRoot)
+        : schemaRoot;
       return validateAgainstSchemaInternal(
         resolved,
         value,
@@ -1004,7 +1031,7 @@ const validateAgainstSchemaInternal = (
         const failure = validateAgainstSchemaInternal(
           branch,
           value,
-          fullSchema,
+          schemaRoot,
           options,
           context,
         );
@@ -1018,7 +1045,7 @@ const validateAgainstSchemaInternal = (
         const failure = validateAgainstSchemaInternal(
           branch,
           value,
-          fullSchema,
+          schemaRoot,
           options,
           context,
         );
@@ -1039,7 +1066,7 @@ const validateAgainstSchemaInternal = (
         const failure = validateAgainstSchemaInternal(
           branch,
           value,
-          fullSchema,
+          schemaRoot,
           options,
           context,
         );
@@ -1101,7 +1128,7 @@ const validateAgainstSchemaInternal = (
       const failure = validateStrictSchemaConstraints(
         schema,
         value,
-        fullSchema,
+        schemaRoot,
         options,
         context,
       );
@@ -1119,7 +1146,7 @@ const validateAgainstSchemaInternal = (
           const failure = validateAgainstSchemaInternal(
             child,
             value[key],
-            fullSchema,
+            schemaRoot,
             options,
             context,
           );
@@ -1157,7 +1184,7 @@ const validateAgainstSchemaInternal = (
             const failure = validateAgainstSchemaInternal(
               schema.additionalProperties,
               value[key],
-              fullSchema,
+              schemaRoot,
               options,
               context,
             );
@@ -1176,7 +1203,7 @@ const validateAgainstSchemaInternal = (
         const failure = validateAgainstSchemaInternal(
           schema.items,
           value[index],
-          fullSchema,
+          schemaRoot,
           options,
           context,
         );

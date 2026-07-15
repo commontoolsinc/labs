@@ -93,6 +93,37 @@ describe("piece schema compatibility", () => {
       .not.toThrow();
   });
 
+  it("rejects narrowing through nested child-local definitions", () => {
+    const argumentWithLocalValue = (value: JSONSchema) =>
+      pattern(
+        {
+          type: "object",
+          properties: {
+            nested: {
+              type: "object",
+              properties: { value: { $ref: "#/$defs/Value" } },
+              $defs: { Value: value },
+            },
+          },
+          $defs: { Value: { type: "number" } },
+        },
+        oldPattern.resultSchema,
+      );
+
+    const previous = argumentWithLocalValue({
+      type: ["number", "string"],
+    });
+    const narrowed = argumentWithLocalValue({ type: "number" });
+    const widened = argumentWithLocalValue({
+      type: ["number", "string", "undefined"],
+    });
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, narrowed))
+      .toThrow(/argument\.nested\.value/);
+    expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
+      .not.toThrow();
+  });
+
   it("keeps embedded ref roots while comparing unchanged native schemas", () => {
     const vnode = {
       $ref: "https://commonfabric.org/schemas/vnode.json",
@@ -1173,6 +1204,27 @@ describe("piece schema compatibility", () => {
       [
         argumentWith({ type: "string" }),
         argumentWith({ $ref: "" } as JSONSchema),
+      ],
+      [
+        argumentWith({ type: [, "number"] } as unknown as JSONSchema),
+        argumentWith({ type: "number" }),
+      ],
+      [
+        argumentWith({
+          type: "object",
+          required: [, "value"],
+        } as unknown as JSONSchema),
+        argumentWith({ type: "object" }),
+      ],
+      [
+        argumentWith({
+          dependentRequired: { value: [, "other"] },
+        } as unknown as JSONSchema),
+        argumentWith({ type: "object" }),
+      ],
+      [
+        argumentWith({ enum: [,] } as unknown as JSONSchema),
+        argumentWith({ type: "number" }),
       ],
     ];
     for (const [previous, candidate] of malformedCases) {

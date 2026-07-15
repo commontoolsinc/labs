@@ -13,6 +13,7 @@ import {
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
   validateAndSanitizeSchemaValueWithOpaqueLinks,
+  validateSchemaDefinition,
   validateSchemaValue,
 } from "../src/cfc/mod.ts";
 
@@ -389,6 +390,66 @@ describe("cfc schema sanitization", () => {
       label: "a@b.co",
       items: ["first", 12],
     })).toBeUndefined();
+  });
+
+  it("uses nested child-local definitions for preflight and values", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        nested: {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/Value" } },
+          $defs: { Value: { type: "string" } },
+        },
+      },
+      $defs: { Value: { type: "number" } },
+    };
+
+    expect(validateSchemaDefinition(schema)).toBeUndefined();
+    expect(validateSchemaValue(schema, { nested: { value: "local" } }))
+      .toBeUndefined();
+    expect(validateSchemaValue(schema, { nested: { value: 1 } }))
+      .toContain("value does not match type string");
+
+    const localOnlyDefinition: JSONSchema = {
+      type: "object",
+      properties: {
+        nested: {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/LocalOnly" } },
+          $defs: { LocalOnly: { type: "string" } },
+        },
+      },
+    };
+    expect(validateSchemaDefinition(localOnlyDefinition)).toBeUndefined();
+  });
+
+  it("rejects sparse schema keyword arrays without rejecting sparse values", () => {
+    const sparseType = [, "number"];
+    const sparseRequired = [, "value"];
+    const sparseDependency = [, "other"];
+    const sparseEnum = [,];
+    const sparseAnyOf = [, { type: "number" }];
+    const sparsePrefixItems = [, { type: "number" }];
+    const malformed = [
+      { type: sparseType },
+      { required: sparseRequired },
+      { dependentRequired: { value: sparseDependency } },
+      { enum: sparseEnum },
+      { anyOf: sparseAnyOf },
+      { prefixItems: sparsePrefixItems },
+    ] as unknown as JSONSchema[];
+
+    for (const schema of malformed) {
+      expect(validateSchemaDefinition(schema)).toBeDefined();
+    }
+    expect(() => validateSchemaValue(malformed[0], 1)).not.toThrow();
+
+    const sparseValue = [1, , 3];
+    expect(validateSchemaValue({
+      type: "array",
+      items: { type: "number" },
+    }, sparseValue)).toBeUndefined();
   });
 
   it("reports every strict migration constraint it cannot satisfy", () => {

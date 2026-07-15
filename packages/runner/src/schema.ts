@@ -53,6 +53,7 @@ import {
 } from "./cfc/label-view-state.ts";
 import type { CfcAddress } from "./cfc/types.ts";
 import { isCellScope } from "./scope.ts";
+import { cfcSchemaChildRoot } from "./cfc/schema-refs.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,
@@ -500,14 +501,17 @@ function _schemaHasIfcUncached(
   }
   seen.add(schema);
 
-  const schemaRoot = schema.$defs !== undefined ? schema : fullSchema ?? schema;
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema ?? schema);
   const resolved = typeof schema.$ref === "string"
     ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot)
     : schema;
   if (resolved === true || resolved === false || !isRecord(resolved)) {
     return false;
   }
-  const childFullSchema = resolved.$defs !== undefined ? resolved : fullSchema;
+  const childFullSchema = cfcSchemaChildRoot(
+    resolved,
+    schemaRoot,
+  );
   if (resolved.ifc !== undefined) {
     return true;
   }
