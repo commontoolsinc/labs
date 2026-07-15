@@ -587,6 +587,14 @@ describe("Memory v2 storage notifications", () => {
         source?: unknown,
       ) => Promise<{ ok?: unknown; error?: unknown }>;
     };
+    const repairStarted = defer<void>();
+    const retryRepair = retryRepairHarness(replica);
+    const waitForConflictReadRepair = retryRepair.waitForConflictReadRepair
+      .bind(retryRepair);
+    retryRepair.waitForConflictReadRepair = (rejection) => {
+      repairStarted.resolve();
+      return waitForConflictReadRepair(rejection);
+    };
     const firstUri = `of:memory-v2-close-retry-a-${Date.now()}` as URI;
     const secondUri = `of:memory-v2-close-retry-b-${Date.now()}` as URI;
     const factAddress = { id: firstUri, type: "application/json" as MIME };
@@ -627,6 +635,7 @@ describe("Memory v2 storage notifications", () => {
     }, staleReadSource(firstUri, 1));
     expect(replica.get(factAddress)?.is).toEqual({ value: { version: 3 } });
 
+    await repairStarted.promise;
     await storageManager.close();
     const result = await commitPromise;
     expect(result.ok).toBeFalsy();
