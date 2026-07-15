@@ -18,23 +18,22 @@ import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
-import { isCell } from "../src/cell.ts";
+import { type Cell, isCell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { encodeCfLinkValue } from "../src/builtins/sqlite/cf-link.ts";
 
-// deno-lint-ignore no-explicit-any
 async function waitUntil<T>(
   runtime: Runtime,
-  cell: any,
+  cell: Cell<T>,
   pred: (v: T) => boolean,
   iterations = 400,
 ): Promise<T> {
-  const cancel = cell.sink(() => {}) as () => void;
+  const cancel = cell.sink(() => {});
   try {
     for (let i = 0; i < iterations; i++) {
       await runtime.idle();
-      const v = cell.get() as T;
+      const v = cell.get();
       if (pred(v)) return v;
       await new Promise((r) => setTimeout(r, 15));
     }
@@ -48,6 +47,13 @@ type QueryState = {
   pending: boolean;
   result?: Array<Record<string, unknown>>;
   error?: unknown;
+};
+
+type SqliteQueryInputWithRowSchema = {
+  db: SqliteDbRef;
+  sql: string;
+  reactOn?: SqliteDbRef;
+  rowSchema?: JSONSchema;
 };
 
 describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () => {
@@ -121,17 +127,17 @@ describe("sqliteQuery rowSchema-driven _cf_link decode (Piece A runtime)", () =>
     } as unknown as JSONSchema;
 
     const tx2 = runtime.edit();
+    const sqliteQueryWithRowSchema = cf.sqliteQuery as unknown as (
+      input: SqliteQueryInputWithRowSchema,
+    ) => ReturnType<typeof cf.sqliteQuery>;
     const p = cf.pattern(() =>
-      cf.sqliteQuery(
-        {
-          db,
-          sql: "SELECT author_cf_link FROM people ORDER BY id",
-          reactOn: db,
-          // transformer-injected for the typed form:
-          rowSchema,
-          // deno-lint-ignore no-explicit-any
-        } as any,
-      )
+      sqliteQueryWithRowSchema({
+        db,
+        sql: "SELECT author_cf_link FROM people ORDER BY id",
+        reactOn: db,
+        // transformer-injected for the typed form:
+        rowSchema,
+      })
     );
     const resultCell = runtime.getCell(
       space,

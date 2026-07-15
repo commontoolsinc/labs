@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/sqlite-query-rowschema-decode.test.ts",
   "packages/runner/test/sqlite-read-labeling.test.ts",
   "packages/runner/test/stack-trace-patterns.test.ts",
   "packages/runner/test/storage-inspector.test.ts",
