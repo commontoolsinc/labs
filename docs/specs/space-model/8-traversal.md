@@ -91,6 +91,11 @@ Top-level `$ref` is resolved before traversal decisions. Defaults are applied fr
 - Arrays validate per item schema
 - Objects validate per property schema
 - Required properties must be present in the filtered result
+- When an explicit property schema rejects a value, an optional property is
+  omitted from the filtered result, while a required property causes the
+  containing object to reject. In particular, an optional `false` property
+  excludes a link without loading or tracking its target; making that property
+  required makes the object unsatisfiable when the property is present.
 
 `additionalProperties` handling is intentionally specialized:
 

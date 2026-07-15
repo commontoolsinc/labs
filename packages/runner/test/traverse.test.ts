@@ -14,6 +14,7 @@ import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   canBranchMatch,
+  combineSchema,
   CompoundCycleTracker,
   createDefaultTraversalContext,
   createTraversalContext,
@@ -2608,6 +2609,76 @@ describe("link schema path narrowing", () => {
     };
   }
 
+  function makeRecursiveFriendsGraph(
+    prefix: string,
+    linkFriendsRequired: boolean,
+  ) {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = `of:${prefix}-friends-root` as URI;
+    const directFriendsUri = `of:${prefix}-direct-friends` as URI;
+    const directFriendUri = `of:${prefix}-direct-friend` as URI;
+    const nestedFriendsUri = `of:${prefix}-nested-friends` as URI;
+    const secondDegreeFriendUri = `of:${prefix}-second-degree-friend` as URI;
+
+    const fullUserSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+        },
+      },
+      required: linkFriendsRequired ? ["id", "friends"] : ["id"],
+    } as const satisfies JSONSchema;
+    const fullFriendsSchema = {
+      type: "array",
+      items: fullUserSchema,
+    } as const satisfies JSONSchema;
+
+    const rootValue = {
+      id: "root",
+      friends: makeLink(directFriendsUri, [], fullFriendsSchema),
+    };
+    const directFriendsValue = [
+      makeLink(directFriendUri, [], fullUserSchema),
+    ];
+    const directFriendValue = {
+      id: "direct",
+      friends: makeLink(nestedFriendsUri, [], fullFriendsSchema),
+    };
+    const nestedFriendsValue = [
+      makeLink(secondDegreeFriendUri, [], fullUserSchema),
+    ];
+
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, directFriendsUri, directFriendsValue);
+    putDoc(store, directFriendUri, directFriendValue);
+    putDoc(store, nestedFriendsUri, nestedFriendsValue);
+    putDoc(store, secondDegreeFriendUri, {
+      id: "second-degree",
+      friends: [],
+    });
+
+    return {
+      store,
+      rootUri,
+      directFriendsUri,
+      directFriendUri,
+      nestedFriendsUri,
+      secondDegreeFriendUri,
+      fullUserSchema,
+      fullFriendsSchema,
+      rootValue,
+      directFriendValue,
+      trackerKey: (id: URI) => `${SPACE}/space/${id}`,
+    };
+  }
+
   const cases: Array<{
     name: string;
     targetPath: string[];
@@ -2766,53 +2837,19 @@ describe("link schema path narrowing", () => {
   // non-opaque control at the end proves that the deeper documents are
   // reachable and are excluded specifically because of the boundary.
   it("limits a recursive friends query to one hop with an opaque boundary", () => {
-    const store = new Map<string, Revision<State>>();
-    const rootUri = "of:opaque-friends-root" as URI;
-    const directFriendsUri = "of:opaque-direct-friends" as URI;
-    const directFriendUri = "of:opaque-direct-friend" as URI;
-    const nestedFriendsUri = "of:opaque-nested-friends" as URI;
-    const secondDegreeFriendUri = "of:opaque-second-degree-friend" as URI;
-
-    const fullUserSchema = {
-      type: "object",
-      properties: {
-        id: { type: "string" },
-        friends: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: { id: { type: "string" } },
-            required: ["id"],
-          },
-        },
-      },
-      required: ["id", "friends"],
-    } as const satisfies JSONSchema;
-    const fullFriendsSchema = {
-      type: "array",
-      items: fullUserSchema,
-    } as const satisfies JSONSchema;
-
-    const rootValue = {
-      id: "root",
-      friends: makeLink(directFriendsUri, [], fullFriendsSchema),
-    };
-    const directFriendsValue = [
-      makeLink(directFriendUri, [], fullUserSchema),
-    ];
-    const directFriendValue = {
-      id: "direct",
-      friends: makeLink(nestedFriendsUri, [], fullFriendsSchema),
-    };
-    const nestedFriendsValue = [
-      makeLink(secondDegreeFriendUri, [], fullUserSchema),
-    ];
-
-    putDoc(store, rootUri, rootValue);
-    putDoc(store, directFriendsUri, directFriendsValue);
-    putDoc(store, directFriendUri, directFriendValue);
-    putDoc(store, nestedFriendsUri, nestedFriendsValue);
-    putDoc(store, secondDegreeFriendUri, { id: "second-degree", friends: [] });
+    const {
+      store,
+      rootUri,
+      directFriendsUri,
+      directFriendUri,
+      nestedFriendsUri,
+      secondDegreeFriendUri,
+      fullUserSchema,
+      fullFriendsSchema,
+      rootValue,
+      directFriendValue,
+      trackerKey,
+    } = makeRecursiveFriendsGraph("opaque", true);
 
     const directFriendSchema = {
       type: "object",
@@ -2860,7 +2897,6 @@ describe("link schema path narrowing", () => {
       friends: [{ id: "direct", friends: directFriendValue.friends }],
     });
 
-    const trackerKey = (id: URI) => `${SPACE}/space/${id}`;
     expect(context.schemaTracker.has(trackerKey(rootUri))).toBe(true);
     expect(context.schemaTracker.has(trackerKey(directFriendsUri))).toBe(true);
     expect(context.schemaTracker.has(trackerKey(directFriendUri))).toBe(true);
@@ -2909,6 +2945,87 @@ describe("link schema path narrowing", () => {
     expect(
       nonOpaqueContext.schemaTracker.has(trackerKey(secondDegreeFriendUri)),
     ).toBe(true);
+  });
+
+  // This parent schema corresponds to the projected type
+  // `{ id: string; friends?: never }`. The stored link still carries a full
+  // User schema with an optional friends list. Intersecting the two should
+  // keep `friends: false` without making it required. Traversal can then omit
+  // that property while retaining the direct friend record itself.
+  it("omits an optional nested friends property narrowed to false", () => {
+    const {
+      store,
+      rootUri,
+      directFriendsUri,
+      directFriendUri,
+      nestedFriendsUri,
+      secondDegreeFriendUri,
+      fullUserSchema,
+      rootValue,
+      trackerKey,
+    } = makeRecursiveFriendsGraph("false-schema", false);
+    const directFriendSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: false,
+      },
+      required: ["id"],
+    } as const satisfies JSONSchema;
+
+    expect(combineSchema(directFriendSchema, fullUserSchema)).toEqual({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: false,
+      },
+      required: ["id"],
+    });
+
+    const querySchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: directFriendSchema,
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const context = createDefaultTraversalContext();
+    const traverser = getTraverser(
+      store,
+      { path: ["value"], schema: querySchema },
+      context,
+    );
+
+    const { ok: result, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toEqual({
+      id: "root",
+      friends: [{ id: "direct" }],
+    });
+    const directFriend = (result as { friends: Record<string, unknown>[] })
+      .friends[0];
+    expect(Object.hasOwn(directFriend, "friends")).toBe(false);
+
+    expect(context.schemaTracker.has(trackerKey(rootUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendsUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(nestedFriendsUri))).toBe(false);
+    expect(context.schemaTracker.has(trackerKey(secondDegreeFriendUri))).toBe(
+      false,
+    );
   });
 });
 
