@@ -1043,6 +1043,7 @@ function assertSuppliedLinkSchemasCompatible(
   options: {
     basePath?: readonly (string | number)[];
     destinationIsStream?: boolean;
+    destinationRoot?: JSONSchema;
   } = {},
 ): Set<SuppliedLink> {
   const preservedDirectHandles = new Set<SuppliedLink>();
@@ -1056,9 +1057,10 @@ function assertSuppliedLinkSchemasCompatible(
     }
     let targetContracts: PathSchemaContract[];
     try {
+      const destinationRoot = options.destinationRoot ?? destinationSchema;
       if (options.destinationIsStream) {
         const streamContracts = linkPathContracts(
-          [{ schema: destinationSchema, root: destinationSchema }],
+          [{ schema: destinationSchema, root: destinationRoot }],
           basePath,
         ).map((contract) => consumeStreamEventContract(contract));
         targetContracts = linkPathContracts(
@@ -1067,7 +1069,7 @@ function assertSuppliedLinkSchemasCompatible(
         );
       } else {
         targetContracts = linkPathContracts(
-          [{ schema: destinationSchema, root: destinationSchema }],
+          [{ schema: destinationSchema, root: destinationRoot }],
           fullPath,
         );
       }
@@ -1280,9 +1282,14 @@ function assertSuppliedLinkSchemasCompatible(
 function localizeWritableDestinationContracts(
   destination: DurableSchemaPath,
   rootCell: Cell<unknown>,
-): { contracts: PathSchemaContract[]; isStream: boolean } {
+): {
+  contracts: PathSchemaContract[];
+  declaredStream?: boolean;
+  approximatedCorrelatedPath: boolean;
+} {
   const { root, path, rawBasePath, schemaBaseDepth } = destination;
   let contracts: PathSchemaContract[] = [{ schema: root, root }];
+  let approximatedCorrelatedPath = false;
   const rawRoot = rootCell.getRawUntyped({ lastNode: "top" });
   for (let index = 0; index <= path.length; index++) {
     const rawPrefix = index <= schemaBaseDepth
@@ -1323,10 +1330,43 @@ function localizeWritableDestinationContracts(
     if (terminal) {
       return {
         contracts: payloadContracts,
-        isStream: outer?.kind === "stream",
+        // An unwrapped contract constrains only the value. It says nothing
+        // about whether another producer-owned projection exposes the same
+        // destination as a Stream (opaque UI values commonly contain such
+        // aliases). Only an explicit Cell wrapper participates in the
+        // capability intersection.
+        declaredStream: outer === undefined
+          ? undefined
+          : outer.kind === "stream",
+        approximatedCorrelatedPath,
       };
     }
-    contracts = linkPathContracts(payloadContracts, [path[index]!]);
+    try {
+      contracts = linkPathContracts(payloadContracts, [path[index]!]);
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !error.message.includes(
+          "correlates the linked field with its parent value",
+        )
+      ) throw error;
+
+      // A concrete write can be checked safely by staging it into every
+      // complete producer root below. Use the conservative path projection to
+      // obtain its local value contract, while remembering that it is not a
+      // future-value proof for a newly supplied durable link.
+      const cfc = new ContextualFlowControl();
+      contracts = payloadContracts.map((contract) => {
+        const child = cfc.schemaAtPath(contract.schema, [
+          String(path[index]!),
+        ]);
+        return {
+          schema: child,
+          root: cfcSchemaChildRoot(child, contract.root),
+        };
+      });
+      approximatedCorrelatedPath = true;
+    }
   }
   throw new Error("write destination path could not be localized");
 }
@@ -1395,6 +1435,14 @@ function omitMissingProjectionAliases(
   resolving = new Set<string>(),
 ): unknown | typeof MISSING_PROJECTION_ALIAS {
   if (isLink(raw)) {
+    if (isCell(schemaView)) {
+      // Schema-aware reads preserve declared Cell/Stream projections as
+      // handles. Keep that opaque proof in the staged producer root instead
+      // of replacing it with the target's untyped payload; unrelated Stream
+      // siblings otherwise look like malformed event objects while another
+      // linked destination is being validated.
+      return schemaView;
+    }
     const tx = cell.tx;
     if (tx === undefined) {
       throw new Error("projection alias reconciliation requires a transaction");
@@ -1631,9 +1679,10 @@ class PiecePropIo implements PieceCellIo {
           );
         }
         const destination = durableDestination;
-        let localizedDestination: ReturnType<
-          typeof localizeWritableDestinationContracts
-        >;
+        let localizedDestination: {
+          contracts: PathSchemaContract[];
+          isStream: boolean;
+        };
         try {
           const destinationRootCell = manager.runtime.getCellFromLink(
             { ...resolved, path: [], schema: undefined },
@@ -1646,8 +1695,11 @@ class PiecePropIo implements PieceCellIo {
               destinationRootCell,
             )
           );
-          const isStream = localized[0]?.isStream ?? false;
-          if (localized.some((entry) => entry.isStream !== isStream)) {
+          const declaredStream = localized.flatMap((entry) =>
+            entry.declaredStream === undefined ? [] : [entry.declaredStream]
+          );
+          const isStream = declaredStream[0] ?? false;
+          if (declaredStream.some((entry) => entry !== isStream)) {
             throw new Error(
               "write destination contracts disagree on Stream capability",
             );
@@ -1657,12 +1709,21 @@ class PiecePropIo implements PieceCellIo {
             isStream,
           };
           const links = suppliedLinks(nextValue);
+          if (
+            links.length > 0 &&
+            localized.some((entry) => entry.approximatedCorrelatedPath)
+          ) {
+            throw new Error(
+              "correlated write destination cannot prove a supplied durable link",
+            );
+          }
           for (const contract of localizedDestination.contracts) {
             assertSuppliedLinkSchemasCompatible(
               links,
               contract.schema,
               resolvedCell,
               manager,
+              { destinationRoot: contract.root },
             );
           }
         } catch (error) {

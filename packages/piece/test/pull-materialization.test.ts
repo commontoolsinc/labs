@@ -2273,6 +2273,84 @@ describe("piece pull materialization", () => {
     expect(manager.getArgument(producer).getRaw()).toEqual({ arr: [1] });
   });
 
+  it("validates concrete writes through correlated producer projections", async () => {
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                kind: { const: "n" },
+                value: { type: "number" },
+              },
+              required: ["kind", "value"],
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { const: "s" },
+                value: { type: "string" },
+              },
+              required: ["kind", "value"],
+            },
+          ],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            value: { type: ["number", "string"] },
+          },
+          required: ["value"],
+        },
+        result: {
+          value: { $alias: { cell: "argument", path: ["value"] } },
+        },
+        nodes: [],
+      }),
+      { kind: "n", value: 1 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, producer);
+
+    await controller.result.set(2, ["value"]);
+    expect(manager.getArgument(producer).getRaw()).toEqual({
+      kind: "n",
+      value: 2,
+    });
+
+    await expect(controller.result.set("bad", ["value"]))
+      .rejects.toThrow(/write destination/);
+    expect(manager.getArgument(producer).getRaw()).toEqual({
+      kind: "n",
+      value: 2,
+    });
+
+    const futureValue = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: ["number", "string"] } },
+          required: ["value"],
+        },
+        result: { value: 3 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      controller.result.set(futureValue.key("value"), ["value"]),
+    ).rejects.toThrow(/correlated write destination/);
+    expect(manager.getArgument(producer).getRaw()).toEqual({
+      kind: "n",
+      value: 2,
+    });
+  });
+
   it("intersects argument and public result destination contracts", async () => {
     const narrow = {
       type: "object",
@@ -2384,6 +2462,97 @@ describe("piece pull materialization", () => {
     await expect(controller.input.set("bad", ["slot", "n"]))
       .rejects.toThrow(/write destination/);
     expect(producer.get()).toEqual({ value: { n: 1 } });
+  });
+
+  it("ignores opaque nested aliases when identifying Stream capability", async () => {
+    const mentionableSchema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    } as const;
+    const eventSchema = {
+      type: "object",
+      properties: {
+        piece: {
+          $ref: "#/$defs/Mentionable",
+          asCell: ["cell"],
+        },
+      },
+      required: ["piece"],
+      asCell: ["stream"],
+    } as const;
+    const streamSchema = {
+      ...eventSchema,
+      $defs: { Mentionable: mentionableSchema },
+    } as const;
+    const mentionable = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: mentionableSchema,
+        result: { name: "target" },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            event: eventSchema,
+            sibling: {
+              type: "object",
+              properties: { detail: { type: "string" } },
+              required: ["detail"],
+              asCell: ["stream"],
+            },
+            opaque: true,
+          },
+          required: ["event", "sibling", "opaque"],
+          $defs: { Mentionable: mentionableSchema },
+        },
+        derivedInternalCells: [{
+          partialCause: "event",
+          schema: streamSchema,
+        }, {
+          partialCause: "sibling",
+          schema: {
+            type: "object",
+            properties: { detail: { type: "string" } },
+            required: ["detail"],
+            asCell: ["stream"],
+          },
+        }],
+        result: {
+          event: { $alias: { partialCause: "event", path: [] } },
+          sibling: { $alias: { partialCause: "sibling", path: [] } },
+          opaque: {
+            handler: { $alias: { partialCause: "event", path: [] } },
+          },
+        },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, producer);
+    const stream = producer.key("event").resolveAsCell();
+    const events: unknown[] = [];
+    const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
+      events.push(event);
+    }, stream.getAsNormalizedFullLink());
+
+    try {
+      await controller.result.set({ piece: mentionable }, ["event"]);
+      await runtime.idle();
+      expect(events).toHaveLength(1);
+    } finally {
+      removeHandler();
+    }
   });
 
   it("accepts a Piece Stream supplied to a Stream Cell input", async () => {
