@@ -1,5 +1,4 @@
 import {
-  Cell,
   Cfc,
   computed,
   CurrentPrincipal,
@@ -21,8 +20,6 @@ import {
 import {
   type ExternalIdentityAssertion,
   type ExternalProfileLink,
-  LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY,
-  type VerifiedExternalIdentity,
   type VerifiedExternalIdentityCell,
 } from "./profile-types.ts";
 
