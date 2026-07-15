@@ -45,6 +45,48 @@ function assertSchemaScope(actual: unknown, expected: unknown) {
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+type SelfReferentialNode = {
+  name: string;
+  children: SelfReferentialNode[];
+};
+
+type CircularObjectNode = {
+  name: string;
+  parent: CircularObjectNode | null;
+  children: CircularObjectNode[];
+};
+
+type NestedCircularContainer = {
+  name: string;
+  items: NestedCircularItem[];
+};
+
+type NestedCircularItem = {
+  name: string;
+  value: NestedCircularRoot | NestedCircularContainer | null;
+};
+
+type NestedCircularRoot = {
+  name: string;
+  nested: NestedCircularContainer;
+};
+
+type AnyOfCircularNode = {
+  type: string;
+  name: string;
+  children?: AnyOfCircularNode[];
+  value?: AnyOfCircularNode | null;
+};
+
+function expectPresent<T>(value: T | null | undefined): T {
+  expect(value).not.toBeNull();
+  expect(value).not.toBeUndefined();
+  if (value == null) {
+    throw new Error("Expected value to be present");
+  }
+  return value;
+}
+
 describe("Schema - Basic Types and References", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -265,10 +307,7 @@ describe("Schema - Basic Types and References", () => {
 
   describe("Schema References", () => {
     it("should handle self-references with $ref: '#/$defs/Node'", () => {
-      const c = runtime.getCell<{
-        name: string;
-        children: Array<{ name: string; children: any[] }>;
-      }>(
+      const c = runtime.getCell<SelfReferentialNode>(
         space,
         "should handle self-references with $ref 1",
         undefined,
@@ -308,11 +347,7 @@ describe("Schema - Basic Types and References", () => {
     });
 
     it("should handle circular references in objects", () => {
-      const c = runtime.getCell<{
-        name: string;
-        parent: any;
-        children: Array<{ name: string; parent: any; children: any[] }>;
-      }>(
+      const c = runtime.getCell<CircularObjectNode>(
         space,
         "should handle circular references in objects 1",
         undefined,
@@ -328,11 +363,11 @@ describe("Schema - Basic Types and References", () => {
       });
 
       // Set up circular references using cell links
-      c.key("parent").setRaw(c.getAsLink());
-      c.key("children").key(0).key("parent").resolveAsCell().setRaw(
+      c.key("parent").setRawUntyped(c.getAsLink());
+      c.key("children").key(0).key("parent").resolveAsCell().setRawUntyped(
         c.getAsLink(),
       );
-      c.key("children").key(1).key("parent").resolveAsCell().setRaw(
+      c.key("children").key(1).key("parent").resolveAsCell().setRawUntyped(
         c.getAsLink(),
       );
 
@@ -355,29 +390,22 @@ describe("Schema - Basic Types and References", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get() as {
-        name: string;
-        parent: any;
-        children: Array<{ name: string; parent: any; children: any[] }>;
-      };
+      const value = cell.get() as CircularObjectNode;
+      const parent = expectPresent(value.parent);
+      const firstChildParent = expectPresent(value.children[0].parent);
+      const secondChildParent = expectPresent(value.children[1].parent);
 
       // Verify the structure is maintained
       expect(value.name).toBe("root");
-      expect(value.parent.name).toBe("root");
+      expect(parent.name).toBe("root");
       expect(value.children[0].name).toBe("child1");
-      expect(value.children[0].parent.name).toBe("root");
+      expect(firstChildParent.name).toBe("root");
       expect(value.children[1].name).toBe("child2");
-      expect(value.children[1].parent.name).toBe("root");
+      expect(secondChildParent.name).toBe("root");
     });
 
     it("should handle nested circular references", () => {
-      const c = runtime.getCell<{
-        name: string;
-        nested: {
-          name: string;
-          items: Array<{ name: string; value: any }>;
-        };
-      }>(
+      const c = runtime.getCell<NestedCircularRoot>(
         space,
         "should handle nested circular references 1",
         undefined,
@@ -395,12 +423,14 @@ describe("Schema - Basic Types and References", () => {
       });
 
       // Set up circular references using cell links
-      c.key("nested").key("items").key(0).key("value").resolveAsCell().setRaw(
-        c.getAsLink(),
-      );
-      c.key("nested").key("items").key(1).key("value").resolveAsCell().setRaw(
-        c.key("nested").getAsLink(),
-      );
+      c.key("nested").key("items").key(0).key("value").resolveAsCell()
+        .setRawUntyped(
+          c.getAsLink(),
+        );
+      c.key("nested").key("items").key(1).key("value").resolveAsCell()
+        .setRawUntyped(
+          c.key("nested").getAsLink(),
+        );
 
       const schema = {
         $ref: "#/$defs/Root",
@@ -431,34 +461,21 @@ describe("Schema - Basic Types and References", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get() as {
-        name: string;
-        nested: {
-          name: string;
-          items: Array<{ name: string; value: any }>;
-        };
-      };
+      const value = cell.get() as NestedCircularRoot;
+      const firstValue = expectPresent(value.nested.items[0].value);
+      const secondValue = expectPresent(value.nested.items[1].value);
 
       // Verify the structure is maintained
       expect(value.name).toBe("root");
       expect(value.nested.name).toBe("nested");
       expect(value.nested.items[0].name).toBe("item1");
-      expect(value.nested.items[0].value.name).toBe("root");
+      expect(firstValue.name).toBe("root");
       expect(value.nested.items[1].name).toBe("item2");
-      expect(value.nested.items[1].value.name).toBe("nested");
+      expect(secondValue.name).toBe("nested");
     });
 
     it("should handle circular references with anyOf", () => {
-      const c = runtime.getCell<{
-        type: string;
-        name: string;
-        children: Array<{
-          type: string;
-          name: string;
-          children?: any[];
-          value?: any;
-        }>;
-      }>(
+      const c = runtime.getCell<AnyOfCircularNode>(
         space,
         "should handle circular references with anyOf 1",
         undefined,
@@ -474,7 +491,7 @@ describe("Schema - Basic Types and References", () => {
       });
 
       // Set up circular references using cell links
-      c.key("children").key(1).key("value").resolveAsCell().setRaw(
+      c.key("children").key(1).key("value").resolveAsCell().setRawUntyped(
         c.getAsLink(),
       );
 
@@ -513,22 +530,15 @@ describe("Schema - Basic Types and References", () => {
       } as const satisfies JSONSchema;
 
       const cell = c.asSchema(schema);
-      const value = cell.get() as {
-        type: string;
-        name: string;
-        children: Array<{
-          type: string;
-          name: string;
-          children?: any[];
-          value?: any;
-        }>;
-      };
+      const value = cell.get() as AnyOfCircularNode;
+      const children = expectPresent(value.children);
+      const childValue = expectPresent(children[1].value);
 
       // Verify the structure is maintained
       expect(value.name).toBe("root");
-      expect(value.children[0].name).toBe("child1");
-      expect(value.children[1].name).toBe("child2");
-      expect(value.children[1].value.name).toBe("root");
+      expect(children[0].name).toBe("child1");
+      expect(children[1].name).toBe("child2");
+      expect(childValue.name).toBe("root");
     });
 
     it("Should support named $ref links", () => {
@@ -682,7 +692,7 @@ describe("Schema - Basic Types and References", () => {
       // Verify that currentCell is Cell<Cell<{ label: string }>> (nested Cell, not unwrapped)
       type CurrentCellUnwrapped = typeof currentCell extends Cell<infer U> ? U
         : never;
-      type CurrentIsCell = CurrentCellUnwrapped extends Cell<any> ? true
+      type CurrentIsCell = CurrentCellUnwrapped extends Cell<unknown> ? true
         : false;
       const _assertCurrentIsNestedCell: CurrentIsCell extends true ? true
         : never = true;
@@ -780,8 +790,8 @@ describe("Schema - Basic Types and References", () => {
       // instance of the container (see CT-1623).
       const currentCell = outer.key("current");
       expect(currentCell.getAsNormalizedFullLink().scope).toBe("space");
-      const schema = currentCell.getAsNormalizedFullLink().schema as any;
-      expect(schema?.asCell?.[0]?.scope ?? schema?.scope).toBe("user");
+      const schema = currentCell.getAsNormalizedFullLink().schema;
+      expect(ContextualFlowControl.getSchemaScopeCap(schema)).toBe("user");
     });
 
     it("should preserve nested asCell wrappers through anyOf branches", () => {
@@ -793,7 +803,7 @@ describe("Schema - Basic Types and References", () => {
       );
       inner.set("hello anyOf nested cell");
 
-      const outer = runtime.getCell<any>(
+      const outer = runtime.getCell<{ current: Cell<Cell<string>> }>(
         space,
         "double-ascell-anyof-outer-string",
         {
@@ -822,7 +832,7 @@ describe("Schema - Basic Types and References", () => {
     });
 
     it('should create nested default cells for asCell: ["cell", "cell"]', () => {
-      const outer = runtime.getCell<any>(
+      const outer = runtime.getCell<{ current: Cell<Cell<string>> }>(
         space,
         "double-ascell-default-outer-string",
         {
@@ -848,7 +858,7 @@ describe("Schema - Basic Types and References", () => {
     });
 
     it("should apply nullable defaults before choosing anyOf asCell branches", () => {
-      const outer = runtime.getCell<any>(
+      const outer = runtime.getCell<{ current: Cell<{ name: string }> | null }>(
         space,
         "nullable-anyof-default-cell",
         {
