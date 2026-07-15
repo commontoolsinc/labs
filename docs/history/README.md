@@ -195,6 +195,8 @@ One line per archived document; each document's header carries the fuller
   July 2026 Lunch Poll Memory schema-sync wire-accounting measurements.
 - [memory-protocol-traffic-lunch-poll-2026-07-14.md](development/performance/memory-protocol-traffic-lunch-poll-2026-07-14.md),
   protocol-level Lunch Poll Memory traffic, repetition, and cache-opportunity analysis.
+- [memory-protocol-traffic-lunch-poll-2026-07-14-addendum-2026-07-15.md](development/performance/memory-protocol-traffic-lunch-poll-2026-07-14-addendum-2026-07-15.md),
+  reproducibility and accounting-scope addendum for the July 14 measurement.
 - [memory-request-schema-cas-lunch-poll-2026-07-14.md](development/performance/memory-request-schema-cas-lunch-poll-2026-07-14.md),
   end-to-end Lunch Poll measurement after durable request-schema CAS landed.
 - [memory-request-schema-cas-refs-first-lunch-poll-2026-07-14.md](development/performance/memory-request-schema-cas-refs-first-lunch-poll-2026-07-14.md),
