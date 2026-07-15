@@ -1600,6 +1600,35 @@ export class WorkerReconciler {
   }
 
   /**
+   * Emit a resolved reactive prop only when it is usable. Availability markers
+   * are control-flow values: initially the DOM prop remains unset, and a later
+   * marker retains the last usable prop value until another usable value
+   * arrives.
+   */
+  private emitReactivePropValueIfAvailable(
+    state: NodeState,
+    key: string,
+    value: unknown,
+    sourceCell?: Cell<unknown>,
+  ): boolean {
+    if (isDataUnavailable(value)) return false;
+
+    const propValue = this.transformPropValueForState(
+      state,
+      key,
+      value,
+      sourceCell,
+    );
+    this.queueOps([{
+      op: "set-prop",
+      nodeId: state.nodeId,
+      key,
+      value: propValue,
+    }]);
+    return true;
+  }
+
+  /**
    * Create a wrapper state for reactive roots.
    */
   private createWrapperState(_ctx: ReconcileContext, nodeId: number): {
@@ -1838,19 +1867,13 @@ export class WorkerReconciler {
             "prop-update",
             () => ({ nodeId: state.nodeId, key, value: resolvedValue }),
           );
-          const propValue = this.transformPropValueForState(
+          const emitted = this.emitReactivePropValueIfAvailable(
             state,
             key,
             resolvedValue,
             value as Cell<unknown>,
           );
-          this.queueOps([{
-            op: "set-prop",
-            nodeId: state.nodeId,
-            key,
-            value: propValue,
-          }]);
-          if (this.isTextIntegrityPolicyProp(key)) {
+          if (emitted && this.isTextIntegrityPolicyProp(key)) {
             this.refreshTextIntegrityBoundary(ctx, state);
           }
         });
@@ -2247,18 +2270,12 @@ export class WorkerReconciler {
           // Schema `true` = accept everything → enables deep traversal of this prop
           const propKeyCell = propsCell.key(key).asSchema(true);
           const propSinkCancel = propKeyCell.sink((deepValue: unknown) => {
-            const propValue = this.transformPropValueForState(
+            this.emitReactivePropValueIfAvailable(
               state,
               key,
               deepValue,
               this.resolveTextPropSourceCell(state, propsCell, key, value),
             );
-            this.queueOps([{
-              op: "set-prop",
-              nodeId: state.nodeId,
-              key,
-              value: propValue,
-            }]);
           });
           addCancel(propSinkCancel);
           state.propSubscriptions.set(key, {
@@ -3047,19 +3064,13 @@ export class WorkerReconciler {
       } else if (isCell(value)) {
         // Reactive prop value
         const sinkCancel = (value as Cell<unknown>).sink((resolvedValue) => {
-          const propValue = this.transformPropValueForState(
+          const emitted = this.emitReactivePropValueIfAvailable(
             state,
             key,
             resolvedValue,
             value as Cell<unknown>,
           );
-          this.queueOps([{
-            op: "set-prop",
-            nodeId: state.nodeId,
-            key,
-            value: propValue,
-          }]);
-          if (this.isTextIntegrityPolicyProp(key)) {
+          if (emitted && this.isTextIntegrityPolicyProp(key)) {
             this.refreshTextIntegrityBoundary(ctx, state);
           }
         });

@@ -8,6 +8,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { KeepAsCell, Runtime } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { cfcLabelViewForCell } from "@commonfabric/runner/cfc";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 
 /**
  * Helper to collect ops emitted by the reconciler.
@@ -286,6 +287,100 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
         cancel();
       }
     });
+
+    await t.step(
+      "reactive prop cells withhold unavailable values",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const labelCell = new MockCell(DataUnavailable.pending());
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: { "aria-label": labelCell },
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op: any) =>
+              op.key === "aria-label"
+            ),
+            false,
+            "An initially pending prop must remain unset",
+          );
+
+          collector.clear();
+          labelCell.set("Love it");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op: any) =>
+              op.key === "aria-label" && op.value === "Love it"
+            ),
+            true,
+            "The first usable prop value must be emitted",
+          );
+
+          collector.clear();
+          labelCell.set(DataUnavailable.pending());
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op: any) =>
+              op.key === "aria-label"
+            ),
+            false,
+            "Pending must retain the last usable prop value",
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
+
+    await t.step(
+      "Cell<Props> deep prop cells withhold unavailable values",
+      async () => {
+        const collector = createOpsCollector();
+        const reconciler = new WorkerReconciler({
+          onOps: collector.onOps,
+        });
+
+        const propsCell = new MockPropsCell({ "aria-label": "Ready" });
+        const rootCell = new MockCell({
+          type: "vnode",
+          name: "button",
+          props: propsCell,
+          children: [],
+        });
+
+        const cancel = mountReconciler(reconciler, rootCell);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          collector.clear();
+
+          propsCell.set({ "aria-label": DataUnavailable.pending() });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+
+          assertEquals(
+            collector.getOpsOfType("set-prop").some((op: any) =>
+              op.key === "aria-label"
+            ),
+            false,
+            "A deep pending prop must retain its last usable value",
+          );
+        } finally {
+          cancel();
+        }
+      },
+    );
 
     await t.step("Cell<Props> prop addition", async () => {
       const collector = createOpsCollector();

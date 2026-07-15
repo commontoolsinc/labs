@@ -704,6 +704,13 @@ signal. It contributes no visible content initially, and a transition from a
 visible value to `undefined` removes that visible content instead of preserving
 it.
 
+An individual reactive DOM prop also treats an unobserved `DataUnavailable` as
+a withheld update: the prop remains unset before its first usable value and
+retains its last usable value afterward. Availability markers never cross the
+renderer IPC boundary as prop values. This is prop-level waiting, not subtree
+pending continuity, so it does not add `data-cf-pending`, `inert`, or the dimmed
+pending treatment to the element.
+
 This pending continuity behavior is the unguarded default, not a loading UI.
 Authors use the reason-specific guards when the interface should replace the
 prior subtree with explicit status content. Confidentiality and integrity
