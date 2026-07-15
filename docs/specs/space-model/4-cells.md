@@ -58,7 +58,6 @@ Subscription and synchronization:
 
 #### Rarely Used Outside Foundation
 
-- `freeze()`, `isFrozen()`
 - `setInitialValue()`, `setSelfRef()`
 - `connect()`, `export()`
 - `setSchema()` (deprecated)
