@@ -13,6 +13,8 @@ import { createBuilder } from "../src/builder/factory.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
+type JavaScriptImplementation = (...args: unknown[]) => unknown;
+
 describe("SES security regressions", () => {
   let runtime: Runtime;
   let engine: Engine;
@@ -271,7 +273,10 @@ describe("SES security regressions", () => {
 
     const compiled = await runtime.patternManager.compilePattern(program);
     const tx = runtime.edit();
-    const resultCell = runtime.getCell<any>(
+    const resultCell = runtime.getCell<{
+      values: number[];
+      handlers: unknown[];
+    }>(
       signer.did(),
       "verified callbacks bless hidden handlers",
       compiled.resultSchema,
@@ -345,12 +350,12 @@ describe("SES security regressions", () => {
       (runtime.runner as unknown as {
         invokeJavaScriptImplementation(
           module: { wrapper?: string },
-          fn: (...args: any[]) => unknown,
+          fn: JavaScriptImplementation,
           argument: unknown,
         ): unknown;
       }).invokeJavaScriptImplementation(
         main?.makeNested as { wrapper?: string },
-        (main?.makeNested as { implementation: (...args: any[]) => unknown })
+        (main?.makeNested as { implementation: JavaScriptImplementation })
           .implementation,
         { $event: undefined, $ctx: undefined },
       )
