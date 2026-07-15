@@ -147,6 +147,7 @@ import type {
   ActionRunTraceEntry,
   EventHandler,
   EventPreflightTraceContext,
+  HandlerInputReadiness,
   QueuedEvent,
   ReactivityLog,
   SchedulerObservationIdentity,
@@ -2705,6 +2706,34 @@ export class Scheduler {
     };
     this.eventInputWaits.set(event, { action: wakeAction, parked: true });
     this.resubscribe(wakeAction, dependencies, { isEffect: true });
+
+    // Re-run readiness under the one-shot wake action's identity. Linked-doc
+    // traversal can then register this action as a settlement waiter, so an
+    // authoritative absence (which produces no storage write) still wakes the
+    // parked FIFO. If the input settled between preflight and this probe,
+    // release the park immediately instead of waiting for a write that may
+    // never arrive.
+    const readTx = this.runtime.edit();
+    readTx.setReadOnly?.("scheduler.parkEventUntilInputChanges()");
+    let readiness: HandlerInputReadiness | undefined;
+    try {
+      readiness = this.withExecutingAction(
+        wakeAction,
+        () => event.handler.inputReadiness?.(readTx, event.event),
+      );
+    } catch (error) {
+      this.handleError(error as Error, event.handler);
+    } finally {
+      readTx.commit();
+    }
+    if (
+      readiness === undefined || readiness.ready ||
+      (readiness.reason !== "pending" && readiness.reason !== "syncing")
+    ) {
+      const wait = this.eventInputWaits.get(event);
+      if (wait?.action === wakeAction) wait.parked = false;
+      this.queueExecution();
+    }
   }
 
   private clearEventInputWait(event: QueuedEvent): void {

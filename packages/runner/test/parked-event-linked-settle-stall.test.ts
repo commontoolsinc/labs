@@ -7,8 +7,7 @@
  * write to the preflight reads. But event preflight runs without an
  * executing-action token, so `ensureLinkedDocLoaded` registers no settlement
  * waiter — and a linked-doc load that settles (confirmed absent) produces no
- * storage write. Hypothesis: the parked event never wakes, later events queue
- * behind it forever, and `idle()` resolves throughout (silent stall).
+ * storage write. Regression: settlement itself must wake the parked FIFO.
  *
  * The control test performs the identical status read inside a subscribed
  * scheduler action, where an executing-action token IS present: the
@@ -44,7 +43,7 @@ const DEFINED_VALUE_SCHEMA = { not: { type: "undefined" } } as const;
 
 type ProbeStatus = "usable" | "syncing" | "unavailable";
 
-describe("input-parked event vs linked-doc settlement (PR #4677 probe)", () => {
+describe("input-parked event vs linked-doc settlement", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -112,7 +111,7 @@ describe("input-parked event vs linked-doc settlement (PR #4677 probe)", () => {
     return inputCell;
   }
 
-  it("parks the head event and never wakes when the linked load settles absent", async () => {
+  it("wakes the parked FIFO when the linked load settles absent", async () => {
     const inputCell = makeLinkedInput("stall");
     const eventStream = runtime.getCell<number>(
       space,
@@ -177,9 +176,8 @@ describe("input-parked event vs linked-doc settlement (PR #4677 probe)", () => {
     expect(handlerRuns).toBe(0);
 
     // The linked-doc load settles: the document is authoritatively absent.
-    // This produces no storage write. If the claim holds, nothing re-checks
-    // the parked head: readiness is never re-invoked and the handler never
-    // runs, while idle() keeps resolving (the awaits below all return).
+    // This produces no storage write. Load settlement itself must re-check the
+    // parked head and allow both queued events to leave the FIFO.
     expect(pendingSyncReleases.length).toBeGreaterThan(0);
     releaseSyncs();
     await storageManager.crossSpaceSettled();
@@ -187,26 +185,8 @@ describe("input-parked event vs linked-doc settlement (PR #4677 probe)", () => {
     await new Promise((resolve) => setTimeout(resolve, 150));
     await runtime.scheduler.idle();
 
-    const stalled = handlerRuns === 0 &&
-      readinessCalls === readinessCallsWhileParked;
-
-    // Regardless of outcome, a write to the preflight-read path must recover
-    // the queue. Writing the "data" path itself (the diff must touch the
-    // subscribed read, not a sibling key) re-runs readiness, which now
-    // classifies usable data, and both queued events dispatch in order.
-    const pokeTx = runtime.edit();
-    inputCell.withTx(pokeTx).set({ data: 42 });
-    await pokeTx.commit();
-    await runtime.scheduler.idle();
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    await runtime.scheduler.idle();
-
     expect(readinessCalls).toBeGreaterThan(readinessCallsWhileParked);
     expect(handledEvents).toEqual([1, 2]);
-
-    // The decisive assertion, last so the recovery expectations above report
-    // their own failures first: settlement alone never woke the parked head.
-    expect(stalled).toBe(true);
   });
 
   it("control: the same read inside a subscribed action re-runs on settlement", async () => {
