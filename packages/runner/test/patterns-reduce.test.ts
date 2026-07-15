@@ -6,7 +6,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema, type PatternFactory } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -14,6 +14,36 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+type TotalResult = { total: number };
+type CountResult = { count: number };
+type ListOpInput<T> = {
+  element: T;
+  index: number;
+  array: T[];
+};
+type CollectionPatternHelpers<T> = {
+  mapWithPattern<S>(
+    op: PatternFactory<ListOpInput<T>, S>,
+    params: Record<string, unknown>,
+  ): S[];
+};
+
+const collectionPattern = <T>(value: unknown): CollectionPatternHelpers<T> =>
+  value as CollectionPatternHelpers<T>;
+
+const numberSchema = {
+  type: "number",
+} as const satisfies JSONSchema;
+
+const numberElementArgumentSchema = {
+  type: "object",
+  properties: {
+    element: numberSchema,
+  },
+  required: ["element"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
 
 describe("Pattern Runner - Reduce", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -63,7 +93,7 @@ describe("Pattern Runner - Reduce", () => {
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<TotalResult>(
       space,
       "reduce-sum",
       {
@@ -79,7 +109,7 @@ describe("Pattern Runner - Reduce", () => {
     await commitTx();
 
     const value = await result.pull();
-    expect((value as any).total).toBe(15);
+    expect(value.total).toBe(15);
   });
 
   it("should reactively update when input changes", async () => {
@@ -101,7 +131,7 @@ describe("Pattern Runner - Reduce", () => {
     );
     inputCell.set({ values: [1, 2, 3] });
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<TotalResult>(
       space,
       "reduce-reactive-result",
       {
@@ -115,7 +145,7 @@ describe("Pattern Runner - Reduce", () => {
     await commitTx();
 
     let value = await result.pull();
-    expect((value as any).total).toBe(6);
+    expect(value.total).toBe(6);
 
     // Update input
     tx = runtime.edit();
@@ -123,7 +153,7 @@ describe("Pattern Runner - Reduce", () => {
     await commitTx();
 
     value = await result.pull();
-    expect((value as any).total).toBe(60);
+    expect(value.total).toBe(60);
   });
 
   it("should count elements", async () => {
@@ -137,7 +167,7 @@ describe("Pattern Runner - Reduce", () => {
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<CountResult>(
       space,
       "reduce-count",
       {
@@ -153,7 +183,7 @@ describe("Pattern Runner - Reduce", () => {
     await commitTx();
 
     const value = await result.pull();
-    expect((value as any).count).toBe(4);
+    expect(value.count).toBe(4);
   });
 
   it("should return initial value for empty array", async () => {
@@ -167,7 +197,7 @@ describe("Pattern Runner - Reduce", () => {
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<TotalResult>(
       space,
       "reduce-empty",
       {
@@ -183,7 +213,7 @@ describe("Pattern Runner - Reduce", () => {
     await commitTx();
 
     const value = await result.pull();
-    expect((value as any).total).toBe(0);
+    expect(value.total).toBe(0);
   });
 
   it("should handle reduce with filtering", async () => {
@@ -197,7 +227,7 @@ describe("Pattern Runner - Reduce", () => {
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<TotalResult>(
       space,
       "reduce-filter",
       {
@@ -213,27 +243,36 @@ describe("Pattern Runner - Reduce", () => {
     await commitTx();
 
     const value = await result.pull();
-    expect((value as any).total).toBe(9); // 1 + 3 + 5
+    expect(value.total).toBe(9); // 1 + 3 + 5
   });
 
   it("should chain map then reduce", async () => {
-    const double = lift((x: number) => x * 2);
+    const double = lift((x: number | undefined) =>
+      typeof x === "number" ? x * 2 : 0
+    );
 
     const sumDoubledPattern = pattern<{ values: number[] }>(
       ({ values }) => {
-        const total = (values as any)
+        const doublePattern = pattern<ListOpInput<number>, number>(
+          ({ element }) => double(element),
+          numberElementArgumentSchema,
+          numberSchema,
+        );
+        const total = collectionPattern<number>(values)
           .mapWithPattern(
-            pattern(({ element, index, array }: FactoryInput<any>) =>
-              (((x: any) => double(x)) as any)(element, index, array)
-            ),
+            doublePattern,
             {},
           )
-          .reduce((acc: number, x: number) => acc + x, 0);
+          .reduce(
+            (acc: number, x: number | undefined) =>
+              typeof x === "number" ? acc + x : acc,
+            0,
+          );
         return { total };
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<TotalResult>(
       space,
       "reduce-chained",
       {
@@ -249,6 +288,6 @@ describe("Pattern Runner - Reduce", () => {
     await commitTx();
 
     const value = await result.pull();
-    expect((value as any).total).toBe(12); // 1*2 + 2*2 + 3*2
+    expect(value.total).toBe(12); // 1*2 + 2*2 + 3*2
   });
 });
