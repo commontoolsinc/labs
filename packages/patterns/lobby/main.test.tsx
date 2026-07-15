@@ -41,11 +41,18 @@ export default pattern(() => {
   const viewerAdminRegistry = Writable.of<LobbyAdminRegistryValue>(
     {} as LobbyAdminRegistryValue,
   );
-  const selectedProfile = Writable.of<LobbyProfile>({
+  // Lobby transports the original assertion cell without interpreting it;
+  // profile publication and downstream consumers enforce its integrity.
+  const selectedVerifiedIdentity = Writable.of({
+    type: "github.login",
+    value: "octocat",
+    verifiedAt: "2026-07-15T22:03:28.000Z",
+  });
+  const selectedProfile = computed((): LobbyProfile => ({
     initialNameApplied: "Selected Profile",
     externalLinks: [{ label: "GitHub", url: "https://github.com/octocat" }],
-    verifiedIdentities: [],
-  });
+    verifiedIdentities: [selectedVerifiedIdentity],
+  }));
   const selectedViewer = LobbyViewerState({
     viewerProfile: selectedProfile,
     roster: viewerRoster,
@@ -164,10 +171,10 @@ export default pattern(() => {
   );
   const assert_selected_profile_joined = computed(() =>
     participantNames(viewerRoster).join(",") === "Selected Profile" &&
-    lobbyParticipantsValue(viewerRoster)[0]?.profile.get()?.externalLinks?.[0]
-        ?.url === "https://github.com/octocat" &&
     lobbyParticipantsValue(viewerRoster)[0]?.profile.get()
-        ?.verifiedIdentities?.length === 0 &&
+        ?.externalLinks?.[0]?.url === "https://github.com/octocat" &&
+    lobbyParticipantsValue(viewerRoster)[0]?.profile.get()
+        ?.verifiedIdentities?.length === 1 &&
     selectedViewer.hasJoined === true &&
     selectedViewer.joinLabel === "You’re here" &&
     selectedViewer.joinDisabled === true &&

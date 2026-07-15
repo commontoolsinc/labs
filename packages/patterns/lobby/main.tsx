@@ -41,17 +41,6 @@ type LobbyExternalProfileLink = {
   readonly url: string;
 };
 
-type LobbyVerifiedExternalIdentityCell = Cell<
-  RequiresIntegrity<
-    {
-      readonly type: string;
-      readonly value: string;
-      readonly verifiedAt: string;
-    },
-    readonly ["loom-verified-external-identity"]
-  >
->;
-
 export interface LobbyProfile {
   readonly initialNameApplied?: string;
   readonly name?: string;
@@ -59,7 +48,8 @@ export interface LobbyProfile {
   readonly bio?: string;
   /** Connector-facing identity hints retained on the stored profile link. */
   readonly externalLinks?: readonly LobbyExternalProfileLink[];
-  readonly verifiedIdentities?: readonly LobbyVerifiedExternalIdentityCell[];
+  /** Transport original assertion cells; consumers validate their integrity. */
+  readonly verifiedIdentities?: readonly Cell<unknown>[];
 }
 
 /** Stable participant identity: the contributor's live `#profile` cell. */
