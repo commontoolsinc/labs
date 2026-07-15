@@ -1,5 +1,4 @@
 import {
-  assertCounterbalancedRendererCpu,
   type BrowserProcessMetrics,
   CdpWorkerProfiler,
   deltaRendererProcessCpu,
@@ -14,10 +13,7 @@ import {
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import {
-  type ActionClaimKey,
-  executionPolicyId,
-} from "@commonfabric/memory/v2";
+import { type ActionClaimKey } from "@commonfabric/memory/v2";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import type {
   ExecutionRoutingDiagnostics,
@@ -38,7 +34,7 @@ import {
   waitForText,
 } from "./cfc-browser-helpers.ts";
 import {
-  assertEnabledPreflightSettlement,
+  assertAuthoritativePreflightSettlement,
   assertExactRoutingPhase,
   type DiscoveredRolloutAction,
   discoverScopedWritingAction,
@@ -48,7 +44,7 @@ const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 const SERVER_EXECUTION_ENABLED = experimentalOptionsFromEnv(Deno.env.get)
   .serverPrimaryExecution === true;
 const CPU_BENCH = Deno.env.get("CF_SERVER_EXECUTION_CPU_BENCH") === "1";
-// The expensive CPU gate is intentionally opt-in. Its workload parser rejects
+// The expensive CPU measurement is intentionally opt-in. Its workload parser rejects
 // partial, padded, fractional, and out-of-range values instead of silently
 // turning a mistyped benchmark into a short green run.
 const CPU_EVENTS = CPU_BENCH
@@ -66,14 +62,10 @@ const MEASURED_OBSERVER_TIMEOUT = CPU_BENCH
 const CPU_FLOOR_US = 100_000;
 
 const PHASES = [
-  { label: "abba-disabled-1", policyEnabled: false },
-  { label: "abba-enabled-1", policyEnabled: true },
-  { label: "abba-enabled-2", policyEnabled: true },
-  { label: "abba-disabled-2", policyEnabled: false },
-  { label: "baab-enabled-1", policyEnabled: true },
-  { label: "baab-disabled-1", policyEnabled: false },
-  { label: "baab-disabled-2", policyEnabled: false },
-  { label: "baab-enabled-2", policyEnabled: true },
+  "authoritative-1",
+  "authoritative-2",
+  "authoritative-3",
+  "authoritative-4",
 ] as const;
 
 type ActionTraceEntry = {
@@ -81,28 +73,34 @@ type ActionTraceEntry = {
   actualWrites: Array<{ entityId: string; path: string[] }>;
 };
 
+type ServerExecutionCounters = {
+  claimsIssued: number;
+  acceptedActionAttempts: number;
+  schedulerRuns: number;
+  actionTransactions: {
+    shadow: number;
+    authoritative: number;
+  };
+  asyncRequests: number;
+  settlements: {
+    committed: number;
+    noOp: number;
+    failed: number;
+    unserved: number;
+  };
+};
+
 type PhaseResult = {
   label: string;
-  policyEnabled: boolean;
   events: number;
   lazyActionRuns: number;
   clientDerivedSuppressed: number;
   clientDerivedUpstreamCommits: number;
-  serverExecutionBoundary:
-    | "claimed-settlement"
-    | "client-upstream";
-  serverExecution: {
-    schedulerRuns: number;
-    actionTransactions: {
-      shadow: number;
-      authoritative: number;
-    };
-    asyncRequests: number;
-    settlements: {
-      committed: number;
-      noOp: number;
-      failed: number;
-      unserved: number;
+  serverExecutionBoundary: "claimed-settlement";
+  serverExecution: Omit<ServerExecutionCounters, "claimsIssued"> & {
+    claimsIssued: {
+      total: number;
+      duringPhase: number;
     };
   };
   routing: ExecutionRoutingDiagnostics;
@@ -112,8 +110,6 @@ type PhaseResult = {
     rendererDelta: RendererProcessCpuDelta;
   };
 };
-
-type ServerExecutionCounters = PhaseResult["serverExecution"];
 
 async function serverExecutionPoolIsQuiescent(): Promise<boolean> {
   const response = await fetch(new URL("/api/health/stats", API_URL));
@@ -146,6 +142,8 @@ async function readServerExecutionCounters(): Promise<ServerExecutionCounters> {
       };
     } | null;
     serverExecutionControl?: {
+      claimsIssued?: number;
+      acceptedActionAttempts?: number;
       settlementsCommitted?: number;
       settlementsNoOp?: number;
       settlementsFailed?: number;
@@ -167,6 +165,11 @@ async function readServerExecutionCounters(): Promise<ServerExecutionCounters> {
     return Number(value);
   };
   return {
+    claimsIssued: counter(control.claimsIssued, "claims issued"),
+    acceptedActionAttempts: counter(
+      control.acceptedActionAttempts,
+      "accepted action attempts",
+    ),
     schedulerRuns: counter(placement.schedulerRuns, "server scheduler runs"),
     actionTransactions: {
       shadow: counter(
@@ -203,6 +206,16 @@ function serverExecutionDelta(
     return next - previous;
   };
   return {
+    claimsIssued: delta(
+      after.claimsIssued,
+      before.claimsIssued,
+      "claims issued",
+    ),
+    acceptedActionAttempts: delta(
+      after.acceptedActionAttempts,
+      before.acceptedActionAttempts,
+      "accepted action attempts",
+    ),
     schedulerRuns: delta(
       after.schedulerRuns,
       before.schedulerRuns,
@@ -261,27 +274,6 @@ type BrowserRuntime = {
   }>;
   setActionRunTraceEnabled(enabled: boolean): Promise<void>;
 };
-
-async function writePolicy(
-  controller: PiecesController,
-  enabled: boolean,
-): Promise<void> {
-  const runtime = controller.manager().runtime;
-  const space = controller.manager().getSpace();
-  const tx = runtime.edit();
-  const write = tx.write({
-    space,
-    id: executionPolicyId(space),
-    type: "application/json",
-    path: [],
-  }, {
-    value: { version: 1, serverPrimaryExecution: enabled },
-  });
-  if (write.error) throw new Error(write.error.message);
-  const committed = await tx.commit();
-  if (committed.error) throw new Error(committed.error.message);
-  await runtime.storageManager.synced();
-}
 
 async function resetActionTrace(page: Page): Promise<void> {
   await page.evaluate(async () => {
@@ -367,19 +359,13 @@ const exactQuery = (key: ActionClaimKey): ExecutionRoutingDiagnosticsQuery => ({
 async function resetExactRoutingCounters(
   page: Page,
   key: ActionClaimKey,
-  policyEnabled: boolean,
 ): Promise<ExecutionRoutingDiagnostics> {
   const diagnostics = await rawResetExactRoutingCounters(page, key);
-  if (policyEnabled) {
-    assertExactRoutingPhase(diagnostics, {
-      key,
-      policyEnabled: true,
-      events: 0,
-    });
-  } else {
-    assertEquals(diagnostics.claims.length, 0);
-    assertEquals(diagnostics.actions.length, 0);
-  }
+  assertExactRoutingPhase(diagnostics, {
+    key,
+    authoritative: true,
+    events: 0,
+  });
   return diagnostics;
 }
 
@@ -396,7 +382,7 @@ async function rawResetExactRoutingCounters(
   return diagnostics;
 }
 
-async function waitForEnabledPreflightSettlement(
+async function waitForAuthoritativePreflightSettlement(
   page: Page,
   key: ActionClaimKey,
   phase = "post-reset",
@@ -481,14 +467,13 @@ async function waitForEnabledPreflightSettlement(
     );
   }
   const diagnostics = await executionRoutingDiagnostics(page, query);
-  assertEnabledPreflightSettlement(diagnostics, key);
+  assertAuthoritativePreflightSettlement(diagnostics, key);
   return diagnostics;
 }
 
 async function waitForExactRoutingPhase(
   page: Page,
   key: ActionClaimKey,
-  policyEnabled: boolean,
   events: number,
 ): Promise<ExecutionRoutingDiagnostics> {
   const query = exactQuery(key);
@@ -499,7 +484,6 @@ async function waitForExactRoutingPhase(
         _probe,
         request: ExecutionRoutingDiagnosticsQuery,
         expectedKey: ActionClaimKey,
-        enabled: boolean,
         expectedEvents: number,
       ) => {
         const rt = (globalThis as typeof globalThis & {
@@ -541,31 +525,22 @@ async function waitForExactRoutingPhase(
           diagnostics.executionAppliedSeq <
             action.lastSettlement.acceptedCommitSeq
         ) return false;
-        if (enabled) {
-          const successfulSettlements = action.settlements.committed +
-            action.settlements.noOp;
-          // The worker may coalesce several accepted source commits into one
-          // run; exact overlay drops prove that settlement covered the batch.
-          return diagnostics.claims.length === 1 &&
-            diagnostics.claims.some(sameKey) &&
-            action.liveClaim !== undefined &&
-            sameKey(action.liveClaim) && action.upstreamRoutes === 0 &&
-            action.claimedOverlayRoutes === expectedEvents &&
-            (expectedEvents === 0
-              ? successfulSettlements === 0
-              : successfulSettlements >= 1 &&
-                successfulSettlements <= expectedEvents) &&
-            action.basisCoveredOverlayDrops === expectedEvents;
-        }
-        return diagnostics.claims.length === 0 &&
-          action.liveClaim === undefined &&
-          action.upstreamRoutes === expectedEvents &&
-          action.claimedOverlayRoutes === 0 &&
-          action.settlements.committed === 0 &&
-          action.settlements.noOp === 0 &&
-          action.basisCoveredOverlayDrops === 0;
+        const successfulSettlements = action.settlements.committed +
+          action.settlements.noOp;
+        // The worker may coalesce several accepted source commits into one
+        // run; exact overlay drops prove that settlement covered the batch.
+        return diagnostics.claims.length === 1 &&
+          diagnostics.claims.some(sameKey) &&
+          action.liveClaim !== undefined &&
+          sameKey(action.liveClaim) && action.upstreamRoutes === 0 &&
+          action.claimedOverlayRoutes === expectedEvents &&
+          (expectedEvents === 0
+            ? successfulSettlements === 0
+            : successfulSettlements >= 1 &&
+              successfulSettlements <= expectedEvents) &&
+          action.basisCoveredOverlayDrops === expectedEvents;
       },
-      { timeout: TIMEOUT, args: [query, key, policyEnabled, events] },
+      { timeout: TIMEOUT, args: [query, key, events] },
     );
   } catch (cause) {
     const latest = await executionRoutingDiagnostics(page, query).catch(
@@ -576,16 +551,14 @@ async function waitForExactRoutingPhase(
       }),
     );
     throw new Error(
-      `timed out waiting for exact ${
-        policyEnabled ? "enabled" : "disabled"
-      } routing phase with ${events} events. Snapshot: ${
+      `timed out waiting for exact authoritative routing phase with ${events} events. Snapshot: ${
         JSON.stringify(latest)
       }`,
       { cause },
     );
   }
   const diagnostics = await executionRoutingDiagnostics(page, query);
-  assertExactRoutingPhase(diagnostics, { key, policyEnabled, events });
+  assertExactRoutingPhase(diagnostics, { key, authoritative: true, events });
   return diagnostics;
 }
 
@@ -718,7 +691,6 @@ const assertRendererCountersContinue = (
     let actorIdentity: Identity;
     let lazyIdentity: Identity;
     let creator: PiecesController;
-    let policyOwner: PiecesController;
     let space: MemorySpace;
     let pieceId: string;
     let executionPieceId: string;
@@ -740,13 +712,6 @@ const assertRendererCountersContinue = (
         identity: actorIdentity,
       });
       space = creator.manager().getSpace();
-      const spaceIdentity = await (await Identity.fromPassphrase("common user"))
-        .derive(SPACE_NAME);
-      policyOwner = await initializePiecesController({
-        spaceName: SPACE_NAME,
-        apiUrl: new URL(API_URL),
-        identity: spaceIdentity,
-      });
       await creator.ensureDefaultPattern();
       const sourcePath = join(
         import.meta.dirname!,
@@ -767,16 +732,14 @@ const assertRendererCountersContinue = (
       doubledEntityId = result.key("doubled").resolveAsCell()
         .getAsNormalizedFullLink().id;
       resultSinkCancel = result.sink(() => {});
-      await writePolicy(policyOwner, false);
     });
 
     afterAll(async () => {
-      await writePolicy(policyOwner, false).catch(() => {});
       resultSinkCancel?.();
-      await Promise.all([creator?.dispose(), policyOwner?.dispose()]);
+      await creator?.dispose();
     });
 
-    it("keeps lazy-client compute no worse while exact claimed writes leave the browser wire", async () => {
+    it("records repeated authoritative server execution phases", async () => {
       const actorPage = actorShell.page();
       const lazyPage = lazyShell.page();
       const view = { spaceName: SPACE_NAME, pieceId };
@@ -825,7 +788,6 @@ const assertRendererCountersContinue = (
         discovered: DiscoveredRolloutAction;
         trace: ActionTraceEntry[];
       }> => {
-        await writePolicy(policyOwner, true);
         await resetActionTrace(actorPage);
         let lastEvidence: unknown;
         for (let attempt = 0; attempt < 12; attempt++) {
@@ -884,12 +846,10 @@ const assertRendererCountersContinue = (
               diagnostics,
               doubledEntityId,
             );
-            // Claim publication is only route readiness. Do not immediately
-            // disable policy and replace the Worker until that exact claim
-            // incarnation has also settled successfully; otherwise discovery
-            // can race away the only live writer before its durable scheduler
-            // observation is available to the replacement generation.
-            await waitForEnabledPreflightSettlement(
+            // Claim publication is only route readiness. Wait until that exact
+            // claim incarnation has also settled successfully before measuring
+            // it, so discovery cannot race ahead of durable scheduler evidence.
+            await waitForAuthoritativePreflightSettlement(
               actorPage,
               discovered.key,
               "initial discovery",
@@ -897,14 +857,13 @@ const assertRendererCountersContinue = (
             // A route-ready activation commonly settles no-op after the actor
             // has already written the same result. Drive one changing event
             // under the installed claim and require its accepted commit before
-            // any policy transition, so replacement discovery has a durable
-            // writer observation rather than only process-local evidence.
+            // measurement, so discovery has a durable writer observation
+            // rather than only process-local evidence.
             await rawResetExactRoutingCounters(actorPage, discovered.key);
             await clickActorAndWait();
             const durableReadiness = await waitForExactRoutingPhase(
               actorPage,
               discovered.key,
-              true,
               1,
             );
             const durableSettlement = durableReadiness.actions[0]
@@ -947,10 +906,7 @@ const assertRendererCountersContinue = (
       const actionKey = discovered.key;
       assertEquals(actionKey.pieceId, executionPieceId);
 
-      const preflightPolicy = async (
-        policyEnabled: boolean,
-      ): Promise<void> => {
-        await writePolicy(policyOwner, policyEnabled);
+      const preflightAuthority = async (): Promise<void> => {
         // Event 1 must prove fresh authority, not reuse an activation
         // settlement or route retained from the previous block.
         await rawResetExactRoutingCounters(actorPage, actionKey);
@@ -960,25 +916,14 @@ const assertRendererCountersContinue = (
           `doubled:${finalCount * 2}`,
         );
         try {
-          // Event 1 invalidates the exact action. Enabled mode must then expose
-          // a successful post-reset settlement under the current live claim;
-          // disabled mode must route this exact event upstream. This setup
+          // Event 1 invalidates the exact action and must expose a successful
+          // post-reset settlement under the current live claim. This setup
           // traffic is deliberately discarded before event 2.
           await clickActorAndWait();
-          if (policyEnabled) {
-            await waitForEnabledPreflightSettlement(actorPage, actionKey);
-          } else {
-            await waitForExactRoutingPhase(
-              actorPage,
-              actionKey,
-              false,
-              1,
-            );
-          }
+          await waitForAuthoritativePreflightSettlement(actorPage, actionKey);
           await resetExactRoutingCounters(
             actorPage,
             actionKey,
-            policyEnabled,
           );
 
           // Event 2 must take exactly the route that the following block will
@@ -987,7 +932,6 @@ const assertRendererCountersContinue = (
           await waitForExactRoutingPhase(
             actorPage,
             actionKey,
-            policyEnabled,
             1,
           );
           await awaitLazyFinalObserver(lazyPage);
@@ -995,7 +939,6 @@ const assertRendererCountersContinue = (
           await resetExactRoutingCounters(
             actorPage,
             actionKey,
-            policyEnabled,
           );
         } catch (cause) {
           await cancelLazyFinalObserver(lazyPage);
@@ -1003,10 +946,8 @@ const assertRendererCountersContinue = (
         }
       };
 
-      const runWarmupBlock = async (
-        policyEnabled: boolean,
-      ): Promise<void> => {
-        await preflightPolicy(policyEnabled);
+      const runWarmupBlock = async (): Promise<void> => {
+        await preflightAuthority();
         const finalCount = expectedCount + WARMUP_EVENTS_PER_BLOCK;
         await armLazyFinalObserver(
           lazyPage,
@@ -1019,7 +960,6 @@ const assertRendererCountersContinue = (
           await waitForExactRoutingPhase(
             actorPage,
             actionKey,
-            policyEnabled,
             WARMUP_EVENTS_PER_BLOCK,
           );
           await awaitLazyFinalObserver(lazyPage);
@@ -1030,17 +970,16 @@ const assertRendererCountersContinue = (
         }
       };
 
-      // Unmeasured ABBA warmup gives both policies the same event count and
-      // cold/warm positions before either CPU block starts (50 events per mode
-      // in CPU mode). Each block's two authority-preflight events remain
-      // separate.
-      for (const policyEnabled of [false, true, true, false]) {
-        await runWarmupBlock(policyEnabled);
+      // Repeated unmeasured warmup moves discovery, compilation, and initial
+      // rendering out of the measured authoritative phases. Each block's two
+      // authority-preflight events remain separate.
+      for (let index = 0; index < 2; index++) {
+        await runWarmupBlock();
       }
 
       let processMonitor: CdpWorkerProfiler | undefined;
       if (CPU_BENCH) {
-        // This connection never attaches to a worker. The authoritative gate
+        // This connection never attaches to a worker. The authoritative sample
         // uses only browser-level SystemInfo counters, never Profiler.start.
         processMonitor = await CdpWorkerProfiler.connect(
           lazyShell.wsEndpoint(),
@@ -1052,9 +991,8 @@ const assertRendererCountersContinue = (
 
       const runPhase = async (
         label: string,
-        policyEnabled: boolean,
       ): Promise<PhaseResult> => {
-        await preflightPolicy(policyEnabled);
+        await preflightAuthority();
         const serverExecutionBefore = await readServerExecutionCounters();
         const lazyActionRunsBefore = await actionRunCounts(lazyPage);
         const loadBefore = await collectBrowserLoadSummary(
@@ -1080,7 +1018,6 @@ const assertRendererCountersContinue = (
         const routing = await waitForExactRoutingPhase(
           actorPage,
           actionKey,
-          policyEnabled,
           CPU_EVENTS,
         );
 
@@ -1162,9 +1099,40 @@ const assertRendererCountersContinue = (
           `${label}-after`,
         );
         const serverExecutionAfter = await readServerExecutionCounters();
+        assert(
+          serverExecutionAfter.claimsIssued > 0,
+          `${label} observed no server-issued execution claim`,
+        );
+        const serverExecutionCounters = serverExecutionDelta(
+          serverExecutionBefore,
+          serverExecutionAfter,
+        );
+        assert(
+          serverExecutionCounters.actionTransactions.authoritative > 0,
+          `${label} observed no authoritative server action transaction`,
+        );
+        assert(
+          serverExecutionCounters.acceptedActionAttempts > 0,
+          `${label} observed no accepted server action attempt`,
+        );
+        assert(
+          serverExecutionCounters.settlements.committed +
+              serverExecutionCounters.settlements.noOp > 0,
+          `${label} observed no successful server settlement`,
+        );
+        assertEquals(serverExecutionCounters.settlements.failed, 0);
+        assertEquals(serverExecutionCounters.settlements.unserved, 0);
+        const { claimsIssued, ...serverExecutionWithoutClaims } =
+          serverExecutionCounters;
+        const serverExecution: PhaseResult["serverExecution"] = {
+          ...serverExecutionWithoutClaims,
+          claimsIssued: {
+            total: serverExecutionAfter.claimsIssued,
+            duringPhase: claimsIssued,
+          },
+        };
         return {
           label,
-          policyEnabled,
           events: CPU_EVENTS,
           lazyActionRuns: afterRunCount - beforeRunCount,
           clientDerivedSuppressed: loadAfter.churn.clientDerivedSuppressed -
@@ -1172,13 +1140,8 @@ const assertRendererCountersContinue = (
           clientDerivedUpstreamCommits:
             loadAfter.churn.clientDerivedUpstreamCommits -
             loadBefore.churn.clientDerivedUpstreamCommits,
-          serverExecutionBoundary: policyEnabled
-            ? "claimed-settlement"
-            : "client-upstream",
-          serverExecution: serverExecutionDelta(
-            serverExecutionBefore,
-            serverExecutionAfter,
-          ),
+          serverExecutionBoundary: "claimed-settlement",
+          serverExecution,
           routing,
           ...(browserProcessCpu ? { browserProcessCpu } : {}),
         };
@@ -1186,17 +1149,17 @@ const assertRendererCountersContinue = (
 
       const phases: PhaseResult[] = [];
       try {
-        for (const phase of PHASES) {
-          phases.push(await runPhase(phase.label, phase.policyEnabled));
+        for (const label of PHASES) {
+          phases.push(await runPhase(label));
         }
         console.log(
           `server-primary execution placement phases: ${
             JSON.stringify({
+              deploymentMode: "server-primary",
               serverScope: "toolshed-process",
               baseline: "zero-lane-quiescence",
               phases: phases.map((phase) => ({
                 label: phase.label,
-                policyEnabled: phase.policyEnabled,
                 events: phase.events,
                 client: {
                   exactLazySchedulerRuns: phase.lazyActionRuns,
@@ -1214,12 +1177,6 @@ const assertRendererCountersContinue = (
           }`,
         );
 
-        let cpuAnalysis:
-          | ReturnType<
-            typeof assertCounterbalancedRendererCpu
-          >
-          | undefined;
-        let cpuGateError: unknown;
         if (CPU_BENCH) {
           const cpuPerEvent = phases.map((phase) => {
             const total = phase.browserProcessCpu?.rendererDelta.totalCpuTimeUs;
@@ -1228,7 +1185,6 @@ const assertRendererCountersContinue = (
           });
           const cpuPhases = phases.map((phase) => ({
             label: phase.label,
-            policyEnabled: phase.policyEnabled,
             rendererCpuUs: phase.browserProcessCpu?.rendererDelta
               .totalCpuTimeUs,
             renderers: phase.browserProcessCpu?.rendererDelta.renderers,
@@ -1239,7 +1195,7 @@ const assertRendererCountersContinue = (
             serverExecution: phase.serverExecution,
           }));
           console.log(
-            `authoritative lazy-browser CPU phases before gate: ${
+            `authoritative lazy-browser CPU phases: ${
               JSON.stringify({ cpuPerEvent, phases: cpuPhases })
             }`,
           );
@@ -1250,7 +1206,7 @@ const assertRendererCountersContinue = (
               JSON.stringify(
                 {
                   capturedAt: new Date().toISOString(),
-                  explicitlyPreGate: true,
+                  deploymentMode: "server-primary",
                   measuredEventsPerPhase: CPU_EVENTS,
                   cpuPerEvent,
                   phases: cpuPhases,
@@ -1258,24 +1214,6 @@ const assertRendererCountersContinue = (
                 null,
                 2,
               ),
-            );
-          }
-          try {
-            cpuAnalysis = assertCounterbalancedRendererCpu(cpuPerEvent, {
-              maximumEnabledRatio: 1.1,
-              maximumReplicateSpread: 0.15,
-            });
-            console.log(
-              `authoritative lazy-browser CPU analysis: ${
-                JSON.stringify(cpuAnalysis)
-              }`,
-            );
-          } catch (cause) {
-            cpuGateError = cause;
-            console.warn(
-              `authoritative lazy-browser CPU gate failed; collecting the non-gating worker profile before surfacing it: ${
-                cause instanceof Error ? cause.message : String(cause)
-              }`,
             );
           }
         }
@@ -1297,7 +1235,6 @@ const assertRendererCountersContinue = (
                 warmupEventsPerBlock: WARMUP_EVENTS_PER_BLOCK,
                 measuredEventsPerPhase: CPU_EVENTS,
                 phases,
-                cpuAnalysis,
               },
               null,
               2,
@@ -1305,14 +1242,14 @@ const assertRendererCountersContinue = (
           );
         }
 
-        // Optional sampling is deliberately after all eight authoritative
-        // SystemInfo phases and their gate. It is diagnostic only: attaching a
-        // worker profiler cannot influence any pass/fail CPU comparison above.
+        // Optional sampling is deliberately after all authoritative SystemInfo
+        // phases. It is diagnostic only: attaching a worker profiler cannot
+        // influence the measurements above.
         if (CPU_BENCH && PROFILE_DIR) {
           const diagnosticEvents = Math.min(CPU_EVENTS, 100);
           let sampler: CdpWorkerProfiler | undefined;
           try {
-            await preflightPolicy(true);
+            await preflightAuthority();
             const finalCount = expectedCount + diagnosticEvents;
             await armLazyFinalObserver(
               lazyPage,
@@ -1329,18 +1266,20 @@ const assertRendererCountersContinue = (
             const routing = await waitForExactRoutingPhase(
               actorPage,
               actionKey,
-              true,
               diagnosticEvents,
             );
             const profile = await sampler.stop();
             await awaitLazyFinalObserver(lazyPage);
             await lazySyncedIdleBarrier(lazyPage);
             await Deno.writeTextFile(
-              join(PROFILE_DIR, "diagnostic-enabled-non-gating.cpuprofile"),
+              join(
+                PROFILE_DIR,
+                "diagnostic-authoritative-non-gating.cpuprofile",
+              ),
               JSON.stringify(profile),
             );
             await Deno.writeTextFile(
-              join(PROFILE_DIR, "diagnostic-enabled-non-gating.json"),
+              join(PROFILE_DIR, "diagnostic-authoritative-non-gating.json"),
               JSON.stringify(
                 {
                   capturedAt: new Date().toISOString(),
@@ -1364,7 +1303,10 @@ const assertRendererCountersContinue = (
             );
             await cancelLazyFinalObserver(lazyPage);
             await Deno.writeTextFile(
-              join(PROFILE_DIR, "diagnostic-enabled-non-gating-failure.json"),
+              join(
+                PROFILE_DIR,
+                "diagnostic-authoritative-non-gating-failure.json",
+              ),
               JSON.stringify(
                 {
                   capturedAt: new Date().toISOString(),
@@ -1379,7 +1321,6 @@ const assertRendererCountersContinue = (
             sampler?.close();
           }
         }
-        if (cpuGateError !== undefined) throw cpuGateError;
       } finally {
         processMonitor?.close();
         await cancelLazyFinalObserver(lazyPage);

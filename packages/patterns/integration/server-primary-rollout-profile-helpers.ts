@@ -58,7 +58,7 @@ export function discoverScopedWritingAction(
 
 export interface ExactRoutingPhaseExpectation {
   readonly key: ActionClaimKey;
-  readonly policyEnabled: boolean;
+  readonly authoritative: boolean;
   readonly events: number;
 }
 
@@ -81,7 +81,7 @@ const addMismatch = (
  * Prove that event 1 produced a successful settlement after the preflight's
  * raw counter reset, under the claim incarnation that is still live now.
  */
-export function enabledPreflightSettlementIssues(
+export function authoritativePreflightSettlementIssues(
   diagnostics: ExecutionRoutingDiagnostics,
   key: ActionClaimKey,
 ): string[] {
@@ -173,14 +173,14 @@ export function enabledPreflightSettlementIssues(
   return issues;
 }
 
-export function assertEnabledPreflightSettlement(
+export function assertAuthoritativePreflightSettlement(
   diagnostics: ExecutionRoutingDiagnostics,
   key: ActionClaimKey,
 ): void {
-  const issues = enabledPreflightSettlementIssues(diagnostics, key);
+  const issues = authoritativePreflightSettlementIssues(diagnostics, key);
   if (issues.length > 0) {
     throw new Error(
-      `enabled preflight did not establish current authority: ${
+      `authoritative preflight did not establish current authority: ${
         issues.join("; ")
       }. Snapshot: ${toCompactDebugString(diagnostics)}`,
     );
@@ -192,7 +192,7 @@ export function exactRoutingPhaseIssues(
   diagnostics: ExecutionRoutingDiagnostics,
   expectation: ExactRoutingPhaseExpectation,
 ): string[] {
-  const { key, policyEnabled, events } = expectation;
+  const { key, authoritative, events } = expectation;
   const issues: string[] = [];
   addMismatch(issues, "space", diagnostics.space, key.space);
   addMismatch(issues, "branch", diagnostics.branch, key.branch);
@@ -252,7 +252,7 @@ export function exactRoutingPhaseIssues(
     );
   }
 
-  if (policyEnabled) {
+  if (authoritative) {
     addMismatch(issues, "claims.length", diagnostics.claims.length, 1);
     const exactClaim = diagnostics.claims.find((candidate) =>
       actionClaimMapKey(candidate) === expectedKey

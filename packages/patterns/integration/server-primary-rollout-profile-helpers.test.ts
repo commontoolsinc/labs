@@ -10,7 +10,7 @@ import type {
   ExecutionRoutingDiagnostics,
 } from "@commonfabric/runner/shared";
 import {
-  assertEnabledPreflightSettlement,
+  assertAuthoritativePreflightSettlement,
   assertExactRoutingPhase,
   discoverScopedWritingAction,
 } from "./server-primary-rollout-profile-helpers.ts";
@@ -167,7 +167,7 @@ Deno.test("action discovery rejects two claimed writers for the exact result ent
 Deno.test("routing phases treat feed and applied sequences as independent domains", () => {
   assertExactRoutingPhase(diagnostics(), {
     key,
-    policyEnabled: true,
+    authoritative: true,
     events: 4,
   });
 });
@@ -177,7 +177,7 @@ Deno.test("routing phases wait for an accepted commit to reach the data sequence
     () =>
       assertExactRoutingPhase(diagnostics({ executionAppliedSeq: 18 }), {
         key,
-        policyEnabled: true,
+        authoritative: true,
         events: 4,
       }),
     Error,
@@ -195,7 +195,7 @@ Deno.test("routing phase failures use fabric-safe snapshot diagnostics", () => {
     () =>
       assertExactRoutingPhase(withFabricDebugValue, {
         key,
-        policyEnabled: true,
+        authoritative: true,
         events: 4,
       }),
     Error,
@@ -203,12 +203,12 @@ Deno.test("routing phase failures use fabric-safe snapshot diagnostics", () => {
   );
 });
 
-Deno.test("enabled preflight requires a post-reset settlement", () => {
-  assertEnabledPreflightSettlement(diagnostics(), key);
+Deno.test("authoritative preflight requires a post-reset settlement", () => {
+  assertAuthoritativePreflightSettlement(diagnostics(), key);
 
   assertThrows(
     () =>
-      assertEnabledPreflightSettlement(
+      assertAuthoritativePreflightSettlement(
         diagnostics({
           actions: [action({
             settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
@@ -232,20 +232,20 @@ Deno.test("preflight failures use fabric-safe snapshot diagnostics", () => {
   } as ExecutionRoutingDiagnostics;
 
   assertThrows(
-    () => assertEnabledPreflightSettlement(withFabricDebugValue, key),
+    () => assertAuthoritativePreflightSettlement(withFabricDebugValue, key),
     Error,
     '"debugBigInt":11n',
   );
 });
 
-Deno.test("enabled preflight settlement must match the current incarnation", () => {
+Deno.test("authoritative preflight settlement must match the current incarnation", () => {
   const nextClaim: ExecutionClaim = {
     ...claim,
     claimGeneration: claim.claimGeneration + 1,
   };
   assertThrows(
     () =>
-      assertEnabledPreflightSettlement(
+      assertAuthoritativePreflightSettlement(
         diagnostics({
           claims: [nextClaim],
           actions: [action({ liveClaim: nextClaim })],
@@ -257,10 +257,10 @@ Deno.test("enabled preflight settlement must match the current incarnation", () 
   );
 });
 
-Deno.test("enabled routing phase requires exact settled claimed-overlay counts", () => {
+Deno.test("authoritative routing phase requires exact settled claimed-overlay counts", () => {
   assertExactRoutingPhase(diagnostics(), {
     key,
-    policyEnabled: true,
+    authoritative: true,
     events: 4,
   });
 
@@ -272,7 +272,7 @@ Deno.test("enabled routing phase requires exact settled claimed-overlay counts",
         }),
         {
           key,
-          policyEnabled: true,
+          authoritative: true,
           events: 4,
         },
       ),
@@ -281,7 +281,7 @@ Deno.test("enabled routing phase requires exact settled claimed-overlay counts",
   );
 });
 
-Deno.test("enabled routing phase accepts one coalesced settlement covering all overlays", () => {
+Deno.test("authoritative routing phase accepts one coalesced settlement covering all overlays", () => {
   assertExactRoutingPhase(
     diagnostics({
       actions: [action({
@@ -290,7 +290,7 @@ Deno.test("enabled routing phase accepts one coalesced settlement covering all o
     }),
     {
       key,
-      policyEnabled: true,
+      authoritative: true,
       events: 4,
     },
   );
@@ -306,7 +306,7 @@ Deno.test("enabled routing phase accepts one coalesced settlement covering all o
           }),
           {
             key,
-            policyEnabled: true,
+            authoritative: true,
             events: 4,
           },
         ),
@@ -316,7 +316,7 @@ Deno.test("enabled routing phase accepts one coalesced settlement covering all o
   }
 });
 
-Deno.test("enabled routing counter reset accepts zero events and settlements", () => {
+Deno.test("authoritative routing counter reset accepts zero events and settlements", () => {
   assertExactRoutingPhase(
     diagnostics({
       actions: [action({
@@ -328,14 +328,14 @@ Deno.test("enabled routing counter reset accepts zero events and settlements", (
     }),
     {
       key,
-      policyEnabled: true,
+      authoritative: true,
       events: 0,
     },
   );
 });
 
-Deno.test("disabled routing phase requires exact upstream-only counts", () => {
-  const disabled = diagnostics({
+Deno.test("non-authoritative routing requires exact upstream-only counts", () => {
+  const nonAuthoritative = diagnostics({
     claims: [],
     actions: [action({
       liveClaim: undefined,
@@ -346,16 +346,16 @@ Deno.test("disabled routing phase requires exact upstream-only counts", () => {
       basisCoveredOverlayDrops: 0,
     })],
   });
-  assertExactRoutingPhase(disabled, {
+  assertExactRoutingPhase(nonAuthoritative, {
     key,
-    policyEnabled: false,
+    authoritative: false,
     events: 4,
   });
 
   assertThrows(
     () =>
       assertExactRoutingPhase({
-        ...disabled,
+        ...nonAuthoritative,
         actions: [action({
           liveClaim: undefined,
           lastSettlement: undefined,
@@ -366,7 +366,7 @@ Deno.test("disabled routing phase requires exact upstream-only counts", () => {
         })],
       }, {
         key,
-        policyEnabled: false,
+        authoritative: false,
         events: 4,
       }),
     Error,

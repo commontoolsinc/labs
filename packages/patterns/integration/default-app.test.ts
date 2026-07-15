@@ -18,6 +18,10 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
+import {
+  beginServerExecutionMeasurement,
+  finishServerExecutionMeasurement,
+} from "./server-execution-measurement.ts";
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -237,6 +241,9 @@ describe("default-app flow test", () => {
 
   it("should create a note via default app and see it in the space list", async () => {
     identity = await Identity.generate({ implementation: "noble" });
+    const executionMeasurement = await beginServerExecutionMeasurement(
+      "default-app-note-create",
+    );
 
     const page = shell.page();
 
@@ -665,6 +672,7 @@ describe("default-app flow test", () => {
         JSON.stringify(triggerSummary, null, 2),
       );
     }
+    await finishServerExecutionMeasurement(executionMeasurement);
   });
 
   it("should persist and reload every rapidly created notebook note", async () => {

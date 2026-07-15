@@ -15,6 +15,10 @@ import {
   waitForText,
   waitForTextAbsent,
 } from "./cfc-browser-helpers.ts";
+import {
+  beginServerExecutionMeasurement,
+  finishServerExecutionMeasurement,
+} from "./server-execution-measurement.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -88,6 +92,9 @@ describe("parking coordinator admin view integration test", () => {
   });
 
   it("renders manager and admin controls with the expected enabled states", async () => {
+    const executionMeasurement = await beginServerExecutionMeasurement(
+      "parking-coordinator-admin-view",
+    );
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -145,5 +152,6 @@ describe("parking coordinator admin view integration test", () => {
     await waitForRuntimeIdle(page);
     await waitForText(page, "#parking-admin-people-section", "People");
     await waitForText(page, "#parking-admin-add-person-open", "+ Add Person");
+    await finishServerExecutionMeasurement(executionMeasurement);
   });
 });
