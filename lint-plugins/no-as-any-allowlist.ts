@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/inspace-child-reload.test.ts",
   "packages/runner/test/json-utils.test.ts",
   "packages/runner/test/link-resolution.test.ts",
   "packages/runner/test/link-utils.test.ts",

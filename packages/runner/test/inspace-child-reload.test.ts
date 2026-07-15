@@ -5,6 +5,7 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("inspace-child-reload");
 const spaceA = signer.did();
@@ -56,11 +57,30 @@ const PROGRAM: RuntimeProgram = {
 
 const RESULT_CAUSE = "inspace child reload parent";
 
-const childLinkListSchema = {
+type ChildOutput = {
+  label: string;
+};
+
+type ParentOutput = {
+  items?: ChildOutput[];
+  create?: { label?: string };
+};
+
+type StaticParentOutput = {
+  kid?: ChildOutput;
+};
+
+type ChildOutputCell = Cell<ChildOutput>;
+
+const childLinkSchema: JSONSchema = {
+  type: "unknown",
+  asCell: ["cell"],
+};
+
+const childLinkListSchema: JSONSchema = {
   type: "array",
-  items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+  items: childLinkSchema,
+};
 
 describe("inSpace child piece reload from its own space (CT-1687)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -89,14 +109,13 @@ describe("inSpace child piece reload from its own space (CT-1687)", () => {
         space: spaceA,
         tx: tx1,
       });
-      const resultCell1 = rt1.getCell<Record<string, unknown>>(
+      const resultCell1 = rt1.getCell<ParentOutput>(
         spaceA,
         RESULT_CAUSE,
         undefined,
         tx1,
       );
-      // deno-lint-ignore no-explicit-any
-      const r1 = rt1.run(tx1, parent as any, {}, resultCell1);
+      const r1 = rt1.run(tx1, parent, {}, resultCell1);
       await tx1.commit();
       await r1.pull();
 
@@ -106,8 +125,7 @@ describe("inSpace child piece reload from its own space (CT-1687)", () => {
 
       // The child materialized in space B (link identity, no deep resolve).
       const links = r1.key("items").asSchema(childLinkListSchema)
-        // deno-lint-ignore no-explicit-any
-        .get() as any[];
+        .get() as ChildOutputCell[];
       expect(links.length).toBe(1);
       const childLink = links[0].getAsNormalizedFullLink();
       expect(childLink.space).toBe(spaceB);
@@ -118,7 +136,7 @@ describe("inSpace child piece reload from its own space (CT-1687)", () => {
       // Session 2: a fresh runtime loads the child piece from ITS OWN space —
       // the shell's navigate-to-piece path. Before the fix this rejects with
       // "Pattern <id> has no stored source".
-      const childCell = rt2.getCellFromLink(childLink);
+      const childCell = rt2.getCellFromLink<ChildOutput>(childLink);
       await childCell.sync();
       const started = await rt2.start(childCell);
       expect(started).toBe(true);
@@ -165,30 +183,26 @@ describe("inSpace child piece reload from its own space (CT-1687)", () => {
         space: spaceA,
         tx: tx1,
       });
-      const resultCell1 = rt1.getCell<Record<string, unknown>>(
+      const resultCell1 = rt1.getCell<StaticParentOutput>(
         spaceA,
         "inspace static child parent",
         undefined,
         tx1,
       );
-      // deno-lint-ignore no-explicit-any
-      const r1 = rt1.run(tx1, parent as any, {}, resultCell1);
+      const r1 = rt1.run(tx1, parent, {}, resultCell1);
       await tx1.commit();
       await r1.pull();
       await rt1.idle();
 
-      const kidCell = r1.key("kid").asSchema(
-        // deno-lint-ignore no-explicit-any
-        { type: "unknown", asCell: ["cell"] } as any,
-        // deno-lint-ignore no-explicit-any
-      ).get() as any;
+      const kidCell = r1.key("kid").asSchema(childLinkSchema)
+        .get() as ChildOutputCell;
       const kidLink = kidCell.getAsNormalizedFullLink();
       expect(kidLink.space).toBe(spaceC);
 
       await rt1.patternManager.flushCompileCacheWrites();
       await rt1.storageManager.synced();
 
-      const childCell = rt2.getCellFromLink(kidLink);
+      const childCell = rt2.getCellFromLink<ChildOutput>(kidLink);
       await childCell.sync();
       const started = await rt2.start(childCell);
       expect(started).toBe(true);
