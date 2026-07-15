@@ -682,17 +682,19 @@ describe("dynamic Factory@1 supervisor", () => {
     const executions: Execution[] = [];
     const { factoryA } = makeFactories(executions);
     let loadAttempts = 0;
-    runtime.patternManager.loadArtifactByIdentity = async (
+    runtime.patternManager.loadArtifactByIdentity = (
       identity,
       symbol,
     ) => {
       expect({ identity, symbol }).toEqual(REFS.a);
       loadAttempts++;
       if (loadAttempts === 1) {
-        throw new Error("transient cold factory load failure");
+        return Promise.reject(
+          new Error("transient cold factory load failure"),
+        );
       }
       warmArtifacts.set(refKey(identity, symbol), factoryA);
-      return factoryA;
+      return Promise.resolve(factoryA);
     };
     const diagnostic = Promise.withResolvers<Error>();
     runtime.scheduler.onError((error) => diagnostic.resolve(error));
