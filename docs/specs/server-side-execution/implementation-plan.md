@@ -1332,7 +1332,10 @@ per-attempt outcomes.
 ### W2.8 — Coalesce accepted-commit wake bursts
 
 **Depends on:** W2.6 (re-measure first — shrink scoping may shrink this).
-**Status:** planned; implement only if conflicts persist after W2.6.
+**Status:** implemented. The post-W2.6 re-measurement showed the conflict
+storm essentially unchanged (114 conflicts / 30 accepted attempts;
+settlements still 13–23 s late; the 14 claim revocations turned out to be
+conflict-retry exhaustion, not demand churn), so this work order proceeded.
 
 The Worker recomputes claimed actions per accepted-commit wave;
 `SelectiveDemandWakeQueue` coalesces only microtask-adjacent pushes, so an
@@ -1344,11 +1347,16 @@ already cover multiple source invalidations, so no protocol change.
 
 **Success criteria:**
 
-- [ ] A burst of source commits inside the window produces one recompute and
-      one settlement covering the latest basis.
-- [ ] A continuous commit stream cannot defer recompute past the cap
-      (deterministic-clock test, no sleeps).
-- [ ] `settle()` still drains the queue deterministically.
+- [x] A burst of source commits inside the window produces one flush
+      (`selective-demand-wake.test.ts` "wake pushes inside the coalescing
+      window flush as one batch").
+- [x] A continuous commit stream cannot defer recompute past the cap
+      (deterministic-clock test "a continuous push stream flushes at the
+      window cap"; pushes arriving mid-drain keep the existing immediate
+      backpressure batching).
+- [x] `settle()` still drains the queue deterministically ("settled waits
+      through an armed coalescing window"; the Worker settle barrier awaits
+      the same promise).
 - [ ] Re-measured default-app run shows claimed-action conflicts reduced to
       near the accepted-attempt count.
 
