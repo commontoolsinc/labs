@@ -5,10 +5,61 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { listResultSchema } from "../src/builtins/list-result-schema.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema, type PatternFactory } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-list-result-schema");
 const space = signer.did();
+
+type ListOpInput<T> = {
+  element: T;
+  index: number;
+  array: T[];
+};
+
+type JSONSchemaObject = Exclude<JSONSchema, boolean>;
+
+type ListResultRef = {
+  export(): { schema?: JSONSchemaObject };
+};
+
+type ListSchemaBuiltins<T> = {
+  mapWithPattern<R>(
+    op: PatternFactory<ListOpInput<T>, R>,
+    params: Record<string, unknown>,
+  ): ListResultRef;
+  filterWithPattern(
+    op: PatternFactory<ListOpInput<T>, boolean>,
+    params: Record<string, unknown>,
+  ): ListResultRef;
+  flatMapWithPattern<R>(
+    op: PatternFactory<ListOpInput<T>, R[]>,
+    params: Record<string, unknown>,
+  ): ListResultRef;
+};
+
+function listBuiltins<T>(values: unknown): ListSchemaBuiltins<T> {
+  return values as ListSchemaBuiltins<T>;
+}
+
+function expectListResultRef(ref: ListResultRef | undefined): ListResultRef {
+  expect(ref).toBeDefined();
+  if (!ref) {
+    throw new Error("missing list builtin result reference");
+  }
+  return ref;
+}
+
+function identityElement(value: number, _index: number, _array: number[]) {
+  return value;
+}
+
+function keepElement(_value: number, _index: number, _array: number[]) {
+  return true;
+}
+
+function wrapElement(value: number, _index: number, _array: number[]) {
+  return [value];
+}
 
 describe("listResultSchema", () => {
   it("builds a plain array schema without item schema", () => {
@@ -61,9 +112,9 @@ describe("listResultSchema", () => {
 
     const { commonfabric } = createTrustedBuilder(runtime);
     const { pattern } = commonfabric;
-    let mappedRef: any;
-    let filteredRef: any;
-    let flattenedRef: any;
+    let mappedRef: ListResultRef | undefined;
+    let filteredRef: ListResultRef | undefined;
+    let flattenedRef: ListResultRef | undefined;
 
     const tx = runtime.edit();
     const valuesCell = runtime.getCell(
@@ -78,21 +129,21 @@ describe("listResultSchema", () => {
     valuesCell.set([]);
 
     const collectionPattern = pattern<{ values: number[] }>(({ values }) => {
-      mappedRef = (values as any).mapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((value: number) => value) as any)(element, index, array)
+      mappedRef = listBuiltins<number>(values).mapWithPattern(
+        pattern<ListOpInput<number>, number>(({ element, index, array }) =>
+          identityElement(element, index, array)
         ),
         {},
       );
-      filteredRef = (values as any).filterWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((_value: number) => true) as any)(element, index, array)
+      filteredRef = listBuiltins<number>(values).filterWithPattern(
+        pattern<ListOpInput<number>, boolean>(({ element, index, array }) =>
+          keepElement(element, index, array)
         ),
         {},
       );
-      flattenedRef = (values as any).flatMapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((value: number) => [value]) as any)(element, index, array)
+      flattenedRef = listBuiltins<number>(values).flatMapWithPattern(
+        pattern<ListOpInput<number>, number[]>(({ element, index, array }) =>
+          wrapElement(element, index, array)
         ),
         {},
       );
@@ -119,7 +170,13 @@ describe("listResultSchema", () => {
     await tx.commit();
     await result.pull();
 
-    for (const ref of [mappedRef, filteredRef, flattenedRef]) {
+    for (
+      const ref of [
+        expectListResultRef(mappedRef),
+        expectListResultRef(filteredRef),
+        expectListResultRef(flattenedRef),
+      ]
+    ) {
       const schema = ref.export().schema;
       expect(schema?.type).toBe("array");
       expect(schema?.ifc).toBeUndefined();

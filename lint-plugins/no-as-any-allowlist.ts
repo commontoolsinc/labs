@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/list-result-schema.test.ts",
   "packages/runner/test/llm-conversation-fixture.test.ts",
   "packages/runner/test/llm-dialog-cell-schema.test.ts",
   "packages/runner/test/llm-dialog-helpers.test.ts",
