@@ -17,6 +17,7 @@ import {
 import { Server } from "../v2/server.ts";
 import {
   accountMemoryWirePayload,
+  classifyServerMessage,
   MemoryWireAccountingAccumulator,
   type MemoryWireAccountingObserver,
   type MemoryWireAccountingRecord,
@@ -381,6 +382,115 @@ Deno.test("memory wire accounting classifies request CAS definitions and refs as
   );
 });
 
+Deno.test("memory wire accounting scopes only direct protocol candidate roots", () => {
+  const cases = [
+    {
+      name: "commit code CID",
+      payload: {
+        type: "transact",
+        commit: { codeCID: "bafy-code", operations: [] },
+      },
+      category: "patchOperation",
+      scope: "alreadyContentAddressed",
+    },
+    {
+      name: "query selector",
+      payload: {
+        type: "graph.query",
+        query: { roots: [{ selector: { path: [] } }] },
+      },
+      category: "queryWatch",
+      scope: "immutableInternable",
+    },
+    {
+      name: "scheduler table collection",
+      payload: {
+        type: "session/effect",
+        effect: { db: { tables: [{ name: "actions" }] } },
+      },
+      category: "sqliteScheduler",
+      scope: "immutableInternable",
+    },
+  ] as const;
+
+  for (const { name, payload, category, scope } of cases) {
+    const accounting = accountMemoryWirePayload(
+      encodeMemoryBoundary(payload),
+      `candidate-root-${name}`,
+    );
+    const matchingCandidate = accounting.candidates.find((candidate) =>
+      candidate.category === category && candidate.scope === scope
+    );
+    assertExists(
+      matchingCandidate,
+      `${name} should be measured at its direct protocol root`,
+    );
+  }
+});
+
+Deno.test("memory wire accounting recognizes protocol identity positions only", () => {
+  const identityPayload = encodeMemoryBoundary({
+    type: "response",
+    space: "did:key:space",
+    sessionId: "session",
+    ok: { sync: { type: "sync", db: { id: "database", tables: [] } } },
+  });
+  const rejectedLookalikes = encodeMemoryBoundary({
+    type: "response",
+    id: "root-id",
+    doc: { value: { space: "document-space" } },
+    invocation: { space: "capability-space" },
+    "/": { "link@1": { schema: { id: "schema-id" } } },
+  });
+
+  assertEquals(
+    accountMemoryWirePayload(identityPayload, "identity-positions").candidates
+      .filter((candidate) => candidate.scope === "identityInternable").length,
+    3,
+  );
+  assertEquals(
+    accountMemoryWirePayload(rejectedLookalikes, "identity-lookalikes")
+      .candidates.some((candidate) => candidate.scope === "identityInternable"),
+    false,
+  );
+});
+
+Deno.test("memory wire accounting classifies server effect and revocation frames", () => {
+  const sync = schemaSync();
+  const cases = [
+    {
+      message: {
+        type: "hello.ok",
+        protocol: MEMORY_PROTOCOL,
+        flags: getMemoryProtocolFlags(),
+      } satisfies ServerMessage,
+      expected: "server.hello.ok",
+    },
+    {
+      message: {
+        type: "session/effect",
+        space: "did:key:space",
+        sessionId: "session",
+        effect: sync,
+      } satisfies ServerMessage,
+      expected: "server.session/effect.sync",
+    },
+    {
+      message: {
+        type: "session/revoked",
+        space: "did:key:space",
+        sessionId: "session",
+        reason: "unauthorized",
+      } satisfies ServerMessage,
+      expected: "server.session/revoked",
+    },
+  ];
+
+  for (const { message, expected } of cases) {
+    assertEquals(classifyServerMessage(message), expected);
+  }
+});
+
 Deno.test("memory wire accounting treats noncanonical payloads as opaque and partitions fingerprints", () => {
   const canonical = encodeMemoryBoundary({
     type: "response",
@@ -470,6 +580,17 @@ Deno.test("memory wire accounting bounds opaque work and consumes retained state
   });
   assertEquals(accumulator.isActive(), false);
   assertExists(accumulator.snapshot().truncated);
+  accumulator.observe({
+    direction: "outbound",
+    connectionId: "ignored-after-limit",
+    classification: "server.hello.ok",
+    baselineBytes: 2,
+    actualBytes: 2,
+  });
+  assertEquals(
+    accumulator.snapshot().records.map((record) => record.connectionId),
+    ["a"],
+  );
   assertEquals(
     (accumulator.snapshot().records[0].metadata as {
       nested: { value: number };
