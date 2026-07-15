@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/module.test.ts",
   "packages/runner/test/multi-instance-resolution.test.ts",
   "packages/runner/test/nested_cell_array.test.ts",
   "packages/runner/test/pattern-binding.test.ts",

@@ -35,13 +35,44 @@ type MouseEvent = {
 };
 
 type TestNode = Pattern["nodes"][number];
-type SourceTrackedImplementation = ((...args: any[]) => any) & {
+type SchemaMouseEvent = {
+  type: "click" | "hover";
+  x: number;
+  y: number;
+};
+type MouseState = {
+  lastX?: number;
+  lastY?: number;
+};
+type ToggleEvent = {
+  type: "click" | "hover";
+  target: string;
+};
+type ToggleState = {
+  elements: Record<string, boolean>;
+};
+type SourceTrackedImplementation = ((...args: never[]) => unknown) & {
   preview?: string;
   src?: string;
 };
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+const isSourceTrackedImplementation = (
+  implementation: Module["implementation"],
+): implementation is SourceTrackedImplementation =>
+  typeof implementation === "function";
+
+const expectSourceTrackedImplementation = (
+  implementation: Module["implementation"],
+) => {
+  expect(isSourceTrackedImplementation(implementation)).toBe(true);
+  if (!isSourceTrackedImplementation(implementation)) {
+    throw new Error("Expected source-tracked implementation");
+  }
+  return implementation;
+};
 
 describe("module", () => {
   let runtime: Runtime;
@@ -101,8 +132,7 @@ describe("module", () => {
       );
 
       expect(isModule(greet)).toBe(true);
-      const module = greet as unknown as Module;
-      expect(module.argumentSchema).toEqual(schema);
+      expect(greet.argumentSchema).toEqual(schema);
     });
 
     it("supports schema validation with description", () => {
@@ -129,13 +159,12 @@ describe("module", () => {
       );
 
       expect(isModule(greet)).toBe(true);
-      const module = greet as unknown as Module;
-      expect(module.argumentSchema).toBeDefined();
-      expect(module.resultSchema).toBeDefined();
-      expect((module.argumentSchema as JSONSchemaObj).description).toBe(
+      expect(greet.argumentSchema).toBeDefined();
+      expect(greet.resultSchema).toBeDefined();
+      expect((greet.argumentSchema as JSONSchemaObj).description).toBe(
         "Person information",
       );
-      expect((module.resultSchema as JSONSchemaObj).description).toBe(
+      expect((greet.resultSchema as JSONSchemaObj).description).toBe(
         "Greeting message",
       );
     });
@@ -164,7 +193,7 @@ describe("module", () => {
       );
       const stream = clickHandler({ x: reactive(10), y: reactive(20) });
       expect(isReactive(stream)).toBe(true);
-      const { value, nodes } = (stream as any).export();
+      const { value, nodes } = stream.export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
@@ -293,19 +322,20 @@ describe("module", () => {
         },
       } as const satisfies JSONSchema;
 
-      const mouseHandler = handler(
+      const mouseHandler = handler<SchemaMouseEvent, MouseState>(
         eventSchema,
         stateSchema,
-        (event: any, state: any) => {
-          state.lastX = event.x;
-          state.lastY = event.y;
+        (event, state) => {
+          Object.assign(state, {
+            lastX: event.x,
+            lastY: event.y,
+          });
         },
       );
 
       expect(isModule(mouseHandler)).toBe(true);
-      const module = mouseHandler as unknown as Module;
-      expect(module.argumentSchema).toBeDefined();
-      expect((module.argumentSchema as JSONSchemaObj).properties?.$event)
+      expect(mouseHandler.argumentSchema).toBeDefined();
+      expect((mouseHandler.argumentSchema as JSONSchemaObj).properties?.$event)
         .toEqual(eventSchema);
     });
 
@@ -329,16 +359,18 @@ describe("module", () => {
         },
       } as const satisfies JSONSchema;
 
-      const toggleHandler = handler(
+      const toggleHandler = handler<ToggleEvent, ToggleState>(
         eventSchema,
         stateSchema,
-        (event: any, state: any) => {
-          state.elements[event.target] = !state.elements[event.target];
+        (event, state) => {
+          Object.assign(state.elements, {
+            [event.target]: !state.elements[event.target],
+          });
         },
       );
 
       const elements = reactive({ button1: true, button2: false });
-      const result = toggleHandler({ elements } as any);
+      const result = toggleHandler({ elements });
 
       expect(isReactive(result)).toBe(true);
       const { nodes } = result.export();
@@ -361,7 +393,7 @@ describe("module", () => {
       );
       const stream = clickHandler.with({ x: reactive(10), y: reactive(20) });
       expect(isReactive(stream)).toBe(true);
-      const { value, nodes } = (stream as any).export();
+      const { value, nodes } = stream.export();
       expect(value).toEqual({ $stream: true });
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
@@ -450,9 +482,7 @@ describe("module", () => {
       // through eager-on tests — keep it exercised.
       setEagerSourceAnnotation(true);
       const dbl = lift((n: number) => n * 2);
-      const impl = (dbl as unknown as Module).implementation as {
-        src?: string;
-      };
+      const impl = expectSourceTrackedImplementation(dbl.implementation);
       expect(impl.src).toMatch(/module\.test\.ts:\d+:\d+$/);
     });
 
@@ -521,9 +551,7 @@ describe("module", () => {
       module: TestNode["module"] & {
         implementation: SourceTrackedImplementation;
       };
-    } =>
-      !!node &&
-      typeof node.module.implementation === "function";
+    } => !!node && isSourceTrackedImplementation(node.module.implementation);
 
     const expectTrackedNode = (
       node: TestNode | undefined,
@@ -688,20 +716,60 @@ describe("module", () => {
     // resolveLocationFromFunctionSource is the `indexOf`-into-script path,
     // the eager annotation's fallback when the stack capture yields nothing
     // (in-worker, SES-censored stacks make it the MAIN path).
-    const makeFrame = (script: string, nextSearchOffset = 0) =>
-      ({
-        sourceLocationContext: {
-          filename: "/probe.tsx",
-          script,
-          nextSearchOffset,
-        },
-        runtime: { harness: { mapPosition: () => null } },
-      }) as unknown as Frame;
+    const makeFrame = (script: string, nextSearchOffset = 0): Frame => ({
+      generatedIdCounter: 0,
+      reactives: new Set(),
+      runtime,
+      sourceLocationContext: {
+        filename: "/probe.tsx",
+        script,
+        nextSearchOffset,
+      },
+    });
+
+    const withMappedPosition = <T>(
+      mappedPosition: ReturnType<Runtime["harness"]["mapPosition"]>,
+      fn: () => T,
+    ): T => {
+      const originalMapPosition = runtime.harness.mapPosition;
+      runtime.harness.mapPosition = () => mappedPosition;
+      try {
+        return fn();
+      } finally {
+        runtime.harness.mapPosition = originalMapPosition;
+      }
+    };
+
+    const staticMappedPosition = {
+      source: "/authored.tsx",
+      line: 7,
+      column: 3,
+    } satisfies NonNullable<ReturnType<Runtime["harness"]["mapPosition"]>>;
+
+    const mappedResult = (
+      fn: (n: number) => number,
+      script: string,
+    ) =>
+      withMappedPosition(
+        staticMappedPosition,
+        () => resolveLocationFromFunctionSource(fn, makeFrame(script)),
+      );
+
+    const unmappedResult = (
+      fn: (n: number) => number,
+      script: string,
+      nextSearchOffset = 0,
+    ) =>
+      withMappedPosition(null, () =>
+        resolveLocationFromFunctionSource(
+          fn,
+          makeFrame(script, nextSearchOffset),
+        ));
 
     it("resolves file:line:col by locating the fn source in the script", () => {
       const fn = (n: number) => n * 2;
       const script = `// header line\nconst dbl = ${fn.toString()};\n`;
-      const result = resolveLocationFromFunctionSource(fn, makeFrame(script));
+      const result = unmappedResult(fn, script);
       expect(result).toBe("/probe.tsx:2:12");
     });
 
@@ -709,16 +777,13 @@ describe("module", () => {
       const fn = (n: number) => n + 1;
       const script = `const inc = ${fn.toString()};\n// tail`;
       // nextSearchOffset past the match forces the second indexOf pass.
-      const result = resolveLocationFromFunctionSource(
-        fn,
-        makeFrame(script, script.length - 3),
-      );
+      const result = unmappedResult(fn, script, script.length - 3);
       expect(result).toBe("/probe.tsx:1:12");
     });
 
     it("returns null when the source is not in the script or no frame context", () => {
       const fn = (n: number) => n - 1;
-      expect(resolveLocationFromFunctionSource(fn, makeFrame("// nothing")))
+      expect(unmappedResult(fn, "// nothing"))
         .toBe(null);
       expect(resolveLocationFromFunctionSource(fn, undefined)).toBe(null);
     });
@@ -740,31 +805,14 @@ describe("module", () => {
     it("returns null for an empty fn source", () => {
       const fn = (n: number) => n;
       Object.defineProperty(fn, "toString", { value: () => "" });
-      expect(resolveLocationFromFunctionSource(fn, makeFrame("anything")))
+      expect(unmappedResult(fn, "anything"))
         .toBe(null);
     });
 
     it("prefers the source-mapped location when the range maps", () => {
       const fn = (n: number) => n * 3;
       const script = `const tri = ${fn.toString()};`;
-      const frame = {
-        sourceLocationContext: {
-          filename: "/probe.tsx",
-          script,
-          nextSearchOffset: 0,
-        },
-        runtime: {
-          harness: {
-            mapPosition: () => ({
-              source: "/authored.tsx",
-              line: 7,
-              column: 3,
-              name: null,
-            }),
-          },
-        },
-      } as unknown as Frame;
-      const result = resolveLocationFromFunctionSource(fn, frame);
+      const result = mappedResult(fn, script);
       expect(result).toBe("/authored.tsx:7:3");
     });
   });
