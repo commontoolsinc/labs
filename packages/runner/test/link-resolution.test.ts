@@ -114,7 +114,7 @@ describe("link-resolution", () => {
         tx,
       );
       innerCell.set({ inner: 10 });
-      const outerCell = runtime.getCell<{ outer: any }>(
+      const outerCell = runtime.getCell<{ outer: unknown }>(
         space,
         "should follow nested aliases 2",
         undefined,
@@ -142,7 +142,7 @@ describe("link-resolution", () => {
     });
 
     it("should allow aliases in aliased paths", () => {
-      const testCell = runtime.getCell<any>(
+      const testCell = runtime.getCell<unknown>(
         space,
         "should allow aliases in aliased paths 1",
         undefined,
@@ -186,7 +186,7 @@ describe("link-resolution", () => {
       );
       targetCell.set({ name: "John", age: 30 });
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<{ link: unknown }>(
         space,
         "schema-source-cell",
         undefined,
@@ -222,7 +222,7 @@ describe("link-resolution", () => {
         },
       } as const satisfies JSONSchema;
 
-      const targetCell = runtime.getCell<any>(
+      const targetCell = runtime.getCell<unknown>(
         space,
         "nested-schema-target",
         schema,
@@ -230,7 +230,7 @@ describe("link-resolution", () => {
       );
       targetCell.set({ user: { name: "Jane", email: "jane@example.com" } });
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "nested-schema-source",
         undefined,
@@ -272,7 +272,7 @@ describe("link-resolution", () => {
       );
       targetCell.set({ value: 42 });
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "redirect-schema-source",
         undefined,
@@ -293,7 +293,7 @@ describe("link-resolution", () => {
 
     it("should handle undefined schemas gracefully", () => {
       // Cell without schema
-      const targetCell = runtime.getCell<any>(
+      const targetCell = runtime.getCell<unknown>(
         space,
         "no-schema-target",
         undefined,
@@ -301,7 +301,7 @@ describe("link-resolution", () => {
       );
       targetCell.set({ data: "test" });
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "no-schema-source",
         undefined,
@@ -326,7 +326,7 @@ describe("link-resolution", () => {
         },
       } as const;
 
-      const targetCell = runtime.getCell<any>(
+      const targetCell = runtime.getCell<unknown>(
         space,
         "rootschema-target",
         schema,
@@ -335,7 +335,7 @@ describe("link-resolution", () => {
       targetCell.set({ name: "Test User" });
 
       // Create a link with setRaw to preserve schema
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<{ link: unknown }>(
         space,
         "rootschema-source",
         undefined,
@@ -366,16 +366,16 @@ describe("link-resolution", () => {
             },
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
       const schema2 = {
         type: "object",
         properties: {
           data: schema1,
         },
-      };
+      } as const satisfies JSONSchema;
 
-      const cell1 = runtime.getCell<any>(
+      const cell1 = runtime.getCell<unknown>(
         space,
         "multi-hop-1",
         schema1,
@@ -383,7 +383,7 @@ describe("link-resolution", () => {
       );
       cell1.set({ nested: { value: "test" } });
 
-      const cell2 = runtime.getCell<any>(
+      const cell2 = runtime.getCell<unknown>(
         space,
         "multi-hop-2",
         schema2,
@@ -394,7 +394,7 @@ describe("link-resolution", () => {
         data: cell1.key("nested").getAsLink({ includeSchema: true }),
       });
 
-      const cell3 = runtime.getCell<any>(
+      const cell3 = runtime.getCell<unknown>(
         space,
         "multi-hop-3",
         undefined,
@@ -435,9 +435,9 @@ describe("link-resolution", () => {
             },
           },
         },
-      };
+      } as const satisfies JSONSchema;
 
-      const targetCell = runtime.getCell<any>(
+      const targetCell = runtime.getCell<unknown>(
         space,
         "array-schema-target",
         schema,
@@ -450,7 +450,7 @@ describe("link-resolution", () => {
         ],
       });
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "array-schema-source",
         undefined,
@@ -485,7 +485,7 @@ describe("link-resolution", () => {
         },
       } as const;
 
-      const destCell = runtime.getCell<any>(
+      const destCell = runtime.getCell<unknown>(
         space,
         "preserve-dest-schema",
         destinationSchema,
@@ -494,7 +494,7 @@ describe("link-resolution", () => {
       destCell.set({ status: "active" });
 
       // Create another cell that links to destCell with schema
-      const linkCell = runtime.getCell<any>(
+      const linkCell = runtime.getCell<unknown>(
         space,
         "link-without-schema",
         undefined,
@@ -503,7 +503,7 @@ describe("link-resolution", () => {
       linkCell.setRaw(destCell.getAsLink({ includeSchema: true }));
 
       // Source cell links to linkCell
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "source-preserve-schema",
         undefined,
@@ -523,7 +523,7 @@ describe("link-resolution", () => {
     it("should treat empty schema objects as permissive links", () => {
       const emptySchema = {} as const;
 
-      const targetCell = runtime.getCell<any>(
+      const targetCell = runtime.getCell<unknown>(
         space,
         "empty-schema-target",
         emptySchema,
@@ -531,7 +531,7 @@ describe("link-resolution", () => {
       );
       targetCell.set({ any: "value" });
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "empty-schema-source",
         undefined,
@@ -578,7 +578,7 @@ describe("link-resolution", () => {
         },
       } as const;
 
-      const targetCell = runtime.getCell<any>(
+      const targetCell = runtime.getCell<unknown>(
         space,
         "complex-nested-schema",
         complexSchema,
@@ -592,7 +592,7 @@ describe("link-resolution", () => {
         },
       });
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "complex-nested-source",
         undefined,
@@ -629,7 +629,7 @@ describe("link-resolution", () => {
         additionalProperties: { type: "number" },
       } as const;
 
-      const targetCell = runtime.getCell<any>(
+      const targetCell = runtime.getCell<unknown>(
         space,
         "additional-props-target",
         schemaWithAdditional,
@@ -637,7 +637,7 @@ describe("link-resolution", () => {
       );
       targetCell.set({ known: "value", extra1: 42, extra2: 100 });
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "additional-props-source",
         undefined,
@@ -673,7 +673,7 @@ describe("link-resolution", () => {
         },
       } as const;
 
-      const targetCell = runtime.getCell<any>(
+      const targetCell = runtime.getCell<unknown>(
         space,
         "mixed-schema-target",
         schema2,
@@ -681,7 +681,7 @@ describe("link-resolution", () => {
       );
       targetCell.set({ value: 42 });
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "mixed-schema-source",
         schema1,
@@ -716,7 +716,7 @@ describe("link-resolution", () => {
         items: { type: "number" },
       } as const satisfies JSONSchema;
 
-      const targetCell = runtime.getCell<any>(
+      const targetCell = runtime.getCell<unknown>(
         space,
         "undefined-schema-field-target",
         schema,
@@ -724,7 +724,7 @@ describe("link-resolution", () => {
       );
       targetCell.set([1, 2, 3]);
 
-      const sourceCell = runtime.getCell<any>(
+      const sourceCell = runtime.getCell<unknown>(
         space,
         "undefined-schema-field-source",
         undefined,
@@ -777,7 +777,7 @@ describe("link-resolution", () => {
       );
       sourceCell.set({ value: 42 });
 
-      const targetCell = runtime.getCell<{ alias: any }>(
+      const targetCell = runtime.getCell<{ alias: unknown }>(
         space,
         "target-cell",
         undefined,
@@ -807,7 +807,7 @@ describe("link-resolution", () => {
       );
       cell.set({ data: { nested: "test" } });
 
-      const aliasCell = runtime.getCell<{ ref: any }>(
+      const aliasCell = runtime.getCell<{ ref: unknown }>(
         space,
         "alias-cell",
         undefined,
@@ -838,7 +838,7 @@ describe("link-resolution", () => {
       );
       cellA.set({ value: "original" });
 
-      const cellB = runtime.getCell<{ redirect: any }>(
+      const cellB = runtime.getCell<{ redirect: unknown }>(
         space,
         "cell-b",
         undefined,
@@ -848,7 +848,7 @@ describe("link-resolution", () => {
         redirect: cellA.key("value").getAsWriteRedirectLink(),
       });
 
-      const cellC = runtime.getCell<{ alias: any }>(
+      const cellC = runtime.getCell<{ alias: unknown }>(
         space,
         "cell-c",
         undefined,
@@ -915,7 +915,7 @@ describe("link-resolution", () => {
       );
 
       // Create cellB with a reference to cellA
-      const cellB = runtime.getCell<any>(
+      const cellB = runtime.getCell<unknown>(
         space,
         "cycle-detection-bug-cellB",
         undefined,
@@ -943,10 +943,8 @@ describe("link-resolution", () => {
 
       // Test 3: A.key("foo").key("bar").get() should work and return "baz"
       // This is where the overtrigger might happen - accessing bar through the cycle
-      let barResult: string;
       try {
-        barResult = cellA.key("foo").key("bar").get() as any;
-        expect(barResult).toBe("baz");
+        expect(cellA.key("foo").key("bar").get()).toBe("baz");
       } catch (e) {
         // If this throws, we've hit the overtrigger bug
         console.error(
@@ -958,10 +956,10 @@ describe("link-resolution", () => {
 
       // Test 4: A.key("foo").key("foo").key("foo").get() should work
       // Multiple levels of following the references
-      let deepResult: any;
+      let deepResult: unknown;
       try {
         deepResult = cellA.key("foo").key("foo").key("foo").get();
-        expect(deepResult.bar).toBe("baz");
+        expect(deepResult).toEqual(expect.objectContaining({ bar: "baz" }));
       } catch (e) {
         // If this throws, we've hit the overtrigger bug
         console.error(
@@ -974,21 +972,21 @@ describe("link-resolution", () => {
 
     it("handles complex circular reference scenarios", () => {
       // More complex scenario with multiple cells and properties
-      const cellA = runtime.getCell<{ b: any; c: any; value: string }>(
+      const cellA = runtime.getCell<{ b: unknown; c: unknown; value: string }>(
         space,
         "complex-cycle-cellA",
         undefined,
         tx,
       );
 
-      const cellB = runtime.getCell<{ a: any; c: any; value: string }>(
+      const cellB = runtime.getCell<{ a: unknown; c: unknown; value: string }>(
         space,
         "complex-cycle-cellB",
         undefined,
         tx,
       );
 
-      const cellC = runtime.getCell<{ a: any; b: any; value: string }>(
+      const cellC = runtime.getCell<{ a: unknown; b: unknown; value: string }>(
         space,
         "complex-cycle-cellC",
         undefined,
@@ -1015,14 +1013,14 @@ describe("link-resolution", () => {
 
     it("handles deeply nested circular references with aliases", () => {
       // Test with a mix of direct cell references and aliases
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "deep-cycle-cellA",
         undefined,
         tx,
       );
 
-      const cellB = runtime.getCell<any>(
+      const cellB = runtime.getCell<unknown>(
         space,
         "deep-cycle-cellB",
         undefined,
@@ -1071,21 +1069,21 @@ describe("link-resolution", () => {
       // This test demonstrates the cycle detection overtrigger bug
       // The bug occurs when navigating through circular references multiple times
       // even when accessing different properties
-      const cellA = runtime.getCell<{ items: any[]; name: string }>(
+      const cellA = runtime.getCell<{ items: unknown[]; name: string }>(
         space,
         "array-cycle-cellA",
         undefined,
         tx,
       );
 
-      const cellB = runtime.getCell<{ parent: any; name: string }>(
+      const cellB = runtime.getCell<{ parent: unknown; name: string }>(
         space,
         "array-cycle-cellB",
         undefined,
         tx,
       );
 
-      const cellC = runtime.getCell<{ root: any; name: string }>(
+      const cellC = runtime.getCell<{ root: unknown; name: string }>(
         space,
         "array-cycle-cellC",
         undefined,
@@ -1122,7 +1120,7 @@ describe("link-resolution", () => {
       // When a cycle is detected, the system logs a warning and returns an empty document
 
       // Case 1: Direct circular reference A -> A
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "direct-cycle-A",
         undefined,
@@ -1137,7 +1135,7 @@ describe("link-resolution", () => {
       expect(() => cellA.get()).toThrow();
 
       // Case 2: Mutual references A -> B -> A
-      const cellB = runtime.getCell<any>(
+      const cellB = runtime.getCell<unknown>(
         space,
         "direct-cycle-B",
         undefined,
@@ -1159,7 +1157,7 @@ describe("link-resolution", () => {
     it("detects cycle when resolving link to its own subpath", () => {
       // Test case: A -> A/foo creates an infinite growing path. The
       // self-subpath shape is detected on the first hop.
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "self-subpath-cycle",
         undefined,
@@ -1175,7 +1173,7 @@ describe("link-resolution", () => {
 
     it("detects cycle for a self-subpath link below the document root", () => {
       // Test case: A/a -> A/a/b
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "nested-self-subpath-cycle",
         undefined,
@@ -1193,7 +1191,7 @@ describe("link-resolution", () => {
     it("reads of a self-subpath link fail deterministically", () => {
       // The Cell Inspector wedge shape: every read fails immediately with a
       // cycle error rather than burning the resolution iteration budget.
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "wedge-read-cycle",
         undefined,
@@ -1207,7 +1205,7 @@ describe("link-resolution", () => {
 
     it("follows same-document links to sibling paths", () => {
       // A link within a document targeting a non-overlapping path resolves.
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "same-doc-sibling-link",
         undefined,
@@ -1223,7 +1221,7 @@ describe("link-resolution", () => {
       // A link at a deeper path targeting its own ancestor is not the
       // self-subpath shape (the target does not pass through the link's
       // position); resolution terminates at the ancestor.
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "same-doc-ancestor-link",
         undefined,
@@ -1245,13 +1243,13 @@ describe("link-resolution", () => {
       // Test case: A -> B, B -> A/foo. The path grows through two documents,
       // so the first-hop self-subpath check does not apply; the iteration
       // limit still backstops it.
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "cross-doc-growing-A",
         undefined,
         tx,
       );
-      const cellB = runtime.getCell<any>(
+      const cellB = runtime.getCell<unknown>(
         space,
         "cross-doc-growing-B",
         undefined,
@@ -1267,13 +1265,13 @@ describe("link-resolution", () => {
 
     it("detects cycles in nested paths", () => {
       // Test case: A/x -> B/y -> A/x (cycle at a specific path)
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "nested-cycle-A",
         undefined,
         tx,
       );
-      const cellB = runtime.getCell<any>(
+      const cellB = runtime.getCell<unknown>(
         space,
         "nested-cycle-B",
         undefined,
@@ -1292,7 +1290,7 @@ describe("link-resolution", () => {
 
     it("shows data URI when resolving cyclic links", () => {
       // To see the data: URI, we need to use the lower-level resolveLink function
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "data-uri-cycle-A",
         undefined,
@@ -1317,13 +1315,13 @@ describe("link-resolution", () => {
 
     it("allows non-cyclic references to the same cell", () => {
       // This should NOT trigger cycle detection - accessing different properties
-      const cellA = runtime.getCell<any>(
+      const cellA = runtime.getCell<unknown>(
         space,
         "non-cycle-A",
         undefined,
         tx,
       );
-      const cellB = runtime.getCell<any>(
+      const cellB = runtime.getCell<unknown>(
         space,
         "non-cycle-B",
         undefined,
