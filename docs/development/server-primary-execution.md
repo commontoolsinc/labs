@@ -117,13 +117,17 @@ rejects a flag-off sample if a server pool exists or execution-control counters
 move. Start a fresh toolshed and shell for each command; for example:
 
 For default-app, the guard also waits until the measured browser has consumed a
-claim, resets its bounded space/branch routing counters, and verifies after the
-interaction that claimed overlays reached successful settlements and were
-dropped only after basis coverage. Its output reports upstream versus claimed-
-overlay routes. A live Worker or executor-side "authoritative transaction"
-counter alone is not enough: claim activation can still be queued, or memory
-can reject the attempt as unserved. A guard failure is therefore measurement
-data, not a timing sample to include in an on/off comparison.
+claim and every boot-era overlay/settlement has drained before it resets the
+bounded space/branch routing counters. After the interaction it waits for all
+measured routes to reach a terminal outcome and requires both claimed overlays
+and successful basis-covered settlements. Its output reports upstream versus
+claimed-overlay routes and includes a bounded `problemActions` list with action
+and piece ids plus the last fallback reason. Canonical `unserved` fallback is
+reported rather than treated as a stuck measurement; failed settlements,
+fence/firewall rejects, worker failures, pending routes, or a workload with no
+authoritative success still reject the sample. The dedicated exact-routing
+fixture below remains the stricter proof that one selected action was served
+entirely by the server.
 
 ```sh
 CF_VERIFY_SERVER_EXECUTION_PLACEMENT=1 \

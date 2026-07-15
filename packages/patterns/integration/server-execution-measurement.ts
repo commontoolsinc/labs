@@ -5,6 +5,11 @@ import type {
   ExecutionRoutingDiagnosticsQuery,
 } from "@commonfabric/runner/shared";
 import { assert, assertEquals } from "@std/assert";
+import {
+  isRoutingMeasurementBaselineReady,
+  isRoutingMeasurementResultReady,
+  routingMeasurementProblemActions,
+} from "../server-execution-measurement-helpers.ts";
 
 const MEASUREMENT_REQUIRED = Deno.env.get(
   "CF_VERIFY_SERVER_EXECUTION_PLACEMENT",
@@ -290,18 +295,35 @@ export async function beginServerExecutionMeasurement(
               measurement.control.settlementsNoOp > 0;
     });
     if (clientRouting !== undefined) {
-      await waitFor(async () => {
+      try {
+        await waitFor(async () =>
+          isRoutingMeasurementBaselineReady(
+            await clientRouting.read(clientRouting.query),
+          )
+        );
+      } catch (error) {
         const diagnostics = await clientRouting.read(clientRouting.query);
-        return !diagnostics.snapshotRequired &&
-          diagnostics.truncatedActionRecords === 0 &&
-          diagnostics.claims.length > 0;
-      });
+        throw new Error(
+          `server execution measurement baseline did not settle: ${
+            JSON.stringify({
+              claims: diagnostics.claims.length,
+              actions: diagnostics.actions.length,
+              snapshotRequired: diagnostics.snapshotRequired,
+              truncatedActionRecords: diagnostics.truncatedActionRecords,
+              problemActions: routingMeasurementProblemActions(diagnostics),
+            })
+          }`,
+          { cause: error },
+        );
+      }
       const reset = await clientRouting.read({
         ...clientRouting.query,
         resetCounters: true,
       });
-      assertEquals(reset.snapshotRequired, false);
-      assertEquals(reset.truncatedActionRecords, 0);
+      assert(
+        isRoutingMeasurementBaselineReady(reset),
+        "routing state changed while resetting the measurement baseline",
+      );
     }
   }
   return {
@@ -319,31 +341,40 @@ export async function finishServerExecutionMeasurement(
   before: ServerExecutionMeasurement | null,
 ): Promise<void> {
   if (before === null) return;
+  let settledClientRouting: ExecutionRoutingDiagnostics | undefined;
   if (before.clientRouting !== undefined) {
-    await waitFor(async () => {
-      const diagnostics = await before.clientRouting!.read(
-        before.clientRouting!.query,
+    try {
+      await waitFor(async () => {
+        const diagnostics = await before.clientRouting!.read(
+          before.clientRouting!.query,
+        );
+        if (!isRoutingMeasurementResultReady(diagnostics)) return false;
+        settledClientRouting = diagnostics;
+        return true;
+      });
+    } catch (error) {
+      const diagnostics = await before.clientRouting.read(
+        before.clientRouting.query,
       );
-      if (
-        diagnostics.snapshotRequired ||
-        diagnostics.truncatedActionRecords !== 0
-      ) return false;
-      return diagnostics.actions.some((action) =>
-        action.claimedOverlayRoutes > 0 &&
-        action.settlements.committed + action.settlements.noOp > 0 &&
-        action.basisCoveredOverlayDrops >= action.claimedOverlayRoutes &&
-        action.nonAuthoritativeOverlayDrops === 0 &&
-        action.pendingOverlayCount === 0 &&
-        action.unresolvedBasisOverlayCount === 0 &&
-        action.pendingSettlementCount === 0 &&
-        action.settlements.failed === 0 &&
-        action.settlements.unserved === 0
+      throw new Error(
+        `server execution measurement result did not settle: ${
+          JSON.stringify({
+            claims: diagnostics.claims.length,
+            actions: diagnostics.actions.length,
+            snapshotRequired: diagnostics.snapshotRequired,
+            truncatedActionRecords: diagnostics.truncatedActionRecords,
+            problemActions: routingMeasurementProblemActions(diagnostics),
+          })
+        }`,
+        { cause: error },
       );
-    });
+    }
   }
   const [after, clientRouting] = await Promise.all([
     readMeasurement(before.label),
-    before.clientRouting?.read(before.clientRouting.query),
+    settledClientRouting === undefined
+      ? before.clientRouting?.read(before.clientRouting.query)
+      : Promise.resolve(settledClientRouting),
   ]);
   assertEquals(after.enabled, before.enabled, "execution mode changed mid-run");
 
@@ -409,6 +440,7 @@ export async function finishServerExecutionMeasurement(
       (total, action) => total + action.pendingSettlementCount,
       0,
     ),
+    problemActions: routingMeasurementProblemActions(clientRouting),
   };
   const result = {
     mode: "authoritative-server" as const,
@@ -546,7 +578,6 @@ export async function finishServerExecutionMeasurement(
     "measured workload published no successful server settlement",
   );
   assertEquals(result.control.settlementsFailed, 0);
-  assertEquals(result.control.settlementsUnserved, 0);
   assertEquals(result.control.leaseFenceRejects, 0);
   assertEquals(result.control.actionFirewallRejects, 0);
   assertEquals(result.workerFailures.starts, 0);
@@ -554,9 +585,8 @@ export async function finishServerExecutionMeasurement(
   if (client !== undefined) {
     assert(client.claimedOverlayRoutes > 0);
     assert(client.settlements.committed + client.settlements.noOp > 0);
-    assert(client.basisCoveredOverlayDrops >= client.claimedOverlayRoutes);
+    assert(client.basisCoveredOverlayDrops > 0);
     assertEquals(client.settlements.failed, 0);
-    assertEquals(client.settlements.unserved, 0);
     assertEquals(client.nonAuthoritativeOverlayDrops, 0);
     assertEquals(client.pendingOverlays, 0);
     assertEquals(client.pendingSettlements, 0);
