@@ -330,11 +330,21 @@ starts, so it was replaced):
 
 ## 5. Cross-space execution (G9)
 
-Cross-space is the one genuinely different beast, kept as its own phase,
-and **scoped in v1 to co-resident spaces** — both engines inside one memory
-host. Nothing below defines a cross-host mechanism; multi-host execution is
-registered as its own gap (accepted-commit subscription, stale-reader
-lookup, and the provider channel are all same-process primitives today).
+Cross-space is the one genuinely different beast — and it is **on the
+pre-ship critical path** (owner decision, 2026-07-15): shipping evaluation
+before C3 lands is restricted to single-space cases. Multi-host is a
+**requirement**, not a deferred gap. The design consequence: the
+cross-engine seam below (accepted-commit subscription for foreign wake,
+authenticated foreign point reads, authorization-epoch propagation, and
+the vector basis) is specified as a **protocol between engines, not as
+in-process calls** — today's same-process primitives become its first
+transport, and the first step beyond co-residency targets **co-hosted
+hosts: low-latency, reliable links** (same deployment locality). That
+assumption set is explicit and load-bearing: it permits synchronous-ish
+point reads and epoch checks without partition-tolerance machinery;
+geo-distributed hosts are a later transport with its own design. C3 built
+against the protocol works identically over both of the first two
+transports.
 
 - **Reads first.** A claimed action with certified or dynamic foreign-space
   *reads* can be served once settlements carry a **vector input basis**
@@ -479,10 +489,13 @@ Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
   with ≥3 concurrent session lanes stays within the agreed budget (§4).
 - **C3 — cross-space reads** (vector basis, foreign wake via the
   foreign-readers index, ACL-checked foreign point reads, foreign
-  authorization generations). Gates: a two-space read chain settles with a
-  vector basis and drops the overlay exactly once; a foreign ACL
-  revocation while idle revokes the claim; a revocation between the
-  foreign read and the home apply settles the attempt unserved.
+  authorization generations — all defined over the cross-engine protocol,
+  with the in-process and co-hosted transports both exercised). **Pre-ship**
+  (owner decision, 2026-07-15). Gates: a two-space read chain settles with
+  a vector basis and drops the overlay exactly once — identically over
+  both transports; a foreign ACL revocation while idle revokes the claim;
+  a revocation between the foreign read and the home apply settles the
+  attempt unserved.
 - **C4 — cross-space writes** (dual leases + the coordinated-commit
   protocol §5 requires as its reviewed entry prerequisite) — explicitly
   last; may be re-scoped after C3 experience.
@@ -503,13 +516,13 @@ that claim is a design bug.
 | --- | --- | --- | --- |
 | R1 | Event handlers (all user intent) | `actionKind === "event-handler"` | Phase 5 signed events; until then §B.3's prediction window persists (counted) |
 | R2 | Render/UI effects | effect kind + render surface | D-projector mode, deliberately unscheduled |
-| R3 | Unverified implementations (host, dynamic, test builders — no verified provenance, so no `impl:` fingerprint) | fingerprint prefix | engineering: extend verified provenance to those constructors; **data step: enumerate the class on dogfood spaces** (44/run in default-app); a product call only if some authoring path can never be stamped |
-| R4 | Actions without a complete scope summary (transformer gaps, hand-built nodes) | summary-presence bit | engineering: transformer emission coverage; same dogfood enumeration (14/run) |
+| R3 | Unverified implementations (no verified provenance, so no `impl:` fingerprint) | fingerprint prefix | **defect class, target zero** (owner, 2026-07-15: must not appear outside tests, and ideally not there either). default-app currently exhibits ~44/run — root-causing why production-shaped patterns emit unverified implementations is a named diagnosis work item, not a tolerated carve-out |
+| R4 | Actions without a complete scope summary | summary-presence bit | **defect class, target zero** (same owner ruling; ~14/run in default-app today); same diagnosis work item |
 | R5 | Builtins outside the server-executable registry | static registry lookup | per-builtin broker support as needed |
-| R6 | Cross-space reads (until C3), cross-space writes (until C4 + coordinated-commit design); multi-host cross-space (gap, no design) | per-address space compare | C3/C4 scheduled; multi-host needs a roadmap answer before it needs a design |
+| R6 | Cross-space reads (until C3), cross-space writes (until C4 + coordinated-commit design) | per-address space compare | **C3 is pre-ship** (owner, 2026-07-15): shipping evaluation before C3 uses single-space cases only. Multi-host is a **requirement**, not a gap — §5 defines the cross-engine seam as a protocol whose first transport beyond in-process targets co-hosted, low-latency, reliable hosts |
 | R7 | user/session contexts before their rank enables (C1/C2 staging) | lattice rank | C1/C2 shipping; temporary by construction |
 | R8 | User-lane work while the principal has zero sessions | host lane state | resolved for v1: session-anchored (simplest); the later delegation design restores offline continuation correctly and owns its consent question |
-| R9 | Spaces owned by the legacy background service | host exclusion lock | Phase 3 registry unification |
+| R9 | Spaces owned by the legacy background service | host exclusion lock | not in use (owner, 2026-07-15); the exclusion interlock stays as a defensive lock and registry unification is deprioritized |
 | R10 | Client compute for claimed actions (N× speculation) and graph-query subscription serving | — (not a classification; standing machinery cost) | Phase 3 feed + G17 suppression, gated on closure coverage data |
 | R11 | Accepted reconciliation windows: §B.3 prediction, §B.4 scalar basis, §5 vector basis | — (counted divergence, not exclusions) | B.3 closes with Phase 5; basis windows accepted and counted |
 
@@ -575,8 +588,10 @@ Landing with **C1**: README §5.B.1's reconnect contract changes from "a
 complete claim snapshot" to "a complete snapshot of the claims this session
 routes" (§2 context-scoped delivery); implementation-plan W2.1's
 implemented-status text is amended to record chain-scoped routing
-superseding exact-contextKey matching. Landing with **C3**: a new gap-
-register row in README §9 for multi-host cross-space execution (this design
-covers co-resident spaces only). Until those land, the parent documents
-describe Phase 2 behavior, which remains accurate for every deployed
-configuration.
+superseding exact-contextKey matching. Landing with **C3**: README §6.8's
+cross-space text is replaced by the cross-engine protocol contract (§5),
+including the co-hosted transport and its low-latency/reliability
+assumptions; a gap-register row is added only for the geo-distributed
+transport, which remains undesigned. Until those land, the parent
+documents describe Phase 2 behavior, which remains accurate for every
+deployed configuration.

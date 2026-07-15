@@ -1396,19 +1396,24 @@ avg 22.3 s → 11.0 s.
 Remaining: the surviving traverse load (7.2 s vs 0.57 s flag-off) is
 per-session graph-query re-evaluation over the doubled commit volume — the
 §2.2/§6.4 cost. Closing it belongs to Phase 3's doc-set delta feed, not to
-another Phase 2.5 patch; treat the ~+34% interactive gap as the Phase 2
-posture's floor until then, and set the W2.9 budget accordingly.
+another Phase 2.5 patch. The ~+34% interactive gap is the Phase 2
+posture's *current state*, and per the owner's W2.9 budget it is **not a
+shippable state** — the feed is on the shipping critical path.
 
 ### W2.9 — Interactive latency gates
 
 **Depends on:** W2.5–W2.7 (and W2.8 if implemented). **Status:** planned.
 
 The CPU-ratio gate cannot see interaction latency. Add flag-off/flag-on
-latency evidence to the rollout bar:
+latency evidence to the rollout bar. **The budget is ~zero** (owner
+decision, 2026-07-15): flag-on must match flag-off within noise; the only
+excusable deltas are those demonstrably inherent to the *test setup*
+itself in ways that differ from production — and every such exclusion must
+be named and justified in the recorded report, not waved through.
 
 - default-app note-create series (fresh-deployment pair, placement guard on):
-  flag-on avg/p95 within an agreed budget of flag-off, and no growth trend
-  across the series that flag-off does not show;
+  flag-on avg/p95 at parity with flag-off per the budget above, and no
+  growth trend across the series that flag-off does not show;
 - lunch-poll two-browser step timings under the same pairing. Diagnosed
   2026-07-15 in two layers. First: claims stay stable (14 issued, 0
   revoked) but vote-flow commits matched no demanded stale reader (5/182
@@ -1429,7 +1434,8 @@ latency evidence to the rollout bar:
 **Success criteria:**
 
 - [ ] Both fixtures pass their placement guards flag-on.
-- [ ] Fresh-pair latency deltas are within the agreed budget and recorded.
+- [ ] Fresh-pair latency deltas are at parity (~0 budget; any test-setup
+      exclusion named and justified) and recorded.
 - [ ] The runbook names the latency gates beside the CPU gate.
 
 ---
@@ -1438,7 +1444,13 @@ latency evidence to the rollout bar:
 
 ### Phase 3 — background demand and narrower feeds
 
-Client demand is P1. Background registry cleanup is lower priority.
+Client demand is P1. Background registry cleanup is lower priority — and
+per the owner (2026-07-15) the legacy background service is not in use, so
+steps 1–3 below are deprioritized further: the durable exclusion interlock
+stays as a defensive lock, and unification happens opportunistically, not
+on the critical path. The feed (step 4) and suppression (step 5) are the
+critical-path items: the W2.9 parity budget makes the feed a shipping
+prerequisite.
 
 1. Translate existing background registry entries into lower-priority
    ExecutionDemand references in the same pool. Never create a second worker
