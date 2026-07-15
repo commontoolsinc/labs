@@ -402,6 +402,55 @@ Deno.test("streaming generation results retain async provenance", async () => {
   );
 });
 
+Deno.test("any and unknown async state producers retain guard provenance", async () => {
+  const source = `
+    import {
+      computed,
+      hasError,
+      llmDialog,
+      pattern,
+      streamData,
+      wish,
+    } from "commonfabric";
+
+    export default pattern(() => {
+      const stream = streamData<any>({ url: "/events" });
+      const wished = wish({ query: "#repo" }).result;
+      const dialog = llmDialog<any>({ messages: [] }).result;
+      const streamFailed = computed(() => hasError(stream));
+      const wishFailed = computed(() => hasError(wished));
+      const dialogFailed = computed(() => hasError(dialog));
+      return { dialogFailed, streamFailed, wishFailed };
+    });
+  `;
+  const { diagnostics } = await validateSource(source, {
+    types: { "commonfabric.d.ts": commonfabricTypes },
+  });
+  assertEquals(
+    diagnostics.filter((diagnostic) =>
+      diagnostic.type === "availability:unobserved-compute-guard"
+    ).length,
+    0,
+  );
+
+  const output = await transformSource(source, {
+    types: { "commonfabric.d.ts": commonfabricTypes },
+    typeCheck: true,
+  });
+  assertStringIncludes(
+    output,
+    'path: ["stream"], reasons: ["error"]',
+  );
+  assertStringIncludes(
+    output,
+    'path: ["wished"], reasons: ["error"]',
+  );
+  assertStringIncludes(
+    output,
+    'path: ["dialog"], reasons: ["error"]',
+  );
+});
+
 Deno.test("partialResultOf is usable while stream guards retain async provenance", async () => {
   const source = `
     import {

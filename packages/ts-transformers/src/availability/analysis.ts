@@ -57,9 +57,10 @@ const ASYNC_RUNTIME_EXPORTS = new Set([
   "fetchProgram",
   "generateTextStream",
   "sqliteQuery",
+  "streamData",
 ]);
 
-function isAdvancedStreamProducer(
+function isAvailabilityResultStateProducer(
   expression: ts.Expression,
   context: TransformationContext,
   seenSymbols: Set<ts.Symbol>,
@@ -73,7 +74,7 @@ function isAdvancedStreamProducer(
     ) || (
       callKind?.kind === "generate-object" &&
       callKind.exportName === "generateObjectStream"
-    );
+    ) || callKind?.kind === "wish" || callKind?.kind === "llm-dialog";
   }
   if (!ts.isIdentifier(target)) return false;
   const symbol = valueSymbolAtIdentifier(target, context);
@@ -81,7 +82,7 @@ function isAdvancedStreamProducer(
   seenSymbols.add(symbol);
   const initializer = constInitializer(target, context);
   return !!initializer &&
-    isAdvancedStreamProducer(initializer, context, seenSymbols);
+    isAvailabilityResultStateProducer(initializer, context, seenSymbols);
 }
 
 function constInitializer(
@@ -138,7 +139,7 @@ export function resolveAvailabilityValueProvenance(
 
   if (ts.isPropertyAccessExpression(target) && target.name.text === "result") {
     if (
-      isAdvancedStreamProducer(
+      isAvailabilityResultStateProducer(
         target.expression,
         context,
         new Set(seenSymbols),
