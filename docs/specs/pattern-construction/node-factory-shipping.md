@@ -1061,7 +1061,11 @@ and handler registers the stable factory-selection link as its own dispatch
 dependency and rereads that link in the consuming transaction, so the current
 selector label still contributes to CFC provenance without briefly removing
 the row's stream registrations. Canonical code/params/modifier changes retain
-the switch-latest teardown and stale-generation fencing rules.
+the switch-latest teardown and stale-generation fencing rules. When a
+label-only selector update leaves a row's output bytes unchanged, the storage
+write remains a no-op and does not retroactively relabel the prior value; the
+current selector label is persisted on that stable row's next value-changing
+execution.
 
 Reactive array lowering does not support the optional JavaScript `thisArg`.
 Pattern callbacks have no ambient JavaScript receiver, and the canonical list

@@ -417,5 +417,50 @@ describe("bound list factory CFC and scope", () => {
         "flatMap-factory-secret",
       ]),
     );
+
+    const mapSelectorLink = mapSelector.getAsNormalizedFullLink();
+    tx.writeOrThrow({
+      space: mapSelectorLink.space,
+      scope: mapSelectorLink.scope,
+      id: mapSelectorLink.id,
+      type: "application/json",
+      path: [],
+    }, {
+      value: mapSelector.getRaw(),
+      cfc: {
+        version: 1,
+        schemaHash: "bound-list-map-selector",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: [],
+            label: { confidentiality: ["map-factory-secret-updated"] },
+          }],
+        },
+      },
+    });
+    await commitAndRenew();
+
+    // A provenance-only selector write cannot relabel a byte-identical numeric
+    // result because that storage write is intentionally a no-op. Change a
+    // regular input next; the stable row's next real execution must reread the
+    // selector and carry its current label without replacing the row identity.
+    captured.withTx(tx).set(4);
+    await commitAndRenew();
+
+    expect(await result.pull()).toEqual({
+      mapped: [5, 7],
+      filtered: [],
+      flattened: [],
+    });
+    await runtime.idle();
+    await runtime.storageManager.synced();
+    expect(mapRowLink(mappedLink)).toEqual(mappedRow);
+    expect(confidentiality(mappedRow, "derived")).toEqual(
+      expect.arrayContaining([
+        "captured-list-secret",
+        "map-factory-secret-updated",
+      ]),
+    );
   });
 });
