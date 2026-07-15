@@ -43,7 +43,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
-| [`requestSchemaCasV1`](#requestschemacasv1) | negotiated Memory protocol flag | on when the host has a durable schema store | Memory v2 | retire after all peers support durable request schema CAS | implemented and measured end to end |
+| [`requestSchemaCasV1`](#requestschemacasv1) | negotiated Memory protocol flag | on when the host injects a schema store | Memory v2 | retire after all peers support durable request schema CAS | implemented and measured end to end |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -545,29 +545,31 @@ the per-epic implementation notes).
 ### `requestSchemaCasV1`
 
 - **Toggle via.** The Memory `hello` capability handshake. Clients advertise
-  support by default; a server advertises it only when its host injects a shared
-  durable schema store. `hello.ok.requestSchemaCas` identifies the store by a
-  durable `generation` and service `audience`.
+  support by default; a server advertises it whenever its host injects a
+  `SchemaStore`. `hello.ok.requestSchemaCas` identifies that store by its
+  `generation` and service `audience`. Toolshed injects a shared durable SQLite
+  store; custom hosts are responsible for choosing storage with the lifetime
+  their clients expect.
 - **Added by.** Memory v2 request-schema CAS work, 2026-07-14.
 - **Purpose.** Removes repeated schemas from supported `graph.query`,
   `session.watch.*`, and `transact` requests. Exact schema-bearing positions use
   `schema-cas@1:<tagged-hash>` references. Negotiated clients optimistically
   send references without definitions, including cold first use. One
   `MissingSchemas` response permits one forced retry with verified canonical
-  `schemaDefinitions`; after admission, the durable store supports sequential
-  refs-only reuse across warm requests, reconnects, new clients, and store
-  reopen. The server expands references before logical query, watch, replay, or
-  persistence paths.
+  `schemaDefinitions`; after admission, a durable injected store supports
+  sequential refs-only reuse across warm requests, reconnects, new clients, and
+  store reopen. The server expands references before logical query, watch,
+  replay, or persistence paths.
 - **Diagnostic override.** Set `CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED=false`
   before Toolshed startup to suppress the server capability for a paired inline
   accounting run. Unset or `default` makes no setter call and preserves the
   Memory package default; `true` explicitly enables it. This is a startup
   measurement override, not a separate protocol.
 - **Current default and planned end state.** Client support is on. Server use is
-  automatically on when a durable schema store is configured and safely absent
-  otherwise, so older or standalone peers continue to receive inline schemas.
-  Retire negotiation only after all deployed peers provide durable request
-  schema availability.
+  automatically on when any `SchemaStore` is injected and safely absent
+  otherwise. Toolshed provides a durable store; standalone or custom hosts may
+  choose a different lifetime. Retire negotiation only after all deployed peers
+  provide durable request schema availability.
 - **Status on 2026-07-14.** Implemented in the client, Memory server, and
   Toolshed durable SQLite store. Definitions are authorized, hash-verified,
   required to be referenced, and inserted atomically after all references
