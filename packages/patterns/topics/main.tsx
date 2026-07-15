@@ -107,10 +107,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       .toSorted((a, b) => (b?.lastActivityAt ?? 0) - (a?.lastActivityAt ?? 0))
   );
 
-  // Reproduction: wrapping each piece in a derived object is enough to make
-  // the downstream handler-bound card computation silently stop running.
-  const topicRows = computed(() => sortedTopics.map((topic) => ({ topic })));
-
   const hasNoTopics = computed(() => sortedTopics.length === 0);
 
   return {
@@ -133,38 +129,37 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
           </cf-vstack>
 
           <cf-vstack gap="2" padding="4">
-            {computed(() => {
-              console.log("[derived-piece-bind repro] card computed ran");
-              return topicRows.map((row) => (
+            {computed(() =>
+              sortedTopics.map((topic) => (
                 <cf-card>
                   <cf-hstack gap="3" align="center">
                     <cf-vstack gap="0" style="flex: 1; min-width: 0;">
                       <cf-text block style="font-weight: 600;">
-                        {row.topic.title || "(untitled topic)"}
+                        {topic.title || "(untitled topic)"}
                       </cf-text>
-                      {row.topic.body
+                      {topic.body
                         ? (
                           <cf-text tone="muted" block truncate>
-                            {snippet(row.topic.body, 120)}
+                            {snippet(topic.body, 120)}
                           </cf-text>
                         )
                         : null}
                       <cf-text variant="caption" tone="muted">
-                        {row.topic.commentCount} comments · by{" "}
-                        {row.topic.createdByName || "someone"} ·{" "}
-                        {whenLabel(row.topic.lastActivityAt)}
+                        {topic.commentCount} comments · by{" "}
+                        {topic.createdByName || "someone"} ·{" "}
+                        {whenLabel(topic.lastActivityAt)}
                       </cf-text>
                     </cf-vstack>
                     <cf-button
                       variant="secondary"
-                      onClick={openTopic({ topic: row.topic })}
+                      onClick={openTopic({ topic })}
                     >
                       Open
                     </cf-button>
                   </cf-hstack>
                 </cf-card>
-              ));
-            })}
+              ))
+            )}
 
             {hasNoTopics
               ? (
