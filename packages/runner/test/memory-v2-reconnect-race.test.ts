@@ -253,6 +253,7 @@ Deno.test("storage manager publishes connection state per space", async () => {
     (state) => states.push({ status: state.status, epoch: state.epoch }),
   );
   const provider = storageManager.open(space) as TestProvider;
+  let storageClosed = false;
 
   try {
     assertEquals(states, [{ status: "idle", epoch: 0 }]);
@@ -273,9 +274,13 @@ Deno.test("storage manager publishes connection state per space", async () => {
       { status: "disconnected", epoch: 1 },
       { status: "ready", epoch: 2 },
     ]);
+
+    await storageManager.close();
+    storageClosed = true;
+    assertEquals(states.at(-1), { status: "closed", epoch: 2 });
   } finally {
     unsubscribe();
-    await storageManager.close();
+    if (!storageClosed) await storageManager.close();
     await server.close();
   }
 });

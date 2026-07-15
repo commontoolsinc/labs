@@ -1382,6 +1382,10 @@ export class Runtime {
       : undefined;
     const existing = this.missingDocLoads.get(key);
     if (existing !== undefined) {
+      // Terminal-error readers remain subscribed intentionally. A restored
+      // connection epoch invalidates the error and wakes one current token per
+      // action; repeated reads replace that action's token instead of growing
+      // the waiter set.
       if (
         existing.status !== "settled" && token !== undefined
       ) {
@@ -1404,9 +1408,10 @@ export class Runtime {
     const { space, scope } = link;
     const id = link.id as URI;
     const sameSpace = sourceSpace === space;
-    const reserved = sameSpace &&
+    const connectionClosed = connectionState?.status === "closed";
+    const reserved = !connectionClosed && sameSpace &&
       this.storageManager.shouldPullDoc?.(space, id, scope) === true;
-    if (sameSpace && !reserved) return "settled";
+    if (sameSpace && !connectionClosed && !reserved) return "settled";
 
     const status: MissingDocLoadEntry["status"] =
       connectionState?.status === "disconnected"

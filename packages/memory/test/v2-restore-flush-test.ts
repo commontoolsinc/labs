@@ -28,6 +28,7 @@ class ReconnectableTransport implements Transport {
   }> = [];
   #deliveredTransactLocalSeqs: number[] = [];
   #firstPendingTransact = defer<void>();
+  #disconnectAfterTransactRelease = false;
 
   constructor(private readonly server: Server) {}
 
@@ -89,10 +90,20 @@ class ReconnectableTransport implements Transport {
     return [...this.#deliveredTransactLocalSeqs];
   }
 
+  disconnectAfterNextTransactRelease(): void {
+    this.#disconnectAfterTransactRelease = true;
+  }
+
   releaseTransacts(): Promise<void> {
     const delayed = this.#delayedTransactResponses.splice(0);
     for (const { payload } of delayed) {
       this.#receiver(payload);
+    }
+    if (this.#disconnectAfterTransactRelease) {
+      this.#disconnectAfterTransactRelease = false;
+      this.#connection?.close();
+      this.#connection = null;
+      this.#closeReceiver(new Error("disconnect"));
     }
     return Promise.resolve();
   }
@@ -168,6 +179,19 @@ Deno.test(
     const unsubscribe = session.subscribeConnectionState((state) => {
       states.push({ status: state.status, epoch: state.epoch });
     });
+    const suppressDisconnectRejection = (event: PromiseRejectionEvent) => {
+      if (
+        event.reason instanceof Error &&
+        event.reason.name === "ConnectionError" &&
+        event.reason.message === "disconnect"
+      ) {
+        event.preventDefault();
+      }
+    };
+    globalThis.addEventListener(
+      "unhandledrejection",
+      suppressDisconnectRejection,
+    );
 
     try {
       assertEquals(session.connectionState, { status: "ready", epoch: 1 });
@@ -209,6 +233,89 @@ Deno.test(
         { status: "ready", epoch: 2 },
       ]);
     } finally {
+      globalThis.removeEventListener(
+        "unhandledrejection",
+        suppressDisconnectRejection,
+      );
+      unsubscribe();
+      await client.close();
+      await server.close();
+    }
+  },
+);
+
+Deno.test(
+  "restore retries when the connection closes before ready publication",
+  async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://restore-ready-generation-race-test"),
+    });
+    const transport = new ReconnectableTransport(server);
+    const client = await connect({ transport });
+    const session = await client.mount(
+      SPACE,
+      {},
+      testSessionOpenAuthFactory,
+    );
+    const states: Array<{ status: string; epoch: number }> = [];
+    const unsubscribe = session.subscribeConnectionState((state) => {
+      states.push({ status: state.status, epoch: state.epoch });
+    });
+    const suppressDisconnectRejection = (event: PromiseRejectionEvent) => {
+      if (
+        event.reason instanceof Error &&
+        event.reason.name === "ConnectionError" &&
+        event.reason.message === "disconnect"
+      ) {
+        event.preventDefault();
+      }
+    };
+    globalThis.addEventListener(
+      "unhandledrejection",
+      suppressDisconnectRejection,
+    );
+
+    try {
+      transport.delayTransacts = true;
+      const pendingCommit = session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "doc:restore-ready-generation-race",
+          value: { value: { ready: true } },
+        }],
+      });
+      await transport.firstPendingTransact;
+      transport.disconnect();
+      await waitFor(() =>
+        transport.delayedTransactLocalSeqs.filter((localSeq) => localSeq === 1)
+          .length >= 2
+      );
+
+      // Deliver the retained commit, then close synchronously before the
+      // restore continuation can publish ready for that connection.
+      transport.disconnectAfterNextTransactRelease();
+      transport.delayTransacts = false;
+      await transport.releaseTransacts();
+      await pendingCommit;
+
+      await waitFor(() =>
+        client.isConnected() &&
+        states.some((state) => state.status === "ready" && state.epoch === 2)
+      );
+      assertEquals(transport.connectionCount, 3);
+      assertEquals(states.slice(0, 3), [
+        { status: "ready", epoch: 1 },
+        { status: "disconnected", epoch: 1 },
+        { status: "ready", epoch: 2 },
+      ]);
+    } finally {
+      globalThis.removeEventListener(
+        "unhandledrejection",
+        suppressDisconnectRejection,
+      );
       unsubscribe();
       await client.close();
       await server.close();

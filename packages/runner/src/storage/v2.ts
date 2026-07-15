@@ -1043,6 +1043,14 @@ export class StorageManager implements IStorageManager {
     if (this.#providers.size === 0) {
       return;
     }
+    const cause = new Error("storage manager closed");
+    for (const space of this.#providers.keys()) {
+      this.#publishConnectionState(space, {
+        status: "closed",
+        epoch: this.#connectionStates.get(space)?.epoch ?? 0,
+        cause,
+      });
+    }
     await Promise.all(
       [...this.#providers.values()].map((provider) => provider.destroy()),
     );
@@ -1054,6 +1062,14 @@ export class StorageManager implements IStorageManager {
   async closeNow(): Promise<void> {
     if (this.#providers.size === 0) {
       return;
+    }
+    const cause = new Error("storage manager closed");
+    for (const space of this.#providers.keys()) {
+      this.#publishConnectionState(space, {
+        status: "closed",
+        epoch: this.#connectionStates.get(space)?.epoch ?? 0,
+        cause,
+      });
     }
     await Promise.all(
       [...this.#providers.values()].map((provider) => provider.destroyNow()),
@@ -1907,13 +1923,16 @@ class SpaceReplica implements ISpaceReplica {
         resolved = undefined;
       }
       if (resolved !== undefined) {
-        this.#cancelConnectionState?.();
-        this.#cancelConnectionState = undefined;
         // Closing the client rejects every in-flight request (pulls/watch
         // refreshes) with a ConnectionError and closes the session's watch
         // view — the generic drain for any open watch, not just the two views
         // tracked above.
-        await resolved.client.close();
+        try {
+          await resolved.client.close();
+        } finally {
+          this.#cancelConnectionState?.();
+          this.#cancelConnectionState = undefined;
+        }
       }
     }
     // With the client closed, every in-flight commit and read/watch pull has
@@ -1995,10 +2014,13 @@ class SpaceReplica implements ISpaceReplica {
     const sessionHandle = this.#sessionHandle;
     this.#sessionHandle = undefined;
     if (sessionHandle) {
-      sessionHandle.then(({ client }) => {
-        this.#cancelConnectionState?.();
-        this.#cancelConnectionState = undefined;
-        return client.close();
+      sessionHandle.then(async ({ client }) => {
+        try {
+          await client.close();
+        } finally {
+          this.#cancelConnectionState?.();
+          this.#cancelConnectionState = undefined;
+        }
       }).catch(() => {
         // The session never opened cleanly; there is nothing to close.
       });

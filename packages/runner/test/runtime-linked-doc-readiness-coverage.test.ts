@@ -233,4 +233,27 @@ describe("linked-document readiness lifecycle", () => {
       storageManager.syncCell = originalSyncCell;
     }
   });
+
+  it("does not reserve a same-space pull when its connection is closed", () => {
+    const target = runtime.getCell(
+      space,
+      "linked-doc-closed-without-reservation",
+    );
+    const link = target.getAsNormalizedFullLink();
+    const cause = new Error("synthetic closed connection");
+    let reservationCalls = 0;
+
+    storageManager.subscribeConnectionState = (_space, callback) => {
+      callback({ status: "closed", epoch: 1, cause });
+      return () => {};
+    };
+    storageManager.shouldPullDoc = () => {
+      reservationCalls++;
+      return true;
+    };
+
+    expect(runtime.ensureLinkedDocLoaded(link, space)).toBe("error");
+    expect(runtime.linkedDocLoadError(link)).toBe(cause);
+    expect(reservationCalls).toBe(0);
+  });
 });

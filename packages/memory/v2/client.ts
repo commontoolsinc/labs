@@ -122,6 +122,7 @@ export class Client {
   #serverFlags: MemoryProtocolFlags | null = null;
   #reconnecting: Promise<void> | null = null;
   #cancelReconnectDelay: (() => void) | null = null;
+  #connectionGeneration = 0;
   #connected = false;
   #closed = false;
 
@@ -147,6 +148,7 @@ export class Client {
 
   async close(): Promise<void> {
     this.#closed = true;
+    this.#connectionGeneration++;
     this.#connected = false;
     this.#cancelReconnectDelay?.();
     this.rejectPending(new Error("memory client closed"));
@@ -245,7 +247,8 @@ export class Client {
     await this.ensureConnected();
   }
 
-  private async hello(): Promise<void> {
+  private async hello(): Promise<number> {
+    const connectionGeneration = this.#connectionGeneration;
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
     await this.transport.send(encodeMemoryBoundary({
@@ -255,7 +258,16 @@ export class Client {
     }));
     try {
       await ack.promise;
+      if (
+        this.#closed ||
+        this.#connectionGeneration !== connectionGeneration
+      ) {
+        const error = new Error("memory connection changed during handshake");
+        error.name = "ConnectionError";
+        throw error;
+      }
       this.#connected = true;
+      return connectionGeneration;
     } finally {
       this.#helloPending = null;
     }
@@ -380,6 +392,7 @@ export class Client {
     if (this.#closed) {
       return;
     }
+    this.#connectionGeneration++;
     this.#connected = false;
     const connectionError = toConnectionError(error);
     for (const session of this.#spaces) {
@@ -400,13 +413,22 @@ export class Client {
       let attempt = 0;
       while (!this.#closed) {
         try {
-          await this.hello();
+          const connectionGeneration = await this.hello();
           const restoredSessions: SpaceSession[] = [];
           for (const session of [...this.#spaces]) {
             if (await session.restore()) restoredSessions.push(session);
           }
+          if (!this.isCurrentConnection(connectionGeneration)) {
+            continue;
+          }
           for (const session of restoredSessions) {
+            if (!this.isCurrentConnection(connectionGeneration)) {
+              break;
+            }
             session.handleRestored();
+          }
+          if (!this.isCurrentConnection(connectionGeneration)) {
+            continue;
           }
           return;
         } catch (error) {
@@ -425,6 +447,11 @@ export class Client {
     } finally {
       this.#reconnecting = null;
     }
+  }
+
+  private isCurrentConnection(connectionGeneration: number): boolean {
+    return !this.#closed && this.#connected &&
+      this.#connectionGeneration === connectionGeneration;
   }
 
   // The reconnect attempt is event-driven: `hello()` awaits the transport's
