@@ -15,6 +15,15 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+type FindIndexResult = { idx?: number };
+type FindIndexSource = {
+  findIndex(predicate: (value: number) => boolean): number;
+};
+
+function findIndexSource(value: unknown): FindIndexSource {
+  return value as FindIndexSource;
+}
+
 describe("Pattern Runner - findIndex", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -50,7 +59,7 @@ describe("Pattern Runner - findIndex", () => {
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<FindIndexResult>(
       space,
       "findindex-basic",
       {
@@ -66,7 +75,7 @@ describe("Pattern Runner - findIndex", () => {
     tx.commit();
 
     const value = await result.pull();
-    expect((value as any).idx).toBe(3); // items[3] === 4
+    expect(value.idx).toBe(3); // items[3] === 4
   });
 
   it("should return -1 when no element matches", async () => {
@@ -77,7 +86,7 @@ describe("Pattern Runner - findIndex", () => {
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<FindIndexResult>(
       space,
       "findindex-no-match",
       {
@@ -93,7 +102,7 @@ describe("Pattern Runner - findIndex", () => {
     tx.commit();
 
     const value = await result.pull();
-    expect((value as any).idx).toBe(-1);
+    expect(value.idx).toBe(-1);
   });
 
   it("should return -1 for empty array", async () => {
@@ -104,7 +113,7 @@ describe("Pattern Runner - findIndex", () => {
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<FindIndexResult>(
       space,
       "findindex-empty",
       {
@@ -120,7 +129,7 @@ describe("Pattern Runner - findIndex", () => {
     tx.commit();
 
     const value = await result.pull();
-    expect((value as any).idx).toBe(-1);
+    expect(value.idx).toBe(-1);
   });
 
   it("should reactively update when input changes", async () => {
@@ -139,7 +148,7 @@ describe("Pattern Runner - findIndex", () => {
     );
     inputCell.set({ items: [1, 2, 3] });
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<FindIndexResult>(
       space,
       "findindex-reactive-result",
       {
@@ -153,7 +162,7 @@ describe("Pattern Runner - findIndex", () => {
     tx.commit();
 
     let value = await result.pull();
-    expect((value as any).idx).toBe(-1); // No element > 3
+    expect(value.idx).toBe(-1); // No element > 3
 
     // Update input to include a match
     tx = runtime.edit();
@@ -161,20 +170,20 @@ describe("Pattern Runner - findIndex", () => {
     tx.commit();
 
     value = await result.pull();
-    expect((value as any).idx).toBe(1); // items[1] === 5
+    expect(value.idx).toBe(1); // items[1] === 5
   });
 
   it("should throw TypeError on non-array input", async () => {
     // The throw surfaces as a scheduler error log (not a rejected promise),
     // so we verify the pattern fails to produce a result.
-    const findPattern = pattern<{ items: any }>(
+    const findPattern = pattern<{ items: FindIndexSource }>(
       ({ items }) => {
-        const idx = (items as any).findIndex((x: number) => x > 0);
+        const idx = items.findIndex((x: number) => x > 0);
         return { idx };
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<FindIndexResult>(
       space,
       "findindex-non-array",
       {
@@ -185,7 +194,7 @@ describe("Pattern Runner - findIndex", () => {
     );
 
     runtime.run(tx, findPattern, {
-      items: 42 as any,
+      items: findIndexSource(42),
     }, resultCell);
     tx.commit();
 
@@ -194,7 +203,7 @@ describe("Pattern Runner - findIndex", () => {
 
     // The pattern errors out — idx is never set
     const value = resultCell.get();
-    expect((value as any)?.idx).toBeUndefined();
+    expect(value?.idx).toBeUndefined();
   });
 
   it("should find first match in objects", async () => {
@@ -209,7 +218,7 @@ describe("Pattern Runner - findIndex", () => {
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<FindIndexResult>(
       space,
       "findindex-objects",
       {
@@ -230,6 +239,6 @@ describe("Pattern Runner - findIndex", () => {
     tx.commit();
 
     const value = await result.pull();
-    expect((value as any).idx).toBe(2); // First active item
+    expect(value.idx).toBe(2); // First active item
   });
 });
