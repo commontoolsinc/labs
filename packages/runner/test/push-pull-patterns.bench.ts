@@ -17,7 +17,7 @@ import {
 } from "@commonfabric/utils/logger";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import type { Cell, JSONSchema } from "../src/builder/types.ts";
+import type { Cell, JSONSchema, PatternFactory } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("bench push pull patterns");
@@ -134,6 +134,15 @@ const flatMappedResultSchema = {
   additionalProperties: false,
 } as const satisfies JSONSchema;
 
+const objectFilteredResultSchema = {
+  type: "object",
+  properties: {
+    filtered: numberObjectArraySchema,
+  },
+  required: ["filtered"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+
 const scalarResultSchema = {
   type: "object",
   properties: {
@@ -145,6 +154,8 @@ const scalarResultSchema = {
 
 let blackhole = 0;
 
+type NumberObject = { value: number };
+
 type BenchEnv = {
   runtime: Runtime;
   storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -152,9 +163,10 @@ type BenchEnv = {
   pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 };
 
-type ListScenario = {
-  outputCell: Cell<number[]>;
+type ListScenario<T> = {
+  outputCell: Cell<T[]>;
   updateValue: (value: number) => Promise<void>;
+  consumeOutput: (value: readonly T[] | undefined) => void;
 };
 
 type FanoutScenario = {
@@ -181,6 +193,31 @@ type BenchTimingSummary = {
 };
 
 const benchTimingSummaries = new Map<string, BenchTimingSummary>();
+
+type ListOpInput<T> = {
+  element: T;
+  index: number;
+  array: T[];
+};
+
+type ListPatternBuiltins<T> = {
+  mapWithPattern<S>(
+    op: PatternFactory<ListOpInput<T>, S>,
+    params: Record<string, unknown>,
+  ): S[];
+  filterWithPattern(
+    op: PatternFactory<ListOpInput<T>, boolean>,
+    params: Record<string, unknown>,
+  ): T[];
+  flatMapWithPattern<S>(
+    op: PatternFactory<ListOpInput<T>, S[]>,
+    params: Record<string, unknown>,
+  ): S[];
+};
+
+function listBuiltins<T>(values: unknown): ListPatternBuiltins<T> {
+  return values as ListPatternBuiltins<T>;
+}
 
 function benchOptions(group: string, baseline = false) {
   return {
@@ -328,24 +365,24 @@ async function cleanup(env: BenchEnv) {
   await env.storageManager.close();
 }
 
-function unaryNumberListOpPattern(
+function unaryNumberListOpPattern<Result>(
   env: BenchEnv,
-  fn: (element: unknown) => unknown,
+  fn: (element: number) => Result,
   resultSchema: JSONSchema,
-) {
-  return env.pattern<{ element: number }, unknown>(
+): PatternFactory<ListOpInput<number>, Result> {
+  return env.pattern<ListOpInput<number>, Result>(
     ({ element }) => fn(element),
     numberElementArgumentSchema,
     resultSchema,
   );
 }
 
-function unaryNumberObjectListOpPattern(
+function unaryNumberObjectListOpPattern<Result>(
   env: BenchEnv,
-  fn: (element: unknown) => unknown,
+  fn: (element: { value: number }) => Result,
   resultSchema: JSONSchema,
-) {
-  return env.pattern<{ element: { value: number } }, unknown>(
+): PatternFactory<ListOpInput<{ value: number }>, Result> {
+  return env.pattern<ListOpInput<{ value: number }>, Result>(
     ({ element }) => fn(element),
     numberObjectElementArgumentSchema,
     resultSchema,
@@ -421,6 +458,11 @@ function consumeArray(value: readonly number[] | undefined) {
   blackhole = (blackhole + value.length + (value[value.length - 1] ?? 0)) | 0;
 }
 
+function consumeNumberObjectArray(value: readonly NumberObject[] | undefined) {
+  if (!value) return;
+  blackhole = (blackhole + value.length + (value.at(-1)?.value ?? 0)) | 0;
+}
+
 function consumeNumber(value: number | undefined) {
   blackhole = (blackhole + (value ?? 0)) | 0;
 }
@@ -437,7 +479,7 @@ function takeLast<T>(values: T[], count: number): T[] {
 async function setupMapScenario(
   env: BenchEnv,
   prefix: string,
-): Promise<ListScenario> {
+): Promise<ListScenario<number>> {
   const values = await createNumberCells(
     env.runtime,
     `${prefix}:values`,
@@ -448,15 +490,13 @@ async function setupMapScenario(
   const double = env.lift((x: number) => x * 2, numberSchema, numberSchema);
   const doublePattern = unaryNumberListOpPattern(
     env,
-    // deno-lint-ignore no-explicit-any
-    (element) => double(element as any),
+    (element) => double(element),
     numberSchema,
   );
 
   const mapPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
-      // deno-lint-ignore no-explicit-any
-      mapped: (values as any).mapWithPattern(doublePattern as any, {}),
+      mapped: listBuiltins<number>(values).mapWithPattern(doublePattern, {}),
     }),
     numberListInputSchema,
     mappedResultSchema,
@@ -475,13 +515,14 @@ async function setupMapScenario(
   return {
     outputCell: result.key("mapped") as Cell<number[]>,
     updateValue: (value) => setNumber(env.runtime, values[TARGET_INDEX], value),
+    consumeOutput: consumeArray,
   };
 }
 
 async function setupFilterScenario(
   env: BenchEnv,
   prefix: string,
-): Promise<ListScenario> {
+): Promise<ListScenario<number>> {
   const values = await createNumberCells(
     env.runtime,
     `${prefix}:values`,
@@ -496,15 +537,16 @@ async function setupFilterScenario(
   );
   const filterPatternFn = unaryNumberListOpPattern(
     env,
-    // deno-lint-ignore no-explicit-any
-    (element) => isPositive(element as any),
+    (element) => isPositive(element),
     booleanSchema,
   );
 
   const filterPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
-      // deno-lint-ignore no-explicit-any
-      filtered: (values as any).filterWithPattern(filterPatternFn as any, {}),
+      filtered: listBuiltins<number>(values).filterWithPattern(
+        filterPatternFn,
+        {},
+      ),
     }),
     numberListInputSchema,
     filteredResultSchema,
@@ -523,13 +565,14 @@ async function setupFilterScenario(
   return {
     outputCell: result.key("filtered") as Cell<number[]>,
     updateValue: (value) => setNumber(env.runtime, values[TARGET_INDEX], value),
+    consumeOutput: consumeArray,
   };
 }
 
 async function setupFlatMapScenario(
   env: BenchEnv,
   prefix: string,
-): Promise<ListScenario> {
+): Promise<ListScenario<number>> {
   const values = await createNumberCells(
     env.runtime,
     `${prefix}:values`,
@@ -544,15 +587,16 @@ async function setupFlatMapScenario(
   );
   const flatMapPatternFn = unaryNumberListOpPattern(
     env,
-    // deno-lint-ignore no-explicit-any
-    (element) => expand(element as any),
+    (element) => expand(element),
     numberArraySchema,
   );
 
   const flatMapPattern = env.pattern<{ values: number[] }>(
     ({ values }) => ({
-      // deno-lint-ignore no-explicit-any
-      flat: (values as any).flatMapWithPattern(flatMapPatternFn as any, {}),
+      flat: listBuiltins<number>(values).flatMapWithPattern(
+        flatMapPatternFn,
+        {},
+      ),
     }),
     numberListInputSchema,
     flatMappedResultSchema,
@@ -571,13 +615,14 @@ async function setupFlatMapScenario(
   return {
     outputCell: result.key("flat") as Cell<number[]>,
     updateValue: (value) => setNumber(env.runtime, values[TARGET_INDEX], value),
+    consumeOutput: consumeArray,
   };
 }
 
 async function setupObjectMapScenario(
   env: BenchEnv,
   prefix: string,
-): Promise<ListScenario> {
+): Promise<ListScenario<number>> {
   const values = await createNumberObjectCells(
     env.runtime,
     `${prefix}:values`,
@@ -588,15 +633,16 @@ async function setupObjectMapScenario(
   const double = env.lift((x: number) => x * 2, numberSchema, numberSchema);
   const doublePattern = unaryNumberObjectListOpPattern(
     env,
-    // deno-lint-ignore no-explicit-any
-    (element) => double((element as any).value),
+    (element) => double(element.value),
     numberSchema,
   );
 
   const mapPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
-      // deno-lint-ignore no-explicit-any
-      mapped: (values as any).mapWithPattern(doublePattern as any, {}),
+      mapped: listBuiltins<{ value: number }>(values).mapWithPattern(
+        doublePattern,
+        {},
+      ),
     }),
     numberObjectListInputSchema,
     mappedResultSchema,
@@ -616,13 +662,14 @@ async function setupObjectMapScenario(
     outputCell: result.key("mapped") as Cell<number[]>,
     updateValue: (value) =>
       setNestedNumber(env.runtime, values[TARGET_INDEX], value),
+    consumeOutput: consumeArray,
   };
 }
 
 async function setupObjectFilterScenario(
   env: BenchEnv,
   prefix: string,
-): Promise<ListScenario> {
+): Promise<ListScenario<NumberObject>> {
   const values = await createNumberObjectCells(
     env.runtime,
     `${prefix}:values`,
@@ -637,41 +684,46 @@ async function setupObjectFilterScenario(
   );
   const filterPatternFn = unaryNumberObjectListOpPattern(
     env,
-    // deno-lint-ignore no-explicit-any
-    (element) => isPositive((element as any).value),
+    (element) => isPositive(element.value),
     booleanSchema,
   );
 
-  const filterPattern = env.pattern<{ values: Array<{ value: number }> }>(
+  const filterPattern = env.pattern<
+    { values: NumberObject[] },
+    { filtered: NumberObject[] }
+  >(
     ({ values }) => ({
-      // deno-lint-ignore no-explicit-any
-      filtered: (values as any).filterWithPattern(filterPatternFn as any, {}),
+      filtered: listBuiltins<NumberObject>(values).filterWithPattern(
+        filterPatternFn,
+        {},
+      ),
     }),
     numberObjectListInputSchema,
-    filteredResultSchema,
+    objectFilteredResultSchema,
   );
 
   const tx = env.runtime.edit();
-  const resultCell = env.runtime.getCell<{ filtered: number[] }>(
+  const resultCell = env.runtime.getCell<{ filtered: NumberObject[] }>(
     space,
     `${prefix}:result`,
-    filteredResultSchema,
+    objectFilteredResultSchema,
     tx,
   );
   const result = env.runtime.run(tx, filterPattern, { values }, resultCell);
   await tx.commit();
 
   return {
-    outputCell: result.key("filtered") as Cell<number[]>,
+    outputCell: result.key("filtered") as Cell<NumberObject[]>,
     updateValue: (value) =>
       setNestedNumber(env.runtime, values[TARGET_INDEX], value),
+    consumeOutput: consumeNumberObjectArray,
   };
 }
 
 async function setupObjectFlatMapScenario(
   env: BenchEnv,
   prefix: string,
-): Promise<ListScenario> {
+): Promise<ListScenario<number>> {
   const values = await createNumberObjectCells(
     env.runtime,
     `${prefix}:values`,
@@ -686,15 +738,16 @@ async function setupObjectFlatMapScenario(
   );
   const flatMapPatternFn = unaryNumberObjectListOpPattern(
     env,
-    // deno-lint-ignore no-explicit-any
-    (element) => expand((element as any).value),
+    (element) => expand(element.value),
     numberArraySchema,
   );
 
   const flatMapPattern = env.pattern<{ values: Array<{ value: number }> }>(
     ({ values }) => ({
-      // deno-lint-ignore no-explicit-any
-      flat: (values as any).flatMapWithPattern(flatMapPatternFn as any, {}),
+      flat: listBuiltins<{ value: number }>(values).flatMapWithPattern(
+        flatMapPatternFn,
+        {},
+      ),
     }),
     numberObjectListInputSchema,
     flatMappedResultSchema,
@@ -714,6 +767,7 @@ async function setupObjectFlatMapScenario(
     outputCell: result.key("flat") as Cell<number[]>,
     updateValue: (value) =>
       setNestedNumber(env.runtime, values[TARGET_INDEX], value),
+    consumeOutput: consumeArray,
   };
 }
 
@@ -765,10 +819,10 @@ async function setupFanoutScenario(
   };
 }
 
-async function runPullBench(
+async function runPullBench<T>(
   b: Deno.BenchContext,
   options: {
-    setupScenario: (env: BenchEnv, prefix: string) => Promise<ListScenario>;
+    setupScenario: (env: BenchEnv, prefix: string) => Promise<ListScenario<T>>;
     prefix: string;
     nextValue: (round: number) => number;
     rounds?: number;
@@ -779,14 +833,14 @@ async function runPullBench(
   try {
     resetAllTimingStats();
     const scenario = await options.setupScenario(env, options.prefix);
-    consumeArray(await scenario.outputCell.pull());
+    scenario.consumeOutput(await scenario.outputCell.pull());
     resetAllTimingBaselines();
     const timingBefore = snapshotSchedulerTiming();
 
     b.start();
     for (let i = 0; i < (options.rounds ?? UPDATE_ROUNDS); i++) {
       await scenario.updateValue(options.nextValue(i));
-      consumeArray(await scenario.outputCell.pull());
+      scenario.consumeOutput(await scenario.outputCell.pull());
     }
     b.end();
 
@@ -800,10 +854,10 @@ async function runPullBench(
   }
 }
 
-async function runSinkBench(
+async function runSinkBench<T>(
   b: Deno.BenchContext,
   options: {
-    setupScenario: (env: BenchEnv, prefix: string) => Promise<ListScenario>;
+    setupScenario: (env: BenchEnv, prefix: string) => Promise<ListScenario<T>>;
     prefix: string;
     nextValue: (round: number) => number;
     rounds?: number;
@@ -815,7 +869,7 @@ async function runSinkBench(
     resetAllTimingStats();
     const scenario = await options.setupScenario(env, options.prefix);
     const cancel = scenario.outputCell.sink((value) => {
-      consumeArray(value);
+      scenario.consumeOutput(value);
     });
     await env.runtime.idle();
     resetAllTimingBaselines();
