@@ -713,7 +713,12 @@ class DenoSpaceExecutor implements SpaceExecutor {
       live === undefined || live.leaseGeneration !== claim.leaseGeneration ||
       live.claimGeneration !== claim.claimGeneration
     ) {
-      throw new Error("executor claim release does not match a live claim");
+      // Worker releases race host-side revokes (demand change, renewal
+      // failure, stop) by construction: the Worker posts asynchronously
+      // against the claim state it last saw. A release naming a claim the
+      // host no longer holds — or an older incarnation — is already handled;
+      // acting on it would revoke a newer incarnation or crash the lane.
+      return;
     }
     this.#revokeClaim(live);
     this.#claims.delete(mapKey);

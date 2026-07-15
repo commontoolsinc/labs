@@ -1082,3 +1082,59 @@ Deno.test("candidate authority waits until the Worker finishes activating demand
     await executor.stop();
   }
 });
+
+Deno.test("a release for a claim the host no longer holds is ignored", async () => {
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  try {
+    // No claim was ever installed for this incarnation; the Worker's release
+    // raced a host-side revoke. It must not crash the lane or revoke anything.
+    worker.unserved(CLAIM, "dynamic-read-outside-static-surface");
+    await flushClaimControl();
+
+    assertEquals(crashes, []);
+    assertEquals(worker.terminated, false);
+    assertEquals(server.revoked, []);
+    assertEquals(diagnostics, []);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("a stale-generation release does not revoke a newer incarnation", async () => {
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+
+    // A delayed release naming a previous claimGeneration must leave the live
+    // incarnation untouched.
+    worker.invalidated(
+      { ...CLAIM, claimGeneration: CLAIM.claimGeneration - 1 },
+      "dynamic-read-outside-static-surface",
+    );
+    await flushClaimControl();
+    assertEquals(crashes, []);
+    assertEquals(server.revoked, []);
+    assertEquals(diagnostics, []);
+
+    // The exact live incarnation still releases normally, exactly once.
+    worker.invalidated(CLAIM, "dynamic-read-outside-static-surface");
+    await flushClaimControl();
+    assertEquals(crashes, []);
+    assertEquals(server.revoked, [CLAIM]);
+    assertEquals(diagnostics, [{
+      claim: CLAIM,
+      diagnosticCode: "dynamic-read-outside-static-surface",
+    }]);
+  } finally {
+    await executor.stop();
+  }
+});
