@@ -5,12 +5,19 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
-import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  IStorageProviderWithReplica,
+} from "../src/storage/interface.ts";
 import type { Action } from "../src/scheduler.ts";
 import type { URI } from "@commonfabric/memory/interface";
-import { createGraphFixture } from "./memory-v2-graph.fixture.ts";
+import {
+  createGraphFixture,
+  type GraphDoc,
+} from "./memory-v2-graph.fixture.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-pull-reactivity");
 const space = signer.did();
@@ -33,6 +40,39 @@ const visibleIds = (
   ids: readonly URI[],
 ) => ids.filter((id) => provider.get(id)?.value !== undefined).sort();
 
+type ReadableProvider = IStorageProviderWithReplica & {
+  get(uri: URI): { value?: unknown } | undefined;
+};
+
+type MaterializedGraphDoc =
+  & Omit<
+    GraphDoc,
+    "primary" | "alternate" | "children"
+  >
+  & {
+    primary?: MaterializedGraphDoc;
+    alternate?: MaterializedGraphDoc;
+    children?: MaterializedGraphDoc[];
+  };
+
+const emulatedServer = (manager: object): MemoryV2Server => {
+  const server = Reflect.get(manager, "server") as unknown;
+  if (typeof server !== "function") {
+    throw new Error("Expected a memory/v2 emulated storage manager");
+  }
+  return server.call(manager) as MemoryV2Server;
+};
+
+const readableProvider = (
+  provider: IStorageProviderWithReplica,
+): ReadableProvider => {
+  const get = Reflect.get(provider, "get") as unknown;
+  if (typeof get !== "function") {
+    throw new Error("Expected a readable memory/v2 storage provider");
+  }
+  return provider as ReadableProvider;
+};
+
 describe("Memory v2 pull reactivity", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -51,14 +91,8 @@ describe("Memory v2 pull reactivity", () => {
     });
     tx = runtime.edit();
 
-    const candidate = storageManager as unknown as {
-      server?: () => MemoryV2Server;
-    };
-    if (typeof candidate.server !== "function") {
-      throw new Error("Expected a memory/v2 emulated storage manager");
-    }
     remoteClient = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(candidate.server()),
+      transport: MemoryV2Client.loopback(emulatedServer(storageManager)),
     });
     remoteSession = await remoteClient.mount(
       space,
@@ -147,13 +181,7 @@ describe("Memory v2 pull reactivity", () => {
     const expandedChildValue = structuredClone(
       fixture.docs.find((doc) => doc.id === expandedChildId)?.value,
     );
-    const observer = storageManager.open(space) as unknown as {
-      get(uri: URI): { value: unknown } | undefined;
-      sync(
-        uri: URI,
-        selector: { path: string[]; schema: unknown },
-      ): Promise<{ ok?: Record<PropertyKey, never> }>;
-    };
+    const observer = readableProvider(storageManager.open(space));
 
     await remoteSession.transact({
       localSeq: remoteLocalSeq++,
@@ -169,11 +197,12 @@ describe("Memory v2 pull reactivity", () => {
       throw new Error(`Missing graph fixture doc ${expandedChildId}`);
     }
 
-    const root = runtime.getCellFromEntityId<any>(
+    const schema = fixture.schema as JSONSchema;
+    const root = runtime.getCellFromEntityId<MaterializedGraphDoc>(
       space,
       fixture.rootId,
       [],
-      fixture.schema as any,
+      schema,
       tx,
     );
     const result = runtime.getCell<string>(
@@ -187,7 +216,7 @@ describe("Memory v2 pull reactivity", () => {
     tx = runtime.edit();
 
     expect(
-      await observer.sync(fixture.rootId, { path: [], schema: fixture.schema }),
+      await observer.sync(fixture.rootId, { path: [], schema }),
     ).toEqual({ ok: {} });
     await root.sync();
     await root.pull();
