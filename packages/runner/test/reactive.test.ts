@@ -31,8 +31,8 @@ describe("reactive function", () => {
 
   it("throws on get", () => {
     const c = reactive<number>();
-    // Use type assertion since .get() is no longer on Reactive type
-    // but we want to verify runtime still throws
-    expect(() => (c as any).get()).toThrow();
+    const get = Reflect.get(Object(c), "get");
+    expect(typeof get).toBe("function");
+    expect(() => Reflect.apply(get, c, [])).toThrow();
   });
 });
