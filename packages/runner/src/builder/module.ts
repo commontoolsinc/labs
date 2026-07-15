@@ -23,7 +23,11 @@ import {
 } from "./node-utils.ts";
 import { assertNotInActionExecution } from "./action-context.ts";
 import { moduleToJSON } from "./json-utils.ts";
-import { brandTrustedBuilderArtifact } from "./pattern-metadata.ts";
+import {
+  brandTrustedBuilderArtifact,
+  getArtifactEntryRef,
+} from "./pattern-metadata.ts";
+import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
 import { getTopFrame } from "./pattern.ts";
 import { generateHandlerSchema } from "../schema.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -654,6 +658,22 @@ function prepareInspectableImplementation<
   implementation: T,
 ): T {
   if (Object.isExtensible(implementation)) {
+    return implementation;
+  }
+
+  // A hardened implementation that already carries verified identity must be
+  // returned as-is. Provenance and artifact entry refs are keyed on the
+  // function OBJECT (WeakMaps, the anti-spoof design), so the wrapper below is
+  // a fresh identity-less function: it serializes body-only with no `$implRef`
+  // and re-evaluates bare-SES — module scope gone — on reload (the silent
+  // "helper is not a function" unlink; see the helper-unlink investigation
+  // record). A registered implementation already passed through a factory
+  // once — that is how it was registered — so it already carries its
+  // inspectable metadata and loses nothing by skipping the wrap.
+  if (
+    getVerifiedProvenance(implementation) !== undefined ||
+    getArtifactEntryRef(implementation) !== undefined
+  ) {
     return implementation;
   }
 
