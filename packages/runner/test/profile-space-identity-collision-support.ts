@@ -4,7 +4,9 @@ import { fromFileUrl } from "@std/path";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 // CT-1650: two DIFFERENT users who create a profile with the SAME display name
 // must end up in DISTINCT profile spaces. Before the fix, profile-create seeded
@@ -51,8 +53,11 @@ export const PROFILE_NAME = "Ada Lovelace";
 const profileLinkListSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} as const satisfies JSONSchema;
+
+type ProfileLinkCell = {
+  getAsNormalizedFullLink(): NormalizedFullLink;
+};
 
 // Run profile-create as `signer`, fire createProfile with `name`, return the
 // space DID of the freshly-created profile (its own inSpace space).
@@ -78,8 +83,7 @@ export async function createProfileSpace(
       undefined,
       tx1,
     );
-    // deno-lint-ignore no-explicit-any
-    const r = rt.run(tx1, parent as any, {}, resultCell);
+    const r = rt.run(tx1, parent, {}, resultCell);
     rt.prepareTxForCommit(tx1);
     const commit1 = await tx1.commit();
     expect(commit1.error).toBeUndefined();
@@ -94,8 +98,7 @@ export async function createProfileSpace(
     await r.pull();
 
     const profiles = r.key("profiles").asSchema(profileLinkListSchema)
-      // deno-lint-ignore no-explicit-any
-      .get() as any[];
+      .get() as readonly ProfileLinkCell[];
     expect(profiles.length).toBe(1);
     const link = profiles[0].getAsNormalizedFullLink();
     // Sanity: the profile lives in its OWN space, not the home space.
