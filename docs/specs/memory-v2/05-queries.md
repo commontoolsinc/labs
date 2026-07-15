@@ -344,13 +344,27 @@ This intersection is computed by `combineSchema`:
 
 ```
 combineSchema(parentSchema, linkSchema):
+  if parentSchema is false:
+    return parentSchema
+
+  if linkSchema is false:
+    return linkSchema
+
   if parentSchema is true/{}:
     return linkSchema  (parent accepts anything, use link's constraint)
 
   if linkSchema is true/{}:
     return parentSchema  (link accepts anything, use parent's constraint)
 
+  compare parentSchema.type and linkSchema.type:
+    let unknown or an absent type use legacy parent precedence
+    treat integer as a subtype of number; their intersection is integer
+    if their possible types cannot overlap, return false
+
   if both are type:"object":
+    // A property required by either input remains required.
+    required = union(parentSchema.required, linkSchema.required)
+
     // Intersect properties: for shared property keys, recurse combineSchema.
     // For properties only in one schema, combine with the other's
     // additionalProperties.
@@ -363,7 +377,15 @@ combineSchema(parentSchema, linkSchema):
     return { type: "object", properties: mergedProperties, ... }
 
   if both are type:"array":
-    return { type: "array", items: combineSchema(parent.items, link.items) }
+    items = parent.items is absent ? link.items
+      : link.items is absent ? parent.items
+      : combineSchema(parent.items, link.items)
+    return {
+      ...linkSchema,
+      ...parentSchema,  // parent metadata wins
+      type: "array",
+      items
+    }
 
   // Fallback: prefer parent schema with link's metadata flags
   return parentSchema

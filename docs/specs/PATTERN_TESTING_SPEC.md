@@ -1,12 +1,16 @@
 # Pattern Testing System Specification
 
-**Status:** Implemented (v2.1 - Discriminated Union Format)
+**Status:** Implemented (v2.3 - Explicit and Continuous VDOM Demand)
 **Author:** Claude (with Gideon, Jordan, Berni)
 **Date:** 2026-01-13
 
 ## Executive Summary
 
-This specification defines a **pattern-native testing system** where tests are themselves patterns. Test patterns (`.test.tsx` files) import and instantiate the patterns they test, define test steps using a **discriminated union format** (`{ action: ... }` or `{ assertion: ... }`), and are run via `cf test`.
+This specification defines a **pattern-native testing system** where tests are
+themselves patterns. Test patterns (`.test.tsx` files) import and instantiate
+the patterns they test, define test steps using a **discriminated union
+format** (`{ action: ... }`, `{ assertion: ... }`, or an explicit harness
+primitive), and are run via `cf test`.
 
 **Key insight:** Tests should be patterns too. This dogfoods the pattern system, keeps testing infrastructure in userland, and allows test patterns to be inspected via CLI for debugging.
 
@@ -22,7 +26,7 @@ This specification defines a **pattern-native testing system** where tests are t
 
 - Replacing existing CI integration tests
 - Testing cross-piece linking (requires deployment)
-- Testing UI rendering (requires browser)
+- Testing browser DOM rendering, layout, or interaction
 - External test runners (Jest, Vitest, etc.)
 
 ---
@@ -67,7 +71,7 @@ A test pattern is a regular pattern file with `.test.tsx` extension that:
 2. **Instantiates it with test data**
 3. **Defines test actions using `action()`** (for triggering events on the pattern)
 4. **Defines assertions as `computed(() => boolean)`** computed from pattern state
-5. **Returns a `tests` array** of discriminated union objects: `{ action: ... }` or `{ assertion: ... }`
+5. **Returns a `tests` array** of discriminated union objects
 
 ### Test Step Format (Discriminated Union)
 
@@ -77,10 +81,24 @@ The `tests` array uses a discriminated union to avoid TypeScript declaration emi
 // Shown at module scope.
 type TestStep =
   | { assertion: Reactive<boolean> }  // from computed(() => condition)
-  | { action: Stream<void> };          // from action(() => handler.send())
+  | { action: Stream<void> }           // from action(() => handler.send())
+  | { render: VNode }                  // one headless VDOM demand window
+  | { settle: true };                  // wait for full async settlement
 ```
 
 This format keeps `action()` streams and `computed()` cells separate in the type system.
+
+`cf test` does not mount a renderer by default. Under the pull scheduler, a
+pattern's `$UI` is therefore not continuously demanded. A
+`{ render: subject[UI] }` step materializes that VDOM through the worker
+reconciler at the current test state, discards the resulting DOM operations,
+waits for the recursively discovered UI computations to settle, and unmounts
+before the next step. This is VDOM evaluation, not browser rendering.
+
+For stress and performance runs, `CF_TEST_CONTINUOUS_UI=1` mounts the test
+descriptor's exported `[UI]` before initial settlement and keeps it demanded
+until cleanup. This opt-in mode applies independently to every multi-user
+participant and does not change the semantics of explicit `render` steps.
 
 ### Example Test Pattern
 
@@ -251,8 +269,8 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
   await tx.commit();
   await runtime.idle();
 
-  // Keep pattern reactive
-  const sinkCancel = patternResult.sink(() => {});
+  // No renderer is mounted by default. Values run only when a test step
+  // explicitly demands them.
 
   // 4. Get the tests array from pattern output
   const testsCell = patternResult.key("tests") as Cell<unknown>;
@@ -268,14 +286,21 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
   let actionCount = 0;
 
   for (let i = 0; i < testsValue.length; i++) {
-    const stepValue = testsValue[i] as { action?: unknown; assertion?: unknown };
+    const stepValue = testsValue[i] as {
+      action?: unknown;
+      assertion?: unknown;
+      render?: unknown;
+      settle?: boolean;
+    };
 
     // Check discriminated union keys
     const isAction = "action" in stepValue;
     const isAssertion = "assertion" in stepValue;
+    const isRender = "render" in stepValue;
+    const isSettle = "settle" in stepValue;
 
-    if (!isAction && !isAssertion) {
-      throw new Error(`Test step at index ${i} must have 'action' or 'assertion' key`);
+    if (!isAction && !isAssertion && !isRender && !isSettle) {
+      throw new Error(`Test step at index ${i} has no supported discriminant`);
     }
 
     if (isAction) {
@@ -290,7 +315,7 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
         timeout(TIMEOUT, `Action at index ${i} timed out after ${TIMEOUT}ms`)
       ]);
 
-    } else {
+    } else if (isAssertion) {
       // It's an assertion - check the boolean value via .key() access
       assertionCount++;
       const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
@@ -303,11 +328,14 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
         afterAction: lastActionIndex !== null ? `action_${actionCount}` : null,
         error: passed ? undefined : `Expected true, got ${JSON.stringify(value)}`,
       });
+    } else if (isRender) {
+      await materializeTestVDOM(testsCell.key(i).key("render"), settleRuntime);
+    } else {
+      await runtime.settled();
     }
   }
 
   // 6. Cleanup
-  sinkCancel();
   engine.dispose();
   await storageManager.close();
 
@@ -320,6 +348,8 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
 - **Discriminated union detection:** Check `"action" in step` vs `"assertion" in step`
 - **Cell access via `.key()`:** Access test steps through reactive cell interface
 - **Void stream `.send()`:** No argument required for `Stream<void>`
+- **Explicit VDOM demand:** A `render` step mounts the worker reconciler only
+  for that step; DOM operations are discarded and demand is cleaned up
 
 ---
 

@@ -1228,6 +1228,26 @@ class TransformObjectCreator
     );
   }
 
+  /**
+   * Plain-schema traversal has already ruled out asCell and default keywords,
+   * so only attach the ordinary back-to-cell annotation here. Keeping this
+   * beside createObject() makes the skipped semantics explicit and leaves the
+   * generic path unchanged for every richer schema.
+   */
+  createPlainSchemaObject(
+    link: NormalizedFullLink,
+    value: AnyCellWrapping<FabricValue> | undefined,
+  ): AnyCellWrapping<FabricValue> {
+    return annotateWithBackToCellSymbols(
+      value,
+      this.runtime,
+      link,
+      this.tx,
+      this.synced,
+      this.labelViewFor(link),
+    );
+  }
+
   // This is an early pass to see if we should just create a proxy or cell
   // If not, we will actually resolve our links to get to our values.
   createObject(

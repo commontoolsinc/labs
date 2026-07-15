@@ -103,6 +103,73 @@ export default pattern(() => {
 - test a sub-pattern before building the next dependent layer when that helps
   isolate failures
 
+## Headless VDOM Materialization
+
+`cf test` remains headless and does not demand a pattern's `$UI` by default.
+That is important under the pull scheduler: state and assertion computations
+run because the harness pulls them, but conditional or nested VDOM can remain
+dirty unless a renderer asks for it.
+
+When a test specifically needs the VDOM evaluated at the current step, add an
+explicit render step after the action that creates that state:
+
+```tsx
+// Shown for illustration only.
+const subject = Pattern({});
+
+return {
+  tests: [
+    { action: actionReachLateState },
+    { render: subject[UI] },
+    { assertion: assertLateState },
+  ],
+};
+```
+
+The step runs the target through the same worker reconciler implementation used
+by the renderer, discards the generated DOM operations, waits for recursively
+discovered VDOM cells to settle, and immediately unmounts. It is transparent
+to assertion counts, honors `skip: true`, and is supported in both single- and
+multi-user tests.
+
+This primitive does not create a browser DOM. Use browser tests for element
+queries, layout, screenshots, accessibility-tree behavior, or real event
+dispatch. Keep render steps targeted: each one evaluates a full VDOM subtree
+and costs more than pulling a state assertion.
+
+### Continuous `$UI` Stress Mode
+
+For occasional stress, coverage, or performance runs, a test can also export
+the subject's UI from its own descriptor:
+
+```tsx
+// Shown for illustration only.
+return {
+  [UI]: subject[UI],
+  tests: [
+    { action: actionReachLateState },
+    { assertion: assertLateState },
+  ],
+};
+```
+
+Then enable a renderer-lifetime demand for that exported UI:
+
+```bash
+CF_TEST_CONTINUOUS_UI=1 deno task cf test <pattern>.test.tsx
+```
+
+The harness mounts `$UI` before its initial settle, keeps it demanded through
+every action and assertion, and unmounts during cleanup. In multi-user tests,
+each participant may export its own `[UI]`, which is mounted in that
+participant's worker. The flag does not change `{ render: ... }` semantics;
+those remain one-step checkpoints.
+
+Continuous mode is deliberately opt-in because it broadens work and can expose
+timing or performance behavior outside the deterministic unit-style contract.
+For a detailed performance run, combine it with
+`--verbose --stats-threshold 0` and pattern coverage as needed.
+
 ## Console Errors and Warnings Fail Tests
 
 `cf test` fails a test when anything is logged at error or warn level during

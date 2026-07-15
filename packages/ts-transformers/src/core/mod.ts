@@ -231,6 +231,7 @@ export {
   CFHelpers,
   injectCfDataHelper,
   injectCfHelpers,
+  isLegacyInjectedEnvelope,
   sourceDisablesCfTransform,
   sourceHasIgnoredDisableDirective,
   transformCfDirective,

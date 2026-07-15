@@ -108,6 +108,31 @@ Result: We include the queried node plus both cell2 and cell3.
 
 Result: We include the queried node plus cell2, but exclude cell3.
 
+## Combining Schemas
+
+When traversal follows a link, the schema from the current query is combined
+with the schema embedded in the link. The result is a pseudo-intersection: both
+schemas constrain the linked value. For object schemas, properties and
+`required` fields from either side survive, while properties defined by both
+sides are combined recursively.
+
+The three `additionalProperties` states above remain distinct during this
+operation. In particular, an absent `additionalProperties` does not prohibit a
+property declared only by the other schema. That property survives the
+combination because neither schema explicitly rejects it. An explicit
+`additionalProperties: false` does reject such one-sided properties, while
+`true` permits them.
+
+For example, combining an object schema that declares and requires `a` with one
+that declares and requires `b` produces a schema containing both properties and
+requiring both. This differs from traversing either schema by itself, where an
+absent `additionalProperties` follows only that schema's explicitly declared
+properties.
+
+See [Schema Narrowing in the Memory v2 query specification](memory-v2/05-queries.md#534-schema-narrowing)
+for the complete combination algorithm, including type intersections, array
+items, metadata precedence, and false schemas.
+
 ## Unsupported Features
 
 We currently don't support a significant subset of JSON Schema validation

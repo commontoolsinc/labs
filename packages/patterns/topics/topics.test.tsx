@@ -7,7 +7,7 @@
  * is set), the unsafe-scheme link rejection, label defaulting, body Edit→Save
  * via setBody, activity-based sorting, and the exported pure helpers.
  */
-import { action, computed, NAME } from "commonfabric";
+import { action, computed, NAME, UI } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics, { openTopic, type TopicPiece } from "./main.tsx";
 import { isSafeLinkUrl, snippet, whenLabel } from "./topic.tsx";
@@ -225,6 +225,7 @@ export default pattern(() => {
   );
 
   return {
+    [UI]: board[UI],
     tests: [
       { assertion: assert_initial },
       { action: action_add_blank_topic },
