@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/resume-republish-unit.test.ts",
   "packages/runner/test/runner.test.ts",
   "packages/runner/test/scheduler-timing.test.ts",
   "packages/runner/test/schema-anyof.test.ts",
