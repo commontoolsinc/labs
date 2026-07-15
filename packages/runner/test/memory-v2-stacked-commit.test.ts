@@ -67,6 +67,58 @@ type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
 };
 
+type CommitResult =
+  | { ok: Record<PropertyKey, never>; error?: undefined }
+  | {
+    ok?: undefined;
+    error: { name?: string; message?: string };
+  };
+type CommitResultPromise = Promise<CommitResult>;
+type RootDocument = { value: RootValue };
+type StackedCommitOperation =
+  | { op: "set"; id: URI; type: MIME; value: RootDocument }
+  | {
+    op: "patch";
+    id: URI;
+    type: MIME;
+    patches: PatchOp[];
+    value: RootDocument;
+  }
+  | { op: "delete"; id: URI; type: MIME };
+type StackedCommit = {
+  operations: StackedCommitOperation[];
+  schedulerObservation?: unknown;
+};
+type StackedReplica =
+  & Omit<
+    IStorageProviderWithReplica["replica"],
+    "commitNative" | "get" | "pull"
+  >
+  & {
+    commitNative(
+      transaction: StackedCommit,
+      source?: unknown,
+    ): CommitResultPromise;
+    buildReads(
+      source: unknown,
+      localSeq: number,
+    ): {
+      confirmed: ConfirmedRead[];
+      pending: PendingRead[];
+    };
+    get(address: {
+      id: URI;
+      type: MIME;
+    }): {
+      since?: number;
+      is?: FabricValue;
+    } | undefined;
+    pull(
+      entries: Array<[{ id: URI; type: MIME }, undefined]>,
+    ): CommitResultPromise;
+  };
+type RevertNotification = Extract<StorageNotification, { type: "revert" }>;
+
 type RootValue = FabricValue;
 type DocState = {
   seq: number;
@@ -143,6 +195,10 @@ type ResultRecord = {
   localSeq: number;
   status: "ok" | "error";
   message?: string;
+};
+type PendingDispatch = {
+  localSeq: number;
+  promise: CommitResultPromise;
 };
 
 class ScriptedServerModel {
@@ -492,58 +548,13 @@ const createHarness = () => {
   const provider = storageManager.open(space) as TestProvider;
   storageManager.subscribe(notifications);
 
-  const replica = provider.replica as unknown as {
-    commitNative(
-      transaction: {
-        operations: Array<
-          | { op: "set"; id: URI; type: MIME; value: unknown }
-          | {
-            op: "patch";
-            id: URI;
-            type: MIME;
-            patches: PatchOp[];
-            value: unknown;
-          }
-          | { op: "delete"; id: URI; type: MIME }
-        >;
-        schedulerObservation?: unknown;
-      },
-      source?: unknown,
-    ): Promise<
-      { ok: Record<PropertyKey, never>; error?: undefined } | {
-        ok?: undefined;
-        error: { name?: string; message?: string };
-      }
-    >;
-    buildReads(
-      source: unknown,
-      localSeq: number,
-    ): {
-      confirmed: ConfirmedRead[];
-      pending: PendingRead[];
-    };
-    get(address: {
-      id: URI;
-      type: MIME;
-    }): {
-      since?: number;
-      is?: FabricValue;
-    } | undefined;
-    pull(
-      entries: Array<[{ id: URI; type: MIME }, undefined]>,
-    ): Promise<
-      { ok: Record<PropertyKey, never>; error?: undefined } | {
-        ok?: undefined;
-        error: { name?: string; message?: string };
-      }
-    >;
-  };
+  const replica = provider.replica as StackedReplica;
 
   let nextLocalSeq = 1;
   const dispatch = (
     operations: RootOp[],
     source?: unknown,
-  ): { localSeq: number; promise: Promise<any> } => {
+  ): PendingDispatch => {
     const localSeq = nextLocalSeq++;
     const promise = replica.commitNative({
       operations: operations.map((operation) =>
@@ -873,6 +884,17 @@ const notificationLog = (notifications: StorageNotification[]) =>
       : [],
   }));
 
+const isRevertNotification = (
+  notification: StorageNotification,
+): notification is RevertNotification => notification.type === "revert";
+
+const valueField = (value: unknown): RootValue | undefined => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return (value as { readonly value?: RootValue }).value;
+};
+
 const topPendingSurface = (
   harness: Harness,
 ) => {
@@ -896,12 +918,12 @@ const expectVisible = (
   }
 };
 
-const assertResultOk = async (promise: Promise<any>) => {
+const assertResultOk = async (promise: CommitResultPromise) => {
   assertEquals(await promise, { ok: {} });
 };
 
 const assertConflict = async (
-  promise: Promise<any>,
+  promise: CommitResultPromise,
   contains?: string,
 ) => {
   const result = await promise;
@@ -973,7 +995,7 @@ const runStressSeed = async (seed: number) => {
   const localModel = createLocalModel();
   const results = new Map<number, ResultRecord>();
   const pending = new Map<number, {
-    promise: Promise<any>;
+    promise: CommitResultPromise;
     operations: RootOp[];
   }>();
   const random = mulberry32(seed);
@@ -1205,21 +1227,7 @@ Deno.test("memory v2 stacked commits preserve earlier patch fields across later 
     harness.model.setOutcome(3, { kind: "accept" });
     harness.model.setOutcome(4, { kind: "accept" });
 
-    const replica = harness.replica as unknown as {
-      commitNative(
-        transaction: {
-          operations: Array<
-            {
-              op: "patch";
-              id: URI;
-              type: MIME;
-              patches: PatchOp[];
-              value: { value: RootValue };
-            }
-          >;
-        },
-      ): Promise<any>;
-    };
+    const replica = harness.replica;
 
     const c2 = replica.commitNative({
       operations: [{
@@ -1712,14 +1720,16 @@ Deno.test("memory v2 stacked commits: duplicate localSeq returns the same promis
       testSessionOpenAuthFactory,
     );
     model.setOutcome(1, { kind: "accept" });
+    const duplicateValue: FabricValue = valueFor("dup");
+    const duplicateOperation: Operation = {
+      op: "set",
+      id: DOCS.A,
+      value: { value: duplicateValue },
+    };
     const commit: ClientCommit = {
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: DOCS.A,
-        value: { value: valueFor("dup") as any } as any,
-      }],
+      operations: [duplicateOperation],
     };
 
     const first = session.transact(commit);
@@ -1921,21 +1931,13 @@ Deno.test("memory v2 stacked commits: conflict rejection delivered before the wi
 
     // Exactly one revert, scoped to A, whose changes read v1mine -> v2winner.
     const reverts = harness.notifications.notifications.filter(
-      (notification) => notification.type === "revert",
+      isRevertNotification,
     );
     assertEquals(reverts.length, 1);
-    const changes = [
-      ...(reverts[0] as unknown as {
-        changes: Iterable<{
-          address: { id: URI };
-          before?: { value?: RootValue };
-          after?: { value?: RootValue };
-        }>;
-      }).changes,
-    ];
+    const changes = [...reverts[0].changes];
     assertEquals(changes.map((change) => change.address.id), [DOCS.A]);
-    assertEquals(changes[0].before?.value, valueFor("v1mine"));
-    assertEquals(changes[0].after?.value, valueFor("v2winner"));
+    assertEquals(valueField(changes[0].before), valueFor("v1mine"));
+    assertEquals(valueField(changes[0].after), valueFor("v2winner"));
 
     // The surfaced rejection's retry gate is already satisfied: readyToRetry
     // resolves immediately now that the catch-up has been applied.
@@ -2308,7 +2310,7 @@ Deno.test("memory v2 stacked commits: dropping an earlier pending write invalida
 
 Deno.test("memory v2 stacked commits: pending visibility preserves fabric values", async () => {
   const harness = await createHarness();
-  let commitPromise: Promise<any> | undefined;
+  let commitPromise: CommitResultPromise | undefined;
   try {
     const timestamp = new FabricEpochNsec(1_234n);
 
