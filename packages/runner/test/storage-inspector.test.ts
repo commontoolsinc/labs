@@ -1,41 +1,180 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import type {
+  Conflict,
+  ConflictError,
+  ConsumerCommandInvocation,
+  EnhancedCommit,
+  InvocationURL,
+  MemorySpace,
+  Proof,
+  Protocol,
+  ProviderCommand,
+  Query,
+  QueryError,
+  SchemaQuery,
+  Signature,
+  Subscribe,
+  SystemError,
+  Transaction,
+  UCAN,
+  Unsubscribe,
+} from "@commonfabric/memory/interface";
 import * as Inspector from "../src/storage/inspector.ts";
 
-const did = "did:key:z6Mk-storage-inspector";
+const did: MemorySpace = "did:key:z6Mk-storage-inspector";
 
-function command(cmd: string, id: string, args: Record<string, unknown> = {}) {
+type ConsumerInvocation = ConsumerCommandInvocation<Protocol>;
+type ConsumerUCAN = UCAN<ConsumerInvocation>;
+type ProviderReceipt = ProviderCommand<Protocol>;
+type ProviderReturnValue = Extract<
+  ProviderReceipt,
+  { the: "task/return" }
+>["is"];
+
+function signature(): Signature<Proof<ConsumerInvocation>> {
+  return new Uint8Array() as Signature<Proof<ConsumerInvocation>>;
+}
+
+function job(id: string): InvocationURL<FabricHash> {
+  return `job:${id}` as InvocationURL<FabricHash>;
+}
+
+function ucan(id: string, invocation: ConsumerInvocation): ConsumerUCAN {
   return {
-    invocation: {
-      iss: did,
-      cmd,
-      sub: did,
-      args,
-      prf: [],
-    },
+    invocation,
     authorization: {
-      signature: new Uint8Array(),
+      signature: signature(),
       access: {
         [id]: {},
       },
     },
-  } as any;
+  } satisfies ConsumerUCAN;
 }
 
-function taskReturn(id: string, is: Record<string, unknown>) {
+function transactionCommand(id: string): ConsumerUCAN {
+  return ucan(
+    id,
+    {
+      iss: did,
+      cmd: "/memory/transact",
+      sub: did,
+      args: { changes: {} },
+      prf: [],
+    } satisfies Transaction,
+  );
+}
+
+function queryCommand(id: string): ConsumerUCAN {
+  return ucan(
+    id,
+    {
+      iss: did,
+      cmd: "/memory/query",
+      sub: did,
+      args: { select: {} },
+      prf: [],
+    } satisfies Query,
+  );
+}
+
+function schemaQueryCommand(
+  id: string,
+  args: Pick<SchemaQuery["args"], "subscribe"> = {},
+): ConsumerUCAN {
+  return ucan(
+    id,
+    {
+      iss: did,
+      cmd: "/memory/graph/query",
+      sub: did,
+      args: { selectSchema: {}, ...args },
+      prf: [],
+    } satisfies SchemaQuery,
+  );
+}
+
+function subscribeCommand(id: string): ConsumerUCAN {
+  return ucan(
+    id,
+    {
+      iss: did,
+      cmd: "/memory/query/subscribe",
+      sub: did,
+      args: { select: {} },
+      prf: [],
+    } satisfies Subscribe,
+  );
+}
+
+function unsubscribeCommand(id: string): ConsumerUCAN {
+  return ucan(
+    id,
+    {
+      iss: did,
+      cmd: "/memory/query/unsubscribe",
+      sub: did,
+      args: { source: job(id) },
+      prf: [],
+    } satisfies Unsubscribe,
+  );
+}
+
+function taskReturn(
+  id: string,
+  is: ProviderReturnValue,
+): ProviderReceipt {
   return {
     the: "task/return",
-    of: `job:${id}`,
+    of: job(id),
     is,
-  } as any;
+  } satisfies ProviderReceipt;
 }
 
-function taskEffect(id: string, is: unknown) {
+function taskEffect(id: string, is: EnhancedCommit): ProviderReceipt {
   return {
     the: "task/effect",
-    of: `job:${id}`,
+    of: job(id),
     is,
-  } as any;
+  } satisfies ProviderReceipt;
+}
+
+function systemError(message: string): SystemError {
+  return Object.assign(new Error(message), { code: 1 });
+}
+
+function conflictError(message: string): ConflictError {
+  const conflict = {
+    space: did,
+    the: "application/json",
+    of: "of:storage-inspector-conflict",
+    expected: null,
+    actual: null,
+    existsInHistory: false,
+    history: [],
+  } satisfies Conflict;
+
+  return Object.assign(new Error(message), {
+    name: "ConflictError" as const,
+    transaction: {
+      iss: did,
+      cmd: "/memory/transact",
+      sub: did,
+      args: { changes: {} },
+      prf: [],
+    } satisfies Transaction,
+    conflict,
+  });
+}
+
+function queryError(message: string): QueryError {
+  return Object.assign(new Error(message), {
+    name: "QueryError" as const,
+    cause: systemError(message),
+    space: did,
+    selector: {},
+  });
 }
 
 describe("storage inspector model", () => {
@@ -73,19 +212,19 @@ describe("storage inspector model", () => {
 
     Inspector.update(model, {
       time: 11,
-      send: command("/memory/transact", "tx"),
+      send: transactionCommand("tx"),
     });
     expect(model.push["job:tx"].ok?.invocation.cmd).toBe("/memory/transact");
 
     Inspector.update(model, {
       time: 12,
-      send: command("/memory/query", "query"),
+      send: queryCommand("query"),
     });
     expect(model.pull["job:query"].ok?.invocation.cmd).toBe("/memory/query");
 
     Inspector.update(model, {
       time: 13,
-      send: command("/memory/graph/query", "graph", { subscribe: true }),
+      send: schemaQueryCommand("graph", { subscribe: true }),
     });
     expect(model.pull["job:graph"].ok?.invocation.cmd).toBe(
       "/memory/graph/query",
@@ -94,13 +233,13 @@ describe("storage inspector model", () => {
 
     Inspector.update(model, {
       time: 14,
-      send: command("/memory/query/subscribe", "sub"),
+      send: subscribeCommand("sub"),
     });
     expect(model.subscriptions["job:sub"].opened).toBe(14);
 
     Inspector.update(model, {
       time: 15,
-      send: command("/memory/query/unsubscribe", "sub"),
+      send: unsubscribeCommand("sub"),
     });
     expect(model.subscriptions["job:sub"]).toBeUndefined();
   });
@@ -110,7 +249,7 @@ describe("storage inspector model", () => {
 
     Inspector.update(model, {
       time: 21,
-      send: command("/memory/transact", "push-ok"),
+      send: transactionCommand("push-ok"),
     });
     Inspector.update(model, {
       time: 22,
@@ -120,12 +259,12 @@ describe("storage inspector model", () => {
 
     Inspector.update(model, {
       time: 23,
-      send: command("/memory/transact", "push-error"),
+      send: transactionCommand("push-error"),
     });
     Inspector.update(model, {
       time: 24,
       receive: taskReturn("push-error", {
-        error: Object.assign(new Error("conflict"), { name: "ConflictError" }),
+        error: conflictError("conflict"),
       }),
     });
     expect(model.push["job:push-error"].error?.message).toBe("conflict");
@@ -133,12 +272,12 @@ describe("storage inspector model", () => {
 
     Inspector.update(model, {
       time: 25,
-      send: command("/memory/query", "pull-error"),
+      send: queryCommand("pull-error"),
     });
     Inspector.update(model, {
       time: 26,
       receive: taskReturn("pull-error", {
-        error: Object.assign(new Error("bad query"), { name: "QueryError" }),
+        error: queryError("bad query"),
       }),
     });
     expect(model.pull["job:pull-error"].error?.message).toBe("bad query");
@@ -146,14 +285,15 @@ describe("storage inspector model", () => {
 
     Inspector.update(model, {
       time: 27,
-      send: command("/memory/query/subscribe", "sub"),
+      send: subscribeCommand("sub"),
     });
+    const effect = { revisions: [], commit: {} } satisfies EnhancedCommit;
     Inspector.update(model, {
       time: 28,
-      receive: taskEffect("sub", { value: 42 }),
+      receive: taskEffect("sub", effect),
     });
     expect(model.subscriptions["job:sub"].updated).toBe(28);
-    expect(model.subscriptions["job:sub"].value).toEqual({ value: 42 });
+    expect(model.subscriptions["job:sub"].value).toEqual(effect);
 
     Inspector.update(model, {
       time: 29,
