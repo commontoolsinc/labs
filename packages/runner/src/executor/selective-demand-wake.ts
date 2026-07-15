@@ -1,12 +1,13 @@
-/** Trailing quiet period before a wake flush. Interactive client work commits
- * in bursts (one UI step is several source commits); recomputing per wire push
- * makes the Worker race every next commit into a conflict. One bounded window
- * lets a burst integrate as one recompute — a settlement may already cover
- * multiple source invalidations, so coalescing changes no protocol shape. */
-export const SELECTIVE_WAKE_COALESCE_WINDOW_MS = 25;
+/** Trailing quiet period before a wake flush. Zero keeps the original
+ * flush-per-push behavior (drains on a microtask): the W2.8 measurement
+ * showed the executor conflict storm was caused by unresolvable shadow
+ * pending reads, not wake cadence, and a 25/100 ms window only delayed
+ * settlements further. The mechanism stays for tuning once a workload
+ * demonstrates a cadence-bound bottleneck. */
+export const SELECTIVE_WAKE_COALESCE_WINDOW_MS = 0;
 /** Hard cap from the first deferred push, so a continuous commit stream still
  * makes progress instead of sliding the window forever. */
-export const SELECTIVE_WAKE_COALESCE_MAX_WINDOW_MS = 100;
+export const SELECTIVE_WAKE_COALESCE_MAX_WINDOW_MS = 0;
 
 export interface SelectiveDemandWakeQueueOptions {
   /** Trailing quiet period; re-armed by each push while under the cap. */
@@ -34,6 +35,7 @@ export class SelectiveDemandWakeQueue {
   readonly #now: () => number;
   #timer: number | null = null;
   #windowStartedAt: number | null = null;
+  #drainQueued = false;
 
   constructor(
     private readonly flush: (pieceIds: readonly string[]) => Promise<void>,
@@ -62,19 +64,33 @@ export class SelectiveDemandWakeQueue {
       void idle.promise.catch(() => undefined);
       this.#idle = idle;
     }
-    // (Re)arm the trailing window, never sliding past the cap.
+    // (Re)arm the trailing window, never sliding past the cap. A zero window
+    // drains on a microtask, preserving flush-per-push semantics.
     const now = this.#now();
     if (this.#windowStartedAt === null) this.#windowStartedAt = now;
     const capRemaining = Math.max(
       0,
       this.#windowStartedAt + this.#maxWindowMs - now,
     );
+    const delay = Math.min(this.#windowMs, capRemaining);
     if (this.#timer !== null) this.#clearTimer(this.#timer);
+    if (delay <= 0) {
+      this.#timer = null;
+      this.#windowStartedAt = null;
+      if (!this.#drainQueued) {
+        this.#drainQueued = true;
+        queueMicrotask(() => {
+          this.#drainQueued = false;
+          this.#startDrain();
+        });
+      }
+      return;
+    }
     this.#timer = this.#setTimer(() => {
       this.#timer = null;
       this.#windowStartedAt = null;
       this.#startDrain();
-    }, Math.min(this.#windowMs, capRemaining));
+    }, delay);
   }
 
   settled(): Promise<void> {
