@@ -222,6 +222,114 @@ describe("llmDialog", () => {
     expect(result.key("error").get()).toMatch(/no matching mock response/);
   });
 
+  it("rejects invalid presented results and recovers across retries", async () => {
+    loadConversationFixture({
+      description: "Invalid presented result is withheld",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: { messagesContain: ["Invalid turn"] },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "present-invalid-result",
+              toolName: "presentResult",
+              input: { answer: "not a number" },
+            }],
+            id: "present-invalid-result-response",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messagesContain: ["Invalid turn"] },
+          response: {
+            role: "assistant",
+            content: "Attempted to present an invalid result.",
+            id: "present-invalid-result-finished",
+          },
+        },
+      ],
+    });
+
+    const presentedSchema = {
+      type: "object",
+      properties: { answer: { type: "number" } },
+      required: ["answer"],
+    } as const satisfies JSONSchema;
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        return llmDialog({ messages, resultSchema: presentedSchema } as any);
+      },
+      false,
+      LLMDialogResultSchema,
+    );
+    const result = runtime.run(
+      tx,
+      testPattern,
+      {},
+      runtime.getCell(space, "llmDialog-invalid-result-retry", undefined, tx),
+    );
+    await tx.commit();
+    await result.pull();
+
+    const addMessage = await result.key("addMessage").pull();
+    let settled = waitForDialogPendingFalse(result);
+    addMessage.send({ role: "user", content: "Invalid turn" });
+    await settled;
+
+    expect(result.key("result").getRaw()).toBe(
+      DataUnavailable.schemaMismatch(),
+    );
+    expect(result.key("error").get()).toMatch(/schema validation/);
+
+    clearMockResponses();
+    settled = waitForDialogPendingFalse(result);
+    addMessage.send({ role: "user", content: "Failed retry" });
+    await settled;
+    const retryFailure = result.key("result").getRaw();
+    expect(isDataUnavailable(retryFailure)).toBe(true);
+    if (isDataUnavailable(retryFailure)) {
+      expect(retryFailure.reason).toBe("error");
+    }
+
+    loadConversationFixture({
+      description: "Valid presented result recovers after failures",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: { messagesContain: ["Valid turn"] },
+          response: {
+            role: "assistant",
+            content: [{
+              type: "tool-call",
+              toolCallId: "present-valid-result",
+              toolName: "presentResult",
+              input: { answer: 42 },
+            }],
+            id: "present-valid-result-response",
+          },
+        },
+        {
+          type: "sendRequest",
+          expectRequest: { messagesContain: ["Valid turn"] },
+          response: {
+            role: "assistant",
+            content: "Presented a valid result.",
+            id: "present-valid-result-finished",
+          },
+        },
+      ],
+    });
+    settled = waitForDialogPendingFalse(result);
+    addMessage.send({ role: "user", content: "Valid turn" });
+    await settled;
+
+    expect(result.key("result").get()).toEqual({ answer: 42 });
+    expect(result.key("error").get()).toBeUndefined();
+  });
+
   it("should support a multi-turn conversation via addMessage", async () => {
     loadConversationFixture({
       description: "Multi-turn conversation: greeting then follow-up",

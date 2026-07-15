@@ -81,6 +81,10 @@ import {
   cfcLabelViewForCellFailClosed,
 } from "../cfc/label-view.ts";
 import {
+  schemaWithOpenObjects,
+  validateAgainstSchema,
+} from "../cfc/schema-sanitization.ts";
+import {
   CFC_ENFORCING_STRICTNESS,
   cfcEnforcementStrictness,
 } from "../cfc/types.ts";
@@ -837,8 +841,26 @@ function beginPresentedResultTurn(
 
   const presented = result.withTx(tx).key("result");
   const raw = presented.getRaw();
-  if (isDataUnavailable(raw) && raw.reason === "error") {
+  if (isDataUnavailable(raw)) {
     presented.setRaw(DataUnavailable.pending());
+  }
+}
+
+function publishPresentedResultSchemaMismatch(
+  tx: IExtendedStorageTransaction,
+  result: Cell<any>,
+  failure: string,
+): void {
+  const message =
+    `llmDialog presented result failed schema validation: ${failure}`;
+  result.withTx(tx).key("error").set(message);
+
+  const presented = result.withTx(tx).key("result");
+  const raw = presented.getRaw();
+  // Match failed-turn semantics: an invalid later attempt must not erase the
+  // last successfully presented value.
+  if (raw === undefined || isDataUnavailable(raw)) {
+    presented.setRaw(DataUnavailable.schemaMismatch());
   }
 }
 
@@ -3692,16 +3714,25 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           // If presentResult was called, cellify the raw input so we can
           // store it on the dialog's result cell (guarded by requestId below).
           let cellifiedResult: unknown | undefined;
+          let hasValidPresentedResult = false;
+          let presentedResultSchemaFailure: string | undefined;
           if (userResultSchema) {
             const presentResultPart = toolCallParts.find(
               (p) => p.toolName === PRESENT_RESULT_TOOL_NAME,
             );
             if (presentResultPart) {
-              cellifiedResult = traverseAndCellify(
-                runtime,
-                space,
+              presentedResultSchemaFailure = validateAgainstSchema(
+                schemaWithOpenObjects(toDeepFrozenSchema(userResultSchema)),
                 presentResultPart.input,
               );
+              if (presentedResultSchemaFailure === undefined) {
+                cellifiedResult = traverseAndCellify(
+                  runtime,
+                  space,
+                  presentResultPart.input,
+                );
+                hasValidPresentedResult = true;
+              }
             }
           }
 
@@ -3763,7 +3794,13 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             (tx) => {
               // Write presentResult atomically with tool result messages,
               // guarded by requestId to prevent stale writes from canceled requests.
-              if (cellifiedResult !== undefined) {
+              if (presentedResultSchemaFailure !== undefined) {
+                publishPresentedResultSchemaMismatch(
+                  tx,
+                  result,
+                  presentedResultSchemaFailure,
+                );
+              } else if (hasValidPresentedResult) {
                 result.withTx(tx).key("result").set(cellifiedResult);
                 result.withTx(tx).key("error").set(undefined);
               }
@@ -3791,7 +3828,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           // whose default pattern doesn't export recordSuggestion simply skip
           // recording (caught below) rather than failing the suggestion flow.
           if (
-            success && cellifiedResult !== undefined &&
+            success && hasValidPresentedResult &&
             queueName === "suggestions"
           ) {
             try {
