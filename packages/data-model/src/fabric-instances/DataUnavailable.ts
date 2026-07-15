@@ -83,27 +83,42 @@ function isErrorFromAnotherRealm(value: unknown): value is Error {
 }
 
 // Split production bundles can evaluate this module more than once in the
-// same worker. Share the concrete-instance registry across those evaluations
-// so guards remain nominal without relying on one module copy's constructor.
-const DATA_UNAVAILABLE_INSTANCES = (() => {
-  const key = Symbol.for("common.fabric.DataUnavailable.instances");
-  const host = globalThis as unknown as Record<PropertyKey, unknown>;
-  if (Object.hasOwn(host, key)) {
-    const existing = host[key];
-    if (!(existing instanceof WeakSet)) {
-      throw new TypeError("Invalid global DataUnavailable instance registry");
-    }
-    return existing as WeakSet<object>;
+// same worker. Share the canonical constructor across those evaluations so
+// every copy mints the same private-field brand without exposing registration.
+const DATA_UNAVAILABLE_CLASS_KEY = Symbol.for(
+  "common.fabric.DataUnavailable.constructor",
+);
+const DATA_UNAVAILABLE_CLASS_HOST = globalThis as unknown as Record<
+  PropertyKey,
+  unknown
+>;
+
+function getCanonicalDataUnavailableClass():
+  | typeof DataUnavailable
+  | undefined {
+  if (!Object.hasOwn(DATA_UNAVAILABLE_CLASS_HOST, DATA_UNAVAILABLE_CLASS_KEY)) {
+    return undefined;
   }
-  const registry = new WeakSet<object>();
-  Object.defineProperty(host, key, {
-    value: registry,
-    configurable: false,
-    enumerable: false,
-    writable: false,
-  });
-  return registry;
-})();
+  const existing = DATA_UNAVAILABLE_CLASS_HOST[DATA_UNAVAILABLE_CLASS_KEY];
+  if (typeof existing !== "function") {
+    throw new TypeError("Invalid global DataUnavailable constructor");
+  }
+  return existing as typeof DataUnavailable;
+}
+
+function installCanonicalDataUnavailableClass(): void {
+  if (getCanonicalDataUnavailableClass()) return;
+  Object.defineProperty(
+    DATA_UNAVAILABLE_CLASS_HOST,
+    DATA_UNAVAILABLE_CLASS_KEY,
+    {
+      value: DataUnavailable,
+      configurable: false,
+      enumerable: false,
+      writable: false,
+    },
+  );
+}
 
 /**
  * Fabric control value representing data which a computation cannot yet use.
@@ -113,7 +128,7 @@ const DATA_UNAVAILABLE_INSTANCES = (() => {
  */
 export class DataUnavailable extends BaseFabricInstance
   implements ApiDataUnavailable {
-  readonly #state: DataUnavailableState;
+  readonly #state!: DataUnavailableState;
 
   static readonly #pending = deepFreeze(
     new DataUnavailable({ reason: "pending" }),
@@ -127,8 +142,21 @@ export class DataUnavailable extends BaseFabricInstance
 
   constructor(state: DataUnavailableState) {
     super();
+    const canonical = getCanonicalDataUnavailableClass();
+    if (canonical && canonical !== DataUnavailable) {
+      return new canonical(state);
+    }
     this.#state = state;
-    DATA_UNAVAILABLE_INSTANCES.add(this);
+  }
+
+  static override [Symbol.hasInstance](value: unknown): boolean {
+    const canonical = getCanonicalDataUnavailableClass();
+    if (canonical && canonical !== DataUnavailable) {
+      return value instanceof canonical;
+    }
+    return value !== null &&
+      (typeof value === "object" || typeof value === "function") &&
+      #state in value;
   }
 
   /** Returns the interned pending marker. */
@@ -279,9 +307,15 @@ export class DataUnavailable extends BaseFabricInstance
 
   /** The codec for instances of this class. */
   static get [CODEC](): FabricCodec {
+    const canonical = getCanonicalDataUnavailableClass();
+    if (canonical && canonical !== DataUnavailable) {
+      return canonical[CODEC];
+    }
     return this.#codec;
   }
 }
+
+installCanonicalDataUnavailableClass();
 
 function invalidState(state: FabricValue, message: string): ProblematicValue {
   return new ProblematicValue(
@@ -330,8 +364,7 @@ function validateState(
 export function isDataUnavailable(
   value: unknown,
 ): value is DataUnavailableVariant {
-  return value !== null && typeof value === "object" &&
-    DATA_UNAVAILABLE_INSTANCES.has(value);
+  return value instanceof DataUnavailable;
 }
 
 /** Returns whether `value` is the concrete pending marker. */

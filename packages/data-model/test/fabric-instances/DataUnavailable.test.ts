@@ -172,10 +172,25 @@ describe("DataUnavailable", () => {
   it("recognizes a concrete marker from a duplicate module instance", () => {
     const foreignPending = ForeignDataUnavailable.pending();
 
-    expect(foreignPending).not.toBeInstanceOf(DataUnavailable);
+    expect(foreignPending).toBeInstanceOf(DataUnavailable);
+    expect(foreignPending).toBeInstanceOf(ForeignDataUnavailable);
+    expect(ForeignDataUnavailable[CODEC]).toBe(DataUnavailable[CODEC]);
     expect(isDataUnavailable(foreignPending)).toBe(true);
     expect(isPending(foreignPending)).toBe(true);
     expect(hasError(foreignPending)).toBe(false);
+  });
+
+  it("does not expose mutable same-realm brand registration", () => {
+    const forged = { reason: "pending", pending: true };
+    const host = globalThis as unknown as Record<PropertyKey, unknown>;
+    const exposedRegistry = host[
+      Symbol.for("common.fabric.DataUnavailable.instances")
+    ] as WeakSet<object> | undefined;
+
+    exposedRegistry?.add(forged);
+    Object.setPrototypeOf(forged, DataUnavailable.prototype);
+
+    expect(isDataUnavailable(forged)).toBe(false);
   });
 
   describe("clone and value protocols", () => {
