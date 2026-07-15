@@ -8,6 +8,7 @@ import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 
 // SCOPE (CT-1754): this guards the verified-binding regression only — an
 // inSpace child's owner-protected list, written by a NON-exported mode-bound
@@ -155,17 +156,28 @@ const PROGRAM: RuntimeProgram = {
 
 const RESULT_CAUSE = "inspace child owner write parent";
 
-const childLinkListSchema = {
+type ChildOutput = {
+  items?: string[];
+  add?: { item?: string };
+  remove?: { item?: string };
+};
+
+type ParentOutput = {
+  children?: ChildOutput[];
+  create?: { seed?: string };
+};
+
+type ChildOutputCell = Cell<ChildOutput>;
+
+const childLinkListSchema: JSONSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+};
 
-const itemListSchema = {
+const itemListSchema: JSONSchema = {
   type: "array",
   items: { type: "string" },
-  // deno-lint-ignore no-explicit-any
-} as any;
+};
 
 describe("inSpace child owner-protected write (profile elements)", () => {
   let server: MemoryV2Server.Server;
@@ -201,14 +213,13 @@ describe("inSpace child owner-protected write (profile elements)", () => {
         space: spaceA,
         tx: tx1,
       });
-      const resultCell1 = rt1.getCell<Record<string, unknown>>(
+      const resultCell1 = rt1.getCell<ParentOutput>(
         spaceA,
         RESULT_CAUSE,
         undefined,
         tx1,
       );
-      // deno-lint-ignore no-explicit-any
-      const r1 = rt1.run(tx1, parent as any, {}, resultCell1);
+      const r1 = rt1.run(tx1, parent, {}, resultCell1);
       // A manual test tx must prepare (the runtime's own commit paths do) or a
       // CFC-relevant tx is rejected wholesale at commit.
       rt1.prepareTxForCommit(tx1);
@@ -227,8 +238,7 @@ describe("inSpace child owner-protected write (profile elements)", () => {
 
       await r1.pull();
       const links = r1.key("children").asSchema(childLinkListSchema)
-        // deno-lint-ignore no-explicit-any
-        .get() as any[];
+        .get() as ChildOutputCell[];
       expect(links.length).toBe(1);
       const childLink = links[0].getAsNormalizedFullLink();
       expect(childLink.space).toBe(spaceB);
@@ -240,7 +250,7 @@ describe("inSpace child owner-protected write (profile elements)", () => {
 
       // Session 2 (own replicas, warm/cached child load): load the child from
       // its own space and start it (the shell's piece view always starts).
-      const childCell = rt2.getCellFromLink(childLink);
+      const childCell = rt2.getCellFromLink<ChildOutput>(childLink);
       await childCell.sync();
       const started = await rt2.start(childCell);
       expect(started).toBe(true);
