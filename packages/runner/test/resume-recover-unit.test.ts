@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createResumeRecovery } from "../src/builtins/resume-recover.ts";
+import {
+  createResumeRecovery,
+  type ResumeRecovery,
+} from "../src/builtins/resume-recover.ts";
 
 // Unit coverage for the post-sync recovery helper, exercised directly against a
 // mock runtime so it is deterministic (no timing or transport window): it
@@ -8,11 +11,24 @@ import { createResumeRecovery } from "../src/builtins/resume-recover.ts";
 // the element already holds a value or its run was superseded, and reports (does
 // not throw on) a failed commit or a failed sync wait.
 
-// deno-lint-ignore-file no-explicit-any
-
+type RecoveryOptions = Parameters<typeof createResumeRecovery>[0];
+type RecoveryRuntime = RecoveryOptions["runtime"];
+type RecoverySpace = RecoveryOptions["space"];
+type RecoveryElementRuns = RecoveryOptions["elementRuns"];
+type RecoveryLogger = RecoveryOptions["logger"];
+type RecoveryScheduleArgs = Parameters<ResumeRecovery["schedule"]>;
+type RecoveryResultCell = RecoveryScheduleArgs[1];
+type RecoveryPattern = RecoveryScheduleArgs[2];
+type RecoveryTransaction = Parameters<
+  RecoveryRuntime["editWithRetry"]
+>[0] extends (tx: infer Tx) => unknown ? Tx
+  : never;
+type ResultCellFixture = RecoveryResultCell & {
+  withTx(tx: RecoveryTransaction): { getRaw(): unknown };
+};
 interface Setup {
-  recovery: ReturnType<typeof createResumeRecovery>;
-  resultCell: any;
+  recovery: ResumeRecovery;
+  resultCell: RecoveryResultCell;
   state: {
     runInputs: unknown[];
     warnings: number;
@@ -35,15 +51,12 @@ function setup(opts: {
   };
   const resultCell = {
     withTx: () => ({ getRaw: opts.getRaw ?? (() => undefined) }),
-  };
-  const elementRuns = new Map<
-    string,
-    { resultCell: any; lastIndex: number }
-  >();
+  } as ResultCellFixture;
+  const elementRuns: RecoveryElementRuns = new Map();
   if (!opts.supersede) {
     elementRuns.set("k", { resultCell, lastIndex: opts.lastIndex ?? 4 });
   }
-  const runtime = {
+  const runtime: RecoveryRuntime = Object.assign({} as RecoveryRuntime, {
     storageManager: {
       open: () =>
         opts.noSynced ? {} : {
@@ -64,20 +77,27 @@ function setup(opts: {
       run: (_tx: unknown, _op: unknown, runInput: unknown) =>
         state.runInputs.push(runInput),
     },
-  };
-  const logger = {
+  });
+  const logger: RecoveryLogger = Object.assign({} as RecoveryLogger, {
     warn: () => {
       state.warnings++;
     },
-  };
+  });
   const recovery = createResumeRecovery({
-    runtime: runtime as any,
-    space: "did:key:z6Mk-resume-recover-unit" as any,
-    elementRuns: elementRuns as any,
-    logger: logger as any,
+    runtime,
+    space: "did:key:z6Mk-resume-recover-unit" as RecoverySpace,
+    elementRuns,
+    logger,
   });
   return { recovery, resultCell, state };
 }
+
+const opPattern: RecoveryPattern = {
+  argumentSchema: true,
+  resultSchema: true,
+  result: {},
+  nodes: [],
+};
 
 async function drive(
   s: Setup,
@@ -85,7 +105,7 @@ async function drive(
     index,
   }),
 ): Promise<void> {
-  s.recovery.schedule("k", s.resultCell, {} as any, buildRunInput);
+  s.recovery.schedule("k", s.resultCell, opPattern, buildRunInput);
   await Promise.all(s.state.tracked);
 }
 
@@ -133,8 +153,8 @@ describe("resume recovery helper", () => {
 
   it("arms at most one recovery per key at a time", async () => {
     const s = setup({});
-    s.recovery.schedule("k", s.resultCell, {} as any, (index) => ({ index }));
-    s.recovery.schedule("k", s.resultCell, {} as any, (index) => ({ index }));
+    s.recovery.schedule("k", s.resultCell, opPattern, (index) => ({ index }));
+    s.recovery.schedule("k", s.resultCell, opPattern, (index) => ({ index }));
     await Promise.all(s.state.tracked);
     // The second schedule is ignored while the first is in flight.
     expect(s.state.tracked.length).toBe(1);
