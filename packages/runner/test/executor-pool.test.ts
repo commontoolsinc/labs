@@ -231,7 +231,6 @@ Deno.test("shared execution pool fails closed without a legacy ownership interlo
     factory,
   });
   pool.start();
-
   try {
     await control.emit(1, [demand(1, ["piece:a"])]);
     await pool.idle();
@@ -246,6 +245,8 @@ Deno.test("shared execution pool fails closed without a legacy ownership interlo
 class FakeExecutor implements SpaceExecutor {
   readonly events: string[];
   demandUpdates: readonly string[][] = [];
+  setDemandGate: Promise<void> | undefined;
+  readonly setDemandStarted = Promise.withResolvers<void>();
   wakes = 0;
   settled = 0;
   settleResult = 0;
@@ -266,9 +267,10 @@ class FakeExecutor implements SpaceExecutor {
     this.events = events;
   }
 
-  setDemand(pieces: readonly string[]): Promise<void> {
+  async setDemand(pieces: readonly string[]): Promise<void> {
     this.demandUpdates = [...this.demandUpdates, [...pieces]];
-    return Promise.resolve();
+    this.setDemandStarted.resolve();
+    await this.setDemandGate;
   }
 
   wake(): Promise<void> {
@@ -905,6 +907,44 @@ Deno.test("shared execution pool treats a rejected scheduled renewal as lease lo
     assertEquals(pool.metrics().leaseLosses, 1);
     assertEquals(pool.metrics().activeWorkers, 1);
   } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("shared execution pool renews authority during a blocked demand update", async () => {
+  const control = new FakeExecutionControl();
+  const factory = new FakeExecutorFactory();
+  const timers = new ManualTimers();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  pool.start();
+  const releaseDemand = Promise.withResolvers<void>();
+
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    const executor = factory.executors[0]!;
+    executor.setDemandGate = releaseDemand.promise;
+
+    const updatingDemand = control.emit(2, [
+      demand(1, ["piece:a", "piece:b"]),
+    ]);
+    await executor.setDemandStarted.promise;
+    const renewalsBeforeTimer = control.renewals;
+
+    timers.fire((delayMs) => delayMs > 2_000);
+    assertEquals(control.renewals, renewalsBeforeTimer + 1);
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+
+    releaseDemand.resolve();
+    await updatingDemand;
+    await pool.idle();
+  } finally {
+    releaseDemand.resolve();
     await pool.close();
   }
 });

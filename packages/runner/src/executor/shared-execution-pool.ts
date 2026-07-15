@@ -860,31 +860,64 @@ export class SharedExecutionPool {
     const remaining = Math.max(1, slot.lease.expiresAt - this.#now());
     slot.renewTimer = this.#setTimer(() => {
       slot.renewTimer = null;
-      if (slot.generationToken !== token || this.#closed) return;
-      void this.#enqueue(slot, async () => {
-        if (slot.lease === null || slot.generationToken !== token) return;
-        let renewed: ExecutionLeaseHandle | null;
-        try {
-          renewed = await this.#control.renewExecutionLease(slot.lease);
-        } catch (error) {
-          console.warn("execution lease renewal failed", error);
-          renewed = null;
-        }
-        if (renewed === null) {
-          this.#metrics.leaseLosses++;
-          await this.#shutdown(slot, true);
-          await this.#reconcile(slot);
-          return;
-        }
-        slot.lease = renewed;
-        // A successful boot alone is not a health boundary: a realm that
-        // repeatedly initializes and immediately crashes must still escalate
-        // its backoff. Surviving through an authority renewal proves this
-        // generation stayed live long enough to reset the crash streak.
-        slot.crashAttempts = 0;
-        this.#scheduleRenewal(slot, token);
-      });
+      const current = slot.lease;
+      if (
+        slot.generationToken !== token || this.#closed || current === null ||
+        current.state !== "active" || slot.state !== "live"
+      ) return;
+      // Renewal is an authority-safety path. It must not wait behind a long
+      // setDemand(), wake(), or other Worker control operation occupying the
+      // lane's serialized reconciliation queue.
+      const task = this.#renewLiveLease(slot, token, current);
+      this.#tasks.add(task);
+      void task.then(
+        () => this.#tasks.delete(task),
+        () => this.#tasks.delete(task),
+      );
     }, Math.max(1, Math.floor(remaining / 2)));
+  }
+
+  async #renewLiveLease(
+    slot: Slot,
+    token: object,
+    expected: ExecutionLeaseHandle,
+  ): Promise<void> {
+    let renewed: ExecutionLeaseHandle | null;
+    try {
+      renewed = await this.#control.renewExecutionLease(expected);
+    } catch (error) {
+      console.warn("execution lease renewal failed", error);
+      renewed = null;
+    }
+    if (renewed !== null) {
+      if (
+        this.#closed || slot.generationToken !== token ||
+        slot.state !== "live" || slot.lease === null ||
+        slot.lease.state !== "active" ||
+        slot.lease.leaseGeneration !== renewed.leaseGeneration
+      ) return;
+      slot.lease = renewed;
+      // A successful boot alone is not a health boundary: a realm that
+      // repeatedly initializes and immediately crashes must still escalate
+      // its backoff. Surviving through an authority renewal proves this
+      // generation stayed live long enough to reset the crash streak.
+      slot.crashAttempts = 0;
+      this.#scheduleRenewal(slot, token);
+      return;
+    }
+
+    // Serialize teardown, but discard a stale failure when another renewal or
+    // lifecycle transition replaced the handle while this request was in
+    // flight.
+    await this.#enqueue(slot, async () => {
+      if (
+        this.#closed || slot.generationToken !== token ||
+        slot.state === "draining" || slot.lease !== expected
+      ) return;
+      this.#metrics.leaseLosses++;
+      await this.#shutdown(slot, true);
+      await this.#reconcile(slot);
+    });
   }
 
   #cancelRenewal(slot: Slot): void {
