@@ -59,10 +59,26 @@ export function parseCheckShRange(
   return min !== undefined && max !== undefined ? { min, max } : undefined;
 }
 
+// An exact MAJOR.MINOR.PATCH version, which is the only shape check.sh's
+// arithmetic can read and the only shape the toolchain cache can be keyed on.
+const EXACT_VERSION = /^\d+\.\d+\.\d+$/;
+
+/** Reports whether `version` is an exact MAJOR.MINOR.PATCH version. */
+export function isExactVersion(version: string): boolean {
+  return EXACT_VERSION.test(version);
+}
+
 // Compares two MAJOR.MINOR.PATCH versions numerically per component. Returns
 // a negative number, zero, or a positive number as `a` is less than, equal
-// to, or greater than `b`.
+// to, or greater than `b`. Throws on anything that is not an exact version:
+// comparing only the leading components would silently ignore the rest and
+// answer as though the trailing garbage were not there.
 export function compareVersions(a: string, b: string): number {
+  for (const version of [a, b]) {
+    if (!isExactVersion(version)) {
+      throw new Error(`Not an exact MAJOR.MINOR.PATCH version: ${version}`);
+    }
+  }
   const aParts = a.split(".").map(Number);
   const bParts = b.split(".").map(Number);
   for (let i = 0; i < 3; i++) {
@@ -95,7 +111,7 @@ export function findProblems(files: {
   if (pin === undefined) {
     return [`${MISE_TOML}: no Deno pin found (expected a 'deno = "..."' line)`];
   }
-  if (!/^\d+\.\d+\.\d+$/.test(pin)) {
+  if (!isExactVersion(pin)) {
     return [
       `${MISE_TOML}: pin "${pin}" is not an exact MAJOR.MINOR.PATCH version`,
     ];
@@ -119,11 +135,29 @@ export function findProblems(files: {
     problems.push(
       `${CHECK_SH}: DENO_VERSION_MIN/DENO_VERSION_MAX not found`,
     );
-  } else if (!versionInRange(pin, range.min, range.max)) {
-    problems.push(
-      `${CHECK_SH}: accepted range [${range.min}, ${range.max}) does not ` +
-        `contain the ${MISE_TOML} pin ${pin}`,
+  } else {
+    // Bounds are checked before they are compared. check.sh reads them with
+    // shell arithmetic, which aborts on a bound carrying anything beyond
+    // MAJOR.MINOR.PATCH — so a bound this check merely compared loosely could
+    // be reported as aligned while making check.sh fail for everyone.
+    const malformed = (["min", "max"] as const).filter(
+      (bound) => !isExactVersion(range[bound]),
     );
+    if (malformed.length > 0) {
+      for (const bound of malformed) {
+        problems.push(
+          `${CHECK_SH}: DENO_VERSION_${bound.toUpperCase()} "${
+            range[bound]
+          }" is not an exact MAJOR.MINOR.PATCH version, which check.sh ` +
+            `cannot compare`,
+        );
+      }
+    } else if (!versionInRange(pin, range.min, range.max)) {
+      problems.push(
+        `${CHECK_SH}: accepted range [${range.min}, ${range.max}) does not ` +
+          `contain the ${MISE_TOML} pin ${pin}`,
+      );
+    }
   }
 
   if (!READS_MISE_TOML.test(files.checkSh)) {
@@ -153,8 +187,8 @@ export function findProblems(files: {
   return problems;
 }
 
-export async function main(): Promise<number> {
-  const read = (path: string) => Deno.readTextFile(join(REPO_ROOT, path));
+export async function main(root: string = REPO_ROOT): Promise<number> {
+  const read = (path: string) => Deno.readTextFile(join(root, path));
   const files = {
     miseToml: await read(MISE_TOML),
     dockerfile: await read(DOCKERFILE),
@@ -177,6 +211,4 @@ export async function main(): Promise<number> {
   return 0;
 }
 
-if (import.meta.main) {
-  Deno.exit(await main());
-}
+if (import.meta.main) Deno.exit(await main());

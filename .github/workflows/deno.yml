@@ -65,7 +65,7 @@ jobs:
       - name: 🚧 Guard against new polling waitFor in integration tests
         run: deno task check-no-waitfor
 
-      - name: 📌 Check Deno toolchain pins are aligned
+      - name: 🔎 Check Deno toolchain pins are aligned
         run: deno task check-deno-pins
 
       - name: 🔎 Check generated commonfabric/cfc types are up to date

@@ -13,7 +13,7 @@ runs:
     # The repository's Deno version is pinned once, in mise.toml. This step
     # reads it so the rest of the action (and any caller that leaves the
     # deno-version input empty) follows the pin.
-    - name: 📌 Resolve pinned Deno version
+    - name: 🔍 Resolve pinned Deno version
       id: resolve
       shell: bash
       env:

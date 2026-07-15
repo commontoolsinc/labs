@@ -1,13 +1,18 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
+import { dirname, fromFileUrl, join } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   compareVersions,
   findProblems,
+  isExactVersion,
   main,
   parseCheckShRange,
   parseDockerfileDenoVersions,
   parseMisePin,
   versionInRange,
 } from "./check-deno-pins.ts";
+
+const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
 // A consistent set of file contents, mirroring the real files' shapes. The
 // action and check.sh fixtures carry the prose mentions of mise.toml that the
@@ -76,6 +81,32 @@ Deno.test("compareVersions compares components numerically", () => {
   assertEquals(compareVersions("2.8.1", "2.8.1"), 0);
 });
 
+// Reading only the leading components would compare "2.8.0.1" as "2.8.0" and
+// answer as though the trailing component were not there.
+Deno.test("compareVersions rejects a version that is not exact", () => {
+  for (const bad of ["2.8.0.1", "2.8", "abc", "", "v2.8.0"]) {
+    assertThrows(
+      () => compareVersions(bad, "2.8.0"),
+      Error,
+      "Not an exact",
+    );
+    assertThrows(
+      () => compareVersions("2.8.0", bad),
+      Error,
+      "Not an exact",
+    );
+  }
+});
+
+Deno.test("isExactVersion accepts only MAJOR.MINOR.PATCH", () => {
+  assert(isExactVersion("2.8.1"));
+  assert(isExactVersion("10.0.100"));
+  assert(!isExactVersion("2.8"));
+  assert(!isExactVersion("2.8.0.1"));
+  assert(!isExactVersion("2.8.x"));
+  assert(!isExactVersion("latest"));
+});
+
 Deno.test("versionInRange includes the minimum and excludes the maximum", () => {
   assert(versionInRange("2.8.0", "2.8.0", "2.9.0"));
   assert(versionInRange("2.8.1", "2.8.0", "2.9.0"));
@@ -111,6 +142,44 @@ Deno.test("findProblems flags a mismatched Dockerfile image", () => {
 Deno.test("findProblems flags a Dockerfile without deno images", () => {
   const files = { ...alignedFiles(), dockerfile: "FROM debian:12\n" };
   assertEquals(findProblems(files).length, 1);
+});
+
+// check.sh reads the bounds with shell arithmetic, which aborts on a bound
+// carrying anything beyond MAJOR.MINOR.PATCH. Comparing such a bound loosely
+// would report "aligned" for a range that makes check.sh fail for everyone.
+Deno.test("findProblems flags a range bound that is not exact", () => {
+  for (const bad of ["2.8.0.1", "2.8", "abc"]) {
+    const withMin = findProblems({
+      ...alignedFiles(),
+      checkSh: alignedFiles().checkSh.replace(
+        'DENO_VERSION_MIN="2.8.0"',
+        `DENO_VERSION_MIN="${bad}"`,
+      ),
+    });
+    assertEquals(withMin.length, 1, `MIN=${bad}`);
+    assert(withMin[0].includes("DENO_VERSION_MIN"), `MIN=${bad}`);
+    assert(withMin[0].includes("not an exact"), `MIN=${bad}`);
+
+    const withMax = findProblems({
+      ...alignedFiles(),
+      checkSh: alignedFiles().checkSh.replace(
+        'DENO_VERSION_MAX="2.9.0"',
+        `DENO_VERSION_MAX="${bad}"`,
+      ),
+    });
+    assertEquals(withMax.length, 1, `MAX=${bad}`);
+    assert(withMax[0].includes("DENO_VERSION_MAX"), `MAX=${bad}`);
+  }
+});
+
+Deno.test("findProblems flags both range bounds when both are malformed", () => {
+  const problems = findProblems({
+    ...alignedFiles(),
+    checkSh: alignedFiles().checkSh
+      .replace('DENO_VERSION_MIN="2.8.0"', 'DENO_VERSION_MIN="2.8"')
+      .replace('DENO_VERSION_MAX="2.9.0"', 'DENO_VERSION_MAX="2.9"'),
+  });
+  assertEquals(problems.length, 2);
 });
 
 Deno.test("findProblems flags a range that excludes the pin", () => {
@@ -192,8 +261,119 @@ Deno.test("findProblems accepts a literal in the action equal to the pin", () =>
   assertEquals(findProblems(files), []);
 });
 
+Deno.test("findProblems flags a check.sh with no range at all", () => {
+  const problems = findProblems({
+    ...alignedFiles(),
+    checkSh: "# The exact Deno version is pinned in mise.toml.\n" +
+      `DENO_VERSION_PINNED="$(sed -n 's/^deno = "\\([^"]*\\)"$/\\1/p' mise.toml | head -1)"\n`,
+  });
+  assertEquals(problems.length, 1);
+  assert(problems[0].includes("DENO_VERSION_MIN/DENO_VERSION_MAX not found"));
+});
+
+// Writes the four files main() reads into a fresh temp tree and returns its
+// root. The caller removes the tree.
+async function fixtureTree(
+  files: ReturnType<typeof alignedFiles>,
+): Promise<string> {
+  const root = await Deno.makeTempDir({ prefix: "check-deno-pins-" });
+  await Deno.mkdir(join(root, "tasks"), { recursive: true });
+  await Deno.mkdir(join(root, ".github", "actions", "deno-setup"), {
+    recursive: true,
+  });
+  await Deno.writeTextFile(join(root, "mise.toml"), files.miseToml);
+  await Deno.writeTextFile(join(root, "Dockerfile.toolshed"), files.dockerfile);
+  await Deno.writeTextFile(join(root, "tasks", "check.sh"), files.checkSh);
+  await Deno.writeTextFile(
+    join(root, ".github", "actions", "deno-setup", "action.yml"),
+    files.denoSetupAction,
+  );
+  return root;
+}
+
+// Runs `body` with console.log and console.error captured, returning what each
+// received. Restores the originals afterward.
+async function captureConsole(
+  body: () => Promise<void>,
+): Promise<{ out: string; err: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const origLog = console.log;
+  const origError = console.error;
+  console.log = (...args) => out.push(args.map(String).join(" "));
+  console.error = (...args) => err.push(args.map(String).join(" "));
+  try {
+    await body();
+  } finally {
+    console.log = origLog;
+    console.error = origError;
+  }
+  return { out: out.join("\n"), err: err.join("\n") };
+}
+
+Deno.test("main reports the pin and returns 0 on aligned files", async () => {
+  const root = await fixtureTree(alignedFiles());
+  try {
+    let code = -1;
+    const { out } = await captureConsole(async () => {
+      code = await main(root);
+    });
+    assertEquals(code, 0);
+    assert(out.includes("Deno toolchain pins are aligned: 2.8.1"));
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("main reports each problem and returns 1 when misaligned", async () => {
+  const root = await fixtureTree({
+    ...alignedFiles(),
+    dockerfile: "FROM denoland/deno:2.5.0 AS builder\n",
+    checkSh: alignedFiles().checkSh.replace(
+      'DENO_VERSION_MAX="2.9.0"',
+      'DENO_VERSION_MAX="2.9"',
+    ),
+  });
+  try {
+    let code = -1;
+    const { err } = await captureConsole(async () => {
+      code = await main(root);
+    });
+    assertEquals(code, 1);
+    assert(err.includes("Deno toolchain pins are misaligned:"));
+    assert(err.includes("2.5.0"));
+    assert(err.includes("DENO_VERSION_MAX"));
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 // The repository's actual files must be aligned; this is the same check CI
 // runs via `deno task check-deno-pins`.
 Deno.test("the repository's pins are aligned", async () => {
   assertEquals(await main(), 0);
+});
+
+// Runs the script the way `deno task check-deno-pins` does, which the calls to
+// main() above do not: they would still pass if the entry point never ran it,
+// or if the task's declared permissions were too narrow to read the files.
+Deno.test("running the script as a command reports the aligned pin", async () => {
+  const output = await runDenoCommandWithTemporaryLock({
+    root: REPO_ROOT,
+    args: (lockPath) => [
+      "run",
+      "--config",
+      join(REPO_ROOT, "deno.jsonc"),
+      "--lock",
+      lockPath,
+      "--allow-read",
+      join(REPO_ROOT, "tasks/check-deno-pins.ts"),
+    ],
+  });
+  assertEquals(output.code, 0);
+  assert(
+    new TextDecoder().decode(output.stdout).includes(
+      "Deno toolchain pins are aligned",
+    ),
+  );
 });
