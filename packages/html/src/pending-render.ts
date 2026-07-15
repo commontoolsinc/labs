@@ -36,6 +36,46 @@ function restoreAttribute(
 }
 
 /**
+ * Apply an authored update to an attribute temporarily owned by pending UI.
+ *
+ * While pending, `inert` and `aria-busy` must keep their safety values in the
+ * live DOM. The authored value is nevertheless allowed to change and becomes
+ * the value restored when pending ends.
+ */
+export function applyPendingRenderAuthoredAttributeUpdate(
+  node: Node | null,
+  name: string,
+  update: () => void,
+): void {
+  if (
+    !isAttributeElement(node) ||
+    (name !== "inert" && name !== "aria-busy")
+  ) {
+    update();
+    return;
+  }
+
+  const snapshot = pendingAttributeSnapshots.get(node);
+  if (!snapshot) {
+    update();
+    return;
+  }
+
+  restoreAttribute(node, "inert", snapshot.inert);
+  restoreAttribute(node, "aria-busy", snapshot.ariaBusy);
+  try {
+    update();
+  } finally {
+    pendingAttributeSnapshots.set(node, {
+      inert: node.getAttribute("inert") ?? null,
+      ariaBusy: node.getAttribute("aria-busy") ?? null,
+    });
+    node.setAttribute("inert", "");
+    node.setAttribute("aria-busy", "true");
+  }
+}
+
+/**
  * Mark retained content as stale while its replacement is pending.
  *
  * `inert` blocks pointer and focus interaction. `aria-busy` tells assistive

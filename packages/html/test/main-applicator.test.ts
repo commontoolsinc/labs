@@ -259,6 +259,74 @@ Deno.test("DomApplicator - create elements", async (t) => {
     assertEquals(button.getAttribute("aria-busy"), null);
   });
 
+  await t.step(
+    "retains authored accessibility updates made while pending",
+    () => {
+      const doc = createMockDocument();
+      const applicator = createDomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+        setProp: (target, key, value) => {
+          const element = target as {
+            setAttribute(name: string, value: string): void;
+            removeAttribute(name: string): void;
+          };
+          if (key === "inert") {
+            if (value === true) element.setAttribute(key, "");
+            else element.removeAttribute(key);
+            return;
+          }
+          if (key === "aria-busy") {
+            if (value == null) element.removeAttribute(key);
+            else element.setAttribute(key, String(value));
+            return;
+          }
+          (target as Record<string, unknown>)[key] = value;
+        },
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [
+          { op: "create-element", nodeId: 1, tagName: "button" },
+          { op: "set-prop", nodeId: 1, key: "inert", value: true },
+          { op: "set-prop", nodeId: 1, key: "aria-busy", value: false },
+          {
+            op: "set-prop",
+            nodeId: 1,
+            key: "data-cf-pending",
+            value: true,
+          },
+        ],
+      });
+
+      applicator.applyBatch({
+        batchId: 2,
+        ops: [
+          { op: "set-prop", nodeId: 1, key: "inert", value: false },
+          { op: "set-prop", nodeId: 1, key: "aria-busy", value: "mixed" },
+        ],
+      });
+
+      const button = applicator.getNode(1) as any;
+      assertEquals(button.getAttribute("inert"), "");
+      assertEquals(button.getAttribute("aria-busy"), "true");
+
+      applicator.applyBatch({
+        batchId: 3,
+        ops: [{
+          op: "remove-prop",
+          nodeId: 1,
+          key: "data-cf-pending",
+        }],
+      });
+
+      assertEquals(button.getAttribute("inert"), null);
+      assertEquals(button.getAttribute("aria-busy"), "mixed");
+    },
+  );
+
   await t.step("updates text nodes without DOM globals", () => {
     const doc = createMockDocument();
     const applicator = createDomApplicator({

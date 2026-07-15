@@ -15,6 +15,7 @@ import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { provideElementSpace } from "./space-context.ts";
 import {
+  applyPendingRenderAuthoredAttributeUpdate,
   PENDING_RENDER_ATTRIBUTE,
   setPendingRenderState,
 } from "../pending-render.ts";
@@ -330,8 +331,14 @@ export class DomApplicator {
       return;
     }
 
-    // Use the configured property setter (defaults to setPropDefault)
-    this.setPropHandler(node, key, value);
+    // Use the configured property setter (defaults to setPropDefault). Pending
+    // rendering temporarily owns inert and aria-busy, but authored updates to
+    // those attributes must still become the values restored on resume.
+    applyPendingRenderAuthoredAttributeUpdate(
+      node,
+      key,
+      () => this.setPropHandler(node, key, value),
+    );
   }
 
   private removeProp(nodeId: number, key: string): void {
@@ -343,17 +350,19 @@ export class DomApplicator {
       return;
     }
 
-    if (key.startsWith("on") && key.length > 2) {
-      this.removeEvent(nodeId, key.slice(2).toLowerCase());
-    } else if (key.startsWith("$") && key.length > 1) {
-      (node as any)[key.slice(1)] = undefined;
-    } else if (key.startsWith("data-")) {
-      node.removeAttribute(key);
-    } else if (key === "style") {
-      node.removeAttribute("style");
-    } else {
-      (node as any)[key] = undefined;
-    }
+    applyPendingRenderAuthoredAttributeUpdate(node, key, () => {
+      if (key.startsWith("on") && key.length > 2) {
+        this.removeEvent(nodeId, key.slice(2).toLowerCase());
+      } else if (key.startsWith("$") && key.length > 1) {
+        (node as any)[key.slice(1)] = undefined;
+      } else if (key.startsWith("data-")) {
+        node.removeAttribute(key);
+      } else if (key === "style") {
+        node.removeAttribute("style");
+      } else {
+        (node as any)[key] = undefined;
+      }
+    });
   }
 
   private setEvent(nodeId: number, eventType: string, handlerId: number): void {
