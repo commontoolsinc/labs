@@ -141,6 +141,42 @@ describe("scheduler event identity", () => {
     }
   });
 
+  it("hydrates a load-pending event as soon as its exact handler registers", async () => {
+    const loadingLink: NormalizedFullLink = {
+      ...eventLink,
+      id: "of:register-during-load-stream",
+      space,
+    };
+    const env = createSchedulerTestRuntime(import.meta.url);
+    const pieceLoad = Promise.withResolvers<boolean>();
+    const handled = Promise.withResolvers<string>();
+    try {
+      const schedulerInternals = env.runtime.scheduler as unknown as {
+        eventQueueState: {
+          loadPieceForEvent?: () => Promise<boolean>;
+        };
+      };
+      schedulerInternals.eventQueueState.loadPieceForEvent = () =>
+        pieceLoad.promise;
+
+      env.runtime.scheduler.queueEvent(loadingLink, "payload");
+      env.runtime.scheduler.addEventHandler((_tx, value) => {
+        handled.resolve(String(value));
+      }, loadingLink);
+
+      const outcome = await Promise.race([
+        handled.promise,
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve("piece-load-deadlock"), 250)
+        ),
+      ]);
+      expect(outcome).toBe("payload");
+    } finally {
+      pieceLoad.resolve(true);
+      await disposeSchedulerTestRuntime(env);
+    }
+  });
+
   it("settles a piece-start failure exactly once", async () => {
     const eventQueue: QueuedEvent[] = [];
     const backgroundTasks = new Set<Promise<unknown>>();

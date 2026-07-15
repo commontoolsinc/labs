@@ -1508,6 +1508,8 @@ export class Scheduler {
     return addSchedulerEventHandler({
       eventHandlers: this.eventHandlers,
       nextEventHandlerGeneration: () => ++this.eventHandlerGeneration,
+      eventQueue: this.eventQueue,
+      queueExecution: () => this.queueExecution(),
     }, {
       handler,
       ref,

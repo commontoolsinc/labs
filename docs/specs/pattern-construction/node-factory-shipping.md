@@ -1467,6 +1467,14 @@ lineage, commit/final callbacks, retry metadata, and deadline all remain
 attached. Every queued intent also retains its original monotonic enqueue
 sequence; when several events park on shared cold readiness, reinsertion by that
 sequence preserves FIFO order rather than reversing promise-continuation order.
+If a durable handler-stream link reaches a renderer before its runner-owned
+handler registration is live, the scheduler parks the event while starting the
+owning piece. The exact matching registration hydrates that load-pending intent
+immediately, even when the broader piece-start promise is still waiting on
+other startup work; otherwise the parked FIFO head and piece startup can wait
+on each other indefinitely. This rule applies only to an intent that had no
+registration when queued. It does not retarget an event already captured by an
+older handler generation into a replacement registration.
 Readiness waiting is distinct from an authored handler attempt and does not
 consume the event's commit-retry budget, call its final callback, or mint a
 receipt. One parked attempt performs one event-driven artifact preparation; it

@@ -256,6 +256,17 @@ function chainOnCommit(
   return chained;
 }
 
+function hydrateLoadPendingEvent(
+  queuedEvent: QueuedEvent,
+  registration: EventHandlerRegistration,
+): void {
+  queuedEvent.handlerRegistration = registration;
+  queuedEvent.handlerGeneration = registration.generation;
+  queuedEvent.handler = registration.handler;
+  queuedEvent.action = (tx) => registration.handler(tx, queuedEvent.event);
+  delete queuedEvent.handlerLoadPending;
+}
+
 export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly eventLink: NormalizedFullLink;
   readonly event: unknown;
@@ -385,11 +396,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           args.eventLink,
         );
         if (loadedHandler) {
-          queuedEvent.handlerRegistration = loadedHandler;
-          queuedEvent.handlerGeneration = loadedHandler.generation;
-          queuedEvent.handler = loadedHandler.handler;
-          queuedEvent.action = (tx) => loadedHandler.handler(tx, args.event);
-          delete queuedEvent.handlerLoadPending;
+          hydrateLoadPendingEvent(queuedEvent, loadedHandler);
         } else {
           dropQueuedEvent(
             state,
@@ -431,6 +438,8 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
 export function addSchedulerEventHandler(state: {
   readonly eventHandlers: EventHandlerRegistration[];
   readonly nextEventHandlerGeneration: () => number;
+  readonly eventQueue?: readonly QueuedEvent[];
+  readonly queueExecution?: () => void;
 }, args: {
   readonly handler: EventHandler;
   readonly ref: NormalizedFullLink;
@@ -472,6 +481,17 @@ export function addSchedulerEventHandler(state: {
     active: true,
   };
   state.eventHandlers.push(registration);
+  let hydratedPendingEvent = false;
+  for (const queuedEvent of state.eventQueue ?? []) {
+    if (
+      queuedEvent.handlerLoadPending === true &&
+      areNormalizedLinksSame(queuedEvent.eventLink, registration.ref)
+    ) {
+      hydrateLoadPendingEvent(queuedEvent, registration);
+      hydratedPendingEvent = true;
+    }
+  }
+  if (hydratedPendingEvent) state.queueExecution?.();
   return () => {
     if (!registration.active) return;
     cancelRegistration(registration, "Event handler registration canceled");
