@@ -6,7 +6,7 @@
  * - noteCount computed from notes array
  * - setTitle stream for renaming
  * - createNote stream for adding notes
- * - createNotes stream for bulk adding (commented out due to multi-push bug)
+ * - createNotes stream for bulk adding
  * - Selection system (selectAll, deselectAll)
  * - Modal state management (showNewNoteModal, cancelNewNote, etc.)
  * - Title editing (startEditTitle, stopEditTitle)
@@ -222,9 +222,7 @@ export default pattern(() => {
   });
 
   // After createNotes with 2 notes, should have 5 total
-  const assert_note_count_after_bulk = computed(() =>
-    notebook.noteCount === 5
-  );
+  const assert_note_count_after_bulk = computed(() => notebook.noteCount === 5);
 
   // ==========================================================================
   // Assertions - Selection System
