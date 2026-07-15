@@ -169,13 +169,21 @@ type ProfileElement = {
   source?: "catalog" | "url";
 };
 
+type ExternalProfileLink = {
+  label: string;
+  url: string;
+};
+
 type ProfileDefaultPattern = {
   [NAME]: string;
   [UI]: VNode;
   name: string;
   avatar: string;
   bio: string;
+  externalLinks: ExternalProfileLink[];
   elements: ProfileElement[];
+  addExternalLink: Stream<{ label?: string; url?: string }>;
+  removeExternalLink: Stream<{ url?: string }>;
   addElement: Stream<AddProfileElementEvent>;
   removeElement: Stream<{ cell: Cell<unknown> }>;
   setBio: Stream<SetProfileBioEvent>;
@@ -191,6 +199,12 @@ shared-profile bio — distinct from Home's legacy `learned.summary`. Like `name
 and `avatar` it is owner-protected (written only through `setBio`), readable
 from the profile result, and exposed as the well-known wish target
 `#profileBio`.
+
+`externalLinks` is the owner-authored list of public profiles maintained
+outside Common Fabric, such as GitHub, LinkedIn, or a personal site. Entries
+contain a display label and an `http(s)` URL; unsafe schemes are rejected before
+storage and never render as live anchors. The list is owner-protected and is
+mutated only through `addExternalLink` / `removeExternalLink`.
 
 `elements` is the profile-space analog of favorites and mentionables. Each
 entry points at a piece that lives in the profile space. `tag` stores the

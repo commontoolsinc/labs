@@ -2751,9 +2751,17 @@ describe("wish built-in", () => {
 
       await result.pull();
 
-      // Single, direct result — the default — not the picker (which would leave
-      // `.result` undefined until a selection).
-      expect(result.key("profile").get()?.result?.name).toBe("Default Della");
+      // The direct result remains the default, while candidates retain the
+      // complete roster for identity-only consumers (such as ProfileHome's
+      // owner edit gate).
+      const profileWish = result.key("profile").get();
+      const candidates = profileWish?.candidates as
+        | Array<{ name?: string }>
+        | undefined;
+      expect(profileWish?.result?.name).toBe("Default Della");
+      expect(candidates).toHaveLength(2);
+      expect(candidates?.map((profile) => profile.name))
+        .toEqual(["Default Della", "Other Otto"]);
     });
 
     it("#profileDefault is not a well-known profile target", async () => {

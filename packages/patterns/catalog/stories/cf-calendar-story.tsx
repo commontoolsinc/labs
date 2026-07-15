@@ -1,6 +1,11 @@
 import { NAME, pattern, UI, type VNode, Writable } from "commonfabric";
 
-import { Controls, SwitchControl, TextControl } from "../ui/controls/index.ts";
+import {
+  Controls,
+  SelectControl,
+  SwitchControl,
+  TextControl,
+} from "../ui/controls/index.ts";
 
 // deno-lint-ignore no-empty-interface
 interface CalendarStoryInput {}
@@ -15,6 +20,7 @@ export default pattern<CalendarStoryInput, CalendarStoryOutput>(() => {
   const disabled = new Writable(false);
   const minDate = new Writable("");
   const maxDate = new Writable("");
+  const weekStart = new Writable<"sunday" | "monday">("sunday");
 
   return {
     [NAME]: "cf-calendar Story",
@@ -38,6 +44,7 @@ export default pattern<CalendarStoryInput, CalendarStoryOutput>(() => {
             disabled={disabled}
             min={minDate}
             max={maxDate}
+            weekStart={weekStart}
           />
           <div
             style={{
@@ -72,6 +79,16 @@ export default pattern<CalendarStoryInput, CalendarStoryOutput>(() => {
             description="Maximum selectable date (YYYY-MM-DD)"
             defaultValue=""
             value={maxDate}
+          />
+          <SelectControl
+            label="week-start"
+            description="First day of the week"
+            defaultValue="sunday"
+            value={weekStart}
+            items={[
+              { label: "Sunday", value: "sunday" },
+              { label: "Monday", value: "monday" },
+            ]}
           />
         </>
       </Controls>

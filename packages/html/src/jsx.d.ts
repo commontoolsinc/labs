@@ -3479,6 +3479,7 @@ interface CFCalendarAttributes<T> extends CFHTMLAttributes<T> {
   "min"?: string;
   "max"?: string;
   "disabled"?: boolean;
+  "weekStart"?: "sunday" | "monday" | CellLike<string>;
   "oncf-change"?: EventHandler<{ value: string; oldValue: string }>;
   "oncf-month-change"?: EventHandler<{ year: number; month: number }>;
 }

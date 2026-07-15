@@ -4,6 +4,7 @@ import ports from "@commonfabric/ports" with { type: "json" };
 import {
   buildBackgroundSupervisorDenoArgs,
   buildDenoArgs,
+  buildFuseBinaryArgs,
   defaultStateDir,
   ensureExecShim,
   fuseMod,
@@ -17,6 +18,7 @@ import {
   removeMountStateFile,
   writeMountState,
 } from "../lib/fuse.ts";
+import { parseAttrcacheTimeoutSeconds } from "../../fuse/mount-options.ts";
 import { cliText } from "../lib/cli-name.ts";
 
 export function isFuseProcessCommand(command: string): boolean {
@@ -327,6 +329,15 @@ export const fuse = new Command()
     "Linux only: export the mount to other users such as Docker daemon. Requires user_allow_other in /etc/fuse.conf.",
   )
   .option(
+    "--noattrcache",
+    "macOS/FUSE-T only: mount with FUSE-T's noattrcache option (the NFS nonegnamecache flag on current FUSE-T). Negative name lookups are never cached; positive attribute caching keeps the NFS client's 5-60 second defaults.",
+    { conflicts: ["attrcache-timeout"] },
+  )
+  .option(
+    "--attrcache-timeout <seconds:integer>",
+    "macOS/FUSE-T only: bound every NFS client attribute-cache window to the given whole seconds (0-86400). FUSE-T mounts default to 1; 0 keeps the NFS client's age-based 5-60 second default caching.",
+  )
+  .option(
     "--cfc-mode <mode:string>",
     "Enable FUSE-side CFC mode: disabled, observe, enforce-explicit, or enforce-strict.",
   )
@@ -377,6 +388,16 @@ export const fuse = new Command()
     const identity = options.identity ? resolve(options.identity) : "";
     const absMountpoint = resolve(mountpoint);
 
+    // cliffy's integer type accepts any whole number; enforce the daemon's
+    // range here so the error surfaces at the command line rather than in
+    // the (possibly backgrounded) FUSE child.
+    const attrcacheTimeout = options.attrcacheTimeout !== undefined
+      ? String(options.attrcacheTimeout)
+      : undefined;
+    if (attrcacheTimeout !== undefined) {
+      parseAttrcacheTimeoutSeconds(attrcacheTimeout);
+    }
+
     if (identity) {
       let stat: Deno.FileInfo;
       try {
@@ -402,44 +423,37 @@ export const fuse = new Command()
     const execBase = basename(execPath);
     const isCompiledBinary = execBase !== "deno" && execBase !== "deno.exe";
 
+    // The mount flags every spawn path forwards, whichever entrypoint runs.
+    const mountFlags = {
+      mountpoint: absMountpoint,
+      apiUrl,
+      identity,
+      execCli,
+      spaces: options.space ?? [],
+      allowOther: options.allowOther,
+      noattrcache: options.noattrcache,
+      attrcacheTimeout,
+      cfcMode: options.cfcMode,
+      cfcAnnotations: options.cfcAnnotations,
+      cfcXattrNamespace: options.cfcXattrNamespace,
+      cfcWritebackXattrs: options.cfcWritebackXattrs,
+      cfcWritebackState: options.cfcWritebackState,
+    };
+
     let spawnCmd: string;
     let spawnArgs: string[];
     if (isCompiledBinary) {
       spawnCmd = execPath;
-      spawnArgs = ["fuse-daemon", absMountpoint];
-      if (apiUrl) spawnArgs.push("--api-url", apiUrl);
-      if (identity) spawnArgs.push("--identity", identity);
-      if (options.allowOther) spawnArgs.push("--allow-other");
-      if (options.cfcMode) spawnArgs.push("--cfc-mode", options.cfcMode);
-      if (options.cfcAnnotations) spawnArgs.push("--cfc-annotations");
-      if (options.cfcXattrNamespace) {
-        spawnArgs.push("--cfc-xattr-namespace", options.cfcXattrNamespace);
-      }
-      if (options.cfcWritebackXattrs) {
-        spawnArgs.push("--cfc-writeback-xattrs");
-      }
-      if (options.cfcWritebackState) {
-        spawnArgs.push("--cfc-writeback-state", options.cfcWritebackState);
-      }
-      if (execCli) spawnArgs.push("--exec-cli", execCli);
-      for (const s of options.space ?? []) spawnArgs.push("--space", s);
+      spawnArgs = buildFuseBinaryArgs({
+        subcommand: "fuse-daemon",
+        ...mountFlags,
+      });
     } else {
-      const modPath = fuseMod(import.meta.url);
       spawnCmd = "deno";
       spawnArgs = buildDenoArgs({
-        modPath,
-        mountpoint: absMountpoint,
-        apiUrl,
-        identity,
-        execCli,
-        allowOther: options.allowOther,
-        cfcMode: options.cfcMode,
-        cfcAnnotations: options.cfcAnnotations,
-        cfcXattrNamespace: options.cfcXattrNamespace,
-        cfcWritebackXattrs: options.cfcWritebackXattrs,
-        cfcWritebackState: options.cfcWritebackState,
+        modPath: fuseMod(import.meta.url),
+        ...mountFlags,
       });
-      for (const s of options.space ?? []) spawnArgs.push("--space", s);
     }
 
     if (options.background) {
@@ -458,50 +472,23 @@ export const fuse = new Command()
         if (!(error instanceof Deno.errors.NotFound)) throw error;
       }
 
-      if (isCompiledBinary) {
-        spawnCmd = execPath;
-        spawnArgs = ["fuse-supervisor", absMountpoint];
-        if (apiUrl) spawnArgs.push("--api-url", apiUrl);
-        if (identity) spawnArgs.push("--identity", identity);
-        if (options.allowOther) spawnArgs.push("--allow-other");
-        if (options.cfcMode) spawnArgs.push("--cfc-mode", options.cfcMode);
-        if (options.cfcAnnotations) spawnArgs.push("--cfc-annotations");
-        if (options.cfcXattrNamespace) {
-          spawnArgs.push("--cfc-xattr-namespace", options.cfcXattrNamespace);
-        }
-        if (options.cfcWritebackXattrs) {
-          spawnArgs.push("--cfc-writeback-xattrs");
-        }
-        if (options.cfcWritebackState) {
-          spawnArgs.push("--cfc-writeback-state", options.cfcWritebackState);
-        }
-        if (execCli) spawnArgs.push("--exec-cli", execCli);
-        spawnArgs.push("--log-file", logFile);
-        spawnArgs.push("--state-path", statePath);
-        spawnArgs.push("--supervisor-status", childStatusPath);
-        spawnArgs.push("--supervisor-token", childStatusToken);
-        for (const s of options.space ?? []) spawnArgs.push("--space", s);
-      } else {
-        spawnCmd = execPath;
-        spawnArgs = buildBackgroundSupervisorDenoArgs({
+      const supervisorFlags = {
+        ...mountFlags,
+        logFile,
+        statePath,
+        supervisorStatusPath: childStatusPath,
+        supervisorToken: childStatusToken,
+      };
+      spawnCmd = execPath;
+      spawnArgs = isCompiledBinary
+        ? buildFuseBinaryArgs({
+          subcommand: "fuse-supervisor",
+          ...supervisorFlags,
+        })
+        : buildBackgroundSupervisorDenoArgs({
           cliModPath: fuseSupervisorMod(import.meta.url),
-          mountpoint: absMountpoint,
-          apiUrl,
-          identity,
-          execCli,
-          logFile,
-          spaces: options.space ?? [],
-          allowOther: options.allowOther,
-          cfcMode: options.cfcMode,
-          cfcAnnotations: options.cfcAnnotations,
-          cfcXattrNamespace: options.cfcXattrNamespace,
-          cfcWritebackXattrs: options.cfcWritebackXattrs,
-          cfcWritebackState: options.cfcWritebackState,
-          statePath,
-          supervisorStatusPath: childStatusPath,
-          supervisorToken: childStatusToken,
+          ...supervisorFlags,
         });
-      }
 
       // Detached background process
       const cmd = new Deno.Command(spawnCmd, {

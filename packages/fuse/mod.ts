@@ -75,6 +75,11 @@ import {
   validateVirtualFileRange,
 } from "./handles.ts";
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
+import {
+  buildMountFuseArgs,
+  type MountCacheOptions,
+  resolveMountCacheOptions,
+} from "./mount-options.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 
 const encoder = new TextEncoder();
@@ -264,12 +269,14 @@ export async function main(argv: string[] = Deno.args) {
       "cfc-xattr-namespace",
       "cfc-mode",
       "cfc-writeback-state",
+      "attrcache-timeout",
     ],
     boolean: [
       "debug",
       "cfc-annotations",
       "cfc-writeback-xattrs",
       "allow-other",
+      "noattrcache",
     ],
     collect: ["space"],
     default: {
@@ -283,10 +290,12 @@ export async function main(argv: string[] = Deno.args) {
       "cfc-xattr-namespace": DEFAULT_CFC_XATTR_NAMESPACE,
       "cfc-mode": "",
       "cfc-writeback-state": "",
+      "attrcache-timeout": "",
       debug: false,
       "cfc-annotations": false,
       "cfc-writeback-xattrs": false,
       "allow-other": false,
+      noattrcache: false,
     },
   });
 
@@ -357,6 +366,20 @@ export async function main(argv: string[] = Deno.args) {
       }; expected trusted, compat, or both`,
     );
     Deno.exit(1);
+  }
+
+  let cacheOptions: MountCacheOptions;
+  try {
+    cacheOptions = resolveMountCacheOptions({
+      noattrcache: Boolean(args.noattrcache),
+      attrcacheTimeout: String(args["attrcache-timeout"] ?? ""),
+      attrcacheTimeoutGiven: argv.some((arg) =>
+        arg === "--attrcache-timeout" || arg.startsWith("--attrcache-timeout=")
+      ),
+    });
+  } catch (e) {
+    console.error(`[FUSE] ${e instanceof Error ? e.message : e}`);
+    return Deno.exit(1);
   }
 
   const mountpoint = args._[0] as string;
@@ -3190,13 +3213,13 @@ export async function main(argv: string[] = Deno.args) {
   setOp(OPS_OFFSETS.create, createCb);
 
   // --- Mount ---
-  const fuseArgs = ["fuse_ct"];
-  if (Deno.build.os === "linux" && args["allow-other"]) {
-    fuseArgs.push("-o", "allow_other");
-    if (!cfcWritebackXattrs) {
-      fuseArgs.push("-o", "default_permissions");
-    }
-  }
+  const fuseArgs = buildMountFuseArgs({
+    os: Deno.build.os,
+    provider: platform.provider(),
+    allowOther: Boolean(args["allow-other"]),
+    cfcWritebackXattrs,
+    ...cacheOptions,
+  });
   const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs(
     fuseArgs,
   );

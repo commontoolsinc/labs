@@ -875,25 +875,16 @@ function resolveHomeSpaceTarget(
       if (!userDID) {
         throw new WishError("User identity DID not available for #profile");
       }
-      const { ordered, defaultValid } = getProfileCandidateCells(ctx);
+      const { ordered } = getProfileCandidateCells(ctx);
       if (ordered.length === 0) {
         // No profile yet — throw so the #profile error path falls back to the
         // create surface (see profileCreateUI).
         throw new WishError("No profile exists yet");
       }
-      // When the viewer has a valid DEFAULT profile, `#profile` resolves to it
-      // directly (single result) — the picker disambiguates *which* profile when
-      // there is no default, it does not re-confirm an explicit default on every
-      // read. Without this short-circuit, any viewer with 2+ profiles gets the
-      // multi-candidate picker and `.result` stays `undefined` until a selection,
-      // dead-locking every pattern that wishes for "the viewer's active profile"
-      // (e.g. profile-group-chat's send guard). Only genuine ambiguity (no
-      // default chosen yet) drives the picker.
-      if (defaultValid) {
-        return [{ cell: ordered[0], pathPrefix: [] }];
-      }
-      // Ordered default-first, then by MRU. Headless / single-result callers
-      // take the first; multiple candidates with no default drive the picker.
+      // Always expose the full, ordered roster as `candidates`. The wish action
+      // below still makes `ordered[0]` the current profile and only renders the
+      // picker when no valid default exists. Keeping the roster here is important
+      // for identity-only consumers such as ProfileHome's owner edit gate.
       return ordered.map((cell) => ({ cell, pathPrefix: [] }));
     }
 
@@ -2137,10 +2128,11 @@ export function wish(
                   tx,
                 ),
             );
+            const profileHasValidDefault =
+              isProfilePersonaTarget(activeParsed) &&
+              getProfileCandidateCells(ctx).defaultValid;
 
-            // #profile with 2+ candidates and no valid default (the only case
-            // that reaches here interactively; a valid default short-circuits to
-            // a single candidate in resolveWishTarget) → CT-1829: `.result` is
+            // #profile with 2+ candidates and no valid default → CT-1829: `.result` is
             // always the single best profile (ordered default → MRU → first, i.e.
             // uniqueResultCells[0]), sent eagerly on the main wish state exactly
             // like the generic multi-match path does at wish.ts:2052. The picker
@@ -2152,7 +2144,8 @@ export function wish(
             if (
               isProfilePersonaTarget(activeParsed) &&
               !headless &&
-              uniqueResultCells.length > 1
+              uniqueResultCells.length > 1 &&
+              !profileHasValidDefault
             ) {
               measureWishPhase(
                 "send-profile-picker",
@@ -2175,7 +2168,11 @@ export function wish(
               return;
             }
 
-            if (uniqueResultCells.length === 1 || headless) {
+            if (
+              uniqueResultCells.length === 1 ||
+              headless ||
+              profileHasValidDefault
+            ) {
               // Single result or headless mode - fast path with unified shape
               // Prefer the result cell's own [UI]; fall back to cf-cell-link
               const resultUI = measureWishPhase(
