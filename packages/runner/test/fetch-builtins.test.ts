@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { FetchBinaryResult } from "@commonfabric/api";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -12,6 +14,39 @@ const signer = await Identity.fromPassphrase("test fetch builtins");
 const space = signer.did();
 
 const BINARY_BODY = new Uint8Array([0, 1, 2, 127, 253, 254, 255]);
+
+type FetchState = {
+  pending?: boolean;
+  result?: unknown;
+  error?: unknown;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readFetchState(value: unknown): FetchState {
+  if (!isRecord(value)) {
+    throw new Error("Expected fetch result state");
+  }
+  return value as FetchState;
+}
+
+function readFetchBinaryResult(value: unknown): FetchBinaryResult {
+  if (
+    !isRecord(value) || typeof value.mediaType !== "string" ||
+    !(value.bytes instanceof FabricBytes)
+  ) {
+    throw new Error("Expected fetchBinary result");
+  }
+  return value as FetchBinaryResult;
+}
+
+function errorMessage(error: unknown): string {
+  return isRecord(error) && typeof error.message === "string"
+    ? error.message
+    : String(error);
+}
 
 describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -87,7 +122,7 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     builtinRef: string,
     params: Record<string, unknown>,
     causeName: string,
-  ): Promise<{ pending: any; result: any; error: any }> {
+  ): Promise<FetchState> {
     const builtin = byRef(builtinRef);
     const testPattern = pattern<{ url: string }>(
       ({ url }) => builtin({ ...params, url }),
@@ -105,7 +140,7 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     await result.pull();
 
-    return result.get() as { pending: any; result: any; error: any };
+    return readFetchState(result.get());
   }
 
   it("fetchText returns the response body as text", async () => {
@@ -166,7 +201,7 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     expect(data.result).toBeUndefined();
     expect(data.pending).toBe(false);
     expect(data.error).toBeDefined();
-    expect(String(data.error?.message ?? data.error)).toContain(
+    expect(errorMessage(data.error)).toContain(
       "failed schema validation",
     );
   });
@@ -178,11 +213,12 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
 
     expect(data.error).toBeUndefined();
     expect(data.pending).toBe(false);
-    expect(data.result.mediaType).toBe("image/png");
+    const binary = readFetchBinaryResult(data.result);
+    expect(binary.mediaType).toBe("image/png");
     // The bytes read back from the cell as a FabricBytes; slice() returns the
     // original buffer.
-    expect(data.result.bytes.length).toBe(BINARY_BODY.length);
-    expect(Array.from(data.result.bytes.slice())).toEqual(
+    expect(binary.bytes.length).toBe(BINARY_BODY.length);
+    expect(Array.from(binary.bytes.slice())).toEqual(
       Array.from(BINARY_BODY),
     );
   });

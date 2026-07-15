@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/fetch-builtins.test.ts",
   "packages/runner/test/fetch-mutex-core.test.ts",
   "packages/runner/test/frozen-proxy-target.test.ts",
   "packages/runner/test/generate-object-tools.test.ts",
