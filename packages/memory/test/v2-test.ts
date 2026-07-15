@@ -329,6 +329,10 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTable: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTableV2: "true" }), null);
     assertEquals(
+      parseMemoryProtocolFlags({ requestSchemaCasV1: "true" }),
+      null,
+    );
+    assertEquals(
       parseMemoryProtocolFlags({ sqliteCommitRowLabelEval: "true" }),
       null,
     );
