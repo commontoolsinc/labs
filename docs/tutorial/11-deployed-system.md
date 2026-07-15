@@ -92,7 +92,7 @@ ran `cf piece link` long ago to feed the list into a dashboard piece.
 2. **Transaction** (Ch. 8). The write lands in a transaction journal in the
    worker-hosted runtime. On commit, the replica applies it optimistically;
    the trigger index dirties the `activeItems`/`completedItems` computeds;
-   pull-execution re-runs them; UI sinks fire; the row moves to "Completed"
+   the settle pass re-runs them; UI sinks fire; the row moves to "Completed"
    in Alice's DOM — all before any network round trip.
 3. **Commit** (Ch. 9). The storage manager emits a `ClientCommit` — a
    `patch` op on the item document — over the session opened at login

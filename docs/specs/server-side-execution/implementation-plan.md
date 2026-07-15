@@ -346,7 +346,7 @@ that it settled.
 
 **Read first:**
 
-- packages/runner/src/scheduler/action-run.ts read tracking, transaction open,
+- packages/runner/src/scheduler/run.ts read tracking, transaction open,
   no-op elision, and observation construction
 - Scheduler-v2 commit gates and bounded settle
 - Memory-v2 revision sequence assignment and feed ordering

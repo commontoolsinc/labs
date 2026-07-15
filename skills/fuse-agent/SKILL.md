@@ -156,9 +156,9 @@ check the pattern source before assuming the agent invoked it incorrectly.
 
 ## Activity Log Pattern
 
-The Activity Log (`activity-log/activity-log.tsx`) is a structured event stream
-for recording agent actions. Log events incrementally as you work — not in one
-batch at the end.
+The Activity Log (`packages/patterns/activity-log/activity-log.tsx`) is a
+structured event stream for recording agent actions. Log events incrementally as
+you work — not in one batch at the end.
 
 **Calling `logEvent.handler`:**
 
@@ -251,7 +251,7 @@ for x in p:
 
 ---
 
-## Agent Piece (`agent/agent.tsx`)
+## Agent Piece (`packages/patterns/agent/agent.tsx`)
 
 Each agent is a piece in the space with its own cells for directive, learned
 state, and lifecycle. Deploy one per agent in the space.
