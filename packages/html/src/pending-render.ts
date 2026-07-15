@@ -50,8 +50,8 @@ export function setPendingRenderState(
   if (pending) {
     if (!pendingAttributeSnapshots.has(node)) {
       pendingAttributeSnapshots.set(node, {
-        inert: node.getAttribute("inert"),
-        ariaBusy: node.getAttribute("aria-busy"),
+        inert: node.getAttribute("inert") ?? null,
+        ariaBusy: node.getAttribute("aria-busy") ?? null,
       });
     }
     node.setAttribute(PENDING_RENDER_ATTRIBUTE, "true");

@@ -1,14 +1,18 @@
 import { assertEquals } from "@std/assert";
 import * as pendingRender from "../src/pending-render.ts";
 
-function attributeElement(attributes = new Map<string, string>()): {
+function attributeElement(
+  attributes = new Map<string, string>(),
+  options?: { missingAttribute: null | undefined },
+): {
   attributes: Map<string, string>;
   element: Node;
 } {
+  const missingAttribute = options ? options.missingAttribute : null;
   return {
     attributes,
     element: {
-      getAttribute: (name: string) => attributes.get(name) ?? null,
+      getAttribute: (name: string) => attributes.get(name) ?? missingAttribute,
       hasAttribute: (name: string) => attributes.has(name),
       setAttribute: (name: string, value: string) =>
         attributes.set(name, value),
@@ -44,6 +48,17 @@ Deno.test("pending render state restores application-owned attributes", () => {
   assertEquals(attributes.get("inert"), "application-value");
   assertEquals(attributes.get("aria-busy"), "false");
   assertEquals(attributes.has("data-cf-pending"), false);
+});
+
+Deno.test("pending cleanup removes attributes missing in DOM-compatible mocks", () => {
+  const { attributes, element } = attributeElement(new Map(), {
+    missingAttribute: undefined,
+  });
+
+  pendingRender.setPendingRenderState(element, true);
+  pendingRender.setPendingRenderState(element, false);
+
+  assertEquals(attributes.size, 0);
 });
 
 Deno.test("pending cleanup leaves unrelated application attributes alone", () => {
