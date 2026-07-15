@@ -9,6 +9,7 @@ import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 
 // GOLD-STANDARD end-to-end repro of the profile card-add flow using the REAL
 // shipped patterns (profile-create.tsx + profile-home.tsx) — no synthetic
@@ -89,14 +90,12 @@ const RESULT_CAUSE = "profile-create real card add";
 const profileLinkListSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} as const satisfies JSONSchema;
 
 const elementsListSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} as const satisfies JSONSchema;
 
 describe("profile-create real card-add (REAL patterns, cross-space)", () => {
   let server: MemoryV2Server.Server;
@@ -136,8 +135,7 @@ describe("profile-create real card-add (REAL patterns, cross-space)", () => {
         undefined,
         tx1,
       );
-      // deno-lint-ignore no-explicit-any
-      const r1 = rt1.run(tx1, parent as any, {}, resultCell1);
+      const r1 = rt1.run(tx1, parent, {}, resultCell1);
       rt1.prepareTxForCommit(tx1);
       const commit1 = await tx1.commit();
       expect(commit1.error).toBeUndefined();
@@ -152,8 +150,7 @@ describe("profile-create real card-add (REAL patterns, cross-space)", () => {
       await r1.pull();
 
       const profiles = r1.key("profiles").asSchema(profileLinkListSchema)
-        // deno-lint-ignore no-explicit-any
-        .get() as any[];
+        .get() as Cell<unknown>[];
       expect(profiles.length).toBe(1);
       const profileLink = profiles[0].getAsNormalizedFullLink();
       // The profile lives in its OWN space (inSpace), not the home space.
@@ -189,8 +186,7 @@ describe("profile-create real card-add (REAL patterns, cross-space)", () => {
       );
       await elementsCell.sync();
       await elementsCell.pull();
-      // deno-lint-ignore no-explicit-any
-      const elements = elementsCell.get() as any[];
+      const elements = elementsCell.get() as Cell<unknown>[];
       expect(elements.length).toBe(1);
     } finally {
       await rt2.dispose();
