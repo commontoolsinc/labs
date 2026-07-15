@@ -8,6 +8,7 @@ import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("inspace-child-owner-seed");
 const spaceA = signer.did(); // "home" — runs the parent, holds the list
@@ -131,11 +132,21 @@ const PROGRAM: RuntimeProgram = {
 
 const RESULT_CAUSE = "inspace child owner seed parent";
 
-const childLinkListSchema = {
+type ChildOutput = {
+  name?: string;
+};
+
+type ParentOutput = {
+  items?: ChildOutput[];
+  create?: { name?: string };
+};
+
+type ChildOutputCell = Cell<ChildOutput>;
+
+const childLinkListSchema: JSONSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+};
 
 describe("inSpace child owner-protected seed value (profile name)", () => {
   let server: MemoryV2Server.Server;
@@ -171,14 +182,13 @@ describe("inSpace child owner-protected seed value (profile name)", () => {
         space: spaceA,
         tx: tx1,
       });
-      const resultCell1 = rt1.getCell<Record<string, unknown>>(
+      const resultCell1 = rt1.getCell<ParentOutput>(
         spaceA,
         RESULT_CAUSE,
         undefined,
         tx1,
       );
-      // deno-lint-ignore no-explicit-any
-      const r1 = rt1.run(tx1, parent as any, {}, resultCell1);
+      const r1 = rt1.run(tx1, parent, {}, resultCell1);
       // The runtime's own commit paths (scheduler, editWithRetry) prepare;
       // an unprepared CFC-relevant tx is rejected wholesale at commit, so a
       // manual test tx must prepare too.
@@ -198,8 +208,7 @@ describe("inSpace child owner-protected seed value (profile name)", () => {
 
       await r1.pull();
       const links = r1.key("items").asSchema(childLinkListSchema)
-        // deno-lint-ignore no-explicit-any
-        .get() as any[];
+        .get() as ChildOutputCell[];
       expect(links.length).toBe(1);
       const childLink = links[0].getAsNormalizedFullLink();
       expect(childLink.space).toBe(spaceB);
