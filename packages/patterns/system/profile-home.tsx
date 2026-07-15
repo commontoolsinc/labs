@@ -1,7 +1,8 @@
 import {
-  AddIntegrity,
+  Cell,
   Cfc,
   computed,
+  CurrentPrincipal,
   Default,
   equals,
   handler,
@@ -10,6 +11,7 @@ import {
   NAME,
   pattern,
   RepresentsCurrentUser,
+  RequiresIntegrity,
   SELF,
   Stream,
   UI,
@@ -20,8 +22,6 @@ import {
 
 export const TRUSTED_PROFILE_HOME_SURFACE = "ProfileHome";
 export const TRUSTED_PROFILE_EDIT_ACTION = "EditProfile";
-
-type CurrentPrincipal = { readonly __ctCurrentPrincipal: true };
 
 type OwnerProtectedProfileWrite<
   T,
@@ -138,40 +138,20 @@ export type ExternalIdentityAssertion = {
 export const LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY =
   "loom-verified-external-identity" as const;
 
-type VerifiedIdentityField<T> = AddIntegrity<
-  T,
+export type VerifiedExternalIdentity = RequiresIntegrity<
+  ExternalIdentityAssertion,
   readonly [typeof LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY]
 >;
 
-export type VerifiedExternalIdentity = AddIntegrity<
-  {
-    type: VerifiedIdentityField<string>;
-    value: VerifiedIdentityField<string>;
-    verifiedAt: VerifiedIdentityField<string>;
-  },
-  readonly [typeof LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY]
->;
+export type VerifiedExternalIdentityCell = Cell<VerifiedExternalIdentity>;
 
-type VerifiedIdentityListWrite<Binding> = Cfc<
-  WriteAuthorizedBy<VerifiedExternalIdentity[], Binding>,
-  {
-    ownerPrincipal: CurrentPrincipal;
-    addIntegrity: readonly [
-      {
-        readonly kind: "represents-principal";
-        readonly subject: CurrentPrincipal;
-      },
-      typeof LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY,
-    ];
-  }
+type VerifiedIdentityListWrite<Binding> = OwnerProtectedProfileWrite<
+  VerifiedExternalIdentityCell[],
+  Binding
 >;
 
 export type MutateVerifiedIdentitiesEvent = {
-  identities?: readonly {
-    type: string;
-    value: string;
-    verifiedAt?: string;
-  }[];
+  identities?: readonly VerifiedExternalIdentityCell[];
 };
 
 export type ProfileHomeOutput = {
@@ -198,10 +178,10 @@ export type ProfileHomeOutput = {
     >,
     []
   >;
-  // Connector-observed account identifiers. Each item carries a CFC integrity
-  // label over type + value + verifiedAt; the surrounding owner protection
-  // also ensures the assertion was written while acting as this profile's
-  // principal and through the dedicated publication handler.
+  // Connector-observed account identifiers. The list contains the original
+  // assertion cells, each of which must already carry Loom's integrity label.
+  // This pattern only collects those capabilities; it never mints or copies
+  // their integrity-bearing values.
   verifiedIdentities: Default<
     VerifiedIdentityListWrite<typeof publishVerifiedIdentities>,
     []
@@ -509,10 +489,6 @@ const mutateExternalProfileLinks = handler<
   state.url?.set("");
 });
 
-function verifiedIdentityKey(type: string, value: string): string {
-  return JSON.stringify([type, value]);
-}
-
 function normalizeVerifiedAt(value: string): string | undefined {
   // Date.parse normalizes impossible dates such as February 31. Validate the
   // RFC3339 calendar and clock components first, then let Date produce the
@@ -556,16 +532,28 @@ function normalizeVerifiedAt(value: string): string | undefined {
     : undefined;
 }
 
-// The dedicated writer for connector-observed identity assertions under the
-// interim trust model: Loom and code acting as the user's Fabric principal are
-// trusted together. This does not cryptographically distinguish arbitrary
-// owner-run code from Loom's connector path; the documented attested-sandbox
-// design adds that stronger boundary later. Re-publishing a type/value pair
-// refreshes its observation time and leaves other useful identifiers intact.
+function isCanonicalVerifiedIdentity(
+  identity: ExternalIdentityAssertion,
+): boolean {
+  const type = identity.type;
+  const value = identity.value;
+  const verifiedAt = identity.verifiedAt;
+  return typeof type === "string" && type.length > 0 &&
+    type === type.trim().toLowerCase() &&
+    typeof value === "string" && value.length > 0 && value === value.trim() &&
+    typeof verifiedAt === "string" &&
+    normalizeVerifiedAt(verifiedAt) === verifiedAt;
+}
+
+// The profile is a collector, not the authority that creates these claims.
+// CFC rejects an event before this handler runs unless every incoming cell
+// already bears the required Loom integrity atom. The handler may inspect the
+// value to reject malformed producer output, but stores/removes the exact cell
+// reference so its integrity provenance is preserved end to end.
 const publishVerifiedIdentities = handler<
   MutateVerifiedIdentitiesEvent,
   {
-    verifiedIdentities: Writable<VerifiedExternalIdentity[]>;
+    verifiedIdentities: Writable<VerifiedExternalIdentityCell[]>;
     mode: "publish" | "revoke";
   }
 >((event, state) => {
@@ -573,48 +561,16 @@ const publishVerifiedIdentities = handler<
   if (incoming.length === 0) return;
 
   if (state.mode === "revoke") {
-    const revoked = new Set(
-      incoming.map((identity) =>
-        verifiedIdentityKey(
-          (identity.type ?? "").trim().toLowerCase(),
-          (identity.value ?? "").trim(),
-        )
-      ),
-    );
-    state.verifiedIdentities.set(
-      state.verifiedIdentities.get().filter((identity) =>
-        !revoked.has(verifiedIdentityKey(identity.type, identity.value))
-      ),
+    incoming.forEach((identity) =>
+      state.verifiedIdentities.removeAll(identity)
     );
     return;
   }
 
-  const normalized: ExternalIdentityAssertion[] = [];
-  for (const identity of incoming) {
-    const type = (identity.type ?? "").trim().toLowerCase();
-    const value = (identity.value ?? "").trim();
-    const verifiedAt = normalizeVerifiedAt((identity.verifiedAt ?? "").trim());
-    if (!type || !value || !verifiedAt) continue;
-    normalized.push({
-      type,
-      value,
-      verifiedAt,
-    });
-  }
-  if (normalized.length === 0) return;
-
-  const next = [...state.verifiedIdentities.get()];
-  for (const identity of normalized) {
-    const existingIndex = next.findIndex((candidate) =>
-      candidate.type === identity.type && candidate.value === identity.value
-    );
-    if (existingIndex === -1) {
-      next.push(identity);
-    } else {
-      next[existingIndex] = identity;
-    }
-  }
-  state.verifiedIdentities.set(next);
+  incoming.forEach((identity) => {
+    if (!isCanonicalVerifiedIdentity(identity.get())) return;
+    state.verifiedIdentities.addUnique(identity);
+  });
 });
 
 // View/edit toggle for the rendered profile view (CT-1748). Plain (un-protected)

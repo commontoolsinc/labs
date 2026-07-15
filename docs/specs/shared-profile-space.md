@@ -161,7 +161,7 @@ The initial profile default pattern should export this contract:
 
 ```ts
 // Shown at module scope.
-import type { AddIntegrity } from "commonfabric";
+import type { Cell, RequiresIntegrity } from "commonfabric";
 
 type ProfileElement = {
   cell: Cell<unknown>;
@@ -176,11 +176,18 @@ type ExternalProfileLink = {
   url: string;
 };
 
-type VerifiedExternalIdentity = AddIntegrity<{
+type ExternalIdentityAssertion = {
   type: string;
   value: string;
   verifiedAt: string;
-}, readonly ["loom-verified-external-identity"]>;
+};
+
+type VerifiedExternalIdentity = RequiresIntegrity<
+  ExternalIdentityAssertion,
+  readonly ["loom-verified-external-identity"]
+>;
+
+type VerifiedExternalIdentityCell = Cell<VerifiedExternalIdentity>;
 
 type ProfileDefaultPattern = {
   [NAME]: string;
@@ -189,19 +196,15 @@ type ProfileDefaultPattern = {
   avatar: string;
   bio: string;
   externalLinks: ExternalProfileLink[];
-  verifiedIdentities: VerifiedExternalIdentity[];
+  verifiedIdentities: VerifiedExternalIdentityCell[];
   elements: ProfileElement[];
   addExternalLink: Stream<{ label?: string; url?: string }>;
   removeExternalLink: Stream<{ url?: string }>;
   publishVerifiedIdentities: Stream<{
-    identities?: readonly {
-      type: string;
-      value: string;
-      verifiedAt: string;
-    }[];
+    identities?: readonly VerifiedExternalIdentityCell[];
   }>;
   revokeVerifiedIdentities: Stream<{
-    identities?: readonly { type: string; value: string }[];
+    identities?: readonly VerifiedExternalIdentityCell[];
   }>;
   addElement: Stream<AddProfileElementEvent>;
   removeElement: Stream<{ cell: Cell<unknown> }>;
@@ -235,12 +238,20 @@ exact matching while retaining the login a local owner-authored person record
 may use. Multiple accounts may also contribute assertions of the same type.
 
 The list is owner-protected and writable only through
-`publishVerifiedIdentities`; each item adds the
+`publishVerifiedIdentities`, but the list is not the authority that creates an
+assertion. Each event item is a durable cell that MUST already carry the
 `loom-verified-external-identity` CFC integrity atom over the complete tuple.
-Re-publishing a `type` + `value` pair refreshes `verifiedAt`. Disabling
-publication or logging out calls `revokeVerifiedIdentities` for the exact
-assertions that connector previously published; stale assertions are a second
-line of defense, not the primary revocation mechanism. Consumers MUST ignore
+The handler validates the tuple's canonical shape and appends the original cell
+reference without modifying or copying its value. This lets one assertion
+producer create an integrity-bearing capability and any authorized collector
+forward that capability without being able to mint it.
+
+Daily refresh updates `verifiedAt` on the same producer-owned assertion cell;
+the profile continues to reference that cell. Disabling publication or logging
+out passes the original assertion reference to `revokeVerifiedIdentities`,
+which removes that exact reference with `removeAll` rather than comparing
+identity contents. Stale assertions are a second line of defense, not the
+primary revocation mechanism. Consumers MUST ignore
 assertions older than their configured freshness window (48 hours by default)
 and MUST fail closed when the item-level integrity label cannot be read. Fresh verified identities are
 high-authority reconciliation evidence, but do not by themselves force a
