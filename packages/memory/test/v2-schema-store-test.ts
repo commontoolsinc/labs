@@ -7,6 +7,13 @@ import {
 import { Database } from "@db/sqlite";
 import { toFileUrl } from "@std/path";
 import type { JSONSchema } from "@commonfabric/api";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { FabricLink } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricBytes,
+  FabricEpochNsec,
+  FabricHash,
+} from "@commonfabric/data-model/fabric-primitives";
 import {
   openSchemaStore,
   SchemaStoreCorruptionError,
@@ -22,6 +29,20 @@ const withStore = async (
   } finally {
     await Deno.remove(directory, { recursive: true });
   }
+};
+
+const encodedByteLength = (schema: JSONSchema): number =>
+  new TextEncoder().encode(jsonFromValue(schema)).byteLength;
+
+const schemaWithRuntimeDefault = (
+  defaultValue: unknown,
+): JSONSchema => {
+  const schema: JSONSchema = { type: "object" };
+  Object.defineProperty(schema, "default", {
+    value: defaultValue,
+    enumerable: true,
+  });
+  return schema;
 };
 
 Deno.test("schema store canonicalizes structurally equal schemas", async () => {
@@ -72,6 +93,43 @@ Deno.test("schema store persists entries and generation across close and reopen"
   });
 });
 
+Deno.test("schema store preserves Fabric runtime defaults across close and reopen", async () => {
+  await withStore(async (url) => {
+    const epoch = new FabricEpochNsec(1_234_567_890n);
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const hash = new FabricHash(new Uint8Array([4, 5, 6]), "test");
+    const link = new FabricLink({ id: "of:runtime-default", path: [] });
+    const first = await openSchemaStore({ url });
+    const stored = [epoch, bytes, hash, link].map((defaultValue) =>
+      first.put(schemaWithRuntimeDefault(defaultValue))
+    );
+    first.close();
+
+    const reopened = await openSchemaStore({ url });
+    try {
+      const defaults = stored.map((entry) => {
+        const schema = reopened.get(entry.hash)?.schema;
+        return schema !== undefined
+          ? Object.getOwnPropertyDescriptor(schema, "default")?.value
+          : undefined;
+      });
+      const [restoredEpoch, restoredBytes, restoredHash, restoredLink] =
+        defaults;
+
+      assert(restoredEpoch instanceof FabricEpochNsec);
+      assertEquals(restoredEpoch.value, epoch.value);
+      assert(restoredBytes instanceof FabricBytes);
+      assertEquals(restoredBytes.slice(), bytes.slice());
+      assert(restoredHash instanceof FabricHash);
+      assertEquals(restoredHash.toString(), hash.toString());
+      assert(restoredLink instanceof FabricLink);
+      assertEquals(restoredLink.payload, link.payload);
+    } finally {
+      reopened.close();
+    }
+  });
+});
+
 Deno.test("schema store fails closed for hash and byte corruption", async () => {
   await withStore(async (url) => {
     const store = await openSchemaStore({ url });
@@ -82,7 +140,7 @@ Deno.test("schema store fails closed for hash and byte corruption", async () => 
     try {
       database.prepare(
         "UPDATE schema_store_entries SET canonical_json = ?, byte_length = ? WHERE hash = ?",
-      ).run("true", 4, stored.hash);
+      ).run("fvj1:true", 9, stored.hash);
     } finally {
       database.close();
     }
@@ -97,6 +155,39 @@ Deno.test("schema store fails closed for hash and byte corruption", async () => 
       assertThrows(
         () => reopened.has(stored.hash),
         SchemaStoreCorruptionError,
+      );
+    } finally {
+      reopened.close();
+    }
+  });
+});
+
+Deno.test("schema store fails closed for malformed Fabric JSON", async () => {
+  await withStore(async (url) => {
+    const store = await openSchemaStore({ url });
+    const stored = store.put({ type: "string" });
+    store.close();
+
+    const malformed = "fvj1:{";
+    const database = await new Database(url.pathname, { create: true });
+    try {
+      database.prepare(
+        "UPDATE schema_store_entries SET canonical_json = ?, byte_length = ? WHERE hash = ?",
+      ).run(
+        malformed,
+        new TextEncoder().encode(malformed).byteLength,
+        stored.hash,
+      );
+    } finally {
+      database.close();
+    }
+
+    const reopened = await openSchemaStore({ url });
+    try {
+      assertThrows(
+        () => reopened.get(stored.hash),
+        SchemaStoreCorruptionError,
+        "invalid Fabric JSON",
       );
     } finally {
       reopened.close();
@@ -121,10 +212,14 @@ Deno.test("schema store quotas permit duplicates without consuming capacity", as
   });
 
   await withStore(async (url) => {
-    const store = await openSchemaStore({ url, maxSchemaBytes: 4 });
+    const stringSchema: JSONSchema = { type: "string" };
+    const store = await openSchemaStore({
+      url,
+      maxSchemaBytes: encodedByteLength(stringSchema) - 1,
+    });
     try {
       assertThrows(
-        () => store.put({ type: "string" }),
+        () => store.put(stringSchema),
         SchemaStoreQuotaError,
         "maxSchemaBytes",
       );
@@ -134,11 +229,17 @@ Deno.test("schema store quotas permit duplicates without consuming capacity", as
   });
 
   await withStore(async (url) => {
-    const store = await openSchemaStore({ url, maxTotalBytes: 17 });
+    const stringSchema: JSONSchema = { type: "string" };
+    const numberSchema: JSONSchema = { type: "number" };
+    const store = await openSchemaStore({
+      url,
+      maxTotalBytes: encodedByteLength(stringSchema) +
+        encodedByteLength(numberSchema) - 1,
+    });
     try {
-      store.put({ type: "string" });
+      store.put(stringSchema);
       assertThrows(
-        () => store.put({ type: "number" }),
+        () => store.put(numberSchema),
         SchemaStoreQuotaError,
         "maxTotalBytes",
       );

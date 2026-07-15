@@ -1,6 +1,10 @@
 import type { JSONSchema } from "@commonfabric/api";
+import {
+  jsonFromValue,
+  valueFromJson,
+} from "@commonfabric/data-model/codec-json";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { hashOf } from "@commonfabric/data-model/value-hash";
+import { isPlainObject } from "@commonfabric/utils/types";
 import { Database } from "@db/sqlite";
 import * as Path from "@std/path";
 
@@ -98,45 +102,34 @@ const validateLimit = (name: string, value: number | undefined): number => {
 const databaseAddress = (url: URL): string =>
   url.protocol === "file:" ? Path.fromFileUrl(url) : ":memory:";
 
-const schemaFromRow = (row: EntryRow, requestedHash: string): StoredSchema => {
-  if (row.hash !== requestedHash) {
-    throw new SchemaStoreCorruptionError(
-      requestedHash,
-      "schema store returned a row for a different hash",
-    );
-  }
-  if (byteLength(row.canonical_json) !== row.byte_length) {
-    throw new SchemaStoreCorruptionError(
-      requestedHash,
-      "schema store byte length does not match stored JSON",
-    );
-  }
+const isSchema = (value: unknown): value is JSONSchema =>
+  value === true || value === false || isPlainObject(value);
 
-  let parsed: unknown;
+const schemaFromEncoded = (
+  canonicalJson: string,
+  requestedHash: string,
+): StoredSchema => {
+  let decoded: unknown;
   try {
-    parsed = JSON.parse(row.canonical_json);
+    decoded = valueFromJson(canonicalJson);
   } catch {
     throw new SchemaStoreCorruptionError(
       requestedHash,
-      "schema store contains invalid JSON",
+      "schema store contains invalid Fabric JSON",
     );
   }
-  if (
-    parsed !== true && parsed !== false &&
-    (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
-  ) {
+  if (!isSchema(decoded)) {
     throw new SchemaStoreCorruptionError(
       requestedHash,
-      "schema store contains a non-schema JSON value",
+      "schema store contains a non-schema Fabric value",
     );
   }
 
   try {
-    const canonical = internSchema(parsed as JSONSchema, true);
-    const canonicalJson = JSON.stringify(canonical.schema);
+    const canonical = internSchema(decoded, true);
     if (
       canonical.taggedHashString !== requestedHash ||
-      canonicalJson !== row.canonical_json
+      jsonFromValue(canonical.schema) !== canonicalJson
     ) {
       throw new SchemaStoreCorruptionError(
         requestedHash,
@@ -151,6 +144,23 @@ const schemaFromRow = (row: EntryRow, requestedHash: string): StoredSchema => {
       "schema store contains an invalid schema",
     );
   }
+};
+
+const schemaFromRow = (row: EntryRow, requestedHash: string): StoredSchema => {
+  if (row.hash !== requestedHash) {
+    throw new SchemaStoreCorruptionError(
+      requestedHash,
+      "schema store returned a row for a different hash",
+    );
+  }
+  if (byteLength(row.canonical_json) !== row.byte_length) {
+    throw new SchemaStoreCorruptionError(
+      requestedHash,
+      "schema store byte length does not match stored JSON",
+    );
+  }
+
+  return schemaFromEncoded(row.canonical_json, requestedHash);
 };
 
 export class SqliteSchemaStore implements SchemaStore {
@@ -214,12 +224,13 @@ export class SqliteSchemaStore implements SchemaStore {
   putAll(schemas: readonly JSONSchema[]): StoredSchema[] {
     const candidates = schemas.map((schema) => {
       const canonical = internSchema(schema, true);
-      // Rehash canonical content instead of relying on the interning cache's
-      // weak identity lookup for the durable content-addressed key.
-      const hash = hashOf(canonical.schema).taggedHashString;
-      const canonicalJson = JSON.stringify(canonical.schema);
+      const canonicalJson = jsonFromValue(canonical.schema);
+      const stored = schemaFromEncoded(
+        canonicalJson,
+        canonical.taggedHashString,
+      );
       return {
-        stored: { hash, schema: canonical.schema },
+        stored,
         canonicalJson,
         size: byteLength(canonicalJson),
       };

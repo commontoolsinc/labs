@@ -31,11 +31,11 @@ Deno.test("resolveSpaceStoreUrl uses a sibling engine directory in single-file m
 Deno.test("resolveSchemaStoreUrl keeps the durable store outside per-space databases", () => {
   assertEquals(
     resolveSchemaStoreUrl(new URL("file:///tmp/cf-memory/")).href,
-    "file:///tmp/cf-memory/schema-store-v1.sqlite",
+    "file:///tmp/cf-memory/schema-store-v2.sqlite",
   );
   assertEquals(
     resolveSchemaStoreUrl(new URL("file:///tmp/cf-memory/space.sqlite")).href,
-    "file:///tmp/cf-memory/space.schema-store-v1.sqlite",
+    "file:///tmp/cf-memory/space.schema-store-v2.sqlite",
   );
   assertEquals(
     resolveSchemaStoreUrl(new URL("memory:")).href,

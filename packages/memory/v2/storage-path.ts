@@ -92,12 +92,12 @@ export const resolveSchemaStoreUrl = (store: URL): URL => {
 
   const storePath = Path.fromFileUrl(store);
   if (!isSingleFileStore(store)) {
-    return new URL("./schema-store-v1.sqlite", store);
+    return new URL("./schema-store-v2.sqlite", store);
   }
 
   const ext = Path.extname(storePath);
   const stem = storePath.slice(0, -ext.length);
-  return Path.toFileUrl(`${stem}.schema-store-v1.sqlite`);
+  return Path.toFileUrl(`${stem}.schema-store-v2.sqlite`);
 };
 
 /**
