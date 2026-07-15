@@ -17,9 +17,13 @@ import {
   loadConversationFixtureFile,
 } from "@commonfabric/llm/client";
 import type {
+  BuiltInLLMContentPart,
   BuiltInLLMMessage,
   BuiltInLLMTool,
+  BuiltInLLMToolCallPart,
+  Cell,
   JSONSchema,
+  Stream,
 } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -46,6 +50,32 @@ const RESULT_SCHEMA = {
   },
   required: ["addMessage"],
 } as const satisfies JSONSchema;
+
+type DialogResult = {
+  addMessage: Stream<BuiltInLLMMessage>;
+  pending?: boolean;
+  error?: unknown;
+  messages?: BuiltInLLMMessage[];
+};
+
+type GenerateObjectResult = {
+  pending?: boolean;
+  error?: unknown;
+  result?: {
+    title: string;
+    score: number;
+  };
+};
+
+type WeatherToolInput = {
+  location: string;
+};
+
+function isToolCallPart(
+  part: BuiltInLLMContentPart | undefined,
+): part is BuiltInLLMToolCallPart {
+  return part?.type === "tool-call";
+}
 
 describe("conversation fixtures", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -101,7 +131,7 @@ describe("conversation fixtures", () => {
       RESULT_SCHEMA,
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<DialogResult>(
       space,
       "fixture-simple-multi-turn",
       RESULT_SCHEMA,
@@ -138,7 +168,7 @@ describe("conversation fixtures", () => {
     );
 
     const getWeatherTool = pattern(
-      ({ location: _location }: any) => {
+      ({ location: _location }: WeatherToolInput) => {
         return "Sunny, 72°F";
       },
       {
@@ -172,7 +202,7 @@ describe("conversation fixtures", () => {
       RESULT_SCHEMA,
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<DialogResult>(
       space,
       "fixture-multi-turn-tools",
       RESULT_SCHEMA,
@@ -204,8 +234,19 @@ describe("conversation fixtures", () => {
     // Verify tool call was made
     const toolCallMsg = msgs[3];
     expect(toolCallMsg.role).toBe("assistant");
-    expect(Array.isArray(toolCallMsg.content)).toBe(true);
-    expect((toolCallMsg.content as any[])[0].toolName).toBe("getWeather");
+    const toolCallContent = toolCallMsg.content;
+    expect(Array.isArray(toolCallContent)).toBe(true);
+    if (!Array.isArray(toolCallContent)) {
+      throw new Error("Expected assistant message content parts");
+    }
+    const toolCallPart = toolCallContent[0];
+    expect(isToolCallPart(toolCallPart)).toBe(true);
+    if (!isToolCallPart(toolCallPart)) {
+      throw new Error(
+        "Expected first assistant content part to be a tool call",
+      );
+    }
+    expect(toolCallPart.toolName).toBe("getWeather");
 
     // Verify final response
     const finalMsg = msgs[5];
@@ -250,7 +291,7 @@ describe("conversation fixtures", () => {
       RESULT_SCHEMA,
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<DialogResult>(
       space,
       "fixture-inline",
       RESULT_SCHEMA,
@@ -300,7 +341,7 @@ describe("conversation fixtures", () => {
       },
     );
 
-    const resultCell = runtime.getCell(
+    const resultCell = runtime.getCell<GenerateObjectResult>(
       space,
       "fixture-generate-object",
       testPattern.resultSchema,
@@ -321,7 +362,7 @@ describe("conversation fixtures", () => {
   });
 });
 
-function waitForMessages(result: any, expectedCount: number) {
+function waitForMessages(result: Cell<DialogResult>, expectedCount: number) {
   let cancel: () => void;
   let timeout: ReturnType<typeof setTimeout>;
   return new Promise<void>((resolve, reject) => {
@@ -332,7 +373,7 @@ function waitForMessages(result: any, expectedCount: number) {
         ),
       );
     }, 5000);
-    cancel = result.sink(({ pending, messages }: any = {}) => {
+    cancel = result.sink(({ pending, messages }) => {
       if (pending === false && messages?.length === expectedCount) {
         resolve();
       }
@@ -343,7 +384,7 @@ function waitForMessages(result: any, expectedCount: number) {
   });
 }
 
-function waitForPending(result: any) {
+function waitForPending(result: Cell<GenerateObjectResult>) {
   let cancel: () => void;
   let timeout: ReturnType<typeof setTimeout>;
   return new Promise<void>((resolve, reject) => {
@@ -358,7 +399,7 @@ function waitForPending(result: any) {
         result: true,
       },
       default: {},
-    }).sink(({ pending, error, result: r }: any = {}) => {
+    }).sink(({ pending, error, result: r } = {}) => {
       if (pending === false && (error !== undefined || r !== undefined)) {
         resolve();
       }
