@@ -53,7 +53,12 @@ export const mapLinkSchemas = (
   for (const [key, child] of Object.entries(mappedValue)) {
     const next = mapLinkSchemas(child, mapSchema);
     changed ||= next !== child;
-    mapped[key] = next;
+    Object.defineProperty(mapped, key, {
+      value: next,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   }
   return changed ? mapped : value;
 };

@@ -155,6 +155,50 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
   );
 });
 
+Deno.test("sync schema table reports each repeated schema once", () => {
+  const observed: JSONSchema[] = [];
+
+  compressSessionSyncSchemas(repeatedSchemaSync(2), (schema) => {
+    observed.push(schema);
+  });
+
+  assertEquals(observed, [internSchema(largeSchema(), true).schema]);
+});
+
+Deno.test("sync schema table preserves own __proto__ fields", () => {
+  const value = JSON.parse('{"__proto__":{"safe":true}}') as Record<
+    string,
+    unknown
+  >;
+  value.ref = linkRefFrom({
+    id: "of:target",
+    path: [],
+    schema: { type: "string" },
+  });
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:proto-source",
+      scope: "space",
+      seq: 1,
+      doc: { value },
+    }],
+    removes: [],
+  };
+
+  const compressed = compressSessionSyncSchemas(sync);
+  const compressedValue = compressed.upserts[0].doc?.value as Record<
+    string,
+    unknown
+  >;
+
+  assert(Object.hasOwn(compressedValue, "__proto__"));
+  assertEquals(compressedValue.__proto__, { safe: true });
+});
+
 Deno.test("sync schema table round-trips legacy aliases nested in arrays", () => {
   const schema: JSONSchema = {
     type: "object",

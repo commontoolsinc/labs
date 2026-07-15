@@ -37,9 +37,9 @@ const schemaRefFor = (
 ): string => {
   const schemaAndHash = internSchema(schema, true);
   const hash = schemaAndHash.taggedHashString;
-  state.onSchema?.(schemaAndHash.schema);
   if (!state.schemas.has(hash)) {
     state.schemas.set(hash, schemaAndHash.schema);
+    state.onSchema?.(schemaAndHash.schema);
   }
   return `${SYNC_SCHEMA_REF_PREFIX}${hash}`;
 };
