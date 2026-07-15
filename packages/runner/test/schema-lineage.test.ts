@@ -5,7 +5,7 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 import { type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { isCell } from "../src/cell.ts";
+import { type Cell, isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -13,6 +13,25 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+function expectCell<T>(value: unknown): asserts value is Cell<T> {
+  expect(isCell(value)).toBe(true);
+}
+
+type ElementWithCellValue = {
+  props: {
+    value: Cell<{ name: string }>;
+  };
+};
+
+function expectElementWithCellValue(
+  value: unknown,
+): asserts value is ElementWithCellValue {
+  expect(typeof value === "object" && value !== null).toBe(true);
+  const props = (value as { props?: unknown }).props;
+  expect(typeof props === "object" && props !== null).toBe(true);
+  expectCell<{ name: string }>((props as { value?: unknown }).value);
+}
 
 describe("Schema Lineage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -244,8 +263,8 @@ describe("Schema Lineage", () => {
         } as const satisfies JSONSchema,
       );
 
-      const value = itemsCellWithSchema.get() as any;
-      expect(isCell(value)).toBe(true);
+      const value = itemsCellWithSchema.get();
+      expectCell<Array<{ id: number; name: string }>>(value);
       expect(value.schema).toEqual(arraySchema);
 
       const firstItem = value.get()[0];
@@ -339,8 +358,8 @@ describe("Schema propagation end-to-end example", () => {
       } as const satisfies JSONSchema,
     );
 
-    const cValue = c.get() as any;
-    expect(isCell(cValue.props.value)).toBe(true);
+    const cValue = c.get();
+    expectElementWithCellValue(cValue);
     expect(cValue.props.value.schema).toEqual({
       type: "object",
       properties: { name: { type: "string" } },
