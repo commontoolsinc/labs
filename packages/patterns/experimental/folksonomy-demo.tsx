@@ -65,7 +65,8 @@ export default pattern<Input, Output>(
     });
     const hasAggregator = computed(() => {
       const result = aggregatorWish.result;
-      return !isPending(result) && !hasError(result) && !isSyncing(result) &&
+      return result != null && !isPending(result) && !hasError(result) &&
+        !isSyncing(result) &&
         !hasSchemaMismatch(result);
     });
 
