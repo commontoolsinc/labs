@@ -25,11 +25,20 @@ if [[ ! -f mise.toml ]]; then
   echo "ERROR: mise.toml not found; cannot read the pinned Deno version."
   exit 1
 fi
-DENO_VERSION_PINNED="$(sed -n 's/^deno = "\([^"]*\)"$/\1/p' mise.toml | head -1)"
-if [[ -z "${DENO_VERSION_PINNED}" ]]; then
+DENO_PINS="$(sed -n 's/^deno = "\([^"]*\)"$/\1/p' mise.toml)"
+# Counted rather than taking the first: TOML rejects a key defined twice, so a
+# second pin means mise cannot load the file, and reading past it would report
+# a version no developer actually gets.
+DENO_PIN_COUNT="$(printf '%s' "${DENO_PINS}" | grep -c . || true)"
+if (( DENO_PIN_COUNT == 0 )); then
   echo "ERROR: Could not read the pinned Deno version from mise.toml."
   exit 1
 fi
+if (( DENO_PIN_COUNT > 1 )); then
+  echo "ERROR: mise.toml defines the Deno pin ${DENO_PIN_COUNT} times; TOML rejects a key defined twice, so mise cannot load it."
+  exit 1
+fi
+DENO_VERSION_PINNED="${DENO_PINS}"
 # This is more portable than parsing `deno --version`
 DENO_VERSION=$(echo "console.log(Deno.version.deno)" | deno run -)
 IFS='.' read -r DENO_MAJOR DENO_MINOR DENO_PATCH <<<"${DENO_VERSION}"

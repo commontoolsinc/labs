@@ -9,6 +9,7 @@ import {
   parseCheckShRange,
   parseDockerfileDenoVersions,
   parseMisePin,
+  parseMisePins,
   versionInRange,
 } from "./check-deno-pins.ts";
 
@@ -26,7 +27,7 @@ function alignedFiles() {
       "FROM denoland/deno:2.8.1\n",
     checkSh: "# The exact Deno version is pinned in mise.toml.\n" +
       'DENO_VERSION_MIN="2.8.0"\nDENO_VERSION_MAX="2.9.0"\n' +
-      `DENO_VERSION_PINNED="$(sed -n 's/^deno = "\\([^"]*\\)"$/\\1/p' mise.toml | head -1)"\n`,
+      `DENO_PINS="$(sed -n 's/^deno = "\\([^"]*\\)"$/\\1/p' mise.toml)"\n`,
     denoSetupAction: '    description: "Defaults to the pin in mise.toml."\n' +
       "    # The repository's Deno version is pinned once, in mise.toml.\n" +
       "      run: |\n" +
@@ -40,6 +41,38 @@ Deno.test("parseMisePin extracts the pinned version", () => {
 
 Deno.test("parseMisePin returns undefined when there is no pin", () => {
   assertEquals(parseMisePin('[tools]\nnode = "22.0.0"\n'), undefined);
+});
+
+Deno.test("parseMisePin returns undefined when the pin is defined twice", () => {
+  assertEquals(
+    parseMisePin('[tools]\ndeno = "2.8.1"\ndeno = "2.8.1"\n'),
+    undefined,
+  );
+});
+
+Deno.test("parseMisePins returns every pin in order", () => {
+  assertEquals(parseMisePins('[tools]\ndeno = "2.8.1"\n'), ["2.8.1"]);
+  assertEquals(parseMisePins('[tools]\nnode = "22.0.0"\n'), []);
+  assertEquals(
+    parseMisePins('[tools]\ndeno = "2.8.1"\ndeno = "2.9.0"\n'),
+    ["2.8.1", "2.9.0"],
+  );
+});
+
+// TOML rejects a key defined twice even when both values agree, so mise fails
+// to load the file. Reading only the first pin would report the toolchain as
+// aligned while `mise install` — the documented way to get it — is broken.
+Deno.test("findProblems flags a Deno pin defined twice", () => {
+  for (
+    const miseToml of [
+      '[tools]\ndeno = "2.8.1"\ndeno = "2.8.1"\n',
+      '[tools]\ndeno = "2.8.1"\ndeno = "2.9.0"\n',
+    ]
+  ) {
+    const problems = findProblems({ ...alignedFiles(), miseToml });
+    assertEquals(problems.length, 1, miseToml);
+    assert(problems[0].includes("defined 2 times"), problems[0]);
+  }
 });
 
 Deno.test("parseDockerfileDenoVersions finds every FROM line", () => {

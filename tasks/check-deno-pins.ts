@@ -33,9 +33,19 @@ const DENO_SETUP_ACTION = ".github/actions/deno-setup/action.yml";
 // pass after the read itself had been replaced with a hardcoded version.
 const READS_MISE_TOML = /sed[^\n]*\bmise\.toml\b/;
 
-// Extracts the pinned Deno version from mise.toml contents.
+// Every `deno = "..."` assignment in mise.toml, in order. TOML rejects a key
+// defined twice, so more than one means mise cannot load the file at all —
+// reading only the first would report a pin no developer actually gets.
+export function parseMisePins(miseToml: string): string[] {
+  return [...miseToml.matchAll(/^deno = "([^"]+)"$/gm)].map((match) =>
+    match[1]
+  );
+}
+
+// The pinned Deno version. Undefined unless the file defines exactly one.
 export function parseMisePin(miseToml: string): string | undefined {
-  return miseToml.match(/^deno = "([^"]+)"$/m)?.[1];
+  const pins = parseMisePins(miseToml);
+  return pins.length === 1 ? pins[0] : undefined;
 }
 
 // Extracts the version tag of each denoland/deno base image in a Dockerfile.
@@ -107,10 +117,17 @@ export function findProblems(files: {
 }): string[] {
   const problems: string[] = [];
 
-  const pin = parseMisePin(files.miseToml);
-  if (pin === undefined) {
+  const pins = parseMisePins(files.miseToml);
+  if (pins.length === 0) {
     return [`${MISE_TOML}: no Deno pin found (expected a 'deno = "..."' line)`];
   }
+  if (pins.length > 1) {
+    return [
+      `${MISE_TOML}: the Deno pin is defined ${pins.length} times; TOML ` +
+      `rejects a key defined twice, so mise cannot load the file`,
+    ];
+  }
+  const pin = pins[0];
   if (!isExactVersion(pin)) {
     return [
       `${MISE_TOML}: pin "${pin}" is not an exact MAJOR.MINOR.PATCH version`,

@@ -25,7 +25,16 @@ runs:
             echo "::error::mise.toml not found; cannot resolve the Deno version. This action requires the repository to be checked out first."
             exit 1
           fi
-          version="$(sed -n 's/^deno = "\([^"]*\)"$/\1/p' mise.toml | head -1)"
+          pins="$(sed -n 's/^deno = "\([^"]*\)"$/\1/p' mise.toml)"
+          # Counted rather than taking the first: TOML rejects a key defined
+          # twice, so a second pin means mise cannot load the file, and reading
+          # past it would install a version no developer actually gets.
+          count="$(printf '%s' "$pins" | grep -c . || true)"
+          if [ "$count" -gt 1 ]; then
+            echo "::error::mise.toml defines the Deno pin $count times; TOML rejects a key defined twice, so mise cannot load it."
+            exit 1
+          fi
+          version="$pins"
         fi
         if [ -z "$version" ]; then
           echo "::error::No deno-version input and no Deno pin found in mise.toml."
