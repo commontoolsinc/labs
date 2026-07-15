@@ -452,7 +452,7 @@ return {
 - [x] Example test pattern
 
 **Files created:**
-- `packages/cli/commands/test.ts`
+- `packages/cli/commands/test-command.ts`
 - `packages/cli/lib/test-runner.ts`
 - `packages/patterns/gideon-tests/test-reactivity-computed-derive-same/index.test.tsx`
 
