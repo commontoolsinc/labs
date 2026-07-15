@@ -193,6 +193,12 @@ One line per archived document; each document's header carries the fuller
   — June 2026 profiling snapshots.
 - [memory-schema-sync-wire-accounting-lunch-poll-2026-07-13.md](development/performance/memory-schema-sync-wire-accounting-lunch-poll-2026-07-13.md),
   July 2026 Lunch Poll Memory schema-sync wire-accounting measurements.
+- [memory-protocol-traffic-lunch-poll-2026-07-14.md](development/performance/memory-protocol-traffic-lunch-poll-2026-07-14.md),
+  protocol-level Lunch Poll Memory traffic, repetition, and cache-opportunity analysis.
+- [memory-request-schema-cas-lunch-poll-2026-07-14.md](development/performance/memory-request-schema-cas-lunch-poll-2026-07-14.md),
+  end-to-end Lunch Poll measurement after durable request-schema CAS landed.
+- [memory-request-schema-cas-refs-first-lunch-poll-2026-07-14.md](development/performance/memory-request-schema-cas-refs-first-lunch-poll-2026-07-14.md),
+  paired disabled, cold, and durable-warm Lunch Poll measurements for refs-first request-schema CAS.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)
