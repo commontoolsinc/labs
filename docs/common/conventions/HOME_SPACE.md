@@ -12,6 +12,23 @@ available when they authenticate.
 Home Space DID = User Identity DID = runtime.storageManager.as.did()
 ```
 
+## Identities, Home Spaces, and People
+
+Because the home space DID and the identity DID are the same value, home spaces
+and identities are one-to-one by construction. Every identity has one home
+space, and every home space belongs to one identity.
+
+An identity is a keypair, not a person. There are no accounts, so the system has
+no way to know that two identities belong to the same human, or that one
+identity is driven by several humans or by automation. Treating an identity as a
+person is an assumption a caller layers on top, not a property the system
+provides.
+
+Work that counts people — daily active users, for example — rests on that
+assumption. What the assumption costs, and what the server records about the
+identity behind a session, are covered in
+[`docs/development/active-user-counting.md`](../../development/active-user-counting.md).
+
 ## Purpose
 
 The home space provides a persistent, user-owned storage location for:
