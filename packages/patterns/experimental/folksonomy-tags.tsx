@@ -32,6 +32,9 @@ import {
   type Default,
   handler,
   hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   lift,
   NAME,
   pattern,
@@ -292,7 +295,10 @@ export const FolksonomyTags = pattern<
     });
 
     // A missing optional aggregator keeps the pattern in local-only mode.
-    const discoveredAggregator = hasError(aggregatorWish.result)
+    const discoveredAggregator = hasError(aggregatorWish.result) ||
+        isPending(aggregatorWish.result) ||
+        isSyncing(aggregatorWish.result) ||
+        hasSchemaMismatch(aggregatorWish.result)
       ? null
       : resultOf(aggregatorWish.result);
     const aggregator = injectedAggregator ?? discoveredAggregator;

@@ -6,8 +6,10 @@ import {
   generateObject,
   handler,
   hasError,
+  hasSchemaMismatch,
   ImageData,
   isPending,
+  isSyncing,
   NAME,
   nonPrivateRandom,
   pattern,
@@ -494,8 +496,18 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-    const resolvedProfileName = resultOf(profileNameWish.result);
-    const resolvedProfileAvatar = resultOf(profileAvatarWish.result);
+    const resolvedProfileName = hasError(profileNameWish.result) ||
+        isPending(profileNameWish.result) ||
+        isSyncing(profileNameWish.result) ||
+        hasSchemaMismatch(profileNameWish.result)
+      ? ""
+      : resultOf(profileNameWish.result);
+    const resolvedProfileAvatar = hasError(profileAvatarWish.result) ||
+        isPending(profileAvatarWish.result) ||
+        isSyncing(profileAvatarWish.result) ||
+        hasSchemaMismatch(profileAvatarWish.result)
+      ? ""
+      : resultOf(profileAvatarWish.result);
     const profileName = computed(() => resolvedProfileName.trim());
     const profileAvatar = computed(() => resolvedProfileAvatar.trim());
     const hasProfile = computed(() => resolvedProfileName.trim() !== "");

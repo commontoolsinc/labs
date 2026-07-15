@@ -25,6 +25,10 @@ import {
   Default,
   equals,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
   pattern,
   type PerUser,
@@ -172,12 +176,29 @@ export default pattern<State>(({ people, expenses, myName }) => {
   // live cell bound to <cf-profile-badge>; the field targets give the name/avatar
   // we snapshot into the ledger on "join". Profile-count-agnostic: resolves the
   // viewer's default profile.
-  const profileWish = wish({ query: "#profile" });
+  const profileWish = wish<{ name?: string; avatar?: string }>({
+    query: "#profile",
+  });
   const profileNameWish = wish<string>({ query: "#profileName" });
   const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-  const profile = resultOf(profileWish.result);
-  const profileName = resultOf(profileNameWish.result);
-  const profileAvatar = resultOf(profileAvatarWish.result);
+  const profile = hasError(profileWish.result) ||
+      isPending(profileWish.result) ||
+      isSyncing(profileWish.result) ||
+      hasSchemaMismatch(profileWish.result)
+    ? undefined
+    : resultOf(profileWish.result);
+  const profileName = hasError(profileNameWish.result) ||
+      isPending(profileNameWish.result) ||
+      isSyncing(profileNameWish.result) ||
+      hasSchemaMismatch(profileNameWish.result)
+    ? ""
+    : resultOf(profileNameWish.result);
+  const profileAvatar = hasError(profileAvatarWish.result) ||
+      isPending(profileAvatarWish.result) ||
+      isSyncing(profileAvatarWish.result) ||
+      hasSchemaMismatch(profileAvatarWish.result)
+    ? ""
+    : resultOf(profileAvatarWish.result);
   const myProfileName = computed(() => profileName.trim());
   const myProfileAvatar = computed(() => profileAvatar.trim());
   const hasProfile = computed(() => profileName.trim() !== "");

@@ -5,6 +5,9 @@ import {
   type Default,
   handler,
   hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
   pattern,
   resultOf,
@@ -104,7 +107,10 @@ export default pattern<AgentInput, AgentOutput>(
       query: "#activityLog",
       headless: true,
     });
-    const activityLog = hasError(activityLogWish.result)
+    const activityLog = hasError(activityLogWish.result) ||
+        isPending(activityLogWish.result) ||
+        isSyncing(activityLogWish.result) ||
+        hasSchemaMismatch(activityLogWish.result)
       ? undefined
       : resultOf(activityLogWish.result);
 
