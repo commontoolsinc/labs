@@ -1342,9 +1342,7 @@ export class Server {
     context?: RequestAuthorizationContext,
   ): Promise<V2Error | RequestAuthorizationContext> {
     if (context !== undefined) {
-      const invalid = this.#requestAuthorizationContextError(message, context);
-      if (invalid !== null) return invalid;
-      return context;
+      return this.#currentRequestAuthorizationContext(message, context);
     }
 
     const session = this.#sessions.get(message.space, message.sessionId);
@@ -1381,10 +1379,10 @@ export class Server {
     };
   }
 
-  #requestAuthorizationContextError(
+  #currentRequestAuthorizationContext(
     message: RequestSchemaCasRequest,
     context: RequestAuthorizationContext,
-  ): V2Error | null {
+  ): V2Error | RequestAuthorizationContext {
     if (
       context[requestAuthorizationBrand] !== true ||
       context.space !== message.space ||
@@ -1403,16 +1401,20 @@ export class Server {
           : "Unknown or replaced session for space",
       );
     }
-    if (
-      this.#aclMode() !== "off" &&
-      context.aclEpoch !== this.#aclEpoch(message.space)
-    ) {
-      return toError(
-        "AuthorizationError",
-        "Space ACL changed while the request was in flight",
-      );
+    if (this.#aclMode() === "off") return context;
+    const aclEpoch = this.#aclEpoch(message.space);
+    if (context.aclEpoch === aclEpoch) return context;
+    if (context.engine === undefined) {
+      return toError("AuthorizationError", "Space ACL state is unavailable");
     }
-    return null;
+    const deny = this.#authorizeCurrentSessionWithEngine(
+      context.engine,
+      message.space,
+      message.sessionId,
+      context.session,
+      context.requirement,
+    );
+    return deny ?? { ...context, aclEpoch };
   }
 
   nowSeconds(): number {
@@ -2495,15 +2497,15 @@ export class Server {
             await this.openEngine(message.space);
           // Authorization may become stale while request-schema expansion or
           // engine opening is in flight. Re-check session identity and the ACL
-          // epoch beside apply without making a duplicate ACL decision.
-          const invalidAuthorization = this.#requestAuthorizationContextError(
+          // epoch beside apply, re-authorizing only when the epoch changed.
+          const currentAuthorization = this.#currentRequestAuthorizationContext(
             message,
             authorization,
           );
-          if (invalidAuthorization !== null) {
+          if ("name" in currentAuthorization) {
             return respondTypedError<Engine.AppliedCommit>(
               message.requestId,
-              invalidAuthorization,
+              currentAuthorization,
             );
           }
           const invalid = this.#validateAclCommit(
@@ -2712,14 +2714,14 @@ export class Server {
       );
     }
     const { engine: aclEngine, session } = authorization;
-    const invalidAuthorization = this.#requestAuthorizationContextError(
+    const currentAuthorization = this.#currentRequestAuthorizationContext(
       message,
       authorization,
     );
-    if (invalidAuthorization !== null) {
+    if ("name" in currentAuthorization) {
       return respondTypedError<GraphQueryResult>(
         message.requestId,
-        invalidAuthorization,
+        currentAuthorization,
       );
     }
     if ((message.query as GraphQuery & { subscribe?: boolean }).subscribe) {
@@ -2866,14 +2868,14 @@ export class Server {
       );
     }
     const { engine: aclEngine, session } = authorization;
-    const invalidAuthorization = this.#requestAuthorizationContextError(
+    const currentAuthorization = this.#currentRequestAuthorizationContext(
       message,
       authorization,
     );
-    if (invalidAuthorization !== null) {
+    if ("name" in currentAuthorization) {
       return respondTypedError<WatchSetResult>(
         message.requestId,
-        invalidAuthorization,
+        currentAuthorization,
       );
     }
 
@@ -2932,14 +2934,14 @@ export class Server {
       );
     }
     const { engine: aclEngine, session } = authorization;
-    const invalidAuthorization = this.#requestAuthorizationContextError(
+    const currentAuthorization = this.#currentRequestAuthorizationContext(
       message,
       authorization,
     );
-    if (invalidAuthorization !== null) {
+    if ("name" in currentAuthorization) {
       return respondTypedError<WatchAddResult>(
         message.requestId,
-        invalidAuthorization,
+        currentAuthorization,
       );
     }
 
