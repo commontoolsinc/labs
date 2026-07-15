@@ -5,7 +5,7 @@
     "test": "deno test --no-check --allow-read --allow-write --allow-run --allow-env=UPDATE_GOLDENS,API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
   },
   "imports": {
-    "typescript": "npm:typescript",
+    "typescript": "npm:typescript@6.0.3",
     "source-map-js": "npm:source-map-js@^1.2.1"
   },
   "exports": {

@@ -10,7 +10,7 @@
     "./runtime-contract": "./src/core/runtime-contract.ts"
   },
   "imports": {
-    "typescript": "npm:typescript"
+    "typescript": "npm:typescript@6.0.3"
   },
   "tasks": {
     "test": "deno test --parallel --allow-read --allow-write --allow-env test/**/*.test.ts",

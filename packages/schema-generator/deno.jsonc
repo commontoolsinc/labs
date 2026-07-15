@@ -11,7 +11,7 @@
     "./property-name": "./src/typescript/property-name.ts"
   },
   "imports": {
-    "typescript": "npm:typescript"
+    "typescript": "npm:typescript@6.0.3"
   },
   "tasks": {
     "test": "deno test --parallel --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,UPDATE_GOLDENS,FIXTURE,SKIP_INPUT_CHECK test/**/*.test.ts",

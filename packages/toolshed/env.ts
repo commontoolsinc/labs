@@ -74,6 +74,10 @@ export const EnvSchema = z.object({
   // traceidratio, parentbased_always_on, parentbased_always_off,
   // parentbased_traceidratio. OTEL_TRACES_SAMPLER_ARG is the ratio for the
   // *ratio variants. Defaults (always_on / 1.0) keep 100% sampling.
+  // Trace-based distinct counts depend on full sampling: the active identity
+  // count reads the user.did attribute on the memory spans, and a ratio sampler
+  // drops identities from that count instead of thinning it proportionally.
+  // See docs/development/active-user-counting.md.
   OTEL_TRACES_SAMPLER: z.string().default("always_on"),
   OTEL_TRACES_SAMPLER_ARG: z.string().default("1.0"),
   // ===========================================================================
