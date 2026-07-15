@@ -15,6 +15,9 @@ import {
   isPending,
   isSyncing,
 } from "@/fabric-instances/DataUnavailable.ts";
+import {
+  DataUnavailable as ForeignDataUnavailable,
+} from "@/fabric-instances/DataUnavailable.ts?foreign-copy";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
@@ -164,6 +167,15 @@ describe("DataUnavailable", () => {
     expect(hasError({ reason: "error", error: new Error("forged") })).toBe(
       false,
     );
+  });
+
+  it("recognizes a concrete marker from a duplicate module instance", () => {
+    const foreignPending = ForeignDataUnavailable.pending();
+
+    expect(foreignPending).not.toBeInstanceOf(DataUnavailable);
+    expect(isDataUnavailable(foreignPending)).toBe(true);
+    expect(isPending(foreignPending)).toBe(true);
+    expect(hasError(foreignPending)).toBe(false);
   });
 
   describe("clone and value protocols", () => {

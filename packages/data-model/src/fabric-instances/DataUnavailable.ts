@@ -82,6 +82,29 @@ function isErrorFromAnotherRealm(value: unknown): value is Error {
     (candidate.stack === undefined || typeof candidate.stack === "string");
 }
 
+// Split production bundles can evaluate this module more than once in the
+// same worker. Share the concrete-instance registry across those evaluations
+// so guards remain nominal without relying on one module copy's constructor.
+const DATA_UNAVAILABLE_INSTANCES = (() => {
+  const key = Symbol.for("common.fabric.DataUnavailable.instances");
+  const host = globalThis as unknown as Record<PropertyKey, unknown>;
+  if (Object.hasOwn(host, key)) {
+    const existing = host[key];
+    if (!(existing instanceof WeakSet)) {
+      throw new TypeError("Invalid global DataUnavailable instance registry");
+    }
+    return existing as WeakSet<object>;
+  }
+  const registry = new WeakSet<object>();
+  Object.defineProperty(host, key, {
+    value: registry,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+  return registry;
+})();
+
 /**
  * Fabric control value representing data which a computation cannot yet use.
  *
@@ -105,6 +128,7 @@ export class DataUnavailable extends BaseFabricInstance
   constructor(state: DataUnavailableState) {
     super();
     this.#state = state;
+    DATA_UNAVAILABLE_INSTANCES.add(this);
   }
 
   /** Returns the interned pending marker. */
@@ -306,28 +330,29 @@ function validateState(
 export function isDataUnavailable(
   value: unknown,
 ): value is DataUnavailableVariant {
-  return value instanceof DataUnavailable;
+  return value !== null && typeof value === "object" &&
+    DATA_UNAVAILABLE_INSTANCES.has(value);
 }
 
 /** Returns whether `value` is the concrete pending marker. */
 export function isPending(value: unknown): value is IsPending {
-  return value instanceof DataUnavailable && value.reason === "pending";
+  return isDataUnavailable(value) && value.reason === "pending";
 }
 
 /** Returns whether `value` is a concrete marker carrying an error. */
 export function hasError(value: unknown): value is HasError {
-  return value instanceof DataUnavailable && value.reason === "error";
+  return isDataUnavailable(value) && value.reason === "error";
 }
 
 /** Returns whether `value` is the concrete syncing marker. */
 export function isSyncing(value: unknown): value is IsSyncing {
-  return value instanceof DataUnavailable && value.reason === "syncing";
+  return isDataUnavailable(value) && value.reason === "syncing";
 }
 
 /** Returns whether `value` is the concrete schema-mismatch marker. */
 export function hasSchemaMismatch(
   value: unknown,
 ): value is HasSchemaMismatch {
-  return value instanceof DataUnavailable &&
+  return isDataUnavailable(value) &&
     value.reason === "schema-mismatch";
 }
