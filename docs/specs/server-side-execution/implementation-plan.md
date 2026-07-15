@@ -1368,22 +1368,36 @@ conflict detection.
 - [ ] Follow-up: rebase reads naming rejected attempts' localSeqs the same
       way (the residual 9), and reduce the stale-confirmed-read retry cost.
 
-### W2.10 — Client-side interactive residual
+### W2.10 — Interactive residual: host main-isolate stalls
 
-**Depends on:** W2.8. **Status:** open; evidence gathered.
+**Depends on:** W2.8. **Status:** partially implemented; the remainder is
+Phase 3's doc-set feed.
 
-With the executor storm fixed, split-phase timing (`viewConditionMs` /
-`viewIdleWaitMs` / `homeIdleWaitMs` in the default-app fixture) attributes
-the remaining flag-on regression (~+39% avg, down from ~+63%) mostly to
-**viewConditionMs** — click until the app state names the new note view,
-before any idle wait — which grows with note count flag-on (156 → 895 ms)
-but stays flat flag-off (~160 ms). The suspect set is client-local claim
-machinery on the interactive path: per-commit overlay recording and its
-linear overlay scans while settlements are outstanding, claim-routing
-bookkeeping per action commit, and execution-feed processing during piece
-creation. Profile the interactive path with overlays pending, fix the
-scans/bookkeeping that scale with outstanding overlays or note count, and
-re-run the split-phase pair until viewConditionMs is flat flag-on.
+Root cause, established by measurement rather than the original client-side
+suspicion: per-note CPU profiles showed the browser runtime Worker ~75%
+idle in every note window — the client waits, it does not compute. A 10 Hz
+toolshed-responsiveness probe then showed flag-on main-isolate stalls
+(p99 1454 ms vs 149 ms flag-off; single graph traversals up to 198 ms;
+traverse total 8.6 s vs 0.57 s flag-off). Every client round trip —
+including the piece-creation acks behind `viewConditionMs` — queues behind
+that. Two flag-on traversal sources: the executor provider's wake path
+re-pulled every stale piece's whole closure per accepted-commit wave, and
+per-session graph-query refresh runs over roughly doubled commit volume
+(server echo commits).
+
+Implemented: the wake path now invalidates live registered actions directly
+and re-pulls a closure only for stale readers with no live registration;
+rejected commits' localSeqs are treated as host-unresolvable with a pre-send
+rebase. Re-probed: toolshed p99 1454 → 744 ms, traverse max 198 → 104 ms,
+note-create avg 830 → 673 ms (flag-off 502 ms; the overall flag-on
+regression is now ~+34%, from ~+63% before Phase 2.5), settlement latency
+avg 22.3 s → 11.0 s.
+
+Remaining: the surviving traverse load (7.2 s vs 0.57 s flag-off) is
+per-session graph-query re-evaluation over the doubled commit volume — the
+§2.2/§6.4 cost. Closing it belongs to Phase 3's doc-set delta feed, not to
+another Phase 2.5 patch; treat the ~+34% interactive gap as the Phase 2
+posture's floor until then, and set the W2.9 budget accordingly.
 
 ### W2.9 — Interactive latency gates
 
@@ -1395,9 +1409,23 @@ latency evidence to the rollout bar:
 - default-app note-create series (fresh-deployment pair, placement guard on):
   flag-on avg/p95 within an agreed budget of flag-off, and no growth trend
   across the series that flag-off does not show;
-- lunch-poll two-browser step timings under the same pairing (this fixture
-  currently fails its placement guard flag-on — zero successful settlements —
-  and must pass it);
+- lunch-poll two-browser step timings under the same pairing. Diagnosed
+  2026-07-15: claims for the poll space now stay stable across the whole run
+  (14 issued, 0 revoked), but the vote-flow commits match no demanded stale
+  reader in the host wake index (5 matches / 182 lookups; 434 of 438
+  accepted-commit notices suppressed as unrelated), so the Worker never
+  recomputes during the vote window and publishes no settlement — the guard
+  correctly fails. The tally computations read per-vote entity documents
+  through links; those reads sit outside the static surface (their unserved
+  diagnostic is `dynamic-read-outside-static-surface`) and are not indexed
+  as demanded readers. Passing this gate therefore requires a decision:
+  either admit same-space dynamic link-following reads to servability and
+  the wake index (the firewall's scope checks already run per attempt; note
+  the spec §B.2 letter constrains reads by space/scope, not by envelope
+  coverage — but the W2.4 product fixture currently certifies nested-entity
+  projections as unserved, so this flips a reviewed criterion), or keep
+  nested projections client-primary in v1 and swap this gate to a workload
+  the v1 boundary covers;
 - record results in a dated `docs/history/development/performance/` report
   and update the runbook's rollout-limits section to name these gates.
 
