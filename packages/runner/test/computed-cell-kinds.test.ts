@@ -267,10 +267,9 @@ describe("computed cell kinds", () => {
       expect(descriptorFor(testPattern, "st")!.kind).toBeUndefined();
     });
 
-    it("keeps handle-bearing lifts computed when capture writes are analyzed", () => {
-      // captureWritesAnalyzed is exhaustive-write PROVENANCE only — the
-      // classifier no longer consults it, and the result matches the
-      // unanalyzed sibling above.
+    it("keeps handle-bearing lifts computed", () => {
+      // A handle-bearing lift still classifies as computed: a replayable
+      // compute's writes are deterministically reproduced from its inputs.
       const embedsHandle = lift(
         (_input: unknown) => 0,
         {
@@ -278,7 +277,6 @@ describe("computed cell kinds", () => {
           properties: { c: { type: "number", asCell: ["cell"] } },
         } as const,
         { type: "number" } as const,
-        { captureWritesAnalyzed: true },
       );
       const testPattern = pattern<{ x: number }>(() => {
         const st = reactive<number>(5);
@@ -298,7 +296,6 @@ describe("computed cell kinds", () => {
         } as const,
         { type: "number" } as const,
         {
-          captureWritesAnalyzed: true,
           materializerWriteInputPaths: [["c"]],
         },
       );

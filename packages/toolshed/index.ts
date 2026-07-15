@@ -1,9 +1,9 @@
 import app from "@/app.ts";
 import env from "@/env.ts";
 import { identity } from "@/lib/identity.ts";
-import { Runtime } from "@commonfabric/runner";
+import type { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { toolshedRuntimeOptions } from "@/runtime-options.ts";
+import { createToolshedRuntime } from "@/runtime-options.ts";
 import { memory } from "@/routes/storage/memory.ts";
 import { shutdownOpenTelemetry } from "@/lib/otel.ts";
 
@@ -18,13 +18,13 @@ const initializeRuntime = () => {
 
     // Options assembly (the MEMORY_URL/API_URL split, EXPERIMENTAL_* wiring)
     // lives in runtime-options.ts, where it is unit-tested (CT-1814).
-    runtime = new Runtime(toolshedRuntimeOptions(
+    runtime = createToolshedRuntime(
       env,
       StorageManager.open({
         memoryHost: new URL(env.MEMORY_URL),
         as: identity,
       }),
-    ));
+    );
     console.log("Runtime initialized successfully");
     console.log("Configured to remote storage:", env.MEMORY_URL);
   } catch (error) {

@@ -35,7 +35,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = pattern((__cf_pattern_input: {
     query: string;
     content: string;

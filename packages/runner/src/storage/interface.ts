@@ -9,6 +9,7 @@ import type {
   EntityDocument,
   PatchOp,
   SchedulerActionSnapshotQuery,
+  SchedulerExecutionContextKey,
   SchedulerSnapshotListResult,
   SqliteDbRef,
   SqliteOperation,
@@ -213,17 +214,19 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
 
   /**
    * Register a deferred async chain in the cross-space promise set so
-   * `Cell.pull()` and the scheduler's `idle()` await it, then drop it from the
-   * set once it settles. Until a chain is registered it is invisible to the
-   * convergence waiters: a pull can return before the chain has settled and
-   * observe held, not-yet-loaded state. This is the safe composition of
-   * `addCrossSpacePromise` and `removeCrossSpacePromise` — prefer it over
-   * wiring the self-removing `finally` by hand at each call site.
+   * `Cell.pull()` and `synced()` await it, then drop it from the set once it
+   * settles. Until a chain is registered it is invisible to those waiters: a
+   * pull can return before the chain has settled and observe held,
+   * not-yet-loaded state. The scheduler's `idle()` does not consult this set at
+   * all, so registering a chain does not make `idle()` await it. This is the
+   * safe composition of `addCrossSpacePromise` and `removeCrossSpacePromise` —
+   * prefer it over wiring the self-removing `finally` by hand at each call site.
    *
    * `work` must eventually settle (resolve or reject). A chain that never
-   * settles stays registered and keeps `Cell.pull()`/`idle()` from observing
-   * convergence until the scheduler's convergence bound trips, so a caller that
-   * wraps an external `sync()` should ensure it cannot hang unbounded.
+   * settles stays registered and keeps `Cell.pull()` and `synced()` from
+   * observing convergence — `Cell.pull()` escapes only at its bounded round cap
+   * — so a caller that wraps an external `sync()` should ensure it cannot hang
+   * unbounded.
    */
   trackUntilSettled(work: Promise<unknown>): void;
 
@@ -236,12 +239,63 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   pendingCrossSpacePromiseCount?(): number;
 
   /**
+   * Whether a link target in `space` should be background-pulled because this
+   * replica has never seen the doc (fresh-replica read asymmetry): selector
+   * driven syncs only deliver what a schema covered, so a link can point at a
+   * same-space doc no selector ever walked — without a pull such reads mask
+   * as `undefined`, indistinguishable from absence. Returns true exactly once
+   * per (space, id, scope) per manager lifetime and only when the local
+   * replica holds no state for the doc; the caller kicks the actual sync (see
+   * the link-resolution hop loop). Optional: managers without lazy remote
+   * replication (e.g. test mocks) simply don't implement it.
+   */
+  shouldPullDoc?(space: MemorySpace, id: URI, scope?: CellScope): boolean;
+
+  /**
+   * Undo a `shouldPullDoc` reservation after the kicked sync FAILED, so a
+   * later read may retry the pull. Without this, one transient sync failure
+   * would mask the doc for the manager's whole lifetime (the reservation is
+   * taken before the async pull settles). No-op when the doc was never
+   * reserved. Callers pair it with the failure path of the sync they kicked.
+   */
+  retractDocPullKick?(space: MemorySpace, id: URI, scope?: CellScope): void;
+
+  /**
    * Wait for the currently pending cross-space promises (and any they
    * transitively kick) to settle, WITHOUT waiting for full provider sync the
    * way `synced()` does. Used by `Cell.pull()`'s convergence loop so pulls
    * that kicked no loads keep their existing timing.
    */
   crossSpaceSettled?(): Promise<void>;
+
+  /**
+   * Documents whose load (`syncCell`) is currently in flight, as
+   * `(space, scope, id)` addresses. The scheduler's event preflight parks the
+   * head event while an address in the handler's read closure (or upstream of
+   * it) is still loading — a load that completes with the document absent
+   * counts as complete (CT-1795).
+   */
+  pendingLoadAddresses?(): readonly Pick<
+    IMemorySpaceAddress,
+    "space" | "scope" | "id"
+  >[];
+
+  /**
+   * Generation of the currently in-flight load for an entity key, or
+   * `undefined` when the key is not loading. A new generation is allocated
+   * after a prior load settles so event preflight can distinguish a genuinely
+   * new provisional snapshot from the load it already waited for.
+   */
+  pendingLoadGeneration?(key: string): number | undefined;
+
+  /**
+   * Resolves when none of the given documents (keyed
+   * `space/scope/id`, see the scheduler's `entityKey`) has an in-flight
+   * load. Resolves immediately when none do. Rejects when any of the captured
+   * load generations fails, so an at-most-once event is not dispatched against
+   * a replica whose required load failed.
+   */
+  loadsSettled?(keys: readonly string[]): Promise<void>;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -318,6 +372,21 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   listSchedulerActionSnapshots?(
     query?: SchedulerActionSnapshotQuery,
   ): Promise<SchedulerSnapshotListResult>;
+
+  /**
+   * Conservative scheduler-snapshot currency oracle. Returns true only when
+   * every address belongs to this provider, has a confirmed local base, and
+   * that base is no newer than the observation sequence.
+   */
+  areSchedulerAddressesCurrentAtOrBelow?(
+    addresses: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean;
+
+  /** Whether an optimistic local write overlaps any supplied address. */
+  schedulerHasPendingWriteOverlapping?(
+    addresses: readonly IMemorySpaceAddress[],
+  ): boolean;
 
   /** Run a server-side read-only SQLite query against a cell-derived db. */
   sqliteQuery?(
@@ -431,6 +500,7 @@ export type StorageNotification =
   | ILoadNotification
   | IPullNotification
   | IIntegrateNotification
+  | ISchedulerObservationsNotification
   | IResetNotification;
 
 /**
@@ -520,6 +590,38 @@ export interface IIntegrateNotification {
   type: "integrate";
   space: MemorySpace;
   changes: IMergedChanges;
+}
+
+/**
+ * Broadcast after an integrate whose subscription push carried scheduler
+ * observation rows for the sync window: other clients' committed action runs
+ * that this runtime's scheduler may ADOPT instead of re-running
+ * (docs/specs/scheduler-v2/incremental-observation-adoption.md). Fired after
+ * the corresponding {@link IIntegrateNotification} in the same synchronous
+ * turn, so adoption clears the dirt those writes caused before dispatch.
+ * `observations` entries are protocol-shaped (observation payload is
+ * `unknown`); the scheduler owns validation. `seqCurrentAtOrBelow` and
+ * `hasPendingWriteOverlapping` are the storage-side adoption oracles
+ * (per-doc replica seq currency; local uncommitted-write overlap).
+ */
+export interface ISchedulerObservationsNotification {
+  type: "scheduler-observations";
+  space: MemorySpace;
+  observations: readonly {
+    observedAtSeq: number;
+    executionContextKey: SchedulerExecutionContextKey;
+    observation: unknown;
+    directDirtySeq?: number;
+    staleSeq?: number;
+    unknownReason?: string;
+  }[];
+  seqCurrentAtOrBelow(
+    reads: readonly IMemorySpaceAddress[],
+    seq: number,
+  ): boolean;
+  hasPendingWriteOverlapping(
+    reads: readonly IMemorySpaceAddress[],
+  ): boolean;
 }
 
 /**

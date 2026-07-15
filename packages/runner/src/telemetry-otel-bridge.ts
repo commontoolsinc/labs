@@ -48,6 +48,15 @@ export interface OtelBridgeOptions {
    * bare key ambiguous (resource vs attribute context) in SigNoz queries.
    */
   metricAttributes?: Attributes;
+  /**
+   * Minimum action-run duration that earns a retroactive `scheduler.action.run`
+   * span. Measured on the lunch-poll diagnose workload: ~4.4% of runs exceed
+   * 10ms (the distribution is bimodal — sub-ms computations vs 10–25ms
+   * effects), so the default adds ~5% span volume, not a multiplier. Every run
+   * still lands in the `ct.scheduler.action.duration_ms` histogram.
+   * @default 10
+   */
+  actionRunSpanThresholdMs?: number;
 }
 
 export interface RuntimeTelemetryOtelBridge {
@@ -86,6 +95,7 @@ export function createRuntimeTelemetryOtelBridge(
   options: OtelBridgeOptions,
 ): RuntimeTelemetryOtelBridge {
   const { tracer, meter } = options;
+  const actionRunSpanThresholdMs = options.actionRunSpanThresholdMs ?? 10;
   const base = options.attributes ?? {};
   const attrs = (extra?: Attributes): Attributes =>
     extra ? { ...base, ...extra } : base;
@@ -142,6 +152,22 @@ export function createRuntimeTelemetryOtelBridge(
     "ct.scheduler.preflight.dirty_dependency_count",
     { description: "Dirty dependencies collected per event" },
   );
+  // Per-run action duration — the signal that names a hot derive directly
+  // (group by ct.module). Same measurement ActionStats records.
+  const actionDuration = meter.createHistogram(
+    "ct.scheduler.action.duration_ms",
+    { unit: "ms", description: "Scheduler action run duration" },
+  );
+  // Settle pass duration/iterations — the user-facing "event → stable graph"
+  // numbers, emitted unconditionally per settle pass.
+  const settleDuration = meter.createHistogram(
+    "ct.scheduler.settle.duration_ms",
+    { unit: "ms", description: "Settle loop wall-clock per pass" },
+  );
+  const settleIterations = meter.createHistogram(
+    "ct.scheduler.settle.iterations",
+    { description: "Settle iterations that ran work, per pass" },
+  );
   // busyRatio is the runner-thrash smoking gun: fraction of a window spent busy.
   const busyRatio = meter.createHistogram("ct.scheduler.busy_ratio", {
     description: "Non-settling window busy ratio (0..1)",
@@ -184,20 +210,28 @@ export function createRuntimeTelemetryOtelBridge(
     id: string,
     kind: "push" | "pull",
     operation: string,
+    extra?: Attributes,
   ) => {
     const span = tracer.startSpan(`storage.${kind}`, {
       attributes: attrs({
         "ct.storage.kind": kind,
         "ct.storage.operation": operation,
+        ...extra,
       }),
     });
     openOps.set(id, { span, startMs: nowMs() });
   };
 
-  const endStorageOp = (id: string, kind: "push" | "pull", error?: string) => {
+  const endStorageOp = (
+    id: string,
+    kind: "push" | "pull",
+    error?: string,
+    sessionId?: string,
+  ) => {
     const open = openOps.get(id);
     const durationMs = open ? nowMs() - open.startMs : undefined;
     if (open) {
+      if (sessionId) open.span.setAttribute("session.id", sessionId);
       if (error) {
         open.span.setStatus({ code: SpanStatusCode.ERROR, message: error });
         open.span.setAttribute("error", true);
@@ -224,6 +258,40 @@ export function createRuntimeTelemetryOtelBridge(
             "ct.error": !!marker.error,
           }),
         );
+        break;
+      case "scheduler.run.complete": {
+        actionDuration.record(
+          marker.durationMs,
+          mattrs({
+            ...patternAttrs(marker.actionInfo),
+            "ct.error": !!marker.error,
+          }),
+        );
+        if (marker.durationMs >= actionRunSpanThresholdMs) {
+          // Retroactive span, same technique as scheduler.preflight: the run
+          // already happened; reconstruct its window from the duration.
+          const end = Date.now();
+          const span = tracer.startSpan("scheduler.action.run", {
+            startTime: end - Math.round(marker.durationMs),
+            attributes: attrs({
+              ...patternAttrs(marker.actionInfo),
+              "ct.action_id": marker.actionId,
+              "ct.duration_ms": marker.durationMs,
+            }),
+          });
+          if (marker.error) {
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: marker.error,
+            });
+          }
+          span.end(end);
+        }
+        break;
+      }
+      case "scheduler.settle":
+        settleDuration.record(marker.durationMs, mattrs());
+        settleIterations.record(marker.iterations, mattrs());
         break;
       case "scheduler.invocation":
         invocations.add(1, mattrs(patternAttrs(marker.handlerInfo)));
@@ -269,7 +337,9 @@ export function createRuntimeTelemetryOtelBridge(
             "ct.read_count": marker.readCount,
             "ct.shallow_read_count": marker.shallowReadCount,
             "ct.dirty_dependency_count": marker.dirtyDependencyCount,
-            "ct.preflight.max_depth": marker.stats.maxDepth,
+            // v2 preflight has no depth-tracked upstream walk (decision 15
+            // inverted it); the walk's cost signal is its visit count.
+            "ct.preflight.visit_count": marker.stats.visitCount,
             "ct.preflight.work_set_add_count": marker.stats.workSetAddCount,
             "ct.preflight.reverse_dependency_edge_count":
               marker.stats.reverseDependencyEdgeCount,
@@ -286,13 +356,20 @@ export function createRuntimeTelemetryOtelBridge(
         nonSettling.add(1, mattrs());
         break;
       case "storage.push.start":
-        startStorageOp(marker.id, "push", marker.operation);
+        // localSeq/space join to the server's memory.transact span, which
+        // stamps the same pair as commit.local_seq / space.did.
+        startStorageOp(marker.id, "push", marker.operation, {
+          ...(marker.localSeq !== undefined
+            ? { "commit.local_seq": marker.localSeq }
+            : {}),
+          ...(marker.spaceDid ? { "space.did": marker.spaceDid } : {}),
+        });
         break;
       case "storage.push.complete":
-        endStorageOp(marker.id, "push");
+        endStorageOp(marker.id, "push", undefined, marker.sessionId);
         break;
       case "storage.push.error":
-        endStorageOp(marker.id, "push", marker.error);
+        endStorageOp(marker.id, "push", marker.error, marker.sessionId);
         break;
       case "storage.pull.start":
         startStorageOp(marker.id, "pull", marker.operation);

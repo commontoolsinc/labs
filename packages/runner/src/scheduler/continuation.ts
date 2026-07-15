@@ -1,35 +1,21 @@
 import { queueTask } from "./diagnostics.ts";
-import {
-  type EventQueueWakeState,
-  hasEventQueueWakeTimer,
-  scheduleEventQueueWake,
-} from "./events.ts";
-import type { MaterializerIndexState } from "./materializers.ts";
-import type { Action, QueuedEvent } from "./types.ts";
+import { isHeadEventParked } from "./events.ts";
+import { planPullExecuteContinuation } from "./execution.ts";
+import type { PullSchedulingState } from "./work-oracle.ts";
+import type { QueuedEvent } from "./types.ts";
 
 export interface ExecuteContinuationState {
-  readonly pending: ReadonlySet<Action>;
-  readonly dirty: ReadonlySet<Action>;
-  readonly effects: ReadonlySet<Action>;
+  readonly pullScheduling: PullSchedulingState;
   readonly eventQueue: readonly QueuedEvent[];
-  readonly eventQueueWakeState: EventQueueWakeState;
   readonly idlePromises: (() => void)[];
-  readonly scheduledFirstTime: Set<Action>;
-  readonly conditionallyScheduledEffects: ReadonlyMap<Action, number>;
-  readonly changedWritesHistory: unknown[];
   readonly consumeRerunAfterCurrentExecute: () => boolean;
-  readonly isDemandedPullComputation: (action: Action) => boolean;
-  readonly materializerIndex: MaterializerIndexState;
-  readonly shouldRunFirstPullComputationInDemandContext: (
-    action: Action,
-  ) => boolean;
-  readonly isDebouncedComputationWaiting: (action: Action) => boolean;
-  readonly getNextDebounceRunTime: (action: Action) => number | undefined;
-  readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly hasPendingLineageHeadEvent: () => boolean;
-  readonly resetLoopCounter: () => void;
+  readonly hasLoadParkedHeadEvent: () => boolean;
+  readonly scheduleWake: (at: number) => void;
+  readonly hasWakeTimer: () => boolean;
   readonly setScheduled: (scheduled: boolean) => void;
   readonly resetSettlingTracker: () => void;
+  readonly resetConvergenceHoldPasses: () => void;
   readonly setPendingQueueTaskTimer: (
     timer: ReturnType<typeof setTimeout> | null,
   ) => void;
@@ -47,26 +33,17 @@ export function applyQuiescentContinuation(
   continuation: QuiescentContinuation,
 ): void {
   if (continuation.nextDirtyPullRunAt !== undefined) {
-    scheduleEventQueueWake(
-      state.eventQueueWakeState,
-      continuation.nextDirtyPullRunAt,
-    );
+    state.scheduleWake(continuation.nextDirtyPullRunAt);
     if (
       !continuation.hasParkedHeadEvent &&
       !continuation.nextDirtyPullRunWaitsForIdle
     ) {
-      resolveIdlePromises(state.idlePromises);
+      finishIdleEpisode(state);
+      // Resolving idle ends this logical non-settling episode even though its
+      // rate-limited retry wake remains armed. A later unrelated wave must get
+      // fresh telemetry/diagnostic accounting.
     }
     markNotScheduled(state);
-    return;
-  }
-
-  if (hasEventQueueWakeTimer(state.eventQueueWakeState)) {
-    markNotScheduled(state);
-
-    // Waiting on a future wake is quiescent from the scheduler's perspective,
-    // so reset the non-settling tracker.
-    state.resetSettlingTracker();
     return;
   }
 
@@ -74,21 +51,22 @@ export function applyQuiescentContinuation(
     markNotScheduled(state);
 
     // A lineage-parked head has no timer; the origin transaction's commit
-    // callback is the wake source.
+    // callback is the wake source. A time-parked event may share the gate wake.
     state.resetSettlingTracker();
     return;
   }
 
-  resolveIdlePromises(state.idlePromises);
-  markNotScheduled(state);
-
-  // Reset settling tracker on idle.
-  state.resetSettlingTracker();
-
-  state.scheduledFirstTime.clear();
-  if (state.conditionallyScheduledEffects.size === 0) {
-    state.changedWritesHistory.length = 0;
+  if (state.hasWakeTimer()) {
+    // The work oracle returned no nextDirtyPullRunAt and no event is parked, so
+    // this shared timer belongs only to dormant/non-idle-relevant work. Leave
+    // the harmless wake armed, but do not let it hold current idle waiters.
+    finishIdleEpisode(state);
+    markNotScheduled(state);
+    return;
   }
+
+  finishIdleEpisode(state);
+  markNotScheduled(state);
 }
 
 export function queueAnotherExecutionTick(
@@ -103,11 +81,53 @@ export function queueAnotherExecutionTick(
 }
 
 function markNotScheduled(state: ExecuteContinuationState): void {
-  state.resetLoopCounter();
   state.setScheduled(false);
 }
 
 function resolveIdlePromises(promises: (() => void)[]): void {
   for (const resolve of promises) resolve();
   promises.length = 0;
+}
+
+function finishIdleEpisode(state: ExecuteContinuationState): void {
+  resolveIdlePromises(state.idlePromises);
+  state.resetConvergenceHoldPasses();
+  state.resetSettlingTracker();
+}
+
+export function applyPullExecuteContinuation(
+  state: ExecuteContinuationState,
+): void {
+  // In pull mode, we consider ourselves done when there are no effects or
+  // effect-demanded computations to execute.
+  //
+  // Read the clock once for the whole ready/parked decision: an event whose
+  // `notBefore` falls between two separate reads would be classed as neither
+  // ready nor parked, letting idle() resolve with it still queued.
+  const now = performance.now();
+  const hasPendingLineageHeadEvent = state.hasPendingLineageHeadEvent();
+  const hasLoadParkedHeadEvent = state.hasLoadParkedHeadEvent();
+  const hasQueuedEventReadyNow = state.eventQueue.length > 0 &&
+    !isHeadEventParked(state, now) &&
+    !hasPendingLineageHeadEvent &&
+    !hasLoadParkedHeadEvent;
+  const hasParkedHeadEvent = state.eventQueue.length > 0 &&
+    (isHeadEventParked(state, now) || hasPendingLineageHeadEvent ||
+      hasLoadParkedHeadEvent);
+  const shouldRerunAfterCurrentExecute = state
+    .consumeRerunAfterCurrentExecute();
+
+  const continuation = planPullExecuteContinuation({
+    pull: state.pullScheduling,
+    shouldRerunAfterCurrentExecute,
+    hasQueuedEventReadyNow,
+    hasParkedHeadEvent,
+  });
+
+  if (!continuation.shouldQueueAnotherTick) {
+    applyQuiescentContinuation(state, continuation);
+    return;
+  }
+
+  queueAnotherExecutionTick(state);
 }

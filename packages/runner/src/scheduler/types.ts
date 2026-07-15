@@ -18,6 +18,19 @@ export interface TelemetryAnnotations {
   writes: NormalizedFullLink[];
   materializerWriteEnvelopes?: NormalizedFullLink[];
   ignoredSchedulingWrites?: NormalizedFullLink[];
+  /**
+   * Concrete structural surface for a transformer-proven complete source lift.
+   * This is runner-owned metadata; raw modules, handlers, and unresolved
+   * redirect surfaces leave it absent and therefore remain fail-closed.
+   */
+  completeSchedulerScopeSummary?: {
+    complete: true;
+    piece: NormalizedFullLink;
+    reads: NormalizedFullLink[];
+    writes: NormalizedFullLink[];
+    materializerWriteEnvelopes: NormalizedFullLink[];
+    directOutputs: NormalizedFullLink[];
+  };
   schedulerObservationIdentity?: SchedulerObservationIdentity;
 }
 
@@ -57,16 +70,6 @@ export type EventHandler =
 export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
 /**
- * Callback to populate a transaction with an action's read dependencies.
- * Called by the scheduler to discover what cells the action will read.
- * The callback should read all cells (using .get({ traverseCells: true })) that
- * the action will access, so the transaction captures all dependencies.
- * The transaction will be aborted after this callback returns, so it's safe
- * to simulate writes.
- */
-export type PopulateDependencies = (tx: IExtendedStorageTransaction) => void;
-
-/**
  * Reactivity log.
  *
  * Used to log reads and writes to docs. Used by scheduler to keep track of
@@ -79,10 +82,7 @@ export type ReactivityLog = {
   writes: IMemorySpaceAddress[];
 };
 
-export type PopulateDependenciesEntry = PopulateDependencies | ReactivityLog;
-
-export type DirtyDependencyTraceContext = SchedulerEventPreflightStats & {
-  depth: number;
+export type EventPreflightTraceContext = SchedulerEventPreflightStats & {
   actionSummaries: Map<Action, SchedulerEventPreflightActionSummary>;
   rootDirectWriterActions: Set<Action>;
 };
@@ -147,29 +147,19 @@ export interface TriggerTraceValueSummary {
   preview?: string | number | boolean | null;
 }
 
-export interface TriggerTraceScheduledEffect {
-  actionId: string;
-  pendingBefore: boolean;
-  dirtyBefore: boolean;
-  debounceMs?: number;
-}
-
 export interface TriggerTraceActionRecord {
   actionId: string;
   actionType: "effect" | "computation";
-  mode: "pull" | "push";
+  mode: "pull";
   decision:
-    | "schedule-push"
-    | "schedule-effect"
-    | "mark-dirty"
-    | "already-dirty"
+    | "mark-invalid"
+    | "already-invalid"
     | "skip-own-commit-source"
     | "skip-same-change-group";
   pendingBefore: boolean;
   pendingAfter: boolean;
   dirtyBefore: boolean;
   dirtyAfter: boolean;
-  scheduledEffects: TriggerTraceScheduledEffect[];
 }
 
 export interface TriggerTraceEntry {
@@ -177,7 +167,7 @@ export interface TriggerTraceEntry {
   notificationType: string;
   changeIndex: number;
   matchedActionCount: number;
-  mode: "pull" | "push";
+  mode: "pull";
   writerActionId?: string;
   space: MemorySpace;
   entityId: URI;
@@ -196,6 +186,14 @@ export type QueuedEvent = {
   action: Action;
   handler: EventHandler;
   event: any;
+  /**
+   * The FIFO slot was reserved before its handler's piece finished loading.
+   * A loading head parks the whole event queue so later, already-registered
+   * handlers cannot overtake it.
+   */
+  handlerLoadPending?: boolean;
+  /** Internal exactly-once guard for terminal pre-dispatch drops. */
+  finalOutcomeNotified?: boolean;
   /**
    * Whether a transient failure for this event should be retried. `true` routes
    * a transient commit failure through the exponential-backoff window and lets

@@ -86,7 +86,7 @@ async function test() {
     address: { city: "Los Angeles" },
   };
   testEmployeeCell.set(employeeData);
-  await tx.commit();
+  assertEquals(await tx.commit(), { ok: {} });
 
   // Create a cell that points to the address portion of that cell
   tx = runtime1.edit();
@@ -97,7 +97,7 @@ async function test() {
     tx,
   );
   testAddressesCell.set({ addresses: [testEmployeeCell.key("address")] });
-  await tx.commit();
+  assertEquals(await tx.commit(), { ok: {} });
 
   await testAddressesCell.sync();
   await testEmployeeCell.sync();
@@ -116,11 +116,12 @@ async function test() {
       memoryHost: new URL(API_URL),
     }),
   });
+  const runtime2Tx = runtime2.edit();
 
   const addressesArrayCell2 = runtime2.getCellFromLink(
     addressesArrayCellLink1,
     addressesArraySchema,
-    tx,
+    runtime2Tx,
   );
   const newCell = await addressesArrayCell2.sync();
   await runtime2.storageManager.synced();

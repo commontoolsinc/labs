@@ -74,7 +74,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     result: { tasks: Item[]; view: string; };
 }, __cfHelpers.JSXElement[]>(({ result }) => {
@@ -140,7 +140,7 @@ const __cfLift_2 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-destructured-map
 // Verifies: .map() on a destructured property of a computed result inside another computed() is NOT transformed to .mapWithPattern()
 //   computed(() => { const { tasks } = result; return tasks.map(fn) }) → lift(({ result }) => { const { tasks } = result; return tasks.map(fn) })(...)

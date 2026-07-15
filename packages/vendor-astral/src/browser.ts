@@ -148,13 +148,22 @@ export class Browser implements AsyncDisposable {
     if (!process) {
       await Promise.allSettled(this.pages.map((page) => page.close()));
     } else {
+      // The CDP `Browser.close` above already asks the browser to exit, so
+      // the process may be gone before either signal below is sent — and
+      // killing an already-exited child throws. That race is a success (the
+      // process is down), not an error, so both kills tolerate it and the
+      // final wait is on `process.status`.
       try {
         // ask nicely first
         process.kill();
         await deadline(process.status, 10 * 1000);
       } catch {
         // then force
-        process.kill("SIGKILL");
+        try {
+          process.kill("SIGKILL");
+        } catch {
+          // Already terminated between the polite close and the SIGKILL.
+        }
         await process.status;
       }
     }

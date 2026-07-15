@@ -34,7 +34,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["a", "b", "c"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-complex-expression
 // Verifies: computed(() => expr) with three cell captures in an arithmetic expression
 //   computed(() => (a.get() * b.get() + c.get()) / 2) → lift(({ a, b, c }) => ...)({ a, b, c })

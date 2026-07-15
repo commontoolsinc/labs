@@ -63,7 +63,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     items: {
         label: string | (string & { readonly [DEFAULT_MARKER]: ""; });
@@ -88,7 +88,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     items: {
         rank: number | (number & { readonly [DEFAULT_MARKER]: 7; });
@@ -113,7 +113,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_4 = __cfHelpers.lift<{
     boxes: {
         note: string | (string & { readonly [DEFAULT_MARKER]: "n/a"; });
@@ -138,7 +138,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["boxes"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     const boxes = __cf_pattern_input.key("boxes");

@@ -35,7 +35,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-nested-callback
 // Verifies: capture extraction works with a nested .map() over a captured cell's array value
 //   computed(() => numbers.get().map(n => n * multiplier.get())) → lift(...)({ numbers, multiplier })

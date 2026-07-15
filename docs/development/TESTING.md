@@ -86,6 +86,48 @@ Deno.exit(0);
 
 When adding runtime features, consider adding integration tests to `packages/runner/integration/` that verify the feature works end-to-end. See existing tests like `basic-persistence.test.ts` or `array_push.test.ts` for examples.
 
+### Recording browser integration tests as video demos
+
+Selected `patterns` and `shell` browser integration tests can be recorded with
+the same local servers, browser identities, UI events, waits, assertions, and
+cleanup used by the normal integration suite:
+
+```bash
+deno task demo patterns cfc-render-policy-demo
+deno task demo patterns cfc-render-policy-demo lunch-poll-vote
+deno task demo patterns lunch-poll-vote --output=tmp/demos/lunch-poll.mp4
+```
+
+Each file filter must resolve to exactly one `*.test.ts` file. The command runs
+each complete file sequentially because its `it` blocks may share suite setup
+and browser state. Every invocation writes an `index.html` video gallery beside
+the test-named MP4s and versioned diagnostic manifests beneath `tmp/demos/`.
+The gallery uses relative links, so its complete directory can be copied or
+served as-is.
+
+With one filter, `--output=PATH` copies the final MP4 to a chosen file. With
+multiple filters, `--output=DIRECTORY` copies the named MP4s and a portable
+`index.html` gallery into that directory.
+
+FFmpeg must be installed and available as `ffmpeg`, or its path must be set in
+`FFMPEG`. Normal integration tests do not require FFmpeg. Useful options are
+`--keep-frames`, `--viewport=WIDTHxHEIGHT`, and `--port-offset=N`.
+
+Presentation mode modifies the existing browser interaction paths rather than
+using demo-only clicks or typing. Inputs type with a readable character delay,
+clicks show an injected cursor, and labeled scenario steps appear as captions.
+All presentation behavior is disabled during `deno task integration`.
+
+Tests with multiple `ShellIntegration` instances retain their independent
+browsers and identities. Each page is recorded against one shared timeline and
+the streams are composed afterward: two participants are side by side, while
+three or four use a 2-by-2 grid. Configure stable labels and colors through the
+shell's `presentation` metadata.
+
+If a test, browser capture, or FFmpeg encode fails, the command exits nonzero
+and retains its manifest and available intermediate streams under the printed
+run directory.
+
 ## Related documentation
 
 - [waitfor-migration.md](waitfor-migration.md) — waiting in tests: prefer
@@ -99,6 +141,9 @@ When adding runtime features, consider adding integration tests to `packages/run
   coverage for authored patterns) and how both feed the coverage-debt gate.
 - [CI_PERFORMANCE.md](CI_PERFORMANCE.md) — the CI wall-time policy, and the
   coverage-debt baseline and ratchet markers that gate a pull request.
+- [BENCHMARKS.md](BENCHMARKS.md) — how `*.bench.ts` files run in CI, how the
+  team ops dashboard charts their trends, and the naming and stdout
+  constraints a bench file must satisfy.
 - [LLM_TESTING.md](LLM_TESTING.md) — testing patterns and server routes that
   call the LLM, including the test-environment guard and conversation fixtures.
 - [UI_TESTING.md](UI_TESTING.md) — testing shadow DOM components in browser

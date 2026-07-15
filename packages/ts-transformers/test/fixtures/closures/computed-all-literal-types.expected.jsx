@@ -44,7 +44,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "numLiteral", "floatLiteral", "boolLiteral", "strLiteral"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // Test that all literal types are widened in closure captures
 // FIXTURE: computed-all-literal-types
 // Verifies: literal values (number, string, boolean, float) are captured and their types widened in schemas

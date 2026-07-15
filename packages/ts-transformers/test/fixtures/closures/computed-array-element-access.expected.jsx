@@ -31,7 +31,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "factors"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-array-element-access
 // Verifies: an array variable accessed by index inside a computed is captured as a whole array
 //   computed(() => expr) → lift(schema, schema)({ value, factors })

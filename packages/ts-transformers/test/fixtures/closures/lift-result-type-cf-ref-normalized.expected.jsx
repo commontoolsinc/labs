@@ -41,7 +41,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: lift-result-type-cf-ref-normalized
 // Verifies: a synthesized lift's RESULT type argument that is a commonfabric
 // type (here JSXElement, the type of the returned JSX) is emitted as the

@@ -114,7 +114,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["text", "active"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     memberIndex: number;
 }, boolean>(({ memberIndex }) => memberIndex === 0, {
@@ -351,7 +351,7 @@ visibleProjects.map((project, projectIndex) => {
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // [TRANSFORM] pattern: type param stripped; input+output schemas appended after callback
 export default pattern((state) => {
     // [TRANSFORM] new Writable: schema arg injected

@@ -10,6 +10,44 @@ import { navigateTo as rawNavigateTo } from "../src/builtins/navigate-to.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+type TransactMessage = { requestId: string };
+type TransactResponse = {
+  type: "response";
+  requestId: string;
+  ok?: unknown;
+  error?: { name: string; message: string };
+};
+
+function delayNextServerTransact(
+  storageManager: ReturnType<typeof StorageManager.emulate>,
+) {
+  const server = (storageManager as unknown as {
+    server(): {
+      transact(message: TransactMessage): Promise<TransactResponse>;
+    };
+  }).server();
+  const original = server.transact.bind(server);
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let shouldDelay = true;
+
+  server.transact = async (message) => {
+    if (!shouldDelay) return await original(message);
+    shouldDelay = false;
+    started.resolve();
+    await release.promise;
+    return await original(message);
+  };
+
+  return {
+    started: started.promise,
+    confirm: () => release.resolve(),
+    restore: () => {
+      server.transact = original;
+    },
+  };
+}
+
 async function runNavigateHandlerTest(conditional: boolean): Promise<void> {
   const storageManager = StorageManager.emulate({ as: signer });
   const navigations: string[] = [];
@@ -85,7 +123,7 @@ async function runNavigateHandlerTest(conditional: boolean): Promise<void> {
     await result.pull();
 
     result.key("openNote").send({});
-    await runtime.idle();
+    await runtime.settled();
     await result.pull();
 
     assert((result.key("menuOpen").get() as unknown) === false);
@@ -103,6 +141,81 @@ Deno.test("handler can update local state and still navigate", async () => {
 Deno.test("conditional handler still navigates after it hides itself", async () => {
   await runNavigateHandlerTest(true);
 });
+
+async function runCancelledDeferredNavigateTest(
+  nested: boolean,
+): Promise<void> {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const navigations: string[] = [];
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    experimental: { commitPreconditions: true },
+    navigateCallback: (target) => {
+      navigations.push(entityRefToString(target.entityId));
+    },
+  });
+  let tx: IExtendedStorageTransaction = runtime.edit();
+  let gate: ReturnType<typeof delayNextServerTransact> | undefined;
+
+  try {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, navigateTo, pattern } = commonfabric;
+    const Target = pattern(() => ({ title: "cancelled target" }));
+    const openTarget = handler(
+      { type: "object", properties: {} },
+      { type: "object", properties: {} },
+      () => {
+        const navigation = navigateTo(Target({}));
+        return nested ? { navigation } : navigation;
+      },
+    );
+    const Root = pattern(() => ({ openTarget: openTarget({}) }));
+    const rootCell = runtime.getCell<{ openTarget: unknown }>(
+      space,
+      { cancelledDeferredNavigate: nested ? "nested" : "direct" },
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, Root, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+    await runtime.scheduler.idleWithPendingCommits();
+
+    gate = delayNextServerTransact(storageManager);
+    root.key("openTarget").send({});
+    await gate.started;
+
+    // The navigate result is assembled, but both result shapes defer its
+    // start until this handler commit succeeds. Stopping the parent must
+    // tombstone that pending start before the commit callback can install it.
+    runtime.runner.stop(rootCell);
+    assertEquals(runtime.runner.cancels.size, 0);
+
+    gate.confirm();
+    await runtime.settled();
+
+    assertEquals(navigations, []);
+    assertEquals(runtime.runner.cancels.size, 0);
+  } finally {
+    gate?.confirm();
+    gate?.restore();
+    await tx.commit();
+    await runtime.dispose();
+    await storageManager.close();
+  }
+}
+
+Deno.test(
+  "stopping a parent tombstones a direct deferred navigateTo result",
+  async () => await runCancelledDeferredNavigateTest(false),
+);
+
+Deno.test(
+  "stopping a parent tombstones a nested deferred navigateTo result",
+  async () => await runCancelledDeferredNavigateTest(true),
+);
 
 Deno.test("navigateTo is idempotent for one result cell", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
@@ -184,7 +297,7 @@ Deno.test("navigateTo is idempotent for one result cell", async () => {
     first.action(tx);
     second.action(tx);
     await tx.commit();
-    await runtime.idle();
+    await runtime.settled();
 
     assertEquals(navigations.length, 1);
     assertEquals(navigations[0], entityRefToString(targetOne.entityId));
@@ -253,14 +366,14 @@ Deno.test(
       builtin.action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
       assert(rejectedResult.error !== undefined);
-      await runtime.idle();
+      await runtime.settled();
       assertEquals(navigations.length, 0);
 
       const retryTx = runtime.edit();
       builtin.action(retryTx);
       const retryResult = await retryTx.commit();
       assert(retryResult.ok !== undefined);
-      await runtime.idle();
+      await runtime.settled();
 
       assertEquals(navigations.length, 1);
       assertEquals(navigations[0], entityRefToString(target.entityId));
@@ -270,3 +383,110 @@ Deno.test(
     }
   },
 );
+
+Deno.test("navigateTo async callback is tracked by runtime.settled", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  let callbackCompleted = false;
+  const callbackStart = Promise.withResolvers<void>();
+  let releaseNavigation!: () => void;
+  const navigationGate = new Promise<void>((resolve) => {
+    releaseNavigation = resolve;
+  });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    navigateCallback: async () => {
+      callbackStart.resolve();
+      await navigationGate;
+      callbackCompleted = true;
+    },
+  });
+
+  try {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, navigateTo, pattern } = commonfabric;
+    const Target = pattern(() => ({ title: "tracked target" }));
+    const openTarget = handler(
+      { type: "object", properties: {} },
+      { type: "object", properties: {} },
+      () => navigateTo(Target({})),
+    );
+    const Root = pattern(() => ({ openTarget: openTarget({}) }));
+
+    const setupTx: IExtendedStorageTransaction = runtime.edit();
+    const rootCell = runtime.getCell(
+      space,
+      "navigateTo tracked root",
+      undefined,
+      setupTx,
+    );
+    const root = runtime.run(setupTx, Root, {}, rootCell);
+    await setupTx.commit();
+    await root.pull();
+
+    root.key("openTarget").send({});
+    // Start the barrier before the scheduler has dispatched the handler. This
+    // pins the registration race: settled() must observe the eventual
+    // post-commit navigation work, not return in the gap before its flush.
+    let settledResolved = false;
+    const settled = runtime.settled().then(() => {
+      settledResolved = true;
+    });
+    await callbackStart.promise;
+    await Promise.resolve();
+    assertEquals(callbackCompleted, false);
+    assertEquals(settledResolved, false);
+
+    releaseNavigation();
+    await settled;
+    assertEquals(callbackCompleted, true);
+  } finally {
+    releaseNavigation();
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("navigateTo contains a rejected async callback", async () => {
+  const storageManager = StorageManager.emulate({ as: signer });
+  const failure = new Error("shell navigation failed");
+  const logged: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => logged.push(args);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+    navigateCallback: () => Promise.reject(failure),
+  });
+
+  try {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, navigateTo, pattern } = commonfabric;
+    const Target = pattern(() => ({ title: "rejected target" }));
+    const openTarget = handler(
+      { type: "object", properties: {} },
+      { type: "object", properties: {} },
+      () => navigateTo(Target({})),
+    );
+    const Root = pattern(() => ({ openTarget: openTarget({}) }));
+    const setupTx = runtime.edit();
+    const rootCell = runtime.getCell(
+      space,
+      "navigateTo rejected callback root",
+      undefined,
+      setupTx,
+    );
+    const root = runtime.run(setupTx, Root, {}, rootCell);
+    await setupTx.commit();
+    await root.pull();
+
+    root.key("openTarget").send({});
+    await runtime.settled();
+
+    assertEquals(logged, [["navigateTo callback failed:", failure]]);
+  } finally {
+    console.error = originalConsoleError;
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});

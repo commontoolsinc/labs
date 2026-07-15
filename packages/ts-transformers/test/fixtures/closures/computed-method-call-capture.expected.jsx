@@ -49,7 +49,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-method-call-capture
 // Verifies: a deep property access on a captured object is restructured into a nested capture object
 //   computed(() => value.get() + state.counter.value) → lift(...)({ value, state: { counter: { value } } })

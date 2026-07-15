@@ -39,7 +39,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["value", "threshold", "a", "b"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-conditional-expression
 // Verifies: computed(() => expr) with four cell captures in a ternary expression
 //   computed(() => value.get() > threshold.get() ? a.get() : b.get()) → lift(({ value, threshold, a, b }) => ...)({ value, threshold, a, b })

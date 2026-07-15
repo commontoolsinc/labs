@@ -11,6 +11,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
+import { createCell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -217,9 +218,186 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
       ),
     ).toBe("space");
   });
+
+  // Drive a query to its terminal state through `settled()` and read the result
+  // cell — the event-driven wait, with no sleep or polling loop. `settled()`
+  // stays open until the post-commit flush writes the result (or error) back, so
+  // the write-back handlers run every time rather than depending on whether the
+  // async flush lands inside the observation window.
+  async function runQueryToSettled(sql: string, label: string) {
+    const queryPattern = cf.pattern(() => {
+      const db = cf.sqliteDatabase({
+        tables: {
+          notes: cf.table({ id: "integer primary key", body: "text" }),
+        },
+      });
+      return cf.sqliteQuery({ db, sql, reactOn: db });
+    });
+    const resultCell = runtime.getCell(
+      space,
+      label,
+      queryPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, queryPattern, {}, resultCell);
+    await tx.commit();
+
+    const view = result as unknown as {
+      get: () => QueryState;
+      sink: (f: () => void) => () => void;
+    };
+    const cancel = view.sink(() => {});
+    try {
+      await runtime.idle();
+      await runtime.settled();
+      return view.get();
+    } finally {
+      cancel();
+    }
+  }
+
+  it("writes a successful query result back through the post-commit flush", async () => {
+    const q = await runQueryToSettled(
+      "SELECT body FROM notes",
+      "sqlite-success-writeback",
+    );
+    expect(q.pending).toBe(false);
+    expect(q.error).toBeUndefined();
+    expect(q.result).toEqual([]);
+  });
+
+  it("writes an error result when the sqlite read fails, rather than staying pending", async () => {
+    // Force the server read to fail. The builtin must surface that as a settled
+    // error result on the query cell, not leave the query pending forever.
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    provider.sqliteQuery = () =>
+      Promise.reject(new Error("sqlite backend unavailable"));
+    try {
+      const q = await runQueryToSettled(
+        "SELECT body FROM notes",
+        "sqlite-error-writeback",
+      );
+      expect(q.pending).toBe(false);
+      expect(q.error).toBeDefined();
+      expect(q.result).toBeUndefined();
+    } finally {
+      provider.sqliteQuery = original;
+    }
+  });
+
+  // Issue a query and hold its server read in flight on `gate` (a Promise the
+  // test resolves by hand — no sleep or timer). While it is held, a write bumps
+  // the db revision, so the query re-issues with a new request hash: a genuine
+  // supersede. When the held read finally finishes, its flush must notice the
+  // hash changed and leave the newer query's state alone.
+  async function runStaleFlush(
+    outcome: "resolve" | "reject",
+    label: string,
+  ): Promise<{ q: QueryState; secondHash: string }> {
+    const provider = runtime.storageManager.open(space) as unknown as {
+      sqliteQuery: (...a: unknown[]) => Promise<unknown>;
+    };
+    const original = provider.sqliteQuery.bind(provider);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    provider.sqliteQuery = async (...a) => {
+      await gate;
+      if (outcome === "reject") throw new Error("sqlite read failed late");
+      return await original(...a);
+    };
+    try {
+      const pattern = cf.pattern(() => {
+        const db = cf.sqliteDatabase({
+          tables: {
+            notes: cf.table({ id: "integer primary key", body: "text" }),
+          },
+        });
+        const q = cf.sqliteQuery({
+          db,
+          sql: "SELECT body FROM notes",
+          reactOn: db,
+        });
+        return { db, q };
+      });
+      const resultCell = runtime.getCell(space, label, undefined, tx);
+      runtime.run(tx, pattern, {}, resultCell);
+      await tx.commit();
+
+      const qCell = resultCell.key("q").resolveAsCell() as unknown as {
+        get: () => QueryState;
+        sink: (f: () => void) => () => void;
+      };
+      const cancel = qCell.sink(() => {});
+      try {
+        // The first query is issued; its server read now waits on the gate.
+        await runtime.idle();
+        const firstHash = qCell.get().requestHash;
+        expect(typeof firstHash).toBe("string");
+        expect(qCell.get().pending).toBe(true);
+
+        // A write bumps the db revision, re-issuing the query with a new hash
+        // while the first read is still held.
+        const execTx = runtime.edit();
+        const handleLink = resultCell.key("db").resolveAsCell()
+          .getAsNormalizedFullLink();
+        const db = createCell(
+          runtime,
+          { ...handleLink, schema: undefined },
+          execTx,
+          false,
+          "sqlite",
+        ) as unknown as {
+          exec(sql: string, params?: readonly unknown[]): void;
+        };
+        db.exec("INSERT INTO notes (body) VALUES (?)", ["seed"]);
+        expect((await execTx.commit()).error).toBeUndefined();
+        await runtime.idle();
+        const secondHash = qCell.get().requestHash;
+        expect(secondHash).not.toBe(firstHash);
+        expect(typeof secondHash).toBe("string");
+
+        // Release both reads. The first (now stale) flush must find the hash
+        // changed and skip its write-back.
+        release();
+        await runtime.settled();
+        return { q: qCell.get(), secondHash: secondHash! };
+      } finally {
+        cancel();
+      }
+    } finally {
+      provider.sqliteQuery = original;
+    }
+  }
+
+  it("a superseded query's successful flush does not overwrite the newer request", async () => {
+    const { q, secondHash } = await runStaleFlush("resolve", "sqlite-stale-ok");
+    // Only the newer query settled its own result; the stale flush was skipped.
+    expect(q.requestHash).toBe(secondHash);
+    expect(q.pending).toBe(false);
+    expect(q.error).toBeUndefined();
+  });
+
+  it("a superseded query's failed flush does not overwrite the newer request", async () => {
+    const { q, secondHash } = await runStaleFlush("reject", "sqlite-stale-err");
+    // Both reads reject, but only the newer query's error survives — the stale
+    // flush's error write is skipped.
+    expect(q.requestHash).toBe(secondHash);
+    expect(q.pending).toBe(false);
+    expect(q.error).toBeDefined();
+  });
 });
 
-type QueryState = { pending: boolean; result?: unknown[]; error?: unknown };
+type QueryState = {
+  pending: boolean;
+  result?: unknown[];
+  error?: unknown;
+  requestHash?: string;
+};
 
 // Wait until `pred(cell value)` holds. A `sink` keeps the effect chain live so
 // reactOn re-runs are driven (pull-mode runs effects only while observed); the

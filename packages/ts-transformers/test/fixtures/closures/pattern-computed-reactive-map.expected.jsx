@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     items: {
         type: "number"
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: pattern-computed-reactive-map
 // Verifies: .map() on a Reactive inside computed() is NOT transformed to mapWithPattern
 //   computed(() => items.map((n) => n * 2)) → lift(({ items }) => items.map((n) => n * 2))({ items })

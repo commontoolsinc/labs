@@ -87,7 +87,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     task: {
         note?: string | undefined;
@@ -107,7 +107,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["task"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     tagIndex: number;
     taskIndex: number;
@@ -124,7 +124,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["tagIndex", "taskIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const tag = __cf_pattern_input.key("element");
     const tagIndex = __cf_pattern_input.key("index");
@@ -448,7 +448,7 @@ section.tasks.length > 0
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const section = __cf_pattern_input.key("element");
     const sectionIndex = __cf_pattern_input.key("index");

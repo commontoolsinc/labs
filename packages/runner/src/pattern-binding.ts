@@ -519,16 +519,52 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
 }
 
 /**
+ * Compute the set of TOP-LEVEL argument keys an argument schema declares
+ * OPAQUE — i.e. carrying an `asCell: ["opaque"]` marker. Distinguished from
+ * `asCell: ["cell"]` (a potentially value-read cell reference). ifElse marks
+ * its pass-through `ifTrue`/`ifFalse` branches opaque so they can be dropped
+ * from the node's declared reads.
+ *
+ * Returns an empty set when the schema declares no opaque keys (the common
+ * case), so callers can cheaply skip the filter.
+ */
+export function opaqueArgumentKeys(
+  argumentSchema: JSONSchema | undefined,
+): Set<string> {
+  const keys = new Set<string>();
+  if (!isRecord(argumentSchema)) return keys;
+  const properties = argumentSchema.properties;
+  if (!isRecord(properties)) return keys;
+  for (const [key, propSchema] of Object.entries(properties)) {
+    const isOpaque = ContextualFlowControl.getAsCellValues(
+      propSchema as JSONSchema,
+    ).some((entry) => ContextualFlowControl.getAsCellKind(entry) === "opaque");
+    if (isOpaque) keys.add(key);
+  }
+  return keys;
+}
+
+/**
  * Traverses binding and returns all cells reachable through write redirects.
  *
  * @param binding - The binding to traverse.
  * @param baseCell - The base cell to use for resolving links.
+ * @param options - Optional configuration.
+ * @param options.skipTopLevelKeys - Top-level argument keys to skip entirely.
+ *   Used to drop OPAQUE forwarded references (e.g. ifElse's
+ *   `ifTrue`/`ifFalse` branches) so they don't become declared reads that pull
+ *   their (possibly unselected) writer. The opacity marker lives on the
+ *   module's argument schema (link schemas are sanitized of `asCell` when a
+ *   sigil link is created — see `sanitizeSchemaForLinks` — so it cannot be
+ *   read off the resolved link), hence keying off the binding KEY here.
  * @returns All links reachable through write redirects.
  */
 export function findAllWriteRedirectCells<T>(
   binding: unknown,
   baseCell: AnyCell<T>,
+  options?: { skipTopLevelKeys?: ReadonlySet<string> },
 ): NormalizedFullLink[] {
+  const skipTopLevelKeys = options?.skipTopLevelKeys;
   const seen: NormalizedFullLink[] = [];
   // `baseCell` is only used for link resolution (runtime/tx/parseLink), which
   // does not depend on the cell's value type, so accept any cell. This lets the
@@ -578,6 +614,18 @@ export function findAllWriteRedirectCells<T>(
       for (const value of Object.values(binding)) find(value, baseCell);
     }
   }
-  find(binding, baseCell);
+  if (
+    skipTopLevelKeys !== undefined && skipTopLevelKeys.size > 0 &&
+    isRecord(binding) && !isCellLink(binding) && !isLegacyAlias(binding)
+  ) {
+    // Drop the named top-level argument keys (opaque forwarded references)
+    // before traversing — they must not contribute to declared reads.
+    for (const [key, value] of Object.entries(binding)) {
+      if (skipTopLevelKeys.has(key)) continue;
+      find(value, baseCell);
+    }
+  } else {
+    find(binding, baseCell);
+  }
   return seen;
 }

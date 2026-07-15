@@ -1,5 +1,6 @@
-// Scheduler throttle and staleness-tolerance tests.
+// Scheduler throttle and bounded-freshness tests.
 
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   afterEach,
   beforeEach,
@@ -18,7 +19,7 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 
-describe("throttle - staleness tolerance", () => {
+describe("throttle - bounded freshness", () => {
   let storageManager: SchedulerTestStorageManager;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -56,6 +57,43 @@ describe("throttle - staleness tolerance", () => {
 
     runtime.scheduler.setThrottle(action, 0);
     expect(runtime.scheduler.getThrottle(action)).toBeUndefined();
+  });
+
+  it("should run dirty work promptly when throttle is cleared", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "throttle-clear-source",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let observed = 0;
+    const effect: Action = (actionTx) => {
+      observed = source.withTx(actionTx).get();
+    };
+    runtime.scheduler.subscribe(effect, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+    await runtime.scheduler.idle();
+    expect(observed).toBe(1);
+
+    runtime.scheduler.setThrottle(effect, 30_000);
+    source.withTx(tx).send(2);
+    await tx.commit();
+    tx = runtime.edit();
+    // Yield through the already-queued scheduler tick so it observes the dirty
+    // gated node and arms the shared wake before the clear.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(observed).toBe(1);
+
+    runtime.scheduler.clearThrottle(effect);
+    await runtime.scheduler.idle();
+    expect(observed).toBe(2);
   });
 
   it("should apply throttle from subscribe options", () => {
@@ -411,5 +449,59 @@ describe("throttle - staleness tolerance", () => {
     await cell.pull();
 
     expect(runCount).toBe(1);
+  });
+
+  it("emits lazy scheduling diagnostics for registration and execution", async () => {
+    const logger = getLogger("scheduler");
+    const previousLevel = logger.level;
+    const previousDisabled = logger.disabled;
+    const originalDebug = console.debug;
+    const debugCalls: unknown[][] = [];
+    logger.level = "debug";
+    logger.disabled = false;
+    console.debug = (...args: unknown[]) => debugCalls.push(args);
+
+    const source = runtime.getCell<number>(
+      space,
+      "throttle-debug-diagnostics",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let observed = 0;
+    const effect: Action = (actionTx) => {
+      observed = source.withTx(actionTx).get();
+    };
+    const log = {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [],
+    };
+
+    try {
+      runtime.scheduler.subscribe(effect, log, { isEffect: true });
+      await runtime.scheduler.idle();
+      expect(observed).toBe(1);
+      runtime.scheduler.subscribe(
+        () => {},
+        { reads: [], shallowReads: [], writes: [] },
+      );
+
+      const keys = debugCalls.flatMap((call) => call).filter((value) =>
+        typeof value === "string"
+      );
+      expect(keys).toContain("schedule");
+      expect(keys).toContain("schedule-resubscribe");
+      expect(keys).toContain("schedule-execute-pull");
+      expect(keys).toContain("schedule-execute");
+    } finally {
+      logger.level = previousLevel;
+      logger.disabled = previousDisabled;
+      console.debug = originalDebug;
+      await runtime.scheduler.idle();
+    }
   });
 });

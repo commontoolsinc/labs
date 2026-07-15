@@ -8,13 +8,17 @@ const emulatedMemoryAudience = "did:key:z6Mk-runner-emulated-memory";
 class EmulatedSessionFactory implements SessionFactory {
   constructor(private readonly getServer: () => MemoryV2Server.Server) {}
 
-  async create(space: MemorySpace, signer?: Signer) {
+  async create(
+    space: MemorySpace,
+    signer?: Signer,
+    mountOptions: MemoryV2Client.MountOptions = {},
+  ) {
     const client = await MemoryV2Client.connect({
       transport: MemoryV2Client.loopback(this.getServer()),
     });
     const session = await client.mount(
       space,
-      {},
+      mountOptions,
       (_space, _session, context) => ({
         invocation: {
           aud: context.audience,

@@ -375,6 +375,15 @@ export interface SessionSync {
   caughtUpLocalSeq?: number;
   upserts: SessionSyncUpsert[];
   removes: SessionSyncRemove[];
+  // Scheduler observation rows for commits inside this sync's
+  // (fromSeq, toSeq] window, so subscribers can ADOPT the writer's action
+  // runs instead of re-running them
+  // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
+  // Present only when both the server flag and the receiving connection's
+  // negotiated persistentSchedulerState flag are on. Same row shape as the
+  // scheduler.snapshot.list result; `observation` is intentionally
+  // `unknown` — the runner owns validation.
+  observations?: SchedulerActionSnapshotResult[];
 }
 
 export interface WatchSetResult {
@@ -549,21 +558,39 @@ export interface SchedulerActionSnapshotQuery {
   pieceId?: string;
   processGeneration?: number;
   actionId?: string;
+  // Commit-seq window (exclusive since, inclusive through): rows whose
+  // carrying commit landed inside a subscription sync's (fromSeq, toSeq]
+  // window — the incremental-adoption fan-out query. Rows with a NULL
+  // commit seq never match a window filter.
+  sinceCommitSeq?: number;
+  throughCommitSeq?: number;
   limit?: number;
   cursor?: SchedulerActionSnapshotCursor;
 }
+
+/**
+ * Server-derived ownership partition for durable scheduler state. The opaque
+ * principal and session components use the same encoding as resolved memory
+ * scope keys; clients must never construct one to select another context.
+ */
+export type SchedulerExecutionContextKey =
+  | "space"
+  | `user:${string}`
+  | `session:${string}:${string}`;
 
 export interface SchedulerActionSnapshotCursor {
   ownerSpace?: string;
   pieceId: string;
   processGeneration: number;
   actionId: string;
+  executionContextKey: SchedulerExecutionContextKey;
 }
 
 export interface SchedulerActionSnapshotResult {
   observationId: number;
   commitSeq: number | null;
   observedAtSeq: number;
+  executionContextKey: SchedulerExecutionContextKey;
   observation: unknown;
   directDirtySeq?: number;
   staleSeq?: number;
@@ -649,7 +676,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 // their defaults and removal paths, in docs/development/EXPERIMENTAL_OPTIONS.md.
 // Update that registry when adding or removing one.
 let persistentSchedulerStateEnabled = false;
-let commitPreconditionsEnabled = false;
+let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
 
 /**
@@ -674,7 +701,7 @@ export function resetPersistentSchedulerStateConfig(): void {
  * but the memory protocol needs the value during client/server handshakes.
  */
 export function setCommitPreconditionsConfig(enabled?: boolean): void {
-  commitPreconditionsEnabled = enabled ?? false;
+  commitPreconditionsEnabled = enabled ?? true;
 }
 
 export function getCommitPreconditionsConfig(): boolean {
@@ -682,7 +709,7 @@ export function getCommitPreconditionsConfig(): boolean {
 }
 
 export function resetCommitPreconditionsConfig(): void {
-  commitPreconditionsEnabled = false;
+  commitPreconditionsEnabled = true;
 }
 
 /**

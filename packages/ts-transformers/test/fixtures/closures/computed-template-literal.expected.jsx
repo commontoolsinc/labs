@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["prefix", "value"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-template-literal
 // Verifies: captured cells used inside a template literal expression are extracted
 //   computed(() => `${prefix.get()}${value.get()}`) → lift(...)({ value, prefix })

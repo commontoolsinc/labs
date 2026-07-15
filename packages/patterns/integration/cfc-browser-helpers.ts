@@ -1,6 +1,8 @@
 import {
   awaitViewSettled,
+  getPresentationSession,
   Page,
+  presentationInteractions,
   type ProbeApi,
   waitForCondition,
 } from "@commonfabric/integration";
@@ -63,6 +65,37 @@ const runtimeSynced = async (): Promise<boolean> => {
   if (!rt?.allSynced) return false;
   await rt.allSynced();
   return true;
+};
+
+// RootView resolves a named view space independently of URL/login state, and
+// AppView then loads that space's active root asynchronously. A previous root
+// can remain interactive during that handoff, so readiness means the rendered
+// active PageHandle itself belongs to the expected space.
+const activeSpaceRootReady = (
+  _probe: ProbeApi,
+  expectedSpace: string,
+): boolean => {
+  const app = (globalThis as typeof globalThis & {
+    app?: { element?: () => unknown };
+  }).app;
+  const root = app?.element?.() as unknown as
+    | (HTMLElement & { getRuntimeSpaceDID(): string | undefined })
+    | undefined;
+  const appView = root?.shadowRoot?.querySelector("x-app-view") as
+    | (HTMLElement & {
+      space?: string;
+      _patterns?: {
+        value?: {
+          activePattern?: { cell(): { space(): string } };
+        };
+      };
+    })
+    | null
+    | undefined;
+  const activePattern = appView?._patterns?.value?.activePattern;
+  return root?.getRuntimeSpaceDID() === expectedSpace &&
+    appView?.space === expectedSpace &&
+    activePattern?.cell().space() === expectedSpace;
 };
 
 const viewSettledReady = (): boolean =>
@@ -474,10 +507,15 @@ export async function fillCfInput(
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
-    await waitForCondition(page, fillAndVerify, {
-      timeout,
-      args: [selector, value],
-    });
+    const presentation = presentationInteractions(page);
+    if (presentation) {
+      await presentation.typeIntoCfInput(selector, value, timeout);
+    } else {
+      await waitForCondition(page, fillAndVerify, {
+        timeout,
+        args: [selector, value],
+      });
+    }
   } catch (cause) {
     const probe = await readCfInputProbe(page, selector).catch(() => undefined);
     throw new Error(
@@ -524,6 +562,17 @@ export async function waitForRuntimeIdle(
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   await waitForCondition(page, runtimeIdle, { timeout });
+}
+
+export async function waitForActiveSpaceRoot(
+  page: Page,
+  expectedSpace: string,
+  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
+) {
+  await waitForCondition(page, activeSpaceRootReady, {
+    timeout,
+    args: [expectedSpace],
+  });
 }
 
 export async function waitForDisabled(
@@ -1128,7 +1177,8 @@ export class StepTimer {
   async run<T>(label: string, fn: () => Promise<T>): Promise<T> {
     const start = performance.now();
     try {
-      return await fn();
+      const presentation = getPresentationSession();
+      return presentation ? await presentation.step(label, fn) : await fn();
     } finally {
       this.#rows.push({ label, ms: Math.round(performance.now() - start) });
     }

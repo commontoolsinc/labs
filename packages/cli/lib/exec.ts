@@ -1,6 +1,6 @@
 import type { PieceManager } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { dirname, join, relative, resolve } from "@std/path";
+import { basename, dirname, join, relative, resolve } from "@std/path";
 import {
   type MountedCallablePath,
   parseMountedCallablePath,
@@ -51,6 +51,9 @@ export interface ExecDependencies {
     manager: CallableManagerLike,
     pieceId: string,
   ) => Promise<CallablePieceLike>;
+  stat?: (path: string) => Promise<Deno.FileInfo>;
+  readDir?: (path: string) => AsyncIterable<Deno.DirEntry>;
+  delay?: (ms: number) => Promise<void>;
   timeoutMs?: number;
   uuid?: () => string;
   waitForResult?: (
@@ -114,32 +117,74 @@ async function readMountedPieceMeta(
   };
 }
 
-async function assertMountedCallableFileExists(absPath: string): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    let stat: Deno.FileInfo;
-    try {
-      stat = await Deno.stat(absPath);
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
-        if (attempt < 19) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
-          continue;
-        }
-        throw new Error(`Mounted callable file not found: ${absPath}`);
+// FUSE-T serves mounts through the macOS NFS client and ignores the entry
+// and attribute cache timeouts the filesystem implementation returns, so
+// the fuse bridge cannot shorten or disable the client's caching from its
+// side. The NFS client answers a negative name lookup from its cache for
+// tens of seconds, and serves a cached parent directory listing without a
+// daemon round-trip for up to about three seconds after the directory was
+// last listed. A listing miss is therefore only authoritative once that
+// validity window has passed since the miss was first observed, so this
+// wait must exceed the window; it includes margin over the observed three
+// seconds.
+const DIR_LISTING_RECHECK_DELAY_MS = 3500;
+
+async function parentListingHasFile(
+  absPath: string,
+  readDir: (path: string) => AsyncIterable<Deno.DirEntry>,
+): Promise<boolean> {
+  const name = basename(absPath);
+  try {
+    for await (const entry of readDir(dirname(absPath))) {
+      if (entry.name === name && !entry.isDirectory) {
+        return true;
       }
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
       throw error;
     }
+  }
+  return false;
+}
 
-    if (stat.isFile) {
+async function assertMountedCallableFileExists(
+  absPath: string,
+  deps: ExecDependencies = {},
+): Promise<void> {
+  const stat = deps.stat ?? Deno.stat;
+  const readDir = deps.readDir ?? Deno.readDir;
+  const delay = deps.delay ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  try {
+    if ((await stat(absPath)).isFile) {
       return;
     }
-
-    if (attempt < 19) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      continue;
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      throw error;
     }
-    throw new Error(`Mounted callable file not found: ${absPath}`);
+    // While the fuse bridge rebuilds a piece prop it clears the subtree and
+    // re-hydrates it on demand, and FUSE-T cannot push cache invalidations
+    // to the kernel, so a stat during that window reports NotFound for a
+    // callable file that exists: the NFS client's negative name cache keeps
+    // answering NotFound long after the bridge has the file again. A parent
+    // directory listing that reaches the bridge is answered after hydration
+    // and names every callable file that exists. The listing entry's type
+    // flags come from the same cached attributes as the stat, so a name
+    // match counts as existence unless the entry is a directory.
+    if (await parentListingHasFile(absPath, readDir)) {
+      return;
+    }
+    // The listing can itself be served from a client cache that predates
+    // the file. Wait out the cache validity window and consult the listing
+    // once more; a second miss means the file does not exist.
+    await delay(DIR_LISTING_RECHECK_DELAY_MS);
+    if (await parentListingHasFile(absPath, readDir)) {
+      return;
+    }
   }
+  throw new Error(`Mounted callable file not found: ${absPath}`);
 }
 
 export async function resolveMountedCallableFile(
@@ -167,7 +212,7 @@ export async function resolveMountedCallableFile(
     throw new Error(`Path is not a mounted callable file: ${absPath}`);
   }
 
-  await assertMountedCallableFileExists(canonicalAbsPath);
+  await assertMountedCallableFileExists(canonicalAbsPath, deps);
   const pieceMeta = await readMountedPieceMeta(canonicalAbsPath, callablePath);
   const manager = deps.loadManager
     ? await deps.loadManager({

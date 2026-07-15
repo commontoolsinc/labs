@@ -198,7 +198,7 @@ registered `scheduler.onError` handlers as a `CommitConvergenceError`.
 
 ## The reactive-action path
 
-The reactive path (`scheduler/action-run.ts`) does not need this backpressure.
+The reactive path (`scheduler/run.ts`) does not need this backpressure.
 Both paths window a stale basis, but they recover from a `ConflictError`
 differently: the event path re-queues it with backoff, while the reactive path
 re-arms its subscription and waits for the catch-up. A reactive action is a

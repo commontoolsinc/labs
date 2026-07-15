@@ -45,7 +45,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["allPieces"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     allPieces: {
         length: number;
@@ -66,7 +66,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["allPieces"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const piece = __cf_pattern_input.key("element");
     return (<li>{piece.key("name")}</li>);

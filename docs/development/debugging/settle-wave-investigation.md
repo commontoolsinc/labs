@@ -52,6 +52,11 @@ Use a simple, repeatable shell flow and keep it fixed across runs:
    per run hides the problem. In the integration harness, prefer
    `SPACE_NAME=...` over a random space.
 
+For integration-test FAILURES, start with the self-diagnosing failure
+output (fill phase ledger, pending-IPC table, worker request ledger) before
+reaching for traces — see
+[Browser Integration Test Diagnostics](integration-test-diagnostics.md).
+
 For a scripted browser reproduction instead of manual console work, the
 default-app integration flow supports trace capture:
 
@@ -249,12 +254,12 @@ body itself.
 
 Start with these locations when traces or logs point to worker churn:
 
-- `packages/runner/src/scheduler.ts` — execute orchestration, queueing, public
-  diagnosis API; `packages/runner/src/scheduler/` holds the mode-specific
-  settle loops (`pull-execution.ts`, `push-execution.ts`), event dispatch
-  (`events.ts`, `pull-events.ts`, `push-events.ts`), action execution and
-  resubscribe timing (`action-run.ts`), and trigger matching
-  (`trigger-index.ts`, `scheduling-writes.ts`, `dependency-graph.ts`)
+- `packages/runner/src/scheduler/facade.ts` — execute orchestration, queueing,
+  and the public diagnosis API; `packages/runner/src/scheduler/` holds the
+  settle loop (`settle.ts`, `execution.ts`, `work-oracle.ts`), event dispatch
+  (`events.ts`), action execution/resubscribe timing (`run.ts`), and trigger
+  matching (`invalidation.ts`, `trigger-index.ts`, `scheduling-writes.ts`,
+  `dependency-graph.ts`)
 - `packages/runtime-client/backends/web-worker/index.ts` — worker message
   entrypoint — and `runtime-processor.ts` — console-facing scheduler IPC
 - `packages/runner/src/storage/cache.ts` — socket event dispatch

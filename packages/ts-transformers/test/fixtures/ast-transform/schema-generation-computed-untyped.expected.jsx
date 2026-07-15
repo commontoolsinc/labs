@@ -12,7 +12,7 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 declare const total: number;
-const __cfLift_1 = __cfHelpers.lift(() => total * 2, false);
+const __cfLift_1 = __cfHelpers.lift(() => total * 2, false, undefined, { completeSchedulerScopeSummary: true });
 // FIXTURE: schema-generation-computed-untyped
 // Verifies: a reactive builder with no generic type args infers schemas from captured values
 //   computed(() => total * 2) → captures `total` ({ type: "number" }) and infers output from the body

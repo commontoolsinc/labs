@@ -9,7 +9,11 @@ export interface SessionFactory {
    *  by lower-level replica tests omit this because they intentionally model
    *  only the messages under test. */
   readonly supportsAclBootstrap?: boolean;
-  create(space: MemorySpace, signer?: Signer): Promise<{
+  create(
+    space: MemorySpace,
+    signer?: Signer,
+    mountOptions?: MemoryClient.MountOptions,
+  ): Promise<{
     client: MemoryClient.Client;
     session: MemoryClient.SpaceSession;
   }>;
@@ -87,7 +91,7 @@ export const createStorageAddressResolver = (
   };
 };
 
-class WebSocketTransport implements MemoryClient.Transport {
+export class WebSocketTransport implements MemoryClient.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #socket: WebSocket | null = null;
@@ -225,7 +229,11 @@ export class RemoteSessionFactory implements SessionFactory {
     };
   }
 
-  async create(space: MemorySpace, signer = this.defaultSigner) {
+  async create(
+    space: MemorySpace,
+    signer = this.defaultSigner,
+    mountOptions: MemoryClient.MountOptions = {},
+  ) {
     const client = await MemoryClient.connect({
       transport: new WebSocketTransport(
         toSpaceWebSocketAddress(this.resolveAddress(space), space),
@@ -233,7 +241,7 @@ export class RemoteSessionFactory implements SessionFactory {
     });
     const session = await client.mount(
       space,
-      {},
+      mountOptions,
       (
         targetSpace: string,
         descriptor: MemoryClient.MountOptions,

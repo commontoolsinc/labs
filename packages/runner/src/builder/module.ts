@@ -364,22 +364,15 @@ export function lift<T, R>(
     ...(options?.materializerWriteInputPaths
       ? { materializerWriteInputPaths: options.materializerWriteInputPaths }
       : {}),
-    ...(options?.captureWritesAnalyzed === true
-      ? { captureWritesAnalyzed: true }
+    ...(options?.completeSchedulerScopeSummary
+      ? { completeSchedulerScopeSummary: true as const }
       : {}),
   });
 }
 
 interface DeriveSchedulerOptions {
   materializerWriteInputPaths?: readonly (readonly string[])[];
-  /**
-   * Transformer-emitted assertion that capability analysis ran over the
-   * callback with no capture escaping tracking, so
-   * `materializerWriteInputPaths` is an EXHAUSTIVE record of writes through
-   * captures. Exhaustive-write provenance only — not consumed by the
-   * computed-cell classifier (replayable compute writes qualify regardless).
-   */
-  captureWritesAnalyzed?: boolean;
+  completeSchedulerScopeSummary?: true;
 }
 
 export function byRef<T, R>(ref: string): ModuleFactory<T, R> {

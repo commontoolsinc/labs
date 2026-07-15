@@ -41,6 +41,7 @@ describe("ExperimentalOptions", () => {
         storageManager: sm,
         experimental: {
           modernCellRep: false,
+          commitPreconditions: false,
         },
       });
       expect(runtime.experimental).toEqual({
@@ -68,7 +69,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: true,
         persistentSchedulerState: false,
-        commitPreconditions: false,
+        commitPreconditions: true,
         computedCellIds: false,
         eagerSourceAnnotation: false,
       });
@@ -86,7 +87,7 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental).toEqual({
         modernCellRep: false,
         persistentSchedulerState: false,
-        commitPreconditions: false,
+        commitPreconditions: true,
         computedCellIds: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
@@ -209,7 +210,7 @@ describe("ExperimentalOptions", () => {
 
       expect(getModernCellRepConfig()).toBe(initial);
       expect(getPersistentSchedulerStateConfig()).toBe(false);
-      expect(getCommitPreconditionsConfig()).toBe(false);
+      expect(getCommitPreconditionsConfig()).toBe(true);
     });
   });
 });

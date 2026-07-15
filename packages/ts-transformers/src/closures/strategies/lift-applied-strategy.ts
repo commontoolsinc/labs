@@ -1,6 +1,7 @@
 import ts from "typescript";
 import type {
   CapabilityParamSummary,
+  FunctionCapabilitySummary,
   TransformationContext,
 } from "../../core/mod.ts";
 import type { ClosureTransformationStrategy } from "./strategy.ts";
@@ -120,76 +121,95 @@ export function isLiftAppliedCall(
   return callKind?.kind === "lift-applied";
 }
 
-function getFirstParameterCapabilitySummary(
+function getCapabilityAnalysis(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
 ): {
-  summary: CapabilityParamSummary | undefined;
-  recursive: boolean;
+  summary: FunctionCapabilitySummary;
+  firstParameter: CapabilityParamSummary | undefined;
 } {
-  const functionSummary = analyzeFunctionCapabilities(callback, {
+  const summary = analyzeFunctionCapabilities(callback, {
     checker,
     typeRegistry,
     includeNestedCallbacks: true,
   });
   const parameter = callback.parameters[0];
-  const recursive = functionSummary.recursive === true;
-  if (!parameter) return { summary: undefined, recursive };
-  const parameterName = ts.isIdentifier(parameter.name)
+  const parameterName = parameter && ts.isIdentifier(parameter.name)
     ? parameter.name.text
     : "__param0";
   return {
-    summary: functionSummary.params.find((param) =>
+    summary,
+    firstParameter: summary.params.find((param) =>
       param.name === parameterName
     ),
-    recursive,
   };
+}
+
+/**
+ * The capability analysis is the existing conservative completeness seam for
+ * source-authored lifts.  A marker is emitted only when that analysis can
+ * account for every cell-bearing parameter use.  In particular, an empty
+ * summary is meaningful proof for a source-backed zero-input computation; it
+ * is not inferred later from an empty runtime observation.
+ */
+function hasCompleteSchedulerScopeSummary(
+  summary: FunctionCapabilitySummary,
+): boolean {
+  if (
+    summary.recursive ||
+    (summary.unreadableCellArguments?.length ?? 0) > 0
+  ) {
+    return false;
+  }
+  return summary.params.every((param) =>
+    !param.wildcard &&
+    !param.hasUnverifiedCellUse &&
+    !param.passthrough &&
+    param.capability !== "opaque" &&
+    (param.opaquePaths?.length ?? 0) === 0
+  );
 }
 
 function createDeriveSchedulerOptions(
   inputParamSummary: CapabilityParamSummary | undefined,
-  recursive: boolean,
+  completeSchedulerScopeSummary: boolean,
   factory: ts.NodeFactory,
 ): ts.ObjectLiteralExpression | undefined {
   const writePaths = inputParamSummary?.writePaths ?? [];
-  // `captureWritesAnalyzed` asserts writePaths are an EXHAUSTIVE record of
-  // writes through captures: analysis ran, no capture escaped tracking
-  // (wildcard), no unrecognized method was called on a cell-like receiver
-  // (hasUnverifiedCellUse — the writer-method list is closed but the Cell API
-  // is not), and analysis was not short-circuited (recursive). It is
-  // exhaustive-write PROVENANCE only: since the computed-by-default
-  // classifier redesign, nothing at runtime consumes it (replayable writers
-  // qualify regardless of capture writes). It is serialized through builder
-  // modules for future consumers — e.g. value-equality dedupe (spec phase 4).
-  const captureWritesAnalyzed = inputParamSummary !== undefined &&
-    inputParamSummary.wildcard !== true &&
-    inputParamSummary.hasUnverifiedCellUse !== true &&
-    !recursive;
-  if (writePaths.length === 0 && !captureWritesAnalyzed) return undefined;
+  if (writePaths.length === 0 && !completeSchedulerScopeSummary) {
+    return undefined;
+  }
 
-  const properties: ts.ObjectLiteralElementLike[] = [];
-  if (writePaths.length > 0) {
-    properties.push(factory.createPropertyAssignment(
-      "materializerWriteInputPaths",
-      factory.createArrayLiteralExpression(
-        writePaths.map((path) =>
-          factory.createArrayLiteralExpression(
-            path.map((segment) => factory.createStringLiteral(segment)),
-            false,
-          )
-        ),
-        false,
-      ),
-    ));
-  }
-  if (captureWritesAnalyzed) {
-    properties.push(factory.createPropertyAssignment(
-      "captureWritesAnalyzed",
-      factory.createTrue(),
-    ));
-  }
-  return factory.createObjectLiteralExpression(properties, false);
+  return factory.createObjectLiteralExpression(
+    [
+      ...(writePaths.length > 0
+        ? [
+          factory.createPropertyAssignment(
+            "materializerWriteInputPaths",
+            factory.createArrayLiteralExpression(
+              writePaths.map((path) =>
+                factory.createArrayLiteralExpression(
+                  path.map((segment) => factory.createStringLiteral(segment)),
+                  false,
+                )
+              ),
+              false,
+            ),
+          ),
+        ]
+        : []),
+      ...(completeSchedulerScopeSummary
+        ? [
+          factory.createPropertyAssignment(
+            "completeSchedulerScopeSummary",
+            factory.createTrue(),
+          ),
+        ]
+        : []),
+    ],
+    false,
+  );
 }
 
 /**
@@ -573,12 +593,12 @@ export function transformLiftAppliedCall(
     captureNameMap,
     hadZeroParameters,
   );
-  const { summary: inputParamSummary, recursive } =
-    getFirstParameterCapabilitySummary(
-      newCallback,
-      checker,
-      options.state?.typeRegistry,
-    );
+  const capabilityAnalysis = getCapabilityAnalysis(
+    newCallback,
+    checker,
+    options.state?.typeRegistry,
+  );
+  const inputParamSummary = capabilityAnalysis.firstParameter;
   if (inputParamSummary) {
     inputTypeNode = applyShrinkAndWrap(
       inputParamSummary,
@@ -600,7 +620,7 @@ export function transformLiftAppliedCall(
   }
   const schedulerOptions = createDeriveSchedulerOptions(
     inputParamSummary,
-    recursive,
+    hasCompleteSchedulerScopeSummary(capabilityAnalysis.summary),
     factory,
   );
 

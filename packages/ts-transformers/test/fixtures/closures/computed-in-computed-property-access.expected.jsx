@@ -11,11 +11,11 @@ import { computed, pattern } from "commonfabric";
 const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
-const __cfLift_1 = __cfHelpers.lift(() => ({ bar: 1 }), false);
+const __cfLift_1 = __cfHelpers.lift(() => ({ bar: 1 }), false, undefined, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift(() => {
     const foo = __cfLift_1().for("foo", true);
     return foo.key("bar");
-}, false);
+}, false, undefined, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-in-computed-property-access
 // Verifies: property access on a computed() result declared INSIDE another computed()
 //   gets transformed to .key() access

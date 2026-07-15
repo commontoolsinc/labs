@@ -49,8 +49,8 @@ export interface CapabilityParamSummary {
    * may be incomplete. Set by unrecognized or dynamic method calls on
    * cell-like receivers, and by `set`/`send` calls carrying an onCommit
    * callback. Consumers asserting write exhaustiveness
-   * (`captureWritesAnalyzed`) must treat this like `wildcard` and fail
-   * closed. Detection is per
+   * (`completeSchedulerScopeSummary`) must treat this like `wildcard` and
+   * fail closed. Detection is per
    * method-call dispatch: extracted method references
    * (`const f = cell.send; f(x)`) are outside the contract.
    */

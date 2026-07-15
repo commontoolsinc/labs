@@ -163,7 +163,7 @@ created per `execute()` and the entire bundle is run with
   `fn.src = "/<id>/pattern.tsx:line:col"` ([builder/module.ts:585][c9]).
 - The scheduler turns that into the durable fingerprint:
   `schedulerImplementationFingerprint` returns `src:${action.src}`
-  ([scheduler/action-run.ts:594][c10]), which keys persistent scheduler
+  ([scheduler/run.ts][c10]), which keys persistent scheduler
   observations.
 
 ## Problem Statement
@@ -583,7 +583,7 @@ Sequence identity first to retire the rehydration bug quickly, then the loader.
 [c7]: ../../packages/runner/src/sandbox/ses-runtime.ts
 [c8]: ../../packages/runner/src/sandbox/ses-runtime.ts
 [c9]: ../../packages/runner/src/builder/module.ts
-[c10]: ../../packages/runner/src/scheduler/action-run.ts
+[c10]: ../../packages/runner/src/scheduler/run.ts
 [c11]: ../../packages/data-model/src/value-hash.ts
 [c12]: ../../packages/runner/src/compilation-cache/storage.ts
 [c13]: ../../packages/runner/src/sandbox/bundle-preflight.ts
@@ -603,7 +603,7 @@ Sequence identity first to retire the rehydration bug quickly, then the loader.
 - `fn.src` assignment from source location
   ([builder/module.ts:585][c9]).
 - Scheduler implementation fingerprint
-  ([scheduler/action-run.ts:594][c10]).
+  ([scheduler/run.ts][c10]).
 - Hash primitive: `hashOf` ([value-hash.ts:526][c11]).
 - Import resolution / import graph: `getImports`, including `export * from`
   ([resolver.ts:94][c15]).

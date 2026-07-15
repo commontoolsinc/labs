@@ -54,7 +54,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: computed-map-input-no-captures
 // Verifies: a computed over a captured cell array uses a plain .map() (not .mapWithPattern)
 //   computed(() => items.get().map(...).length) → lift(...)({ items })

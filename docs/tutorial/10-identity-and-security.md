@@ -102,10 +102,10 @@ As a temporary pre-launch compatibility rule, a populated space that has never
 had an ACL is authenticated-public READ/WRITE but never OWNER. A malformed,
 ownerless, or retracted ACL fails closed. ACL replacement must be a whole,
 space-scoped document and may not remove the last concrete owner. Enforcement
-is a deployment dial (`MEMORY_ACL_MODE`: `off`/`observe`/`enforce`); the default
-is still `off`, and `enforce` additionally revokes live sessions that lose
-access. Structural ACL validity and fresh-space genesis remain hard invariants
-in `observe` mode.
+is a deployment dial (`MEMORY_ACL_MODE`: `off`/`observe`/`enforce`) that
+defaults to `enforce`; `enforce` additionally revokes live sessions that lose
+access. Operators can still select `observe` or `off` explicitly. Structural
+ACL validity and fresh-space genesis remain hard invariants in `observe` mode.
 
 ## Running untrusted code: three rings
 

@@ -3,6 +3,13 @@ export type Cancel = () => void;
 
 export type AddCancel = (cancel: Cancel | undefined | null) => void;
 
+export type DeferredCancelOwnership = {
+  cancel: Cancel;
+  isCancelled: () => boolean;
+  /** Records the exact cancel installed by this attempt; returns cancellation. */
+  markInstalled: (installedCancel: Cancel | undefined) => boolean;
+};
+
 /** Is value a cancel function? */
 export const isCancel = (value: unknown): value is Cancel => {
   return typeof value === "function" && value.length === 0;
@@ -21,6 +28,8 @@ export const cancel = (cancellable: Cancellable) => {
 /**
  * Create a cancel function that can gather and manage other
  * cancel functions.
+ * Cancellation is latched: repeated cancellation is a no-op, and cleanup
+ * added after cancellation runs immediately.
  * @returns a pair of cancel function and a function to add cancel to group.
  * @example
  * const [cancel, addCancel] = useCancelGroup();
@@ -30,13 +39,34 @@ export const cancel = (cancellable: Cancellable) => {
  */
 export const useCancelGroup = (): [Cancel, AddCancel] => {
   const cancels = new Set<Cancel>();
+  let cancelled = false;
 
   /** Cancel all cancel functions in the group */
   const cancelAll = () => {
-    for (const cancel of cancels) {
-      cancel();
+    if (cancelled) {
+      return;
     }
-    cancels.clear();
+    cancelled = true;
+
+    const errors: unknown[] = [];
+    try {
+      for (const cancel of cancels) {
+        try {
+          cancel();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+    } finally {
+      cancels.clear();
+    }
+
+    if (errors.length === 1) {
+      throw errors[0];
+    }
+    if (errors.length > 1) {
+      throw new AggregateError(errors, "Multiple cancellation cleanups failed");
+    }
   };
 
   /** Add a cancel function to the group */
@@ -44,10 +74,45 @@ export const useCancelGroup = (): [Cancel, AddCancel] => {
     if (cancel == null) {
       return;
     }
+    if (cancelled) {
+      cancel();
+      return;
+    }
     cancels.add(cancel);
   };
 
   return [cancelAll, addCancel];
+};
+
+/**
+ * Own a cancel registration that will be installed later. Cancellation before
+ * installation tombstones the pending work; cancellation afterwards invokes
+ * the supplied exact-registration cleanup at most once.
+ */
+export const useDeferredCancelOwnership = (
+  cancelInstalled: (installedCancel: Cancel) => void,
+): DeferredCancelOwnership => {
+  let cancelled = false;
+  let installedCancel: Cancel | undefined;
+  let stopped = false;
+  const cancel = () => {
+    cancelled = true;
+    if (installedCancel === undefined || stopped) return;
+    stopped = true;
+    cancelInstalled(installedCancel);
+  };
+
+  return {
+    cancel,
+    isCancelled: () => cancelled,
+    markInstalled: (registration) => {
+      installedCancel = registration;
+      // Installation can re-enter arbitrary owner code. If cancellation
+      // happened during that synchronous window, finish the hand-off now.
+      if (cancelled) cancel();
+      return cancelled;
+    },
+  };
 };
 
 export const noOp = () => {};

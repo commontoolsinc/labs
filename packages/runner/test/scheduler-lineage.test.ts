@@ -89,7 +89,7 @@ function createLineageHooks() {
   const errors: unknown[] = [];
   let queueExecutions = 0;
   const lineage = new SpeculationLineage({
-    removeQueuedEvent: (event) => removed.push(event),
+    dropQueuedEvent: (event) => removed.push(event),
     queueExecution: () => queueExecutions++,
     onError: (error) => errors.push(error),
   });

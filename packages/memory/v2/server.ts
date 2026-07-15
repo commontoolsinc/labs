@@ -17,6 +17,8 @@ import {
   type Operation,
   parseMemoryProtocolFlags,
   type ResponseMessage,
+  type SchedulerActionSnapshotQuery,
+  type SchedulerExecutionContextKey,
   type SchedulerSnapshotListRequest,
   type SchedulerSnapshotListResult,
   type ServerMessage,
@@ -169,21 +171,25 @@ const randomHex = (bytes: number): string => {
   return [...data].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
-const schedulerObservationFromValue = (
-  observation: unknown,
-): Engine.SchedulerActionObservation | undefined => {
-  if (
-    !isRecord(observation) ||
-    observation.version !== 1 ||
-    typeof observation.pieceId !== "string" ||
-    typeof observation.actionId !== "string" ||
-    typeof observation.processGeneration !== "number" ||
-    !Array.isArray(observation.reads) ||
-    !Array.isArray(observation.shallowReads)
-  ) {
-    return undefined;
-  }
-  return observation as unknown as Engine.SchedulerActionObservation;
+const isNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+const schedulerApplicableContextKeys = (
+  principal: string | undefined,
+  sessionId: string,
+): SchedulerExecutionContextKey[] => {
+  const keys: SchedulerExecutionContextKey[] = ["space"];
+  if (principal === undefined) return keys;
+  keys.push(
+    Engine.resolveScopeKey("user", {
+      principal,
+    }) as SchedulerExecutionContextKey,
+    Engine.resolveScopeKey("session", {
+      principal,
+      sessionId,
+    }) as SchedulerExecutionContextKey,
+  );
+  return keys;
 };
 
 type CommitSchedulerObservation = {
@@ -194,7 +200,9 @@ type CommitSchedulerObservation = {
 const schedulerObservationsFromCommit = (
   commit: ClientCommit,
 ): CommitSchedulerObservation[] => {
-  const single = schedulerObservationFromValue(commit.schedulerObservation);
+  const single = Engine.schedulerObservationFromValue(
+    commit.schedulerObservation,
+  );
   if (single) {
     return [{ localSeq: commit.localSeq, observation: single }];
   }
@@ -202,7 +210,7 @@ const schedulerObservationsFromCommit = (
   const batch = commit.schedulerObservationBatch ?? [];
   const observations: CommitSchedulerObservation[] = [];
   for (const item of batch) {
-    const observation = schedulerObservationFromValue(
+    const observation = Engine.schedulerObservationFromValue(
       item.schedulerObservation,
     );
     if (!observation) {
@@ -348,6 +356,12 @@ class Connection {
   #ready = false;
   #closed = false;
   #syncSchemaTable = false;
+  // Negotiated persistentSchedulerState: when both sides carry the flag,
+  // subscription sync pushes to this connection include the scheduler
+  // observation rows of the sync window, so its runtimes can ADOPT other
+  // clients' action runs instead of re-running them
+  // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
+  #persistentSchedulerState = false;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
@@ -586,6 +600,9 @@ class Connection {
       const serverFlags = parseMemoryProtocolFlags(response.flags);
       this.#syncSchemaTable = clientFlags?.syncSchemaTableV2 === true &&
         serverFlags?.syncSchemaTableV2 === true;
+      this.#persistentSchedulerState =
+        clientFlags?.persistentSchedulerState === true &&
+        serverFlags?.persistentSchedulerState === true;
       this.#ready = true;
       return;
     }
@@ -764,15 +781,23 @@ class Connection {
       return;
     }
 
-    for (const { sessionId } of this.#sessions.values()) {
+    for (const { space: sessionSpace, sessionId } of this.#sessions.values()) {
       if (this.#closed) {
         return;
+      }
+      // A construction intentionally reuses one authenticated session id in
+      // every space. Dirty refresh is still space-specific: syncing that id
+      // through a connection mounted in another space would advance the real
+      // target session's cursor, then send its effect down the wrong socket.
+      if (sessionSpace !== space) {
+        continue;
       }
       const effect = await this.server.syncSessionForConnection(
         space,
         sessionId,
         dirtyIds,
         dirtyOrigins,
+        { adoptionObservations: this.#persistentSchedulerState },
       );
       if (this.#closed) {
         return;
@@ -812,6 +837,10 @@ export class Server {
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
   #refreshTimer: ReturnType<typeof setTimeout> | null = null;
   #refreshing: Promise<void> | null = null;
+  // The owner commit is synchronous, but cross-space scheduler fan-out awaits
+  // other engines. Preserve owner apply order across concurrent connections so
+  // an older mirror cannot land after a newer one.
+  #schedulerSideEffectsByOwnerSpace = new Map<string, Promise<void>>();
   #lastRefreshDurationMs = 0;
   #store?: URL;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
@@ -1918,6 +1947,17 @@ export class Server {
         if (message.commit.branch !== undefined) {
           span.setAttribute("branch", message.commit.branch);
         }
+        // (space.did, session.id, commit.local_seq) is the deterministic join
+        // to the CLIENT half of this commit (the runner's storage.push span).
+        // Unlike request.id — minted per send attempt and re-minted on
+        // reconnect resends — localSeq is stable across retries and known
+        // before the response, so it also identifies rejected commits.
+        if (message.sessionId !== undefined) {
+          span.setAttribute("session.id", message.sessionId);
+        }
+        if (message.commit.localSeq !== undefined) {
+          span.setAttribute("commit.local_seq", message.commit.localSeq);
+        }
         try {
           const engine = await this.openEngine(message.space);
           // The session may be revoked or replaced while openEngine awaits.
@@ -1960,7 +2000,11 @@ export class Server {
               deny,
             );
           }
-          const schedulerStateEnabled = getPersistentSchedulerStateConfig();
+          // Scheduler ownership is derived from an authenticated principal.
+          // An otherwise-authorized anonymous memory session may still commit
+          // cell data, but cannot persist scoped scheduler metadata.
+          const schedulerStateEnabled = getPersistentSchedulerStateConfig() &&
+            session.principal !== undefined;
           const commitPayload = schedulerStateEnabled ? message.commit : {
             ...message.commit,
             schedulerObservation: undefined,
@@ -1971,16 +2015,28 @@ export class Server {
             : [];
           const previousReadSpaces = new Map<number, Set<string>>();
           for (const { localSeq, observation } of schedulerObservations) {
+            const previousSnapshots = Engine.listSchedulerActionSnapshots(
+              engine,
+              {
+                branch: message.commit.branch ?? "",
+                ownerSpace: message.space,
+                pieceId: observation.pieceId,
+                processGeneration: observation.processGeneration,
+                actionId: observation.actionId,
+                applicableExecutionContextKeys: schedulerApplicableContextKeys(
+                  session.principal,
+                  message.sessionId,
+                ),
+              },
+            ).snapshots;
             previousReadSpaces.set(
               localSeq,
-              this.schedulerObservationReadSpaces(
-                Engine.getLatestSchedulerActionSnapshot(engine, {
-                  branch: message.commit.branch ?? "",
-                  ownerSpace: message.space,
-                  pieceId: observation.pieceId,
-                  processGeneration: observation.processGeneration,
-                  actionId: observation.actionId,
-                })?.observation,
+              new Set(
+                previousSnapshots.flatMap((
+                  snapshot,
+                ) => [...this.schedulerObservationReadSpaces(
+                  snapshot.observation,
+                )]),
               ),
             );
           }
@@ -2235,12 +2291,19 @@ export class Server {
       }
       const page = Engine.listSchedulerActionSnapshots(
         engine,
-        message.query,
+        {
+          ...message.query,
+          applicableExecutionContextKeys: schedulerApplicableContextKeys(
+            session.principal,
+            message.sessionId,
+          ),
+        },
       );
       const snapshots = page.snapshots.map((snapshot) => ({
         observationId: snapshot.observationId,
         commitSeq: snapshot.commitSeq,
         observedAtSeq: snapshot.observedAtSeq,
+        executionContextKey: snapshot.executionContextKey,
         observation: snapshot.observation,
         ...(snapshot.directDirtySeq !== undefined
           ? { directDirtySeq: snapshot.directDirtySeq }
@@ -2608,6 +2671,7 @@ export class Server {
     sessionId: string,
     dirtyIds?: ReadonlySet<string>,
     dirtyOrigins?: ReadonlyMap<string, DirtyOrigin>,
+    options?: { adoptionObservations?: boolean },
   ): Promise<SessionEffectMessage | null> {
     const session = this.#sessions.get(space, sessionId);
     if (session === null) {
@@ -2628,7 +2692,9 @@ export class Server {
           const pendingCaughtUpLocalSeq = session.pendingCaughtUpLocalSeq;
           const hasPendingCatchUp =
             pendingCaughtUpLocalSeq > session.caughtUpLocalSeq;
-          const finishCatchUp = (sync: SessionSync): SessionEffectMessage => {
+          const finishCatchUp = async (
+            sync: SessionSync,
+          ): Promise<SessionEffectMessage> => {
             if (hasPendingCatchUp) {
               session.caughtUpLocalSeq = Math.max(
                 session.caughtUpLocalSeq,
@@ -2639,6 +2705,12 @@ export class Server {
               }
               sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
             }
+            await this.attachAdoptionObservations(
+              space,
+              sessionId,
+              sync,
+              options,
+            );
             return {
               type: "session/effect",
               space,
@@ -2650,19 +2722,34 @@ export class Server {
             fromSeq = session.lastSyncedSeq,
             toSeq?: number,
           ): Promise<SessionEffectMessage | null> => {
-            if (!hasPendingCatchUp) {
-              return null;
-            }
             const serverSeq = toSeq ??
               Engine.serverSeq(await this.openEngine(space));
+            const mayCarryAdoption = options?.adoptionObservations === true &&
+              session.watches.length > 0 &&
+              serverSeq > fromSeq;
+            if (!hasPendingCatchUp && !mayCarryAdoption) {
+              return null;
+            }
             session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
-            return finishCatchUp({
+            const sync: SessionSync = {
               type: "sync",
               fromSeq,
               toSeq: serverSeq,
               upserts: [],
               removes: [],
-            });
+            };
+            const message = await finishCatchUp(sync);
+            // Do not manufacture an empty push solely to probe the adoption
+            // window. When a row is present, however, the sync must cross the
+            // wire even without a document diff or the session watermark can
+            // advance past that row forever.
+            if (
+              !hasPendingCatchUp &&
+              (sync.observations?.length ?? 0) === 0
+            ) {
+              return null;
+            }
+            return message;
           };
           if (session.watches.length === 0) {
             return await emptyCatchUp();
@@ -2758,7 +2845,7 @@ export class Server {
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
             });
-            return finishCatchUp({
+            return await finishCatchUp({
               type: "sync",
               fromSeq,
               toSeq,
@@ -2792,12 +2879,103 @@ export class Server {
           if (isEmptySync(sync)) {
             return await emptyCatchUp(sync.fromSeq, sync.toSeq);
           }
-          return finishCatchUp(sync);
+          return await finishCatchUp(sync);
         } finally {
           span.end();
         }
       },
     );
+  }
+
+  // Attach the sync window's scheduler observation rows so the receiving
+  // client can ADOPT other clients' committed action runs instead of
+  // re-running them (incremental-observation-adoption.md §4). Only for
+  // connections that negotiated persistentSchedulerState, on any advancing
+  // sync window (including an empty catch-up), and echo-suppressed by the
+  // observation writer session.
+  // Adoption is an optimization: a failed observation query must never fail
+  // the sync push.
+  private async attachAdoptionObservations(
+    space: string,
+    sessionId: string,
+    sync: SessionSync,
+    options?: { adoptionObservations?: boolean },
+  ): Promise<void> {
+    if (
+      options?.adoptionObservations !== true ||
+      !getPersistentSchedulerStateConfig() ||
+      sync.toSeq <= sync.fromSeq
+    ) {
+      return;
+    }
+    try {
+      // Watch-scope the rows exactly like the doc diff: a row whose read set
+      // reaches outside this session's tracked docs must not ship. The
+      // receiver could never verify those reads current (their changes are
+      // never pushed to it), and adopting such a row would skip the very run
+      // that loads and subscribes them — a permanently stale action. Dropping
+      // the row also keeps observation metadata (doc ids, fingerprints)
+      // inside the watch boundary that scopes every other byte of this push.
+      const session = this.#sessions.get(space, sessionId);
+      if (session === null) return;
+      const trackedIds = session.trackedIds;
+      const adoptionSurfaceTracked = (
+        observation: Engine.SchedulerActionObservation,
+      ): boolean =>
+        [
+          ...(observation.reads ?? []),
+          ...(observation.shallowReads ?? []),
+          ...(observation.actualChangedWrites ?? []),
+          ...(observation.currentKnownWrites ?? []),
+        ].every((address) =>
+          address.space === space &&
+          trackedIds.has(toDirtyKey(address.id, declaredScope(address.scope)))
+        );
+      const engine = await this.openEngine(space);
+      const page = Engine.listSchedulerActionSnapshots(engine, {
+        sinceCommitSeq: sync.fromSeq,
+        throughCommitSeq: sync.toSeq,
+        applicableExecutionContextKeys: schedulerApplicableContextKeys(
+          session.principal,
+          sessionId,
+        ),
+      });
+      const receiverWriterSessionKey = Engine.resolveCommitSessionKey(
+        sessionId,
+        session.principal,
+      );
+      const observations = page.snapshots
+        .filter((snapshot) =>
+          snapshot.writerSessionId !== receiverWriterSessionKey &&
+          adoptionSurfaceTracked(snapshot.observation)
+        )
+        .map((snapshot) => ({
+          observationId: snapshot.observationId,
+          commitSeq: snapshot.commitSeq,
+          observedAtSeq: snapshot.observedAtSeq,
+          executionContextKey: snapshot.executionContextKey,
+          observation: snapshot.observation,
+          ...(snapshot.directDirtySeq !== undefined
+            ? { directDirtySeq: snapshot.directDirtySeq }
+            : {}),
+          ...(snapshot.staleSeq !== undefined
+            ? { staleSeq: snapshot.staleSeq }
+            : {}),
+          ...(snapshot.unknownReason !== undefined
+            ? { unknownReason: snapshot.unknownReason }
+            : {}),
+        }));
+      // A window with more rows than one page (nextCursor set) sends the
+      // first page only; receivers degrade to running the remainder.
+      if (observations.length > 0) {
+        sync.observations = observations;
+      }
+    } catch (error) {
+      console.warn(
+        "attachAdoptionObservations failed; sync pushed without observations",
+        error,
+      );
+    }
   }
 
   markSpaceDirty(
@@ -3027,10 +3205,14 @@ export class Server {
   private async mirrorSchedulerObservation(
     ownerSpace: string,
     observation: Engine.SchedulerActionObservation,
+    originExecutionContextKey: SchedulerExecutionContextKey,
     commit: Engine.AppliedCommit,
     previousReadSpaces: ReadonlySet<string>,
     session: SessionState | undefined,
   ): Promise<void> {
+    if (session?.principal === undefined) {
+      return;
+    }
     const mirrorSpaces = this.schedulerObservationReadSpaces(observation);
     for (const space of previousReadSpaces) {
       mirrorSpaces.add(space);
@@ -3045,16 +3227,51 @@ export class Server {
         continue;
       }
       const engine = await this.openEngine(space);
-      Engine.upsertSchedulerObservation(engine, {
+      Engine.upsertMirroredSchedulerObservation(engine, {
         branch: commit.branch,
         ownerSpace,
         observedAtSeq: commit.seq,
+        scopeContext: {
+          principal: session.principal,
+          sessionId: session.id,
+        },
+        writerSessionId: Engine.resolveCommitSessionKey(
+          session.id,
+          session.principal,
+        ),
+        originExecutionContextKey,
         observation,
       });
     }
   }
 
-  private async runPostCommitSchedulerSideEffects(
+  private runPostCommitSchedulerSideEffects(
+    ownerSpace: string,
+    commit: Engine.AppliedCommit,
+    observations: readonly CommitSchedulerObservation[],
+    previousReadSpaces: ReadonlyMap<number, ReadonlySet<string>>,
+    session: SessionState | undefined,
+  ): Promise<void> {
+    const run = () =>
+      this.applyPostCommitSchedulerSideEffects(
+        ownerSpace,
+        commit,
+        observations,
+        previousReadSpaces,
+        session,
+      );
+    const previous = this.#schedulerSideEffectsByOwnerSpace.get(ownerSpace);
+    const queued = previous?.then(run, run) ?? run();
+    const tracked = queued.finally(() => {
+      if (this.#schedulerSideEffectsByOwnerSpace.get(ownerSpace) === tracked) {
+        this.#schedulerSideEffectsByOwnerSpace.delete(ownerSpace);
+      }
+    });
+    this.#schedulerSideEffectsByOwnerSpace.set(ownerSpace, tracked);
+    return tracked;
+  }
+
+  private async applyPostCommitSchedulerSideEffects(
     ownerSpace: string,
     commit: Engine.AppliedCommit,
     observations: readonly CommitSchedulerObservation[],
@@ -3067,23 +3284,41 @@ export class Server {
 
     try {
       await this.propagateSchedulerDirtyToOwnerSpaces(ownerSpace, commit);
-      const keptObservationLocalSeqs = commit.schedulerObservationResults
-        ? new Set(
-          commit.schedulerObservationResults
-            .filter((result) => result.status === "kept")
-            .map((result) => result.localSeq),
+      const observationResults = commit.schedulerObservationResults
+        ? new Map(
+          commit.schedulerObservationResults.map((result) => [
+            result.localSeq,
+            result,
+          ]),
         )
         : undefined;
+      // A semantic commit replay can outlive an observation that was removed by
+      // later context narrowing. There is no active owner context to mirror in
+      // that case; replaying the stale payload would resurrect invalid state.
+      if (observations.length > 0 && observationResults === undefined) {
+        return;
+      }
       for (const { localSeq, observation } of observations) {
-        if (
-          keptObservationLocalSeqs &&
-          !keptObservationLocalSeqs.has(localSeq)
-        ) {
+        const result = observationResults?.get(localSeq);
+        if (result === undefined) {
+          throw new Error(
+            `scheduler observation ${localSeq} missing owner result`,
+          );
+        }
+        if (result.status === "dropped") {
+          continue;
+        }
+        // A kept replay remains idempotently acknowledged even after a later
+        // observation replaced or narrowed its owner snapshot. The engine omits
+        // the effective context in that case so this stale payload cannot
+        // recreate or roll back a mirror.
+        if (result.executionContextKey === undefined) {
           continue;
         }
         await this.mirrorSchedulerObservation(
           ownerSpace,
           observation,
+          result.executionContextKey,
           commit,
           previousReadSpaces.get(localSeq) ?? new Set(),
           session,
@@ -3184,6 +3419,84 @@ export class Server {
     return opened;
   }
 }
+
+const isSchedulerExecutionContextKey = (
+  value: unknown,
+): value is SchedulerExecutionContextKey =>
+  value === "space" ||
+  (typeof value === "string" &&
+    (/^user:[^:]+$/.test(value) || /^session:[^:]+:[^:]+$/.test(value)));
+
+const parseSchedulerSnapshotQuery = (
+  value: Record<string, unknown>,
+): SchedulerActionSnapshotQuery | undefined => {
+  // Context is selected only from the authenticated server session. A cursor
+  // may carry the last returned context for stable continuation, but the query
+  // itself has no arbitrary context selector.
+  if (
+    "executionContextKey" in value ||
+    "execution_context_key" in value ||
+    (value.branch !== undefined && typeof value.branch !== "string") ||
+    (value.ownerSpace !== undefined && typeof value.ownerSpace !== "string") ||
+    (value.pieceId !== undefined && typeof value.pieceId !== "string") ||
+    (value.processGeneration !== undefined &&
+      !isNonNegativeInteger(value.processGeneration)) ||
+    (value.actionId !== undefined && typeof value.actionId !== "string") ||
+    (value.sinceCommitSeq !== undefined &&
+      !isNonNegativeInteger(value.sinceCommitSeq)) ||
+    (value.throughCommitSeq !== undefined &&
+      !isNonNegativeInteger(value.throughCommitSeq)) ||
+    (value.limit !== undefined && !isNonNegativeInteger(value.limit))
+  ) {
+    return undefined;
+  }
+  let cursor: SchedulerActionSnapshotQuery["cursor"];
+  if (value.cursor !== undefined) {
+    if (
+      !isRecord(value.cursor) ||
+      (value.cursor.ownerSpace !== undefined &&
+        typeof value.cursor.ownerSpace !== "string") ||
+      typeof value.cursor.pieceId !== "string" ||
+      !isNonNegativeInteger(value.cursor.processGeneration) ||
+      typeof value.cursor.actionId !== "string" ||
+      !isSchedulerExecutionContextKey(value.cursor.executionContextKey)
+    ) {
+      return undefined;
+    }
+    cursor = {
+      ...(value.cursor.ownerSpace !== undefined
+        ? { ownerSpace: value.cursor.ownerSpace }
+        : {}),
+      pieceId: value.cursor.pieceId,
+      processGeneration: value.cursor.processGeneration,
+      actionId: value.cursor.actionId,
+      executionContextKey: value.cursor.executionContextKey,
+    };
+  }
+  return {
+    ...(value.branch !== undefined ? { branch: value.branch as string } : {}),
+    ...(value.ownerSpace !== undefined
+      ? { ownerSpace: value.ownerSpace as string }
+      : {}),
+    ...(value.pieceId !== undefined
+      ? { pieceId: value.pieceId as string }
+      : {}),
+    ...(value.processGeneration !== undefined
+      ? { processGeneration: value.processGeneration as number }
+      : {}),
+    ...(value.actionId !== undefined
+      ? { actionId: value.actionId as string }
+      : {}),
+    ...(value.sinceCommitSeq !== undefined
+      ? { sinceCommitSeq: value.sinceCommitSeq as number }
+      : {}),
+    ...(value.throughCommitSeq !== undefined
+      ? { throughCommitSeq: value.throughCommitSeq as number }
+      : {}),
+    ...(value.limit !== undefined ? { limit: value.limit as number } : {}),
+    ...(cursor !== undefined ? { cursor } : {}),
+  };
+};
 
 export const parseClientMessage = (
   payload: string,
@@ -3367,12 +3680,14 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     isRecord(parsed.query)
   ) {
+    const query = parseSchedulerSnapshotQuery(parsed.query);
+    if (query === undefined) return null;
     return {
       type: "scheduler.snapshot.list",
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
-      query: parsed.query as SchedulerSnapshotListRequest["query"],
+      query,
     };
   }
 

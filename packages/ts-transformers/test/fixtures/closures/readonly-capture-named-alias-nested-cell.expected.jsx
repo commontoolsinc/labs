@@ -64,7 +64,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: readonly-capture-named-alias-nested-cell
 // Verifies (BEHAVIOR LOCK): a by-reference, read-only-used capture of a bare
 //   `Cell<EntriesValue>` (EntriesValue = Entry[] | Default<[]>, Entry has a

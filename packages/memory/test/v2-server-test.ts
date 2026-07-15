@@ -132,6 +132,86 @@ Deno.test("memory v2 server parser ignores transact invocation and authorization
   );
 });
 
+Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () => {
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "scheduler.snapshot.list",
+      requestId: "scheduler-list-context",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:alice",
+      query: { executionContextKey: "user:did%3Akey%3Abob" },
+    })),
+    null,
+  );
+
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "scheduler.snapshot.list",
+      requestId: "scheduler-list-cursor",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:alice",
+      query: {
+        branch: "feature",
+        ownerSpace: "did:key:z6Mk-owner",
+        pieceId: "space:of:piece",
+        processGeneration: 0,
+        actionId: "pattern.tsx:computed:1",
+        sinceCommitSeq: 1,
+        throughCommitSeq: 2,
+        limit: 10,
+        cursor: {
+          ownerSpace: "did:key:z6Mk-owner",
+          pieceId: "space:of:piece",
+          processGeneration: 0,
+          actionId: "pattern.tsx:computed:1",
+          executionContextKey: "session:did%3Akey%3Aalice:session%3Aalice",
+        },
+      },
+    })),
+    {
+      type: "scheduler.snapshot.list",
+      requestId: "scheduler-list-cursor",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:alice",
+      query: {
+        branch: "feature",
+        ownerSpace: "did:key:z6Mk-owner",
+        pieceId: "space:of:piece",
+        processGeneration: 0,
+        actionId: "pattern.tsx:computed:1",
+        sinceCommitSeq: 1,
+        throughCommitSeq: 2,
+        limit: 10,
+        cursor: {
+          ownerSpace: "did:key:z6Mk-owner",
+          pieceId: "space:of:piece",
+          processGeneration: 0,
+          actionId: "pattern.tsx:computed:1",
+          executionContextKey: "session:did%3Akey%3Aalice:session%3Aalice",
+        },
+      },
+    },
+  );
+
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "scheduler.snapshot.list",
+      requestId: "scheduler-list-invalid-cursor",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:alice",
+      query: {
+        cursor: {
+          pieceId: "space:of:piece",
+          processGeneration: -1,
+          actionId: "pattern.tsx:computed:1",
+          executionContextKey: "space",
+        },
+      },
+    })),
+    null,
+  );
+});
+
 Deno.test("memory v2 session registry scopes session ids by space", () => {
   const sessions = new SessionRegistry();
   const first = sessions.open(
@@ -465,6 +545,38 @@ Deno.test("memory v2 server allows the same session id in different spaces", asy
     assertEquals(openedTwo.ok?.sessionId, "session:fixed");
     assertEquals(openedTwo.ok?.serverSeq, 0);
     assertExists(openedTwo.ok?.sessionToken);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 dirty refresh stays on the connection's mounted space", async () => {
+  const server = createServer("memory://memory-v2-server-refresh-space-scope");
+  const first = server.connect(() => {});
+  const second = server.connect(() => {});
+  const firstSpace = "did:key:z6Mk-refresh-space-one";
+  const secondSpace = "did:key:z6Mk-refresh-space-two";
+  const sessionId = "session:shared-across-spaces";
+
+  try {
+    first.addSession(firstSpace, sessionId);
+    second.addSession(secondSpace, sessionId);
+
+    const syncCalls: Array<{ space: string; sessionId: string }> = [];
+    server.syncSessionForConnection = (space, mountedSessionId) => {
+      syncCalls.push({ space, sessionId: mountedSessionId });
+      return Promise.resolve(null);
+    };
+
+    // The server fans a dirty-space refresh to every connection. A connection
+    // mounted only in another space must not consume this session's cursor,
+    // even when both mounts intentionally share one execution-context id.
+    await Promise.all([
+      first.refreshDirty(secondSpace),
+      second.refreshDirty(secondSpace),
+    ]);
+
+    assertEquals(syncCalls, [{ space: secondSpace, sessionId }]);
   } finally {
     await server.close();
   }
@@ -966,6 +1078,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
     assertEquals(committed.ok?.seq, 1);
     assertEquals(committed.ok?.revisions, [{
       id: "of:doc:1",
+      scopeKey: "space",
       branch: "",
       seq: 1,
       opIndex: 0,

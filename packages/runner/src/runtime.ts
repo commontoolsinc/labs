@@ -219,7 +219,7 @@ export interface ExperimentalOptions {
   modernCellRep?: boolean | undefined;
   /** Persist scheduler observations and use them for scheduler rehydration. */
   persistentSchedulerState?: boolean | undefined;
-  /** Attach origin-committed preconditions to scheduler-v2 lineage commits. */
+  /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
   /**
    * Mint kind-tagged entity ids (`fid2:computed:`) for internal cells the
@@ -600,7 +600,7 @@ export class Runtime {
   readonly moduleByteCache?: ModuleByteCache;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly telemetry: RuntimeTelemetry;
-  /** Resolved experimental flags (all properties present, defaulting to `false`). */
+  /** Resolved experimental flags (all properties present with built-in defaults). */
   readonly experimental: ExperimentalOptions;
   /** Resolved committed-write backpressure policy (all fields present). */
   readonly commitBackpressure: CommitBackpressurePolicy;
@@ -835,14 +835,22 @@ export class Runtime {
       ...options.experimental,
     };
 
-    // Log any overridden experimental flags.
+    // Log any overridden experimental flags. Never on stdout: the cf CLI's
+    // machine-readable output (`cf piece ls` etc.) is consumed by scripts, and
+    // this banner made every command's stdout non-empty under a flag override.
+    // Not console.error/warn either: the cf test console enforcement fails
+    // tests on those. Direct process stderr in Deno; plain console in browser
+    // realms (no stdout contract there).
     const overrideFlags = Object.entries(this.experimental)
       .filter(([_, v]) => v !== undefined)
       .map(([k, v]) => `${k}=${v}`);
     if (overrideFlags.length > 0) {
-      console.log(
-        `Experimental flag overrides: ${overrideFlags.join(", ")}`,
-      );
+      const banner = `Experimental flag overrides: ${overrideFlags.join(", ")}`;
+      if (typeof Deno !== "undefined" && Deno.stderr) {
+        Deno.stderr.writeSync(new TextEncoder().encode(banner + "\n"));
+      } else {
+        console.log(banner);
+      }
     }
 
     // Propagate experimental flags to their ambient control points, then read
@@ -916,6 +924,12 @@ export class Runtime {
     });
 
     this.storageManager = options.storageManager;
+    // Hand the storage layer the telemetry bus so it can emit the
+    // storage.push/pull markers (duck-typed: only the v2 StorageManager
+    // implements it; emulated/test managers simply don't have the method).
+    (this.storageManager as {
+      setTelemetry?: (telemetry: RuntimeTelemetry) => void;
+    }).setTelemetry?.(this.telemetry);
     this.moduleByteCache = options.moduleByteCache;
     // Validated + digested + frozen before the trust-snapshot provider
     // default below, whose `revision` covers the config digest (a trust
@@ -1015,11 +1029,11 @@ export class Runtime {
     return this.scheduler.idle();
   }
 
-  // In-flight async builtin operations — the work the async builtins (fetchJson,
-  // fetchProgram, llm/llmDialog, and reactive sqlite queries) perform AFTER their
-  // handler returns, from a post-commit outbox flush: a network / LLM call or a
-  // sqlite RPC, plus the result writeback. `idle()` deliberately does NOT wait
-  // for these (a handler must never block on network I/O); `settled()` does.
+  // In-flight async builtin operations — the work async builtins (fetchJson,
+  // fetchProgram, llm/llmDialog, reactive sqlite queries, and navigation)
+  // perform AFTER their handler returns, from a post-commit outbox flush: a
+  // network / LLM / navigation call or a sqlite RPC, plus any result writeback.
+  // `idle()` deliberately does NOT wait for these; `settled()` does.
   #pendingAsyncWork = new Set<Promise<unknown>>();
 
   /**
@@ -1048,7 +1062,12 @@ export class Runtime {
    */
   async settled(maxRounds = 50): Promise<void> {
     for (let round = 0; round < maxRounds; round++) {
-      await this.scheduler.idle();
+      // Use the commit-aware scheduler barrier. A successful handler commit can
+      // synchronously schedule a deferred result pattern (notably navigateTo)
+      // from its commit callback; plain idle() can resolve in the gap before
+      // that callback queues the next scheduler turn. The joint barrier
+      // rechecks scheduler work whenever pending commits drain.
+      await this.scheduler.idleWithPendingCommits();
       await this.storageManager.synced();
       if (this.#pendingAsyncWork.size === 0) return;
       await Promise.allSettled([...this.#pendingAsyncWork]);
@@ -1122,7 +1141,7 @@ export class Runtime {
     this.runner.stopAll();
 
     // Scheduler background work can still be using storage, for example the
-    // subscription-time persistent-state rehydration lookup. Let that finish
+    // lifecycle-guarded boot-time persistent-state listing. Let that finish
     // before tearing down storage sessions.
     await this.scheduler.idle();
 
@@ -1251,29 +1270,51 @@ export class Runtime {
     return wrapped;
   }
 
-  // (space, id) pairs for which a missing-link-target load has been kicked
-  // this session. The kicked sync establishes a live per-doc subscription, so
-  // a later creation of the doc still arrives — one kick per doc suffices.
+  // (space, scope, id) triples for which a missing-link-target load has been
+  // kicked this session. The kicked sync establishes a live per-doc
+  // subscription, so a later creation of the doc still arrives — one kick per
+  // doc suffices. Scope is part of the key: scoped instances (user/session)
+  // are distinct docs, and a kick for one scope must not suppress another's.
   private missingDocLoadKicks = new Set<string>();
 
   /**
-   * Asynchronously load a cross-space link target that a read found absent
-   * from the local replica (CT-1667): per-space server queries cannot follow
-   * links across space boundaries, so the client must fetch such targets
-   * itself. Fire-and-forget, but registered as a cross-space promise so
+   * Asynchronously load a link target that a read found absent from the
+   * local replica. Cross-space targets (CT-1667): per-space server queries
+   * cannot follow links across space boundaries, so the client must fetch
+   * such targets itself. Same-space targets (fresh-replica read asymmetry):
+   * a rejecting-selector sync delivers only the root doc, so a link can
+   * point at a doc no selector ever walked — those are fetched only when
+   * the local replica has never seen the doc (`shouldPullDoc`), so reads of
+   * genuinely absent optional values do not become repeated server queries.
+   * Fire-and-forget, but registered as a cross-space promise so
    * `storageManager.synced()` and `Cell.pull()`'s convergence loop can await
    * it; the absent doc is a tracked read, so the reader re-runs on arrival.
    * Deduped per (space, id): the kicked sync leaves a live subscription
    * behind, so repeat kicks add nothing.
    */
-  ensureLinkedDocLoaded(link: NormalizedFullLink): void {
-    const key = `${link.space}\0${link.id}`;
+  ensureLinkedDocLoaded(
+    link: NormalizedFullLink,
+    sourceSpace?: MemorySpace,
+  ): void {
+    const { space, id, scope } = link;
+    const key = `${space}\0${normalizeCellScope(scope)}\0${id}`;
     if (this.missingDocLoadKicks.has(key)) return;
+    // A same-space target the replica already has state for (or a manager
+    // without lazy replication) needs no fetch.
+    const sameSpace = sourceSpace === space;
+    const mgr = this.storageManager;
+    const reserved = sameSpace &&
+      mgr.shouldPullDoc?.(space, id, scope) === true;
+    if (sameSpace && !reserved) return;
     this.missingDocLoadKicks.add(key);
-    this.storageManager.trackUntilSettled(
+    mgr.trackUntilSettled(
       this.getCellFromLink(link).sync().catch(() => {
-        // Allow a retry on failure (e.g. transient disconnect).
+        // Allow a retry on failure (e.g. transient disconnect): clear this
+        // dedup set, and hand back the storage manager's reservation when
+        // THIS kick took it — a cross-space kick never reserved, and must
+        // not clear a reservation a concurrent same-space read holds.
         this.missingDocLoadKicks.delete(key);
+        if (reserved) mgr.retractDocPullKick?.(space, id, scope);
       }),
     );
   }

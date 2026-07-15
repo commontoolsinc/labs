@@ -307,6 +307,53 @@ file by hand, point it at the compiled binary (`deno task build-binaries`, then
 
 Example: `PIPE_CONSOLE=1 deno task integration`
 
+## Presentation mode and video demos
+
+`deno task demo` enables an opt-in presentation layer around the existing
+browser integration stack. It does not define `demo.click()` or `demo.type()`:
+the same `fillCfInput`, `clickCfButton`, trusted-action, and Astral element
+operations used by the test remain responsible for the interaction.
+
+The command accepts one or more test-file filters. Multiple files are recorded
+sequentially into isolated artifact subdirectories, with a top-level
+`index.html` gallery linking every completed, test-named MP4.
+
+In presentation mode, those paths may add human-readable typing delay, cursor
+travel, a click pulse, participant labels, and captions. With presentation mode
+off they retain their normal fast behavior. Direct interaction forms used by a
+new demo should be checked against the shared presentation hooks; prefer the
+existing higher-level helpers where they already encode the correct settle,
+single-action, commit, and effect-wait behavior.
+
+Presentation timing is not correctness timing. Continue to settle the view and
+wait for the specific state or DOM effect event-drivenly. A caption hold may
+begin only after that effect has arrived, and it resolves immediately outside
+presentation mode. Never add `sleep`, `waitForTimeout`, or a longer correctness
+timeout merely to pace a video.
+
+Use `StepTimer.run(label, action)` for a viewer-readable scenario boundary when
+the test already benefits from step timing. During a demo it records the step
+on the shared timeline and shows the label on every active participant; during
+a normal test it only records the existing timing row. Labels should tell the
+viewer what changed, not expose implementation diagnostics or protected values
+before the UI legitimately reveals them.
+
+For multi-user demos, attach stable participant metadata without changing the
+identity or browser topology:
+
+```text
+const alice = new ShellIntegration({
+  presentation: { id: "alice", label: "Alice", color: "#7c3aed" },
+});
+const bob = new ShellIntegration({
+  presentation: { id: "bob", label: "Bob", color: "#0891b2" },
+});
+```
+
+Each shell still launches its own browser. Recording and composition happen
+around the test; participants are never collapsed into iframes or a shared
+browser profile.
+
 ## Debugging Tips
 
 If semantic locators are not finding your element:

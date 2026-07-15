@@ -65,7 +65,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["done"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     view: string[];
 }, string | undefined>(({ view }) => view[0], {

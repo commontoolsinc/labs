@@ -69,7 +69,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["name", "value"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     state: {
         items: {
@@ -98,7 +98,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: ternary-hoisted-compute-plain-map-branch
 // Verifies: once a ternary JSX branch is wholly compute-wrapped, compute-owned
 // array maps inside that branch stay plain Array.map() calls.

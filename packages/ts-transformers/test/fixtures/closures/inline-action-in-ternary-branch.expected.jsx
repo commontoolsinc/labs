@@ -86,7 +86,7 @@ const __cfLift_1 = __cfHelpers.lift<{
             required: ["$UI"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema, { captureWritesAnalyzed: true });
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: inline-action-in-ternary-branch
 // Verifies: inline arrow handler inside explicit computed() in a ternary branch is extracted and captured in a lift-applied computation
 //   computed(() => <cf-button onClick={() => state.isEditing.set(true)} />) → lift(..., handler(...)(...))({ state: { isEditing: asCell } })

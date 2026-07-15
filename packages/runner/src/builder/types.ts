@@ -228,15 +228,11 @@ declare module "@commonfabric/api" {
      */
     materializerWriteInputPaths?: readonly (readonly string[])[];
     /**
-     * Transformer assertion that capability analysis ran over this module's
-     * callback and no capture escaped tracking, making
-     * `materializerWriteInputPaths` an exhaustive record of capture writes
-     * (`.send()` included). Pure provenance: the computed-cell classifier no
-     * longer consumes it (replayable compute writes qualify regardless — see
-     * `assignComputedCellKinds`), but the exhaustive-write guarantee stays
-     * available to consumers that need a closed-world write record.
+     * Transformer proof that this source-backed lift's cell surface is
+     * exhaustively described by its structural bindings.  Absence means
+     * unknown/incomplete; raw modules and handlers never receive this marker.
      */
-    captureWritesAnalyzed?: boolean;
+    completeSchedulerScopeSummary?: true;
     /** Run this module's result in a specific space. */
     targetSpace?: MemorySpace;
   }
