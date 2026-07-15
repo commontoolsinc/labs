@@ -70,11 +70,14 @@ unservability.
 
 PerSession inclusion is deliberate (revisiting §5.B.6's deferral):
 session-scoped derivation does not need Phase 5 events. Its inputs arrive
-as ordinary session-scoped source commits, and the acting-context can be
-bound from the accepted commit's authenticated origin session — the same
-causal-origin pattern the builtin broker already uses for
-`causalActorMatchesSponsor`. Events remain the Phase 5 vehicle for
-*handlers*; derivations ride the lattice.
+as ordinary accepted commits — the session's own scoped writes and any
+other principal's shared-state writes alike — and execution authority
+comes from the lane's own grant (§3), independent of which commit caused a
+recompute. (The causal-origin pattern the builtin broker uses for
+`causalActorMatchesSponsor` is *only* an egress-consent precedent; an
+earlier draft generalized it into lane authority and review showed that
+unserves every cross-session-caused recompute.) Events remain the Phase 5
+vehicle for *handlers*; derivations ride the lattice.
 
 ## 2. The lattice, restated as an execution model
 
@@ -97,13 +100,20 @@ primitive:
   principal's runtime evidence). A client that derives `space` while the
   server claims at `user:<did>` would silently never suppress — restoring
   the write race for exactly the actions this design adds. Routing is
-  therefore **rank-aware**: match the `ActionClaimKey` minus contextKey,
+  therefore **chain-scoped**: match the `ActionClaimKey` minus contextKey,
   then accept iff `claim.contextKey ∈ {"space", user:<my did>,
-  session:<my did>:<my sessionId>}` and its rank is ≥ the client's own
-  minimum rank for the action. A claim naming another principal or another
-  session never matches; a claim broader or narrower-within-my-lattice
+  session:<my did>:<my sessionId>}` — the client's own lattice chain. A
+  claim naming another principal or another session never matches; a claim
+  broader or narrower-within-my-lattice
   than my local estimate still suppresses, which also gives continuity
-  across lane moves.
+  across lane moves. There is deliberately **no rank comparison against the
+  client's own estimate**: the server's floor may lag the client's local
+  evidence (or vice versa), and rejecting a broader-than-my-estimate claim
+  would leave client and lane both executing into *different* scoped
+  instances — a divergent-duplicate window. Accepting it instead parks the
+  client on a lane that, when it performs the narrower read, firewall-
+  rejects, narrows, and reissues under revoke-before-issue — the same
+  fail-open correction path as every other misclassification.
 - **Control events are context-scoped, not space-broadcast.**
   Session-context claims/revokes/settlements are delivered only to the
   session their contextKey names; user-context events only to that
@@ -114,16 +124,19 @@ primitive:
   suffix would thrash into full snapshots. Scoping also shrinks a
   reconnect snapshot to "my lanes + the space lane," which is what keeps
   the reconnect story coherent at scale.
-- **At most one live claim per action across all lanes.** Claims keyed by
+- **Live claims for one action must be routing-disjoint.** Claims keyed by
   full `ActionClaimKey` would otherwise permit a space-lane claim and a
-  session-lane claim for the same action to be live simultaneously. The
-  invariant: at most one live claim per (branch, space, pieceId, actionId,
-  fingerprints) across contextKeys, and a lane move is ordered
-  **revoke-before-issue** on the control feed — the interim window is
-  explicitly client-authoritative (fail-open, as everywhere else). When a
-  space-context action narrows, one space claim may legitimately fan out
-  into per-session claims; each issuance follows its own revoke-first
-  ordering.
+  session-lane claim for the same action to be live simultaneously with
+  one client matching both. The invariant, checkable at issuance: for one
+  (branch, space, pieceId, actionId, fingerprints) tuple, no single client
+  identity (did, sessionId) may match two live claims under the
+  chain-scoped acceptance rule. That permits the legitimate fan-out —
+  `session:alice:s1` and `session:bob:s2` coexisting, since no client
+  matches both — and forbids space+anything and `user:p` +
+  `session:p:sN`. A lane move is ordered **revoke-before-issue** on the
+  control feed — the interim window is explicitly client-authoritative
+  (fail-open, as everywhere else), and each issuance in a narrowing
+  fan-out follows its own revoke-first ordering.
 - **Demand stays doc/piece-shaped and connection-owned.** A session's
   demand implies demand for its own session-context lane; user-context
   lanes aggregate demand from all of a principal's sessions. No new demand
@@ -199,13 +212,32 @@ starts, so it was replaced):
   `executionClaimAssertion` is validated today. Which commit *caused* a
   recompute is irrelevant to lane authority: any principal's accepted
   source commit may invalidate a session-lane action, and the recompute
-  runs under the lane's own grant. Causal-origin comparison remains only
-  where it exists today — identity-sensitive builtin egress (§B.5's
-  sponsor-match rule, applied against the lane grant's session).
+  runs under the lane's own grant.
+- **Scoped-lane builtin egress is a decision, not an inheritance.** Naively
+  applying §B.5's causal-actor rule against the lane grant's session would
+  re-import the rejected causal-origin shape for the builtin subset: a
+  session-context `generateText` over shared poll data, invalidated by
+  another principal's vote, would settle unserved on every foreign-caused
+  recompute — a permanent claim-churn generator. v1 therefore **statically
+  excludes builtins with cross-session-reachable inputs (any shared
+  space- or user-scoped read surface) from scoped-lane claims**; they stay
+  client-primary. This is a named, narrow carve-out (egress only —
+  pure derivations are unaffected, so §1's no-carve-out thesis holds for
+  integrity), chosen because the alternative — executing egress under
+  Alice's lane grant when Bob's commit caused the recompute — weakens
+  §B.5's confused-deputy protection and must not be adopted without CFC
+  owners explicitly signing off. Relaxing the carve-out on the argument
+  that the lane grant is the consent boundary is Open question 6.
 - **Per-lane fencing.** Each lane grant carries a monotonic **lane
-  generation**, carried on the lane's commits and claims alongside the
-  Worker-wide `leaseGeneration`. Lane drain = fence that generation
-  immediately (every new first application from the lane rejects), revoke
+  generation**, host-internal — not a wire-protocol field on claims (§2's
+  protocol-shape promise stands; claim incarnations already fence
+  settlements). Its check locus is the host provider: **every lane
+  operation, scoped point reads included, validates the live lane grant
+  and its generation**. That is the generation's unique job — commits are
+  already fenced atomically by the lease generation plus exact live-claim
+  resolution, but a queued scoped *read* arriving after the owning session
+  died has no claim to check, and user-lane re-anchoring needs an
+  incarnation name. Lane drain = fence that generation immediately, revoke
   that lane's claims, leave sibling lanes untouched — §B.8's drain
   semantics at lane granularity. The host performs this drain when the
   lane-owning session disconnects, including mid-settle: the host, not the
@@ -244,10 +276,19 @@ starts, so it was replaced):
   narrow state emits narrow-instance outputs plus links, so a broad
   document's value never changes from a narrow read, and any actual narrow
   read monotonically narrows the reader's own floor. That rule is a named
-  invariant of this design, enforced per commit by the execution firewall's
-  per-address scope checks — not an assumption; a builtin or hand-built
-  node copying a narrow value into a broad instance would strand broad-lane
-  readers stale and must be rejected at that boundary.
+  invariant of this design — and per-address scope checks alone cannot
+  enforce it, because the rule itself *requires* a session-lane transaction
+  to write one thing into broader instances: the stable scoped **link** in
+  the declared output slot. The generalized write rule is therefore:
+  a lane's writes to instances broader than the lane are admissible only
+  when the written value is a scoped link whose declared scope is at or
+  narrower than the lane, restricted to declared output/link slots.
+  Primary enforcement lives in the runner's output-scoping step (which
+  already decides instance placement and link emission); the execution
+  firewall remains the scope-*resolution* backstop and gains the
+  link-shape check for broader-instance writes. A builtin or hand-built
+  node copying a narrow *value* into a broad instance strands broad-lane
+  readers stale and is rejected at that boundary.
 - **User lanes follow principal liveness** (any connected session of the
   principal) in v1; with delegated keys they may also serve wake-on-commit
   while offline, which is precisely the async-durability win PerUser state
@@ -332,15 +373,21 @@ folded into `serverPrimaryExecution` once all ranks graduate).
 Two hard rollout rules the dial alone does not give:
 
 - **Version skew needs a subcapability, and lane opening must be gated on
-  it.** Scoped claims require the rank-aware routing of §2; a Phase-2
+  it.** Scoped claims require the chain-scoped routing of §2; a Phase-2
   client negotiates today's capabilities, would receive session-context
   claims for its own session, match none of them (its keys say `space`),
   and never suppress — while the server also executes: duplicated compute
   plus write races on the hottest per-keystroke state, strictly worse than
   flag-off. Scoped claim delivery therefore rides a new handshake
   subcapability (`context-lattice-claims-v1`), and — the load-bearing
-  half — the host must not open a user or session lane for a session that
-  did not negotiate it.
+  half — the host must not open a session lane for a session that did not
+  negotiate it. **User lanes need the stronger rule:** a user lane may open
+  only when *every* connected session of that principal has negotiated the
+  subcapability, and it drains when a non-negotiating session of the
+  principal connects. Otherwise a principal running one negotiated and one
+  Phase-2 client would have the Phase-2 session committing user-scoped
+  derived writes against the lane's commits — the exact write race this
+  gate exists to prevent, created by its own half-measure.
 - **C2 on multi-session spaces is gated on the Phase 3 feed** (or at
   minimum session-scoped watch filtering). Session lanes add roughly one
   server commit per session-derived change per session — multiplying
@@ -371,7 +418,7 @@ Interactions:
 | `packages/runner/src/executor/executor-worker.ts` | one Runtime per lane (session/user lanes constructed on demand inside the same Worker), lane-keyed candidate/claim maps; acting context threaded to the provider. **The Worker replica must be re-keyed by effective scope key** — the client replica keys documents by declared scope because a client is single-session; a multi-lane replica holding two sessions' instances of one id collides otherwise. This re-keying (doc map, pending versions, overlays, unresolvable-read rebase, provider sync frames, lane-tagged read resolution) is the intra-Worker confidentiality boundary and is load-bearing, not a refactor detail |
 | `packages/runner/src/storage/v2-host-provider.ts` | `actingContext` on commits; host validation against claim contextKey + the live lane grant (per-lane generation); scoped point queries under the acting principal |
 | `packages/memory/v2/server.ts` / `engine.ts` | claims/settlements/wake queries keyed by contextKey (schema already carries it); lane grants with per-lane generations and host-side drain on session death; context-scoped control-event delivery (§2); the `context-lattice-claims-v1` subcapability gate on lane opening (§6); session-lane demand derivation; foreign-readers index and vector basis (C3) |
-| `packages/runner/src/storage/v2.ts` (client) | **rank-aware claim routing replaces exact-contextKey matching (§2 — a W2.1 contract change)**; overlay basis becomes per-space vector in C3 with the cross-replica confirmation plumbing §5 names |
+| `packages/runner/src/storage/v2.ts` (client) | **chain-scoped claim routing replaces exact-contextKey matching (§2 — a W2.1 contract change)**; overlay basis becomes per-space vector in C3 with the cross-replica confirmation plumbing §5 names |
 | docs | EXPERIMENTAL_OPTIONS entry for the rank dial; runbook signals per lane rank |
 
 Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
@@ -430,3 +477,22 @@ Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
    session lanes at the cost of a per-group lease/fencing design and
    shared-cache loss. The C2 latency gate (§4) decides whether this
    question must be answered before or after first enablement.
+6. **Scoped-lane builtin egress relaxation.** §3 excludes builtins with
+   cross-session-reachable inputs from scoped-lane claims in v1. The
+   candidate relaxation — the lane grant as the consent boundary, so a
+   foreign-caused recompute may perform egress under the lane's authority —
+   weakens §B.5's confused-deputy protection (another principal's commit
+   triggering egress under this session's identity) and requires CFC
+   owners to decide it explicitly.
+
+## 9. Parent-document edits owed by this design
+
+Landing with **C1**: README §5.B.1's reconnect contract changes from "a
+complete claim snapshot" to "a complete snapshot of the claims this session
+routes" (§2 context-scoped delivery); implementation-plan W2.1's
+implemented-status text is amended to record chain-scoped routing
+superseding exact-contextKey matching. Landing with **C3**: a new gap-
+register row in README §9 for multi-host cross-space execution (this design
+covers co-resident spaces only). Until those land, the parent documents
+describe Phase 2 behavior, which remains accurate for every deployed
+configuration.
