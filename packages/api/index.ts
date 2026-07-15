@@ -114,7 +114,11 @@ export type DataUnavailableVariant =
  */
 export type AsyncResult<T> = T | DataUnavailableVariant;
 
-/** Type-only association between a direct stream result and its partial view. */
+/**
+ * Type-only association between a direct stream result and its partial view.
+ * The runtime association is local to the direct producer call; composed
+ * patterns must export the projected partial as a separate field.
+ */
 export declare const PARTIAL_RESULT: unique symbol;
 export interface PartialResultSource<Final, Partial> {
   readonly [PARTIAL_RESULT]: {
@@ -3094,6 +3098,8 @@ export type ResultOfFunction = <R>(
 /**
  * Returns the usable intermediate value associated with a streaming call.
  * Availability remains observable on the original streaming request.
+ * The argument must be the direct producer result or a stable const alias;
+ * partial-channel associations do not cross subpattern boundaries.
  */
 export type PartialResultOfFunction = <Final, Partial>(
   result: PartialResultSource<Final, Partial>,

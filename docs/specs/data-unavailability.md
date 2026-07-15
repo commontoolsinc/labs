@@ -784,6 +784,13 @@ intermediate text; in that case its partial projection remains unavailable
 while the final object becomes usable. The object API never casts incomplete
 provider text to `Partial<T>`.
 
+The zero-node association is currently local to the direct streaming call (or
+a stable const alias of it). Returning an `AsyncStreamResult` from a subpattern
+preserves its final result but not the separate partial channel; the transformer
+rejects `partialResultOf(child.request)` instead of allowing a runtime failure.
+If a composed parent needs partial output, have the child project and return
+`partialResultOf(request)` as a separate field.
+
 The persisted operation state still contains pending, result, error, partial,
 messages, grounding sources, and request hashes as applicable. Those fields are
 runtime implementation detail rather than a public state wrapper. Repository

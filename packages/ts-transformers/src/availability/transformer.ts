@@ -8,6 +8,7 @@ import { HelpersOnlyTransformer } from "../core/transformers.ts";
 import type { TransformationContext } from "../core/context.ts";
 import {
   guardOperandExposesAvailability,
+  isDirectPartialResultSource,
   parseAvailabilityObservation,
   resolveAvailabilityObservation,
   unwrapAvailabilityExpression,
@@ -293,6 +294,17 @@ export class AvailabilityAnalysisTransformer extends HelpersOnlyTransformer {
         const callKind = detectCallKind(node, context.checker);
         const reactiveContext = context.getReactiveContext(node);
         if (
+          callKind?.kind === "partial-result" &&
+          (!node.arguments[0] ||
+            !isDirectPartialResultSource(node.arguments[0], context))
+        ) {
+          context.reportDiagnosticOnce({
+            type: "availability:unsupported-partial-result-source",
+            message:
+              "partialResultOf() currently requires the direct result of generateTextStream(), generateObjectStream(), or streamData() (including stable const aliases). A stream result returned by a subpattern no longer carries its partial-channel association.",
+            node,
+          });
+        } else if (
           callKind?.kind === "availability-observer" &&
           reactiveContext.kind === "compute"
         ) {

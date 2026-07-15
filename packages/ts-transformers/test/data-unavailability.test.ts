@@ -491,6 +491,29 @@ Deno.test("partialResultOf is usable while stream guards retain async provenance
   );
 });
 
+Deno.test("partialResultOf accepts a stable streamData alias", async () => {
+  const source = `
+    import { partialResultOf, pattern, streamData } from "commonfabric";
+
+    type Event = { id: string; data: { value: number } };
+
+    export default pattern(() => {
+      const request = streamData<Event>({ url: "/events" });
+      const alias = request;
+      return { partial: partialResultOf(alias) };
+    });
+  `;
+  const { diagnostics } = await validateSource(source, {
+    types: { "commonfabric.d.ts": commonfabricTypes },
+  });
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:unsupported-partial-result-source",
+    ),
+    false,
+  );
+});
+
 Deno.test("partialResultOf does not expose an availability guard surface", async () => {
   const source = `
     import {
@@ -516,6 +539,37 @@ Deno.test("partialResultOf does not expose an availability guard surface", async
       "availability:unobserved-compute-guard",
     ),
     true,
+  );
+});
+
+Deno.test("partialResultOf rejects stream results after pattern composition", async () => {
+  const source = `
+    import {
+      generateTextStream,
+      partialResultOf,
+      pattern,
+    } from "commonfabric";
+
+    const Child = pattern(() => ({
+      request: generateTextStream({ prompt: "child" }),
+    }));
+
+    export default pattern(() => {
+      const child = Child({});
+      const direct = partialResultOf(child.request);
+      const children = [child];
+      const mapped = children.map((entry) => partialResultOf(entry.request));
+      return { direct, mapped };
+    });
+  `;
+  const { diagnostics } = await validateSource(source, {
+    types: { "commonfabric.d.ts": commonfabricTypes },
+  });
+  assertEquals(
+    diagnostics.filter((diagnostic) =>
+      diagnostic.type === "availability:unsupported-partial-result-source"
+    ).length,
+    2,
   );
 });
 

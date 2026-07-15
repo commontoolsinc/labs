@@ -60,21 +60,50 @@ const ASYNC_RUNTIME_EXPORTS = new Set([
   "streamData",
 ]);
 
-function isAvailabilityResultStateProducer(
+export function isDirectPartialResultSource(
   expression: ts.Expression,
   context: TransformationContext,
-  seenSymbols: Set<ts.Symbol>,
+  seenSymbols: Set<ts.Symbol> = new Set(),
 ): boolean {
   const target = unwrapAvailabilityExpression(expression);
   if (ts.isCallExpression(target)) {
     const callKind = detectCallKind(target, context.checker);
     return (
       callKind?.kind === "runtime-call" &&
-      callKind.exportName === "generateTextStream"
+      (callKind.exportName === "generateTextStream" ||
+        callKind.exportName === "streamData")
     ) || (
       callKind?.kind === "generate-object" &&
       callKind.exportName === "generateObjectStream"
-    ) || callKind?.kind === "wish" || callKind?.kind === "llm-dialog";
+    );
+  }
+  if (!ts.isIdentifier(target)) return false;
+  const symbol = valueSymbolAtIdentifier(target, context);
+  if (!symbol || seenSymbols.has(symbol)) return false;
+  seenSymbols.add(symbol);
+  const initializer = constInitializer(target, context);
+  return !!initializer &&
+    isDirectPartialResultSource(initializer, context, seenSymbols);
+}
+
+function isAvailabilityResultStateProducer(
+  expression: ts.Expression,
+  context: TransformationContext,
+  seenSymbols: Set<ts.Symbol>,
+): boolean {
+  if (
+    isDirectPartialResultSource(
+      expression,
+      context,
+      new Set(seenSymbols),
+    )
+  ) {
+    return true;
+  }
+  const target = unwrapAvailabilityExpression(expression);
+  if (ts.isCallExpression(target)) {
+    const callKind = detectCallKind(target, context.checker);
+    return callKind?.kind === "wish" || callKind?.kind === "llm-dialog";
   }
   if (!ts.isIdentifier(target)) return false;
   const symbol = valueSymbolAtIdentifier(target, context);
