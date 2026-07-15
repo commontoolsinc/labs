@@ -2697,8 +2697,16 @@ function _combineSchemaUncached(
       // Merge $defs from the two schema, with parent taking priority
       const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
       // In this case, we use the link for flags, but generally use the parent
-      // since the object types may be different
+      // since the object types may be different.
+      // A link-carried `default` survives unless the parent has its own —
+      // matching the object/object and array/array branches above, whose
+      // `{...linkSchema, ...parentSchema}` spreads already behave this way.
+      // This is what lets a `.of()` cell's declared default (carried on the
+      // manifest link schema) reach reads governed by lowered lift/handler
+      // input schemas, which have no `default` of their own (CT-1880).
       return mergeSchemaFlags(linkSchema, {
+        ...(linkSchema.default !== undefined &&
+          { default: linkSchema.default }),
         ...parentSchema,
         ...(narrowedType !== undefined && { type: narrowedType }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
