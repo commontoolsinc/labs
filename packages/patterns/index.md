@@ -67,7 +67,7 @@ App and integration directories: `activity-log/`, `agent/`, `airtable/`,
 `auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
 `contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
 explorations), `github-activity/`, `google/` (the `core/` tree; `google/WIP/` is
-legacy), `habit-tracker/`, `lunch-poll/`, `profile-group-chat/`,
+legacy), `habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
 `project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
 `scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
 `weekly-calendar/`.
@@ -980,6 +980,45 @@ interface LobbyOutput {
   messages: Message[];
   users: User[];
   sessionId: string;
+}
+```
+
+## `lobby/main.tsx`
+
+Simple multiplayer presence lobby. Each viewer joins by contributing their live
+Fabric profile cell from `wish({ query: "#profile" })`; every participant is
+rendered with `cf-profile-badge`. Admin membership uses the shared trusted admin
+registry flow: an empty registry defaults to everyone being an admin, and
+turning that fallback off seeds the acting participant as the first explicit
+admin. Admins can promote other participants and remove people. Agents can call
+the no-payload `addSelf` action and read the profile-free `allParticipants`
+snapshot for downstream processing.
+
+**Keywords:** multiplayer, lobby, roster, profile, wish, trusted admin, CFC
+
+### Input Schema
+
+```ts
+interface LobbyInput {
+  roster?: PerSpace<LobbyRosterValue>;
+  adminRegistry?: PerSpace<LobbyAdminRegistryCell>;
+}
+```
+
+### Output Schema
+
+```ts
+interface LobbyOutput {
+  addSelf: Stream<void>;
+  allParticipants: readonly LobbyParticipantView[];
+  participants: readonly LobbyParticipantView[];
+  participantCount: number;
+  currentUserIsAdmin: boolean;
+  everyoneIsAdmin: boolean;
+  join: Stream<LobbyTrustedActionEvent>;
+  removeParticipant: Stream<LobbyTrustedActionEvent>;
+  toggleParticipantAdmin: Stream<LobbyTrustedActionEvent>;
+  setEveryoneIsAdmin: Stream<LobbyTrustedActionEvent>;
 }
 ```
 
