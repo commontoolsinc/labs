@@ -1,4 +1,6 @@
 import type {
+  AssertPart,
+  AssertRecord,
   CellScope,
   FactoryInput,
   Frame,
@@ -16,6 +18,7 @@ import type {
   StripCell,
   toJSON,
 } from "./types.ts";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { reactive, stream } from "./reactive.ts";
 import {
   applyArgumentIfcToResult,
@@ -514,6 +517,39 @@ export const computed: <T>(fn: () => T) => Reactive<T> = <T>(fn: () => T) =>
   createNodeFactory<any, T>({
     type: "javascript",
     implementation: fn,
+    argumentSchema: false,
+  })(undefined);
+
+/**
+ * Records one operand of an `assert` body and returns it unchanged.
+ *
+ * The value is rendered here, while it is still the resolved value the body
+ * computed. The array is local to a single evaluation of the body and is
+ * discarded unless the assertion fails.
+ */
+export const assertCapture = <T>(
+  parts: AssertPart[],
+  src: string,
+  value: T,
+): T => {
+  parts.push({ src, rendered: toCompactDebugString(value) });
+  return value;
+};
+
+/**
+ * assert: a `computed` for pattern-test assertions that reports its operands.
+ *
+ * The assert-diagnostics transformer rewrites the body to record each operand
+ * and to return an `AssertRecord`, so this implementation is reached only when
+ * a source opts out of the transform. It produces the same record shape with
+ * no operands recorded, so the declared type holds either way.
+ */
+export const assert: (fn: () => boolean) => Reactive<AssertRecord> = (
+  fn: () => boolean,
+) =>
+  createNodeFactory<any, AssertRecord>({
+    type: "javascript",
+    implementation: () => ({ ok: fn(), source: "", parts: [] }),
     argumentSchema: false,
   })(undefined);
 

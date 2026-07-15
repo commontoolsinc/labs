@@ -70,7 +70,7 @@ A test pattern is a regular pattern file with `.test.tsx` extension that:
 1. **Imports the pattern under test**
 2. **Instantiates it with test data**
 3. **Defines test actions using `action()`** (for triggering events on the pattern)
-4. **Defines assertions as `computed(() => boolean)`** computed from pattern state
+4. **Defines assertions as `assert(() => boolean)`** computed from pattern state
 5. **Returns a `tests` array** of discriminated union objects
 
 ### Test Step Format (Discriminated Union)
@@ -79,14 +79,28 @@ The `tests` array uses a discriminated union to avoid TypeScript declaration emi
 
 ```typescript
 // Shown at module scope.
+import type { AssertRecord } from "commonfabric";
+
 type TestStep =
-  | { assertion: Reactive<boolean> }  // from computed(() => condition)
+  // from assert(() => condition), or computed(() => condition)
+  | { assertion: Reactive<boolean> | Reactive<AssertRecord> }
   | { action: Stream<void> }           // from action(() => handler.send())
   | { render: VNode }                  // one headless VDOM demand window
   | { settle: true };                  // wait for full async settlement
 ```
 
-This format keeps `action()` streams and `computed()` cells separate in the type system.
+This format keeps `action()` streams and assertion cells separate in the type
+system.
+
+An `assert(...)` assertion carries an `AssertRecord` — `{ ok, source, parts }` —
+rather than a bare boolean. The transformer rewrites its body to record each
+operand as it is computed, so a failure can report the operands and their
+values instead of only `false`. A `computed(...)` assertion carries the boolean
+and reports `Expected true, got false`. See
+[Assertion diagnostics](../../packages/ts-transformers/README.md#assertion-diagnostics)
+for the rewrite, and
+[Pattern Testing](../common/workflows/pattern-testing.md#prefer-assert-over-computed)
+for the authoring side.
 
 `cf test` does not mount a renderer by default. Under the pull scheduler, a
 pattern's `$UI` is therefore not continuously demanded. A
@@ -104,7 +118,7 @@ participant and does not change the semantics of explicit `render` steps.
 
 ```tsx
 // Shown at module scope.
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, Writable } from "commonfabric";
 import ExpenseTracker from "./expense-tracker.tsx";
 
 type Expense = { description: string; amount: number; category: string };
@@ -125,16 +139,16 @@ export default pattern(() => {
     subject.addExpense.send({ description: "Gas", amount: 40, category: "transport" });
   });
 
-  // 3. Define assertions as computed(() => boolean)
-  const assert_has_one_expense = computed(() => {
+  // 3. Define assertions as assert(() => boolean)
+  const assert_has_one_expense = assert(() => {
     return subject.expenses.length === 1;
   });
 
-  const assert_total_is_45 = computed(() => {
+  const assert_total_is_45 = assert(() => {
     return subject.result.totalAmount === 45;
   });
 
-  const assert_categories_correct = computed(() => {
+  const assert_categories_correct = assert(() => {
     const byCategory = subject.result.byCategory;
     return byCategory.food === 5 && byCategory.transport === 40;
   });
@@ -160,7 +174,8 @@ The `cf test` runner processes the `tests` array **in order**:
 
 1. For each item in `tests`:
    - If it has `action` key: call `.send()`, then `await runtime.idle()`
-   - If it has `assertion` key: read `.get()`, assert it equals `true`
+   - If it has `assertion` key: read `.get()`; an `AssertRecord` passes when
+     its `ok` is true, any other value passes when it equals `true`
 2. Report pass/fail for each assertion
 3. Handle timeouts (5s default) for stuck tests
 
@@ -514,11 +529,13 @@ The `@commonfabric/pattern-testing` package has been removed from the codebase.
 2. **Simpler runner** - Just call `.send()` (no arguments for void)
 3. **Readable** - Test data is visible in the action body
 
-### Why `computed(() => boolean)` for assertions?
+### Why `assert(() => boolean)` for assertions?
 
 1. **Reactive** - Assertions are computed from live pattern state
 2. **Pattern-native** - Uses the same Cell system as patterns
 3. **Debuggable** - Can inspect assertion cell values via CLI
+4. **Self-explaining** - A failure reports the operands and their values,
+   rather than only the boolean the comparison collapsed to
 
 ---
 
@@ -528,7 +545,8 @@ The `@commonfabric/pattern-testing` package has been removed from the codebase.
 2. **Test patterns can be deployed as pieces** for debugging
 3. **The runner correctly detects Stream vs Cell<boolean>**
 4. **Timeouts prevent infinite loops from hanging CI**
-5. **Error messages identify which assertion failed and why**
+5. **Error messages identify which assertion failed and why**, naming the
+   operands of a failed `assert(...)` and the values they held
 
 ---
 
@@ -565,7 +583,7 @@ export default pattern<Input, Output>(({ value }) => ({
 ```tsx
 // Shown at module scope.
 // counter.test.tsx
-import { Writable, action, computed, pattern } from "commonfabric";
+import { Writable, action, assert, pattern } from "commonfabric";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
@@ -586,11 +604,11 @@ export default pattern(() => {
     counter.decrement.send();
   });
 
-  // Assertions - computed(() => boolean)
-  const assert_starts_at_zero = computed(() => counter.value === 0);
-  const assert_is_one = computed(() => counter.value === 1);
-  const assert_is_three = computed(() => counter.value === 3);
-  const assert_is_two = computed(() => counter.value === 2);
+  // Assertions - assert(() => boolean)
+  const assert_starts_at_zero = assert(() => counter.value === 0);
+  const assert_is_one = assert(() => counter.value === 1);
+  const assert_is_three = assert(() => counter.value === 3);
+  const assert_is_two = assert(() => counter.value === 2);
 
   return {
     tests: [

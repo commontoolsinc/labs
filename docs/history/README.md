@@ -105,6 +105,9 @@ One line per archived document; each document's header carries the fuller
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
+- [assertion-diagnostics.md](plans/assertion-diagnostics.md) — power-assert
+  operand reporting for pattern-test assertions, with the compile-time
+  constraints that shaped it, executed 2026-07.
 - [cfc-future-work-implementation.md](plans/cfc-future-work-implementation.md)
   — the CFC future-work epics (clause core, exchange rules/policy,
   observation classes, integrity floors, sqlite row-set, deployment flips),

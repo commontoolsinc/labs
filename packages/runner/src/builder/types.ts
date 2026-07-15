@@ -9,6 +9,8 @@ import type {
   AsComparableCell,
   AsOpaqueCell,
   AsReadonlyCell,
+  AssertCaptureFunction,
+  AssertFunction,
   AsStream,
   AsWriteonlyCell,
   ByRefFunction,
@@ -112,6 +114,8 @@ export type {
   AsComparableCell,
   AsOpaqueCell,
   AsReadonlyCell,
+  AssertPart,
+  AssertRecord,
   AsStream,
   AsWriteonlyCell,
   Cell,
@@ -337,6 +341,12 @@ export interface BuilderFunctionsAndConstants {
   handler: HandlerFunction;
   action: ActionFunction;
   computed: ComputedFunction;
+  assert: AssertFunction;
+
+  // Operand recording for `assert` bodies. The assert-diagnostics transformer
+  // emits calls to this against the injected `__cfHelpers` object; it is not
+  // meant to be called from authored code.
+  assertCapture: AssertCaptureFunction;
 
   // Built-in modules
   str: StrFunction;
