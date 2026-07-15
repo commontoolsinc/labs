@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/storage-sigil-topology-refresh.bench.ts",
   "packages/runner/test/storage-source-topology-refresh.bench.ts",
   "packages/runner/test/storage-subscription-filter.bench.ts",
   "packages/runner/test/storage-subscription-refresh.bench.ts",

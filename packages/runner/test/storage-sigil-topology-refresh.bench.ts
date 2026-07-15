@@ -1,5 +1,8 @@
 import { Identity } from "@commonfabric/identity";
+import type { Result, Unit, URI } from "@commonfabric/memory/interface";
+import type { EntityDocument } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 const signer = await Identity.fromPassphrase("bench sigil topology refresh");
@@ -8,10 +11,11 @@ const DOC_COUNT = 48;
 const UPDATE_COUNT = 5;
 const LINKS_PER_DOC = 4;
 
-type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
-  open(space: string): infer T;
-} ? T
-  : never;
+type TestProvider = IStorageProviderWithReplica & {
+  send(
+    batch: { uri: URI; value: EntityDocument | undefined }[],
+  ): Promise<Result<Unit, Error>>;
+};
 
 const docUri = (index: number) => `of:sigil-topology-refresh-${index}` as const;
 const targetUri = (index: number, version: number) =>
@@ -69,7 +73,7 @@ const sigilLink = (id: string) => ({
   },
 });
 
-const targetDoc = (id: string, version: number) => ({
+const targetDoc = (id: URI, version: number) => ({
   uri: id,
   value: {
     value: {
@@ -106,16 +110,16 @@ const setup = async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider = storageManager.open(space) as TestProvider;
 
-  await (provider as any).send(
+  await provider.send(
     Array.from(
       { length: DOC_COUNT * LINKS_PER_DOC },
       (_, index) => targetDoc(targetUri(index, 0), 0),
     ),
   );
 
-  await (provider as any).send(
+  await provider.send(
     Array.from({ length: DOC_COUNT }, (_, index) => ({
       uri: docUri(index),
       value: buildDoc(index, 0),
@@ -124,29 +128,29 @@ const setup = async () => {
 
   for (let index = 0; index < DOC_COUNT; index++) {
     const uri = docUri(index);
-    await (provider as any).sync(uri, { path: [], schema: false });
-    await (provider as any).sync(uri, { path: [], schema: rootSchema });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, { path: [], schema: false });
+    await provider.sync(uri, { path: [], schema: rootSchema });
+    await provider.sync(uri, {
       path: ["$UI"],
       schema: rootSchema.properties.$UI,
     });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, {
       path: ["argument", "element"],
       schema: elementSchema,
     });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, {
       path: ["argument", "params", "allPieces"],
       schema: allPiecesSchema,
     });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, {
       path: ["argument", "backlinks"],
       schema: backlinksSchema,
     });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, {
       path: ["internal", "__#0"],
       schema: internalZeroSchema,
     });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, {
       path: ["internal", "__#3stream"],
       schema: internalStreamSchema,
     });
@@ -167,13 +171,13 @@ const runUpdateLoop = async (
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) => {
   for (let version = 1; version <= UPDATE_COUNT; version++) {
-    await (provider as any).send(
+    await provider.send(
       Array.from(
         { length: DOC_COUNT * LINKS_PER_DOC },
         (_, index) => targetDoc(targetUri(index, version), version),
       ),
     );
-    await (provider as any).send(
+    await provider.send(
       Array.from({ length: DOC_COUNT }, (_, index) => ({
         uri: docUri(index),
         value: buildDoc(index, version),
