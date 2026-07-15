@@ -13,7 +13,7 @@
 // Writes are NOT here — they are the imperative `SqliteDb.exec` (cell.ts), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes), and
 // shares param encoding via `encodeSqliteParams` (cell.ts). See
-// docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
+// docs/specs/sqlite-builtin/01-api.md.
 //
 // `_cf_link` result columns ARE decoded here when the transformer injects a
 // `rowSchema` (asCell columns -> sigil objects; see decodeRowLinkColumns). The

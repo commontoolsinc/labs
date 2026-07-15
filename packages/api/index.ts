@@ -2203,6 +2203,7 @@ export type CompileResult<T> =
   | Exclude<DataUnavailableVariant, HasError>
   | CompileHasError;
 
+/** @internal Legacy raw operation state retained for persisted graphs. */
 export interface BuiltInCompileAndRunState<T> {
   pending: boolean;
   result?: CompileResult<T>;
@@ -2563,7 +2564,7 @@ export type SqliteDatabase = { readonly [__sqliteDb]: true };
 
 /** Imperative write on a SqliteDb handle: records a SQLite write onto the
  *  current transaction so it commits atomically with surrounding cell writes
- *  (see docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md). */
+ *  (see docs/specs/sqlite-builtin/04-server-execution-and-transactions.md). */
 export interface ISqliteExecutable {
   exec(
     sql: string,

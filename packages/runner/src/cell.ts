@@ -1120,7 +1120,7 @@ export class CellImpl<T extends FabricValue>
    * Only valid on a `"sqlite"`-kind cell and inside a transaction (e.g. a
    * handler). Throws on an `undefined` param (it may be a value that isn't ready
    * yet — pass a resolved value, or `null` for SQL NULL). See
-   * docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md.
+   * docs/specs/sqlite-builtin/01-api.md.
    */
   exec(
     sql: string,

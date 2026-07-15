@@ -4128,10 +4128,10 @@ export class SchemaInjectionTransformer extends HelpersOnlyTransformer {
 
       // sqliteQuery<Row>({ db, sql, ... }) - lowers the Row type argument to an
       // injected `rowSchema` property (mirrors generate-object's `schema`). The
-      // runtime builtin composes `result.items = rowSchema`, so a consumer's
-      // schema carries `asCell` for Cell<> Row fields and `*_cf_link` result
-      // columns rehydrate to live Cells (see
-      // docs/specs/sqlite-builtin/plans/sqlite-query-row-lowering.md).
+      // runtime builtin applies it to the successful value's `rows` array, so
+      // a consumer of `resultOf(query).rows` carries `asCell` for Cell<> Row
+      // fields and `*_cf_link` result columns rehydrate to live Cells (see
+      // docs/specs/sqlite-builtin/01-api.md).
       if (
         callKind?.kind === "runtime-call" &&
         callKind.exportName === "sqliteQuery"

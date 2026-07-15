@@ -821,7 +821,7 @@ export interface IStorageTransaction {
    * `sqlite` op; on SQL failure the whole commit aborts). Claims `space` as a
    * write target (same write-isolation rules as a cell write) and throws if the
    * tx is not writable. See
-   * docs/specs/sqlite-builtin/plans/sqlite-execute-commit-fold.md.
+   * docs/specs/sqlite-builtin/04-server-execution-and-transactions.md.
    */
   recordSqliteWrite?(space: MemorySpace, op: SqliteOperation): void;
 

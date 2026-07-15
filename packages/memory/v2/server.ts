@@ -846,7 +846,7 @@ export class Server {
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
   // cell-derived per-(space,id) file. v1 in-memory; persistence is deferred (see
-  // docs/specs/sqlite-builtin/plans/on-disk-source.md).
+  // docs/specs/sqlite-builtin/03-database-sources.md).
   #diskSources = new DiskSourceRegistry();
   // Pooled read-only connections (keyed by canonical file path) for SQLite
   // reads — injected on-disk sources and cell-derived dbs alike run here,

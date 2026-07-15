@@ -33,9 +33,9 @@ distinct (and CFC can gate them independently):
 
 - **`db.query<Row>(sql, { params?, reactOn? })`** — read-only `SELECT`. Reactive:
   re-runs when its `reactOn` input changes. Returns
-  `Reactive<{ pending, result?: Row[], error? }>`; unlike the single-result
-  `fetchJson` and `generateText` APIs, SQLite queries intentionally retain an
-  explicit operation-state object. A free
+  `Reactive<AsyncResult<{ rows: Row[]; withheld?: number }>>`, matching the
+  direct-result contract used by fetch and generation. Ordinary consumers use
+  `resultOf(request)`; guards inspect availability on the request itself. A free
   `sqliteQuery<Row>({ db, sql, ... })` function is equivalent.
 - **`db.exec(sql, params?)`** — writes (`INSERT`/`UPDATE`/`DELETE`). Imperative,
   called inside a handler; returns `void`. It records a `sqlite` op onto the
