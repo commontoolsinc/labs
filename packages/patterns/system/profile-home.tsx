@@ -138,9 +138,32 @@ export type ExternalIdentityAssertion = {
 export const LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY =
   "loom-verified-external-identity" as const;
 
-export type VerifiedExternalIdentity = AddIntegrity<
-  ExternalIdentityAssertion,
+type VerifiedIdentityField<T> = AddIntegrity<
+  T,
   readonly [typeof LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY]
+>;
+
+export type VerifiedExternalIdentity = AddIntegrity<
+  {
+    type: VerifiedIdentityField<string>;
+    value: VerifiedIdentityField<string>;
+    verifiedAt: VerifiedIdentityField<string>;
+  },
+  readonly [typeof LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY]
+>;
+
+type VerifiedIdentityListWrite<Binding> = Cfc<
+  WriteAuthorizedBy<VerifiedExternalIdentity[], Binding>,
+  {
+    ownerPrincipal: CurrentPrincipal;
+    addIntegrity: readonly [
+      {
+        readonly kind: "represents-principal";
+        readonly subject: CurrentPrincipal;
+      },
+      typeof LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY,
+    ];
+  }
 >;
 
 export type MutateVerifiedIdentitiesEvent = {
@@ -180,10 +203,7 @@ export type ProfileHomeOutput = {
   // also ensures the assertion was written while acting as this profile's
   // principal and through the dedicated publication handler.
   verifiedIdentities: Default<
-    OwnerProtectedProfileWrite<
-      VerifiedExternalIdentity[],
-      typeof publishVerifiedIdentities
-    >,
+    VerifiedIdentityListWrite<typeof publishVerifiedIdentities>,
     []
   >;
   elements: OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>;
@@ -585,10 +605,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       >
     >([]).for("externalLinks");
     const verifiedIdentities = new Writable<
-      OwnerProtectedProfileWrite<
-        VerifiedExternalIdentity[],
-        typeof publishVerifiedIdentities
-      >
+      VerifiedIdentityListWrite<typeof publishVerifiedIdentities>
     >([]).for("verifiedIdentities");
     // Unprotected draft backing the bio textarea; saved into the protected
     // `bio` cell through `setBio` (CT-1648).
