@@ -4,8 +4,8 @@ import {
   citedPath,
   collectDrift,
   isRooted,
-  listTreeFiles,
   readSkillDocs,
+  readTree,
   readWorkspaceExports,
   resolvesInTree,
   skillDirOf,
@@ -23,11 +23,13 @@ const TREE = new Tree([
   "skills/agent-browser/scripts/form-automation.sh",
   "skills/lit-component/SKILL.md",
   "skills/lit-component/references/theme-system.md",
-  // A symlinked directory: git records it as one file entry, so nothing below it
+  // A symlinked directory: git records it as one entry, so nothing below it
   // appears in the tree. The real repo has 40-odd of these under .claude/skills
   // and .agents/skills.
   ".claude/skills/lit-component",
-]);
+  // An ordinary file that sits where a directory once did.
+  "docs/common/concepts/computed",
+], [".claude/skills/lit-component"]);
 
 Deno.test("Tree knows files, directories, and their ancestors", () => {
   assert(TREE.has("packages/runner/src/cell.ts"));
@@ -43,8 +45,17 @@ Deno.test("Tree.has resolves a path below a symlinked directory", () => {
   // through it must not be reported as missing when it reads fine on disk.
   assert(TREE.has(".claude/skills/lit-component/SKILL.md"));
   assert(TREE.has(".claude/skills/lit-component/references/theme-system.md"));
-  // A sibling that is not below any file entry is still judged normally.
+  // A sibling that is not below a symlink is still judged normally.
   assertEquals(TREE.has(".claude/skills/nonesuch/SKILL.md"), false);
+});
+
+Deno.test("Tree.has rejects a path below an ordinary file", () => {
+  // The exception above is for symlinks only. Where a directory has since been
+  // collapsed into a file, a citation that still points inside it is stale, and
+  // git can say so — `docs/common/concepts/computed` is a file, not a symlink.
+  assert(TREE.has("docs/common/concepts/computed"));
+  assertEquals(TREE.has("docs/common/concepts/computed/computed.md"), false);
+  assertEquals(TREE.has("packages/runner/src/cell.ts/nested.ts"), false);
 });
 
 Deno.test("Tree.filesMatching selects and sorts", () => {
@@ -241,7 +252,7 @@ Deno.test("collectDrift resolves each doc against its own skill", () => {
 // Runs against the real repository: every fact every skill cites must resolve.
 Deno.test("every skill's cited paths and specifiers resolve", async () => {
   const root = fromFileUrl(new URL("..", import.meta.url));
-  const tree = new Tree(await listTreeFiles(root));
+  const tree = await readTree(root);
   const docs = await readSkillDocs(root, tree);
   assert(docs.length > 0, "found no markdown under skills/");
   const drift = collectDrift(docs, tree, await readWorkspaceExports(root));

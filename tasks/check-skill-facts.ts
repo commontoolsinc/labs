@@ -40,34 +40,42 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 export class Tree {
   readonly #files: Set<string> = new Set();
   readonly #dirs: Set<string> = new Set();
+  readonly #symlinks: Set<string>;
 
-  /** Builds a tree from repo-relative, forward-slash file paths. */
-  constructor(files: Iterable<string>) {
+  /**
+   * Builds a tree from repo-relative, forward-slash file paths. `symlinks` names
+   * those entries git records as symlinks, which must also appear in `files`.
+   */
+  constructor(files: Iterable<string>, symlinks: Iterable<string> = []) {
     for (const path of files) {
       this.#files.add(path);
       for (let i = path.indexOf("/"); i !== -1; i = path.indexOf("/", i + 1)) {
         this.#dirs.add(path.slice(0, i));
       }
     }
+    this.#symlinks = new Set(symlinks);
   }
 
   /** Is `path` a file or a directory in the tree? */
   has(path: string): boolean {
     if (this.#files.has(path) || this.#dirs.has(path)) return true;
-    return this.#underFileEntry(path);
+    return this.#underSymlink(path);
   }
 
   /**
-   * Is `path` below something git records as a file? A symlinked directory is a
-   * single file entry, so nothing beneath it appears in the tree — the repo
-   * carries 40-odd of them, since `.claude/skills/<name>` and
-   * `.agents/skills/<name>` are symlinks into `skills/`. What lies below one
-   * cannot be answered from git, so such a path counts as resolving rather than
-   * being reported as missing when it reads fine.
+   * Is `path` below a symlink? A symlinked directory is a single entry, so
+   * nothing beneath it appears in the tree — the repo carries 40-odd of them,
+   * since `.claude/skills/<name>` and `.agents/skills/<name>` are symlinks into
+   * `skills/`. What lies below one cannot be answered from git, so such a path
+   * counts as resolving rather than being reported as missing when it reads fine.
+   *
+   * Only symlinks get this exception. An ordinary file is opaque to nothing: a
+   * path below one is stale — a directory the citation predates has since become
+   * a file — and reporting it is the point.
    */
-  #underFileEntry(path: string): boolean {
+  #underSymlink(path: string): boolean {
     for (let i = path.indexOf("/"); i !== -1; i = path.indexOf("/", i + 1)) {
-      if (this.#files.has(path.slice(0, i))) return true;
+      if (this.#symlinks.has(path.slice(0, i))) return true;
     }
     return false;
   }
@@ -97,10 +105,30 @@ async function gitLsFiles(root: string, args: string[]): Promise<string[]> {
   return new TextDecoder().decode(stdout).split("\0").filter((p) => p !== "");
 }
 
+/** The mode git gives a symlink entry in `ls-files -s` output. */
+const SYMLINK_MODE = "120000";
+
 /**
- * Lists every path that is part of the repo: tracked files, plus untracked files
- * .gitignore does not cover, minus files the index still holds but the working
- * tree no longer has.
+ * The paths of tracked symlinks. `ls-files -s` prefixes each entry with
+ * "<mode> <object> <stage>\t", so the mode distinguishes a symlink from an
+ * ordinary file, which the plain listing cannot.
+ */
+async function gitSymlinks(root: string): Promise<string[]> {
+  const entries = await gitLsFiles(root, ["--cached", "-s"]);
+  const paths: string[] = [];
+  for (const entry of entries) {
+    const tab = entry.indexOf("\t");
+    if (tab !== -1 && entry.startsWith(`${SYMLINK_MODE} `)) {
+      paths.push(entry.slice(tab + 1));
+    }
+  }
+  return paths;
+}
+
+/**
+ * Reads the repo as git sees it: tracked files, plus untracked files .gitignore
+ * does not cover, minus files the index still holds but the working tree no
+ * longer has.
  *
  * Untracked-but-not-ignored files count so a skill may cite a doc added in the
  * same change before it is staged. Ignored files never count, which is what
@@ -108,13 +136,17 @@ async function gitLsFiles(root: string, args: string[]): Promise<string[]> {
  * means a citation breaks the moment its target is moved away, rather than
  * lingering until the deletion is staged.
  */
-export async function listTreeFiles(root: string): Promise<string[]> {
-  const [present, deleted] = await Promise.all([
+export async function readTree(root: string): Promise<Tree> {
+  const [present, deleted, symlinks] = await Promise.all([
     gitLsFiles(root, ["--cached", "--others", "--exclude-standard"]),
     gitLsFiles(root, ["--deleted"]),
+    gitSymlinks(root),
   ]);
   const gone = new Set(deleted);
-  return present.filter((path) => !gone.has(path));
+  return new Tree(
+    present.filter((path) => !gone.has(path)),
+    symlinks.filter((path) => !gone.has(path)),
+  );
 }
 
 /**
@@ -354,7 +386,7 @@ function reportDrift(drift: Drift[]): void {
 
 /** Runs the check over `root`, reports, and returns a process exit code. */
 export async function main(root: string = REPO_ROOT): Promise<number> {
-  const tree = new Tree(await listTreeFiles(root));
+  const tree = await readTree(root);
   const docs = await readSkillDocs(root, tree);
   const drift = collectDrift(docs, tree, await readWorkspaceExports(root));
   if (drift.length > 0) {
