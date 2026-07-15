@@ -144,16 +144,22 @@ export class PatternContextValidationTransformer
 
       if (
         ts.isCallExpression(node) &&
-        detectCallKind(node, checker)?.kind === "wish" &&
-        context.getReactiveContext(node).kind === "compute"
+        detectCallKind(node, checker)?.kind === "wish"
       ) {
-        context.reportDiagnosticOnce({
-          severity: "error",
-          type: "compute-context:local-reactive-use",
-          message:
-            "wish() creates a reactive factory node and must be called in the pattern body, outside computed() or lift(). Capture its request or resultOf() projection in the callback instead.",
-          node,
-        });
+        const reactiveContext = context.getReactiveContext(node);
+        if (
+          reactiveContext.owner === "computed" ||
+          reactiveContext.owner === "lift" ||
+          reactiveContext.owner === "lift-applied"
+        ) {
+          context.reportDiagnosticOnce({
+            severity: "error",
+            type: "compute-context:local-reactive-use",
+            message:
+              "wish() creates a reactive factory node and must be called in the pattern body, outside computed() or lift(). Capture its request or resultOf() projection in the callback instead.",
+            node,
+          });
+        }
       }
 
       // Check for function creation in pattern context

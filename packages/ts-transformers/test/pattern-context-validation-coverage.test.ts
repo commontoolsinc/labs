@@ -41,6 +41,29 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "wish factories in standalone helpers remain available for schema injection",
+  async () => {
+    const source = `
+      import { wish } from "commonfabric";
+
+      export function buildWish<T>(query: string) {
+        return wish<T>({ query });
+      }
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      0,
+    );
+  },
+);
+
 // validateComputationExpression -> findProblematicAccess: a reactive property
 // access used in a bare statement-position arithmetic computation is at a
 // restricted (non-lowerable) site, so it is rejected with
