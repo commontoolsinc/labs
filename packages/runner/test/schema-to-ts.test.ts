@@ -951,11 +951,11 @@ describe("Schema-to-TS Type Conversion", () => {
 
     expect(user.name).toBe("John");
     expect(user.age).toBe(30);
-    (expect(user.tags) as any).toEqualIgnoringSymbols([
+    expect(user.tags).toEqualIgnoringSymbols([
       "developer",
       "typescript",
     ]);
-    (expect(user.settings.get()) as any).toEqualIgnoringSymbols({
+    expect(user.settings.get()).toEqualIgnoringSymbols({
       theme: "dark",
       notifications: true,
     });
