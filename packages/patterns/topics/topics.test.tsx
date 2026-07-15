@@ -10,10 +10,17 @@
 import { action, computed, NAME, UI } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics, { openTopic, type TopicPiece } from "./main.tsx";
-import { isSafeLinkUrl, snippet, whenLabel } from "./topic.tsx";
+import Topic, { isSafeLinkUrl, snippet, whenLabel } from "./topic.tsx";
 
 export default pattern(() => {
   const board = Topics({});
+  // The board stores only TopicPiece's shared-safe projection. Exercise the
+  // session-local UI controls on a direct Topic instance so this test does not
+  // require those narrower cells to resolve through the shared topics array.
+  const directTopic = Topic({
+    title: "Direct topic",
+    body: "line one\nline two",
+  });
 
   // --- actions ---
 
@@ -63,40 +70,40 @@ export default pattern(() => {
   // --- UI-affordance flows (the same paths the rendered controls drive) ---
 
   const action_submit_topic_via_composer = action(() => {
-    board.newTitle.set("Composed topic");
+    board.newTitle?.set("Composed topic");
     board.submitTopic.send();
   });
   const action_submit_blank_comment_draft = action(() => {
-    board.topics?.[0]?.commentDraft.set("   ");
-    board.topics?.[0]?.submitComment.send();
+    directTopic.commentDraft.set("   ");
+    directTopic.submitComment.send();
   });
   const action_submit_comment_draft = action(() => {
-    board.topics?.[0]?.commentDraft.set("via the composer");
-    board.topics?.[0]?.submitComment.send();
+    directTopic.commentDraft.set("via the composer");
+    directTopic.submitComment.send();
   });
   // Edit flows are split across test steps: startEditBody's handler runs in
   // the scheduler AFTER this action body, so a same-action draft-set would be
   // overwritten by the handler's own body→draft copy.
   const action_start_edit = action(() => {
-    board.topics?.[0]?.startEditBody.send();
+    directTopic.startEditBody.send();
   });
   const action_cancel_edit = action(() => {
-    board.topics?.[0]?.bodyDraft.set("abandoned draft");
-    board.topics?.[0]?.cancelEditBody.send();
+    directTopic.bodyDraft.set("abandoned draft");
+    directTopic.cancelEditBody.send();
   });
   const action_save_edit = action(() => {
-    board.topics?.[0]?.bodyDraft.set("edited body");
-    board.topics?.[0]?.saveBody.send();
+    directTopic.bodyDraft.set("edited body");
+    directTopic.saveBody.send();
   });
   const action_submit_blank_link_draft = action(() => {
-    board.topics?.[0]?.linkUrlDraft.set("   ");
-    board.topics?.[0]?.submitLink.send();
+    directTopic.linkUrlDraft.set("   ");
+    directTopic.submitLink.send();
   });
   const action_submit_link_draft = action(() => {
-    board.topics?.[0]?.linkUrlDraft.set("https://example.com/design");
-    board.topics?.[0]?.linkLabelDraft.set("design notes");
-    board.topics?.[0]?.linkKindDraft.set("session");
-    board.topics?.[0]?.submitLink.send();
+    directTopic.linkUrlDraft.set("https://example.com/design");
+    directTopic.linkLabelDraft.set("design notes");
+    directTopic.linkKindDraft.set("session");
+    directTopic.submitLink.send();
   });
   // Bound at pattern-body level (binding inside an action is an illegal
   // position); the reactive reference resolves at send time, by which point
@@ -175,41 +182,41 @@ export default pattern(() => {
   const assert_composed_topic = computed(() =>
     board.topicCount === 3 &&
     board.topics?.[2]?.title === "Composed topic" &&
-    board.newTitle.get() === ""
+    board.newTitle?.get() === ""
   );
 
   const assert_blank_draft_rejected = computed(() =>
-    board.topics?.[0]?.commentCount === 2
+    directTopic.commentCount === 0
   );
 
   const assert_composer_comment = computed(() =>
-    board.topics?.[0]?.commentCount === 3 &&
-    board.topics?.[0]?.comments?.[2]?.body === "via the composer" &&
-    board.topics?.[0]?.commentDraft.get() === ""
+    directTopic.commentCount === 1 &&
+    directTopic.comments?.[0]?.body === "via the composer" &&
+    directTopic.commentDraft.get() === ""
   );
 
   // startEditBody copied the current body into the draft and opened the editor.
   const assert_editing = computed(() =>
-    board.topics?.[0]?.editingBody === true &&
-    board.topics?.[0]?.bodyDraft.get() === "line one\nline two"
+    directTopic.editingBody === true &&
+    directTopic.bodyDraft.get() === "line one\nline two"
   );
 
   const assert_edit_cancelled = computed(() =>
-    board.topics?.[0]?.editingBody === false &&
-    board.topics?.[0]?.body === "line one\nline two"
+    directTopic.editingBody === false &&
+    directTopic.body === "line one\nline two"
   );
 
   const assert_edit_saved = computed(() =>
-    board.topics?.[0]?.editingBody === false &&
-    board.topics?.[0]?.body === "edited body"
+    directTopic.editingBody === false &&
+    directTopic.body === "edited body"
   );
 
   const assert_link_draft_flow = computed(() =>
-    (board.topics?.[0]?.links ?? []).length === 2 &&
-    board.topics?.[0]?.links?.[1]?.kind === "session" &&
-    board.topics?.[0]?.links?.[1]?.label === "design notes" &&
-    board.topics?.[0]?.linkUrlDraft.get() === "" &&
-    board.topics?.[0]?.linkKindDraft.get() === "web"
+    (directTopic.links ?? []).length === 1 &&
+    directTopic.links?.[0]?.kind === "session" &&
+    directTopic.links?.[0]?.label === "design notes" &&
+    directTopic.linkUrlDraft.get() === "" &&
+    directTopic.linkKindDraft.get() === "web"
   );
 
   // A fresh comment on the FIRST topic makes it the most recently active.
@@ -264,6 +271,9 @@ export default pattern(() => {
       { assertion: assert_edit_saved },
       { action: action_submit_blank_link_draft },
       { action: action_submit_link_draft },
+      // Materialize the direct Topic after its comment and link exist so the
+      // nested row renderers are exercised without putting UI into TopicPiece.
+      { render: directTopic[UI] },
       { assertion: assert_link_draft_flow },
       { action: action_open_topic },
       { assertion: assert_pure_helpers },

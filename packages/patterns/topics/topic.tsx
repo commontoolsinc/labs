@@ -4,6 +4,7 @@ import {
   Default,
   NAME,
   pattern,
+  type PerSession,
   type PerUser,
   safeDateNow,
   Stream,
@@ -54,9 +55,13 @@ export interface TopicInput {
  * status, labels, or assignees; what a topic grows next is part of the
  * experiment (CT-1878).
  */
-export interface TopicOutput {
+/**
+ * The shared-safe projection stored in the tracker's list. Session-local UI
+ * controls are intentionally excluded: a TopicPiece can be followed from a
+ * shared list even when the viewer has no matching session-local cells.
+ */
+export interface TopicPiece {
   [NAME]: string;
-  [UI]: VNode;
   title: string;
   body: string;
   comments: TopicComment[];
@@ -69,14 +74,21 @@ export interface TopicOutput {
   addComment: Stream<{ body: string }>;
   addLink: Stream<{ kind: TopicLinkKind; url: string; label: string }>;
   setBody: Stream<{ body: string }>;
-  /** Session-local composer/edit state, exposed like the chat exemplar's
-   * drafts so embedders and tests can drive the same flows the UI does. */
-  commentDraft: Writable<string>;
-  bodyDraft: Writable<string>;
-  editingBody: boolean;
-  linkUrlDraft: Writable<string>;
-  linkLabelDraft: Writable<string>;
-  linkKindDraft: Writable<TopicLinkKind>;
+}
+
+/** The complete result available when a Topic is instantiated directly. */
+export interface TopicOutput extends TopicPiece {
+  [UI]: VNode;
+  /**
+   * Session-local composer/edit state. These controls belong to a direct Topic
+   * instance, not the shared TopicPiece projection used by the tracker's list.
+   */
+  commentDraft: PerSession<Writable<string>>;
+  bodyDraft: PerSession<Writable<string>>;
+  editingBody: PerSession<boolean>;
+  linkUrlDraft: PerSession<Writable<string>>;
+  linkLabelDraft: PerSession<Writable<string>>;
+  linkKindDraft: PerSession<Writable<TopicLinkKind>>;
   /** UI affordances as streams: composer submit, body edit lifecycle. */
   submitComment: Stream<void>;
   startEditBody: Stream<void>;
@@ -84,9 +96,6 @@ export interface TopicOutput {
   cancelEditBody: Stream<void>;
   submitLink: Stream<void>;
 }
-
-/** The shape stored in the tracker's list. */
-export type TopicPiece = TopicOutput;
 
 // ===== Shared theme (calm editorial light) =====
 

@@ -37,8 +37,9 @@ export interface StormProfile {
 export interface StormMessage {
   /** Live link to the sender's per-user profile cell (forces element→doc). */
   // PerUser declaration required by the scope-isolation write guard:
-  // per-reader resolution is the deliberate repro shape here.
-  authorProfile: PerUser<Cell<StormProfile>>;
+  // per-reader resolution is the deliberate repro shape here. The property is
+  // optional because another reader's scoped target may be unavailable.
+  authorProfile?: PerUser<Cell<StormProfile>>;
   author: string;
   body: string;
   n: number;
