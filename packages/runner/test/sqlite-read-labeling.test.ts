@@ -14,6 +14,23 @@ import { labelResultSchema } from "../src/builtins/sqlite-builtins.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "../src/cfc/observation.ts";
 
+type NullOriginLabelResultSchema = {
+  properties: {
+    result: {
+      items: {
+        properties: {
+          n: {
+            ifc: {
+              confidentiality: string[];
+              integrity?: string[];
+            };
+          };
+        };
+      };
+    };
+  };
+};
+
 describe("labelResultSchema (pure)", () => {
   const tables = {
     emails: {
@@ -81,7 +98,7 @@ describe("labelResultSchema (pure)", () => {
       t,
     );
     expect(error).toBeUndefined();
-    const ifc = (schema as Record<string, any>).properties.result.items
+    const ifc = (schema as NullOriginLabelResultSchema).properties.result.items
       .properties.n.ifc;
     expect([...ifc.confidentiality].sort()).toEqual(["body-secret", "sender"]);
     expect(ifc.integrity ?? []).toEqual([]);
