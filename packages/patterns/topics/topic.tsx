@@ -478,10 +478,15 @@ export default pattern<TopicInput, TopicOutput>(
                   {editingBody
                     ? (
                       <cf-vstack gap="2">
-                        <cf-textarea
+                        <cf-code-editor
                           $value={bodyDraft}
-                          rows={12}
+                          $mentionable={mentionable}
+                          language="text/markdown"
+                          mode="prose"
+                          wordWrap
+                          tabIndent
                           placeholder="The topic's living document…"
+                          style="min-height: 12rem;"
                         />
                         <cf-hstack gap="2">
                           <cf-button variant="primary" onClick={saveBody}>
@@ -494,11 +499,7 @@ export default pattern<TopicInput, TopicOutput>(
                       </cf-vstack>
                     )
                     : hasBody
-                    ? (
-                      <cf-text block style="white-space: pre-wrap;">
-                        {body}
-                      </cf-text>
-                    )
+                    ? <cf-markdown content={body} />
                     : (
                       <cf-text tone="muted" block>
                         No body yet. The body is this topic's living document —

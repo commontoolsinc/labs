@@ -41,6 +41,11 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   read-side from it (SELF + equals to find its own row). Requires the
   path-scoped wildcard fix (#4714) — the derive combines a resolveAsCell chain
   with an equals-only SELF capture in one computed.
+- **Authoring: cf-code-editor in the Edit→Save draft flow.** The editor binds
+  the session-local `bodyDraft` (never live to the shared string — whole-value
+  conflict semantics hold) with `@`-mention autocomplete over `mentionable`;
+  inserted `[Name](/of:fid1:…)` links are matched by the same fid scan as pasted
+  URLs. The read view renders the body as markdown.
 - **Cross-references are derived at read time, never persisted.** The board
   rescans the whole corpus per render (trivial at board scale) instead of
   materializing backlinks into topics: an index pattern that writes derived
