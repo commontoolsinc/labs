@@ -456,6 +456,338 @@ describe("piece pull materialization", () => {
     expect(await controller.result.get()).toEqual({ output: 99 });
   });
 
+  it("ignores missing optional result aliases when validating a path write", async () => {
+    const model = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        arrayField: { type: "array", items: { type: "number" } },
+      },
+      required: ["value"],
+    } as const;
+    const pattern: Pattern = {
+      argumentSchema: model,
+      resultSchema: model,
+      result: {
+        value: { $alias: { cell: "argument", path: ["value"] } },
+        arrayField: {
+          $alias: { cell: "argument", path: ["arrayField"] },
+        },
+      },
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { value: 1 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    expect(await controller.result.get()).toEqual({ value: 1 });
+    await controller.result.set(2, ["value"]);
+    expect(await controller.result.get()).toEqual({ value: 2 });
+
+    await expect(controller.result.set("bad", ["value"])).rejects.toThrow(
+      /updated result does not match its schema/,
+    );
+    expect(await controller.result.get()).toEqual({ value: 2 });
+  });
+
+  it("validates result stream payloads independently of sibling projections", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          event: { type: "number", asCell: ["stream"] },
+        },
+        required: ["event"],
+      },
+      resultSchema: {
+        type: "object",
+        properties: {
+          event: { type: "number", asCell: ["stream"] },
+          projection: {
+            anyOf: [{
+              type: "object",
+              properties: {
+                type: { type: "string", enum: ["projected"] },
+                optionalObject: { type: "object" },
+              },
+              required: ["type"],
+            }],
+          },
+        },
+        required: ["event", "projection"],
+      },
+      result: {
+        event: { $alias: { cell: "argument", path: ["event"] } },
+        // This mirrors projections such as $FS: an optional nested alias can
+        // materialize as present undefined even though the event is unrelated.
+        projection: {
+          type: "projected",
+          optionalObject: {
+            $alias: { cell: "argument", path: ["missing"] },
+          },
+        },
+      },
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { event: { $stream: true } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const stream = manager.getArgument(piece).key("event");
+    const events: unknown[] = [];
+    const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
+      events.push(event);
+    }, stream.getAsNormalizedFullLink());
+
+    try {
+      await controller.result.set(7, ["event"]);
+      await runtime.idle();
+      expect(events).toEqual([7]);
+
+      await expect(controller.result.set("bad", ["event"])).rejects.toThrow(
+        /updated result does not match its schema/,
+      );
+      expect(events).toEqual([7]);
+    } finally {
+      removeHandler();
+    }
+  });
+
+  it("fails closed for mixed stream and non-stream result alternatives", async () => {
+    for (const keyword of ["anyOf", "oneOf"] as const) {
+      const pattern: Pattern = {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            event: { type: "number", asCell: ["stream"] },
+          },
+          required: ["event"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            event: {
+              [keyword]: [
+                { type: "number", asCell: ["stream"] },
+                { type: "string" },
+              ],
+            },
+          },
+          required: ["event"],
+        },
+        result: {
+          event: { $alias: { cell: "argument", path: ["event"] } },
+        },
+        nodes: [],
+      };
+      const piece = await manager.runPersistent(
+        trustPattern(runtime, pattern),
+        { event: { $stream: true } },
+        undefined,
+        { start: true },
+      );
+      const controller = new PieceController(manager, piece);
+      const stream = manager.getArgument(piece).key("event");
+      const events: unknown[] = [];
+      const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
+        events.push(event);
+      }, stream.getAsNormalizedFullLink());
+
+      try {
+        const issue = new RegExp(
+          `mixed stream and non-stream ${keyword} alternatives`,
+        );
+        await expect(controller.result.set(7, ["event"])).rejects.toThrow(
+          issue,
+        );
+        await expect(
+          controller.result.set("wrong", ["event"]),
+        ).rejects.toThrow(issue);
+        expect(events).toEqual([]);
+      } finally {
+        removeHandler();
+      }
+    }
+  });
+
+  it("retains unwrapped allOf constraints on stream payloads", async () => {
+    const rootSchema: Pattern["argumentSchema"] = {
+      type: "object",
+      properties: { event: { $ref: "#/$defs/Event" } },
+      required: ["event"],
+      $defs: {
+        Event: {
+          allOf: [
+            { $ref: "#/$defs/NumberStream" },
+            { minimum: 0 },
+          ],
+        },
+        NumberStream: { type: "number", asCell: ["stream"] },
+      },
+    };
+    const pattern: Pattern = {
+      argumentSchema: rootSchema,
+      resultSchema: rootSchema,
+      result: {
+        event: { $alias: { cell: "argument", path: ["event"] } },
+      },
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { event: { $stream: true } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const stream = manager.getArgument(piece).key("event");
+    const events: unknown[] = [];
+    const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
+      events.push(event);
+    }, stream.getAsNormalizedFullLink());
+
+    try {
+      await controller.result.set(5, ["event"]);
+      await runtime.idle();
+      expect(events).toEqual([5]);
+      await expect(controller.result.set(-1, ["event"])).rejects.toThrow(
+        /updated result does not match its schema/,
+      );
+      expect(events).toEqual([5]);
+    } finally {
+      removeHandler();
+    }
+  });
+
+  it("accepts nested Cell handles in result stream events", async () => {
+    const eventSchema: Pattern["argumentSchema"] = {
+      type: "object",
+      properties: {
+        handle: { type: "number", asCell: ["cell"] },
+      },
+      required: ["handle"],
+      asCell: ["stream"],
+    };
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: { event: eventSchema },
+        required: ["event"],
+      },
+      resultSchema: {
+        type: "object",
+        properties: { event: eventSchema },
+        required: ["event"],
+      },
+      result: {
+        event: { $alias: { cell: "argument", path: ["event"] } },
+      },
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { event: { $stream: true } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const stream = manager.getArgument(piece).key("event");
+    const events: unknown[] = [];
+    const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
+      events.push(event);
+    }, stream.getAsNormalizedFullLink());
+
+    const numberSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+        result: { value: 9 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const stringSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          required: ["value"],
+        },
+        result: { value: "wrong" },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const streamSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            event: { type: "number", asCell: ["stream"] },
+          },
+          required: ["event"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            event: { type: "number", asCell: ["stream"] },
+          },
+          required: ["event"],
+        },
+        result: {
+          event: { $alias: { cell: "argument", path: ["event"] } },
+        },
+        nodes: [],
+      }),
+      { event: { $stream: true } },
+      undefined,
+      { start: true },
+    );
+
+    try {
+      await controller.result.set(
+        { handle: numberSource.key("value") },
+        ["event"],
+      );
+      await runtime.idle();
+      expect(events).toHaveLength(1);
+
+      await expect(
+        controller.result.set(
+          { handle: stringSource.key("value") },
+          ["event"],
+        ),
+      ).rejects.toThrow(
+        /input link at event.handle.*type string is not accepted/s,
+      );
+      await expect(
+        controller.result.set(
+          { handle: streamSource.key("event") },
+          ["event"],
+        ),
+      ).rejects.toThrow(/Stream handle is not accepted as cell/);
+      expect(events).toHaveLength(1);
+    } finally {
+      removeHandler();
+    }
+  });
+
   it("validates stale result views against the durable result schema", async () => {
     const initialPattern = await runtime.patternManager.compilePattern(
       compiledResultNarrowingProgram("string | number"),
@@ -685,6 +1017,53 @@ describe("piece pull materialization", () => {
     await expect(
       new PieceController(manager, readonlyPiece).input.set(source, ["handle"]),
     ).resolves.toBeUndefined();
+  });
+
+  it("accepts a cold opaque Cell in a whole setInput value", async () => {
+    const payloadSchema = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    } as const;
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: payloadSchema },
+          required: ["value"],
+        },
+        // The producer contract is durable even while this target is cold.
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { ...payloadSchema, asCell: ["cell"] },
+          },
+          required: ["handle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { handle: sourcePiece.key("value") },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, targetPiece);
+
+    await expect(
+      controller.setInput({ handle: sourcePiece.key("value") }),
+    ).resolves.toBeUndefined();
+    expect(await controller.input.get(["handle"])).toBeUndefined();
   });
 
   it("accepts a Piece Stream supplied to a Stream Cell input", async () => {

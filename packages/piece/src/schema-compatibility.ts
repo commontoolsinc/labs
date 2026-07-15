@@ -84,6 +84,19 @@ const COMPLEX_CONSTRAINT_KEYS = [
   "then",
 ] as const;
 
+const COMPLEX_CONSTRAINT_TYPES: Partial<
+  Record<(typeof COMPLEX_CONSTRAINT_KEYS)[number], readonly string[]>
+> = {
+  contains: ["array"],
+  dependentRequired: ["object"],
+  dependentSchemas: ["object"],
+  maxContains: ["array"],
+  minContains: ["array"],
+  patternProperties: ["object"],
+  prefixItems: ["array"],
+  propertyNames: ["object"],
+};
+
 const SEMANTIC_EXTENSION_KEYS = [
   "asCell",
   "ifc",
@@ -320,6 +333,23 @@ function schemaSubsetIssue(
     }
 
     for (const key of COMPLEX_CONSTRAINT_KEYS) {
+      const applicableTypes = COMPLEX_CONSTRAINT_TYPES[key];
+      if (
+        applicableTypes !== undefined &&
+        !schemaMayProduceType(source, applicableTypes)
+      ) {
+        continue;
+      }
+      // A closed source with no patterns has a finite set of possible field
+      // names. objectSubsetIssue() can prove each named field against changed
+      // target patternProperties directly, while open or pattern-generated
+      // source fields still require exact pattern equality below.
+      if (
+        key === "patternProperties" && source.additionalProperties === false &&
+        Object.keys(source.patternProperties ?? {}).length === 0
+      ) {
+        continue;
+      }
       if (
         !schemasResolveEqually(
           { [key]: source[key] },
@@ -331,12 +361,18 @@ function schemaSubsetIssue(
       }
     }
 
-    if (declaresObjectShape(source) || declaresObjectShape(target)) {
+    if (
+      schemaMayProduceType(source, ["object"]) &&
+      (declaresObjectShape(source) || declaresObjectShape(target))
+    ) {
       const objectIssue = objectSubsetIssue(source, target, path, context);
       if (objectIssue) return objectIssue;
     }
 
-    if (declaresArrayShape(source) || declaresArrayShape(target)) {
+    if (
+      schemaMayProduceType(source, ["array"]) &&
+      (declaresArrayShape(source) || declaresArrayShape(target))
+    ) {
       const arrayIssue = arraySubsetIssue(source, target, path, context);
       if (arrayIssue) return arrayIssue;
     }
@@ -394,8 +430,14 @@ function objectSubsetIssue(
     ? source.patternProperties
     : target.patternProperties;
 
-  for (const property of Object.keys(previousProperties)) {
-    if (!Object.hasOwn(candidateProperties, property)) {
+  // Pattern evolution preserves named fields as part of the public contract,
+  // even when the candidate object is otherwise open. A durable-link subset
+  // proof is different: a source may name additional fields that an open
+  // target accepts through patternProperties/additionalProperties. Treating
+  // those fields as "removed" rejects valid Fabric projections such as $FS.
+  if (context.defaultComparison === "evolution") {
+    for (const property of Object.keys(previousProperties)) {
+      if (Object.hasOwn(candidateProperties, property)) continue;
       return `${path}.${property}: existing ${context.role} field was removed`;
     }
   }
@@ -509,13 +551,94 @@ function objectSubsetIssue(
   }
 
   for (const property of Object.keys(previousProperties)) {
-    const issue = schemaSubsetIssue(
-      sourceProperties[property],
-      targetProperties[property],
-      `${path}.${property}`,
-      context,
+    const propertyPath = `${path}.${property}`;
+    const sourceDirect = sourceProperties[property];
+    const sourceContracts = [
+      sourceDirect,
+      ...matchingPatternPropertySchemas(source.patternProperties, property),
+    ];
+
+    // Keep the ordinary named-property proof on the detailed path. When a
+    // source pattern also applies, its conjunct may be the stronger fact that
+    // proves the target constraint, but a failed proof should still report the
+    // useful leaf-level reason from the named property.
+    if (Object.hasOwn(targetProperties, property)) {
+      const directIssue = schemaSubsetIssue(
+        sourceDirect,
+        targetProperties[property],
+        propertyPath,
+        context,
+      );
+      if (
+        directIssue !== undefined &&
+        !sourceContracts.slice(1).some((sourceContract) =>
+          schemaSubsetIssue(
+            sourceContract,
+            targetProperties[property],
+            propertyPath,
+            { ...context, allowEvolutionPolicy: false },
+          ) === undefined
+        )
+      ) {
+        return directIssue;
+      }
+    }
+
+    const targetPatternContracts = matchingPatternPropertySchemas(
+      target.patternProperties,
+      property,
     );
-    if (issue) return issue;
+    for (const targetContract of targetPatternContracts) {
+      const directIssue = schemaSubsetIssue(
+        sourceDirect,
+        targetContract,
+        propertyPath,
+        { ...context, allowEvolutionPolicy: false },
+      );
+      if (
+        directIssue !== undefined &&
+        !sourceContracts.slice(1).some((sourceContract) =>
+          schemaSubsetIssue(
+            sourceContract,
+            targetContract,
+            propertyPath,
+            { ...context, allowEvolutionPolicy: false },
+          ) === undefined
+        )
+      ) {
+        return directIssue;
+      }
+    }
+
+    if (
+      !Object.hasOwn(targetProperties, property) &&
+      targetPatternContracts.length === 0
+    ) {
+      const targetAdditional = target.additionalProperties ?? true;
+      if (targetAdditional === true) continue;
+      if (targetAdditional === false) {
+        return `${path}.${property}: source field is rejected by the target object`;
+      }
+      const directIssue = schemaSubsetIssue(
+        sourceDirect,
+        targetAdditional,
+        propertyPath,
+        { ...context, allowEvolutionPolicy: false },
+      );
+      if (
+        directIssue !== undefined &&
+        !sourceContracts.slice(1).some((sourceContract) =>
+          schemaSubsetIssue(
+            sourceContract,
+            targetAdditional,
+            propertyPath,
+            { ...context, allowEvolutionPolicy: false },
+          ) === undefined
+        )
+      ) {
+        return directIssue;
+      }
+    }
   }
 
   return additionalPropertiesSubsetIssue(source, target, path, context);
@@ -636,13 +759,14 @@ function scalarConstraintSubsetIssue(
   path: string,
 ): string | undefined {
   const lowerBounds = [
-    "minimum",
-    "exclusiveMinimum",
-    "minLength",
-    "minItems",
-    "minProperties",
+    ["minimum", ["number", "integer"]],
+    ["exclusiveMinimum", ["number", "integer"]],
+    ["minLength", ["string"]],
+    ["minItems", ["array"]],
+    ["minProperties", ["object"]],
   ] as const;
-  for (const key of lowerBounds) {
+  for (const [key, applicableTypes] of lowerBounds) {
+    if (!schemaMayProduceType(source, applicableTypes)) continue;
     const sourceValue = source[key];
     const targetValue = target[key];
     if (
@@ -654,13 +778,14 @@ function scalarConstraintSubsetIssue(
   }
 
   const upperBounds = [
-    "maximum",
-    "exclusiveMaximum",
-    "maxLength",
-    "maxItems",
-    "maxProperties",
+    ["maximum", ["number", "integer"]],
+    ["exclusiveMaximum", ["number", "integer"]],
+    ["maxLength", ["string"]],
+    ["maxItems", ["array"]],
+    ["maxProperties", ["object"]],
   ] as const;
-  for (const key of upperBounds) {
+  for (const [key, applicableTypes] of upperBounds) {
+    if (!schemaMayProduceType(source, applicableTypes)) continue;
     const sourceValue = source[key];
     const targetValue = target[key];
     if (
@@ -671,16 +796,28 @@ function scalarConstraintSubsetIssue(
     }
   }
 
-  if (target.uniqueItems === true && source.uniqueItems !== true) {
+  if (
+    schemaMayProduceType(source, ["array"]) && target.uniqueItems === true &&
+    source.uniqueItems !== true
+  ) {
     return `${path}: uniqueItems became more restrictive`;
   }
-  if (target.pattern !== undefined && source.pattern !== target.pattern) {
+  if (
+    schemaMayProduceType(source, ["string"]) &&
+    target.pattern !== undefined && source.pattern !== target.pattern
+  ) {
     return `${path}: pattern changed in a way compatibility checking cannot prove safe`;
   }
-  if (target.format !== undefined && source.format !== target.format) {
+  if (
+    schemaMayProduceType(source, ["string"]) && target.format !== undefined &&
+    source.format !== target.format
+  ) {
     return `${path}: format changed in a way compatibility checking cannot prove safe`;
   }
-  if (target.multipleOf !== undefined) {
+  if (
+    schemaMayProduceType(source, ["number", "integer"]) &&
+    target.multipleOf !== undefined
+  ) {
     if (
       source.multipleOf === undefined ||
       source.multipleOf % target.multipleOf !== 0
@@ -689,6 +826,16 @@ function scalarConstraintSubsetIssue(
     }
   }
   return undefined;
+}
+
+/** JSON Schema scalar keywords are ignored for values of unrelated types. */
+function schemaMayProduceType(
+  schema: SchemaObject,
+  applicableTypes: readonly string[],
+): boolean {
+  const types = schemaTypes(schema);
+  return types === undefined || types.includes("unknown") ||
+    types.some((type) => applicableTypes.includes(type));
 }
 
 function schemaAlternatives(

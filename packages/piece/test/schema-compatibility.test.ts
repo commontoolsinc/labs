@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
+import { validateSchemaValue } from "@commonfabric/runner/cfc";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   assertPatternSchemasBackwardCompatible,
@@ -40,6 +41,81 @@ const oldPattern = pattern(
 );
 
 describe("piece schema compatibility", () => {
+  it("accepts named Fabric projection fields through an open link target", () => {
+    const source: JSONSchema = {
+      type: "object",
+      properties: {
+        mentioned: { type: "array", items: true },
+        backlinks: { type: "array", items: true },
+        $FS: { type: "object" },
+        explicitUndefined: { type: "undefined" },
+      },
+      required: ["mentioned", "backlinks", "$FS", "explicitUndefined"],
+      additionalProperties: false,
+    };
+    const openTarget: JSONSchema = {
+      type: "object",
+      properties: {
+        mentioned: { type: "array", items: true },
+        backlinks: { type: "array", items: true },
+      },
+      required: ["mentioned", "backlinks"],
+    };
+
+    expect(() => assertSchemaSubset(source, openTarget)).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(source, {
+        ...openTarget,
+        additionalProperties: false,
+      })
+    ).toThrow(/\$FS: source field is rejected/);
+    expect(() =>
+      assertSchemaSubset(source, {
+        ...openTarget,
+        patternProperties: { "^\\$FS$": { type: "string" } },
+      })
+    ).toThrow(/patternProperties|\$FS/);
+
+    const finiteProjection: JSONSchema = {
+      type: "object",
+      properties: { $FS: { type: "object" } },
+      required: ["$FS"],
+      additionalProperties: false,
+    };
+    expect(() =>
+      assertSchemaSubset(finiteProjection, {
+        type: "object",
+        patternProperties: { "^\\$FS$": { type: "object" } },
+        required: ["$FS"],
+        additionalProperties: false,
+      })
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        {
+          type: "object",
+          patternProperties: { "^x": { type: "number" } },
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          patternProperties: { "^y": { type: "number" } },
+          additionalProperties: false,
+        },
+      )
+    ).toThrow(/patternProperties changed/);
+
+    const intersectedProperty: JSONSchema = {
+      type: "object",
+      properties: { x: { type: ["number", "string"] } },
+      patternProperties: { "^x$": { type: "number" } },
+      required: ["x"],
+      additionalProperties: false,
+    };
+    expect(() => assertSchemaSubset(intersectedProperty, intersectedProperty))
+      .not.toThrow();
+  });
+
   it("uses target defaults as link proofs only under default-stable ancestors", () => {
     const properties = {
       x: { type: "number" as const },
@@ -1033,6 +1109,100 @@ describe("piece schema compatibility", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(argumentPrevious, argumentAnyOf)
     ).not.toThrow();
+
+    const argumentWidenedWithNumericConstraint = pattern(
+      {
+        type: "object",
+        properties: {
+          value: {
+            type: ["undefined", "number"],
+            minimum: 0,
+          },
+        },
+      },
+      oldPattern.resultSchema,
+    );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        argumentPrevious,
+        argumentWidenedWithNumericConstraint,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number" },
+        { type: ["undefined", "number"], minimum: 0 },
+      )
+    ).toThrow();
+    for (
+      const target of [
+        {
+          type: ["undefined", "string"],
+          pattern: "^ok$",
+        },
+        {
+          type: ["undefined", "array"],
+          items: { type: "string" },
+          contains: { const: "ok" },
+        },
+        {
+          type: ["undefined", "object"],
+          properties: { value: { type: "number" } },
+          required: ["value"],
+          additionalProperties: false,
+          propertyNames: { pattern: "^value$" },
+        },
+      ] satisfies JSONSchema[]
+    ) {
+      expect(() => assertSchemaSubset({ type: "undefined" }, target)).not
+        .toThrow();
+    }
+    for (
+      const target of [
+        {
+          type: ["undefined", "string"],
+          contentEncoding: "base64",
+        },
+        {
+          type: ["undefined", "string"],
+          contentMediaType: "application/json",
+        },
+        {
+          type: ["undefined", "string"],
+          contentSchema: { type: "string" },
+        },
+      ] satisfies JSONSchema[]
+    ) {
+      expect(validateSchemaValue(target, undefined, target)).toMatch(
+        /content validation is not supported/,
+      );
+      expect(() => assertSchemaSubset({ type: "undefined" }, target)).toThrow();
+    }
+    expect(() =>
+      assertSchemaSubset(
+        { type: "array", items: { type: "number" } },
+        {
+          type: ["undefined", "array"],
+          items: { type: "string" },
+        },
+      )
+    ).toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        {
+          type: "object",
+          properties: { value: { type: "string" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+        {
+          type: ["undefined", "object"],
+          properties: { value: { type: "number" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+      )
+    ).toThrow();
 
     const requiredUndefinedDefault = pattern(
       {

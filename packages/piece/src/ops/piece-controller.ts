@@ -90,6 +90,12 @@ interface PathSchemaContract {
   mayBeMissing?: boolean;
 }
 
+interface StreamEventLocalization {
+  contract: PathSchemaContract;
+  consumedStream: boolean;
+  issue?: string;
+}
+
 const LINK_PATH_SAFE_ANCESTOR_KEYS = new Set([
   "$comment",
   "$defs",
@@ -305,14 +311,24 @@ function consumeOuterCellContract(schema: JSONSchema): OuterCellContract {
   };
 }
 
-/** Consume a stream channel marker from each top-level schema alternative. */
-function consumeStreamEventContract(
+/**
+ * Localize a schema from a stream handle to its event payload.
+ *
+ * A union can describe both stream and non-stream durable values. Every union
+ * branch must expose the same outer stream wrapper before it can be consumed;
+ * mixed unions fail closed because an unwrapped branch may also accept an
+ * opaque stream handle. Intersections retain unwrapped sibling constraints on
+ * the payload, while an explicit non-stream Cell wrapper is contradictory.
+ */
+function localizeStreamEventContract(
   unresolved: PathSchemaContract,
   active = new WeakSet<object>(),
-): PathSchemaContract {
+): StreamEventLocalization {
   const contract = resolvePathSchemaContract(unresolved);
   const { schema, root } = contract;
-  if (typeof schema !== "object" || schema === null) return contract;
+  if (typeof schema !== "object" || schema === null) {
+    return { contract, consumedStream: false };
+  }
   if (active.has(schema)) {
     throw new Error("recursive stream event schema cannot be localized");
   }
@@ -322,31 +338,101 @@ function consumeStreamEventContract(
     if (entries.length > 0) {
       const consumed = consumeOuterCellContract(schema);
       if (consumed.kind !== "stream") {
-        throw new Error(`stream event schema uses ${consumed.kind} wrapper`);
+        return {
+          contract,
+          consumedStream: false,
+          issue: `stream event schema uses ${consumed.kind} wrapper`,
+        };
       }
-      return { schema: consumed.payloadSchema, root };
+      return {
+        contract: { schema: consumed.payloadSchema, root },
+        consumedStream: true,
+      };
     }
 
     let changed = false;
+    let consumedStream = false;
     const result = { ...schema };
-    for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+    for (const key of ["anyOf", "oneOf"] as const) {
       const alternatives = schema[key];
       if (!Array.isArray(alternatives)) continue;
-      result[key] = alternatives.map((alternative) =>
-        consumeStreamEventContract(
+      const localized = alternatives.map((alternative) =>
+        localizeStreamEventContract(
           {
             schema: alternative,
             root: cfcSchemaChildRoot(alternative, root),
           },
           active,
-        ).schema
+        )
       );
-      changed = true;
+      const streamAlternatives = localized.filter((alternative) =>
+        alternative.consumedStream
+      );
+      if (streamAlternatives.length > 0) {
+        if (streamAlternatives.length !== localized.length) {
+          return {
+            contract,
+            consumedStream: false,
+            issue:
+              `stream event schema has mixed stream and non-stream ${key} alternatives`,
+          };
+        }
+        result[key] = streamAlternatives.map((alternative) =>
+          alternative.contract.schema
+        );
+        consumedStream = true;
+        changed = true;
+      } else {
+        const invalid = localized.find((alternative) =>
+          alternative.issue !== undefined
+        );
+        if (invalid !== undefined) return invalid;
+      }
     }
-    return { schema: changed ? result : schema, root };
+
+    if (Array.isArray(schema.allOf)) {
+      const localized = schema.allOf.map((alternative) =>
+        localizeStreamEventContract(
+          {
+            schema: alternative,
+            root: cfcSchemaChildRoot(alternative, root),
+          },
+          active,
+        )
+      );
+      const invalid = localized.find((alternative) =>
+        alternative.issue !== undefined
+      );
+      if (invalid !== undefined) return invalid;
+      if (localized.some((alternative) => alternative.consumedStream)) {
+        result.allOf = localized.map((alternative, index) =>
+          alternative.consumedStream
+            ? alternative.contract.schema
+            : schema.allOf![index]
+        );
+        consumedStream = true;
+        changed = true;
+      }
+    }
+    return {
+      contract: { schema: changed ? result : schema, root },
+      consumedStream,
+    };
   } finally {
     active.delete(schema);
   }
+}
+
+/** Consume exactly one stream wrapper from the applicable event contract. */
+function consumeStreamEventContract(
+  contract: PathSchemaContract,
+): PathSchemaContract {
+  const localized = localizeStreamEventContract(contract);
+  if (localized.issue !== undefined) throw new Error(localized.issue);
+  if (!localized.consumedStream) {
+    throw new Error("stream event schema has no stream-bearing alternative");
+  }
+  return localized.contract;
 }
 
 function canFollowSourceScope(
@@ -485,8 +571,8 @@ function assertSuppliedLinkSchemasCompatible(
         );
       }
     }
-    const preservesDirectHandle = !options.destinationIsStream &&
-      targetWrapper !== undefined && isCell(suppliedLink.value);
+    const preservesDirectHandle = targetWrapper !== undefined &&
+      isCell(suppliedLink.value);
 
     const sourceRoot = preservesDirectHandle
       ? durableSource.root
@@ -812,19 +898,54 @@ class PiecePropIo implements PieceCellIo {
             linkValue,
           );
         }
-        const validationRoot = replaceMaterializedValueAtPath(
-          targetCell.asSchema(undefined).withTx(tx).get(),
-          writePath,
-          materializedValue,
-        );
-        const issue = validateSchemaValue(
-          schema,
-          validationRoot,
-          schema,
-          { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
-        );
-        if (issue !== undefined) {
-          throw new Error(`updated result does not match its schema: ${issue}`);
+        if (isStream(txCell)) {
+          // Sending an event does not replace the stream handle in the result
+          // object. Validate the payload contract itself so unrelated result
+          // projections (VNode/FS values, or optional aliases that are not
+          // materialized yet) cannot invalidate an otherwise valid event.
+          // This consumes exactly one stream wrapper and retains nested Cell
+          // contracts plus Common Fabric extensions such as `undefined`.
+          const eventContracts = linkPathContracts(
+            [{ schema, root: schema }],
+            writePath,
+          ).map((contract) => consumeStreamEventContract(contract));
+          for (const contract of eventContracts) {
+            const issue = validateSchemaValue(
+              contract.schema,
+              materializedValue,
+              contract.root,
+              { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+            );
+            if (issue !== undefined) {
+              throw new Error(
+                `updated result does not match its schema: ${issue}`,
+              );
+            }
+          }
+        } else {
+          const validationRoot = replaceMaterializedValueAtPath(
+            // Result projections contain aliases for optional outputs whose
+            // targets may not exist yet. Untyped materialization turns those
+            // missing aliases into present `undefined` properties, which can
+            // make an unrelated path write fail (for example, optional array
+            // output -> present undefined). The durable schema-aware view
+            // keeps missing optional projections absent while preserving
+            // explicit undefined wherever the schema accepts it.
+            targetCell.withTx(tx).get(),
+            writePath,
+            materializedValue,
+          );
+          const issue = validateSchemaValue(
+            schema,
+            validationRoot,
+            schema,
+            { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+          );
+          if (issue !== undefined) {
+            throw new Error(
+              `updated result does not match its schema: ${issue}`,
+            );
+          }
         }
         setTerminalValue(value);
       }
@@ -894,12 +1015,40 @@ export class PieceController<T = unknown> {
       while (true) {
         const { pattern, ref } = await this.#loadCurrentPattern();
         try {
+          const links = suppliedLinks(input);
           assertSuppliedLinkSchemasCompatible(
-            suppliedLinks(input),
+            links,
             pattern.argumentSchema,
             this.#manager.getArgument(this.#cell),
             this.#manager,
           );
+          // Validate the exact caller value before Runner serializes Cell
+          // handles into argument links. Every accepted link below has already
+          // been proved against its durable producer contract, so treating it
+          // as opaque here checks the surrounding native value without
+          // dereferencing a cold/absent `asCell` payload. This also preserves
+          // Common Fabric's first-class explicit `undefined` semantics.
+          const acceptsProvedLink = (
+            value: unknown,
+            schema: JSONSchema,
+          ) => isLink(value) || schemaAcceptsOpaqueCellValue(value, schema);
+          const candidate = mergeSchemaDefaults(
+            input,
+            extractDefaultValues(pattern.argumentSchema),
+            pattern.argumentSchema,
+            { acceptOpaqueValue: acceptsProvedLink },
+          );
+          const issue = validateSchemaValue(
+            pattern.argumentSchema,
+            candidate,
+            pattern.argumentSchema,
+            { acceptOpaqueValue: acceptsProvedLink },
+          );
+          if (issue !== undefined) {
+            throw new Error(
+              `updated arguments do not match the candidate schema: ${issue}`,
+            );
+          }
           // Use setup/start so we can update inputs without forcing reschedule.
           // The identity guard prevents a concurrent setsrc from being
           // overwritten by this already-loaded pattern.

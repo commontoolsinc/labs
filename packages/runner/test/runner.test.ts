@@ -1644,6 +1644,51 @@ describe("setup/start", () => {
     expect(cellValue).toEqual({ output: 2 });
   });
 
+  it("replays same-pattern opaque Cell arguments without validating payloads", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          myProfile: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            required: ["name"],
+            asCell: ["cell"],
+          },
+        },
+        required: ["myProfile"],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const trusted = trustExecutable(runtime, pattern);
+    const profile = runtime.getCell(space, "cold profile");
+    const resultCell = runtime.getCell(space, "opaque replay result");
+
+    await runtime.runSynced(resultCell, trusted, { myProfile: profile });
+    const expectedPatternIdentity = getPatternIdentityRef(resultCell);
+    expect(expectedPatternIdentity).toBeDefined();
+
+    // Both a live same-pattern update and a stopped-piece replay receive the
+    // Cell handle itself. Its absent payload is not the argument value to
+    // validate against the wrapped object schema.
+    await expect(runtime.runSynced(
+      resultCell,
+      trusted,
+      { myProfile: profile },
+      { expectedPatternIdentity: expectedPatternIdentity! },
+    )).resolves.toBeDefined();
+
+    runtime.runner.stop(resultCell);
+    await expect(runtime.runSynced(
+      resultCell,
+      trusted,
+      { myProfile: profile },
+      { expectedPatternIdentity: expectedPatternIdentity! },
+    )).resolves.toBeDefined();
+  });
+
   it("start is idempotent when called multiple times", async () => {
     const pattern: Pattern = {
       argumentSchema: {

@@ -993,12 +993,17 @@ export class Runner {
         defaults,
         pattern.argumentSchema,
       );
-      this.updateAndValidateArgument(
+      // Nested-pattern replay passes opaque Cell handles here. Candidate-
+      // schema validation materializes the argument cell and would dereference
+      // those handles before validating them, rejecting a valid `asCell` slot
+      // when its payload is cold or absent. Piece API argument mutations
+      // validate their exact supplied value before entering Runner;
+      // pattern-changing updates always take the validated path below.
+      this.updateArgument(
         tx,
         argumentLink,
         nextArgument,
         pattern.argumentSchema,
-        defaults,
       );
       return { resultCell, needsStart: false };
     }
@@ -1237,7 +1242,7 @@ export class Runner {
       }
     }
     if (nextArgument !== undefined && !argumentUpdated) {
-      if (updatesExistingArgument) {
+      if (updatesExistingArgument && !samePattern) {
         this.updateAndValidateArgument(
           tx,
           argumentLink,
@@ -1246,6 +1251,9 @@ export class Runner {
           defaults,
         );
       } else {
+        // New argument cells and same-pattern replay retain the historic write
+        // path. Piece API argument mutations validate their exact supplied
+        // value before entering Runner.
         this.updateArgument(
           tx,
           argumentLink,
