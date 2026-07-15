@@ -72,12 +72,14 @@ will select. Gating is capture-granular: if a computation captures a projected
 result, it waits whenever that capture is unavailable even when the branch it
 would have taken did not read the value.
 
-When an unavailable value reaches JSX without an explicit guard, rendering
-starts blank. After a usable value has rendered, a pending replacement keeps
-that last subtree visible but dimmed and non-interactive until usable data
-returns. Error, syncing, and schema-mismatch values clear the prior content.
-Use guards when the UI should show an explicit loading or failure state
-instead.
+When an unavailable value reaches JSX without an explicit guard, the affected
+reactive slot starts blank; the rest of the surrounding render is unaffected.
+After a usable value has rendered, a pending replacement keeps the last
+element-rooted subtree visible but dimmed and non-interactive until usable data
+returns. A retained bare text node stays visible but has no element on which to
+apply the pending style or `inert`; it also has no interactive surface. Error,
+syncing, and schema-mismatch values clear the affected prior content. Use
+guards when the UI should show an explicit loading or failure state instead.
 
 The public pattern type `AsyncResult<T>` is the availability union described
 here. An unrelated internal memory utility also uses the name `AsyncResult`

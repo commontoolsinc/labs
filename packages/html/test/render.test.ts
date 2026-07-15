@@ -27,6 +27,11 @@ class InputEvent extends SynthesizedEvent {}
 class MouseEvent extends SynthesizedEvent {}
 
 function reactiveChild<T>(initial: T): CellHandle<T> {
+  const [runtime, ref] = reactiveHandleParts("reactive-child");
+  return new CellHandle(runtime, ref, initial);
+}
+
+function reactiveHandleParts(id: string): [RuntimeClient, CellRef] {
   const connection = {
     signal: new AbortController().signal,
     subscribe: () => {},
@@ -38,12 +43,12 @@ function reactiveChild<T>(initial: T): CellHandle<T> {
   } as unknown as RuntimeClient;
   const ref = {
     space: "did:key:html-test",
-    id: "reactive-child",
+    id,
     path: [],
     type: "application/json",
     schema: {},
   } as unknown as CellRef;
-  return new CellHandle(runtime, ref, initial);
+  return [runtime, ref];
 }
 
 class SchemaBoundCellHandle<T> extends CellHandle<T> {
@@ -53,22 +58,7 @@ class SchemaBoundCellHandle<T> extends CellHandle<T> {
 }
 
 function reactiveRoot<T>(initial: T): CellHandle<T> {
-  const connection = {
-    signal: new AbortController().signal,
-    subscribe: () => {},
-    unsubscribe: () => Promise.resolve(),
-    request: () => Promise.resolve({}),
-  };
-  const runtime = {
-    [$conn]: () => connection,
-  } as unknown as RuntimeClient;
-  const ref = {
-    space: "did:key:html-test",
-    id: "reactive-root",
-    path: [],
-    type: "application/json",
-    schema: {},
-  } as unknown as CellRef;
+  const [runtime, ref] = reactiveHandleParts("reactive-root");
   return new SchemaBoundCellHandle(runtime, ref, initial);
 }
 
