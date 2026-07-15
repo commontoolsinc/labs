@@ -9,10 +9,14 @@ import {
   loadConversationFixture,
 } from "@commonfabric/llm/client";
 import type {
+  BuiltInLLMContentPart,
   BuiltInLLMMessage,
   BuiltInLLMTool,
+  BuiltInLLMToolCallPart,
+  FactoryInput,
   JSONSchema,
 } from "@commonfabric/api";
+import type { LLMRequest } from "@commonfabric/llm/types";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -20,12 +24,135 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
+import type { Cell as RunnerCell, Stream } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 // Enable mock mode once for all tests
 enableMockMode();
+
+type ResultState = {
+  messages?: BuiltInLLMMessage[];
+  pending?: boolean;
+  pinnedCells?: Array<{ path: string; name: string }>;
+};
+
+type ToolResultPartForTest = {
+  type: "tool-result";
+  toolCallId: string;
+  toolName: string;
+  output: {
+    type: "json" | "text" | "error-text";
+    value: unknown;
+  };
+};
+
+type WeatherInput = {
+  location: string;
+};
+
+type ResultCellState<T> = {
+  result: RunnerCell<T>;
+};
+
+type EmailState = {
+  emails: RunnerCell<unknown[]>;
+};
+
+type BriefingState = {
+  result: RunnerCell<unknown>;
+  title: string;
+  source: string;
+  body: unknown;
+};
+
+type SendMailState = {
+  sent: RunnerCell<unknown>;
+  route?: string;
+};
+
+type SendMailInputWithResult = {
+  recipient: string;
+  subject: string;
+  body: string;
+  result: RunnerCell<unknown>;
+};
+
+type ChildAgentInput = {
+  prompt: string;
+  resultSchema: JSONSchema;
+};
+
+type SafeChildAgentInput = ChildAgentInput & {
+  body: FactoryInput<Record<string, unknown>>;
+  emails: FactoryInput<Record<string, unknown>>;
+  route: string;
+};
+
+type ReadBriefingInput = {
+  result: RunnerCell<unknown>;
+};
+
+type ReadBriefingState = {
+  title: string;
+  source: string;
+  body: unknown;
+};
+
+function cast<T>(value: unknown): T {
+  return value as T;
+}
+
+function patternToolAsBuiltInTool(value: unknown): BuiltInLLMTool {
+  return cast<BuiltInLLMTool>(value);
+}
+
+function toolCatalogInput(value: unknown): Parameters<
+  typeof llmToolExecutionHelpers.buildToolCatalog
+>[0] {
+  return cast<
+    Parameters<typeof llmToolExecutionHelpers.buildToolCatalog>[0]
+  >(value);
+}
+
+function isContentPart(value: unknown): value is BuiltInLLMContentPart {
+  return typeof value === "object" && value !== null && "type" in value;
+}
+
+function firstContentPart(
+  message: BuiltInLLMMessage,
+): BuiltInLLMContentPart {
+  const { content } = message;
+  expect(Array.isArray(content)).toBe(true);
+  const part = Array.isArray(content) ? content[0] : undefined;
+  expect(isContentPart(part)).toBe(true);
+  return part as BuiltInLLMContentPart;
+}
+
+function firstToolCallPart(message: BuiltInLLMMessage): BuiltInLLMToolCallPart {
+  const part = firstContentPart(message);
+  expect(part.type).toBe("tool-call");
+  return part as BuiltInLLMToolCallPart;
+}
+
+function firstToolResultPart(
+  message: BuiltInLLMMessage,
+): ToolResultPartForTest {
+  const part = firstContentPart(message);
+  expect(part.type).toBe("tool-result");
+  return cast<ToolResultPartForTest>(part);
+}
+
+function hasToolResult(
+  content: BuiltInLLMMessage["content"],
+  toolName: string,
+): boolean {
+  return Array.isArray(content) &&
+    content.some((part) =>
+      part.type === "tool-result" && part.toolName === toolName
+    );
+}
 
 describe("llmDialog", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -189,7 +316,9 @@ describe("llmDialog", () => {
         },
         required: ["addMessage"],
       } as const satisfies JSONSchema,
-      (_event: any, { addMessage }: any) => {
+      (_event: unknown, { addMessage }: {
+        addMessage: Stream<BuiltInLLMMessage>;
+      }) => {
         addMessage.send({
           role: "user",
           content: "Hello from handler",
@@ -202,7 +331,7 @@ describe("llmDialog", () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
         const dialog = llmDialog({ messages });
         return {
-          run: sendPrompt({ addMessage: dialog.addMessage as any }),
+          run: sendPrompt({ addMessage: dialog.addMessage }),
           pending: dialog.pending,
           messages,
         };
@@ -281,7 +410,7 @@ describe("llmDialog", () => {
     let toolCalled = false;
 
     const getWeatherTool = pattern(
-      ({ location: _location }: any) => {
+      ({ location: _location }: WeatherInput) => {
         toolCalled = true;
         return "Sunny, 25C";
       },
@@ -300,9 +429,7 @@ describe("llmDialog", () => {
         const dialog = llmDialog({
           messages,
           tools: {
-            getWeather: patternTool(
-              getWeatherTool,
-            ) as unknown as BuiltInLLMTool,
+            getWeather: patternToolAsBuiltInTool(patternTool(getWeatherTool)),
           },
         });
         return {
@@ -341,12 +468,9 @@ describe("llmDialog", () => {
     const messages = (await result.key("messages").pull())!;
     expect(messages).toHaveLength(4);
     expect(messages[1].role).toBe("assistant");
-    const content = messages[1].content as any[];
-    expect(Array.isArray(content)).toBe(true);
-    expect(content[0].type).toBe("tool-call");
-    expect(content[0].toolName).toBe("getWeather");
+    expect(firstToolCallPart(messages[1]).toolName).toBe("getWeather");
     expect(messages[2].role).toBe("tool");
-    expect((messages[2].content as any)[0].toolName).toEqual("getWeather");
+    expect(firstToolResultPart(messages[2]).toolName).toEqual("getWeather");
     expect(messages[3].role).toBe("assistant");
     expect(messages[3].content).toBe(
       "The weather in San Francisco is sunny and 25C.",
@@ -383,7 +507,7 @@ describe("llmDialog", () => {
         type: "object",
         properties: {},
       },
-      ({ result }: any) => {
+      ({ result }: ResultCellState<{ ok: boolean }>) => {
         result.set({ ok: true });
       },
     );
@@ -408,7 +532,7 @@ describe("llmDialog", () => {
           messages,
           builtinTools: false,
           tools: {
-            sendMail: {
+            sendMail: patternToolAsBuiltInTool({
               description: "Send an email.",
               inputSchema: {
                 type: "object",
@@ -421,7 +545,7 @@ describe("llmDialog", () => {
                 additionalProperties: false,
               } as const satisfies JSONSchema,
               handler: sendMailHandler({}),
-            } as unknown as BuiltInLLMTool,
+            }),
           },
         });
         return {
@@ -490,10 +614,10 @@ describe("llmDialog", () => {
           },
         };
       },
-    } as any;
+    };
 
     const catalog = llmToolExecutionHelpers.buildToolCatalog(
-      toolsCell,
+      toolCatalogInput(toolsCell),
       false,
     );
 
@@ -539,7 +663,7 @@ describe("llmDialog", () => {
 
     const sendMail = handler<
       SendMailArgs,
-      { emails: any }
+      EmailState
     >(
       {
         type: "object",
@@ -617,7 +741,7 @@ describe("llmDialog", () => {
     await runtime.idle();
 
     const catalog = llmToolExecutionHelpers.buildToolCatalog(
-      result.key("tools") as any,
+      toolCatalogInput(result.key("tools")),
       false,
     );
     const summaryLink = createLLMFriendlyLink(
@@ -680,7 +804,7 @@ describe("llmDialog", () => {
 
     const sendMail = handler<
       SendMailArgs,
-      { emails: any }
+      EmailState
     >(
       {
         type: "object",
@@ -758,7 +882,7 @@ describe("llmDialog", () => {
     await runtime.idle();
 
     const catalog = llmToolExecutionHelpers.buildToolCatalog(
-      result.key("tools") as any,
+      toolCatalogInput(result.key("tools")),
       false,
     );
     const summaryLink = createLLMFriendlyLink(
@@ -888,17 +1012,15 @@ describe("llmDialog", () => {
       required: ["addMessage"],
     } as const satisfies JSONSchema;
 
-    const subAgentPattern = pattern<any, any>(
-      ({ prompt, resultSchema }) => {
-        return generateObject({
+    const subAgentPattern = pattern(
+      ({ prompt, resultSchema }: ChildAgentInput) => {
+        return generateObject<unknown>({
           prompt,
           schema: resultSchema,
           tools: {
-            helperTool: patternTool(
-              helperTool,
-            ) as unknown as BuiltInLLMTool,
+            helperTool: patternToolAsBuiltInTool(patternTool(helperTool)),
           },
-        } as any).result;
+        }).result;
       },
       {
         type: "object",
@@ -923,7 +1045,7 @@ describe("llmDialog", () => {
           tools: {
             delegate: {
               description: "Run a child agent and return schema-limited JSON.",
-              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
+              ...patternToolAsBuiltInTool(patternTool(subAgentPattern)),
             },
           },
         });
@@ -1012,7 +1134,10 @@ describe("llmDialog", () => {
         },
         required: ["title", "source", "body"],
       },
-      ({ result }: { result: any }, { title, source, body }: any) => {
+      (
+        { result }: ReadBriefingInput,
+        { title, source, body }: ReadBriefingState,
+      ) => {
         result.set({
           title,
           source,
@@ -1042,22 +1167,22 @@ describe("llmDialog", () => {
         required: ["sent"],
       },
       (
-        { recipient, subject, body, result }: any,
-        { sent, route }: any,
+        { recipient, subject, body, result }: SendMailInputWithResult,
+        { sent, route }: SendMailState,
       ) => {
         sent.set({ recipient, subject, body, route });
         result.set({ ok: true });
       },
     );
 
-    const subAgentPattern = pattern<any, any>(
-      ({ prompt, resultSchema, body, emails, route }) => {
-        return generateObject({
+    const subAgentPattern = pattern(
+      ({ prompt, resultSchema, body, emails, route }: SafeChildAgentInput) => {
+        return generateObject<unknown>({
           prompt,
           system: "Child worker.",
           schema: resultSchema,
           tools: {
-            readRawBriefing: {
+            readRawBriefing: patternToolAsBuiltInTool({
               description: "Read the nested body.",
               inputSchema: {
                 type: "object",
@@ -1069,8 +1194,8 @@ describe("llmDialog", () => {
                 source: "https://example.invalid",
                 body,
               }),
-            } as unknown as BuiltInLLMTool,
-            sendMail: {
+            }),
+            sendMail: patternToolAsBuiltInTool({
               description: "Send a nested email.",
               inputSchema: {
                 type: "object",
@@ -1083,10 +1208,10 @@ describe("llmDialog", () => {
                 additionalProperties: false,
               } as const satisfies JSONSchema,
               handler: sendMail({ sent: emails, route }),
-            } as unknown as BuiltInLLMTool,
+            }),
           },
           observationMaxConfidentiality: ["internal"],
-        } as any).result;
+        }).result;
       },
       {
         type: "object",
@@ -1126,7 +1251,7 @@ describe("llmDialog", () => {
           builtinTools: false,
           observationMaxConfidentiality: ["internal"],
           tools: {
-            readRawBriefing: {
+            readRawBriefing: patternToolAsBuiltInTool({
               description: "Read the briefing.",
               inputSchema: {
                 type: "object",
@@ -1141,17 +1266,17 @@ describe("llmDialog", () => {
                   nextStep: "Use subAgent.",
                 },
               }),
-            } as unknown as BuiltInLLMTool,
+            }),
             subAgent: {
               description:
                 "Run a higher-clearance worker and return schema-limited JSON.",
-              ...(patternTool(subAgentPattern, {
+              ...patternToolAsBuiltInTool(patternTool(subAgentPattern, {
                 body: hostileBody,
                 emails,
                 route: "safe-child",
-              }) as unknown as BuiltInLLMTool),
+              })),
             },
-            sendMail: {
+            sendMail: patternToolAsBuiltInTool({
               description: "Send an email.",
               inputSchema: {
                 type: "object",
@@ -1164,7 +1289,7 @@ describe("llmDialog", () => {
                 additionalProperties: false,
               } as const satisfies JSONSchema,
               handler: sendMail({ sent, route: "parent" }),
-            } as unknown as BuiltInLLMTool,
+            }),
           },
         });
         return {
@@ -1303,10 +1428,8 @@ describe("llmDialog", () => {
           messages,
           observationMaxConfidentiality: ["internal"],
           tools: {
-            readInternal: patternTool(
-              readInternal,
-            ) as unknown as BuiltInLLMTool,
-            publicOnly: patternTool(publicOnly) as unknown as BuiltInLLMTool,
+            readInternal: patternToolAsBuiltInTool(patternTool(readInternal)),
+            publicOnly: patternToolAsBuiltInTool(patternTool(publicOnly)),
           },
         });
         return {
@@ -1337,11 +1460,11 @@ describe("llmDialog", () => {
 
     const messages = (await result.key("messages").pull())!;
     expect(messages[4].role).toBe("tool");
-    expect((messages[4].content as any)[0].toolName).toBe("publicOnly");
-    expect((messages[4].content as any)[0].output.type).toBe("error-text");
-    expect((messages[4].content as any)[0].output.value).toContain(
-      "Tool call denied",
-    );
+    const deniedResult = firstToolResultPart(messages[4]);
+    expect(deniedResult.toolName).toBe("publicOnly");
+    expect(deniedResult.output.type).toBe("error-text");
+    expect(typeof deniedResult.output.value).toBe("string");
+    expect(deniedResult.output.value).toContain("Tool call denied");
     expect(messages[5].content).toBe("Denied as expected.");
   });
 
@@ -2064,7 +2187,7 @@ describe("llmDialog", () => {
   });
 
   it("should omit built-in tools and guidance when builtinTools is false", async () => {
-    let capturedRequest: any;
+    let capturedRequest: LLMRequest | undefined;
 
     addMockResponse(
       (req) => {
@@ -2110,7 +2233,7 @@ describe("llmDialog", () => {
           builtinTools: false,
           system: "Base system prompt.",
           tools: {
-            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+            ping: patternToolAsBuiltInTool(patternTool(pingTool)),
           },
         });
         return {
@@ -2144,16 +2267,17 @@ describe("llmDialog", () => {
     await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
 
     expect(capturedRequest).toBeDefined();
-    expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
-    expect(capturedRequest.system).not.toContain("# Link and Cell Model");
-    expect(capturedRequest.system).not.toContain("call listRecent()");
+    expect(Object.keys(capturedRequest?.tools ?? {})).toEqual(["ping"]);
+    expect(capturedRequest?.system).toContain("Base system prompt.");
+    expect(capturedRequest?.system).not.toContain("# Link and Cell Model");
+    expect(capturedRequest?.system).not.toContain("call listRecent()");
 
     const flattenedTools = await result.key("flattenedTools").pull();
     expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
   });
 
-  it("should omit built-in tools even when llmDialog params are cast to any", async () => {
-    let capturedRequest: any;
+  it("should omit built-in tools when llmDialog params cross a typed boundary", async () => {
+    let capturedRequest: LLMRequest | undefined;
 
     addMockResponse(
       (req) => {
@@ -2194,14 +2318,14 @@ describe("llmDialog", () => {
     const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
-        const dialog = llmDialog({
+        const dialog = llmDialog(cast<Parameters<typeof llmDialog>[0]>({
           messages,
           builtinTools: false,
           system: "Base system prompt.",
           tools: {
-            ping: patternTool(pingTool) as unknown as BuiltInLLMTool,
+            ping: patternToolAsBuiltInTool(patternTool(pingTool)),
           },
-        } as any);
+        }));
         return {
           addMessage: dialog.addMessage,
           pending: dialog.pending,
@@ -2233,14 +2357,14 @@ describe("llmDialog", () => {
     await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
 
     expect(capturedRequest).toBeDefined();
-    expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
+    expect(Object.keys(capturedRequest?.tools ?? {})).toEqual(["ping"]);
 
     const flattenedTools = await result.key("flattenedTools").pull();
     expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
   });
 
   it("should expose handler-based custom tools in flattenedTools", async () => {
-    let capturedRequest: any;
+    let capturedRequest: LLMRequest | undefined;
 
     addMockResponse(
       (req) => {
@@ -2290,7 +2414,7 @@ describe("llmDialog", () => {
           builtinTools: false,
           system: "Base system prompt.",
           tools: {
-            ping: {
+            ping: patternToolAsBuiltInTool({
               description: "Ping the system.",
               inputSchema: {
                 type: "object",
@@ -2298,7 +2422,7 @@ describe("llmDialog", () => {
                 additionalProperties: false,
               },
               handler: pingHandler({}),
-            } as BuiltInLLMTool,
+            }),
           },
         });
         return {
@@ -2332,7 +2456,7 @@ describe("llmDialog", () => {
     await expect(waitForMessages(result, 2)).resolves.toBeUndefined();
 
     expect(capturedRequest).toBeDefined();
-    expect(Object.keys(capturedRequest.tools ?? {})).toEqual(["ping"]);
+    expect(Object.keys(capturedRequest?.tools ?? {})).toEqual(["ping"]);
 
     const flattenedTools = await result.key("flattenedTools").pull();
     expect(Object.keys(flattenedTools ?? {})).toEqual(["ping"]);
@@ -2373,10 +2497,7 @@ describe("llmDialog", () => {
     addMockResponse(
       (req) => {
         const matches = req.messages.some((m) =>
-          m.role === "tool" && Array.isArray(m.content) &&
-          m.content.some((c: any) =>
-            c.type === "tool-result" && c.toolName === "readInternal"
-          )
+          m.role === "tool" && hasToolResult(m.content, "readInternal")
         );
         if (matches) {
           turn2Request = { messages: req.messages };
@@ -2436,9 +2557,9 @@ describe("llmDialog", () => {
             // Generous pattern-supplied bound — would let "internal" ship.
             observationMaxConfidentiality: ["internal"],
             tools: {
-              readInternal: commonfabric.patternTool(
-                readInternal,
-              ) as unknown as BuiltInLLMTool,
+              readInternal: patternToolAsBuiltInTool(
+                commonfabric.patternTool(readInternal),
+              ),
             },
           });
           return {
@@ -2473,7 +2594,7 @@ describe("llmDialog", () => {
       // The tool EXECUTED (it was not denied and did not error) — the leak is
       // prevented by redacting its labeled result to an opaque link, so a
       // failed invocation must not masquerade as a successful redaction.
-      const output = (toolMessage.content as any)[0].output;
+      const output = firstToolResultPart(toolMessage).output;
       expect(output.type).toBe("json");
       expect(JSON.stringify(output.value)).toContain("@link");
       const toolText = JSON.stringify(toolMessage.content);
@@ -2492,7 +2613,10 @@ describe("llmDialog", () => {
   });
 });
 
-function waitForMessages(result: any, expectedCount: number) {
+function waitForMessages<T>(
+  result: RunnerCell<T>,
+  expectedCount: number,
+) {
   let cancel: () => void;
   let timeout: ReturnType<typeof setTimeout>;
   return new Promise<void>((resolve, reject) => {
@@ -2503,7 +2627,8 @@ function waitForMessages(result: any, expectedCount: number) {
         ),
       );
     }, 5000);
-    cancel = result.sink(({ pending, messages }: any = {}) => {
+    cancel = result.sink((state) => {
+      const { pending, messages } = cast<ResultState>(state ?? {});
       if (pending === false && messages?.length === expectedCount) {
         resolve();
       }
@@ -2514,14 +2639,18 @@ function waitForMessages(result: any, expectedCount: number) {
   });
 }
 
-function waitForPinnedCells(result: any, expectedCount: number) {
+function waitForPinnedCells<T>(
+  result: RunnerCell<T>,
+  expectedCount: number,
+) {
   let cancel: () => void;
   let timeout: ReturnType<typeof setTimeout>;
   return new Promise<void>((resolve, reject) => {
     timeout = setTimeout(() => {
       reject(new Error(`Timeout waiting for ${expectedCount} pinned cells`));
     }, 5000);
-    cancel = result.sink(({ pinnedCells }: any = {}) => {
+    cancel = result.sink((state) => {
+      const { pinnedCells } = cast<ResultState>(state ?? {});
       if (Array.isArray(pinnedCells) && pinnedCells.length === expectedCount) {
         resolve();
       }
