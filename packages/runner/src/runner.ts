@@ -87,7 +87,6 @@ import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   describePatternOrModule,
   extractDefaultValues,
-  mergeObjects,
   mergeSchemaDefaults,
   sanitizeDebugLabel,
   setRunnableName,
