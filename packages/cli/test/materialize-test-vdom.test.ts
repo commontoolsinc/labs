@@ -26,8 +26,8 @@ Deno.test("materializeTestVDOM reports reconciliation errors after mounting", as
       super(runtime, undefined, undefined, false, undefined, "cell");
     }
 
-    async pull(): Promise<unknown> {
-      return this.value;
+    pull(): Promise<unknown> {
+      return Promise.resolve(this.value);
     }
 
     asSchema(): this {
@@ -50,8 +50,9 @@ Deno.test("materializeTestVDOM reports reconciliation errors after mounting", as
   try {
     const error = await assertRejects(
       () =>
-        materializeTestVDOM(root as unknown as Cell<unknown>, async () => {
+        materializeTestVDOM(root as unknown as Cell<unknown>, () => {
           root.set({ invalid: true });
+          return Promise.resolve();
         }),
       Error,
       "VDOM materialization failed: Invalid VDOM content",
