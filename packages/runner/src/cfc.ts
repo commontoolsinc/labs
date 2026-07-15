@@ -56,90 +56,99 @@ const symbolicSchemaAtPathClassifierCache = new WeakMap<
 const buildSymbolicSchemaAtPathClassifier = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
+  active: Set<object>,
 ): SymbolicSchemaAtPathClassifier | undefined => {
   if (typeof schema === "boolean") return () => "boolean";
-  if (schema.$ref !== undefined) {
-    const resolved = resolveCfcSchemaRefs(schema, fullSchema);
-    if (resolved === undefined) return undefined;
-    const nextFullSchema = isRecord(resolved) && resolved.$defs !== undefined
-      ? resolved
-      : fullSchema;
-    return buildSymbolicSchemaAtPathClassifier(
-      resolved,
-      nextFullSchema,
-    );
-  }
-  if (schema.anyOf || schema.oneOf) {
-    const options = (schema.anyOf && schema.oneOf)
-      ? [...schema.anyOf, ...schema.oneOf]
-      : schema.anyOf ?? schema.oneOf ?? [];
-    const classifiers: SymbolicSchemaAtPathClassifier[] = [];
-    for (const option of options) {
-      const classifier = buildSymbolicSchemaAtPathClassifier(
-        option,
-        fullSchema,
+  if (active.has(schema)) return undefined;
+  active.add(schema);
+  try {
+    if (schema.$ref !== undefined) {
+      const resolved = resolveCfcSchemaRefs(schema, fullSchema);
+      if (resolved === undefined) return undefined;
+      const nextFullSchema = isRecord(resolved) && resolved.$defs !== undefined
+        ? resolved
+        : fullSchema;
+      return buildSymbolicSchemaAtPathClassifier(
+        resolved,
+        nextFullSchema,
+        active,
       );
-      if (classifier === undefined) return undefined;
-      classifiers.push(classifier);
     }
-    // The immediately repeated lookup is the dominant cache-hit case. One
-    // entry removes the union-width cost without reintroducing raw path-part
-    // cardinality. Combined branch behaviors are assigned compact local ids;
-    // their count is bounded by the schema's own properties/prefix items.
-    const combinedKeyIds = new Map<string, string>();
-    let memoPart: string | undefined;
-    let memoKey = "";
-    return (part) => {
-      if (part === memoPart) return memoKey;
-      let combinedKey = "union";
-      for (const classifier of classifiers) {
-        const childKey = classifier(part);
-        combinedKey += `|${childKey.length}:${childKey}`;
+    if (schema.anyOf || schema.oneOf) {
+      const options = (schema.anyOf && schema.oneOf)
+        ? [...schema.anyOf, ...schema.oneOf]
+        : schema.anyOf ?? schema.oneOf ?? [];
+      const classifiers: SymbolicSchemaAtPathClassifier[] = [];
+      for (const option of options) {
+        const classifier = buildSymbolicSchemaAtPathClassifier(
+          option,
+          fullSchema,
+          active,
+        );
+        if (classifier === undefined) return undefined;
+        classifiers.push(classifier);
       }
-      let key = combinedKeyIds.get(combinedKey);
-      if (key === undefined) {
-        key = `union:${combinedKeyIds.size}`;
-        combinedKeyIds.set(combinedKey, key);
-      }
-      memoPart = part;
-      memoKey = key;
-      return key;
-    };
-  }
-  if (cfcSchemaIsTrue(schema)) return () => "wildcard";
-  if (schema.type === "object") {
-    const properties = schema.properties;
-    if (properties !== undefined) {
-      const fallback = Object.keys(properties).length === 0
-        ? "empty"
-        : "missing";
-      return (part) =>
-        Object.hasOwn(properties, part)
-          ? `property:${part.length}:${part}`
-          : schema.additionalProperties !== undefined
-          ? "additional"
-          : fallback;
+      // The immediately repeated lookup is the dominant cache-hit case. One
+      // entry removes the union-width cost without reintroducing raw path-part
+      // cardinality. Combined branch behaviors are assigned compact local ids;
+      // their count is bounded by the schema's own properties/prefix items.
+      const combinedKeyIds = new Map<string, string>();
+      let memoPart: string | undefined;
+      let memoKey = "";
+      return (part) => {
+        if (part === memoPart) return memoKey;
+        let combinedKey = "union";
+        for (const classifier of classifiers) {
+          const childKey = classifier(part);
+          combinedKey += `|${childKey.length}:${childKey}`;
+        }
+        let key = combinedKeyIds.get(combinedKey);
+        if (key === undefined) {
+          key = `union:${combinedKeyIds.size}`;
+          combinedKeyIds.set(combinedKey, key);
+        }
+        memoPart = part;
+        memoKey = key;
+        return key;
+      };
     }
-    return schema.additionalProperties !== undefined
-      ? () => "additional"
-      : () => "open";
+    if (cfcSchemaIsTrue(schema)) return () => "wildcard";
+    if (schema.type === "object") {
+      const properties = schema.properties;
+      if (properties !== undefined) {
+        const fallback = Object.keys(properties).length === 0
+          ? "empty"
+          : "missing";
+        return (part) =>
+          Object.hasOwn(properties, part)
+            ? `property:${part.length}:${part}`
+            : schema.additionalProperties !== undefined
+            ? "additional"
+            : fallback;
+      }
+      return schema.additionalProperties !== undefined
+        ? () => "additional"
+        : () => "open";
+    }
+    if (schema.type === "array") {
+      const prefixItemCount = schema.prefixItems?.length ?? 0;
+      return (part) => {
+        if (!isArrayIndexPropertyName(part)) return "invalid-index";
+        const index = Number(part);
+        return index < prefixItemCount ? `prefix:${index}` : "items";
+      };
+    }
+    if (
+      schema.type === "unknown" ||
+      Array.isArray(schema.type) && schema.type.includes("unknown")
+    ) {
+      return () => "unknown";
+    }
+    // schemaAtPath cannot descend through terminal primitive schemas.
+    return () => "terminal";
+  } finally {
+    active.delete(schema);
   }
-  if (schema.type === "array") {
-    const prefixItemCount = schema.prefixItems?.length ?? 0;
-    return (part) => {
-      if (!isArrayIndexPropertyName(part)) return "invalid-index";
-      const index = Number(part);
-      return index < prefixItemCount ? `prefix:${index}` : "items";
-    };
-  }
-  if (
-    schema.type === "unknown" ||
-    Array.isArray(schema.type) && schema.type.includes("unknown")
-  ) {
-    return () => "unknown";
-  }
-  // schemaAtPath cannot descend through terminal primitive schemas.
-  return () => "terminal";
 };
 
 /**
@@ -160,6 +169,7 @@ const symbolicSchemaAtPathPart = (
     classifier = buildSymbolicSchemaAtPathClassifier(
       schema,
       schema,
+      new Set(),
     ) ?? SYMBOLIC_CLASSIFIER_UNSUPPORTED;
     symbolicSchemaAtPathClassifierCache.set(schema, classifier);
   }

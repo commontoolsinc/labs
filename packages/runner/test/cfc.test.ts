@@ -123,6 +123,23 @@ describe("ContextualFlowControl.schemaAtPath", () => {
     expect(cfc.schemaAtPath(schema, ["0"])).toBe(true);
   });
 
+  it("falls back when composition branches contain an indirect ref cycle", () => {
+    const cfc = new ContextualFlowControl();
+    const schema = deepFreeze({
+      $ref: "#/$defs/A",
+      $defs: {
+        A: {
+          anyOf: [true, { $ref: "#/$defs/B" }],
+        },
+        B: {
+          oneOf: [{ $ref: "#/$defs/A" }],
+        },
+      },
+    } as JSONSchemaObj);
+
+    expect(cfc.schemaAtPath(schema, ["value"])).toBe(true);
+  });
+
   it("falls back when a union classifier cannot resolve a ref", () => {
     const cfc = new ContextualFlowControl();
     const schema = deepFreeze({
