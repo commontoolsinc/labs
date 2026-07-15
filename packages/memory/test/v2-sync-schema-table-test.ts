@@ -29,6 +29,7 @@ import {
   expandSessionSyncSchemas,
   type SchemaTableSessionSync,
 } from "../v2/sync-schema-table.ts";
+import { findSyncSchemaRef } from "../v2/sync-schema-ref.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
 const textEncoder = new TextEncoder();
@@ -344,6 +345,20 @@ Deno.test("sync schema table continues through sibling fields after link payload
   assertEquals(compressedPayload.schema, `schema-ref@2:${primaryHash}`);
   assertEquals(compressedSiblingPayload.schema, `schema-ref@2:${siblingHash}`);
   assertEquals(expandSessionSyncSchemas(compressed), sync);
+});
+
+Deno.test("sync schema table ignores inherited fields while finding schema refs", () => {
+  const inherited = {
+    hidden: {
+      $alias: {
+        schema: "schema-ref@2:inherited",
+      },
+    },
+  };
+  const payload = Object.create(inherited) as Record<string, unknown>;
+  payload.visible = { value: "ordinary data" };
+
+  assertEquals(findSyncSchemaRef(payload), undefined);
 });
 
 Deno.test("sync schema table leaves syncs without compressible schemas unchanged", () => {
