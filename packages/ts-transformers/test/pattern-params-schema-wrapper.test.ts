@@ -8,6 +8,7 @@ import {
 } from "../src/mod.ts";
 import { ReactiveVariableForTransformer } from "../src/transformers/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { registerTrustedCommonFabricTestSources } from "./trusted-commonfabric-sources.ts";
 
 interface SourceTransformer {
   toFactory(program: ts.Program): ts.TransformerFactory<ts.SourceFile>;
@@ -62,6 +63,7 @@ function transformWith(
       ),
   };
   const program = ts.createProgram([fileName, declarationName], options, host);
+  registerTrustedCommonFabricTestSources(program, [declarationName]);
   const sourceFile = program.getSourceFile(fileName);
   if (!sourceFile) throw new Error("Expected source file");
 

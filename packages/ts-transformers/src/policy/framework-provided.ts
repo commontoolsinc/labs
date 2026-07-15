@@ -216,14 +216,14 @@ function isTrustedFrameworkProvided(
   const alias = type.aliasSymbol;
   if (
     alias?.name === FRAMEWORK_PROVIDED_ALIAS &&
-    isCommonFabricSymbol(alias)
+    isCommonFabricSymbol(alias, checker)
   ) {
     return true;
   }
 
   return checker.getPropertiesOfType(type).some((property) =>
     property.getName().startsWith(FRAMEWORK_PROVIDED_MARKER_PREFIX) &&
-    isCommonFabricSymbol(property)
+    isCommonFabricSymbol(property, checker)
   );
 }
 

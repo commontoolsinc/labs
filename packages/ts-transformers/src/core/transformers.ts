@@ -19,6 +19,8 @@ export interface SchemaHint {
    */
   readonly factoryContracts?: readonly {
     readonly kind: "pattern" | "module" | "handler";
+    /** Exact trusted factory type that supplied this semantic contract. */
+    readonly factoryType?: ts.Type;
     readonly inputTypeNode: ts.TypeNode;
     readonly inputType?: ts.Type;
     readonly inputSchema?: unknown;

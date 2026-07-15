@@ -1,4 +1,15 @@
 import ts from "typescript";
+import { isCommonFabricSymbol } from "./common-fabric-symbols.ts";
+
+function resolveAliasedSymbol(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  if (!symbol) return undefined;
+  return (symbol.flags & ts.SymbolFlags.Alias) !== 0
+    ? checker.getAliasedSymbol(symbol)
+    : symbol;
+}
 
 /**
  * Check if a type is a union that includes undefined.
@@ -26,10 +37,12 @@ export function isDefaultNodeWithUndefined(
     return false;
   }
 
-  const typeName = ts.isIdentifier(typeNode.typeName)
-    ? typeNode.typeName.text
-    : undefined;
-  if (typeName !== "Default") {
+  if (
+    !isDefaultAliasSymbol(
+      checker.getSymbolAtLocation(typeNode.typeName),
+      checker,
+    )
+  ) {
     return false;
   }
 
@@ -54,21 +67,15 @@ export function isOptionalSymbol(symbol: ts.Symbol): boolean {
 /**
  * Returns true if `symbol` is the `Default` type alias from `@commonfabric/api`.
  *
- * Checks both the symbol name AND its declaring source file so that any
- * user-defined type that happens to be named "Default" is not treated as the
- * framework's Default<T,V>.
+ * A file name or module-like path is not authority. The compiler/module
+ * resolver must have registered the declaration's exact SourceFile object for
+ * this checker.
  */
-export function isDefaultAliasSymbol(symbol: ts.Symbol | undefined): boolean {
-  if (!symbol || symbol.getName() !== "Default") return false;
-  const decl = symbol.declarations?.[0];
-  if (!decl) return false;
-  const fileName = decl.getSourceFile().fileName;
-  // The canonical Default<T,V> is declared in @commonfabric/api (packages/api/index.ts).
-  // Cover both workspace-resolved paths (".../packages/api/index.ts") and any
-  // future npm-published form ("@commonfabric/api").
-  // Also accept "commonfabric.d.ts" which is the filename used in test environments
-  // where the types are registered under a synthetic path.
-  return fileName.endsWith("/packages/api/index.ts") ||
-    fileName.includes("@commonfabric/api") ||
-    fileName.endsWith("commonfabric.d.ts");
+export function isDefaultAliasSymbol(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): boolean {
+  const resolved = resolveAliasedSymbol(symbol, checker);
+  return resolved?.getName() === "Default" &&
+    isCommonFabricSymbol(resolved, checker);
 }

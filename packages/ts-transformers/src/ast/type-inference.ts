@@ -904,7 +904,7 @@ function extractElementFromArrayType(
           aliasTypeArguments?: readonly ts.Type[];
         };
         if (
-          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
+          isDefaultAliasSymbol(innerAlias.aliasSymbol, checker) &&
           innerAlias.aliasTypeArguments?.[0]
         ) {
           return extractElementFromArrayType(
@@ -1023,7 +1023,7 @@ export function inferArrayElementType(
           aliasTypeArguments?: readonly ts.Type[];
         };
         if (
-          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
+          isDefaultAliasSymbol(innerAlias.aliasSymbol, checker) &&
           innerAlias.aliasTypeArguments?.[0] &&
           checker.isArrayType(innerAlias.aliasTypeArguments[0])
         ) {
@@ -1105,7 +1105,8 @@ function isEffectiveArrayMember(
     aliasTypeArguments?: readonly ts.Type[];
   };
   if (
-    isDefaultAliasSymbol(alias.aliasSymbol) && alias.aliasTypeArguments?.[0]
+    isDefaultAliasSymbol(alias.aliasSymbol, checker) &&
+    alias.aliasTypeArguments?.[0]
   ) {
     const baseT = alias.aliasTypeArguments[0];
     return checker.isArrayType(baseT) || checker.isTupleType(baseT);
@@ -1155,7 +1156,7 @@ export function hasArrayTypeArgument(
           aliasTypeArguments?: readonly ts.Type[];
         };
         if (
-          isDefaultAliasSymbol(innerAlias.aliasSymbol) &&
+          isDefaultAliasSymbol(innerAlias.aliasSymbol, checker) &&
           innerAlias.aliasTypeArguments?.[0]
         ) {
           const baseT = innerAlias.aliasTypeArguments[0];

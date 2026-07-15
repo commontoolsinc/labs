@@ -43,6 +43,7 @@ import type {
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
+  IStorageTransaction,
   MemorySpace,
   URI,
 } from "./storage/interface.ts";
@@ -224,6 +225,111 @@ const collectFactoryArtifactIdentities = (
   for (const nested of Object.values(value)) {
     collectFactoryArtifactIdentities(nested, identities, seen);
   }
+};
+
+type PendingFactoryArtifactPublication = {
+  readonly owners: Set<symbol>;
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+  readonly reject: (reason?: unknown) => void;
+};
+
+type FactoryArtifactPublicationRegistration = {
+  readonly sourceDependency?: Promise<void>;
+  readonly onConfirmed: () => void;
+  readonly onRejected: (reason: unknown) => void;
+};
+
+// Runtime-private coordination for Runtimes that share one speculative
+// StorageManager. The key is content identity in one containing space; wire
+// Factory@1 state never names, creates, or settles these gates.
+const pendingFactoryArtifactPublications = new WeakMap<
+  IStorageManager,
+  Map<string, PendingFactoryArtifactPublication>
+>();
+
+const factoryArtifactPublicationKey = (
+  space: MemorySpace,
+  identity: string,
+): string => `${space}\0${identity}`;
+
+const factoryArtifactPublicationMap = (
+  storageManager: IStorageManager,
+): Map<string, PendingFactoryArtifactPublication> => {
+  let publications = pendingFactoryArtifactPublications.get(storageManager);
+  if (publications === undefined) {
+    publications = new Map();
+    pendingFactoryArtifactPublications.set(storageManager, publications);
+  }
+  return publications;
+};
+
+const registerFactoryArtifactPublication = (
+  storageManager: IStorageManager,
+  identity: string,
+  source: MemorySpace,
+  destination: MemorySpace,
+): FactoryArtifactPublicationRegistration => {
+  const publications = factoryArtifactPublicationMap(storageManager);
+  const precedingSourcePublication = publications.get(
+    factoryArtifactPublicationKey(source, identity),
+  );
+  const sourceDependency = precedingSourcePublication?.promise;
+  const destinationKey = factoryArtifactPublicationKey(destination, identity);
+  let publication = publications.get(destinationKey);
+  // A same-space follow-up must wait for the preceding generation without
+  // joining the very gate it awaits. Replace the map entry with its own
+  // generation; the prior owner's callbacks still settle the captured promise
+  // but cannot delete this newer entry.
+  if (
+    source === destination && publication === precedingSourcePublication
+  ) {
+    publication = undefined;
+  }
+  if (publication === undefined) {
+    const pending = Promise.withResolvers<void>();
+    // A publication may have no dependent copy. Own the rejection immediately
+    // so a rejected containing commit cannot become an unhandled promise.
+    void pending.promise.catch(() => {});
+    publication = {
+      owners: new Set(),
+      promise: pending.promise,
+      resolve: pending.resolve,
+      reject: pending.reject,
+    };
+    publications.set(destinationKey, publication);
+  }
+  const owner = Symbol(destinationKey);
+  publication.owners.add(owner);
+
+  return {
+    sourceDependency,
+    onConfirmed: () => {
+      if (!publication.owners.delete(owner)) return;
+      if (publications.get(destinationKey) === publication) {
+        publications.delete(destinationKey);
+      }
+      publication.owners.clear();
+      publication.resolve();
+    },
+    onRejected: (reason) => {
+      if (!publication.owners.delete(owner)) return;
+      if (publication.owners.size > 0) return;
+      if (publications.get(destinationKey) === publication) {
+        publications.delete(destinationKey);
+      }
+      const message = typeof reason === "object" && reason !== null &&
+          "message" in reason &&
+          typeof (reason as { message?: unknown }).message === "string"
+        ? (reason as { message: string }).message
+        : String(reason);
+      publication.reject(
+        reason instanceof Error
+          ? reason
+          : new Error(message, { cause: reason }),
+      );
+    },
+  };
 };
 
 // Deno/Node `AsyncLocalStorage` when available, the promise-aware fallback
@@ -680,6 +786,13 @@ export class Runtime {
   // Runner-private provenance for context-free Factory@1 shells read from a
   // containing cell. Never serialized into Factory@1 state.
   private factoryArtifactSources = new WeakMap<object, Set<MemorySpace>>();
+  // `prepareTxForCommit()` is an eager, repeatable seam and `commit()` invokes
+  // the same preparation again. Reuse one publication owner per transaction so
+  // an overwritten keyed native preparation cannot leave an orphaned gate.
+  private factoryArtifactPublicationRegistrations = new WeakMap<
+    IStorageTransaction,
+    Map<string, FactoryArtifactPublicationRegistration>
+  >();
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
@@ -1383,7 +1496,7 @@ export class Runtime {
           },
         }
         : {}),
-    });
+    }, (preparedTx) => this.prepareFactoryArtifactPublications(preparedTx));
     wrapped.setCfcEnforcementMode(this.cfcEnforcementMode);
     wrapped.setCfcFlowLabelsMode(this.cfcFlowLabels);
     wrapped.setCfcWriteFloorMode(this.cfcWriteFloor);
@@ -1660,7 +1773,7 @@ export class Runtime {
           identity,
           destination,
         ) &&
-        this.factoryArtifactSourceFor(factories, destination) === undefined &&
+        this.factoryArtifactSourceFor(factories) === undefined &&
         this.patternManager.artifactSourceSpace(identity, destination) ===
           undefined
       ) {
@@ -1689,11 +1802,10 @@ export class Runtime {
 
   private factoryArtifactSourceFor(
     factories: readonly object[],
-    destination: MemorySpace,
   ): MemorySpace | undefined {
     for (const factory of factories) {
       for (const source of this.factoryArtifactSources.get(factory) ?? []) {
-        if (source !== destination) return source;
+        return source;
       }
     }
     return undefined;
@@ -1734,7 +1846,7 @@ export class Runtime {
         // fallback and must still pass complete source verification.
         const source =
           this.patternManager.artifactSourceSpace(identity, destination) ??
-            this.factoryArtifactSourceFor(factories, destination);
+            this.factoryArtifactSourceFor(factories);
         if (source === undefined) {
           this.patternManager.assertArtifactAvailableInSpace(
             identity,
@@ -1746,19 +1858,51 @@ export class Runtime {
             "storage transaction does not support atomic factory artifact publication",
           );
         }
+        const preparationKey = `factory-artifact:${identity}`;
+        const registrationKey = factoryArtifactPublicationKey(
+          destination,
+          identity,
+        );
+        let registrations = this.factoryArtifactPublicationRegistrations.get(
+          tx.tx,
+        );
+        if (registrations === undefined) {
+          registrations = new Map();
+          this.factoryArtifactPublicationRegistrations.set(
+            tx.tx,
+            registrations,
+          );
+        }
+        let registration = registrations.get(registrationKey);
+        if (registration === undefined) {
+          registration = registerFactoryArtifactPublication(
+            this.storageManager,
+            identity,
+            source!,
+            destination,
+          );
+          registrations.set(registrationKey, registration);
+        }
         tx.tx.addNativeCommitPreparation(destination, {
-          key: `factory-artifact:${identity}`,
+          key: preparationKey,
           prepare: () =>
             this.patternManager.prepareArtifactPublication(
               identity,
               source!,
               destination,
+              registration.sourceDependency,
             ),
-          onConfirmed: () =>
-            this.patternManager.noteArtifactPublicationConfirmed(
-              identity,
-              destination,
-            ),
+          onConfirmed: () => {
+            try {
+              this.patternManager.noteArtifactPublicationConfirmed(
+                identity,
+                destination,
+              );
+            } finally {
+              registration.onConfirmed();
+            }
+          },
+          onRejected: registration.onRejected,
         });
       }
     }

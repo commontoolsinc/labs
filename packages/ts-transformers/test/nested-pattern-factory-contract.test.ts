@@ -1,4 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import type { JSONSchema } from "@commonfabric/api";
+import { factorySchemasEqual } from "@commonfabric/data-model/schema-utils";
 import ts from "typescript";
 
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
@@ -7,8 +9,8 @@ import { transformSource, validateSource } from "./utils.ts";
 
 interface PatternContract {
   kind: "pattern";
-  argumentSchema: unknown;
-  resultSchema: unknown;
+  argumentSchema: JSONSchema;
+  resultSchema: JSONSchema;
 }
 
 function patternCalls(root: ts.SourceFile): ts.CallExpression[] {
@@ -36,8 +38,8 @@ function rootPatternCall(root: ts.SourceFile): ts.CallExpression {
 function callContract(call: ts.CallExpression): PatternContract {
   return {
     kind: "pattern",
-    argumentSchema: literalToValue(call.arguments[1]!),
-    resultSchema: literalToValue(call.arguments[2]!),
+    argumentSchema: literalToValue(call.arguments[1]!) as JSONSchema,
+    resultSchema: literalToValue(call.arguments[2]!) as JSONSchema,
   };
 }
 
@@ -73,6 +75,25 @@ function collectPropertyContracts(value: unknown): PatternContract[] {
 
 function requiredFields(schema: unknown): readonly string[] {
   return (schema as { required?: readonly string[] }).required ?? [];
+}
+
+function resolvedPropertyAlternatives(
+  schema: JSONSchema,
+  property: string,
+): readonly unknown[] {
+  const object = schema as {
+    properties: Record<string, unknown>;
+    $defs?: Record<string, unknown>;
+  };
+  const value = object.properties[property] as { anyOf?: readonly unknown[] };
+  const alternatives = value.anyOf ?? [value];
+  return alternatives.map((alternative) => {
+    const ref = (alternative as { $ref?: unknown }).$ref;
+    if (typeof ref !== "string" || !ref.startsWith("#/$defs/")) {
+      return alternative;
+    }
+    return object.$defs?.[ref.slice("#/$defs/".length)];
+  });
 }
 
 Deno.test("nested factory schemas match the hoisted base contract exactly", async () => {
@@ -114,6 +135,799 @@ export default pattern<{ prefix: string }>(({ prefix }) => ({
 
   assertEquals(childContract.argumentSchema, baseArgumentSchema);
   assertEquals(childContract.resultSchema, baseResultSchema);
+});
+
+Deno.test("nested factory result contracts retain captured factory leaves exactly", async () => {
+  const output = await transformSource(
+    `
+import {
+  pattern,
+  type Cell,
+  type HandlerFactory,
+  type ModuleFactory,
+  type PatternFactory,
+} from "commonfabric";
+
+interface Input { value: number }
+interface Output { result: number }
+
+export default pattern<{
+  cell: Cell<string>;
+  config: { label: string };
+  patternOperation: PatternFactory<Input, Output>;
+  moduleOperation: ModuleFactory<Input, Output>;
+  handlerOperation: HandlerFactory<Input, Output>;
+  reserved: string;
+}>(({
+  cell,
+  config,
+  patternOperation,
+  moduleOperation,
+  handlerOperation,
+  reserved,
+}) => ({
+  child: pattern<Input>(({ value }) => ({
+    value,
+    cell,
+    label: config.label,
+    patternOperation,
+    moduleOperation,
+    handlerOperation,
+    reserved,
+  })),
+}));
+`,
+    { types: COMMONFABRIC_TYPES, typeCheck: true },
+  );
+  const root = parseModule(output);
+  const base = basePatternCalls(root).find((call) =>
+    callsNamed(call.arguments[0]!, "withPatternParamsSchema").length === 1
+  );
+  assert(base, output);
+
+  const baseContract = callContract(base);
+  const nestedContract = propertyContract(
+    resultProperties(rootPatternCall(root)).child,
+  );
+
+  assertEquals(nestedContract.kind, baseContract.kind, output);
+  assert(
+    factorySchemasEqual(
+      nestedContract.argumentSchema,
+      baseContract.argumentSchema,
+    ),
+    output,
+  );
+  assertEquals(nestedContract.resultSchema, baseContract.resultSchema, output);
+  assert(
+    factorySchemasEqual(nestedContract.resultSchema, baseContract.resultSchema),
+    output,
+  );
+});
+
+Deno.test("anonymous union factory captures retain every exact alternative", async () => {
+  const output = await transformSource(
+    `
+import {
+  pattern,
+  type Cell,
+  type ModuleFactory,
+  type PatternFactory,
+} from "commonfabric";
+
+interface Input { value: number }
+interface TextOutput { text: string }
+interface CountOutput { count: number }
+
+export default pattern<{
+  cell: Cell<string>;
+  sameKind:
+    | PatternFactory<Input, TextOutput>
+    | PatternFactory<Input, CountOutput>;
+  crossKind:
+    | PatternFactory<Input, TextOutput>
+    | ModuleFactory<Input, TextOutput>;
+  nullable: PatternFactory<Input, TextOutput> | null;
+  optional?: PatternFactory<Input, TextOutput>;
+}>(({ cell, sameKind, crossKind, nullable, optional }) => ({
+  child: pattern<Input>(({ value }) => ({
+    value,
+    cell,
+    sameKind,
+    crossKind,
+    nullable,
+    optional,
+  })),
+}));
+`,
+    { types: COMMONFABRIC_TYPES, typeCheck: true },
+  );
+  const root = parseModule(output);
+  const base = basePatternCalls(root).find((call) =>
+    callsNamed(call.arguments[0]!, "withPatternParamsSchema").length === 1
+  );
+  assert(base, output);
+
+  const baseContract = callContract(base);
+  const nestedContract = propertyContract(
+    resultProperties(rootPatternCall(root)).child,
+  );
+  assert(
+    factorySchemasEqual(nestedContract.resultSchema, baseContract.resultSchema),
+    output,
+  );
+
+  const properties = (baseContract.resultSchema as {
+    properties: Record<string, { anyOf: readonly Record<string, unknown>[] }>;
+  }).properties;
+  assertEquals(
+    properties.sameKind.anyOf.map((entry) =>
+      (entry.asFactory as { kind: string }).kind
+    ),
+    ["pattern", "pattern"],
+    output,
+  );
+  assertEquals(
+    properties.crossKind.anyOf.map((entry) =>
+      (entry.asFactory as { kind: string }).kind
+    ),
+    ["pattern", "module"],
+    output,
+  );
+  assertEquals(properties.nullable.anyOf.at(-1), { type: "null" }, output);
+  assertEquals(properties.optional.anyOf[0], { type: "undefined" }, output);
+});
+
+Deno.test("authored parent input factory metadata survives nested capture", async () => {
+  const output = await transformSource(
+    `
+import { pattern, type Cell, type PatternFactory } from "commonfabric";
+
+interface Input { value: number }
+interface Output { result: number }
+
+const parentInputSchema = {
+  type: "object",
+  properties: {
+    cell: { type: "string", asCell: ["cell"] },
+    operation: {
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: {
+          type: "object",
+          description: "authored operation input",
+          properties: { value: { type: "number", minimum: 0 } },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          description: "authored operation output",
+          properties: { result: { type: "number", maximum: 10 } },
+          required: ["result"],
+        },
+      },
+    },
+  },
+  required: ["cell", "operation"],
+} as const;
+
+export default pattern<{
+  cell: Cell<string>;
+  operation: PatternFactory<Input, Output>;
+}>(({ cell, operation }) => ({
+  child: pattern<Input>(({ value }) => ({ value, cell, operation })),
+}), parentInputSchema);
+`,
+    { types: COMMONFABRIC_TYPES, typeCheck: true },
+  );
+  const root = parseModule(output);
+  const base = basePatternCalls(root).find((call) =>
+    callsNamed(call.arguments[0]!, "withPatternParamsSchema").length === 1
+  );
+  assert(base, output);
+  const carrier = callsNamed(base.arguments[0]!, "withPatternParamsSchema")[0];
+  assert(carrier, output);
+
+  const expected = {
+    asFactory: {
+      kind: "pattern",
+      argumentSchema: {
+        type: "object",
+        description: "authored operation input",
+        properties: { value: { type: "number", minimum: 0 } },
+        required: ["value"],
+      },
+      resultSchema: {
+        type: "object",
+        description: "authored operation output",
+        properties: { result: { type: "number", maximum: 10 } },
+        required: ["result"],
+      },
+    },
+  };
+  const paramsSchema = literalToValue(carrier.arguments[1]!) as {
+    properties: Record<string, unknown>;
+  };
+  const baseOperation = (callContract(base).resultSchema as {
+    properties: Record<string, unknown>;
+  }).properties.operation;
+  const nestedOperation = (propertyContract(
+    resultProperties(rootPatternCall(root)).child,
+  ).resultSchema as { properties: Record<string, unknown> }).properties
+    .operation;
+
+  assertEquals(paramsSchema.properties.operation, expected, output);
+  assertEquals(baseOperation, expected, output);
+  assertEquals(nestedOperation, expected, output);
+});
+
+Deno.test("authored same-kind anyOf and oneOf metadata survive exactly", async () => {
+  for (const unionKeyword of ["anyOf", "oneOf"] as const) {
+    const output = await transformSource(
+      `
+import { pattern, type Cell, type PatternFactory } from "commonfabric";
+
+interface Input { value: number }
+interface TextOutput { text: string }
+interface CountOutput { count: number }
+
+const parentInputSchema = {
+  type: "object",
+  properties: {
+    cell: { type: "string", asCell: ["cell"] },
+    operation: {
+      ${unionKeyword}: [{
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: {
+            type: "object",
+            description: "text operation input",
+            properties: { value: { type: "number", minimum: 0 } },
+            required: ["value"],
+          },
+          resultSchema: {
+            type: "object",
+            description: "text operation output",
+            properties: { text: { type: "string", minLength: 2 } },
+            required: ["text"],
+          },
+        },
+      }, {
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: {
+            type: "object",
+            description: "count operation input",
+            properties: { value: { type: "number", maximum: 100 } },
+            required: ["value"],
+          },
+          resultSchema: {
+            type: "object",
+            description: "count operation output",
+            properties: {
+              count: { type: "number", minimum: 1, maximum: 9 },
+            },
+            required: ["count"],
+          },
+        },
+      }],
+    },
+  },
+  required: ["cell", "operation"],
+} as const;
+
+export default pattern<{
+  cell: Cell<string>;
+  operation:
+    | PatternFactory<Input, TextOutput>
+    | PatternFactory<Input, CountOutput>;
+}>(({ cell, operation }) => ({
+  child: pattern<Input>(({ value }) => ({ value, cell, operation })),
+}), parentInputSchema);
+`,
+      { types: COMMONFABRIC_TYPES, typeCheck: true },
+    );
+    const root = parseModule(output);
+    const base = basePatternCalls(root).find((call) =>
+      callsNamed(call.arguments[0]!, "withPatternParamsSchema").length === 1
+    );
+    assert(base, output);
+    const carrier = callsNamed(
+      base.arguments[0]!,
+      "withPatternParamsSchema",
+    )[0];
+    assert(carrier, output);
+
+    const expected = {
+      anyOf: [{
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: {
+            type: "object",
+            description: "text operation input",
+            properties: { value: { type: "number", minimum: 0 } },
+            required: ["value"],
+          },
+          resultSchema: {
+            type: "object",
+            description: "text operation output",
+            properties: { text: { type: "string", minLength: 2 } },
+            required: ["text"],
+          },
+        },
+      }, {
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: {
+            type: "object",
+            description: "count operation input",
+            properties: { value: { type: "number", maximum: 100 } },
+            required: ["value"],
+          },
+          resultSchema: {
+            type: "object",
+            description: "count operation output",
+            properties: {
+              count: { type: "number", minimum: 1, maximum: 9 },
+            },
+            required: ["count"],
+          },
+        },
+      }],
+    } as const satisfies JSONSchema;
+    const paramsSchema = literalToValue(carrier.arguments[1]!) as {
+      properties: Record<string, JSONSchema>;
+    };
+    const baseContract = callContract(base);
+    const baseOperation = (baseContract.resultSchema as {
+      properties: Record<string, JSONSchema>;
+    }).properties.operation;
+    const nestedContract = propertyContract(
+      resultProperties(rootPatternCall(root)).child,
+    );
+    const nestedOperation = (nestedContract.resultSchema as {
+      properties: Record<string, JSONSchema>;
+    }).properties.operation;
+
+    assertEquals(paramsSchema.properties.operation, expected, output);
+    assertEquals(baseOperation, expected, output);
+    assertEquals(nestedOperation, expected, output);
+    assert(
+      factorySchemasEqual(
+        nestedContract.resultSchema,
+        baseContract.resultSchema,
+      ),
+      output,
+    );
+  }
+});
+
+Deno.test("authored nullable factory metadata survives nested capture", async () => {
+  const output = await transformSource(
+    `
+import { pattern, type Cell, type PatternFactory } from "commonfabric";
+
+interface Input { value: number }
+interface Output { result: number }
+
+const parentInputSchema = {
+  type: "object",
+  properties: {
+    cell: { type: "string", asCell: ["cell"] },
+    operation: {
+      anyOf: [{
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: {
+            type: "object",
+            description: "nullable operation input",
+            properties: { value: { type: "number", minimum: 0 } },
+            required: ["value"],
+          },
+          resultSchema: {
+            type: "object",
+            description: "nullable operation output",
+            properties: { result: { type: "number", maximum: 10 } },
+            required: ["result"],
+          },
+        },
+      }, { type: "null" }],
+    },
+  },
+  required: ["cell", "operation"],
+} as const;
+
+export default pattern<{
+  cell: Cell<string>;
+  operation: PatternFactory<Input, Output> | null;
+}>(({ cell, operation }) => ({
+  child: pattern<Input>(({ value }) => ({ value, cell, operation })),
+}), parentInputSchema);
+`,
+    { types: COMMONFABRIC_TYPES, typeCheck: true },
+  );
+  const root = parseModule(output);
+  const base = basePatternCalls(root).find((call) =>
+    callsNamed(call.arguments[0]!, "withPatternParamsSchema").length === 1
+  );
+  assert(base, output);
+  const carrier = callsNamed(base.arguments[0]!, "withPatternParamsSchema")[0];
+  assert(carrier, output);
+
+  const expected = {
+    anyOf: [{
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: {
+          type: "object",
+          description: "nullable operation input",
+          properties: { value: { type: "number", minimum: 0 } },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          description: "nullable operation output",
+          properties: { result: { type: "number", maximum: 10 } },
+          required: ["result"],
+        },
+      },
+    }, { type: "null" }],
+  } as const satisfies JSONSchema;
+  const paramsSchema = literalToValue(carrier.arguments[1]!) as {
+    properties: Record<string, JSONSchema>;
+  };
+  const baseContract = callContract(base);
+  const baseOperation = (baseContract.resultSchema as {
+    properties: Record<string, JSONSchema>;
+  }).properties.operation;
+  const nestedContract = propertyContract(
+    resultProperties(rootPatternCall(root)).child,
+  );
+  const nestedOperation = (nestedContract.resultSchema as {
+    properties: Record<string, JSONSchema>;
+  }).properties.operation;
+
+  assertEquals(paramsSchema.properties.operation, expected, output);
+  assertEquals(baseOperation, expected, output);
+  assertEquals(nestedOperation, expected, output);
+});
+
+Deno.test("authored nullable factory aliases preserve exact metadata", async () => {
+  const output = await transformSource(
+    `
+import { pattern, type Cell, type PatternFactory } from "commonfabric";
+
+interface Input { value: number }
+interface Output { result: number }
+type Operation = PatternFactory<Input, Output>;
+
+const parentInputSchema = {
+  type: "object",
+  properties: {
+    cell: { type: "string", asCell: ["cell"] },
+    operation: {
+      anyOf: [{
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: {
+            type: "object",
+            description: "aliased nullable input",
+            properties: { value: { type: "number", minimum: 7 } },
+            required: ["value"],
+          },
+          resultSchema: {
+            type: "object",
+            description: "aliased nullable output",
+            properties: { result: { type: "number", maximum: 9 } },
+            required: ["result"],
+          },
+        },
+      }, { type: "null" }],
+    },
+  },
+  required: ["cell", "operation"],
+} as const;
+
+export default pattern<{
+  cell: Cell<string>;
+  operation: Operation | null;
+}>(({ cell, operation }) => ({
+  child: pattern<Input>(({ value }) => ({ value, cell, operation })),
+}), parentInputSchema);
+`,
+    { types: COMMONFABRIC_TYPES, typeCheck: true },
+  );
+  const root = parseModule(output);
+  const base = basePatternCalls(root).find((call) =>
+    callsNamed(call.arguments[0]!, "withPatternParamsSchema").length === 1
+  );
+  assert(base, output);
+  const carrier = callsNamed(base.arguments[0]!, "withPatternParamsSchema")[0];
+  assert(carrier, output);
+
+  const expected = {
+    anyOf: [{
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: {
+          type: "object",
+          description: "aliased nullable input",
+          properties: { value: { type: "number", minimum: 7 } },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          description: "aliased nullable output",
+          properties: { result: { type: "number", maximum: 9 } },
+          required: ["result"],
+        },
+      },
+    }, { type: "null" }],
+  } as const satisfies JSONSchema;
+  const paramsSchema = literalToValue(carrier.arguments[1]!) as JSONSchema;
+  const baseSchema = callContract(base).resultSchema;
+  const nestedSchema = propertyContract(
+    resultProperties(rootPatternCall(root)).child,
+  ).resultSchema;
+
+  assertEquals(
+    resolvedPropertyAlternatives(paramsSchema, "operation"),
+    expected.anyOf,
+    output,
+  );
+  assertEquals(
+    resolvedPropertyAlternatives(baseSchema, "operation"),
+    expected.anyOf,
+    output,
+  );
+  assertEquals(
+    resolvedPropertyAlternatives(nestedSchema, "operation"),
+    expected.anyOf,
+    output,
+  );
+});
+
+Deno.test("authored mixed factory aliases preserve exact metadata", async () => {
+  const output = await transformSource(
+    `
+import {
+  pattern,
+  type Cell,
+  type HandlerFactory,
+  type ModuleFactory,
+  type PatternFactory,
+} from "commonfabric";
+
+interface Input { value: number }
+interface PatternOutput { text: string }
+interface ModuleOutput { count: number }
+interface HandlerOutput { accepted: boolean }
+type PatternOperation = PatternFactory<Input, PatternOutput>;
+type ModuleOperation = ModuleFactory<Input, ModuleOutput>;
+type HandlerOperation = HandlerFactory<Input, HandlerOutput>;
+
+const parentInputSchema = {
+  type: "object",
+  properties: {
+    cell: { type: "string", asCell: ["cell"] },
+    operation: {
+      anyOf: [{
+        asFactory: {
+          kind: "pattern",
+          argumentSchema: {
+            type: "object",
+            description: "aliased pattern input",
+            properties: { value: { type: "number", minimum: 1 } },
+            required: ["value"],
+          },
+          resultSchema: {
+            type: "object",
+            description: "aliased pattern output",
+            properties: { text: { type: "string", minLength: 2 } },
+            required: ["text"],
+          },
+        },
+      }, {
+        asFactory: {
+          kind: "module",
+          argumentSchema: {
+            type: "object",
+            description: "aliased module input",
+            properties: { value: { type: "number", maximum: 8 } },
+            required: ["value"],
+          },
+          resultSchema: {
+            type: "object",
+            description: "aliased module output",
+            properties: { count: { type: "number", maximum: 5 } },
+            required: ["count"],
+          },
+        },
+      }, {
+        asFactory: {
+          kind: "handler",
+          contextSchema: {
+            type: "object",
+            description: "aliased handler context",
+            properties: { value: { type: "number", minimum: 3 } },
+            required: ["value"],
+          },
+          eventSchema: {
+            type: "object",
+            description: "aliased handler event",
+            properties: { accepted: { type: "boolean" } },
+            required: ["accepted"],
+          },
+        },
+      }, { type: "null" }],
+    },
+  },
+  required: ["cell", "operation"],
+} as const;
+
+export default pattern<{
+  cell: Cell<string>;
+  operation: PatternOperation | ModuleOperation | HandlerOperation | null;
+}>(({ cell, operation }) => ({
+  child: pattern<Input>(({ value }) => ({ value, cell, operation })),
+}), parentInputSchema);
+`,
+    { types: COMMONFABRIC_TYPES, typeCheck: true },
+  );
+  const root = parseModule(output);
+  const base = basePatternCalls(root).find((call) =>
+    callsNamed(call.arguments[0]!, "withPatternParamsSchema").length === 1
+  );
+  assert(base, output);
+  const carrier = callsNamed(base.arguments[0]!, "withPatternParamsSchema")[0];
+  assert(carrier, output);
+
+  const expected = {
+    anyOf: [{ type: "null" }, {
+      asFactory: {
+        kind: "pattern",
+        argumentSchema: {
+          type: "object",
+          description: "aliased pattern input",
+          properties: { value: { type: "number", minimum: 1 } },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          description: "aliased pattern output",
+          properties: { text: { type: "string", minLength: 2 } },
+          required: ["text"],
+        },
+      },
+    }, {
+      asFactory: {
+        kind: "module",
+        argumentSchema: {
+          type: "object",
+          description: "aliased module input",
+          properties: { value: { type: "number", maximum: 8 } },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          description: "aliased module output",
+          properties: { count: { type: "number", maximum: 5 } },
+          required: ["count"],
+        },
+      },
+    }, {
+      asFactory: {
+        kind: "handler",
+        contextSchema: {
+          type: "object",
+          description: "aliased handler context",
+          properties: { value: { type: "number", minimum: 3 } },
+          required: ["value"],
+        },
+        eventSchema: {
+          type: "object",
+          description: "aliased handler event",
+          properties: { accepted: { type: "boolean" } },
+          required: ["accepted"],
+        },
+      },
+    }],
+  } as const satisfies JSONSchema;
+  const paramsSchema = literalToValue(carrier.arguments[1]!) as JSONSchema;
+  const baseSchema = callContract(base).resultSchema;
+  const nestedSchema = propertyContract(
+    resultProperties(rootPatternCall(root)).child,
+  ).resultSchema;
+
+  assertEquals(
+    resolvedPropertyAlternatives(paramsSchema, "operation"),
+    expected.anyOf,
+    output,
+  );
+  assertEquals(
+    resolvedPropertyAlternatives(baseSchema, "operation"),
+    expected.anyOf,
+    output,
+  );
+  assertEquals(
+    resolvedPropertyAlternatives(nestedSchema, "operation"),
+    expected.anyOf,
+    output,
+  );
+});
+
+Deno.test("collapsed same-kind authored alternatives diagnose ambiguity", async () => {
+  const { diagnostics } = await validateSource(
+    `
+import { pattern, type Cell, type PatternFactory } from "commonfabric";
+
+interface Input { value: number }
+interface Output { result: number }
+
+const firstAlternative = {
+  asFactory: {
+    kind: "pattern",
+    argumentSchema: {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    },
+    resultSchema: {
+      type: "object",
+      description: "first",
+      properties: { result: { type: "number" } },
+      required: ["result"],
+    },
+  },
+} as const;
+const secondAlternative = {
+  asFactory: {
+    kind: "pattern",
+    argumentSchema: {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    },
+    resultSchema: {
+      type: "object",
+      description: "second",
+      properties: { result: { type: "number" } },
+      required: ["result"],
+    },
+  },
+} as const;
+const parentInputSchema = {
+  type: "object",
+  properties: {
+    cell: { type: "string", asCell: ["cell"] },
+    operation: {
+      anyOf: [firstAlternative, secondAlternative],
+    },
+  },
+  required: ["cell", "operation"],
+} as const;
+
+export default pattern<{
+  cell: Cell<string>;
+  operation:
+    | PatternFactory<Input, Output>
+    | PatternFactory<Input, Output>;
+}>(({ cell, operation }) => ({
+  child: pattern<Input>(({ value }) => ({ value, cell, operation })),
+}), parentInputSchema);
+`,
+    { types: COMMONFABRIC_TYPES },
+  );
+  const contractDiagnostics = diagnostics.filter((diagnostic) =>
+    diagnostic.type ===
+      "pattern-factory:ambiguous-authored-union-contract"
+  );
+
+  assertEquals(contractDiagnostics.length, 1);
+  assertStringIncludes(
+    contractDiagnostics[0]!.message,
+    "could not be mapped exactly",
+  );
 });
 
 Deno.test("local aliases and shorthand properties retain exact factory contracts", async () => {

@@ -12,6 +12,7 @@ import type { TypeWithInternals } from "../type-utils.ts";
 export type FactoryTypeKind = "pattern" | "module" | "handler";
 
 export interface FactoryTypeInfo {
+  readonly type: ts.Type;
   readonly kind: FactoryTypeKind;
   readonly inputType: ts.Type;
   readonly outputType: ts.Type;
@@ -34,11 +35,10 @@ const FACTORY_ALIAS_KINDS: Readonly<Record<string, FactoryTypeKind>> = {
 function hasFabricFactoryBrand(
   type: ts.Type,
   checker: ts.TypeChecker,
-  requireProvenance: boolean,
 ): boolean {
   return checker.getPropertiesOfType(type).some((property) =>
     property.getName().startsWith("__@FABRIC_FACTORY_TYPE") &&
-    (!requireProvenance || isCommonFabricSymbol(property))
+    isCommonFabricSymbol(property, checker)
   );
 }
 
@@ -53,7 +53,6 @@ function hasProperty(
 function detectFactoryKind(
   type: ts.Type,
   checker: ts.TypeChecker,
-  requireProvenance = false,
 ): FactoryTypeKind | undefined {
   // A union remains a stored union. UnionFormatter must retain every arm as
   // `anyOf`; invocation compatibility is a transformer concern.
@@ -69,13 +68,12 @@ function detectFactoryKind(
   // FabricFactory brand plus the stable public factory surface.
   if (
     namedKind !== undefined &&
-    (!requireProvenance ||
-      ((type as TypeWithInternals).aliasSymbol !== undefined &&
-        isCommonFabricSymbol((type as TypeWithInternals).aliasSymbol!)))
+    (type as TypeWithInternals).aliasSymbol !== undefined &&
+    isCommonFabricSymbol((type as TypeWithInternals).aliasSymbol!, checker)
   ) {
     return namedKind;
   }
-  if (!hasFabricFactoryBrand(type, checker, requireProvenance)) {
+  if (!hasFabricFactoryBrand(type, checker)) {
     return undefined;
   }
 
@@ -113,35 +111,23 @@ function unwrapHandlerEvent(
 }
 
 /**
- * Detect a first-class public factory and recover its effective call schema
- * types. Call signatures are used after kind detection so aliases and branded
- * intersections retain the concrete substitutions TypeScript already made.
- */
-export function detectFactoryType(
-  type: ts.Type,
-  checker: ts.TypeChecker,
-): FactoryTypeInfo | undefined {
-  return detectFactoryTypeInternal(type, checker, false);
-}
-
-/**
  * Detect only a factory whose alias or private brand comes from Common Fabric.
- * Transformer/runtime-authority decisions must use this form; the structural
- * form above remains for schema formatting of compiler-owned synthetic types.
+ * Transformer, schema-writer, and runtime-authority decisions must use this
+ * form. Compiler-owned synthetic contracts bypass name matching through
+ * explicit schema hints instead.
  */
 export function detectTrustedFactoryType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): FactoryTypeInfo | undefined {
-  return detectFactoryTypeInternal(type, checker, true);
+  return detectFactoryTypeInternal(type, checker);
 }
 
 function detectFactoryTypeInternal(
   type: ts.Type,
   checker: ts.TypeChecker,
-  requireProvenance: boolean,
 ): FactoryTypeInfo | undefined {
-  const kind = detectFactoryKind(type, checker, requireProvenance);
+  const kind = detectFactoryKind(type, checker);
   if (kind === undefined) return undefined;
 
   const signature = type.getCallSignatures()[0];
@@ -155,7 +141,7 @@ function detectFactoryTypeInternal(
     : callResult;
   if (!outputType) return undefined;
 
-  return { kind, inputType, outputType };
+  return { type, kind, inputType, outputType };
 }
 
 /** True when a stored value type is a factory or a union containing one. */
@@ -168,7 +154,7 @@ export function containsFactoryType(
       containsFactoryType(member, checker)
     );
   }
-  return detectFactoryType(type, checker) !== undefined;
+  return detectTrustedFactoryType(type, checker) !== undefined;
 }
 
 /** Formats PatternFactory, ModuleFactory, and HandlerFactory values. */
@@ -187,7 +173,7 @@ export class FactoryFormatter implements TypeFormatter {
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
     return (this.hintedFactories(context)?.length ?? 0) > 0 ||
-      detectFactoryType(type, context.typeChecker) !== undefined;
+      detectTrustedFactoryType(type, context.typeChecker) !== undefined;
   }
 
   formatType(
@@ -195,7 +181,7 @@ export class FactoryFormatter implements TypeFormatter {
     context: GenerationContext,
   ): JSONSchemaMutable {
     const hints = this.hintedFactories(context);
-    const detected = detectFactoryType(type, context.typeChecker);
+    const detected = detectTrustedFactoryType(type, context.typeChecker);
     if ((!hints || hints.length === 0) && !detected) {
       throw new Error("FactoryFormatter received a non-factory type");
     }
@@ -241,12 +227,10 @@ export class FactoryFormatter implements TypeFormatter {
     detected: FactoryTypeInfo,
   ): JSONSchemaObjMutable {
     const formatContractSchema = (type: ts.Type) =>
-      context.factoryContractDocument
-        ? this.schemaGenerator.formatChildType(type, context)
-        : this.schemaGenerator.generateFactoryContractSchema(
-          type,
-          context.typeChecker,
-        );
+      this.schemaGenerator.generateFactoryContractSchema(
+        type,
+        context.typeChecker,
+      );
     const inputSchema = formatContractSchema(detected.inputType);
     const outputSchema = formatContractSchema(detected.outputType);
     return asFactorySchema(detected.kind, inputSchema, outputSchema);

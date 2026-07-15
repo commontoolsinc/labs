@@ -3,8 +3,13 @@ import type {
   JSONSchemaMutable,
   JSONSchemaObjMutable,
 } from "@commonfabric/api";
-import type { GenerationContext, TypeFormatter } from "../interface.ts";
+import type {
+  GenerationContext,
+  SchemaHint,
+  TypeFormatter,
+} from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
+import { detectTrustedFactoryType } from "./factory-formatter.ts";
 import {
   cloneSchemaDefinition,
   detectWrapperViaNode,
@@ -63,6 +68,7 @@ function orderMemberNodesBySemanticType(
   memberNodes: readonly ts.TypeNode[],
   checker: ts.TypeChecker,
   typeRegistry?: WeakMap<ts.Node, ts.Type>,
+  schemaHints?: WeakMap<ts.Node, SchemaHint>,
 ): Array<ts.TypeNode | undefined> {
   const remaining = memberNodes.map((node) => ({
     node,
@@ -70,9 +76,72 @@ function orderMemberNodesBySemanticType(
   }));
 
   return members.map((member) => {
-    const matchIndex = remaining.findIndex(({ type }) =>
+    let matchIndex = remaining.findIndex(({ type }) =>
       type !== undefined && unionMemberTypesMatch(type, member, checker)
     );
+    if (matchIndex === -1) {
+      const detected = detectTrustedFactoryType(member, checker);
+      if (detected) {
+        const hintedKindCandidates = remaining.flatMap(({ node }, index) => {
+          const contracts = schemaHints?.get(node)?.factoryContracts ??
+            schemaHints?.get(ts.getOriginalNode(node))?.factoryContracts;
+          return contracts?.some((contract) => contract.kind === detected.kind)
+            ? [index]
+            : [];
+        });
+        const hintedMatch = hintedKindCandidates.find((index) => {
+          const node = remaining[index]!.node;
+          const contracts = schemaHints?.get(node)?.factoryContracts ??
+            schemaHints?.get(ts.getOriginalNode(node))?.factoryContracts;
+          return contracts?.some((contract) => {
+            if (contract.kind !== detected.kind) return false;
+            const inputType = getTypeNodeMemberType(
+              contract.inputTypeNode,
+              checker,
+              typeRegistry,
+            );
+            if (
+              !inputType ||
+              !unionMemberTypesMatch(inputType, detected.inputType, checker)
+            ) return false;
+            // An `any` semantic output cannot help pair alternatives; the
+            // compiler-owned node hint is authoritative in that case. When a
+            // concrete output survives, require it to agree as well.
+            if (
+              (detected.outputType.flags &
+                (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0
+            ) {
+              return true;
+            }
+            const outputType = getTypeNodeMemberType(
+              contract.outputTypeNode,
+              checker,
+              typeRegistry,
+            );
+            return !!outputType && unionMemberTypesMatch(
+              outputType,
+              detected.outputType,
+              checker,
+            );
+          }) ?? false;
+        });
+        if (hintedMatch !== undefined) matchIndex = hintedMatch;
+        const semanticKindCount = members.filter((candidate) =>
+          detectTrustedFactoryType(candidate, checker)?.kind === detected.kind
+        ).length;
+        if (
+          matchIndex === -1 && hintedKindCandidates.length === 1 &&
+          semanticKindCount === 1
+        ) {
+          // Synthetic contract TypeNodes can be unbound in checker APIs when
+          // this formatter is invoked without the transformer's TypeRegistry.
+          // One semantic member and one hinted node of the detected kind are
+          // still an exact, compiler-owned pairing. Never use this fallback
+          // when same-kind alternatives would require guessing.
+          matchIndex = hintedKindCandidates[0]!;
+        }
+      }
+    }
     if (matchIndex === -1) {
       return undefined;
     }
@@ -106,6 +175,7 @@ export class UnionFormatter implements TypeFormatter {
         memberNodes,
         context.typeChecker,
         context.typeRegistry,
+        context.schemaHints,
       )
       : undefined;
 

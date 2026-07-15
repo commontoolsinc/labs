@@ -116,89 +116,6 @@ function readPatternParamsSchema(
   return hasParamsSlot ? patternParamsSchemas.get(callback)! : undefined;
 }
 
-/**
- * Pattern invocation outputs are a view over the child pattern's result doc.
- * The authored result schema remains the factory's public contract, but its
- * `scope` keywords cannot be applied to that view: returned cells are stored as
- * links, and re-applying the declared scope to the containing result path would
- * address a new scoped slot instead of following the returned link.
- *
- * Keep all other contract metadata, including stream wrappers and nested
- * factory contracts. `asFactory` is copied as an atomic contract because scope
- * declarations inside its argument/result schemas describe the future factory
- * invocation rather than this result view.
- */
-function scopeSilentResultViewSchema(schema: JSONSchema): JSONSchema {
-  if (schema === true || schema === false) return schema;
-  const seen = new WeakMap<object, JSONSchema>();
-  const schemaMaps = [
-    "$defs",
-    "definitions",
-    "properties",
-    "patternProperties",
-    "dependentSchemas",
-  ] as const;
-  const schemaArrays = ["allOf", "anyOf", "oneOf", "prefixItems"] as const;
-  const schemaValues = [
-    "additionalProperties",
-    "unevaluatedProperties",
-    "unevaluatedItems",
-    "propertyNames",
-    "items",
-    "contains",
-    "not",
-    "if",
-    "then",
-    "else",
-    "contentSchema",
-  ] as const;
-
-  const visit = (current: JSONSchema): JSONSchema => {
-    if (current === true || current === false) return current;
-    const cached = seen.get(current);
-    if (cached !== undefined) return cached;
-
-    const { scope: _scope, ...result } = current;
-    seen.set(current, result);
-    const currentRecord = current as Record<string, unknown>;
-    const resultRecord = result as Record<string, unknown>;
-
-    for (const key of schemaMaps) {
-      const map = currentRecord[key];
-      if (!isRecord(map)) continue;
-      resultRecord[key] = Object.fromEntries(
-        Object.entries(map).map(([name, nested]) => [
-          name,
-          visit(nested as JSONSchema),
-        ]),
-      );
-    }
-    for (const key of schemaArrays) {
-      const entries = currentRecord[key];
-      if (!Array.isArray(entries)) continue;
-      resultRecord[key] = entries.map((entry) => visit(entry as JSONSchema));
-    }
-    for (const key of schemaValues) {
-      const nested = currentRecord[key];
-      if (nested === undefined || Array.isArray(nested)) continue;
-      if (typeof nested === "boolean" || isRecord(nested)) {
-        resultRecord[key] = visit(nested as JSONSchema);
-      }
-    }
-    if (Array.isArray(current.asCell)) {
-      result.asCell = current.asCell.map((entry) => {
-        if (!isRecord(entry)) return entry;
-        const { scope: _scope, ...scopeSilentEntry } = entry;
-        return scopeSilentEntry;
-      });
-    }
-
-    return result;
-  };
-
-  return visit(schema);
-}
-
 export function withFrameworkProvidedPaths<
   T extends CompilerPatternCallback,
 >(
@@ -857,10 +774,12 @@ function factoryFromPattern<T, R>(
         ) {
           throw new Error("Bound pattern params require callback binding");
         }
-        const outputs = reactive<R>(
-          undefined,
-          scopeSilentResultViewSchema(resultSchema),
-        );
+        // The result Cell is an execution view, not the authored public
+        // contract. Attaching the full result schema here makes downstream
+        // whole-result captures merge that contract into the live value and
+        // can make opaque payloads such as VNodes unreadable. Contract checks
+        // derive the exact schema from the producing Factory@1 instead.
+        const outputs = reactive<R>();
         const frame = getTopFrame();
         let nodeFactory: PatternFactory<T, R> = factory;
         if (spaceSelector !== undefined) {
@@ -952,7 +871,10 @@ function factoryFromPattern<T, R>(
         rootToken: factoryRootToken,
         ...(ref === undefined ? {} : { ref }),
         argumentSchema: pattern.argumentSchema,
-        resultSchema: pattern.resultSchema,
+        // The graph artifact strips non-stream asCell markers because result
+        // cells store links. Factory@1 instead carries the authored public call
+        // contract, which must match the transformer-emitted asFactory schema.
+        resultSchema,
         ...(Object.hasOwn(options, "paramsSchema") ? { paramsSchema } : {}),
         ...(Object.hasOwn(options, "params") ? { params } : {}),
         ...(defaultScope === undefined ? {} : { defaultScope }),

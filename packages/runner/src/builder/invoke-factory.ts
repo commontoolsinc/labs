@@ -39,7 +39,12 @@ export function invokeFactory(
     return eventStream;
   }
 
-  const outputs = reactive<unknown>(undefined, expected.resultSchema);
+  // Pattern results are live views over child result documents. Their public
+  // Factory@1 contract stays on expectedFactory and must not be merged into the
+  // current payload; module/lift outputs retain their execution schema.
+  const outputs = expected.kind === "pattern"
+    ? reactive<unknown>()
+    : reactive<unknown>(undefined, expected.resultSchema);
   const node: NodeRef = {
     module: factory as NodeRef["module"],
     inputs: input,

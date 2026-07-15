@@ -720,6 +720,94 @@ describe("dynamic Factory@1 node", () => {
     );
   });
 
+  it("retries the same named execution selector after transient resolution failure", async () => {
+    const base = commonfabric.pattern(
+      ({ value }: { value: number }) => ({ result: value }),
+      ARGUMENT_SCHEMA,
+      RESULT_SCHEMA,
+    );
+    setDurableArtifactEntryRef(base, REFS.pattern);
+    warmArtifacts.set(
+      refKey(REFS.pattern.identity, REFS.pattern.symbol),
+      base,
+    );
+    const selected = base.inSpace("transient-dynamic-target");
+    const state = sealFactoryState(selected);
+    let resolutionAttempts = 0;
+    let resolved = false;
+    runtime.resolveSpaceNameSync = () =>
+      resolved ? dynamicExecutionSpace : undefined;
+    runtime.resolveSpaceName = (name) => {
+      expect(name).toBe("transient-dynamic-target");
+      resolutionAttempts++;
+      if (resolutionAttempts === 1) {
+        return Promise.reject(
+          new Error("transient execution-space lookup failure"),
+        );
+      }
+      resolved = true;
+      return Promise.resolve(dynamicExecutionSpace);
+    };
+    const diagnostic = Promise.withResolvers<Error>();
+    runtime.scheduler.onError((error) => diagnostic.resolve(error));
+
+    const sourceA = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-space-retry-source-a",
+      undefined,
+      tx,
+    );
+    const sourceB = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-space-retry-source-b",
+      undefined,
+      tx,
+    );
+    const selector = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-space-retry-selector",
+      undefined,
+      tx,
+    );
+    sourceA.set(createFactoryShell(state));
+    sourceB.set(createFactoryShell({ ...state }));
+    selector.setRaw(sourceA.getAsWriteRedirectLink());
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "dynamic-factory-space-retry-result",
+      RESULT_SCHEMA,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outerPattern(PATTERN_CONTRACT),
+      { factory: selector, value: 16 },
+      resultCell,
+    );
+    await commitAndRenew();
+
+    expect(
+      (await within(diagnostic.promise, "execution-space lookup diagnostic"))
+        .message,
+    ).toContain("transient execution-space lookup failure");
+    expect(resolutionAttempts).toBe(1);
+
+    // The selected Factory@1 state is unchanged; only its resolved source
+    // changed. Failed name readiness must create a fresh generation instead of
+    // taking the active-child same-state no-op.
+    selector.withTx(tx).setRaw(sourceB.getAsWriteRedirectLink());
+    await within(commitAndRenew(), "same-selector retarget commit");
+
+    expect(await within(result.pull(), "retried named selector result"))
+      .toEqual({
+        result: 16,
+      });
+    expect(resolutionAttempts).toBe(2);
+    expect(result.resolveAsCell().getAsNormalizedFullLink().space).toBe(
+      dynamicExecutionSpace,
+    );
+  });
+
   it("preserves a cell-derived execution selector until dynamic instantiation", async () => {
     const anchor = runtime.getCell(
       dynamicExecutionSpace,

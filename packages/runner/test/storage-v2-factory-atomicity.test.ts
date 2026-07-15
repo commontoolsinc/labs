@@ -122,3 +122,21 @@ Deno.test("storage v2 carries one keyed wire preparation without committing it l
   assertEquals(native?.preparations, [preparation]);
   assertEquals([...tx.getWriteDetails(SPACE)], []);
 });
+
+Deno.test("storage v2 rejects a native preparation when its transaction aborts locally", () => {
+  const tx = new V2StorageTransaction(managerWith(undefined));
+  const reason = new Error("local transaction rejection");
+  let observed: unknown;
+  tx.addNativeCommitPreparation(SPACE, {
+    key: "artifact:factory",
+    prepare: () => [],
+    onRejected: (value) => {
+      observed = value;
+    },
+  });
+
+  const result = tx.abort(reason);
+
+  assert(result.ok);
+  assertStrictEquals(observed, reason);
+});

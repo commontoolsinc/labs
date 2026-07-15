@@ -869,6 +869,14 @@ export class Runner {
     options: SetupValidationOptions = {},
   ): Promise<Cell<R>> {
     if (providedTx) {
+      // Factory kind is canonical carried state, so enforce the root boundary
+      // before deciding whether the value needs materialization. In particular,
+      // a trusted live HandlerFactory and its decoded shell must not diverge.
+      // Raw legacy Module/handler descriptors remain outside this first-class
+      // factory guard and retain their existing setup behavior.
+      if (isAdmittedFabricFactory(patternOrModule)) {
+        this.assertSetupFactoryKind(patternOrModule as MaterializedFactory);
+      }
       const prepared = this.materializeSetupFactorySync(
         patternOrModule,
         resultCell,
@@ -888,6 +896,15 @@ export class Runner {
       // to what would have happened if the write succeeded and was immediately
       // overwritten. Still surface real callback failures from setupInternal so
       // callers don't silently continue after a broken setup.
+      if (isAdmittedFabricFactory(patternOrModule)) {
+        try {
+          this.assertSetupFactoryKind(patternOrModule as MaterializedFactory);
+        } catch (error) {
+          // Non-transactional setup is Promise-based, so retain its rejection
+          // contract even though carried factory kind is synchronously known.
+          return Promise.reject(error);
+        }
+      }
       const setup = (prepared: Pattern | Module | undefined) =>
         this.runtime.editWithRetry((tx) => {
           this.setupInternal(tx, prepared, argument, resultCell, options);
@@ -941,8 +958,13 @@ export class Runner {
     patternOrModule: Pattern | Module | undefined,
     resultCell: Cell<R>,
   ): Pattern | Module | undefined {
-    if (!this.requiresSetupFactoryMaterialization(patternOrModule)) {
+    if (!isAdmittedFabricFactory(patternOrModule)) {
       return patternOrModule;
+    }
+    if (isTrustedBuilderArtifact(patternOrModule)) {
+      return this.assertSetupFactoryKind(
+        patternOrModule as unknown as MaterializedFactory,
+      );
     }
     const factory = materializeFactory(patternOrModule, {
       runtime: this.runtime,
@@ -3534,10 +3556,13 @@ export class Runner {
     let currentSelectionLabel: unknown = undefined;
     let hasSelection = false;
     let selectionGenerationActive = false;
+    let selectionReadinessPending = false;
+    let selectionReadinessFailed = false;
     let fastPreemptedSelection = false;
     let childCancel: Cancel | undefined;
     let sinkCancel: Cancel | undefined;
     let selectionSourceLinks: readonly NormalizedFullLink[] = [];
+    let selectionGenerationSourceLinks: readonly NormalizedFullLink[] = [];
     let fastSelectionQueued = false;
     const resolvedExecutionSpaces = new Map<string, MemorySpace>();
     const callSiteLink = resultCell.getAsNormalizedFullLink();
@@ -3686,6 +3711,8 @@ export class Runner {
         },
       }).then(() => {
         if (!active || generation !== selectedGeneration) return;
+        selectionReadinessPending = false;
+        selectionReadinessFailed = false;
         // Cold readiness is only a cache transition. Reread the live binding
         // and synchronously rematerialize that current value before execution.
         const current = readCurrent();
@@ -3704,9 +3731,15 @@ export class Runner {
         );
       }).catch((error) => {
         if (!active || generation !== selectedGeneration) return;
+        selectionReadinessPending = false;
         if (error instanceof FactoryMaterializationSupersededError) {
           return;
         }
+        // The canonical selection remains installed, but it has no active
+        // child. A later selector notification for the same Factory@1 state
+        // must therefore create a fresh generation instead of taking the
+        // active-child same-state no-op.
+        selectionReadinessFailed = true;
         this.runtime.scheduler.reportError(error, {
           name: "dynamic-factory-readiness",
         });
@@ -3726,6 +3759,7 @@ export class Runner {
       const task = this.runtime.resolveSpaceName(spaceName).then(
         (resolvedSpace) => {
           if (!active || generation !== selectedGeneration) return;
+          selectionReadinessPending = false;
           resolvedExecutionSpaces.set(spaceName, resolvedSpace);
           const current = readCurrent();
           if (
@@ -3744,6 +3778,12 @@ export class Runner {
         },
         (error) => {
           if (!active || generation !== selectedGeneration) return;
+          selectionReadinessPending = false;
+          // Name resolution is readiness for the installed canonical
+          // selection just like artifact loading. Keep the failed generation
+          // fenced, but let a later same-state selector notification create a
+          // fresh generation and retry the resolver.
+          selectionReadinessFailed = true;
           this.runtime.scheduler.reportError(error, {
             name: "dynamic-factory-space-readiness",
           });
@@ -3766,6 +3806,7 @@ export class Runner {
           error instanceof FactoryArtifactUnavailableError ||
           error instanceof DynamicFactoryExecutionSpaceUnavailableError
         ) {
+          selectionReadinessPending = true;
           // Publish the selector dependency before exposing deterministic
           // readiness gates; otherwise a replacement can land in that window.
           queueMicrotask(() => {
@@ -3796,25 +3837,59 @@ export class Runner {
         hasSelection && sameCanonicalSelection(canonical, currentCanonical) &&
         deepEqual(cfcLabel, currentSelectionLabel)
       ) {
-        if (!fastPreemptedSelection) return;
-        fastPreemptedSelection = false;
-        if (selection === undefined) return;
-        const current = readCurrent();
-        selectionSourceLinks = [
-          ...current.dereferenceSources,
-          current.sourceLink,
-        ];
-        activateSelection(
-          selection,
-          current.artifactSpace,
-          generation,
-        );
-        return;
+        let pendingSourceChanged = false;
+        if (selectionReadinessPending) {
+          const current = readCurrent();
+          const currentSourceLinks = [
+            ...current.dereferenceSources,
+            current.sourceLink,
+          ];
+          pendingSourceChanged = !deepEqual(
+            currentSourceLinks,
+            selectionGenerationSourceLinks,
+          );
+          if (pendingSourceChanged) {
+            // Canonical Factory@1 state alone is sufficient for the active
+            // child no-op, but a pending readiness attempt is also owned by
+            // the source chain that supplied its artifact space. Retargeting
+            // that chain creates a fresh generation immediately so the old
+            // async completion can be fenced.
+            selectionSourceLinks = currentSourceLinks;
+            selectionReadinessPending = false;
+            selectionReadinessFailed = false;
+            fastPreemptedSelection = false;
+          }
+        }
+        if (!pendingSourceChanged) {
+          if (!fastPreemptedSelection && !selectionReadinessFailed) return;
+          fastPreemptedSelection = false;
+          if (selectionReadinessFailed) {
+            // Fall through to the ordinary replacement path below so the
+            // failed generation is fenced and current provenance is reread.
+            selectionReadinessFailed = false;
+          } else {
+            if (selection === undefined) return;
+            const current = readCurrent();
+            selectionSourceLinks = [
+              ...current.dereferenceSources,
+              current.sourceLink,
+            ];
+            selectionGenerationSourceLinks = selectionSourceLinks;
+            activateSelection(
+              selection,
+              current.artifactSpace,
+              generation,
+            );
+            return;
+          }
+        }
       }
 
       hasSelection = true;
       currentCanonical = canonical;
       currentSelectionLabel = cfcLabel;
+      selectionReadinessPending = false;
+      selectionReadinessFailed = false;
       generation++;
       const selectedGeneration = generation;
       childCancel?.();
@@ -3827,6 +3902,7 @@ export class Runner {
         ...current.dereferenceSources,
         current.sourceLink,
       ];
+      selectionGenerationSourceLinks = selectionSourceLinks;
       activateSelection(selection, current.artifactSpace, selectedGeneration);
     };
 
@@ -3845,6 +3921,8 @@ export class Runner {
       hasSelection = true;
       currentCanonical = canonical;
       currentSelectionLabel = cfcLabel;
+      selectionReadinessPending = false;
+      selectionReadinessFailed = false;
       generation++;
       childCancel?.();
       childCancel = undefined;

@@ -3,7 +3,6 @@ export { SchemaGenerator } from "./schema-generator.ts";
 export { createSchemaTransformerV2 } from "./plugin.ts";
 export {
   containsFactoryType,
-  detectFactoryType,
   detectTrustedFactoryType,
   type FactoryTypeInfo,
   type FactoryTypeKind,
@@ -13,6 +12,7 @@ export {
   isCommonFabricDeclaration,
   isCommonFabricModuleName,
   isCommonFabricSymbol,
+  registerCommonFabricDeclarationSources,
 } from "./typescript/common-fabric-symbols.ts";
 
 // Public types for API consumers

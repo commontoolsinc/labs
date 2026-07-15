@@ -1,8 +1,13 @@
 import ts from "typescript";
 
-const COMMONFABRIC_DECLARATION = "commonfabric.d.ts";
 const COMMONFABRIC_MODULE_NAME = "commonfabric";
 const COMMONFABRIC_PACKAGE_PREFIX = "@commonfabric/";
+
+/** Exact compiler-owned declaration sources trusted by each checker. */
+const TRUSTED_SOURCES = new WeakMap<
+  ts.TypeChecker,
+  WeakSet<ts.SourceFile>
+>();
 
 export function isCommonFabricModuleName(moduleName: string): boolean {
   return moduleName === COMMONFABRIC_MODULE_NAME ||
@@ -19,42 +24,37 @@ export function getImportTypeModuleName(
     : undefined;
 }
 
+/**
+ * Register declaration sources selected by a trusted compiler/module resolver.
+ * File names and module strings are lookup inputs only; SourceFile object
+ * identity is the authority checked below.
+ */
+export function registerCommonFabricDeclarationSources(
+  checker: ts.TypeChecker,
+  sources: Iterable<ts.SourceFile>,
+): void {
+  let trusted = TRUSTED_SOURCES.get(checker);
+  if (!trusted) {
+    trusted = new WeakSet();
+    TRUSTED_SOURCES.set(checker, trusted);
+  }
+  for (const source of sources) trusted.add(source);
+}
+
 export function isCommonFabricDeclaration(
   declaration: ts.Declaration,
+  checker: ts.TypeChecker,
 ): boolean {
-  if (
-    isCommonFabricDeclarationSourceFile(
-      declaration.getSourceFile().fileName,
-    )
-  ) {
-    return true;
-  }
-
-  let current: ts.Node | undefined = declaration;
-  while (current) {
-    if (
-      ts.isModuleDeclaration(current) &&
-      ts.isStringLiteral(current.name) &&
-      isCommonFabricModuleName(current.name.text)
-    ) {
-      return true;
-    }
-    current = current.parent;
-  }
-
-  return false;
+  return TRUSTED_SOURCES.get(checker)?.has(declaration.getSourceFile()) ??
+    false;
 }
 
-function isCommonFabricDeclarationSourceFile(fileName: string): boolean {
-  const normalized = fileName.replace(/\\/g, "/");
-  return normalized === COMMONFABRIC_DECLARATION ||
-    normalized.endsWith(`/${COMMONFABRIC_DECLARATION}`) ||
-    normalized.endsWith("/packages/api/index.ts") ||
-    normalized.includes("/@commonfabric/api/") ||
-    normalized.includes("/packages/runner/src/");
-}
-
-/** Checks whether a TypeScript symbol is declared by Common Fabric itself. */
-export function isCommonFabricSymbol(symbol: ts.Symbol): boolean {
-  return (symbol.getDeclarations() ?? []).some(isCommonFabricDeclaration);
+/** Checks whether a symbol is declared by a compiler-trusted Common Fabric source. */
+export function isCommonFabricSymbol(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): boolean {
+  return (symbol.getDeclarations() ?? []).some((declaration) =>
+    isCommonFabricDeclaration(declaration, checker)
+  );
 }

@@ -219,7 +219,7 @@ Deno.test("Cast Validation", async (t) => {
   });
 
   await t.step(
-    "errors on wrappers from framework module declarations",
+    "allows wrappers from authored framework-looking module declarations",
     async () => {
       const source = `
         import { Cell } from "@commonfabric/local-test";
@@ -240,13 +240,18 @@ Deno.test("Cast Validation", async (t) => {
         },
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertEquals(errors[0]!.type, "cast-validation:cell-cast");
+      assertEquals(
+        errors.length,
+        0,
+        "Authored module names must not confer Common Fabric provenance",
+      );
     },
   );
 
-  await t.step("errors on qualified framework import types", async () => {
-    const source = `
+  await t.step(
+    "allows qualified import types from authored framework-looking modules",
+    async () => {
+      const source = `
       declare module "@commonfabric/local-test" {
         export namespace wrappers {
           export interface Cell<T> {
@@ -258,13 +263,17 @@ Deno.test("Cast Validation", async (t) => {
       const data: any = { value: 42 };
       const cell = data as import("@commonfabric/local-test").wrappers.Cell<number>;
     `;
-    const { diagnostics } = await validateSource(source, {
-      types: COMMONFABRIC_TYPES,
-    });
-    const errors = getErrors(diagnostics);
-    assertGreater(errors.length, 0, "Expected at least one error");
-    assertEquals(errors[0]!.type, "cast-validation:cell-cast");
-  });
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Authored ambient module strings must not confer Common Fabric provenance",
+      );
+    },
+  );
 
   await t.step("allows import types from non-framework modules", async () => {
     const source = `

@@ -14,6 +14,7 @@ import {
   detectCallKind,
   detectNewExpressionKind,
   ensureTypeNodeRegistered,
+  findEnclosingPatternBuilderCallbackDescriptor,
   getLiftAppliedInnerCall,
   getNodeText,
   getPatternBuilderCallbackDescriptor,
@@ -993,6 +994,34 @@ export function resolvePatternFactorySchemaContract(
 
   if (inputType) typeRegistry?.set(inputTypeNode, inputType);
   if (outputType) typeRegistry?.set(outputTypeNode, outputType);
+  const returnExpression = getCallbackReturnExpression(callback);
+  if (returnExpression) {
+    // Contract resolution runs during closure conversion, before the later
+    // SchemaInjection traversal reaches the hoisted base pattern. Preserve
+    // exact factory-valued leaves on the contract's own result TypeNode now so
+    // the curried value embedded in its parent sees the same alternatives.
+    propagateFactoryContractHints(
+      returnExpression,
+      outputTypeNode,
+      context,
+    );
+  }
+  if (inputType) {
+    propagateTrustedFactoryContractsFromType(
+      inputTypeNode,
+      inputType,
+      context,
+      new Set(),
+    );
+  }
+  if (outputType) {
+    propagateTrustedFactoryContractsFromType(
+      outputTypeNode,
+      outputType,
+      context,
+      new Set(),
+    );
+  }
 
   return {
     kind: "pattern",
@@ -2260,7 +2289,7 @@ function buildObjectLiteralReturnTypeNode(
   );
 }
 
-function propagateFactoryContractHints(
+export function propagateFactoryContractHints(
   expression: ts.Expression,
   typeNode: ts.TypeNode,
   context: TransformationContext,
@@ -2272,8 +2301,35 @@ function propagateFactoryContractHints(
     context.checker,
     new Set(),
   );
-  const contracts = collectFactoryContractHints(expr, context, new Set());
-  for (const contract of contracts) {
+  const directContracts = collectFactoryContractHints(
+    expr,
+    context,
+    new Set(),
+  );
+  const contracts = directContracts.length > 0 || !ts.isUnionTypeNode(node) ||
+      isAmbiguousAuthoredFactoryContractExpression(expr)
+    ? directContracts
+    : collectTrustedFactoryTypeContracts(
+      getTypeAtLocationWithFallback(
+        expr,
+        context.checker,
+        context.options.state?.typeRegistry,
+      ),
+      context,
+    );
+  const authoredWholeUnionContracts = contracts.filter((contract) =>
+    authoredWholeFactoryUnionContracts.has(contract)
+  );
+  if (authoredWholeUnionContracts.length > 0 && ts.isUnionTypeNode(node)) {
+    for (const contract of authoredWholeUnionContracts) {
+      appendFactoryContractHint(node, contract, context);
+    }
+  }
+  for (
+    const contract of contracts.filter((contract) =>
+      !authoredWholeFactoryUnionContracts.has(contract)
+    )
+  ) {
     const target = selectFactoryContractTypeNode(node, contract, context);
     if (target) {
       appendFactoryContractHint(target, contract, context);
@@ -2282,7 +2338,10 @@ function propagateFactoryContractHints(
         context.checker,
         context.options.state?.typeRegistry,
       );
-      if (expressionType) {
+      if (
+        expressionType && !isAnyOrUnknownType(expressionType) &&
+        !ts.isUnionTypeNode(node)
+      ) {
         context.options.state?.typeRegistry.set(target, expressionType);
       }
     }
@@ -2636,11 +2695,624 @@ function collectFactoryContractHints(
         ...collectFactoryContractHints(branches[1], context, seen),
       ]);
     }
+
+    const authoredInputContracts = collectAuthoredPatternInputFactoryContracts(
+      expr,
+      context,
+    );
+    if (authoredInputContracts.length > 0) {
+      context.recordSchemaHint(expr, {
+        factoryContracts: authoredInputContracts,
+      });
+      return authoredInputContracts;
+    }
+
+    const type = getTypeAtLocationWithFallback(
+      expr,
+      context.checker,
+      context.options.state?.typeRegistry,
+    );
+    const detected = type && detectTrustedFactoryType(type, context.checker);
+    if (detected) {
+      const contract = factoryContractHintFromTrustedType(detected, context);
+      if (contract) {
+        context.recordSchemaHint(expr, { factoryContracts: [contract] });
+        return [contract];
+      }
+    }
     return [];
   } finally {
     seen.delete(expr);
     seen.delete(source);
   }
+}
+
+function collectTrustedFactoryTypeContracts(
+  type: ts.Type | undefined,
+  context: TransformationContext,
+  activeTypes: Set<ts.Type> = new Set(),
+): readonly FactoryContractHint[] {
+  if (!type) return [];
+  const detected = detectTrustedFactoryType(type, context.checker);
+  if (detected) {
+    const contract = factoryContractHintFromTrustedType(
+      detected,
+      context,
+      activeTypes,
+    );
+    return contract ? [contract] : [];
+  }
+  if ((type.flags & ts.TypeFlags.Union) === 0) return [];
+  return dedupeFactoryContracts(
+    (type as ts.UnionType).types.flatMap((member) =>
+      collectTrustedFactoryTypeContracts(member, context, activeTypes)
+    ),
+  );
+}
+
+type TrustedFactoryContractCache = WeakMap<ts.Type, FactoryContractHint>;
+
+const trustedFactoryContractCaches = new WeakMap<
+  TransformationContext,
+  TrustedFactoryContractCache
+>();
+
+function cachedTrustedFactoryContract(
+  detected: NonNullable<ReturnType<typeof detectTrustedFactoryType>>,
+  context: TransformationContext,
+): FactoryContractHint | undefined {
+  return trustedFactoryContractCaches.get(context)?.get(detected.type);
+}
+
+function cacheTrustedFactoryContract(
+  detected: NonNullable<ReturnType<typeof detectTrustedFactoryType>>,
+  context: TransformationContext,
+  contract: FactoryContractHint,
+): void {
+  let cache = trustedFactoryContractCaches.get(context);
+  if (!cache) {
+    cache = new WeakMap();
+    trustedFactoryContractCaches.set(context, cache);
+  }
+  cache.set(detected.type, contract);
+}
+
+function factoryContractHintFromTrustedType(
+  detected: NonNullable<ReturnType<typeof detectTrustedFactoryType>>,
+  context: TransformationContext,
+  activeTypes: Set<ts.Type> = new Set(),
+): FactoryContractHint | undefined {
+  const cached = cachedTrustedFactoryContract(detected, context);
+  if (cached) return cached;
+  const inputTypeNode = typeToInjectableSchemaTypeNode(
+    detected.inputType,
+    context.checker,
+    context.sourceFile,
+    context.factory,
+  );
+  const outputTypeNode = typeToInjectableSchemaTypeNode(
+    detected.outputType,
+    context.checker,
+    context.sourceFile,
+    context.factory,
+  );
+  if (!inputTypeNode || !outputTypeNode) return undefined;
+  context.options.state?.typeRegistry.set(inputTypeNode, detected.inputType);
+  context.options.state?.typeRegistry.set(outputTypeNode, detected.outputType);
+  const contract: FactoryContractHint = {
+    kind: detected.kind,
+    factoryType: detected.type,
+    inputTypeNode,
+    inputType: detected.inputType,
+    outputTypeNode,
+    outputType: detected.outputType,
+  };
+  // Publish the shell before walking nested public schemas so recursive
+  // factory types terminate on this exact compiler-owned contract object.
+  // Reusing it also keeps repeated synthetic passes idempotent without
+  // collapsing distinct builder contracts that happen to print alike.
+  cacheTrustedFactoryContract(detected, context, contract);
+  propagateTrustedFactoryContractsFromType(
+    inputTypeNode,
+    detected.inputType,
+    context,
+    activeTypes,
+  );
+  propagateTrustedFactoryContractsFromType(
+    outputTypeNode,
+    detected.outputType,
+    context,
+    activeTypes,
+  );
+  return contract;
+}
+
+function propagateTrustedFactoryContractsFromType(
+  typeNode: ts.TypeNode,
+  type: ts.Type,
+  context: TransformationContext,
+  seen: Set<ts.Type>,
+): void {
+  if (seen.has(type)) return;
+  seen.add(type);
+  try {
+    const node = unwrapFactoryContractTypeNode(typeNode);
+    if (ts.isUnionTypeNode(node)) {
+      const members = (type.flags & ts.TypeFlags.Union) !== 0
+        ? (type as ts.UnionType).types
+        : [type];
+      for (const member of members) {
+        for (
+          const contract of collectTrustedFactoryTypeContracts(
+            member,
+            context,
+            seen,
+          )
+        ) {
+          const target = selectFactoryContractTypeNode(node, contract, context);
+          if (!target) continue;
+          if (!context.lookupSchemaHint(target)?.factoryContracts?.length) {
+            appendFactoryContractHint(target, contract, context);
+          }
+          context.options.state?.typeRegistry.set(target, member);
+        }
+      }
+      return;
+    }
+    if (ts.isTypeLiteralNode(node)) {
+      for (const member of node.members) {
+        if (!ts.isPropertySignature(member) || !member.type) continue;
+        const name = propertyNameText(member.name);
+        if (!name) continue;
+        const property = context.checker.getPropertyOfType(type, name);
+        if (!property) continue;
+        const declaration = property.valueDeclaration ??
+          property.declarations?.[0] ?? context.sourceFile;
+        const propertyType = context.checker.getTypeOfSymbolAtLocation(
+          property,
+          declaration,
+        );
+        context.options.state?.typeRegistry.set(member.type, propertyType);
+        propagateTrustedFactoryContractsFromType(
+          member.type,
+          propertyType,
+          context,
+          seen,
+        );
+      }
+      return;
+    }
+    if (ts.isArrayTypeNode(node)) {
+      const elementType = context.checker.getIndexTypeOfType(
+        type,
+        ts.IndexKind.Number,
+      );
+      if (elementType) {
+        propagateTrustedFactoryContractsFromType(
+          node.elementType,
+          elementType,
+          context,
+          seen,
+        );
+      }
+    }
+  } finally {
+    seen.delete(type);
+  }
+}
+
+function collectAuthoredPatternInputFactoryContracts(
+  expression: ts.Expression,
+  context: TransformationContext,
+): readonly FactoryContractHint[] {
+  const origin = resolvePatternInputSchemaOrigin(
+    expression,
+    context,
+    new Set(),
+  );
+  if (!origin) return [];
+  const descriptor = findEnclosingPatternBuilderCallbackDescriptor(
+    origin.callback,
+    context.checker,
+  );
+  if (!descriptor) return [];
+  const inputSchemaExpression = detectSchemaArguments(
+    descriptor.call.arguments,
+    descriptor.argument,
+  )[0];
+  if (!inputSchemaExpression) return [];
+  const resolved = resolveFactorySchemaValue(inputSchemaExpression, context);
+  if (!resolved.resolved) return [];
+  const schema = schemaValueAtPropertyPath(resolved.value, origin.path);
+  if (schema === undefined) return [];
+
+  const expressionType = getTypeAtLocationWithFallback(
+    expression,
+    context.checker,
+    context.options.state?.typeRegistry,
+  );
+  const typedContracts = collectTrustedFactoryTypeContracts(
+    expressionType,
+    context,
+  );
+  if (typedContracts.length === 0) return [];
+  const authored = analyzeAuthoredFactorySchemaContracts(schema);
+  const authoredContracts = authored.contracts;
+
+  if (authored.isUnion) {
+    const expressionMembers = expressionType &&
+        (expressionType.flags & ts.TypeFlags.Union) !== 0
+      ? (expressionType as ts.UnionType).types
+      : expressionType
+      ? [expressionType]
+      : [];
+    const kindsMatch = factoryContractKindCountsEqual(
+      typedContracts,
+      authoredContracts,
+    );
+    if (
+      authored.complete &&
+      expressionMembers.length === typedContracts.length &&
+      typedContracts.length === authoredContracts.length && kindsMatch
+    ) {
+      const available = [...typedContracts];
+      return authoredContracts.map((authoredContract) => {
+        const typedIndex = available.findIndex((typed) =>
+          typed.kind === authoredContract.kind
+        );
+        if (typedIndex < 0) {
+          throw new Error("Factory union kind counts changed during recovery");
+        }
+        const [typed] = available.splice(typedIndex, 1);
+        if (!typed) {
+          throw new Error("Factory union kind counts changed during recovery");
+        }
+        const contract: FactoryContractHint = {
+          ...typed,
+          inputSchema: authoredContract.inputSchema,
+          outputSchema: authoredContract.outputSchema,
+        };
+        authoredWholeFactoryUnionContracts.add(contract);
+        return contract;
+      });
+    }
+
+    const canMapIndividualArms = authored.flat &&
+      authoredContracts.length === typedContracts.length && kindsMatch &&
+      factoryContractKindsAreUnique(typedContracts) &&
+      expressionMembers.length ===
+        typedContracts.length + authored.nonFactoryAlternatives.length &&
+      authoredNonFactoryAlternativesMatchTypes(
+        authored.nonFactoryAlternatives,
+        expressionMembers.filter((member) =>
+          detectTrustedFactoryType(member, context.checker) === undefined
+        ),
+      );
+    if (canMapIndividualArms) {
+      return typedContracts.map((typed) => {
+        const authoredContract = authoredContracts.find((candidate) =>
+          candidate.kind === typed.kind
+        );
+        if (!authoredContract) {
+          throw new Error("Factory union kind counts changed during recovery");
+        }
+        return {
+          ...typed,
+          inputSchema: authoredContract.inputSchema,
+          outputSchema: authoredContract.outputSchema,
+        };
+      });
+    }
+
+    markAmbiguousAuthoredFactoryContractExpression(expression);
+    context.reportDiagnosticOnce({
+      severity: "error",
+      type: "pattern-factory:ambiguous-authored-union-contract",
+      message:
+        "The authored factory alternatives could not be mapped exactly to " +
+        "the trusted Common Fabric factory type arms without guessing. Use " +
+        "a complete flat anyOf or oneOf, or ensure each factory kind in a " +
+        "mixed union occurs exactly once and its non-factory alternatives " +
+        "match the declared type.",
+      node: expression,
+    });
+    return [];
+  }
+  if (authoredContracts.length === 0) return [];
+
+  const enriched: FactoryContractHint[] = [];
+  for (const typed of typedContracts) {
+    const candidates = authoredContracts.filter((authored) =>
+      authored.kind === typed.kind
+    );
+    // Exact schema metadata must never be guessed between same-kind union
+    // alternatives. The unambiguous single-contract case covers a dynamic
+    // factory arriving through one authored pattern input; compiler-owned
+    // value/branch metadata remains the authority for ambiguous alternatives.
+    if (candidates.length !== 1) continue;
+    const authored = candidates[0]!;
+    enriched.push({
+      ...typed,
+      inputSchema: authored.inputSchema,
+      outputSchema: authored.outputSchema,
+    });
+  }
+  return enriched;
+}
+
+interface PatternInputSchemaOrigin {
+  readonly callback: ts.ArrowFunction | ts.FunctionExpression;
+  readonly path: readonly string[];
+}
+
+function resolvePatternInputSchemaOrigin(
+  expression: ts.Expression,
+  context: TransformationContext,
+  seen: Set<ts.Node>,
+): PatternInputSchemaOrigin | undefined {
+  const current = unwrapExpression(expression);
+  const original = ts.getOriginalNode(current);
+  if (seen.has(current) || seen.has(original)) return undefined;
+  seen.add(current);
+  seen.add(original);
+  try {
+    if (
+      ts.isPropertyAccessExpression(current) ||
+      ts.isElementAccessExpression(current)
+    ) {
+      const key = ts.isPropertyAccessExpression(current)
+        ? current.name.text
+        : staticFactoryContractKey(
+          current.argumentExpression,
+          context.checker,
+        );
+      if (key === undefined) return undefined;
+      const parent = resolvePatternInputSchemaOrigin(
+        current.expression,
+        context,
+        seen,
+      );
+      return parent
+        ? { ...parent, path: [...parent.path, String(key)] }
+        : undefined;
+    }
+    if (!ts.isIdentifier(current)) return undefined;
+    const declaration = factoryContractValueDeclaration(
+      current,
+      context.checker,
+    );
+    if (declaration && ts.isBindingElement(declaration)) {
+      return patternInputBindingOrigin(declaration);
+    }
+    if (declaration && ts.isParameter(declaration)) {
+      const callback = declaration.parent;
+      if (
+        (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) &&
+        callback.parameters[0] === declaration
+      ) {
+        return { callback, path: [] };
+      }
+    }
+    const initializer = getVariableInitializer(current, context.checker);
+    return initializer
+      ? resolvePatternInputSchemaOrigin(initializer, context, seen)
+      : undefined;
+  } finally {
+    seen.delete(current);
+    seen.delete(original);
+  }
+}
+
+function patternInputBindingOrigin(
+  binding: ts.BindingElement,
+): PatternInputSchemaOrigin | undefined {
+  const path: string[] = [];
+  let current = binding;
+  while (true) {
+    const pattern = current.parent;
+    if (ts.isObjectBindingPattern(pattern)) {
+      const name = current.propertyName ?? current.name;
+      if (
+        !ts.isIdentifier(name) && !ts.isStringLiteralLike(name) &&
+        !ts.isNumericLiteral(name)
+      ) return undefined;
+      path.unshift(name.text);
+    } else if (ts.isArrayBindingPattern(pattern)) {
+      const index = pattern.elements.indexOf(current);
+      if (index < 0) return undefined;
+      path.unshift(String(index));
+    } else {
+      return undefined;
+    }
+    const owner = pattern.parent;
+    if (ts.isParameter(owner)) {
+      const callback = owner.parent;
+      return (
+          (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) &&
+          callback.parameters[0] === owner
+        )
+        ? { callback, path }
+        : undefined;
+    }
+    if (!ts.isBindingElement(owner)) return undefined;
+    current = owner;
+  }
+}
+
+function schemaValueAtPropertyPath(
+  value: unknown,
+  path: readonly string[],
+): unknown {
+  let current = value;
+  for (const segment of path) {
+    if (!isSchemaRecord(current)) return undefined;
+    const properties = current.properties;
+    if (!isSchemaRecord(properties) || !Object.hasOwn(properties, segment)) {
+      return undefined;
+    }
+    current = properties[segment];
+  }
+  return current;
+}
+
+interface AuthoredFactorySchemaContract {
+  readonly kind: "pattern" | "module" | "handler";
+  readonly inputSchema: unknown;
+  readonly outputSchema: unknown;
+}
+
+interface AuthoredFactorySchemaAnalysis {
+  readonly contracts: readonly AuthoredFactorySchemaContract[];
+  readonly nonFactoryAlternatives: readonly unknown[];
+  readonly isUnion: boolean;
+  readonly flat: boolean;
+  readonly complete: boolean;
+  readonly keyword?: "anyOf" | "oneOf";
+}
+
+const authoredWholeFactoryUnionContracts = new WeakSet<FactoryContractHint>();
+const ambiguousAuthoredFactoryContractExpressions = new WeakSet<ts.Node>();
+
+function markAmbiguousAuthoredFactoryContractExpression(
+  expression: ts.Expression,
+): void {
+  ambiguousAuthoredFactoryContractExpressions.add(expression);
+  ambiguousAuthoredFactoryContractExpressions.add(
+    ts.getOriginalNode(expression),
+  );
+}
+
+function isAmbiguousAuthoredFactoryContractExpression(
+  expression: ts.Expression,
+): boolean {
+  return ambiguousAuthoredFactoryContractExpressions.has(expression) ||
+    ambiguousAuthoredFactoryContractExpressions.has(
+      ts.getOriginalNode(expression),
+    );
+}
+
+function factoryContractKindCountsEqual(
+  typed: readonly FactoryContractHint[],
+  authored: readonly AuthoredFactorySchemaContract[],
+): boolean {
+  const kinds = ["pattern", "module", "handler"] as const;
+  return kinds.every((kind) =>
+    typed.filter((contract) => contract.kind === kind).length ===
+      authored.filter((contract) => contract.kind === kind).length
+  );
+}
+
+function factoryContractKindsAreUnique(
+  contracts: readonly FactoryContractHint[],
+): boolean {
+  return new Set(contracts.map((contract) => contract.kind)).size ===
+    contracts.length;
+}
+
+function authoredNonFactoryAlternativesMatchTypes(
+  alternatives: readonly unknown[],
+  types: readonly ts.Type[],
+): boolean {
+  const remaining = [...types];
+  for (const alternative of alternatives) {
+    if (!isSchemaRecord(alternative)) return false;
+    const expectedFlag = alternative.type === "null"
+      ? ts.TypeFlags.Null
+      : alternative.type === "undefined"
+      ? ts.TypeFlags.Undefined
+      : undefined;
+    if (expectedFlag === undefined) return false;
+    const index = remaining.findIndex((type) =>
+      (type.flags & expectedFlag) !== 0
+    );
+    if (index < 0) return false;
+    remaining.splice(index, 1);
+  }
+  return remaining.length === 0;
+}
+
+function analyzeAuthoredFactorySchemaContracts(
+  value: unknown,
+): AuthoredFactorySchemaAnalysis {
+  if (!isSchemaRecord(value)) {
+    return {
+      contracts: [],
+      nonFactoryAlternatives: [value],
+      isUnion: false,
+      flat: true,
+      complete: false,
+    };
+  }
+  const unionEntries = (["anyOf", "oneOf"] as const).filter((keyword) =>
+    Array.isArray(value[keyword])
+  );
+  if (unionEntries.length > 0) {
+    const keyword = unionEntries[0]!;
+    const alternatives = value[keyword] as unknown[];
+    const parts = alternatives.map(analyzeAuthoredFactorySchemaContracts);
+    return {
+      contracts: parts.flatMap((part) => part.contracts),
+      nonFactoryAlternatives: parts.flatMap((part) =>
+        part.nonFactoryAlternatives
+      ),
+      isUnion: true,
+      flat: unionEntries.length === 1 && alternatives.length > 0 &&
+        parts.every((part) => !part.isUnion && part.flat),
+      complete: unionEntries.length === 1 && alternatives.length > 0 &&
+        parts.every((part) =>
+          part.complete && !part.isUnion && part.contracts.length === 1
+        ),
+      keyword,
+    };
+  }
+  const contract = value.asFactory;
+  if (!isSchemaRecord(contract)) {
+    return {
+      contracts: [],
+      nonFactoryAlternatives: [value],
+      isUnion: false,
+      flat: true,
+      complete: false,
+    };
+  }
+  const kind = contract.kind;
+  if (kind !== "pattern" && kind !== "module" && kind !== "handler") {
+    return {
+      contracts: [],
+      nonFactoryAlternatives: [value],
+      isUnion: false,
+      flat: true,
+      complete: false,
+    };
+  }
+  const inputKey = kind === "handler" ? "contextSchema" : "argumentSchema";
+  const outputKey = kind === "handler" ? "eventSchema" : "resultSchema";
+  if (
+    !Object.hasOwn(contract, inputKey) || !Object.hasOwn(contract, outputKey)
+  ) {
+    return {
+      contracts: [],
+      nonFactoryAlternatives: [value],
+      isUnion: false,
+      flat: true,
+      complete: false,
+    };
+  }
+  return {
+    contracts: [{
+      kind,
+      inputSchema: contract[inputKey],
+      outputSchema: contract[outputKey],
+    }],
+    nonFactoryAlternatives: [],
+    isUnion: false,
+    flat: true,
+    complete: true,
+  };
+}
+
+function isSchemaRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function appendFactoryContractHint(
@@ -2671,6 +3343,84 @@ function selectFactoryContractTypeNode(
   context: TransformationContext,
 ): ts.TypeNode | undefined {
   if (!ts.isUnionTypeNode(typeNode)) return typeNode;
+
+  const semanticCandidates = typeNode.types.filter((member) =>
+    factoryContractMemberTypes(member, context).some((memberType) =>
+      factoryContractMatchesType(memberType, contract, context.checker)
+    )
+  );
+  if (semanticCandidates.length === 1) return semanticCandidates[0];
+  // More than one semantic match means exact metadata cannot be assigned to
+  // one same-kind arm without guessing. Do not fall through to name/text
+  // recovery in that case.
+  if (semanticCandidates.length > 1) return undefined;
+
+  // Synthetic alias nodes can be unbound even though their containing union
+  // retains the checker-owned semantic type in the transformer registry. Map
+  // the exact semantic arm back through the TypeScript checker's own emitted
+  // representation. Authored alias text alone never grants factory authority:
+  // the semantic arm was already proven by its trusted factory brand, and a
+  // non-unique representation fails closed.
+  const unionType = factoryContractRegisteredType(typeNode, context);
+  const semanticArms = unionType && (unionType.flags & ts.TypeFlags.Union) !== 0
+    ? (unionType as ts.UnionType).types.filter((member) =>
+      factoryContractMatchesType(member, contract, context.checker)
+    )
+    : [];
+  if (semanticArms.length > 1) return undefined;
+  const semanticArm = semanticArms[0];
+  if (semanticArm) {
+    const semanticNode = typeToInjectableSchemaTypeNode(
+      semanticArm,
+      context.checker,
+      context.sourceFile,
+      context.factory,
+    );
+    if (semanticNode) {
+      const expected = normalizeTypeNodeText(
+        printTypeNode(semanticNode, context.sourceFile),
+      );
+      const representationCandidates = typeNode.types.filter((member) =>
+        normalizeTypeNodeText(printTypeNode(member, context.sourceFile)) ===
+          expected
+      );
+      if (representationCandidates.length === 1) {
+        context.options.state?.typeRegistry.set(
+          representationCandidates[0]!,
+          semanticArm,
+        );
+        return representationCandidates[0];
+      }
+      if (representationCandidates.length > 1) return undefined;
+    }
+  }
+
+  if (contract.factoryType) {
+    const factoryTypeNode = typeToInjectableSchemaTypeNode(
+      contract.factoryType,
+      context.checker,
+      context.sourceFile,
+      context.factory,
+    );
+    if (factoryTypeNode) {
+      const expected = normalizeTypeNodeText(
+        printTypeNode(factoryTypeNode, context.sourceFile),
+      );
+      const representationCandidates = typeNode.types.filter((member) =>
+        normalizeTypeNodeText(printTypeNode(member, context.sourceFile)) ===
+          expected
+      );
+      if (representationCandidates.length === 1) {
+        context.options.state?.typeRegistry.set(
+          representationCandidates[0]!,
+          contract.factoryType,
+        );
+        return representationCandidates[0];
+      }
+      if (representationCandidates.length > 1) return undefined;
+    }
+  }
+
   const expectedName = contract.kind === "pattern"
     ? "PatternFactory"
     : contract.kind === "module"
@@ -2687,7 +3437,7 @@ function selectFactoryContractTypeNode(
   const expectedOutput = normalizeTypeNodeText(
     printTypeNode(contract.outputTypeNode, context.sourceFile),
   );
-  return candidates.find((candidate) => {
+  const exactCandidates = candidates.filter((candidate) => {
     const unwrapped = unwrapFactoryContractTypeNode(candidate);
     const args = factoryTypeNodeArguments(unwrapped);
     const input = args?.[0];
@@ -2702,6 +3452,78 @@ function selectFactoryContractTypeNode(
       output?.kind === ts.SyntaxKind.UnknownKeyword;
     return inputMatches && (outputMatches || unresolvedOutput);
   });
+  return exactCandidates.length === 1 ? exactCandidates[0] : undefined;
+}
+
+function factoryContractTypesMatch(
+  left: ts.Type,
+  right: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  return left === right ||
+    (checker.isTypeAssignableTo(left, right) &&
+      checker.isTypeAssignableTo(right, left));
+}
+
+function factoryContractMatchesType(
+  type: ts.Type,
+  contract: FactoryContractHint,
+  checker: ts.TypeChecker,
+): boolean {
+  const detected = detectTrustedFactoryType(type, checker);
+  if (!detected || detected.kind !== contract.kind) return false;
+  return (!contract.inputType || factoryContractTypesMatch(
+    detected.inputType,
+    contract.inputType,
+    checker,
+  )) && (!contract.outputType || factoryContractTypesMatch(
+    detected.outputType,
+    contract.outputType,
+    checker,
+  ));
+}
+
+function factoryContractRegisteredType(
+  node: ts.TypeNode,
+  context: TransformationContext,
+): ts.Type | undefined {
+  const original = ts.getOriginalNode(node) as ts.TypeNode;
+  const registry = context.options.state?.typeRegistry;
+  const registered = registry?.get(node) ?? registry?.get(original);
+  if (registered) return registered;
+  try {
+    return context.checker.getTypeFromTypeNode(original);
+  } catch {
+    return undefined;
+  }
+}
+
+function factoryContractMemberTypes(
+  node: ts.TypeNode,
+  context: TransformationContext,
+): readonly ts.Type[] {
+  const original = ts.getOriginalNode(node) as ts.TypeNode;
+  const registry = context.options.state?.typeRegistry;
+  const candidates: ts.Type[] = [];
+  const add = (type: ts.Type | undefined) => {
+    if (type && !candidates.includes(type)) candidates.push(type);
+  };
+  add(registry?.get(node));
+  add(registry?.get(original));
+  try {
+    add(context.checker.getTypeFromTypeNode(original));
+  } catch {
+    // Synthetic node with no checker binding; containing-union recovery below
+    // may still map it by the semantic arm's symbol identity.
+  }
+  if (original !== node) {
+    try {
+      add(context.checker.getTypeFromTypeNode(node));
+    } catch {
+      // Same fallback as above.
+    }
+  }
+  return candidates;
 }
 
 function unwrapFactoryContractTypeNode(typeNode: ts.TypeNode): ts.TypeNode {

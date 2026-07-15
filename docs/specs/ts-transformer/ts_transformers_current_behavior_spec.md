@@ -435,9 +435,11 @@ Compute wrappers override restrictions:
 - the SQLite `table(columns, (row) => ({...}))` row-label rule callback —
   classified as the supported `sqlite-row-label-rule` compute boundary
   (`callback-boundary.ts`). `table()` is recognized by name **plus** the
-  `SqliteTableFunction` type alias from Common Fabric's own typings (so an
-  unrelated user function named `table` does not match). The rule callback is
-  evaluated eagerly at pattern build into a serialized JSON AST, so it is
+  `SqliteTableFunction` type alias whose declaration `SourceFile` was registered
+  for that exact checker by the compiler's trusted runtime-type resolver. A
+  matching alias name, ambient module string, `commonfabric.d.ts` filename, or
+  `@commonfabric`-looking path grants no callback ownership. The rule callback
+  is evaluated eagerly at pattern build into a serialized JSON AST, so it is
   compute-owned and is deliberately exempt from SES self-containment validation
   (see the `ses-callback:callable-capture` exclusion below).
 
@@ -934,6 +936,14 @@ capturing sites emit exactly one private `.curry(params)`. `.curry` is absent
 from the public API, takes one argument, and never binds public input fields.
 Tool descriptors use direct or metadata-wrapped PatternFactory values and have
 no separate transformer strategy.
+
+Closure schemas retain the exact authored public contracts of captured factory
+values, including nullable and mixed unions whose factory arms use local type
+aliases. The transformer carries the trusted semantic factory type beside each
+contract and maps synthetic alias arms through the checker's emitted type
+representation. Non-factory arms remain in ordinary semantic union order, and
+same-kind mappings that are not unique fail closed rather than guessing from an
+alias name.
 
 ### 9.7 Pattern callback lowering
 

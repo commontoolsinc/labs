@@ -5,6 +5,7 @@ import { assertValidPatternParams } from "../src/builder/factory-params.ts";
 import { isReactiveMarker, type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { getCellOrThrow } from "../src/query-result-proxy.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 function symbolic(schema: JSONSchema): unknown {
@@ -409,7 +410,7 @@ Deno.test("pattern curry accepts sanitized nested cell metadata only from a real
   }
 });
 
-Deno.test("pattern curry retains a nested pattern result stream contract", async () => {
+Deno.test("pattern curry reads a nested result contract without constraining its live view", async () => {
   const signer = await Identity.fromPassphrase(
     "factory-params-nested-pattern-stream-test",
   );
@@ -453,6 +454,7 @@ Deno.test("pattern curry retains a nested pattern result stream contract", async
     pattern(
       () => {
         const extractor = extractorPattern({});
+        assertEquals(getCellOrThrow(extractor).export().schema, undefined);
         assertEquals(
           assertValidPatternParams(
             {
@@ -467,6 +469,133 @@ Deno.test("pattern curry retains a nested pattern result stream contract", async
         return {};
       },
       true,
+      true,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern curry combines a producing result contract with live IFC", async () => {
+  const signer = await Identity.fromPassphrase(
+    "factory-params-result-contract-live-ifc-test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const resultSchema = {
+    type: "object",
+    properties: { value: { type: "string" } },
+    required: ["value"],
+  } as const satisfies JSONSchema;
+  const paramsSchema = {
+    type: "object",
+    properties: { child: resultSchema },
+    required: ["child"],
+  } as const satisfies JSONSchema;
+  const argumentSchema = {
+    type: "object",
+    properties: {
+      secret: {
+        type: "string",
+        ifc: { confidentiality: ["secret"] },
+      },
+    },
+    required: ["secret"],
+  } as const satisfies JSONSchema;
+
+  try {
+    const { pattern } = createTrustedBuilder(runtime).commonfabric;
+    const Child = pattern(
+      () => ({ value: "ok" }),
+      true,
+      resultSchema,
+    );
+    pattern(
+      (input: any) => {
+        const child = Child({ secret: input.secret });
+        assertEquals(
+          (getCellOrThrow(child).export().schema as any)?.ifc
+            ?.confidentiality,
+          ["secret"],
+        );
+        assertEquals(
+          assertValidPatternParams({ child }, paramsSchema),
+          undefined,
+        );
+        return {};
+      },
+      argumentSchema,
+      true,
+    );
+  } finally {
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("pattern curry reads a dynamic child contract from call-site metadata", async () => {
+  const signer = await Identity.fromPassphrase(
+    "factory-params-dynamic-child-contract-test",
+  );
+  const storageManager = StorageManager.emulate({ as: signer });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const argumentSchema = {
+    type: "object",
+    properties: { value: { type: "string" } },
+    required: ["value"],
+  } as const satisfies JSONSchema;
+  const resultSchema = {
+    type: "object",
+    properties: { value: { type: "string" } },
+    required: ["value"],
+  } as const satisfies JSONSchema;
+  const expected = {
+    kind: "pattern",
+    argumentSchema,
+    resultSchema,
+  } as const;
+  const paramsSchema = {
+    type: "object",
+    properties: { child: resultSchema },
+    required: ["child"],
+  } as const satisfies JSONSchema;
+  const outerArgumentSchema = {
+    type: "object",
+    properties: { factory: { asFactory: expected } },
+    required: ["factory"],
+  } as const satisfies JSONSchema;
+
+  try {
+    const commonfabric = createTrustedBuilder(runtime).commonfabric;
+    const invokeFactory = (commonfabric as unknown as {
+      invokeFactory: (
+        factory: unknown,
+        input: unknown,
+        contract: typeof expected,
+      ) => unknown;
+    }).invokeFactory;
+    commonfabric.pattern(
+      (input: any) => {
+        const child = invokeFactory(
+          input.factory,
+          { value: "ok" },
+          expected,
+        );
+        assertEquals(getCellOrThrow(child).export().schema, undefined);
+        assertEquals(
+          assertValidPatternParams({ child }, paramsSchema),
+          undefined,
+        );
+        return {};
+      },
+      outerArgumentSchema,
       true,
     );
   } finally {

@@ -5,6 +5,7 @@ import {
   type MergeablePushMisuse,
 } from "../../src/policy/mod.ts";
 import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
+import { registerTrustedCommonFabricTestSources } from "../trusted-commonfabric-sources.ts";
 
 function collectMergeablePushMisuses(
   source: string,
@@ -107,6 +108,9 @@ function createProgramWithFiles(
   };
 
   const program = ts.createProgram([entryFileName], options, host);
+  if (files["/commonfabric.d.ts"] !== undefined) {
+    registerTrustedCommonFabricTestSources(program, ["/commonfabric.d.ts"]);
+  }
   const sourceFile = program.getSourceFile(entryFileName);
   if (!sourceFile) {
     throw new Error("Expected source file in program.");
@@ -2986,11 +2990,9 @@ Deno.test(
 Deno.test(
   "Capability analysis tracks known fixed-symbol element access without wildcard",
   () => {
-    const { program, sourceFile } = createProgramWithSource(
-      `
-      declare const NAME: unique symbol;
-      declare const UI: unique symbol;
-      declare const SELF: unique symbol;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": `
+      import { NAME, UI, SELF } from "commonfabric";
 
       const fn = (input: {
         [NAME]?: string;
@@ -2999,7 +3001,8 @@ Deno.test(
         extra: number;
       }) => [input[NAME], input[UI], input[SELF]];
       `,
-    );
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
     const summary = analyzeFunctionCapabilities(
       findArrowByVariableName(sourceFile, "fn"),
       { checker: program.getTypeChecker() },
@@ -3043,15 +3046,16 @@ Deno.test(
 Deno.test(
   "Capability analysis tracks known fixed-symbol destructuring without wildcard",
   () => {
-    const { program, sourceFile } = createProgramWithSource(
-      `
-      declare const SELF: unique symbol;
+    const { program, sourceFile } = createProgramWithFiles({
+      "/test.ts": `
+      import { SELF } from "commonfabric";
 
       const fn = (
         { [SELF]: self, value }: { [SELF]?: { id: string }; value: string },
       ) => self?.id ?? value;
       `,
-    );
+      "/commonfabric.d.ts": COMMONFABRIC_TYPES["commonfabric.d.ts"]!,
+    });
     const summary = analyzeFunctionCapabilities(
       findArrowByVariableName(sourceFile, "fn"),
       { checker: program.getTypeChecker() },

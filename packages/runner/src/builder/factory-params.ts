@@ -9,6 +9,7 @@ import {
 import { isRecord } from "@commonfabric/utils/types";
 
 import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 import {
   type FactoryContract,
   factoryContractFromSchema,
@@ -16,6 +17,7 @@ import {
 import { isCell } from "../cell.ts";
 import { isCellLink, parseLink } from "../link-utils.ts";
 import { isCellScope } from "../scope.ts";
+import { isTrustedBuilderArtifact } from "./pattern-metadata.ts";
 import { isReactive, type JSONSchema } from "./types.ts";
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -110,16 +112,85 @@ function factoryContractFailure(
     : `factory schema mismatch for ${expected.kind}`;
 }
 
+function producingFactoryResultSchema(value: unknown): JSONSchema | undefined {
+  if (!isCell(value) && !isReactive(value)) return undefined;
+  const exported = value.export();
+  if (!(exported.nodes instanceof Set)) return undefined;
+
+  for (const node of exported.nodes) {
+    if (!isCell(node.outputs) && !isReactive(node.outputs)) continue;
+    const output = node.outputs.export();
+    if (output.cell !== exported.cell) continue;
+    if (
+      output.path.some((segment: PropertyKey, index: number) =>
+        segment !== exported.path[index]
+      )
+    ) continue;
+
+    let resultSchema: JSONSchema | undefined;
+    if (
+      node.expectedFactory?.kind === "pattern" ||
+      node.expectedFactory?.kind === "module"
+    ) {
+      // Dynamic invocation carries a compiler-generated, runner-trusted
+      // call-site contract even though its selected module is symbolic.
+      resultSchema = node.expectedFactory.resultSchema;
+    } else if (
+      isAdmittedFabricFactory(node.module) &&
+      isTrustedBuilderArtifact(node.module)
+    ) {
+      const state = factoryStateOf(node.module);
+      if (state.kind !== "handler") resultSchema = state.resultSchema;
+    }
+    if (resultSchema === undefined) continue;
+    const path = exported.path.slice(output.path.length).map(String);
+    const schema = path.length === 0
+      ? resultSchema
+      : new ContextualFlowControl().getSchemaAtPath(
+        resultSchema,
+        path,
+      );
+    if (schema !== undefined) return schema;
+  }
+  return undefined;
+}
+
+function withLiveResultIfc(
+  contract: JSONSchema | undefined,
+  liveSchema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  if (contract === undefined || liveSchema === undefined) {
+    return liveSchema ?? contract;
+  }
+  if (
+    liveSchema === true || liveSchema === false ||
+    Object.keys(liveSchema).some((key) => key !== "ifc") ||
+    !isRecord(liveSchema.ifc) ||
+    Object.keys(liveSchema.ifc).some((key) => key !== "confidentiality")
+  ) {
+    return liveSchema;
+  }
+
+  const cfc = new ContextualFlowControl();
+  return cfc.schemaWithLub(contract, cfc.lubSchema(liveSchema) ?? []);
+}
+
 function symbolicSchema(value: unknown): JSONSchema | undefined {
   // Eager graph construction can hand curry an opaque Cell whose frame has no
   // runtime space yet. Its authored schema is already available on the Cell;
   // parsing it as a link would incorrectly force identity/space minting during
   // compile-time validation.
   if (isCell(value)) {
-    return value.export().schema;
+    return withLiveResultIfc(
+      producingFactoryResultSchema(value),
+      value.export().schema,
+    );
   }
   if (isReactive(value)) {
-    return value.export().schema;
+    return withLiveResultIfc(
+      producingFactoryResultSchema(value),
+      value.export().schema,
+    );
   }
   if (isCellLink(value)) {
     return parseLink(value).schema;

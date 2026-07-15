@@ -164,7 +164,12 @@ export class CommonFabricFormatter implements TypeFormatter {
     // Fallback: check via aliasSymbol for Default<T> when typeToTypeNode expanded the alias.
     // typeToTypeNode expands Default<T,V> to its branded union representation, losing the
     // "Default" type node. The type object itself still carries aliasSymbol = Default.
-    if (isDefaultAliasSymbol((type as TypeWithInternals).aliasSymbol)) {
+    if (
+      isDefaultAliasSymbol(
+        (type as TypeWithInternals).aliasSymbol,
+        context.typeChecker,
+      )
+    ) {
       return true;
     }
 
@@ -276,7 +281,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     // and V from aliasTypeArguments[1] so the default value is preserved in the schema.
     const typeWithAlias = type as TypeWithInternals;
     if (
-      isDefaultAliasSymbol(typeWithAlias.aliasSymbol) &&
+      isDefaultAliasSymbol(typeWithAlias.aliasSymbol, context.typeChecker) &&
       typeWithAlias.aliasTypeArguments &&
       typeWithAlias.aliasTypeArguments.length >= 1
     ) {

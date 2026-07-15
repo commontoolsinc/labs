@@ -6,6 +6,7 @@ export {
   isCommonFabricDeclaration,
   isCommonFabricModuleName,
   isCommonFabricSymbol,
+  registerCommonFabricDeclarationSources,
 } from "@commonfabric/schema-generator/common-fabric-symbols";
 
 /**
@@ -21,7 +22,7 @@ export function resolvesToCommonFabricSymbol(
   seen.add(symbol);
 
   if (symbol.getName() === targetName) {
-    if (isCommonFabricSymbol(symbol)) {
+    if (isCommonFabricSymbol(symbol, checker)) {
       return true;
     }
   }

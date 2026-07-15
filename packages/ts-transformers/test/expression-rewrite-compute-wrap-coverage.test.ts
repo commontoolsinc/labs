@@ -8,6 +8,7 @@ import {
   findPendingComputeWrapCandidate,
 } from "../src/transformers/expression-rewrite/emitters/compute-wrap-invariants.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
+import { registerTrustedCommonFabricTestSources } from "./trusted-commonfabric-sources.ts";
 
 // These tests exercise the compute-wrap invariant guard that emitters call
 // before adding a compute wrapper. The guard turns a disagreement between the
@@ -66,6 +67,7 @@ function createContext(source: string): {
     options,
     host,
   );
+  registerTrustedCommonFabricTestSources(program, ["commonfabric.d.ts"]);
   const sourceFile = program.getSourceFile(fileName)!;
   const context = new TransformationContext({
     program,

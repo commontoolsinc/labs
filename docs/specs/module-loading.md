@@ -374,8 +374,16 @@ under a schema loads the whole import closure transitively from a single request
    persists.
 
 Each document holds
-`{ code, filename, imports: [{ specifier, link }], delegatedModuleIdentities? }`,
-where `link` is a sigil link to the dependency's document in the same set.
+`{ code, filename, imports: [{ specifier, link }], roots?: [link],
+delegatedModuleIdentities? }`, where each `link` is a sigil link to a document
+in the same set. `imports` contains authored identity-bearing edges. `roots`
+contains synthetic closure-load topology such as generated `cfc.ts` helpers
+that are emitted with an entry but unreachable through authored imports. Only
+`imports` participates in the module Merkle identity. Root sets are monotonic
+and additive because one module identity may be sealed under several entry
+topologies; cache writers preserve existing roots through a narrow pre-synced
+read and append new links by stored-value equality.
+
 `delegatedModuleIdentities` is mutable metadata, excluded from the Merkle
 identity, that records predecessor module hashes whose writer authority the
 current module may exercise. Since content-addressing does not authenticate
@@ -388,12 +396,19 @@ entries and authenticated entries already stored in either document set under
 from the successful commit under the attesting space in the active runtime. It
 never replaces entries, because one content-addressed successor can be shared by
 patterns updated from different predecessors. Because
-`identity` is a one-way Merkle hash, the `imports` links are load-bearing (stored
+The runtime-independent source set can consequently retain helper generations
+from several compiler versions. A runtime-versioned compiled closure selects
+the matching source subset by its compiled identity set. On a version miss,
+cold recovery recompiles only the entry's authored-import-reachable source view
+and lets the current compiler inject current helpers, rather than feeding old
+same-filename root generations back as authored inputs. Because `identity` is a
+one-way Merkle hash, the authored `imports` links are load-bearing (stored
 explicitly), but the parent hash commits to its children's identities, so the
 graph wiring is verifiable on load by recomputing identities and checking each
 against its document key — the content-addressed analog of the structural graph
 verifier. A module shared by N programs is stored once per `(space, identity)`;
-a "program" is just an entry identity over a shared set of module documents.
+a "program" is an entry identity plus its selected closure topology over the
+shared module documents.
 
 This replaces the whole-program `PatternMeta` store after the flag flip (the two
 coexist behind the flag until then). The compiler-version `fingerprint` and

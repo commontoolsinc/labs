@@ -415,7 +415,22 @@ document, accepts an identical existing document as a no-op, and rejects a
 different existing document as an integrity failure. On success, the containing
 write and all of its ensures share one transaction boundary. An `ensure` may
 carry trusted `ignore` document paths for incidental metadata excluded from the
-content identity; clients must not derive those paths from authored values.
+content identity and trusted `addUnique` paths for identity-excluded arrays.
+The server removes both path families before comparing the canonical core. Only
+after that core matches does it union each declared `addUnique` array by stored
+value, recording one atomic patch revision when values were added and no
+revision for an existing superset. `ignore` fields are never merged. Clients
+must not derive either path family from authored values.
+
+An ensure and an authored `set`, `patch`, or `delete` MUST NOT target the same
+resolved `(id, scope)` address in one commit. The server rejects that shape
+before writing a revision. Multiple ensures at the address remain valid only
+when their normalized `ignore` and `addUnique` policies are identical. The
+server rejects the empty root path in either family, deduplicates and
+canonically orders each path family, rejects any ancestor/descendant overlap
+within or between them (including the same path in both families), and performs
+all policy validation before writing a revision. Equivalent policies then apply
+sequentially/idempotently inside the transaction.
 
 ```typescript
 // Shown at module scope.

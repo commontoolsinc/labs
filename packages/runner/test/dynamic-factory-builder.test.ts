@@ -150,13 +150,21 @@ describe("dynamic factory builder node shape", () => {
 
       expect(isReactive(output)).toBe(true);
       expect((output as any).export().name).toBe("result");
+      expect((output as any).export().schema).toEqual(
+        kind === "pattern" ? undefined : RESULT_SCHEMA,
+      );
       expect(built.nodes).toHaveLength(1);
 
       const node = built.nodes[0] as Pattern["nodes"][number];
       expect(node.module).toEqual(
         argumentAlias("operation", factorySchema(expected)),
       );
-      expect(node.outputs).toEqual(derivedAlias("result", RESULT_SCHEMA));
+      expect(node.outputs).toEqual(
+        derivedAlias(
+          "result",
+          kind === "pattern" ? undefined : RESULT_SCHEMA,
+        ),
+      );
 
       // This must be an explicit call-site contract, not merely the authored
       // schema carried by the symbolic module link.

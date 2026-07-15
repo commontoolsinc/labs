@@ -8,7 +8,7 @@ import {
 } from "@commonfabric/data-model/fabric-factory";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import type { Frame } from "../src/builder/types.ts";
+import type { Frame, JSONSchema } from "../src/builder/types.ts";
 import { byRef, handler, lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -85,6 +85,39 @@ describe("builder factory state", () => {
     expect(() => patternFactory({})).not.toThrow();
     expect(() => moduleFactory({ value: 1 })).not.toThrow();
     expect(() => handlerFactory({})).not.toThrow();
+  });
+
+  it("retains the authored pattern result schema as the public factory contract", () => {
+    const publicResultSchema = {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          piece: { type: "object", asCell: ["cell"] },
+        },
+      },
+    } as const satisfies JSONSchema;
+    const factory = pattern(
+      (_input: unknown) => [],
+      true,
+      publicResultSchema,
+    );
+
+    // Pattern graph outputs store cell links, so the execution artifact keeps
+    // its historical link-sanitized schema.
+    expect(factory.resultSchema).toEqual({
+      type: "array",
+      items: {
+        type: "object",
+        properties: { piece: { type: "object" } },
+      },
+    });
+    // Factory@1 describes the public call contract, which must still match the
+    // transformer-emitted asFactory contract exactly.
+    const state = factoryStateOf(factory);
+    expect(state.kind).toBe("pattern");
+    if (state.kind !== "pattern") throw new Error("expected pattern state");
+    expect(state.resultSchema).toEqual(publicResultSchema);
   });
 
   it("shares a root token across modifier derivations while retaining raw modifiers", () => {

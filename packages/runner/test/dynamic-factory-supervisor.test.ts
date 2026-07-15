@@ -678,6 +678,163 @@ describe("dynamic Factory@1 supervisor", () => {
     expect(executions).toEqual([{ factory: "B", value: 6 }]);
   });
 
+  it("retries the same cold factory after a failed load when its source retargets", async () => {
+    const executions: Execution[] = [];
+    const { factoryA } = makeFactories(executions);
+    let loadAttempts = 0;
+    runtime.patternManager.loadArtifactByIdentity = async (
+      identity,
+      symbol,
+    ) => {
+      expect({ identity, symbol }).toEqual(REFS.a);
+      loadAttempts++;
+      if (loadAttempts === 1) {
+        throw new Error("transient cold factory load failure");
+      }
+      warmArtifacts.set(refKey(identity, symbol), factoryA);
+      return factoryA;
+    };
+    const diagnostic = Promise.withResolvers<Error>();
+    runtime.scheduler.onError((error) => diagnostic.resolve(error));
+
+    const stateA = sealFactoryState(factoryA);
+    const sourceA = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-retry-source-a",
+      undefined,
+      tx,
+    );
+    const sourceB = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-retry-source-b",
+      undefined,
+      tx,
+    );
+    const selector = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-retry-selector",
+      undefined,
+      tx,
+    );
+    sourceA.set(createFactoryShell(stateA));
+    sourceB.set(createFactoryShell({ ...stateA }));
+    selector.setRaw(sourceA.getAsWriteRedirectLink());
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "dynamic-factory-retry-result",
+      RESULT_SCHEMA,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outerPattern(),
+      { factory: selector, value: 7 },
+      resultCell,
+    );
+    await commitAndRenew();
+
+    expect(
+      (await within(diagnostic.promise, "transient cold diagnostic")).message,
+    ).toContain("transient cold factory load failure");
+    expect(loadAttempts).toBe(1);
+    expect(executions).toEqual([]);
+
+    // The selected Factory@1 state is unchanged; only its resolved source
+    // changed. A failed readiness generation must not turn that notification
+    // into the ordinary active-child same-state no-op.
+    selector.withTx(tx).setRaw(sourceB.getAsWriteRedirectLink());
+    await commitAndRenew();
+
+    expect(await within(result.pull(), "same-factory retry result")).toEqual({
+      result: 70,
+    });
+    expect(loadAttempts).toBe(2);
+    expect(executions).toEqual([{ factory: "A", value: 7 }]);
+  });
+
+  it("retries a same-state source retarget that lands before cold readiness fails", async () => {
+    const executions: Execution[] = [];
+    const { factoryA } = makeFactories(executions);
+    const firstLoadEntered = Promise.withResolvers<void>();
+    const secondLoadEntered = Promise.withResolvers<void>();
+    const rejectFirstLoad = Promise.withResolvers<void>();
+    let loadAttempts = 0;
+    runtime.patternManager.loadArtifactByIdentity = async (
+      identity,
+      symbol,
+    ) => {
+      expect({ identity, symbol }).toEqual(REFS.a);
+      loadAttempts++;
+      if (loadAttempts === 1) {
+        firstLoadEntered.resolve();
+        await rejectFirstLoad.promise;
+        throw new Error("superseded source load failed");
+      }
+      secondLoadEntered.resolve();
+      warmArtifacts.set(refKey(identity, symbol), factoryA);
+      return factoryA;
+    };
+    const diagnostics: Error[] = [];
+    runtime.scheduler.onError((error) => diagnostics.push(error));
+
+    const stateA = sealFactoryState(factoryA);
+    const sourceA = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-pending-retry-source-a",
+      undefined,
+      tx,
+    );
+    const sourceB = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-pending-retry-source-b",
+      undefined,
+      tx,
+    );
+    const selector = runtime.getCell<unknown>(
+      space,
+      "dynamic-factory-pending-retry-selector",
+      undefined,
+      tx,
+    );
+    sourceA.set(createFactoryShell(stateA));
+    sourceB.set(createFactoryShell({ ...stateA }));
+    selector.setRaw(sourceA.getAsWriteRedirectLink());
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "dynamic-factory-pending-retry-result",
+      RESULT_SCHEMA,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      outerPattern(),
+      { factory: selector, value: 9 },
+      resultCell,
+    );
+    await commitAndRenew();
+    await within(firstLoadEntered.promise, "first source load to enter");
+
+    // Retarget while A is still pending. The Factory@1 state is byte-equal,
+    // but the source provenance changed and must immediately become the next
+    // readiness generation instead of waiting for A to settle.
+    selector.withTx(tx).setRaw(sourceB.withTx(tx).getAsWriteRedirectLink());
+    await commitAndRenew();
+    await within(secondLoadEntered.promise, "retargeted source load to enter");
+    expect(loadAttempts).toBe(2);
+
+    rejectFirstLoad.resolve();
+    expect(await within(result.pull(), "pending source-retarget retry result"))
+      .toEqual({ result: 90 });
+    await runtime.scheduler.idle();
+    expect(loadAttempts).toBe(2);
+    expect(executions).toEqual([{ factory: "A", value: 9 }]);
+    expect(
+      diagnostics.some((error) =>
+        error.message.includes("superseded source load failed")
+      ),
+    ).toBe(false);
+  });
+
   it("does not revive a cold selection after its owning piece is stopped", async () => {
     const executions: Execution[] = [];
     const { factoryA } = makeFactories(executions);

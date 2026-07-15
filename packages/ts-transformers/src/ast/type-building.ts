@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { isCommonFabricSymbol as isTrustedCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import type { TransformationContext } from "../core/mod.ts";
 import type { CaptureTreeNode } from "../utils/capture-tree.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
@@ -55,22 +56,14 @@ export function qualifyCommonFabricTypeRefs(
 ): ts.TypeNode {
   const { factory } = context;
 
-  // Module symbol names are stored with surrounding double quotes for
-  // external modules (e.g. `"commonfabric"`). Match either form.
-  const isCommonFabricModuleName = (name: string | undefined): boolean =>
-    name === "commonfabric" || name === '"commonfabric"';
-
   const buildHelperQualifiedName = (leafName: string): ts.QualifiedName =>
     factory.createQualifiedName(
       factory.createIdentifier("__cfHelpers"),
       factory.createIdentifier(leafName),
     );
 
-  const isCommonFabricSymbol = (sym: ts.Symbol | undefined): boolean => {
-    if (!sym) return false;
-    const parent = (sym as unknown as { parent?: ts.Symbol }).parent;
-    return isCommonFabricModuleName(parent?.name) && !!sym.name;
-  };
+  const isTrustedExportSymbol = (sym: ts.Symbol | undefined): boolean =>
+    !!sym && isTrustedCommonFabricSymbol(sym, context.checker);
 
   // From a Type, find the export name in commonfabric (if any).
   //
@@ -92,11 +85,11 @@ export function qualifyCommonFabricTypeRefs(
   ): string | undefined => {
     if (!type) return undefined;
     if (type.aliasSymbol) {
-      return isCommonFabricSymbol(type.aliasSymbol)
+      return isTrustedExportSymbol(type.aliasSymbol)
         ? type.aliasSymbol.name
         : undefined;
     }
-    return isCommonFabricSymbol(type.symbol) ? type.symbol.name : undefined;
+    return isTrustedExportSymbol(type.symbol) ? type.symbol.name : undefined;
   };
 
   // For a union/intersection member TypeNode, find the constituent Type to
@@ -193,14 +186,16 @@ export function qualifyCommonFabricTypeRefs(
     node: ts.TypeNode,
     pairedType: ts.Type | undefined,
   ): ts.TypeNode => {
-    // `import("commonfabric").X<...>` → `__cfHelpers.X<...>` (syntactic).
+    // `import("commonfabric").X<...>` is rewritten only when its paired type
+    // resolves to a compiler-trusted Common Fabric declaration.
     if (ts.isImportTypeNode(node) && !node.isTypeOf) {
       const arg = node.argument;
       if (
         ts.isLiteralTypeNode(arg) &&
         ts.isStringLiteral(arg.literal) &&
         arg.literal.text === "commonfabric" &&
-        node.qualifier
+        node.qualifier &&
+        commonFabricExportName(pairedType)
       ) {
         const leafName = ts.isIdentifier(node.qualifier)
           ? node.qualifier.text

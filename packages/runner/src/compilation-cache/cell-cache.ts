@@ -599,10 +599,58 @@ interface StoredSourceDoc {
   filename: string;
   imports: { specifier: string; link: unknown }[];
   delegatedModuleIdentities?: string[];
+  // Synthetic closure-only edges are intentionally separate from authored
+  // imports: they make the stored graph load-complete but are not part of the
+  // module's Merkle identity.
+  roots?: unknown[];
   // Optional product annotations — see {@link SourceDoc.annotations}. Stored
   // verbatim; never part of the content identity.
   annotations?: Record<string, unknown>;
 }
+
+/** Flat write/read-back schema: resolve root links without recursively loading. */
+const SOURCE_DOC_WRITE_SCHEMA = {
+  type: "object",
+  properties: {
+    kind: { type: "string" },
+    identity: { type: "string" },
+    code: { type: "string" },
+    filename: { type: "string" },
+    imports: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          specifier: { type: "string" },
+          link: { asCell: ["cell"] },
+        },
+      },
+    },
+    roots: { type: "array", items: { asCell: ["cell"] } },
+    annotations: { type: "object" },
+  },
+} as const satisfies JSONSchema;
+
+const rootCellKey = (cell: Cell<unknown>): string => {
+  const { space, id, path, scope } = cell.getAsNormalizedFullLink();
+  return JSON.stringify([space, id, scope, path]);
+};
+
+/** Existing topology is monotonic; append new roots in deterministic order. */
+const unionRootLinks = (
+  existing: readonly unknown[] | undefined,
+  additions: readonly Cell<unknown>[],
+): unknown[] => {
+  const roots: Cell<unknown>[] = (existing ?? []).filter(isCell);
+  const seen = new Set(roots.map(rootCellKey));
+  for (const addition of additions) {
+    const key = rootCellKey(addition);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    roots.push(addition);
+  }
+  return roots.map((root) => root.getAsLink());
+};
 
 /**
  * Schema for a source-set document. **Recursive**: each `imports[].link` is an
@@ -633,6 +681,10 @@ export const SOURCE_DOC_SCHEMA = {
         delegatedModuleIdentities: {
           type: "array",
           items: { type: "string" },
+        },
+        roots: {
+          type: "array",
+          items: { $ref: "#/$defs/sourceDoc", asCell: ["cell"] },
         },
         // Optional, non-normative product annotations (see SourceDoc).
         annotations: { type: "object" },
@@ -671,6 +723,7 @@ function sourceDocWriteSchema(): JSONSchema {
         items: { type: "string" },
         ifc: { addIntegrity: [COMPILED_INTEGRITY_ATOM] },
       },
+      roots: { type: "array", items: { asCell: ["cell"] } },
       annotations: { type: "object" },
     },
   };
@@ -727,6 +780,13 @@ export const WRITE_TARGET_EDGE_SYNC_SCHEMA = {
         },
       },
     },
+    // Synthetic roots are direct links, not derived import-edge documents.
+    // Pull their stored values without following them so an idempotent
+    // write-back compares against the complete entry document.
+    roots: {
+      type: "array",
+      items: true,
+    },
   },
 } as const satisfies JSONSchema;
 
@@ -764,16 +824,35 @@ export function writeSourceDocs(
       const baseCell = runtime.getCell<StoredSourceDoc>(
         space,
         sourceDocKey(identity),
-        undefined,
+        SOURCE_DOC_WRITE_SCHEMA,
         tx,
       );
-      // Preserve product annotations on the entry doc only. Annotations are
-      // only written there; reading every dependency doc here turns unrelated
-      // stale cache cells into writeback conflict preconditions.
-      const existing = baseCell.get();
+      // Preserve product annotations on the entry doc only. Root topology is
+      // read through its narrow path on every doc so previously published roots
+      // remain monotonic; write-back pre-sync explicitly loads that path. Avoid
+      // a whole-document read here: it would turn unrelated stale cache fields
+      // into writeback conflict preconditions.
       const existingAnnotations = identity === entryIdentity
-        ? existing?.annotations
+        ? baseCell.key("annotations").get()
         : undefined;
+      const existingRoots = baseCell.key("roots").get();
+      const authoredImports = doc.imports.filter((imp) =>
+        !imp.specifier.startsWith(ROOT_LINK_SPECIFIER)
+      );
+      const roots = doc.imports.filter((imp) =>
+        imp.specifier.startsWith(ROOT_LINK_SPECIFIER)
+      );
+      const storedRoots = unionRootLinks(
+        existingRoots,
+        roots.map((imp) =>
+          runtime.getCell(
+            space,
+            sourceDocKey(imp.identity),
+            undefined,
+            tx,
+          )
+        ),
+      );
       const delegatedModuleIdentities = [
         ...(doc.delegatedModuleIdentities ?? []),
       ];
@@ -789,7 +868,7 @@ export function writeSourceDocs(
         identity,
         code: doc.code,
         filename: doc.filename,
-        imports: doc.imports.map((imp) => ({
+        imports: authoredImports.map((imp) => ({
           specifier: imp.specifier,
           link: runtime.getCell(
             space,
@@ -801,6 +880,7 @@ export function writeSourceDocs(
         ...(delegatedModuleIdentities.length > 0
           ? { delegatedModuleIdentities }
           : {}),
+        ...(storedRoots.length > 0 ? { roots: storedRoots } : {}),
         ...(isRecord(existingAnnotations)
           ? { annotations: existingAnnotations }
           : {}),
@@ -875,6 +955,18 @@ export async function loadSourceClosure(
         doc.delegatedModuleIdentities,
       )
       : [];
+    for (const rootLink of doc.roots ?? []) {
+      if (!isCell(rootLink)) continue;
+      const child = (rootLink as Cell<unknown>)
+        .asSchema(SOURCE_DOC_SCHEMA)
+        .get() as StoredSourceDoc | undefined;
+      if (!child || typeof child.identity !== "string") continue;
+      imports.push({
+        specifier: `${ROOT_LINK_SPECIFIER}${child.identity}`,
+        identity: child.identity,
+      });
+      childDocs.push({ doc: child, cell: rootLink as Cell<unknown> });
+    }
     out.set(doc.identity, {
       kind: "source",
       code: doc.code,
@@ -977,6 +1069,7 @@ const compiledDocProperties = {
       },
     },
   },
+  roots: { type: "array", items: { asCell: ["cell"] } },
 } as const;
 
 /**
@@ -1017,6 +1110,10 @@ export const COMPILED_DOC_SCHEMA = {
             },
           },
         },
+        roots: {
+          type: "array",
+          items: { $ref: "#/$defs/compiledDoc", asCell: ["cell"] },
+        },
       },
     },
   },
@@ -1048,6 +1145,7 @@ interface StoredCompiledDoc {
   policyManifests?: readonly unknown[];
   delegatedModuleIdentities?: string[];
   imports: { specifier: string; link: unknown }[];
+  roots?: unknown[];
 }
 
 /**
@@ -1252,6 +1350,28 @@ export function writeCompiledDocs(
       if (policyManifests !== undefined) {
         runtime.registerCfcPolicyManifests(undefined, policyManifests);
       }
+      const refs = storedImportRefs(module, entryIdentity, extraRoots, {
+        includeFabricEdges: true,
+      });
+      const authoredImports = refs.filter((ref) =>
+        !ref.specifier.startsWith(ROOT_LINK_SPECIFIER)
+      );
+      const roots = refs.filter((ref) =>
+        ref.specifier.startsWith(ROOT_LINK_SPECIFIER)
+      );
+      // The write-back target sync loads this narrow path. Preserve its set
+      // without broad-reading the compiled body or import-edge documents.
+      const storedRoots = unionRootLinks(
+        cell.key("roots").get() as unknown[] | undefined,
+        roots.map((ref) =>
+          runtime.getCell(
+            space,
+            compiledDocKey(opts.runtimeVersion, ref.identity),
+            undefined,
+            tx,
+          )
+        ),
+      );
       cell.set({
         kind: "compiled",
         identity: module.identity,
@@ -1272,9 +1392,7 @@ export function writeCompiledDocs(
         ...(delegatedModuleIdentities.length > 0
           ? { delegatedModuleIdentities }
           : {}),
-        imports: storedImportRefs(module, entryIdentity, extraRoots, {
-          includeFabricEdges: true,
-        }).map((ref) => ({
+        imports: authoredImports.map((ref) => ({
           specifier: ref.specifier,
           link: runtime.getCell(
             space,
@@ -1283,6 +1401,7 @@ export function writeCompiledDocs(
             tx,
           ).getAsLink(),
         })),
+        ...(storedRoots.length > 0 ? { roots: storedRoots } : {}),
       } as StoredCompiledDoc);
     }
   });
@@ -1433,6 +1552,18 @@ export async function loadCompiledClosure(
       const child = verifiedDoc(linkedCell.asSchema(COMPILED_DOC_SCHEMA));
       if (child === undefined) continue;
       imports.push({ specifier: imp.specifier, identity: child.identity });
+      if (!visited.has(child.identity)) queue.push({ doc: child });
+    }
+    for (const rootLink of doc.roots ?? []) {
+      if (!isCell(rootLink)) continue;
+      const child = verifiedDoc(
+        (rootLink as Cell<unknown>).asSchema(COMPILED_DOC_SCHEMA),
+      );
+      if (child === undefined) continue;
+      imports.push({
+        specifier: `${ROOT_LINK_SPECIFIER}${child.identity}`,
+        identity: child.identity,
+      });
       if (!visited.has(child.identity)) queue.push({ doc: child });
     }
     out.set(doc.identity, {

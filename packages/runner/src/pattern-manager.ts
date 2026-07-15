@@ -215,6 +215,36 @@ function uniqueCacheableImports(
   return out;
 }
 
+/**
+ * Source recovery recompiles the entry's authored import view only. Synthetic
+ * roots are emitted compiler topology (and may retain several runtime
+ * generations under one content-addressed entry); the current compiler injects
+ * its own helpers. Feeding retained roots back as authored files can introduce
+ * duplicate filenames or select an obsolete ambient generation.
+ */
+function authoredSourceFiles(
+  sourceDocs: ReadonlyMap<string, SourceDoc>,
+  entryIdentity: string,
+): Source[] {
+  const files: Source[] = [];
+  const seen = new Set<string>();
+  const pending = [entryIdentity];
+  while (pending.length > 0) {
+    const identity = pending.shift()!;
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    const doc = sourceDocs.get(identity);
+    if (doc === undefined) continue;
+    files.push({ name: doc.filename, contents: doc.code });
+    for (const imp of doc.imports) {
+      if (!imp.specifier.startsWith(ROOT_LINK_SPECIFIER)) {
+        pending.push(imp.identity);
+      }
+    }
+  }
+  return files;
+}
+
 interface VerifiedArtifactClosure {
   readonly sourceDocs: Map<string, SourceDoc>;
   readonly compiledDocs?: Map<string, CompiledDoc>;
@@ -455,6 +485,7 @@ export class PatternManager {
     entryIdentity: string,
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
+    sourcePublication?: Promise<void>,
   ):
     | readonly NativeStorageCommitOperation[]
     | Promise<readonly NativeStorageCommitOperation[]> {
@@ -472,6 +503,13 @@ export class PatternManager {
     }
 
     return (async () => {
+      // A Cell read may observe a containing value from the speculative local
+      // overlay before that value's artifact ensures are durable. Await only
+      // the exact source-space/content-identity publication generation; warm
+      // verified closures returned above and unrelated publications remain
+      // synchronous and independent.
+      await sourcePublication;
+      if (this.isArtifactAvailableInSpace(entryIdentity, toSpace)) return [];
       await Promise.allSettled([...this.pendingCacheWriteBacks]);
       const closure = await this.loadVerifiedArtifactClosure(
         fromSpace,
@@ -538,6 +576,11 @@ export class PatternManager {
             `Artifact closure ${entryIdentity} produced unexpected ${operation.op} draft operation`,
           );
         }
+        const document = operation.value;
+        const isSourceDocument = isRecord(document) &&
+          isRecord(document.value) && document.value.kind === "source";
+        const isCompiledDocument = isRecord(document) &&
+          isRecord(document.value) && document.value.kind === "compiled";
         return {
           op: "ensure" as const,
           id: operation.id,
@@ -548,9 +591,19 @@ export class PatternManager {
           // of the module's content identity and must not create false
           // mismatches against a pre-existing destination artifact.
           ignore: [
-            toDocumentPath(["value", "annotations"]),
+            ...(isSourceDocument
+              ? [toDocumentPath(["value", "annotations"])]
+              : []),
             toDocumentPath(["cfc"]),
           ],
+          // Synthetic closure roots affect load topology only. Source and
+          // compiled identity exclude them, so the same module may
+          // legitimately be sealed with a different root set in another entry
+          // closure. Union them so the destination retains every published
+          // closure's reachability. Product annotations remain source-only.
+          ...(isSourceDocument || isCompiledDocument
+            ? { addUnique: [toDocumentPath(["value", "roots"])] }
+            : {}),
         };
       });
     } finally {
@@ -839,12 +892,11 @@ export class PatternManager {
       entryIdentity,
       runtimeVersion,
     );
-    if (existing !== undefined) {
-      this.noteArtifactClosureAvailable(toSpace, existing.sourceDocs.keys());
-      return;
-    }
-
     if (fromSpace === toSpace) {
+      if (existing !== undefined) {
+        this.noteArtifactClosureAvailable(toSpace, existing.sourceDocs.keys());
+        return;
+      }
       throw new Error(
         `Artifact closure ${entryIdentity} is unavailable in space ${toSpace}`,
       );
@@ -859,6 +911,23 @@ export class PatternManager {
       throw new Error(
         `Artifact closure ${entryIdentity} is unavailable in source space ${fromSpace}`,
       );
+    }
+    const existingCoversOrigin = existing !== undefined &&
+      [...origin.sourceDocs.keys()].every((identity) =>
+        existing.sourceDocs.has(identity)
+      ) &&
+      (origin.compiledDocs === undefined ||
+        (existing.compiledDocs !== undefined &&
+          [...origin.compiledDocs.keys()].every((identity) =>
+            existing.compiledDocs!.has(identity)
+          )));
+    if (existingCoversOrigin) {
+      // Synthetic roots are topology rather than module identity. A valid
+      // destination can therefore be only a subset of the exact trusted
+      // origin closure; accept it only after proving coverage, while an
+      // existing superset remains an idempotent no-op.
+      this.noteArtifactClosureAvailable(toSpace, existing.sourceDocs.keys());
+      return;
     }
     const modules = this.modulesFromVerifiedArtifactClosure(origin);
 
@@ -885,7 +954,12 @@ export class PatternManager {
       copied === undefined ||
       [...origin.sourceDocs.keys()].some((identity) =>
         !copied.sourceDocs.has(identity)
-      )
+      ) ||
+      (origin.compiledDocs !== undefined &&
+        (copied.compiledDocs === undefined ||
+          [...origin.compiledDocs.keys()].some((identity) =>
+            !copied.compiledDocs!.has(identity)
+          )))
     ) {
       throw new Error(
         `Artifact closure ${entryIdentity} failed verification in destination space ${toSpace}`,
@@ -925,9 +999,6 @@ export class PatternManager {
       );
       if (
         !compiledDocs.has(entryIdentity) ||
-        [...sourceDocs.keys()].some((identity) =>
-          !compiledDocs.has(identity)
-        ) ||
         [...compiledDocs.keys()].some((identity) =>
           !sourceDocs.has(identity)
         ) ||
@@ -936,7 +1007,25 @@ export class PatternManager {
       ) {
         return undefined;
       }
-      return { sourceDocs, compiledDocs, runtimeVersion };
+      // Source roots are monotonic across compiler/runtime generations, while
+      // compiled documents are version-keyed. Select the source view named by
+      // this compiled closure instead of requiring old source-only generations
+      // to appear in the current version's compiled set.
+      const selectedSourceDocs = new Map<string, SourceDoc>();
+      for (const identity of compiledDocs.keys()) {
+        selectedSourceDocs.set(identity, sourceDocs.get(identity)!);
+      }
+      if (
+        [...selectedSourceDocs.values()].some((doc) =>
+          doc.imports.some((imp) =>
+            !imp.specifier.startsWith(ROOT_LINK_SPECIFIER) &&
+            !compiledDocs.has(imp.identity)
+          )
+        )
+      ) {
+        return undefined;
+      }
+      return { sourceDocs: selectedSourceDocs, compiledDocs, runtimeVersion };
     } finally {
       readTx.abort?.("artifact-closure verification complete");
     }
@@ -1828,10 +1917,7 @@ export class PatternManager {
     if (entry === undefined) return false;
     const moduleDelegations = moduleDelegationsFromDocs(sourceDocs);
 
-    const sourceFiles: Source[] = [...sourceDocs.values()].map((doc) => ({
-      name: doc.filename,
-      contents: doc.code,
-    }));
+    const sourceFiles = authoredSourceFiles(sourceDocs, entryIdentity);
 
     const patternCoverage = this.patternCoverageFor();
     try {

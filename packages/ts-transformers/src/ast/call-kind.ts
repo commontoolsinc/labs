@@ -2017,6 +2017,7 @@ function resolveBuilderSymbolKind(
   const importedBuilderName = getImportedCommonFabricNamedExport(
     symbol,
     BUILDER_SYMBOL_NAMES,
+    checker,
   );
   if (importedBuilderName) {
     return {
@@ -2036,9 +2037,7 @@ function resolveBuilderSymbolKind(
   // symbol got here, not in what it is.
   const name = resolved.getName();
   if (
-    BUILDER_SYMBOL_NAMES.has(name) &&
-    (isCommonFabricSymbol(resolved) || isImportedFromCommonFabric(resolved) ||
-      isAmbientSymbol(resolved))
+    BUILDER_SYMBOL_NAMES.has(name) && isCommonFabricSymbol(resolved, checker)
   ) {
     return {
       kind: "builder",
@@ -2097,24 +2096,10 @@ function canUseBuilderSignatureFallback(symbol: ts.Symbol): boolean {
   );
 }
 
-function isImportedFromCommonFabric(symbol: ts.Symbol): boolean {
-  return (symbol.declarations ?? []).some((declaration) => {
-    let current: ts.Node | undefined = declaration;
-    while (current) {
-      if (ts.isImportDeclaration(current)) {
-        return ts.isStringLiteral(current.moduleSpecifier) &&
-          (current.moduleSpecifier.text === "commonfabric" ||
-            current.moduleSpecifier.text === "@commonfabric/common");
-      }
-      current = current.parent;
-    }
-    return false;
-  });
-}
-
 function getImportedCommonFabricNamedExport(
   symbol: ts.Symbol,
   allowedNames: ReadonlySet<string>,
+  checker: ts.TypeChecker,
 ): string | undefined {
   for (const declaration of symbol.declarations ?? []) {
     if (!ts.isImportSpecifier(declaration)) continue;
@@ -2134,21 +2119,16 @@ function getImportedCommonFabricNamedExport(
 
     const importedName = declaration.propertyName?.text ??
       declaration.name.text;
-    if (allowedNames.has(importedName)) {
+    const resolved = checker.getAliasedSymbol(symbol);
+    if (
+      allowedNames.has(importedName) &&
+      resolved &&
+      isCommonFabricSymbol(resolved, checker)
+    ) {
       return importedName;
     }
   }
   return undefined;
-}
-
-function isAmbientSymbol(symbol: ts.Symbol): boolean {
-  const declarations = symbol.declarations ?? [];
-  return declarations.length > 0 &&
-    declarations.every((declaration) =>
-      declaration.getSourceFile().isDeclarationFile ||
-      (ts.getCombinedModifierFlags(declaration) & ts.ModifierFlags.Ambient) !==
-        0
-    );
 }
 
 function resolveSymbolKind(
@@ -2159,6 +2139,7 @@ function resolveSymbolKind(
   const importedName = getImportedCommonFabricNamedExport(
     symbol,
     COMMONFABRIC_CALL_NAMES,
+    checker,
   );
   if (importedName) {
     return createNamedCallKind(importedName, symbol);
@@ -2204,9 +2185,7 @@ function resolveSymbolKind(
   if (
     namedCallKind &&
     (
-      isCommonFabricSymbol(resolved) ||
-      isImportedFromCommonFabric(resolved) ||
-      isAmbientSymbol(resolved)
+      isCommonFabricSymbol(resolved, checker)
     )
   ) {
     return namedCallKind;
@@ -2337,6 +2316,7 @@ function detectCellConstructorExpressionName(
   const importedName = getImportedCommonFabricNamedExport(
     symbol,
     CELL_LIKE_CLASSES,
+    checker,
   );
   if (importedName) return importedName;
 
@@ -2346,7 +2326,7 @@ function detectCellConstructorExpressionName(
   const name = resolved.getName();
   if (
     CELL_LIKE_CLASSES.has(name) &&
-    (isCommonFabricSymbol(resolved) || isImportedFromCommonFabric(resolved))
+    isCommonFabricSymbol(resolved, checker)
   ) {
     return name;
   }

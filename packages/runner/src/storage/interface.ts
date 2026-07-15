@@ -1773,6 +1773,7 @@ export type NativeStorageCommitOperation =
     scope?: CellScope;
     value: FabricValue;
     ignore?: readonly DocumentPath[];
+    addUnique?: readonly DocumentPath[];
   };
 
 export interface NativeStorageCommitPreparation {
@@ -1787,6 +1788,8 @@ export interface NativeStorageCommitPreparation {
     | Promise<readonly NativeStorageCommitOperation[]>;
   /** Runs only after the augmented commit is durably accepted. */
   onConfirmed?: () => void;
+  /** Runs when the containing transaction, preparation, or wire commit fails. */
+  onRejected?: (reason: unknown) => void;
 }
 
 export interface NativeStorageCommit {

@@ -48,22 +48,32 @@ const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((_
             asFactory: {
                 kind: "pattern",
                 argumentSchema: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
+                    $ref: "#/$defs/OperationInput",
+                    $defs: {
+                        OperationInput: {
+                            type: "object",
+                            properties: {
+                                value: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["value"]
                         }
-                    },
-                    required: ["value"]
+                    }
                 },
                 resultSchema: {
-                    type: "object",
-                    properties: {
-                        result: {
-                            type: "number"
+                    $ref: "#/$defs/OperationOutput",
+                    $defs: {
+                        OperationOutput: {
+                            type: "object",
+                            properties: {
+                                result: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["result"]
                         }
-                    },
-                    required: ["result"]
+                    }
                 }
             }
         },
@@ -71,22 +81,32 @@ const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((_
             asFactory: {
                 kind: "module",
                 argumentSchema: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
+                    $ref: "#/$defs/OperationInput",
+                    $defs: {
+                        OperationInput: {
+                            type: "object",
+                            properties: {
+                                value: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["value"]
                         }
-                    },
-                    required: ["value"]
+                    }
                 },
                 resultSchema: {
-                    type: "object",
-                    properties: {
-                        result: {
-                            type: "number"
+                    $ref: "#/$defs/OperationOutput",
+                    $defs: {
+                        OperationOutput: {
+                            type: "object",
+                            properties: {
+                                result: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["result"]
                         }
-                    },
-                    required: ["result"]
+                    }
                 }
             }
         },
@@ -103,13 +123,18 @@ const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((_
                     required: ["value"]
                 },
                 eventSchema: {
-                    type: "object",
-                    properties: {
-                        result: {
-                            type: "number"
+                    $ref: "#/$defs/OperationOutput",
+                    $defs: {
+                        OperationOutput: {
+                            type: "object",
+                            properties: {
+                                result: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["result"]
                         }
-                    },
-                    required: ["result"]
+                    }
                 }
             }
         },
@@ -143,22 +168,32 @@ const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((_
             asFactory: {
                 kind: "pattern",
                 argumentSchema: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
+                    $ref: "#/$defs/OperationInput",
+                    $defs: {
+                        OperationInput: {
+                            type: "object",
+                            properties: {
+                                value: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["value"]
                         }
-                    },
-                    required: ["value"]
+                    }
                 },
                 resultSchema: {
-                    type: "object",
-                    properties: {
-                        result: {
-                            type: "number"
+                    $ref: "#/$defs/OperationOutput",
+                    $defs: {
+                        OperationOutput: {
+                            type: "object",
+                            properties: {
+                                result: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["result"]
                         }
-                    },
-                    required: ["result"]
+                    }
                 }
             }
         },
@@ -166,22 +201,32 @@ const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((_
             asFactory: {
                 kind: "module",
                 argumentSchema: {
-                    type: "object",
-                    properties: {
-                        value: {
-                            type: "number"
+                    $ref: "#/$defs/OperationInput",
+                    $defs: {
+                        OperationInput: {
+                            type: "object",
+                            properties: {
+                                value: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["value"]
                         }
-                    },
-                    required: ["value"]
+                    }
                 },
                 resultSchema: {
-                    type: "object",
-                    properties: {
-                        result: {
-                            type: "number"
+                    $ref: "#/$defs/OperationOutput",
+                    $defs: {
+                        OperationOutput: {
+                            type: "object",
+                            properties: {
+                                result: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["result"]
                         }
-                    },
-                    required: ["result"]
+                    }
                 }
             }
         },
@@ -198,13 +243,18 @@ const __cfPattern_1 = __cfHelpers.pattern(__cfHelpers.withPatternParamsSchema((_
                     required: ["value"]
                 },
                 eventSchema: {
-                    type: "object",
-                    properties: {
-                        result: {
-                            type: "number"
+                    $ref: "#/$defs/OperationOutput",
+                    $defs: {
+                        OperationOutput: {
+                            type: "object",
+                            properties: {
+                                result: {
+                                    type: "number"
+                                }
+                            },
+                            required: ["result"]
                         }
-                    },
-                    required: ["result"]
+                    }
                 }
             }
         },
@@ -359,9 +409,100 @@ export default pattern((__cf_pattern_input_1) => {
                         label: {
                             type: "string"
                         },
-                        patternOperation: true,
-                        moduleOperation: true,
-                        handlerOperation: true,
+                        patternOperation: {
+                            asFactory: {
+                                kind: "pattern",
+                                argumentSchema: {
+                                    $ref: "#/$defs/OperationInput",
+                                    $defs: {
+                                        OperationInput: {
+                                            type: "object",
+                                            properties: {
+                                                value: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["value"]
+                                        }
+                                    }
+                                },
+                                resultSchema: {
+                                    $ref: "#/$defs/OperationOutput",
+                                    $defs: {
+                                        OperationOutput: {
+                                            type: "object",
+                                            properties: {
+                                                result: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["result"]
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        moduleOperation: {
+                            asFactory: {
+                                kind: "module",
+                                argumentSchema: {
+                                    $ref: "#/$defs/OperationInput",
+                                    $defs: {
+                                        OperationInput: {
+                                            type: "object",
+                                            properties: {
+                                                value: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["value"]
+                                        }
+                                    }
+                                },
+                                resultSchema: {
+                                    $ref: "#/$defs/OperationOutput",
+                                    $defs: {
+                                        OperationOutput: {
+                                            type: "object",
+                                            properties: {
+                                                result: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["result"]
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        handlerOperation: {
+                            asFactory: {
+                                kind: "handler",
+                                contextSchema: {
+                                    type: "object",
+                                    properties: {
+                                        value: {
+                                            type: "number"
+                                        }
+                                    },
+                                    required: ["value"]
+                                },
+                                eventSchema: {
+                                    $ref: "#/$defs/OperationOutput",
+                                    $defs: {
+                                        OperationOutput: {
+                                            type: "object",
+                                            properties: {
+                                                result: {
+                                                    type: "number"
+                                                }
+                                            },
+                                            required: ["result"]
+                                        }
+                                    }
+                                }
+                            }
+                        },
                         reserved: {
                             type: "string"
                         }

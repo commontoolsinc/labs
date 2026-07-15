@@ -1361,20 +1361,79 @@ describe("schema-utils", () => {
       expect(byLegacyDefinitions).toHaveProperty("definitions");
     });
 
-    it("preserves and recursively normalizes asFactory", () => {
-      const referenced = {
-        $defs: {
-          Input: {
-            type: "object",
-            properties: { value: { type: "number" } },
+    it("normalizes every nested factory schema as its own ref document", () => {
+      const referenced: JSONSchemaObj = {
+        type: "object",
+        properties: {
+          child: {
+            asFactory: {
+              kind: "pattern",
+              argumentSchema: {
+                $defs: {
+                  Input: {
+                    type: "object",
+                    properties: { value: { type: "number" } },
+                    required: ["value"],
+                  },
+                },
+                $ref: "#/$defs/Input",
+              },
+              resultSchema: {
+                $defs: {
+                  Output: {
+                    type: "object",
+                    properties: { result: { type: "string" } },
+                    required: ["result"],
+                  },
+                },
+                $ref: "#/$defs/Output",
+              },
+            },
           },
         },
+        required: ["child"],
+      };
+      const inline: JSONSchemaObj = {
+        type: "object",
+        properties: {
+          child: {
+            asFactory: {
+              kind: "pattern",
+              argumentSchema: {
+                type: "object",
+                properties: { value: { type: "number" } },
+                required: ["value"],
+              },
+              resultSchema: {
+                type: "object",
+                properties: { result: { type: "string" } },
+                required: ["result"],
+              },
+            },
+          },
+        },
+        required: ["child"],
+      };
+
+      expect(factorySchemasEqual(referenced, inline)).toBe(true);
+    });
+
+    it("preserves and recursively normalizes asFactory", () => {
+      const referenced = {
         asFactory: {
           kind: "pattern",
-          argumentSchema: { $ref: "#/$defs/Input" },
+          argumentSchema: {
+            $defs: {
+              Input: {
+                type: "object",
+                properties: { value: { type: "number" } },
+              },
+            },
+            $ref: "#/$defs/Input",
+          },
           resultSchema: { type: "string" },
         },
-      } as JSONSchema;
+      } satisfies JSONSchema;
       const inline: JSONSchemaObj = {
         asFactory: {
           kind: "pattern",
@@ -1398,24 +1457,158 @@ describe("schema-utils", () => {
 
       expect(factorySchemasEqual(referenced, inline)).toBe(true);
       expect(factorySchemasEqual(referenced, different)).toBe(false);
+
+      const escapedDocument = {
+        $defs: referenced.asFactory.argumentSchema.$defs,
+        asFactory: {
+          ...referenced.asFactory,
+          argumentSchema: { $ref: "#/$defs/Input" },
+        },
+      } as JSONSchema;
+      expect(factorySchemasEqual(escapedDocument, inline)).toBe(false);
     });
 
-    it("fails closed on unresolved, external, malformed, and cyclic refs", () => {
+    it("compares recursive local refs structurally across independent documents", () => {
+      const recursiveNode = (
+        valueType: "string" | "number" = "string",
+      ): JSONSchema => ({
+        $defs: {
+          Node: {
+            type: "object",
+            properties: {
+              value: { type: valueType },
+              next: {
+                anyOf: [
+                  { type: "null" },
+                  { $ref: "#/$defs/Node" },
+                ],
+              },
+            },
+            required: ["value", "next"],
+          },
+        },
+        $ref: "#/$defs/Node",
+      });
+      const inlineRecursive: JSONSchema = {
+        type: "object",
+        properties: {
+          value: { type: "string" },
+          next: {
+            anyOf: [
+              { type: "null" },
+              { $ref: "#" },
+            ],
+          },
+        },
+        required: ["value", "next"],
+      };
+      const aliasedRecursive: JSONSchema = {
+        $defs: {
+          Node: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+              next: {
+                anyOf: [
+                  { type: "null" },
+                  { $ref: "#/$defs/NodeAlias" },
+                ],
+              },
+            },
+            required: ["value", "next"],
+          },
+          NodeAlias: { $ref: "#/$defs/Node" },
+        },
+        $ref: "#/$defs/Node",
+      };
+
+      const left = recursiveNode();
+      const right = recursiveNode();
+      expect(factorySchemasEqual(left, left)).toBe(true);
+      expect(factorySchemasEqual(left, right)).toBe(true);
+      expect(factorySchemasEqual(left, inlineRecursive)).toBe(true);
+      expect(factorySchemasEqual(left, aliasedRecursive)).toBe(true);
+      expect(factorySchemasEqual(left, recursiveNode("number"))).toBe(false);
+      expect(factorySchemasEqual(left, {
+        ...(recursiveNode() as JSONSchemaObj),
+        additionalProperties: false,
+      })).toBe(false);
+
+      expect(factorySchemasEqual(
+        {
+          asFactory: {
+            kind: "pattern",
+            argumentSchema: left,
+            resultSchema: true,
+          },
+        },
+        {
+          asFactory: {
+            kind: "pattern",
+            argumentSchema: right,
+            resultSchema: true,
+          },
+        },
+      )).toBe(true);
+    });
+
+    it("terminates on mutual local ref cycles without conflating structure", () => {
+      const mutualCycle = () =>
+        ({
+          $defs: {
+            Left: {
+              type: "object",
+              properties: { right: { $ref: "#/$defs/Right" } },
+              required: ["right"],
+            },
+            Right: {
+              type: "array",
+              items: { $ref: "#/$defs/Left" },
+            },
+          },
+          $ref: "#/$defs/Left",
+        }) satisfies JSONSchema;
+      const differentCycle = {
+        $defs: {
+          Left: {
+            type: "object",
+            properties: { right: { $ref: "#/$defs/Right" } },
+            required: ["right"],
+          },
+          Right: {
+            type: "object",
+            properties: { left: { $ref: "#/$defs/Left" } },
+            required: ["left"],
+          },
+        },
+        $ref: "#/$defs/Left",
+      } satisfies JSONSchema;
+
+      expect(factorySchemasEqual(mutualCycle(), mutualCycle())).toBe(true);
+      expect(factorySchemasEqual(mutualCycle(), differentCycle)).toBe(false);
+    });
+
+    it("fails closed on unresolved, external, malformed refs and JavaScript cycles", () => {
       const unresolved = { $ref: "#/$defs/Missing" } as JSONSchema;
       const external = { $ref: "other.json#/$defs/Value" } as JSONSchema;
       const malformed = { $ref: "#/$defs/Bad~2escape" } as JSONSchema;
-      const cyclic = {
-        $defs: {
-          Left: { $ref: "#/$defs/Right" },
-          Right: { $ref: "#/$defs/Left" },
-        },
-        $ref: "#/$defs/Left",
-      } as JSONSchema;
 
-      for (const invalid of [unresolved, external, malformed, cyclic]) {
+      for (const invalid of [unresolved, external, malformed]) {
         expect(factorySchemasEqual(invalid, invalid)).toBe(false);
         expect(factorySchemasEqual(invalid, true)).toBe(false);
       }
+
+      const objectCycle: Record<string, unknown> = {
+        type: "object",
+        properties: {},
+      };
+      (objectCycle.properties as Record<string, unknown>).self = objectCycle;
+      expect(
+        factorySchemasEqual(
+          objectCycle as unknown as JSONSchema,
+          objectCycle as unknown as JSONSchema,
+        ),
+      ).toBe(false);
     });
   });
 });

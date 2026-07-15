@@ -19,7 +19,7 @@ import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { parseLink, toMemorySpaceAddress } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -849,11 +849,16 @@ describe("Cell commit callbacks", () => {
         // Seed the storage layer directly to model a cold runtime reading a
         // value that was durably published elsewhere. The ordinary Cell writer
         // correctly refuses to create such a value without publication proof.
-        tx.writeValueOrThrow(
-          arrayCell.getAsNormalizedFullLink(),
+        // Bypass this Runtime's commit hook as well: a normal Runtime-issued
+        // commit now owns factory-artifact publication and correctly rejects a
+        // shell with no local publication proof. The raw storage transaction
+        // models bytes that were already committed by another runtime.
+        const seeded = tx.tx.write(
+          toMemorySpaceAddress(arrayCell.getAsNormalizedFullLink()),
           [{ factory }],
         );
-        await tx.commit();
+        expect(seeded.error).toBeUndefined();
+        await tx.tx.commit();
         tx = runtime.edit();
         const persistedArrayCell = runtime.getCell<
           Array<{ factory: unknown }>
@@ -881,7 +886,7 @@ describe("Cell commit callbacks", () => {
         const resolved = persistedArrayCell.key(0).resolveAsCell();
         expect(
           resolved.getAsNormalizedFullLink().id.startsWith(
-            FABRIC_VALUE_DATA_URI_PREFIX,
+            `data:${DATA_URI_MEDIA_TYPE},`,
           ),
         ).toBe(true);
         expect(() =>

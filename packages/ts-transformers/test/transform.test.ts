@@ -710,6 +710,8 @@ export { value };
 
     const enabledByDefault = await transformFiles({
       "/main.ts": source,
+    }, {
+      types: COMMONFABRIC_TYPES,
     });
     const enabledRoot = parseModule(enabledByDefault["/main.ts"]!);
     assert(callsNamed(enabledRoot, "lift").length >= 1);
@@ -717,11 +719,30 @@ export { value };
 
     const disabled = await transformFiles({
       "/main.ts": `/// <cf-disable-transform />\n${source}`,
+    }, {
+      types: COMMONFABRIC_TYPES,
     });
 
     const disabledRoot = parseModule(disabled["/main.ts"]!);
     assertEquals(callsNamed(disabledRoot, "computed").length, 1);
     assertEquals(callsNamed(disabledRoot, "lift").length, 0);
+  });
+
+  it("rejects an authored source that collides with a trusted type source", async () => {
+    await assertRejects(
+      () =>
+        transformFiles({
+          "/main.ts": `
+            import { pattern } from "commonfabric";
+            export default pattern(() => ({ ok: true }));
+          `,
+          "commonfabric.d.ts": `
+            export declare function pattern<T>(callback: () => T): T;
+          `,
+        }, { types: COMMONFABRIC_TYPES }),
+      Error,
+      "collides with trusted Common Fabric test source",
+    );
   });
 
   it("wraps top-level data candidates with __cfHelpers.__cf_data", async () => {

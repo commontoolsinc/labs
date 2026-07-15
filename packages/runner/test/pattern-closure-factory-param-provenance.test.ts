@@ -205,7 +205,12 @@ describe("factory-valued pattern closure params provenance", () => {
       tx,
     );
     const link = selector.getAsNormalizedFullLink();
-    tx.writeOrThrow({
+    // Model Factory@1 bytes that another runtime already published durably.
+    // A Runtime-issued transaction must retain its production publication
+    // guard and reject this synthetic ref because this test runtime has no
+    // artifact proof yet. Seed through the underlying storage transaction so
+    // the consumer paths below can exercise cold/warm loading and provenance.
+    const seeded = tx.tx.write({
       space: link.space,
       scope: link.scope,
       id: link.id,
@@ -225,7 +230,8 @@ describe("factory-valued pattern closure params provenance", () => {
         },
       },
     });
-    expect((await tx.commit()).error).toBeUndefined();
+    expect(seeded.error).toBeUndefined();
+    expect((await tx.tx.commit()).error).toBeUndefined();
     tx = runtime.edit();
     return runtime.getCellFromLink(link);
   }

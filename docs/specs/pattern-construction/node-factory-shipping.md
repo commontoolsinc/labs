@@ -564,8 +564,12 @@ not create a separate durability exception.
 Publication preserves the memory system's optimistic local-commit contract:
 
 1. The authored write is staged normally. Committing it allocates its
-   `localSeq`, applies it to the local pending overlay, and emits the synchronous
-   speculative commit notification without waiting for artifact I/O.
+   `localSeq` and reserves that sequence's causal wire position before applying
+   it to the local pending overlay or invoking any synchronous subscriber. It
+   then emits the synchronous speculative commit notification without waiting
+   for artifact I/O. A transaction created reentrantly by that notification is
+   therefore optimistic immediately but cannot reserve ahead of the transaction
+   whose value triggered it.
 2. For every warm verified closure, the runner synchronously adds artifact
    ensure operations to the wire commit. A warm publication introduces no
    asynchronous readiness boundary. Every successful source-verification path,
@@ -579,6 +583,11 @@ Publication preserves the memory system's optimistic local-commit contract:
 3. If a trusted source closure is not loaded, the same local commit remains
    speculative while runner-owned preparation loads and verifies it. No
    authored callback or setter becomes asynchronous.
+   Every transaction issued by a `Runtime` performs this artifact-publication
+   preparation from its own `commit()` boundary. Calling
+   `Runtime.prepareTxForCommit()` earlier remains an idempotent eager path for
+   scheduler and CFC work, but correctness never depends on a public
+   transaction caller remembering that separate helper.
 4. Wire submission for that logical session is held until preparation finishes.
    Later transactions may build on the speculative overlay, but their wire
    commits cannot pass the blocked lower `localSeq`.
@@ -625,6 +634,61 @@ Concurrent publication of the same closure is therefore idempotent and does not
 reject either containing write. Different content under one content identity is
 not a harmless race and must fail closed.
 
+Synthetic `cf:cache-root/` edges are closure-load topology, not authored module
+imports and not part of a module's Merkle identity. Stored source documents and
+runtime-versioned compiled documents therefore keep them in a dedicated
+`roots` set, separate from identity-bearing `imports`. Canonical cache writers
+preserve an existing roots set through a narrow, pre-synced path read and append
+new roots in deterministic order; they do not broad-read dependency documents
+or remove roots contributed by another entry topology.
+
+An artifact ensure compares the canonical document core first, excluding only
+its explicitly declared incidental and additive paths. After that core compares
+equal, the server atomically unions the ensure's `roots` into the durable set by
+stored-value equality. Missing roots are added in deterministic input order;
+roots already present, including an existing superset from another entry
+topology, are a no-op. This preserves cold source and compiled reachability when
+the same module document is published first as a dependency and later as an
+entry with generated roots. Generic ignored fields are never merged, and a core
+mismatch still rejects before any additive update.
+
+Cross-space closure verification must compare the trusted origin's complete
+source and runtime-versioned compiled identity sets with the destination. A
+destination that independently verifies but covers only an older topology is
+repaired; a destination superset is accepted without rewriting. Exact-space
+availability is granted only after that coverage proof.
+
+The global source-root set may retain valid synthetic helper generations from
+several compiler/runtime versions. A runtime-versioned compiled closure selects
+the matching source view by its own identity set; older source-only generations
+do not make the current compiled closure incomplete. When the selected runtime
+version has no compiled closure, cold recovery recompiles only the entry's
+authored-import-reachable source view and lets the current compiler inject its
+own synthetic helpers. Retained roots are never fed back as authored input, so
+two valid ambient generations with the same filename cannot shadow one another
+during recovery.
+
+An atomic commit may contain multiple idempotent ensures for one resolved
+address only when their normalized `ignore` and `addUnique` policies agree.
+Every policy path is non-empty: the document root cannot be excluded from the
+identity comparison or treated as an additive set. Policy paths are deduplicated
+and ordered canonically; overlapping paths within or between the two families
+are rejected before any revision, so no declaration order can change which
+content is identity-bearing or additive. A commit must
+not combine an ensure with an authored `set`, `patch`, or `delete` for that
+address. The server resolves scope first and rejects these order-dependent
+shapes before writing any revision, so a containing authored operation cannot
+overwrite the content-addressed artifact it just checked.
+
+When concurrent containing-value commits publish the same module identity from
+different trusted source topologies, each direct runtime transaction carries
+its own complete source ensures. Their additive root sets converge atomically
+at the destination: neither successful commit may discard roots installed by
+the other, and a fresh runtime must be able to verify and traverse both source
+closures. Compiled-root convergence remains the runtime-versioned compilation
+cache's separate replication responsibility; containing-value publication may
+remain source-only because verified source is the cold recovery authority.
+
 Artifact source provenance used during cold preparation is runner-private and
 transient. It is neither serialized into `Factory@1` nor retained by the
 destination. A context-free shell with neither destination availability nor
@@ -635,6 +699,24 @@ This association is only a candidate source location: cold preparation must
 load and verify the complete closure there before the containing commit can
 reach the wire. The association itself grants no execution authority and is
 lost when the runtime or shell is collected.
+The candidate remains valid when the containing Cell and the new write are in
+the same space. A fresh runtime must be able to reread a durable Factory and
+write it to another Cell in that space: cold preparation verifies the existing
+closure and carries idempotent ensures before the new containing value reaches
+the wire. Exact-space availability is still granted only after confirmation.
+If the candidate Cell is itself visible only through a speculative containing
+commit, cold source verification waits for that exact `(space, artifact
+identity)` publication to confirm. This dependency is runner-private and shared
+only by runtimes using the same speculative storage manager; it is not derived
+from Factory state. Warm verified or cached source remains synchronous, and a
+pending publication for another identity or space does not serialize the write.
+Concurrent publishers own the keyed gate by generation: any confirmation makes
+the source usable, while rejection fails dependent preparation only after no
+publisher for that generation can still confirm. Local abort, preparation
+failure, and wire rejection all settle their ownership, so a dependent copy
+fails retryably rather than hanging. A same-space follow-up captures the prior
+generation before registering its own publication and therefore never waits on
+itself.
 When both a verified runner-owned source and a Cell-read candidate exist, the
 verified source wins. The candidate may be an intermediate destination whose
 containing publication is still speculative; it must not make a causally
@@ -984,12 +1066,106 @@ factory argument into a symbolic proxy nor drop a pattern's public schemas.
 
 Version 1 requires the stored factory's canonical public schemas to equal the
 call site's generated schemas after reference resolution and normalization.
+When closure conversion returns a captured factory through a nested pattern,
+the compiler recovers that leaf's public contract in strict provenance order:
+compiler-owned metadata for the concrete builder/value first; then the
+statically resolved public input schema at the binding path of the enclosing
+pattern; and, when neither carries a more specific contract, the expression's
+trusted Common Fabric factory type. An authored input schema may enrich only a
+value already proven factory-typed by a Common Fabric alias/private brand; an
+`asFactory` object alone grants no transformer or runtime authority. The
+compiler attaches the recovered contract to the corresponding result type
+before the enclosing pattern emits its schema. A
+returned factory-valued property must therefore retain its complete nested
+`asFactory` contract; it must never be widened to `true` in the enclosing
+factory's `resultSchema` when the hoisted factory's own emitted result schema
+has the exact factory leaf. Type-directed recovery carries only the public
+kind and schemas; it never invents `FrameworkProvided` authority.
+For anonymous union, nullable, and optional captures, every trusted factory arm
+receives its own compiler hint while non-factory arms remain in the union. The
+synthetic schema writer formats those hinted members in the semantic union
+order used by ordinary type-based generation, so exact alternatives do not
+reorder merely because a contract crossed a closure boundary.
+When the enclosing pattern's authored public input schema supplies a complete,
+flat `anyOf` or `oneOf` containing only factory alternatives and its
+factory-kind counts match every trusted Common Fabric factory type arm, those
+authored alternatives are authoritative as one ordered union contract. The
+compiler carries them together across the private params and nested result
+boundaries; it does not guess a correspondence between same-kind type arms and
+therefore preserves descriptions, constraints, and other schema-only
+distinctions exactly. The generated TypeScript union schema uses the canonical
+`anyOf` container in either case while retaining every authored factory
+alternative exactly.
+
+Mixed unions retain their non-factory arms. When each authored factory
+alternative maps unambiguously by kind to exactly one trusted factory type arm,
+the compiler enriches that arm and leaves alternatives such as `null` or
+`undefined` intact. This includes authored aliases such as
+`type Operation = PatternFactory<I, O>`: the compiler carries the exact trusted
+factory `ts.Type` with the recovered contract and uses the checker's own type
+representation to select the synthetic alias arm. Alias text is only a lookup
+representation after factory provenance and input/output types are proven; it
+never grants factory authority. A non-unique same-kind match fails closed.
+Only a union whose authored factory alternatives truly cannot be mapped
+without guessing is a compile-time error. Once authored factory metadata is
+discovered, an ambiguous mapping must never silently fall back to type-derived
+contracts.
+For a pattern factory, `Factory@1.resultSchema` is the authored public result
+schema passed to `pattern()`, including reactive `asCell` annotations. The
+pattern graph may separately use a link-sanitized result schema that strips
+non-stream `asCell` markers because result documents store links; that internal
+storage schema must never replace the public schema in factory state. Otherwise
+a valid factory whose result contains `Writable` values fails exact call-site
+contract validation during materialization.
+
+That public contract belongs to the factory and the compiler-generated call
+site, not to a live invocation's result-view cell. The serialized graph keeps
+its separate link-sanitized schema as described above. The result view remains
+schema-unconstrained so a downstream whole-result capture does not merge the
+authored contract into the current payload (which can make opaque values such
+as VNodes unreadable). When compiler-only closure binding needs the schema of a
+symbolic child-result path, it derives that path from the trusted producing
+`Factory@1.resultSchema`. It must not attach the public result schema to the
+live view merely to transport contract metadata. Dynamic confidentiality
+labels propagated onto that result view remain authoritative; closure-contract
+validation combines those live labels with the producing factory's public
+content schema rather than letting an IFC-only view schema hide the contract.
+
 Any transformer decision that grants factory call, capture, or trusted metadata
-semantics requires the public alias or private factory-brand symbol to resolve
-to a Common Fabric declaration. A user-defined type merely named
+semantics, including emission of an `asFactory` schema, requires the public
+alias or private factory-brand symbol to resolve to a Common Fabric declaration.
+A declaration is Common Fabric only when the compiler/runtime-module resolver
+has registered that exact TypeScript `SourceFile` object as trusted for the
+current `TypeChecker`. Module specifier strings and file paths are resolution
+inputs, never authority: an authored relative file named `commonfabric.d.ts`,
+an authored path resembling `packages/api`, and an ambient declaration for
+`commonfabric` or `@commonfabric/*` remain untrusted even when they reproduce
+the public aliases and private-brand spelling exactly. Real workspace/package
+API sources and virtual runtime declarations gain authority only through the
+same compiler-owned registration after module resolution.
+That registration stays bound to the resolver-supplied source bytes through
+program assembly. Before a single or batched compile registers a trusted name,
+the resolved program must contain exactly the source the trusted resolver
+returned. An authored source may not shadow a trusted source name, and batch
+unioning must reject the collision in either input order rather than retaining
+one source while carrying authority from the other. Test harnesses that accept
+authored virtual files and compiler-owned type maps enforce the same separation.
+The same exact-source rule covers other schema-generation privileges. Reserved
+computed keys (`UI`, `NAME`, `SELF`, and `FS`) receive their Common Fabric
+meaning only when their symbol comes from a registered declaration source, and
+`Default<T, V>` may change property optionality only when its resolved alias
+does too. An arbitrary unique symbol with a reserved spelling, a locally
+authored `Default`, or either declaration placed at a Common-Fabric-looking
+file path remains ordinary authored TypeScript. Compiler-created
+`__cfHelpers.<key>` nodes may use the reserved-key fast path only when the
+compiler explicitly marks that lookup as synthetic authority; the helper's
+spelling alone is insufficient.
+A user-defined type merely named
 `PatternFactory`, `ModuleFactory`, or `HandlerFactory` remains an ordinary
-callable type. Structural factory detection is confined to schema formatting of
-compiler-owned synthetic types and does not grant runtime or transformer trust.
+callable type and schema generation must never emit `asFactory` for it.
+Compiler-owned synthetic contracts instead carry explicit schema hints; those
+hints provide their exact public schemas without granting authority to a
+structurally similar authored type.
 Because JSON Schema defines `enum` as a set, normalization compares its members
 independently of array order while still requiring the exact same member values.
 This permits schema sanitization and Fabric round-tripping to reorder an enum
@@ -997,6 +1173,29 @@ without creating a false factory-contract mismatch; no other array-valued
 keyword is made order-insensitive by this rule. Schema variance is deferred.
 Local URI-fragment JSON Pointers are split into segments before percent decoding,
 so a `%2F` names a slash inside one property rather than a path separator.
+Every `argumentSchema`, `resultSchema`, `contextSchema`, and `eventSchema`
+inside a nested `asFactory` contract is an independent JSON Schema document.
+Canonical schema writers generate each field in a fresh document context and
+attach the complete transitive local `$defs` subset required by that field;
+they never reuse the containing schema's definition accumulator. Ordinary
+recursive data remains finite through local refs and every emitted field must
+therefore satisfy `factorySchemasEqual(field, field)`, as must the containing
+argument, result, or closure-params schema.
+Normalization resolves its local `$ref`s against that field's own root and
+applies the same rule recursively to deeper factory contracts, while retaining
+object-cycle detection across document boundaries. A nested contract cannot
+borrow `$defs` from its containing value schema. Valid recursive local refs are
+canonicalized as structural back-edges, so independently allocated or
+equivalently inlined recursive documents compare and terminate. Recursion
+structure after ref resolution and every ordinary keyword remain exact.
+Unresolved, external, or malformed refs and direct JavaScript object cycles
+fail closed.
+There is one representability boundary: a factory contract that recursively
+contains the same factory contract would require an infinite tree of
+independently rooted documents. The schema writer rejects that higher-order
+cycle with a source-located compile diagnostic. It must not emit a bare
+`{ "$ref": "#" }` back-edge, silently widen the repeated contract, borrow an
+ancestor's `$defs`, or expand until resource exhaustion.
 Normalization also preserves every own schema key (including `__proto__`) in
 prototype-safe maps; browser object accessors cannot erase a contract difference.
 The resolved trusted artifact is authoritative; wire-carried schema hints never
@@ -1137,13 +1336,25 @@ the canceled promise may finish later, but its transaction and subscriptions
 are generation-fenced and cannot commit. The replacement begins when the
 ordinary scheduler lane advances.
 
-Replaying the same canonical `Factory@1` state is a no-op. If A is cold and B
-is selected before A finishes loading, A may populate the trusted artifact
-cache but can never instantiate; completion is fenced by owner and selection
-generation, and the resumed attempt rereads the binding. A deterministic
-missing/forged/wrong-kind/schema failure fails the current generation closed
-but a later valid selection may recover. A source-load rejection also fails the
-current preparation attempt; a later selector/input change begins a fresh one.
+Replaying the same canonical `Factory@1` state is a no-op while the selection
+has an active child or a still-valid readiness attempt. It is not a no-op after
+that selection's readiness attempt failed: a later selector notification,
+including a redirect retarget to the same canonical factory state, creates a
+fresh generation, rereads source provenance, and may retry. This applies to
+both artifact loading and named execution-space resolution. Source provenance
+is also part of the ownership of a pending readiness attempt: if a redirect
+retargets from source A to source B while preserving byte-equal canonical
+factory state, the supervisor starts B's readiness in a fresh generation
+immediately rather than waiting for A to settle. Replaying the same state
+through the same source chain remains a no-op. Any later completion or
+rejection from A is fenced and cannot instantiate or report against B. More
+generally, if A is cold and B is selected before A finishes loading, A may
+populate the trusted artifact cache but can never instantiate; completion is
+fenced by owner and selection generation, and the resumed attempt rereads the
+binding. A deterministic missing/forged/wrong-kind/schema failure fails the
+current generation closed but a later valid selection may recover. A
+source-load or space-resolution rejection also fails the current preparation
+attempt; a later selector/input change begins a fresh one.
 
 The stable output spot remains the cause/identity anchor, matching existing
 sub-pattern and list-builtin invariants. The binding and selected canonical
@@ -1241,6 +1452,15 @@ to stored Cells, handler event payloads, result bindings, query-result writes,
 runtime-client, CLI, and FUSE writes.
 The bare `Factory@1` wire state remains only `{ identity, symbol }` and never
 names or grants an artifact source space.
+
+Root setup and synchronous `run()` accept first-class pattern and module
+factories, but not a first-class handler factory. The runner rejects
+`kind: "handler"` from canonical factory state before loading source or writing
+piece state, identically for a trusted live factory and a decoded shell.
+Transaction-bound setup and `run()` perform the same check synchronously;
+Promise-based non-transactional setup rejects its returned promise. This
+first-class kind check does not reclassify legacy raw module/handler execution
+descriptors, whose compatibility path remains separate.
 
 An `$implRef` does not feed this resolver as a factory ref. It names only an
 implementation function and omits module/handler configuration. The surrounding

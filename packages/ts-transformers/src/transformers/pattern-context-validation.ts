@@ -1237,7 +1237,7 @@ export class PatternContextValidationTransformer
         detectTrustedFactoryType(member, checker) !== undefined &&
         checker.getPropertiesOfType(member).some((property) =>
           property.getName().startsWith("__@FABRIC_FACTORY_TYPE") &&
-          isCommonFabricSymbol(property)
+          isCommonFabricSymbol(property, checker)
         )
       );
   }

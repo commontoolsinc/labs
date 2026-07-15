@@ -49,6 +49,8 @@ export class SchemaGenerator implements ISchemaGenerator {
   private anonymousNames: WeakMap<ts.Type, string> = new WeakMap();
   /** Counter to generate stable synthetic identifiers */
   private anonymousNameCounter: number = 0;
+  /** Contract-document types on the current synchronous generation path. */
+  private activeFactoryContractTypes = new Set<ts.Type>();
 
   /**
    * Generate JSON Schema for a TypeScript type.
@@ -109,16 +111,31 @@ export class SchemaGenerator implements ISchemaGenerator {
     type: ts.Type,
     checker: ts.TypeChecker,
   ): JSONSchemaMutable {
-    return this.generateSchemaInternal(
-      type,
-      checker,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      true,
-    );
+    if (this.activeFactoryContractTypes.has(type)) {
+      const symbol = type.aliasSymbol ?? type.getSymbol();
+      const declaration = symbol?.getDeclarations()?.[0];
+      const location = declaration
+        ? (() => {
+          const source = declaration.getSourceFile();
+          const { line, character } = source.getLineAndCharacterOfPosition(
+            declaration.getStart(source),
+          );
+          return `${source.fileName}:${line + 1}:${character + 1}`;
+        })()
+        : "unknown location";
+      throw new Error(
+        `${location}: Recursive nested factory contract for ` +
+          `'${checker.typeToString(type)}' cannot be emitted as a finite ` +
+          "self-contained schema document",
+      );
+    }
+
+    this.activeFactoryContractTypes.add(type);
+    try {
+      return this.generateSchemaInternal(type, checker);
+    } finally {
+      this.activeFactoryContractTypes.delete(type);
+    }
   }
 
   /**
@@ -133,7 +150,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     options?: { widenLiterals?: boolean },
     schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
-    factoryContractDocument = false,
   ): JSONSchemaMutable {
     // Create unified context with all state
     const cycles = this.getCycles(type, checker);
@@ -163,7 +179,6 @@ export class SchemaGenerator implements ISchemaGenerator {
       ...(typeRegistry && { typeRegistry }),
       ...(options?.widenLiterals && { widenLiterals: true }),
       ...(schemaHints && { schemaHints }),
-      ...(factoryContractDocument && { factoryContractDocument: true }),
     };
 
     // Auto-detect: Should we use node-based or type-based analysis?
@@ -745,6 +760,22 @@ export class SchemaGenerator implements ISchemaGenerator {
     context: GenerationContext,
   ): JSONSchemaMutable {
     const typeRegistry = context.typeRegistry;
+    const factoryContracts = context.schemaHints?.get(typeNode)
+      ?.factoryContracts ??
+      context.schemaHints?.get(ts.getOriginalNode(typeNode))?.factoryContracts;
+    if (factoryContracts?.length) {
+      // A node-scoped factory contract is compiler-owned provenance for a
+      // synthetic type that may be unbound (`any`) in checker APIs. Route it
+      // through FactoryFormatter before structural node fallbacks; ordinary
+      // authored lookalikes have no such hint and receive no factory meaning.
+      const hintedType = typeRegistry?.get(typeNode) ?? checker.getAnyType();
+      const { typeNode: _, ...baseContext } = context;
+      return this.formatType(
+        hintedType,
+        { ...baseContext, typeNode },
+        false,
+      );
+    }
 
     // Handle TypeLiteral nodes (object types)
     if (ts.isTypeLiteralNode(typeNode)) {
@@ -850,9 +881,16 @@ export class SchemaGenerator implements ISchemaGenerator {
     // explicitly. Keyword types (string, number, boolean, undefined, null) are
     // resolved directly by the switch below, so they never cause widening.
     if (ts.isUnionTypeNode(typeNode)) {
-      const memberSchemas = typeNode.types.map((member) =>
-        this.analyzeTypeNodeStructure(member, checker, context)
-      );
+      const memberSchemas = typeNode.types.map((member) => {
+        const memberType = typeRegistry?.get(member) ??
+          checker.getTypeFromTypeNode(member);
+        // Route each arm through the ordinary child formatter so node-scoped
+        // compiler hints (notably exact asFactory contracts) and wrapper
+        // semantics are honored. `any`/unbound synthetic arms still fall back
+        // to node analysis inside formatChildType, preserving keyword and
+        // ordinary non-factory union behavior.
+        return this.formatChildType(memberType, context, member);
+      });
       if (memberSchemas.some((schema) => schema === true)) {
         return true;
       }

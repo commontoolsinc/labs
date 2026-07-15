@@ -515,6 +515,8 @@ const createHarness = () => {
         preparations?: Array<{
           key: string;
           prepare: () => Promise<readonly unknown[]> | readonly unknown[];
+          onConfirmed?: () => void;
+          onRejected?: (reason: unknown) => void;
         }>;
         schedulerObservation?: unknown;
       },
@@ -1004,8 +1006,70 @@ Deno.test("memory v2 keeps cold prepared commits optimistic while preserving wir
   }
 });
 
+Deno.test("memory v2 reserves wire order before reentrant optimistic notifications", async () => {
+  const harness = createHarness();
+  let second:
+    | Promise<
+      | { ok: Record<PropertyKey, never>; error?: undefined }
+      | {
+        ok?: undefined;
+        error: { name?: string; message?: string };
+      }
+    >
+    | undefined;
+  try {
+    harness.notifications.onNotification = (notification) => {
+      if (second !== undefined || notification.type !== "commit") return;
+      const changedIds = "changes" in notification
+        ? [...notification.changes].map((change) => change.address.id)
+        : [];
+      if (!changedIds.includes(DOCS.A)) return;
+
+      second = harness.replica.commitNative({
+        operations: [{
+          op: "set",
+          id: DOCS.B,
+          type: DOCUMENT_MIME,
+          value: { value: valueFor("second") },
+        }],
+      }, sourceFromReads([{ id: DOCS.A }]));
+    };
+
+    const first = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("first") },
+      }],
+    });
+
+    assertExists(second);
+    assertEquals(visibleValue(harness.provider, DOCS.A), valueFor("first"));
+    assertEquals(visibleValue(harness.provider, DOCS.B), valueFor("second"));
+    assertEquals(await first, { ok: {} });
+    assertEquals(await second, { ok: {} });
+    assertEquals(harness.model.transactLocalSeqs, [1, 2]);
+    assertEquals(
+      harness.model.applied.get(2)?.commit.reads.pending.map((read) => ({
+        id: read.id,
+        path: [...read.path],
+        localSeq: read.localSeq,
+      })),
+      [{
+        id: DOCS.A,
+        path: ["value"],
+        localSeq: 1,
+      }],
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 releases the causal wire turn when preparation rejects", async () => {
   const harness = createHarness();
+  let observedRejection: unknown;
   try {
     const first = harness.replica.commitNative({
       operations: [{
@@ -1017,6 +1081,9 @@ Deno.test("memory v2 releases the causal wire turn when preparation rejects", as
       preparations: [{
         key: "artifact:rejected",
         prepare: () => Promise.reject(new Error("artifact preparation failed")),
+        onRejected: (reason) => {
+          observedRejection = reason;
+        },
       }],
     });
     const second = harness.replica.commitNative({
@@ -1033,6 +1100,7 @@ Deno.test("memory v2 releases the causal wire turn when preparation rejects", as
     assert(
       String(rejected.error.message).includes("artifact preparation failed"),
     );
+    assertStrictEquals(observedRejection, rejected.error);
     assertEquals(await second, { ok: {} });
     assertEquals(harness.model.transactLocalSeqs, [2]);
   } finally {

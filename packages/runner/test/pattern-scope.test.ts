@@ -77,7 +77,7 @@ Deno.test("Cell.key keeps base scope; schema carries the scope", async () => {
   }
 });
 
-Deno.test("pattern invocation makes unevaluated item schemas scope-silent", async () => {
+Deno.test("pattern invocation keeps authored result schemas off the live view", async () => {
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
@@ -94,14 +94,7 @@ Deno.test("pattern invocation makes unevaluated item schemas scope-silent", asyn
 
     pattern(() => {
       const child = Child({});
-      const schema = getCellOrThrow(child).export().schema as Record<
-        string,
-        unknown
-      >;
-      assertEquals(
-        (schema.unevaluatedItems as Record<string, unknown>).scope,
-        undefined,
-      );
+      assertEquals(getCellOrThrow(child).export().schema, undefined);
       return {};
     });
   } finally {

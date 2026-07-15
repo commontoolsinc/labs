@@ -25,6 +25,11 @@ import {
   updatePatternBuilderCallbackArgument,
 } from "../../src/ast/call-kind.ts";
 import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
+import { registerTrustedCommonFabricTestSources } from "../trusted-commonfabric-sources.ts";
+import {
+  TRUSTED_COMMONFABRIC_GLOBALS,
+  TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME,
+} from "../trusted-commonfabric-sources.ts";
 
 // Harness A: a bare source-file-only program (no lib, no module resolution).
 // Mirrors the setup in call-kind.test.ts for cases that need only structural
@@ -48,19 +53,43 @@ function createProgram(source: string): {
     compilerOptions.target!,
     true,
   );
+  const commonFabricSourceFile = ts.createSourceFile(
+    TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME,
+    TRUSTED_COMMONFABRIC_GLOBALS,
+    compilerOptions.target!,
+    true,
+  );
 
   const host = ts.createCompilerHost(compilerOptions, true);
-  host.getSourceFile = (name) => name === fileName ? sourceFile : undefined;
+  host.getSourceFile = (name) =>
+    name === fileName
+      ? sourceFile
+      : name === TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME
+      ? commonFabricSourceFile
+      : undefined;
   host.getCurrentDirectory = () => "/";
   host.getDirectories = () => [];
-  host.fileExists = (name) => name === fileName;
-  host.readFile = (name) => name === fileName ? source : undefined;
+  host.fileExists = (name) =>
+    name === fileName || name === TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME;
+  host.readFile = (name) =>
+    name === fileName
+      ? source
+      : name === TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME
+      ? TRUSTED_COMMONFABRIC_GLOBALS
+      : undefined;
   host.writeFile = () => {};
   host.useCaseSensitiveFileNames = () => true;
   host.getCanonicalFileName = (name) => name;
   host.getNewLine = () => "\n";
 
-  const program = ts.createProgram([fileName], compilerOptions, host);
+  const program = ts.createProgram(
+    [fileName, TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME],
+    compilerOptions,
+    host,
+  );
+  registerTrustedCommonFabricTestSources(program, [
+    TRUSTED_COMMONFABRIC_GLOBALS_SOURCE_NAME,
+  ]);
   return { sourceFile, checker: program.getTypeChecker() };
 }
 
@@ -112,6 +141,7 @@ function createProgramWithCommonFabric(source: string): {
       }),
   };
   const program = ts.createProgram(["/test.ts"], options, host);
+  registerTrustedCommonFabricTestSources(program, ["/commonfabric.d.ts"]);
   return {
     sourceFile: program.getSourceFile("/test.ts")!,
     checker: program.getTypeChecker(),

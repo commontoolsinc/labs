@@ -26,6 +26,7 @@ import {
 import { unwrapExpression } from "../../utils/expression.ts";
 import {
   type PatternFactorySchemaContractHint,
+  propagateFactoryContractHints,
   resolvePatternFactorySchemaContract,
 } from "../../transformers/schema-injection.ts";
 import { CaptureCollector } from "../capture-collector.ts";
@@ -144,6 +145,16 @@ export class PatternStrategy implements ClosureTransformationStrategy {
       context.factory,
     );
 
+    const captureProperties = buildCapturePropertyAssignments(
+      captureTree,
+      context.factory,
+    );
+    preserveCaptureReferenceOrigins(captureProperties, captureTree);
+    const captures = context.factory.createObjectLiteralExpression(
+      captureProperties,
+      captureTree.size > 1,
+    );
+
     const hasUnrepresentableCapture = reportUnrepresentableCaptureSchemas(
       captureTree,
       context,
@@ -151,6 +162,9 @@ export class PatternStrategy implements ClosureTransformationStrategy {
     const paramsType = hasUnrepresentableCapture
       ? context.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword)
       : new SchemaFactory(context).createHandlerStateSchema(captureTree);
+    if (!hasUnrepresentableCapture) {
+      propagateFactoryContractHints(captures, paramsType, context);
+    }
     const paramsSchema = context.cfHelpers.createHelperCall(
       "toSchema",
       callback,
@@ -169,15 +183,6 @@ export class PatternStrategy implements ClosureTransformationStrategy {
       node,
       node.typeArguments,
       [wrappedCallback, ...node.arguments.slice(1)],
-    );
-    const captureProperties = buildCapturePropertyAssignments(
-      captureTree,
-      context.factory,
-    );
-    preserveCaptureReferenceOrigins(captureProperties, captureTree);
-    const captures = context.factory.createObjectLiteralExpression(
-      captureProperties,
-      captureTree.size > 1,
     );
 
     const curriedPattern = context.factory.createCallExpression(

@@ -8,12 +8,39 @@ import {
   transformCfDirective,
 } from "../src/mod.ts";
 import { assert } from "@std/assert";
+import {
+  registerTrustedCommonFabricTestSources,
+  sharedCommonFabricTestSourceNames,
+} from "./trusted-commonfabric-sources.ts";
 
 const ENV_TYPE_ENTRIES = ["es2023", "dom", "jsx"] as const;
 
 type EnvTypeKey = (typeof ENV_TYPE_ENTRIES)[number];
 let envTypesCache: Record<EnvTypeKey, string> | undefined;
 let sourceFileCache: Map<string, ts.SourceFile> | undefined;
+
+function registerTestCommonFabricSource(
+  program: ts.Program,
+  types: Record<string, string>,
+): void {
+  registerTrustedCommonFabricTestSources(
+    program,
+    sharedCommonFabricTestSourceNames(types),
+  );
+}
+
+function assertNoTrustedCommonFabricTestSourceCollisions(
+  authoredFiles: Readonly<Record<string, string>>,
+  types: Readonly<Record<string, string>>,
+): void {
+  for (const sourceName of sharedCommonFabricTestSourceNames(types)) {
+    if (Object.hasOwn(authoredFiles, sourceName)) {
+      throw new Error(
+        `Authored source '${sourceName}' collides with trusted Common Fabric test source`,
+      );
+    }
+  }
+}
 
 export interface TransformOptions {
   mode?: "transform" | "error";
@@ -49,6 +76,7 @@ export async function batchTypeCheckFixtures(
   options: { types?: Record<string, string> } = {},
 ): Promise<BatchTypeCheckResult> {
   const { types = {} } = options;
+  assertNoTrustedCommonFabricTestSourceCollisions(files, types);
 
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
@@ -237,6 +265,7 @@ export async function batchTypeCheckFixtures(
   const rootFiles = [...Object.keys(transformedFiles), ...typeDefFiles];
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
+  registerTestCommonFabricSource(program, types);
 
   // Get all diagnostics
   const diagnostics = ts.getPreEmitDiagnostics(program);
@@ -291,6 +320,7 @@ export async function transformFiles(
     logger,
     typeCheck = false,
   } = options;
+  assertNoTrustedCommonFabricTestSourceCollisions(inFiles, types);
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
   }
@@ -476,6 +506,7 @@ export async function transformFiles(
   const rootFiles = [...Object.keys(files), ...typeDefFiles];
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
+  registerTestCommonFabricSource(program, types);
 
   // Type checking - only run diagnostics if needed
   if (typeCheck || logger) {
@@ -652,6 +683,7 @@ export async function validateFiles(
     types = {},
     logger,
   } = options;
+  assertNoTrustedCommonFabricTestSourceCollisions(inFiles, types);
   if (!envTypesCache) {
     envTypesCache = await loadEnvironmentTypes();
   }
@@ -821,6 +853,7 @@ export async function validateFiles(
   const rootFiles = [...Object.keys(files), ...typeDefFiles];
 
   const program = ts.createProgram(rootFiles, compilerOptions, host);
+  registerTestCommonFabricSource(program, types);
   const pipeline = new CommonFabricTransformerPipeline({
     mode,
     logger,

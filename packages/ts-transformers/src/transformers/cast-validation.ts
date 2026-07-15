@@ -9,10 +9,8 @@
 import ts from "typescript";
 import { spellingsWhere } from "@commonfabric/schema-generator/wrapper-names";
 import {
-  getImportTypeModuleName,
   HelpersOnlyTransformer,
   isCommonFabricDeclaration,
-  isCommonFabricModuleName,
   TransformationContext,
 } from "../core/mod.ts";
 
@@ -284,27 +282,20 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
       );
     }
     if (ts.isImportTypeNode(typeNode)) {
-      return this.resolveImportTypeName(typeNode);
+      return this.resolveImportTypeName(typeNode, context, seenSymbols);
     }
     return undefined;
   }
 
   private resolveImportTypeName(
     typeNode: ts.ImportTypeNode,
+    context: TransformationContext,
+    seenSymbols: Set<ts.Symbol>,
   ): string | undefined {
     const qualifier = typeNode.qualifier;
-    const moduleName = getImportTypeModuleName(typeNode);
-    if (
-      !qualifier ||
-      !moduleName ||
-      !isCommonFabricModuleName(moduleName)
-    ) {
-      return undefined;
-    }
-    const typeName = ts.isIdentifier(qualifier)
-      ? qualifier.text
-      : qualifier.right.text;
-    return this.isWrapperTypeName(typeName) ? typeName : undefined;
+    return qualifier
+      ? this.resolveWrapperTypeName(qualifier, context, seenSymbols)
+      : undefined;
   }
 
   private resolveWrapperTypeName(
@@ -338,7 +329,7 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
     const symbolName = symbol.getName();
     if (
       this.isWrapperTypeName(symbolName) &&
-      this.hasCommonFabricDeclaration(symbol)
+      this.hasCommonFabricDeclaration(symbol, context.checker)
     ) {
       return symbolName;
     }
@@ -397,9 +388,12 @@ export class CastValidationTransformer extends HelpersOnlyTransformer {
       CELL_LIKE_TYPE_NAMES.has(typeName);
   }
 
-  private hasCommonFabricDeclaration(symbol: ts.Symbol): boolean {
+  private hasCommonFabricDeclaration(
+    symbol: ts.Symbol,
+    checker: ts.TypeChecker,
+  ): boolean {
     return (symbol.declarations ?? []).some((declaration) =>
-      isCommonFabricDeclaration(declaration)
+      isCommonFabricDeclaration(declaration, checker)
     );
   }
 }

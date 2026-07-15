@@ -3,54 +3,199 @@ import { expect } from "@std/expect";
 import ts from "typescript";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
 import { detectTrustedFactoryType } from "../../src/formatters/factory-formatter.ts";
-import { asObjectSchema, getTypeFromCode } from "../utils.ts";
+import { registerCommonFabricDeclarationSources } from "../../src/typescript/common-fabric-symbols.ts";
+import { asObjectSchema, getTypeFromCode, getTypeFromFiles } from "../utils.ts";
 
 const FACTORY_DECLARATIONS = `
-  declare const FABRIC_FACTORY_TYPE: unique symbol;
-  declare const EXTRA_BRAND: unique symbol;
+  export declare const FABRIC_FACTORY_TYPE: unique symbol;
+  export declare const EXTRA_BRAND: unique symbol;
 
-  type FactoryInput<T> = T;
-  type FabricFactory<Args extends unknown[], Result> = {
+  export type FactoryInput<T> = T;
+  export type FabricFactory<Args extends unknown[], Result> = {
     readonly [FABRIC_FACTORY_TYPE]: { readonly args: Args; readonly result: Result };
   };
-  type PatternFactory<T, R> =
+  export type PatternFactory<T, R> =
     & ((inputs: FactoryInput<T>) => Reactive<R>)
     & FabricFactory<[FactoryInput<T>], Reactive<R>>
     & { argumentSchema: object; resultSchema: object };
-  type ModuleFactory<T, R> =
+  export type ModuleFactory<T, R> =
     & ((inputs: FactoryInput<T>) => Reactive<R>)
     & FabricFactory<[FactoryInput<T>], Reactive<R>>
     & { type: "ref" | "javascript" };
-  type HandlerFactory<T, E> =
+  export type HandlerFactory<T, E> =
     & ((context: FactoryInput<T>) => Stream<E>)
     & FabricFactory<[FactoryInput<T>], Stream<E>>
     & { type: "ref" | "javascript"; with(inputs: FactoryInput<T>): Stream<E> };
 
-  type PatternAlias<T, R> = PatternFactory<T, R>;
-  type BrandedModule<T, R> = ModuleFactory<T, R> & {
+  export type PatternAlias<T, R> = PatternFactory<T, R>;
+  export type BrandedModule<T, R> = ModuleFactory<T, R> & {
     readonly [EXTRA_BRAND]: true;
   };
 `;
+
+const FACTORY_IMPORTS = `
+  import type {
+    BrandedModule,
+    HandlerFactory,
+    ModuleFactory,
+    PatternAlias,
+    PatternFactory,
+  } from "./$builtins/commonfabric.d.ts";
+`;
+
+const getTrustedFactoryType = async (code: string, typeName: string) => {
+  const result = await getTypeFromFiles(
+    {
+      "/$builtins/commonfabric.d.ts": FACTORY_DECLARATIONS,
+      "/test.ts": `${FACTORY_IMPORTS}\n${code}`,
+    },
+    "/test.ts",
+    typeName,
+  );
+  const builtin = result.program.getSourceFile(
+    "/$builtins/commonfabric.d.ts",
+  );
+  if (!builtin) throw new Error("Expected compiler-owned Common Fabric types");
+  registerCommonFabricDeclarationSources(result.checker, [builtin]);
+  return result;
+};
+
+const FACTORY_SCHEMA_FIELDS = new Set([
+  "argumentSchema",
+  "resultSchema",
+  "contextSchema",
+  "eventSchema",
+]);
+
+function collectFactorySchemaDocuments(value: unknown): unknown[] {
+  const documents: unknown[] = [];
+  const visit = (current: unknown) => {
+    if (!current || typeof current !== "object") return;
+    if (Array.isArray(current)) {
+      current.forEach(visit);
+      return;
+    }
+    for (const [key, child] of Object.entries(current)) {
+      if (FACTORY_SCHEMA_FIELDS.has(key)) documents.push(child);
+      visit(child);
+    }
+  };
+  visit(value);
+  return documents;
+}
+
+function hasOnlyResolvableLocalRefs(document: unknown): boolean {
+  if (!document || typeof document !== "object") return true;
+  const root = document as Record<string, unknown>;
+  const active = new Set<object>();
+  const resolve = (ref: string): unknown => {
+    if (ref === "#") return root;
+    if (!ref.startsWith("#/")) return undefined;
+    let current: unknown = root;
+    for (const encoded of ref.slice(2).split("/")) {
+      const key = decodeURIComponent(encoded).replaceAll("~1", "/").replaceAll(
+        "~0",
+        "~",
+      );
+      if (!current || typeof current !== "object" || !(key in current)) {
+        return undefined;
+      }
+      current = (current as Record<string, unknown>)[key];
+    }
+    return current;
+  };
+  const visit = (value: unknown): boolean => {
+    if (!value || typeof value !== "object") return true;
+    if (active.has(value)) return true;
+    active.add(value);
+    try {
+      if (Array.isArray(value)) return value.every(visit);
+      for (const [key, child] of Object.entries(value)) {
+        if (FACTORY_SCHEMA_FIELDS.has(key)) continue;
+        if (key === "$ref") {
+          if (typeof child !== "string") return false;
+          const target = resolve(child);
+          if (target === undefined || !visit(target)) return false;
+        } else if (!visit(child)) {
+          return false;
+        }
+      }
+      return true;
+    } finally {
+      active.delete(value);
+    }
+  };
+  return visit(root);
+}
 
 describe("Schema: factory types", () => {
   it("does not grant factory semantics to a user type merely named PatternFactory", async () => {
     const code = `
       type PatternFactory<T, R> = (input: T) => R;
-      type SchemaRoot = PatternFactory<{ value: number }, string>;
+      interface SchemaRoot {
+        operation: PatternFactory<{ value: number }, string>;
+      }
     `;
     const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
     expect(detectTrustedFactoryType(type, checker)).toBeUndefined();
+
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+    expect(schema.properties).not.toHaveProperty("operation");
+  });
+
+  it("does not trust branded declarations imported from an authored commonfabric.d.ts", async () => {
+    const { type, checker } = await getTypeFromFiles(
+      {
+        "/attacker/commonfabric.d.ts": FACTORY_DECLARATIONS,
+        "/test.ts": `
+          import type { PatternFactory } from "./attacker/commonfabric.d.ts";
+          interface SchemaRoot {
+            operation: PatternFactory<{ value: number }, string>;
+          }
+        `,
+      },
+      "/test.ts",
+      "SchemaRoot",
+    );
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+    expect(schema.properties).not.toHaveProperty("operation");
+  });
+
+  it("does not trust authored ambient Common Fabric module declarations", async () => {
+    const { type, checker } = await getTypeFromFiles(
+      {
+        "/attacker.d.ts": `declare module "commonfabric" {
+          ${FACTORY_DECLARATIONS}
+        }`,
+        "/test.ts": `
+          import type { PatternFactory } from "commonfabric";
+          interface SchemaRoot {
+            operation: PatternFactory<{ value: number }, string>;
+          }
+        `,
+      },
+      "/test.ts",
+      "SchemaRoot",
+    );
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+    expect(schema.properties).not.toHaveProperty("operation");
   });
 
   it("emits the public schemas for all three factory kinds", async () => {
-    const code = `${FACTORY_DECLARATIONS}
+    const code = `
       interface SchemaRoot {
         pattern: PatternFactory<{ query: string }, { count: number }>;
         module: ModuleFactory<{ value: number }, { label: string }>;
         handler: HandlerFactory<{ prefix: string }, { value: number }>;
       }
     `;
-    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const { type, checker } = await getTrustedFactoryType(code, "SchemaRoot");
     const schema = asObjectSchema(
       createSchemaTransformerV2().generateSchema(type, checker),
     );
@@ -104,7 +249,7 @@ describe("Schema: factory types", () => {
   });
 
   it("preserves aliases, extra branded intersections, containers, and unions", async () => {
-    const code = `${FACTORY_DECLARATIONS}
+    const code = `
       interface SchemaRoot {
         alias: PatternAlias<{ text: string }, { length: number }>;
         branded: BrandedModule<{ id: string }, boolean>;
@@ -115,7 +260,7 @@ describe("Schema: factory types", () => {
           | ModuleFactory<{ value: number }, number>;
       }
     `;
-    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+    const { type, checker } = await getTrustedFactoryType(code, "SchemaRoot");
     const schema = asObjectSchema(
       createSchemaTransformerV2().generateSchema(type, checker),
     );
@@ -151,8 +296,39 @@ describe("Schema: factory types", () => {
     )).toEqual(["pattern", "module"]);
   });
 
-  it("terminates when a factory result recursively contains the factory", async () => {
-    const code = `${FACTORY_DECLARATIONS}
+  it("emits self-contained documents for recursive nested factory contracts", async () => {
+    const code = `
+      interface RecursiveValue {
+        value: string;
+        next?: RecursiveValue;
+      }
+
+      interface ClosureParams {
+        operation: ModuleFactory<RecursiveValue, RecursiveValue>;
+      }
+
+      interface PublicResult {
+        operation: HandlerFactory<RecursiveValue, RecursiveValue>;
+      }
+
+      interface SchemaRoot {
+        factory: PatternFactory<ClosureParams, PublicResult>;
+      }
+    `;
+    const { type, checker } = await getTrustedFactoryType(code, "SchemaRoot");
+    const schema = asObjectSchema(
+      createSchemaTransformerV2().generateSchema(type, checker),
+    );
+
+    const documents = collectFactorySchemaDocuments(schema);
+    expect(documents.length).toBe(6);
+    for (const document of documents) {
+      expect(hasOnlyResolvableLocalRefs(document)).toBe(true);
+    }
+  });
+
+  it("rejects recursively nested factory contracts without expanding forever", async () => {
+    const code = `
       interface RecursiveResult {
         self: ModuleFactory<{ value: string }, RecursiveResult>;
       }
@@ -161,24 +337,19 @@ describe("Schema: factory types", () => {
         factory: ModuleFactory<{ value: string }, RecursiveResult>;
       }
     `;
-    const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
-    const schema = asObjectSchema(
-      createSchemaTransformerV2().generateSchema(type, checker),
-    );
+    const { type, checker } = await getTrustedFactoryType(code, "SchemaRoot");
 
-    const resultSchema = (schema.properties?.factory as any).asFactory
-      .resultSchema;
-    expect(resultSchema.$ref).toBe("#/$defs/RecursiveResult");
-    expect(
-      resultSchema.$defs.RecursiveResult.properties.self.asFactory.resultSchema,
-    ).toEqual({ $ref: "#/$defs/RecursiveResult" });
+    expect(() => createSchemaTransformerV2().generateSchema(type, checker))
+      .toThrow(
+        /test\.ts:\d+:\d+: Recursive nested factory contract.*cannot be emitted as a finite self-contained schema document/,
+      );
   });
 
   it("uses compiler-owned exact contracts for factories inside readonly tuples", async () => {
-    const code = `${FACTORY_DECLARATIONS}
+    const code = `
       type SchemaRoot = readonly [PatternFactory<{ stale: string }, any>];
     `;
-    const { type, checker, typeNode } = await getTypeFromCode(
+    const { type, checker, typeNode } = await getTrustedFactoryType(
       code,
       "SchemaRoot",
     );
@@ -242,10 +413,10 @@ describe("Schema: factory types", () => {
   });
 
   it("emits every compiler-owned contract sharing one semantic factory type", async () => {
-    const code = `${FACTORY_DECLARATIONS}
+    const code = `
       type SchemaRoot = PatternFactory<{ stale: string }, any>;
     `;
-    const { type, checker, typeNode } = await getTypeFromCode(
+    const { type, checker, typeNode } = await getTrustedFactoryType(
       code,
       "SchemaRoot",
     );
@@ -320,10 +491,10 @@ describe("Schema: factory types", () => {
   });
 
   it("preserves exact compiler-owned schema values beyond TypeScript types", async () => {
-    const code = `${FACTORY_DECLARATIONS}
+    const code = `
       type SchemaRoot = PatternFactory<{ stale: string }, any>;
     `;
-    const { type, checker, typeNode } = await getTypeFromCode(
+    const { type, checker, typeNode } = await getTrustedFactoryType(
       code,
       "SchemaRoot",
     );

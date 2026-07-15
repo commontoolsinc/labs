@@ -51,7 +51,18 @@ type SchemaNormalizationResult =
 interface SchemaNormalizationContext {
   readonly root: JSONSchema;
   readonly activeObjects: Set<object>;
-  readonly activeRefs: Set<string>;
+  /**
+   * Non-alias schema nodes on the current normalization path. A `$ref` may
+   * point back to one of these nodes; its de Bruijn-style distance is the
+   * canonical cycle marker. Ref-only aliases use their own stack so inserting
+   * an alias cannot change the normalized recursive structure.
+   */
+  readonly activeSchemaNodes: object[];
+  /**
+   * Ref-only nodes followed on the current path, used to terminate pure alias
+   * cycles.
+   */
+  readonly activeRefAliases: object[];
 }
 
 const SINGLE_SCHEMA_KEYWORDS = new Set([
@@ -244,13 +255,33 @@ function normalizeFactoryContract(
   const record = value as Record<string, unknown>;
   const normalized: Record<string, NormalizedSchemaValue> = Object.create(null);
   for (const key of Object.keys(record).sort()) {
+    const entry = record[key];
     const result = FACTORY_SCHEMA_FIELDS.has(key)
-      ? normalizeSchemaNode(record[key] as JSONSchema, context)
-      : normalizeSchemaData(record[key], context);
+      ? normalizeFactorySchemaDocument(entry, context)
+      : normalizeSchemaData(entry, context);
     if (result === SCHEMA_NORMALIZATION_FAILED) return result;
     normalized[key] = result;
   }
   return normalized;
+}
+
+function normalizeFactorySchemaDocument(
+  value: unknown,
+  parent: SchemaNormalizationContext,
+): SchemaNormalizationResult {
+  if (typeof value !== "boolean" && !isPlainObject(value)) {
+    return SCHEMA_NORMALIZATION_FAILED;
+  }
+  const schema = value as JSONSchema;
+  return normalizeSchemaNode(schema, {
+    root: schema,
+    // Object identity remains shared across document boundaries so malformed
+    // JavaScript object cycles fail closed. JSON Pointer activity is local to
+    // this public factory schema because every field owns its own `$defs`.
+    activeObjects: parent.activeObjects,
+    activeSchemaNodes: [],
+    activeRefAliases: [],
+  });
 }
 
 function normalizeSchemaKeyword(
@@ -356,26 +387,47 @@ function normalizeSchemaNode(
   if (!isPlainObject(schema)) return SCHEMA_NORMALIZATION_FAILED;
   if (context.activeObjects.has(schema)) return SCHEMA_NORMALIZATION_FAILED;
 
+  const hasRef = Object.hasOwn(schema, "$ref");
+  const refOnlyAlias = hasRef &&
+    Object.keys(schema).every((key) =>
+      key === "$ref" || key === "$defs" || key === "definitions"
+    );
+  const activeNodeStack = refOnlyAlias
+    ? context.activeRefAliases
+    : context.activeSchemaNodes;
   context.activeObjects.add(schema);
+  activeNodeStack.push(schema);
   try {
-    const hasRef = Object.hasOwn(schema, "$ref");
     let resolved: NormalizedSchemaValue | undefined;
     if (hasRef) {
       if (typeof schema.$ref !== "string") {
         return SCHEMA_NORMALIZATION_FAILED;
       }
-      if (context.activeRefs.has(schema.$ref)) {
-        return SCHEMA_NORMALIZATION_FAILED;
-      }
       const target = resolveLocalSchemaRef(schema.$ref, context.root);
       if (target === undefined) return SCHEMA_NORMALIZATION_FAILED;
-      context.activeRefs.add(schema.$ref);
-      try {
+      const activeSchemaTargetIndex = typeof target === "object"
+        ? context.activeSchemaNodes.lastIndexOf(target)
+        : -1;
+      const activeAliasTargetIndex = typeof target === "object"
+        ? context.activeRefAliases.lastIndexOf(target)
+        : -1;
+      if (activeSchemaTargetIndex >= 0) {
+        // Definition names and pointer spellings are not semantic. Encode the
+        // edge by its distance to the active target so independently allocated
+        // and equivalently inlined recursive documents normalize identically.
+        resolved = [
+          "$recursive-ref",
+          context.activeSchemaNodes.length - 1 - activeSchemaTargetIndex,
+        ];
+      } else if (activeAliasTargetIndex >= 0) {
+        // A cycle consisting only of ref aliases has no schema structure to
+        // distinguish after reference resolution. Collapse every such cycle to
+        // the same terminating marker rather than encoding alias hop count.
+        resolved = ["$recursive-ref-alias-cycle"];
+      } else {
         const normalized = normalizeSchemaNode(target, context);
         if (normalized === SCHEMA_NORMALIZATION_FAILED) return normalized;
         resolved = normalized;
-      } finally {
-        context.activeRefs.delete(schema.$ref);
       }
     }
 
@@ -399,6 +451,7 @@ function normalizeSchemaNode(
       ? normalized
       : mergeResolvedSchemaRef(resolved, normalized);
   } finally {
+    activeNodeStack.pop();
     context.activeObjects.delete(schema);
   }
 }
@@ -409,18 +462,22 @@ function normalizeFactorySchema(
   return normalizeSchemaNode(schema, {
     root: schema,
     activeObjects: new Set(),
-    activeRefs: new Set(),
+    activeSchemaNodes: [],
+    activeRefAliases: [],
   });
 }
 
 /**
  * Compare factory public schemas after deterministic structural normalization.
  *
- * Each schema resolves JSON Pointer `$ref`s only against its own document root.
- * Definition containers are removed after resolution; every other keyword,
- * including Common Fabric's `asFactory`, remains part of exact equality. Any
- * external, missing, malformed, or cyclic reference fails closed (`false`).
- * Missing schemas remain distinct from the JSON Schema `true` value.
+ * Each top-level schema, and each public schema field inside a nested
+ * `asFactory`, resolves JSON Pointer `$ref`s only against its own document
+ * root. Definition containers are removed after resolution; every other
+ * keyword, including Common Fabric's `asFactory`, remains part of exact
+ * equality. Valid recursive local refs normalize to structural back-edges;
+ * external, missing, or malformed refs and direct JavaScript object cycles fail
+ * closed (`false`). Missing schemas remain distinct from the JSON Schema `true`
+ * value.
  */
 export function factorySchemasEqual(
   left: JSONSchema | undefined,

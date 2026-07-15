@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { fromFileUrl, join } from "@std/path";
 import ts from "typescript";
 import { createSchemaTransformerV2 } from "../../src/plugin.ts";
+import { registerCommonFabricDeclarationSources } from "../../src/typescript/common-fabric-symbols.ts";
 import { asObjectSchema } from "../utils.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("../../../../", import.meta.url));
@@ -36,6 +37,7 @@ function getTypeFromRealApiCode(
 ): {
   type: ts.Type;
   checker: ts.TypeChecker;
+  program: ts.Program;
   sourceFile: ts.SourceFile;
 } {
   const compilerOptions: ts.CompilerOptions = {
@@ -132,7 +134,13 @@ function getTypeFromRealApiCode(
     throw new Error(`Type ${typeName} not found`);
   }
 
-  return { type: foundType, checker, sourceFile };
+  const commonFabricApi = program.getSourceFile(
+    join(REPO_ROOT, "packages/api/index.ts"),
+  );
+  if (!commonFabricApi) throw new Error("Real Common Fabric API not resolved");
+  registerCommonFabricDeclarationSources(checker, [commonFabricApi]);
+
+  return { type: foundType, checker, program, sourceFile };
 }
 
 describe("Schema: real API FactoryInput", () => {

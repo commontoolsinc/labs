@@ -23,7 +23,12 @@ import type {
 } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { convertCellsToLinks } from "../src/cell.ts";
-import { setCompileCacheRuntimeVersionForTesting } from "../src/compilation-cache/cell-cache.ts";
+import {
+  loadVerifiedSourceClosure,
+  ROOT_LINK_SPECIFIER,
+  setCompileCacheRuntimeVersionForTesting,
+  writeSourceDocs,
+} from "../src/compilation-cache/cell-cache.ts";
 import {
   type MaterializedFactory,
   materializeFactory,
@@ -487,25 +492,95 @@ describe("Factory@1 runner round trips", () => {
     });
   });
 
-  it("rejects a decoded HandlerFactory at root setup before writing piece state", async () => {
-    const { shells } = await storeFactories();
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    extraRuntimes.push(runtime);
-    const result = runtime.getCell(
+  it("rejects live and decoded HandlerFactory values at root setup before writing piece state", async () => {
+    const { factories, shells } = await storeFactories();
+    for (
+      const [label, handlerFactory] of [
+        ["live", factories[2]],
+        ["decoded", shells[2]],
+      ] as const
+    ) {
+      const result = writer.getCell(
+        sourceSpace,
+        `rejected-${label}-handler-root-factory`,
+      );
+
+      await expect(
+        writer.setup(undefined, handlerFactory as never, {}, result),
+      ).rejects.toThrow(
+        "Root setup requires a pattern or module factory, got handler",
+      );
+
+      expect(result.getRaw()).toBeUndefined();
+    }
+  });
+
+  it("rejects live and decoded HandlerFactory values in transaction-bound root setup", async () => {
+    const { factories, shells } = await storeFactories();
+    for (
+      const [label, handlerFactory] of [
+        ["live", factories[2]],
+        ["decoded", shells[2]],
+      ] as const
+    ) {
+      const tx = writer.edit();
+      const result = writer.getCell(
+        sourceSpace,
+        `rejected-${label}-transaction-handler-root-factory`,
+        undefined,
+        tx,
+      );
+
+      expect(() => writer.setup(tx, handlerFactory as never, {}, result))
+        .toThrow(
+          "Root setup requires a pattern or module factory, got handler",
+        );
+      expect(result.getRaw()).toBeUndefined();
+      if (tx.status().status === "ready") {
+        tx.abort(new Error("expected handler rejection"));
+      }
+    }
+  });
+
+  it("rejects live and decoded HandlerFactory values in root run before writing piece state", async () => {
+    const { factories, shells } = await storeFactories();
+    for (
+      const [label, handlerFactory] of [
+        ["live", factories[2]],
+        ["decoded", shells[2]],
+      ] as const
+    ) {
+      const tx = writer.edit();
+      const result = writer.getCell(
+        sourceSpace,
+        `rejected-${label}-run-handler-root-factory`,
+        undefined,
+        tx,
+      );
+
+      expect(() => writer.run(tx, handlerFactory as never, {}, result)).toThrow(
+        "Root setup requires a pattern or module factory, got handler",
+      );
+      expect(result.getRaw()).toBeUndefined();
+      if (tx.status().status === "ready") {
+        tx.abort(new Error("expected handler rejection"));
+      }
+    }
+  });
+
+  it("preserves root setup compatibility for raw non-factory handler descriptors", async () => {
+    const { factories } = await storeFactories();
+    const rawHandlerDescriptor = { ...factories[2] };
+    expect(isAdmittedFabricFactory(rawHandlerDescriptor)).toBe(false);
+    const result = writer.getCell(
       sourceSpace,
-      "rejected-handler-root-factory",
+      "raw-handler-root-descriptor",
     );
 
     await expect(
-      runtime.setup(undefined, shells[2] as never, {}, result),
-    ).rejects.toThrow(
-      "Root setup requires a pattern or module factory, got handler",
-    );
-
-    expect(result.getRaw()).toBeUndefined();
+      writer.setup(undefined, rawHandlerDescriptor as never, {}, result),
+    ).resolves.toBe(result);
+    expect(result.getMetaRaw("patternIdentity")).toBeDefined();
   });
 
   it("preserves modifier state, including anonymous and link-mapped selectors", async () => {
@@ -569,7 +644,7 @@ describe("Factory@1 runner round trips", () => {
     expect(destinationSpace).not.toBe(state.spaceSelector);
   });
 
-  it("atomically publishes every by-value factory kind into its destination space", async () => {
+  it("atomically publishes every by-value factory kind through direct transaction commit", async () => {
     const { identity, factories, shells, states } = await storeFactories();
     const tx = writer.edit();
     const destination = writer.getCell<{ factories: FactoryTuple }>(
@@ -580,7 +655,6 @@ describe("Factory@1 runner round trips", () => {
     );
     destination.set({ factories });
 
-    writer.prepareTxForCommit(tx);
     expect(destination.getRaw()).toEqual({ factories });
     expect((await tx.commit()).error).toBeUndefined();
     expect(
@@ -683,16 +757,453 @@ describe("Factory@1 runner round trips", () => {
       destinationTx,
     );
     destination.set(carried);
-    mover.prepareTxForCommit(destinationTx);
 
     // Source verification is async in this fresh PatternManager, but local
     // speculative visibility is not.
     expect(destination.getRaw()).toEqual(carried);
     expect((await destinationTx.commit()).error).toBeUndefined();
+    expect(
+      mover.patternManager.isArtifactAvailableInSpace(
+        sealFactoryState(carried.factories[0]).ref.identity,
+        destinationSpace,
+      ),
+    ).toBe(true);
+  });
+
+  it("cold-verifies a Cell-read factory before rewriting it within the same space", async () => {
+    const { factories } = await storeFactories();
+    const sourceTx = writer.edit();
+    const source = writer.getCell<{ factories: FactoryTuple }>(
+      sourceSpace,
+      "same-space-cold-publication-source",
+      undefined,
+      sourceTx,
+    );
+    source.set({ factories });
+    writer.prepareTxForCommit(sourceTx);
+    expect((await sourceTx.commit()).error).toBeUndefined();
+
+    const mover = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    extraRuntimes.push(mover);
+    const carried = mover.getCell<{ factories: FactoryTuple }>(
+      sourceSpace,
+      "same-space-cold-publication-source",
+    ).getRaw()! as unknown as { factories: FactoryTuple };
+    const destinationTx = mover.edit();
+    const destination = mover.getCell<{ factories: FactoryTuple }>(
+      sourceSpace,
+      "same-space-cold-publication-destination",
+      undefined,
+      destinationTx,
+    );
+
+    expect(() => destination.set(carried)).not.toThrow();
+    expect(destination.getRaw()).toEqual(carried);
+    expect((await destinationTx.commit()).error).toBeUndefined();
+    expect(
+      mover.patternManager.isArtifactAvailableInSpace(
+        sealFactoryState(carried.factories[0]).ref.identity,
+        sourceSpace,
+      ),
+    ).toBe(true);
+  });
+
+  it("waits for a speculative source publication before cold-verifying an onward copy", async () => {
+    const { factories } = await storeFactories();
+    const sourceTx = writer.edit();
+    const source = writer.getCell<{ factories: FactoryTuple }>(
+      sourceSpace,
+      "causal-cold-publication-source",
+      undefined,
+      sourceTx,
+    );
+    source.set({ factories });
+    writer.prepareTxForCommit(sourceTx);
+    expect((await sourceTx.commit()).error).toBeUndefined();
+
+    const publisher = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const follower = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    extraRuntimes.push(publisher, follower);
+
+    const carried = publisher.getCell<{ factories: FactoryTuple }>(
+      sourceSpace,
+      "causal-cold-publication-source",
+    ).getRaw()! as unknown as { factories: FactoryTuple };
+    const releaseFirstPreparation = Promise.withResolvers<void>();
+    const prepareArtifactPublication = publisher.patternManager
+      .prepareArtifactPublication.bind(publisher.patternManager);
+    publisher.patternManager.prepareArtifactPublication = ((
+      identity,
+      fromSpace,
+      toSpace,
+    ) => {
+      if (toSpace !== destinationSpace) {
+        return prepareArtifactPublication(identity, fromSpace, toSpace);
+      }
+      return releaseFirstPreparation.promise.then(() =>
+        prepareArtifactPublication(identity, fromSpace, toSpace)
+      );
+    }) as typeof publisher.patternManager.prepareArtifactPublication;
+
+    const firstTx = publisher.edit();
+    const intermediate = publisher.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "causal-cold-publication-intermediate",
+      undefined,
+      firstTx,
+    );
+    intermediate.set(carried);
+    const firstCommit = firstTx.commit();
+    expect(intermediate.getRaw()).toEqual(carried);
+
+    const onward = follower.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "causal-cold-publication-intermediate",
+    ).getRaw()! as unknown as { factories: FactoryTuple };
+    const loadStarted = Promise.withResolvers<void>();
+    let didStartLoad = false;
+    const managerInternals = follower.patternManager as unknown as {
+      loadVerifiedArtifactClosure: (
+        ...args: unknown[]
+      ) => Promise<unknown>;
+    };
+    const loadVerifiedArtifactClosure = managerInternals
+      .loadVerifiedArtifactClosure.bind(follower.patternManager);
+    managerInternals.loadVerifiedArtifactClosure = (...args) => {
+      if (args[0] === destinationSpace) {
+        didStartLoad = true;
+        loadStarted.resolve();
+      }
+      return loadVerifiedArtifactClosure(...args);
+    };
+
+    const secondTx = follower.edit();
+    const destination = follower.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "causal-cold-publication-onward",
+      undefined,
+      secondTx,
+    );
+    destination.set(onward);
+    const secondCommit = secondTx.commit();
+    const racedPredecessor = await Promise.race([
+      loadStarted.promise.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 20)),
+    ]);
+
+    releaseFirstPreparation.resolve();
+    const firstResult = await firstCommit;
+    const secondResult = await secondCommit;
+    publisher.patternManager.prepareArtifactPublication =
+      prepareArtifactPublication;
+    managerInternals.loadVerifiedArtifactClosure = loadVerifiedArtifactClosure;
+
+    expect(racedPredecessor).toBe(false);
+    expect(didStartLoad).toBe(true);
+    expect(firstResult.error).toBeUndefined();
+    expect(secondResult.error).toBeUndefined();
+    expect(destination.getRaw()).toEqual(onward);
+  });
+
+  it("rejects an onward copy when its speculative source publication fails", async () => {
+    const { factories } = await storeFactories();
+    const sourceTx = writer.edit();
+    const source = writer.getCell<{ factories: FactoryTuple }>(
+      sourceSpace,
+      "rejected-causal-publication-source",
+      undefined,
+      sourceTx,
+    );
+    source.set({ factories });
+    writer.prepareTxForCommit(sourceTx);
+    expect((await sourceTx.commit()).error).toBeUndefined();
+
+    const publisher = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const follower = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    extraRuntimes.push(publisher, follower);
+    const carried = publisher.getCell<{ factories: FactoryTuple }>(
+      sourceSpace,
+      "rejected-causal-publication-source",
+    ).getRaw()! as unknown as { factories: FactoryTuple };
+
+    const releaseRejectedPreparation = Promise.withResolvers<void>();
+    const prepareArtifactPublication = publisher.patternManager
+      .prepareArtifactPublication.bind(publisher.patternManager);
+    publisher.patternManager.prepareArtifactPublication = ((
+      identity,
+      fromSpace,
+      toSpace,
+    ) => {
+      if (toSpace !== destinationSpace) {
+        return prepareArtifactPublication(identity, fromSpace, toSpace);
+      }
+      return releaseRejectedPreparation.promise.then(() => {
+        throw new Error("forced source publication rejection");
+      });
+    }) as typeof publisher.patternManager.prepareArtifactPublication;
+
+    const firstTx = publisher.edit();
+    publisher.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "rejected-causal-publication-intermediate",
+      undefined,
+      firstTx,
+    ).set(carried);
+    const firstCommit = firstTx.commit();
+
+    const onward = follower.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "rejected-causal-publication-intermediate",
+    ).getRaw()! as unknown as { factories: FactoryTuple };
+    let didStartLoad = false;
+    const managerInternals = follower.patternManager as unknown as {
+      loadVerifiedArtifactClosure: (
+        ...args: unknown[]
+      ) => Promise<unknown>;
+    };
+    const loadVerifiedArtifactClosure = managerInternals
+      .loadVerifiedArtifactClosure.bind(follower.patternManager);
+    managerInternals.loadVerifiedArtifactClosure = (...args) => {
+      if (args[0] === destinationSpace) didStartLoad = true;
+      return loadVerifiedArtifactClosure(...args);
+    };
+
+    const secondTx = follower.edit();
+    follower.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "rejected-causal-publication-onward",
+      undefined,
+      secondTx,
+    ).set(onward);
+    const secondCommit = secondTx.commit();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(didStartLoad).toBe(false);
+
+    releaseRejectedPreparation.resolve();
+    const [firstResult, secondResult] = await Promise.race([
+      Promise.all([firstCommit, secondCommit]),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("dependent publications did not settle")),
+          1_000,
+        )
+      ),
+    ]);
+    publisher.patternManager.prepareArtifactPublication =
+      prepareArtifactPublication;
+    managerInternals.loadVerifiedArtifactClosure = loadVerifiedArtifactClosure;
+
+    expect(firstResult.error?.message).toContain(
+      "forced source publication rejection",
+    );
+    expect(secondResult.error?.message).toContain(
+      "forced source publication rejection",
+    );
+    expect(didStartLoad).toBe(false);
   });
 });
 
 describe("Factory@1 fresh-runtime value round trip", () => {
+  it("atomically unions source roots from concurrent direct factory publications", async () => {
+    const server = createSharedServer();
+    let seedStorage: SharedServerStorageManager | undefined =
+      SharedServerStorageManager.connectTo(server, { as: signer });
+    let seedRuntime: Runtime | undefined = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: seedStorage,
+    });
+    let publisherAStorage: SharedServerStorageManager | undefined;
+    let publisherBStorage: SharedServerStorageManager | undefined;
+    let publisherA: Runtime | undefined;
+    let publisherB: Runtime | undefined;
+    let readerStorage: SharedServerStorageManager | undefined;
+    let reader: Runtime | undefined;
+
+    const factoryProgram: RuntimeProgram = {
+      main: "/factory.tsx",
+      files: [{
+        name: "/factory.tsx",
+        contents: [
+          "import { pattern } from 'commonfabric';",
+          "export default pattern<{ value: number }>(({ value }) => ({ result: value }));",
+        ].join("\n"),
+      }],
+    };
+    const rootProgram = (name: string): RuntimeProgram => ({
+      main: `/${name}.ts`,
+      files: [{
+        name: `/${name}.ts`,
+        contents: `export const generation = ${JSON.stringify(name)};`,
+      }],
+    });
+
+    try {
+      let entryIdentity: string | undefined;
+      const live = await seedRuntime.patternManager.compilePattern(
+        factoryProgram,
+        {
+          space: sourceSpace,
+          onEntryIdentity(identity) {
+            entryIdentity = identity;
+          },
+        },
+      );
+      expect(entryIdentity).toBeDefined();
+      const shell = valueFromJson(
+        jsonFromValue(live as unknown as FabricValue),
+      ) as PatternFactory<unknown, unknown>;
+      const compiledFactory = await seedRuntime.harness.compileToRecordGraph(
+        factoryProgram,
+      );
+      const factoryModule = compiledFactory.modules.find((module) =>
+        module.identity === entryIdentity
+      )!;
+      const rootA = (await seedRuntime.harness.compileToRecordGraph(
+        rootProgram("publication-root-a"),
+      )).modules[0]!;
+      const rootB = (await seedRuntime.harness.compileToRecordGraph(
+        rootProgram("publication-root-b"),
+      )).modules[0]!;
+      expect(rootA.identity).not.toBe(rootB.identity);
+
+      for (
+        const [space, root] of [
+          [sourceSpace, rootA],
+          [destinationSpace, rootB],
+        ] as const
+      ) {
+        const tx = seedRuntime.edit();
+        writeSourceDocs(
+          seedRuntime,
+          space,
+          [factoryModule, root],
+          entryIdentity!,
+          tx,
+        );
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      await seedStorage.synced();
+      await seedRuntime.dispose();
+      seedRuntime = undefined;
+      await seedStorage.close();
+      seedStorage = undefined;
+
+      publisherAStorage = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      publisherBStorage = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      publisherA = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: publisherAStorage,
+      });
+      publisherB = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: publisherBStorage,
+      });
+      const [factoryA, factoryB] = await Promise.all([
+        prepareFactory(shell, {
+          runtime: publisherA,
+          artifactSpace: sourceSpace,
+        }),
+        prepareFactory(shell, {
+          runtime: publisherB,
+          artifactSpace: destinationSpace,
+        }),
+      ]);
+
+      const txA = publisherA.edit();
+      publisherA.getCell(
+        onwardDestinationSpace,
+        "atomic-publication-topology-a",
+        undefined,
+        txA,
+      ).set({ factory: factoryA });
+      const txB = publisherB.edit();
+      publisherB.getCell(
+        onwardDestinationSpace,
+        "atomic-publication-topology-b",
+        undefined,
+        txB,
+      ).set({ factory: factoryB });
+      const [commitA, commitB] = await Promise.all([
+        txA.commit(),
+        txB.commit(),
+      ]);
+      expect(commitA.error).toBeUndefined();
+      expect(commitB.error).toBeUndefined();
+      await Promise.all([
+        publisherA.patternManager.flushCompileCacheWrites(),
+        publisherB.patternManager.flushCompileCacheWrites(),
+      ]);
+
+      await publisherA.dispose();
+      publisherA = undefined;
+      await publisherAStorage.close();
+      publisherAStorage = undefined;
+      await publisherB.dispose();
+      publisherB = undefined;
+      await publisherBStorage.close();
+      publisherBStorage = undefined;
+
+      readerStorage = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      reader = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: readerStorage,
+      });
+      const readTx = reader.edit();
+      const closure = await loadVerifiedSourceClosure(
+        reader,
+        onwardDestinationSpace,
+        entryIdentity!,
+        readTx,
+      );
+      readTx.abort?.("atomic publication verification complete");
+      expect(closure?.has(rootA.identity)).toBe(true);
+      expect(closure?.has(rootB.identity)).toBe(true);
+      const entryRoots = closure?.get(entryIdentity!)?.imports.filter((imp) =>
+        imp.specifier.startsWith(ROOT_LINK_SPECIFIER)
+      ).map((imp) => imp.identity);
+      expect(entryRoots).toContain(rootA.identity);
+      expect(entryRoots).toContain(rootB.identity);
+
+      const materialized = await prepareFactory(shell, {
+        runtime: reader,
+        artifactSpace: onwardDestinationSpace,
+      });
+      invokeOne(reader, 0, materialized, onwardDestinationSpace);
+      await reader.patternManager.flushCompileCacheWrites();
+    } finally {
+      await reader?.dispose();
+      await readerStorage?.close();
+      await publisherA?.dispose();
+      await publisherAStorage?.close();
+      await publisherB?.dispose();
+      await publisherBStorage?.close();
+      await seedRuntime?.dispose();
+      await seedStorage?.close();
+      await server.close();
+    }
+  });
+
   it("persists, cold-decodes, materializes, and invokes every factory kind", async () => {
     const server = createSharedServer();
     let writerStorage: SharedServerStorageManager | undefined =
