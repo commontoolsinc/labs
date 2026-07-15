@@ -346,6 +346,7 @@ declare module "@commonfabric/api" {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
+        keepAsCell?: KeepAsCell;
       },
     ): SigilWriteRedirectLink;
     getRaw(options?: RawCellReadOptions): Immutable<T> | undefined;
@@ -2066,6 +2067,7 @@ export class CellImpl<T extends FabricValue>
       base?: Cell<any>;
       baseSpace?: MemorySpace;
       includeSchema?: boolean;
+      keepAsCell?: KeepAsCell;
     },
   ): SigilWriteRedirectLink {
     return createSigilLinkFromParsedLink(this.link, {

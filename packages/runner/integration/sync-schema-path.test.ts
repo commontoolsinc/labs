@@ -36,6 +36,7 @@ function read(
 }
 
 async function test() {
+  const runId = crypto.randomUUID();
   // First runtime - save data
   const runtime1 = new Runtime({
     apiUrl: new URL(API_URL),
@@ -77,7 +78,7 @@ async function test() {
   let tx = runtime1.edit();
   const testEmployeeCell = runtime1.getCell(
     space,
-    `storage test employee cell`,
+    `storage test employee cell ${runId}`,
     employeeSchema,
     tx,
   );
@@ -92,7 +93,7 @@ async function test() {
   tx = runtime1.edit();
   const testAddressesCell = runtime1.getCell(
     space,
-    `storage test addresses cell`,
+    `storage test addresses cell ${runId}`,
     employeAddressesSchema,
     tx,
   );

@@ -355,10 +355,16 @@ const notebookSourceStateMatches = async (
     notebookInternalManifest,
   );
 
-  const argumentNotes = (notebookArgument as { notes?: unknown[] } | undefined)
+  const argumentNotes = (notebookArgument as { notes?: unknown } | undefined)
     ?.notes;
-  const argumentNotesLength = Array.isArray(argumentNotes)
-    ? argumentNotes.length
+  const resolvedArgumentNotes = Array.isArray(argumentNotes)
+    ? argumentNotes
+    : argumentNotes !== null && typeof argumentNotes === "object" &&
+        typeof (argumentNotes as { sync?: unknown }).sync === "function"
+    ? await (argumentNotes as { sync: () => Promise<unknown> }).sync()
+    : undefined;
+  const argumentNotesLength = Array.isArray(resolvedArgumentNotes)
+    ? resolvedArgumentNotes.length
     : undefined;
   const internal = notebookInternal as {
     noteCount?: unknown;

@@ -8,18 +8,18 @@ import type {
   JSONSchema,
   SchemaScope,
 } from "./builder/types.ts";
-import { CycleTracker } from "./traverse.ts";
 import { isSchemaScope } from "./scope.ts";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { uniqueCfcAtoms } from "./cfc/observation.ts";
 import {
+  cfcSchemaChildRoot,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,
   cfcSchemaToObject,
   findCfcSchemaRefs,
-  isEmbeddedCfcSchemaRef,
   resolveCfcSchemaRef,
+  resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
   resolveCfcSchemaRefsOrThrow,
   selectReferencedCfcSchemaDefs,
@@ -53,26 +53,60 @@ const symbolicSchemaAtPathClassifierCache = new WeakMap<
   SymbolicSchemaAtPathClassifier | typeof SYMBOLIC_CLASSIFIER_UNSUPPORTED
 >();
 
+interface RootedSchemaVisit {
+  root: object;
+  schema: object;
+  parent?: RootedSchemaVisit;
+}
+
+const rootedSchemaVisitIsActive = (
+  visit: RootedSchemaVisit | undefined,
+  root: object,
+  schema: object,
+): boolean => {
+  for (let cursor = visit; cursor !== undefined; cursor = cursor.parent) {
+    if (cursor.root === root && cursor.schema === schema) return true;
+  }
+  return false;
+};
+
 const buildSymbolicSchemaAtPathClassifier = (
   schema: JSONSchema,
   fullSchema: JSONSchema,
-  active: Set<object>,
+  active?: RootedSchemaVisit,
 ): SymbolicSchemaAtPathClassifier | undefined => {
   if (typeof schema === "boolean") return () => "boolean";
-  if (active.has(schema)) return undefined;
-  active.add(schema);
-  try {
+  const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  if (rootedSchemaVisitIsActive(active, rootKey, schema)) return undefined;
+  const nextActive = { root: rootKey, schema, parent: active };
+  {
     if (schema.$ref !== undefined) {
-      const resolved = resolveCfcSchemaRefs(schema, fullSchema);
+      const resolved = resolveCfcSchemaRefs(schema, schemaRoot);
       if (resolved === undefined) return undefined;
-      const nextFullSchema = isRecord(resolved) && resolved.$defs !== undefined
-        ? resolved
-        : fullSchema;
+      const nextFullSchema = cfcSchemaChildRoot(
+        resolved,
+        resolveCfcSchemaRefRoot(schema, schemaRoot),
+      );
       return buildSymbolicSchemaAtPathClassifier(
         resolved,
         nextFullSchema,
-        active,
+        nextActive,
       );
+    }
+    if (Array.isArray(schema.type)) {
+      const { type: _types, ...base } = schema;
+      const classifiers: SymbolicSchemaAtPathClassifier[] = [];
+      for (const type of schema.type) {
+        const classifier = buildSymbolicSchemaAtPathClassifier(
+          { ...base, type },
+          schemaRoot,
+          nextActive,
+        );
+        if (classifier === undefined) return undefined;
+        classifiers.push(classifier);
+      }
+      return combineSymbolicSchemaClassifiers(classifiers);
     }
     if (schema.anyOf || schema.oneOf) {
       const options = (schema.anyOf && schema.oneOf)
@@ -82,35 +116,13 @@ const buildSymbolicSchemaAtPathClassifier = (
       for (const option of options) {
         const classifier = buildSymbolicSchemaAtPathClassifier(
           option,
-          fullSchema,
-          active,
+          cfcSchemaChildRoot(option, schemaRoot),
+          nextActive,
         );
         if (classifier === undefined) return undefined;
         classifiers.push(classifier);
       }
-      // The immediately repeated lookup is the dominant cache-hit case. One
-      // entry removes the union-width cost without reintroducing raw path-part
-      // cardinality. Combined branch behaviors are assigned compact local ids;
-      // their count is bounded by the schema's own properties/prefix items.
-      const combinedKeyIds = new Map<string, string>();
-      let memoPart: string | undefined;
-      let memoKey = "";
-      return (part) => {
-        if (part === memoPart) return memoKey;
-        let combinedKey = "union";
-        for (const classifier of classifiers) {
-          const childKey = classifier(part);
-          combinedKey += `|${childKey.length}:${childKey}`;
-        }
-        let key = combinedKeyIds.get(combinedKey);
-        if (key === undefined) {
-          key = `union:${combinedKeyIds.size}`;
-          combinedKeyIds.set(combinedKey, key);
-        }
-        memoPart = part;
-        memoKey = key;
-        return key;
-      };
+      return combineSymbolicSchemaClassifiers(classifiers);
     }
     if (cfcSchemaIsTrue(schema)) return () => "wildcard";
     if (schema.type === "object") {
@@ -146,9 +158,33 @@ const buildSymbolicSchemaAtPathClassifier = (
     }
     // schemaAtPath cannot descend through terminal primitive schemas.
     return () => "terminal";
-  } finally {
-    active.delete(schema);
   }
+};
+
+// The immediately repeated lookup is the dominant cache-hit case. One entry
+// removes union-width cost without reintroducing raw path-part cardinality.
+const combineSymbolicSchemaClassifiers = (
+  classifiers: readonly SymbolicSchemaAtPathClassifier[],
+): SymbolicSchemaAtPathClassifier => {
+  const combinedKeyIds = new Map<string, string>();
+  let memoPart: string | undefined;
+  let memoKey = "";
+  return (part) => {
+    if (part === memoPart) return memoKey;
+    let combinedKey = "union";
+    for (const classifier of classifiers) {
+      const childKey = classifier(part);
+      combinedKey += `|${childKey.length}:${childKey}`;
+    }
+    let key = combinedKeyIds.get(combinedKey);
+    if (key === undefined) {
+      key = `union:${combinedKeyIds.size}`;
+      combinedKeyIds.set(combinedKey, key);
+    }
+    memoPart = part;
+    memoKey = key;
+    return key;
+  };
 };
 
 /**
@@ -169,7 +205,6 @@ const symbolicSchemaAtPathPart = (
     classifier = buildSymbolicSchemaAtPathClassifier(
       schema,
       schema,
-      new Set(),
     ) ?? SYMBOLIC_CLASSIFIER_UNSUPPORTED;
     symbolicSchemaAtPathClassifierCache.set(schema, classifier);
   }
@@ -198,15 +233,6 @@ const schemaAtPathKey = (
 // Class for handling cfc rules.
 // The spec's confidentiality model is based on structured atoms.
 export class ContextualFlowControl {
-  private static childFullSchema(
-    schema: JSONSchema,
-    fallback: JSONSchema,
-  ): JSONSchema {
-    // Once a subtree carries its own $defs, that subtree becomes the root for
-    // resolving deeper local $refs. Otherwise keep the inherited root schema.
-    return isRecord(schema) && isRecord(schema.$defs) ? schema : fallback;
-  }
-
   static uniqueAtoms(atoms: Iterable<unknown>): IFCAtom[] {
     return uniqueCfcAtoms(atoms);
   }
@@ -238,7 +264,7 @@ export class ContextualFlowControl {
     joined: Set<unknown>,
     schema: JSONSchema,
     fullSchema: JSONSchema = schema,
-    cycleTracker: CycleTracker<JSONSchema> = new CycleTracker<JSONSchema>(true),
+    active?: RootedSchemaVisit,
   ): Set<unknown> {
     if (typeof schema === "boolean") {
       return joined;
@@ -251,11 +277,14 @@ export class ContextualFlowControl {
     // `FabricEpochNsec`, `FabricBytes`, `FabricHash`) that may appear in
     // schema `default` fields; plain `JSON.stringify` would silently
     // mis-encode them.
-    using t = cycleTracker.include(internSchema(schema));
-    if (t === null) {
+    const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
+    const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+    const canonical = internSchema(schema) as JSONSchemaObj;
+    if (rootedSchemaVisitIsActive(active, rootKey, canonical)) {
       // we've already joined this
       return joined;
     }
+    const nextActive = { root: rootKey, schema: canonical, parent: active };
     if (schema.ifc) {
       ContextualFlowControl.addIfcAtoms(joined, schema.ifc.confidentiality);
     }
@@ -270,11 +299,11 @@ export class ContextualFlowControl {
             ContextualFlowControl.joinSchema(
               joined,
               branch as JSONSchema,
-              ContextualFlowControl.childFullSchema(
+              cfcSchemaChildRoot(
                 branch as JSONSchema,
-                fullSchema,
+                schemaRoot,
               ),
-              cycleTracker,
+              nextActive,
             );
           }
         }
@@ -289,8 +318,8 @@ export class ContextualFlowControl {
           ContextualFlowControl.joinSchema(
             joined,
             item,
-            ContextualFlowControl.childFullSchema(item, fullSchema),
-            cycleTracker,
+            cfcSchemaChildRoot(item, schemaRoot),
+            nextActive,
           );
         }
       }
@@ -300,8 +329,8 @@ export class ContextualFlowControl {
         ContextualFlowControl.joinSchema(
           joined,
           value,
-          ContextualFlowControl.childFullSchema(value, fullSchema),
-          cycleTracker,
+          cfcSchemaChildRoot(value, schemaRoot),
+          nextActive,
         );
       }
     }
@@ -312,35 +341,35 @@ export class ContextualFlowControl {
       ContextualFlowControl.joinSchema(
         joined,
         schema.additionalProperties,
-        ContextualFlowControl.childFullSchema(
+        cfcSchemaChildRoot(
           schema.additionalProperties,
-          fullSchema,
+          schemaRoot,
         ),
-        cycleTracker,
+        nextActive,
       );
     } else if (schema.items && typeof schema.items === "object") {
       // TODO(@ubik2): need to handle prefixItems -- also probably not else if here
       ContextualFlowControl.joinSchema(
         joined,
         schema.items,
-        ContextualFlowControl.childFullSchema(schema.items, fullSchema),
-        cycleTracker,
+        cfcSchemaChildRoot(schema.items, schemaRoot),
+        nextActive,
       );
     } else if (schema.$ref) {
       // Follow the references
       const resolvedSchema = ContextualFlowControl.resolveSchemaRefsOrThrow(
         schema,
-        fullSchema,
+        schemaRoot,
       );
-      if (isEmbeddedCfcSchemaRef(schema.$ref)) {
-        // Absolute $ref means we should reset our fullSchema
-        fullSchema = resolvedSchema;
-      }
+      const resolvedRoot = cfcSchemaChildRoot(
+        resolvedSchema,
+        resolveCfcSchemaRefRoot(schema, schemaRoot),
+      );
       ContextualFlowControl.joinSchema(
         joined,
         resolvedSchema,
-        fullSchema,
-        cycleTracker,
+        resolvedRoot,
+        nextActive,
       );
     }
     return joined;
@@ -593,16 +622,25 @@ export class ContextualFlowControl {
           defs = cursor.$defs;
         }
       }
-      if (isRecord(cursor) && ("anyOf" in cursor || "oneOf" in cursor)) {
+      if (
+        isRecord(cursor) &&
+        (Array.isArray(cursor.type) || "anyOf" in cursor || "oneOf" in cursor)
+      ) {
         const subSchemas = new Set<JSONSchema>();
-        const options = (cursor.anyOf && cursor.oneOf)
-          ? [...cursor.anyOf, ...cursor.oneOf]
-          : cursor.anyOf ?? cursor.oneOf ?? [];
+        const cursorObject = cursor;
+        const options = Array.isArray(cursorObject.type)
+          ? cursorObject.type.map((type) => ({ ...cursorObject, type }))
+          : (cursorObject.anyOf && cursorObject.oneOf)
+          ? [...cursorObject.anyOf, ...cursorObject.oneOf]
+          : cursorObject.anyOf ?? cursorObject.oneOf ?? [];
         for (const entry of options) {
+          const entryDefs = isRecord(entry) && entry.$defs !== undefined
+            ? entry.$defs as Record<string, JSONSchema>
+            : defs;
           const optSchema = this.schemaAtPathInternal(
             entry,
             path.slice(index),
-            defs,
+            entryDefs,
             extraConfidentiality,
             defaultEmptyProperties,
             defaultMissingProperty,

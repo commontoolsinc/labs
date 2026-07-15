@@ -766,7 +766,14 @@ export class PieceManager {
     pattern: Pattern | Module,
     pieceId: string,
     inputs?: object,
-    options?: { start?: boolean },
+    options?: {
+      start?: boolean;
+      expectedPatternIdentity?: { identity: string; symbol: string };
+      validateArgumentLinks?: (
+        argumentCell: Cell<unknown>,
+        argumentSchema: JSONSchema,
+      ) => void;
+    },
   ): Promise<Cell<unknown>> {
     const piece = this.runtime.getCellFromEntityId(
       this.space,
@@ -774,17 +781,24 @@ export class PieceManager {
     );
     await piece.sync();
     const start = options?.start ?? true;
+    let currentPiece = piece;
     if (start) {
-      await this.runtime.runSynced(piece, pattern, inputs);
+      currentPiece = await this.runtime.runSynced(piece, pattern, inputs, {
+        expectedPatternIdentity: options?.expectedPatternIdentity,
+        validateArgumentLinks: options?.validateArgumentLinks,
+      });
     } else {
+      if (options?.expectedPatternIdentity) {
+        throw new Error("atomic pattern updates require starting the piece");
+      }
       await this.runtime.setup(undefined, pattern, inputs ?? {}, piece);
     }
-    await this.syncPattern(piece);
+    await this.syncPattern(currentPiece);
     if (start) {
-      await this.getResult(piece).pull();
+      await this.getResult(currentPiece).pull();
     }
 
-    return piece;
+    return currentPiece;
   }
 
   /**
@@ -933,7 +947,10 @@ export class PieceManager {
     await linkCell.sync();
     linkCell = linkCell.asSchemaFromLinks(); // Make sure we have the full schema
     linkCell = linkCell.key(...linkPath);
-    linkCell = linkCell.resolveAsCell();
+    // Keep Piece result links anchored at the public result projection. Its
+    // durable, monotonically narrowing result schema is the producer contract;
+    // resolving through an alias here would discard that contract and point at
+    // an untyped internal cell instead.
 
     // Get target cell (piece or arbitrary cell)
     const { cell: targetCell, isPiece: targetIsPiece } =

@@ -1,16 +1,21 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { CELL_KINDS } from "../src/scope.ts";
 import {
   cfcObjectSchemaIsClosed,
   INJECTION_SAFE_ATOM,
   isPrimitiveJsonValue,
   isPromptInjectionMaterialRiskAtom,
+  resolveCfcSchemaRefRoot,
   resolveSchemaForValidation,
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
   validateAndSanitizeSchemaValueWithOpaqueLinks,
+  validateSchemaDefinition,
+  validateSchemaValue,
 } from "../src/cfc/mod.ts";
 
 const promptRisk = {
@@ -71,8 +76,28 @@ describe("cfc schema sanitization", () => {
       .toEqual({ type: "integer" });
     expect(resolveSchemaForValidation({ $ref: "#/$defs/Missing" }, fullSchema))
       .toBe(false);
+    expect(resolveSchemaForValidation(
+      { $ref: "#/$defs/toString" },
+      { $defs: {} },
+    )).toBe(false);
+    expect(resolveCfcSchemaRefRoot({ $ref: "#/$defs/Missing" }, fullSchema))
+      .toBe(fullSchema);
     expect(resolveSchemaForValidation({ type: "string" }, fullSchema))
       .toEqual({ type: "string" });
+
+    const embeddedAlias: JSONSchema = {
+      $ref: "#/$defs/VNode",
+      $defs: {
+        VNode: { $ref: "https://commonfabric.org/schemas/vnode.json" },
+      },
+    };
+    expect(resolveSchemaForValidation(embeddedAlias, embeddedAlias))
+      .not.toBe(false);
+    expect(validateSchemaValue(embeddedAlias, {
+      type: "vnode",
+      name: "div",
+      props: {},
+    })).toBeUndefined();
   });
 
   it("annotates injection-safe primitive schema shapes", () => {
@@ -157,6 +182,31 @@ describe("cfc schema sanitization", () => {
     expect(annotated.properties.list.items.ifc.addIntegrity).toContainEqual(
       INJECTION_SAFE_ATOM,
     );
+
+    const extended = schemaWithInjectionSafeAnnotations({
+      type: ["number", "undefined"],
+    }, observed) as any;
+    expect(extended.ifc.addIntegrity).toContainEqual(INJECTION_SAFE_ATOM);
+  });
+
+  it("uses child-local definitions while annotating nested refs", () => {
+    const annotated = schemaWithInjectionSafeAnnotations({
+      type: "object",
+      properties: {
+        nested: {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/Value" } },
+          $defs: { Value: { type: "string" } },
+        },
+      },
+      $defs: { Value: { type: "number" } },
+    }, [promptRisk]) as any;
+    const valueIfc = annotated.properties.nested.properties.value.ifc;
+
+    expect(valueIfc.addIntegrity ?? []).not.toContainEqual(
+      INJECTION_SAFE_ATOM,
+    );
+    expect(valueIfc.confidentiality).toContainEqual(promptRisk);
   });
 
   it("annotates oneOf, allOf, empty objects, and not schemas", () => {
@@ -213,6 +263,9 @@ describe("cfc schema sanitization", () => {
       ],
     }, {})).toBe("missing required property name");
     expect(validateAgainstSchema({
+      allOf: [{ type: "number" }, { minimum: 0 }],
+    }, 1)).toBeUndefined();
+    expect(validateAgainstSchema({
       anyOf: [{ type: "string" }, { type: "number" }],
     }, false)).toBe("value does not match anyOf");
     expect(validateAgainstSchema({
@@ -245,9 +298,612 @@ describe("cfc schema sanitization", () => {
       "extra: value does not match type number",
     );
     expect(validateAgainstSchema({
+      type: "object",
+      properties: { title: { type: "string" } },
+      additionalProperties: { type: "number" },
+    }, { title: "ok", extra: 1 })).toBeUndefined();
+    expect(validateAgainstSchema({
       type: "array",
       items: { type: "string" },
     }, ["ok", 2])).toBe("1: value does not match type string");
+    expect(validateAgainstSchema({
+      type: "array",
+      items: { type: "string" },
+    }, ["ok"])).toBeUndefined();
+  });
+
+  it("strictly validates Common Fabric values for schema migrations", () => {
+    expect(validateSchemaValue({ type: "undefined" }, undefined))
+      .toBeUndefined();
+    expect(validateSchemaValue({ type: "undefined" }, "not undefined"))
+      .toContain("type undefined");
+    expect(validateSchemaValue({
+      type: "object",
+      properties: { known: { type: "number" } },
+    }, { known: 1, extra: true })).toBeUndefined();
+    expect(validateSchemaValue({
+      type: "object",
+      properties: { known: { type: "number" } },
+      additionalProperties: false,
+    }, { known: 1, extra: true })).toContain("additional property extra");
+    expect(validateSchemaValue({ type: "custom" } as any, "value"))
+      .toContain("unsupported schema type custom");
+
+    const opaque = Object.create(null);
+    const onlyWhenAuthorized = (_value: unknown, schema: JSONSchema) =>
+      typeof schema === "object" && Array.isArray(schema.asCell);
+    const plainUnion: JSONSchema = { type: ["number", "undefined"] };
+    expect(validateSchemaValue(
+      plainUnion,
+      opaque,
+      plainUnion,
+      { acceptOpaqueValue: onlyWhenAuthorized },
+    )).toContain("type number|undefined");
+    const cellUnion: JSONSchema = {
+      type: ["number", "undefined"],
+      asCell: ["cell"],
+    };
+    expect(validateSchemaValue(
+      cellUnion,
+      opaque,
+      cellUnion,
+      { acceptOpaqueValue: onlyWhenAuthorized },
+    )).toBeUndefined();
+
+    expect(validateSchemaValue({
+      type: "object",
+      properties: { toString: { type: "number" as const } },
+      required: ["toString"],
+    }, {})).toContain("missing required property toString");
+    expect(validateSchemaValue({
+      type: "object",
+      properties: { toString: { type: "number" as const } },
+    }, {})).toBeUndefined();
+    expect(validateSchemaValue({
+      type: "object",
+      dependentRequired: { toString: ["value"] },
+    }, {})).toBeUndefined();
+
+    const sparse = [1, , 3];
+    expect(validateSchemaValue({
+      type: "array",
+      items: { type: "number" },
+    }, sparse)).toBeUndefined();
+    expect(validateSchemaValue({
+      type: "array",
+      items: { type: "number" },
+    }, [1, undefined, 3])).toContain("1:");
+    const sparsePrefix = [, 2];
+    expect(validateSchemaValue({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: { type: "number" },
+    }, sparsePrefix)).toBeUndefined();
+    expect(validateSchemaValue({
+      type: "array",
+      prefixItems: [{ type: "string" }],
+      items: { type: "number" },
+    }, [undefined, 2])).toContain("0:");
+
+    expect(validateSchemaValue({ type: "array", uniqueItems: true }, [
+      new FabricBytes(new Uint8Array([1])),
+      new FabricBytes(new Uint8Array([2])),
+    ])).toBeUndefined();
+    expect(validateSchemaValue({ type: "array", uniqueItems: true }, [
+      new FabricBytes(new Uint8Array([1])),
+      new FabricBytes(new Uint8Array([1])),
+    ])).toContain("not unique");
+
+    const validSchema: JSONSchema = {
+      type: "object",
+      minProperties: 3,
+      maxProperties: 3,
+      required: ["count", "label", "items"],
+      properties: {
+        count: {
+          type: "number",
+          minimum: 10,
+          exclusiveMinimum: 9,
+          maximum: 20,
+          exclusiveMaximum: 21,
+          multipleOf: 2,
+        },
+        label: {
+          type: "string",
+          minLength: 3,
+          maxLength: 20,
+          pattern: "^[a-z@.]+$",
+          format: "email",
+        },
+        items: {
+          type: "array",
+          minItems: 2,
+          maxItems: 3,
+          uniqueItems: true,
+          prefixItems: [{ type: "string" }],
+          items: { type: "number" },
+          contains: { type: "number", minimum: 10 },
+          minContains: 1,
+          maxContains: 2,
+        },
+      },
+      dependentRequired: { count: ["label"] },
+      dependentSchemas: { count: { required: ["items"] } },
+      propertyNames: { pattern: "^[a-z]+$" },
+      patternProperties: { "^lab": { type: "string" } },
+    };
+    expect(validateSchemaValue(validSchema, {
+      count: 12,
+      label: "a@b.co",
+      items: ["first", 12],
+    })).toBeUndefined();
+  });
+
+  it("uses nested child-local definitions for preflight and values", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: {
+        nested: {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/Value" } },
+          $defs: { Value: { type: "string" } },
+        },
+      },
+      $defs: { Value: { type: "number" } },
+    };
+
+    expect(validateSchemaDefinition(schema)).toBeUndefined();
+    expect(validateSchemaValue(schema, { nested: { value: "local" } }))
+      .toBeUndefined();
+    expect(validateSchemaValue(schema, { nested: { value: 1 } }))
+      .toContain("value does not match type string");
+
+    const localOnlyDefinition: JSONSchema = {
+      type: "object",
+      properties: {
+        nested: {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/LocalOnly" } },
+          $defs: { LocalOnly: { type: "string" } },
+        },
+      },
+    };
+    expect(validateSchemaDefinition(localOnlyDefinition)).toBeUndefined();
+  });
+
+  it("keeps referenced definition bodies in their child-local scope", () => {
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { item: { $ref: "#/$defs/Entry" } },
+      $defs: {
+        Entry: {
+          type: "object",
+          properties: { value: { $ref: "#/$defs/Value" } },
+          required: ["value"],
+          $defs: { Value: { type: "string" } },
+        },
+        Value: { type: "number" },
+      },
+    };
+
+    expect(validateSchemaDefinition(schema)).toBeUndefined();
+    expect(validateSchemaValue(schema, { item: { value: "local" } }))
+      .toBeUndefined();
+    expect(validateSchemaValue(schema, { item: { value: 1 } }))
+      .toContain("value does not match type string");
+  });
+
+  it("rejects sparse schema keyword arrays without rejecting sparse values", () => {
+    const sparseType = [, "number"];
+    const sparseRequired = [, "value"];
+    const sparseDependency = [, "other"];
+    const sparseEnum = [,];
+    const sparseAnyOf = [, { type: "number" }];
+    const sparsePrefixItems = [, { type: "number" }];
+    const accessorType = ["number"];
+    Object.defineProperty(accessorType, 0, {
+      enumerable: true,
+      get: () => "number",
+    });
+    const nonEnumerableRequired = ["value"];
+    Object.defineProperty(nonEnumerableRequired, 0, {
+      value: "value",
+      enumerable: false,
+    });
+    const malformed = [
+      { type: sparseType },
+      { type: accessorType },
+      { required: sparseRequired },
+      { required: nonEnumerableRequired },
+      { dependentRequired: { value: sparseDependency } },
+      { enum: sparseEnum },
+      { anyOf: sparseAnyOf },
+      { prefixItems: sparsePrefixItems },
+    ] as unknown as JSONSchema[];
+
+    for (const schema of malformed) {
+      expect(validateSchemaDefinition(schema)).toBeDefined();
+    }
+    expect(() => validateSchemaValue(malformed[0], 1)).not.toThrow();
+
+    const sparseValue = [1, , 3];
+    expect(validateSchemaValue({
+      type: "array",
+      items: { type: "number" },
+    }, sparseValue)).toBeUndefined();
+  });
+
+  it("validates Common Fabric cell-wrapper extensions", () => {
+    const valid: JSONSchema = {
+      type: "undefined",
+      default: undefined,
+      scope: "session",
+      anyOf: [
+        ...CELL_KINDS.map((kind) => ({ asCell: [kind] })),
+        { asCell: [{ kind: "cell", scope: "any" }] },
+        { asCell: [{ kind: "cell", scope: undefined }] },
+      ],
+    };
+    expect(validateSchemaDefinition(valid)).toBeUndefined();
+
+    const sparseAsCell = [, "cell"];
+    const accessorAsCell = ["cell"];
+    Object.defineProperty(accessorAsCell, 0, {
+      enumerable: true,
+      get: () => "cell",
+    });
+    const inheritedKind = Object.create({ kind: "cell" });
+    const inheritedScope = Object.assign(Object.create({ scope: "session" }), {
+      kind: "cell",
+    });
+    const inheritedAsCell = Object.create({ asCell: ["cell"] });
+    const inheritedSchemaScope = Object.create({ scope: "session" });
+    const nonEnumerableKind = {};
+    Object.defineProperty(nonEnumerableKind, "kind", { value: "cell" });
+    const nonEnumerableScope = { kind: "cell" };
+    Object.defineProperty(nonEnumerableScope, "scope", { value: "session" });
+    const nonEnumerableAsCell = {};
+    Object.defineProperty(nonEnumerableAsCell, "asCell", {
+      value: ["cell"],
+    });
+    const nonEnumerableSchemaScope = {};
+    Object.defineProperty(nonEnumerableSchemaScope, "scope", {
+      value: "session",
+    });
+    const malformed = [
+      { asCell: [] },
+      { asCell: sparseAsCell },
+      { asCell: accessorAsCell },
+      { asCell: ["bogus"] },
+      { asCell: [42] },
+      { asCell: [{ kind: "bogus" }] },
+      { asCell: [{ kind: "cell", scope: "bogus" }] },
+      { asCell: [inheritedKind] },
+      { asCell: [inheritedScope] },
+      { asCell: [nonEnumerableKind] },
+      { asCell: [nonEnumerableScope] },
+      inheritedAsCell,
+      nonEnumerableAsCell,
+      { scope: "bogus" },
+      inheritedSchemaScope,
+      nonEnumerableSchemaScope,
+    ] as unknown as JSONSchema[];
+    for (const schema of malformed) {
+      expect(validateSchemaDefinition(schema)).toBeDefined();
+    }
+  });
+
+  it("reports malformed strict keyword shapes at their exact child", () => {
+    const malformed: [JSONSchema, string][] = [
+      [{ type: ["number", 1] } as unknown as JSONSchema, "non-string"],
+      [{ type: ["number", "number"] }, "duplicate"],
+      [{ minLength: -1 }, "non-negative integer"],
+      [{ pattern: 1 } as unknown as JSONSchema, "pattern must be a string"],
+      [{ properties: [] } as unknown as JSONSchema, "object of schemas"],
+      [
+        { dependentRequired: [] } as unknown as JSONSchema,
+        "dependentRequired: must be an object",
+      ],
+      [
+        { uniqueItems: "yes" } as unknown as JSONSchema,
+        "uniqueItems: must be a boolean",
+      ],
+      [{ enum: [1, 1] }, "enum: values must be unique"],
+      [
+        { anyOf: [{ type: ["number", "number"] }] },
+        "anyOf[0]",
+      ],
+      [
+        { prefixItems: [{ type: ["number", "number"] }] },
+        "prefixItems[0]",
+      ],
+      [
+        { items: { type: ["number", "number"] } },
+        "items",
+      ],
+    ];
+    for (const [schema, message] of malformed) {
+      expect(validateSchemaDefinition(schema)).toContain(message);
+    }
+  });
+
+  it("fails closed for cyclic values and indeterminate schema branches", () => {
+    const recursive: JSONSchema = {
+      $ref: "#/$defs/Node",
+      $defs: {
+        Node: {
+          type: "object",
+          properties: { next: { $ref: "#/$defs/Node" } },
+        },
+      },
+    };
+    const cyclic: { next?: unknown } = {};
+    cyclic.next = cyclic;
+    expect(validateSchemaValue(recursive, cyclic)).toContain(
+      "recursive schema",
+    );
+
+    expect(validateSchemaValue([] as unknown as JSONSchema, 1)).toContain(
+      "object or boolean",
+    );
+    expect(validateSchemaValue({ $ref: "#/$defs/Missing" }, 1)).toContain(
+      "cannot resolve schema reference",
+    );
+    expect(validateSchemaValue({
+      anyOf: [
+        { type: "number" },
+        { $ref: "#/$defs/Missing" },
+      ],
+    }, "not-a-number")).toContain("cannot resolve schema reference");
+  });
+
+  it("skips sparse value holes in every collection validation mode", () => {
+    const sparse = [1, , 3];
+    expect(validateAgainstSchema({ items: { type: "number" } }, sparse))
+      .toBeUndefined();
+    expect(validateSchemaValue({ uniqueItems: true }, [1, , 1])).toContain(
+      "not unique",
+    );
+    expect(validateSchemaValue({ contains: { type: "number" } }, [1, ,]))
+      .toBeUndefined();
+
+    const sameFunction = () => 1;
+    expect(validateSchemaValue({ uniqueItems: true }, [
+      sameFunction,
+      sameFunction,
+    ])).toContain("not unique");
+    expect(validateSchemaValue({ uniqueItems: true }, [
+      () => 1,
+      () => 1,
+    ])).toBeUndefined();
+  });
+
+  it("reports every strict migration constraint it cannot satisfy", () => {
+    const invalid: [JSONSchema, unknown, string][] = [
+      [{ not: { type: "number" } }, 1, "not schema"],
+      [{ if: { type: "number" }, then: { minimum: 2 } }, 1, "minimum"],
+      [{ if: { type: "number" }, else: { minLength: 2 } }, "x", "minLength"],
+      [{ minimum: 2 }, 1, "minimum"],
+      [{ exclusiveMinimum: 1 }, 1, "exclusiveMinimum"],
+      [{ maximum: 1 }, 2, "maximum"],
+      [{ exclusiveMaximum: 2 }, 2, "exclusiveMaximum"],
+      [{ multipleOf: 2 }, 3, "multiple"],
+      [{ multipleOf: 0 }, 0, "multiple"],
+      [{ minLength: 2 }, "x", "minLength"],
+      [{ maxLength: 1 }, "xy", "maxLength"],
+      [{ pattern: "[" }, "x", "invalid pattern"],
+      [{ pattern: "^x$" }, "y", "pattern"],
+      [{ format: "email" }, "invalid", "format email"],
+      [{ minItems: 2 }, [1], "minItems"],
+      [{ maxItems: 1 }, [1, 2], "maxItems"],
+      [{ uniqueItems: true }, [1, 1], "not unique"],
+      [{ prefixItems: [{ type: "string" }] }, [1], "0:"],
+      [{ items: { type: "number" } }, ["x"], "0:"],
+      [{ contains: { type: "number" } }, ["x"], "fewer than 1"],
+      [
+        {
+          contains: { type: "number" },
+          maxContains: 1,
+        },
+        [1, 2],
+        "more than 1",
+      ],
+      [{ minProperties: 2 }, { one: 1 }, "minProperties"],
+      [{ maxProperties: 1 }, { one: 1, two: 2 }, "maxProperties"],
+      [
+        {
+          dependentRequired: { one: ["two"] },
+        },
+        { one: 1 },
+        "dependent property two",
+      ],
+      [
+        {
+          dependentSchemas: { one: { required: ["two"] } },
+        },
+        { one: 1 },
+        "missing required property two",
+      ],
+      [{ propertyNames: { pattern: "^[a-z]+$" } }, { "BAD!": 1 }, "BAD!"],
+      [
+        { patternProperties: { "[": { type: "number" } } },
+        { x: 1 },
+        "invalid property pattern",
+      ],
+      [{ patternProperties: { "^x": { type: "number" } } }, { x: "bad" }, "x:"],
+      [{ contentEncoding: "base64" }, "encoded", "not supported"],
+      [{ contentMediaType: "application/json" }, "encoded", "not supported"],
+      [{ contentSchema: { type: "object" } }, "encoded", "not supported"],
+    ];
+    for (const [schema, value, message] of invalid) {
+      expect(validateSchemaValue(schema, value)).toContain(message);
+    }
+    expect(validateSchemaValue({
+      prefixItems: [{ type: "string" }, { type: "number" }],
+    }, ["only-present-item"])).toBeUndefined();
+  });
+
+  it("fails closed on recursive schema validation", () => {
+    const recursive: JSONSchema = {
+      allOf: [{ $ref: "#/$defs/Loop" }],
+      $defs: {
+        Loop: { allOf: [{ $ref: "#/$defs/Loop" }] },
+      },
+    };
+
+    expect(() => validateSchemaValue(recursive, "value")).not.toThrow();
+    expect(validateSchemaValue(recursive, "value")).toContain(
+      "recursive schema",
+    );
+
+    const productive: JSONSchema = {
+      $ref: "#/$defs/Node",
+      $defs: {
+        Node: {
+          type: "object",
+          properties: {
+            value: { type: "number" },
+            next: { $ref: "#/$defs/Node" },
+          },
+          required: ["value"],
+        },
+      },
+    };
+    expect(validateSchemaValue(productive, {
+      value: 1,
+      next: { value: 2 },
+    })).toBeUndefined();
+  });
+
+  it("tracks recursive validation separately for each definition root", () => {
+    const shared = { $ref: "#/$defs/V" } as const;
+    const child = {
+      $defs: { V: { type: "string" } },
+      allOf: [shared],
+    } as const;
+    const schema: JSONSchema = {
+      $defs: { V: { allOf: [child] } },
+      allOf: [shared],
+    };
+
+    expect(validateSchemaDefinition(schema)).toBeUndefined();
+    expect(validateSchemaValue(schema, "x")).toBeUndefined();
+    expect(validateSchemaValue(schema, 1)).toContain("type string");
+  });
+
+  it("reports malformed referenced schemas and literal payloads", () => {
+    const cyclic: any = {
+      type: "object",
+      properties: {},
+    };
+    cyclic.properties.self = cyclic;
+    const malformed: JSONSchema[] = [
+      {
+        $ref: "#/$defs/X",
+        $defs: { X: null },
+      } as unknown as JSONSchema,
+      { const: Symbol("unique") } as unknown as JSONSchema,
+      { enum: [new Map()] } as unknown as JSONSchema,
+      { default: () => {} } as unknown as JSONSchema,
+      { default: new Uint8Array([1]) } as unknown as JSONSchema,
+      cyclic,
+    ];
+
+    for (const schema of malformed) {
+      expect(() => validateSchemaDefinition(schema)).not.toThrow();
+      expect(validateSchemaDefinition(schema)).toBeDefined();
+    }
+  });
+
+  it("does not treat indeterminate recursive branches as ordinary mismatches", () => {
+    const loop = { allOf: [{ $ref: "#/$defs/Loop" }] };
+    const definitions = { Loop: loop };
+    const expectRecursiveFailure = (
+      schema: Exclude<JSONSchema, boolean>,
+      value: unknown,
+    ) => {
+      expect(validateSchemaValue({ ...schema, $defs: definitions }, value))
+        .toContain("recursive schema");
+    };
+
+    expectRecursiveFailure({ not: { $ref: "#/$defs/Loop" } }, "value");
+    expectRecursiveFailure({
+      oneOf: [{ type: "string" }, { $ref: "#/$defs/Loop" }],
+    }, "value");
+    expectRecursiveFailure({
+      if: { $ref: "#/$defs/Loop" },
+      then: false,
+      else: true,
+    }, "value");
+    expectRecursiveFailure({
+      type: "array",
+      contains: { $ref: "#/$defs/Loop" },
+      minContains: 0,
+      maxContains: 0,
+    }, ["value"]);
+
+    expect(validateSchemaValue({
+      anyOf: [{ type: "string" }, { $ref: "#/$defs/Loop" }],
+      $defs: definitions,
+    }, "value")).toBeUndefined();
+
+    expect(validateSchemaValue({
+      not: { type: "custom" } as unknown as JSONSchema,
+    }, "value")).toContain("unsupported schema type custom");
+    expect(validateSchemaValue({
+      oneOf: [
+        { type: "string" },
+        { type: "custom" } as unknown as JSONSchema,
+      ],
+    }, "value")).toContain("unsupported schema type custom");
+    expect(validateSchemaValue({
+      if: { type: "string", pattern: "[" },
+      then: false,
+      else: true,
+    }, "value")).toContain("invalid pattern");
+    expect(validateSchemaValue({
+      not: { type: "string", contentEncoding: "base64" },
+    }, "value")).toContain("content validation is not supported");
+    expect(validateSchemaValue({
+      anyOf: [
+        { type: "string" },
+        { type: "custom" } as unknown as JSONSchema,
+      ],
+    }, "value")).toBeUndefined();
+  });
+
+  it("validates the schema formats generated by Common Fabric", () => {
+    const valid: [string, string][] = [
+      ["email", "a@b.co"],
+      ["email", "a@localhost"],
+      ["email", '"quoted local"@example.com'],
+      ["uri", "https://example.com/path"],
+      ["date", "2026-07-14"],
+      ["date-time", "2026-07-14T12:34:56Z"],
+      ["date-time", "2026-07-14t12:34:56z"],
+      ["date-time", "2016-12-31T23:59:60Z"],
+    ];
+    for (const [format, value] of valid) {
+      expect(validateSchemaValue({ type: "string", format }, value))
+        .toBeUndefined();
+    }
+    for (
+      const [format, value] of [
+        ["email", ".a@example.com"],
+        ["email", "a..b@example.com"],
+        ["email", "a@example..com"],
+        ["uri", "not a uri"],
+        ["date", "not a date"],
+        ["date", "2026-02-30"],
+        ["date-time", "not a timestamp"],
+        ["date-time", "2026-02-30T12:00:00Z"],
+        ["date-time", "2026-01-01T24:00:00Z"],
+        ["custom", "value"],
+      ]
+    ) {
+      expect(validateSchemaValue({ type: "string", format }, value))
+        .toContain(`format ${format}`);
+    }
   });
 });
 
@@ -324,7 +980,12 @@ describe("schema-based prompt injection sanitization compatibility", () => {
 
     const sanitized = schemaWithInjectionSafeAnnotations(
       schema,
-      [...flatRisks, ...orRisks],
+      [
+        ...flatRisks,
+        ...orRisks,
+        "prompt-injection-risk",
+        { anyOf: ["prompt-injection-risk", keep(100)] },
+      ],
     ) as any;
 
     const remaining: unknown[] = sanitized.properties.action.ifc
@@ -341,7 +1002,7 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     );
     expect(hasMaterialRiskAnywhere).toBe(false);
     // The retained (non-risk) alternatives survive.
-    expect(remaining.length).toBe(40);
+    expect(remaining.length).toBe(41);
   });
 
   it("marks a whole closed object when every readable child is instruction-inert", () => {

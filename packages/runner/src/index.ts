@@ -105,13 +105,18 @@ export {
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
+  sanitizeSchemaForLinks,
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 export {
   asPatternIdentityRef,
+  extractDefaultValues,
   getPatternIdentityRef,
   getPatternSource,
+  mergeSchemaDefaults,
   patternIdentityKey,
+  schemaAcceptsOpaqueCellValue,
+  schemaHasDefaultValue,
   setPatternSource,
 } from "./runner.ts";
 
