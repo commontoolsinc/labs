@@ -99,6 +99,34 @@ function resolveCompositeInput(
     : current;
 }
 
+function typeMayIncludeNullish(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  seen: Set<ts.Type> = new Set(),
+): boolean {
+  if (seen.has(type)) return false;
+  seen.add(type);
+
+  if (
+    type.flags &
+    (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Null |
+      ts.TypeFlags.Undefined | ts.TypeFlags.Void)
+  ) {
+    return true;
+  }
+  if (type.isUnion()) {
+    return type.types.some((member) =>
+      typeMayIncludeNullish(member, checker, seen)
+    );
+  }
+  if (type.flags & ts.TypeFlags.TypeParameter) {
+    const constraint = checker.getBaseConstraintOfType(type);
+    return !constraint || constraint === type ||
+      typeMayIncludeNullish(constraint, checker, seen);
+  }
+  return checker.getNonNullableType(type) !== type;
+}
+
 function objectInputProperty(
   input: ts.Expression,
   propertyName: string,
@@ -248,7 +276,11 @@ export class AvailabilityAnalysisTransformer extends HelpersOnlyTransformer {
         if (
           ts.isCallExpression(left) &&
           detectCallKind(left, context.checker)?.kind ===
-            "availability-result"
+            "availability-result" &&
+          !typeMayIncludeNullish(
+            context.checker.getTypeAtLocation(left),
+            context.checker,
+          )
         ) {
           context.reportDiagnosticOnce({
             type: "availability:dead-result-fallback",

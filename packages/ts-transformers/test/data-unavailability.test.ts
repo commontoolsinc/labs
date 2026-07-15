@@ -703,26 +703,57 @@ Deno.test("reports observeAvailability inside the compute boundary it tries to w
 });
 
 Deno.test("reports a dead nullish fallback after resultOf", async () => {
-  const { diagnostics } = await validateSource(`
-    import {
-      AsyncResult,
-      pattern,
-      resultOf,
-    } from "commonfabric";
+  const { diagnostics } = await validateSource(
+    `
+      import {
+        AsyncResult,
+        pattern,
+        resultOf,
+      } from "commonfabric";
 
-    type Repo = { name: string };
+      type Repo = { name: string };
 
-    export default pattern((input: { request: AsyncResult<Repo> }) => {
-      const repo = resultOf(input.request) ?? { name: "fallback" };
-      return { repo };
-    });
-  `);
+      export default pattern((input: { request: AsyncResult<Repo> }) => {
+        const repo = resultOf(input.request) ?? { name: "fallback" };
+        return { repo };
+      });
+    `,
+    { types: { "commonfabric.d.ts": commonfabricTypes } },
+  );
 
   assertEquals(
     diagnosticTypes(diagnostics).includes(
       "availability:dead-result-fallback",
     ),
     true,
+  );
+});
+
+Deno.test("allows nullish fallbacks for valid nullable result values", async () => {
+  const { diagnostics } = await validateSource(
+    `
+      import { AsyncResult, pattern, resultOf } from "commonfabric";
+
+      type Repo = { name: string };
+
+      export default pattern((input: {
+        nullable: AsyncResult<Repo | null>;
+        optional: AsyncResult<Repo | undefined>;
+      }) => {
+        const nullable = resultOf(input.nullable) ?? { name: "none" };
+        const optionalResult = resultOf(input.optional);
+        const optional = optionalResult ?? { name: "missing" };
+        return { nullable, optional };
+      });
+    `,
+    { types: { "commonfabric.d.ts": commonfabricTypes } },
+  );
+
+  assertEquals(
+    diagnostics.filter((diagnostic) =>
+      diagnostic.type === "availability:dead-result-fallback"
+    ).length,
+    0,
   );
 });
 

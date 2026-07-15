@@ -1010,13 +1010,15 @@ must migrate those uses as part of the public-name cutover. Ordinary consumers
 now call `resultOf(request)` once to obtain a statically usable value; consumers
 which render availability states keep the `AsyncResult<T>` and use guards.
 
-Fallback-while-loading code requires special review. Replacing
-`request.result ?? fallback` with `resultOf(request) ?? fallback` is incorrect:
-the runtime marker remains present and truthy even though TypeScript exposes the
-usable type. Use explicit guarded fallback UI, explicit persisted state for a
-last-successful value, or the `latestComplete()` snapshot. This is the
-headline migration hazard for out-of-repository patterns and a candidate for a
-future lint over falsy/defaulting operations on projected results.
+Fallback-while-loading code requires special review. When the successful `T`
+excludes `null` and `undefined`, replacing `request.result ?? fallback` with
+`resultOf(request) ?? fallback` is incorrect: the runtime marker remains present
+and truthy even though TypeScript exposes the usable type. Use explicit guarded
+fallback UI, explicit persisted state for a last-successful value, or the
+`latestComplete()` snapshot. When `T` itself includes `null` or `undefined`, a
+nullish fallback remains valid for those successful values; it still does not
+act as a loading fallback. This distinction is the headline migration hazard
+for out-of-repository patterns.
 
 Within pattern code and these docs, `AsyncResult<T>` means the public
 availability union. The internal memory package has an unrelated generic named
