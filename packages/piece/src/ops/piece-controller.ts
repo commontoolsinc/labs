@@ -399,7 +399,8 @@ export function linkPathContracts(
   );
 }
 
-function materializedValueAtPath(
+/** @internal Exported for focused correlated-write contract tests. */
+export function materializedValueAtPath(
   root: unknown,
   path: readonly (string | number)[],
 ): unknown {
@@ -490,7 +491,8 @@ const LINK_PATH_NEUTRAL_ANCESTOR_KEYS = new Set([
   "writeOnly",
 ]);
 
-function selectCurrentContainerSchema(
+/** @internal Exported for focused correlated-write contract tests. */
+export function selectCurrentContainerSchema(
   schema: Exclude<JSONSchema, boolean>,
   currentValue: unknown,
 ): JSONSchema {
@@ -509,7 +511,7 @@ function selectCurrentContainerSchema(
     : [schema.type];
   if (declaredTypes !== undefined && !declaredTypes.includes(currentType)) {
     throw new Error(
-      `current producer value is not accepted as a ${currentType} container`,
+      `current producer value is not accepted as an ${currentType} container`,
     );
   }
 
@@ -543,7 +545,8 @@ function selectCurrentContainerSchema(
  * every currently matching anyOf branch remains a separate conjunct so an
  * overlapping ordinary alternative cannot erase a restricted Cell capability.
  */
-function currentValuePathContracts(
+/** @internal Exported for focused correlated-write contract tests. */
+export function currentValuePathContracts(
   unresolved: PathSchemaContract,
   segment: string | number,
   currentValue: unknown,
@@ -730,7 +733,8 @@ function outerCellShapesMatch(
 }
 
 /** Consume a uniform outer Cell wrapper through refs and compositions. */
-function localizeOuterCellContract(
+/** @internal Exported for focused Cell-capability contract tests. */
+export function localizeOuterCellContract(
   unresolved: PathSchemaContract,
   stored: StoredCellTopology | undefined = undefined,
   active = new WeakSet<object>(),
@@ -898,7 +902,8 @@ export function cellCapabilityCanNarrow(
 const cellKindCanWrite = (kind: CellKind): boolean =>
   kind === "cell" || kind === "writeonly" || kind === "stream";
 
-function assertWritablePiecePath(
+/** @internal Exported for focused Cell-capability contract tests. */
+export function assertWritablePiecePath(
   schema: JSONSchema,
   path: readonly (string | number)[],
   bindingAtTerminal: boolean,
@@ -1109,7 +1114,8 @@ function canFollowSourceScope(
  * carried by the supplied alias. A caller can narrow a Cell view before
  * serializing it, so the envelope itself is not evidence about future writes.
  */
-function durableSourceContract(
+/** @internal Exported for focused producer-topology contract tests. */
+export function durableSourceContract(
   linkedCell: Cell<unknown>,
   manager: PieceManager,
 ): DurableSourceContract | undefined {
@@ -1361,7 +1367,8 @@ function includePossibleMissingValue(
   };
 }
 
-function assertSuppliedLinkSchemasCompatible(
+/** @internal Exported for focused durable-link contract tests. */
+export function assertSuppliedLinkSchemasCompatible(
   links: readonly SuppliedLink[],
   destinationSchema: JSONSchema,
   baseCell: Cell<unknown>,
@@ -1605,7 +1612,8 @@ function assertSuppliedLinkSchemasCompatible(
   return preservedDirectHandles;
 }
 
-function localizeWritableDestinationContracts(
+/** @internal Exported for focused write-destination contract tests. */
+export function localizeWritableDestinationContracts(
   destination: DurableSchemaPath,
   rootCell: Cell<unknown>,
   nextValue: unknown,
@@ -1725,7 +1733,8 @@ function rawValueAtPath(
   return { present: true, value };
 }
 
-function rawResolvedValueAtPath(
+/** @internal Exported for focused projection-presence tests. */
+export function rawResolvedValueAtPath(
   tx: NonNullable<Cell<unknown>["tx"]>,
   resolved: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>,
 ): { present: boolean; value: unknown } {
@@ -1760,7 +1769,8 @@ function rawResolvedValueAtPath(
   );
 }
 
-function omitMissingProjectionAliases(
+/** @internal Exported for focused projection-presence tests. */
+export function omitMissingProjectionAliases(
   materialized: unknown,
   raw: unknown,
   schemaView: unknown,
@@ -1945,6 +1955,22 @@ function validateDurableSourceRoots(
   return undefined;
 }
 
+/** @internal Exported for focused projection-capability tests. */
+export function resolveDeclaredStreamCapability(
+  values: readonly (boolean | undefined)[],
+): boolean {
+  const declared = values.filter((entry): entry is boolean =>
+    entry !== undefined
+  );
+  const isStream = declared[0] ?? false;
+  if (declared.some((entry) => entry !== isStream)) {
+    throw new Error(
+      "write destination contracts disagree on Stream capability",
+    );
+  }
+  return isStream;
+}
+
 class PiecePropIo implements PieceCellIo {
   #cc: PieceController;
   #type: PiecePropIoType;
@@ -2047,15 +2073,9 @@ class PiecePropIo implements PieceCellIo {
               nextValue,
             )
           );
-          const declaredStream = localized.flatMap((entry) =>
-            entry.declaredStream === undefined ? [] : [entry.declaredStream]
+          const isStream = resolveDeclaredStreamCapability(
+            localized.map((entry) => entry.declaredStream),
           );
-          const isStream = declaredStream[0] ?? false;
-          if (declaredStream.some((entry) => entry !== isStream)) {
-            throw new Error(
-              "write destination contracts disagree on Stream capability",
-            );
-          }
           localizedDestination = {
             contracts: localized.flatMap((entry) => entry.contracts),
             isStream,

@@ -22,12 +22,23 @@ import {
 } from "@commonfabric/runner/cfc";
 import { PieceManager } from "../src/manager.ts";
 import {
+  assertSuppliedLinkSchemasCompatible,
+  assertWritablePiecePath,
   cellCapabilityCanNarrow,
   consumeOuterCellContract,
   consumeStreamEventContract,
+  currentValuePathContracts,
+  durableSourceContract,
   linkPathContracts,
+  localizeOuterCellContract,
   localizeStreamEventContract,
+  localizeWritableDestinationContracts,
+  materializedValueAtPath,
+  omitMissingProjectionAliases,
   PieceController,
+  rawResolvedValueAtPath,
+  resolveDeclaredStreamCapability,
+  selectCurrentContainerSchema,
 } from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
@@ -472,6 +483,265 @@ describe("piece link contract localization", () => {
     });
   });
 
+  it("selects current container shapes and rejects impossible ones", () => {
+    const scalar = { type: "number", maximum: 10 } as const;
+    expect(selectCurrentContainerSchema(scalar, 1)).toBe(scalar);
+    expect(() =>
+      selectCurrentContainerSchema(
+        { type: "array", items: true },
+        { value: 1 },
+      )
+    ).toThrow(/not accepted as an object container/);
+
+    expect(
+      selectCurrentContainerSchema(
+        {
+          type: ["object", "array"],
+          properties: { value: { type: "number" } },
+          required: ["value"],
+          items: { type: "number" },
+          uniqueItems: true,
+          maximum: 10,
+          minLength: 1,
+          dependentRequired: { value: ["other"] },
+        },
+        { value: 1 },
+      ),
+    ).toEqual({
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    });
+  });
+
+  it("localizes every selected current-value composition branch", () => {
+    const anyOfSchema: JSONSchema = {
+      anyOf: [{
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      }, {
+        type: "object",
+        properties: { value: { type: "number", minimum: 0 } },
+        required: ["value"],
+      }],
+    };
+    expect(
+      currentValuePathContracts(
+        contract(anyOfSchema),
+        "value",
+        { value: 1 },
+        { value: 2 },
+      ).map((entry) => entry.schema),
+    ).toEqual([
+      true,
+      { type: "number" },
+      { type: "number", minimum: 0 },
+    ]);
+
+    const oneOfSchema: JSONSchema = {
+      oneOf: [{
+        type: "object",
+        properties: {
+          kind: { const: "number" },
+          value: { type: "number" },
+        },
+        required: ["kind", "value"],
+      }, {
+        type: "object",
+        properties: {
+          kind: { const: "string" },
+          value: { type: "string" },
+        },
+        required: ["kind", "value"],
+      }],
+    };
+    expect(
+      currentValuePathContracts(
+        contract(oneOfSchema),
+        "value",
+        { kind: "number", value: 1 },
+        { kind: "string", value: "next" },
+      ).map((entry) => entry.schema),
+    ).toEqual([true, { type: "string" }, { type: "number" }]);
+
+    const allOfSchema: JSONSchema = {
+      allOf: [{
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      }, {
+        type: "object",
+        properties: { value: { type: "number", minimum: 0 } },
+        required: ["value"],
+      }],
+    };
+    expect(
+      currentValuePathContracts(
+        contract(allOfSchema),
+        "value",
+        { value: 1 },
+        { value: 2 },
+      ).map((entry) => entry.schema),
+    ).toEqual([
+      true,
+      { type: "number" },
+      { type: "number", minimum: 0 },
+    ]);
+    expect(() =>
+      currentValuePathContracts(
+        contract(allOfSchema),
+        "value",
+        { value: 1 },
+        { value: -1 },
+      )
+    ).toThrow(/does not satisfy an allOf write contract/);
+  });
+
+  it("fails closed when current-value branch selection is not provable", () => {
+    expect(() =>
+      currentValuePathContracts(
+        contract({ type: "number", dependentRequired: {} }),
+        "value",
+        1,
+        2,
+      )
+    ).toThrow(/dependentRequired correlates/);
+
+    expect(() =>
+      currentValuePathContracts(
+        contract({
+          type: "array",
+          anyOf: [{ type: "array", items: { type: "number" } }],
+        }),
+        0,
+        [1],
+        { value: 1 },
+      )
+    ).toThrow(/not accepted as an object container/);
+
+    expect(() =>
+      currentValuePathContracts(
+        contract({
+          dependentSchemas: { value: { required: ["other"] } },
+          anyOf: [{ type: "object" }],
+        }),
+        "value",
+        1,
+        2,
+      )
+    ).toThrow(/dependentSchemas correlates/);
+
+    expect(() =>
+      currentValuePathContracts(
+        contract({ allOf: [] }),
+        "value",
+        1,
+        2,
+      )
+    ).toThrow(/allOf correlates/);
+
+    expect(() =>
+      currentValuePathContracts(
+        contract({
+          anyOf: [{
+            type: "object",
+            properties: { kind: { const: "known" } },
+            required: ["kind"],
+          }],
+        }),
+        "kind",
+        { kind: "known" },
+        { kind: "unknown" },
+      )
+    ).toThrow(/does not select a valid anyOf write contract/);
+
+    const overlapping: JSONSchema = {
+      oneOf: [{
+        type: "object",
+        properties: { value: { type: "number" } },
+        required: ["value"],
+      }, {
+        type: "object",
+        properties: { value: { minimum: 0 } },
+        required: ["value"],
+      }],
+    };
+    expect(() =>
+      currentValuePathContracts(
+        contract(overlapping),
+        "value",
+        { value: 1 },
+        { value: 2 },
+      )
+    ).toThrow(/does not select a valid oneOf write contract/);
+
+    const recursive: JSONSchema = { anyOf: [{ type: "object" }] };
+    const active = new WeakSet<object>();
+    active.add(recursive as object);
+    expect(() =>
+      currentValuePathContracts(
+        contract(recursive),
+        "value",
+        { value: 1 },
+        { value: 2 },
+        active,
+      )
+    ).toThrow(/recursive correlated write schema/);
+  });
+
+  it("localizes outer Cell compositions without erasing authority", () => {
+    const readonly = { type: "number", asCell: ["readonly"] } as JSONSchema;
+    const writeonly = {
+      type: "number",
+      asCell: ["writeonly"],
+    } as JSONSchema;
+
+    expect(
+      localizeOuterCellContract(contract({
+        anyOf: [readonly, writeonly],
+      })).issue,
+    ).toMatch(/incompatible outer capabilities/);
+
+    expect(
+      localizeOuterCellContract(
+        contract({ anyOf: [readonly, { type: "number" }, { type: "string" }] }),
+        { value: 1, opaqueHandle: false },
+      ).contract.schema,
+    ).toEqual({ anyOf: [{ type: "number" }, { type: "string" }] });
+
+    expect(
+      localizeOuterCellContract(contract({
+        anyOf: [{ type: "number", asCell: ["stream"] }, true],
+      })).issue,
+    ).toMatch(/mixed stream and non-stream anyOf alternatives/);
+    expect(
+      localizeOuterCellContract(contract({ anyOf: [readonly, true] })).issue,
+    ).toMatch(/ambiguous wrapped and unwrapped anyOf alternatives/);
+
+    expect(
+      localizeOuterCellContract(contract({
+        allOf: [readonly, writeonly],
+      })).issue,
+    ).toMatch(/incompatible outer capabilities/);
+
+    const recursiveAnyOf = {} as { anyOf?: JSONSchema[] };
+    recursiveAnyOf.anyOf = [recursiveAnyOf as JSONSchema];
+    expect(
+      localizeOuterCellContract(
+        contract(recursiveAnyOf as JSONSchema),
+      ).issue,
+    ).toMatch(/recursive Cell schema/);
+
+    const recursiveAllOf = {} as { allOf?: JSONSchema[] };
+    recursiveAllOf.allOf = [recursiveAllOf as JSONSchema];
+    expect(
+      localizeOuterCellContract(
+        contract(recursiveAllOf as JSONSchema),
+      ).issue,
+    ).toMatch(/recursive Cell schema/);
+  });
+
   it("consumes only well-formed outer Cell wrappers", () => {
     expect(consumeOuterCellContract(true)).toEqual({
       kind: "cell",
@@ -556,6 +826,440 @@ describe("piece pull materialization", () => {
   afterEach(async () => {
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  it("resolves explicit Stream capability without guessing from opaque views", () => {
+    expect(resolveDeclaredStreamCapability([undefined, true, true])).toBe(
+      true,
+    );
+    expect(resolveDeclaredStreamCapability([undefined])).toBe(false);
+    expect(() => resolveDeclaredStreamCapability([true, false])).toThrow(
+      /disagree on Stream capability/,
+    );
+  });
+
+  it("distinguishes absent projection documents from failed reads", () => {
+    const resolved = runtime.getCell(
+      manager.getSpace(),
+      "projection-read-" + crypto.randomUUID(),
+    ).getAsNormalizedFullLink();
+    const transaction = (
+      result: unknown,
+    ): Parameters<typeof rawResolvedValueAtPath>[0] =>
+      ({ read: () => result }) as unknown as Parameters<
+        typeof rawResolvedValueAtPath
+      >[0];
+
+    expect(
+      rawResolvedValueAtPath(
+        transaction({ error: { name: "NotFoundError" } }),
+        resolved,
+      ),
+    ).toEqual({ present: false, value: undefined });
+    expect(() =>
+      rawResolvedValueAtPath(
+        transaction({ error: { name: "StorageFailure" } }),
+        resolved,
+      )
+    ).toThrow(/projection alias document read failed: StorageFailure/);
+    expect(
+      rawResolvedValueAtPath(
+        transaction({ ok: { value: { metadata: {} } } }),
+        resolved,
+      ),
+    ).toEqual({ present: false, value: undefined });
+    expect(
+      rawResolvedValueAtPath(
+        transaction({
+          ok: { value: { value: { nested: { value: 7 } } } },
+        }),
+        { ...resolved, path: ["nested", "value"] },
+      ),
+    ).toEqual({ present: true, value: 7 });
+  });
+
+  it("follows materialized Cells and fails closed on recursive write authority", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const argument = manager.getArgument(piece);
+
+    expect(
+      materializedValueAtPath({ argument }, ["argument", "input"]),
+    ).toBe(5);
+    expect(materializedValueAtPath(1, ["missing"])).toBeUndefined();
+    expect(() => assertWritablePiecePath(true, [], false, false, argument)).not
+      .toThrow();
+
+    const recursive = {} as { anyOf?: JSONSchema[] };
+    recursive.anyOf = [recursive as JSONSchema];
+    expect(() =>
+      assertWritablePiecePath(
+        recursive as JSONSchema,
+        ["value"],
+        false,
+        true,
+        argument,
+      )
+    ).toThrow(/recursive Cell schema/);
+  });
+
+  it("rejects conflicting and descendant Stream destinations", async () => {
+    const rootCell = runtime.getCell(
+      manager.getSpace(),
+      "destination-contract-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      rootCell.withTx(tx).setRawUntyped({
+        value: 1,
+        channel: { nested: 1 },
+      });
+    });
+    const destination = (
+      root: JSONSchema,
+      path: (string | number)[],
+    ): Parameters<typeof localizeWritableDestinationContracts>[0] => ({
+      root,
+      path,
+      rawBasePath: [],
+      schemaBaseDepth: 0,
+      validationCell: rootCell,
+      validationPath: path,
+    });
+
+    const conflicting: JSONSchema = {
+      type: "object",
+      properties: {
+        value: { type: "number", asCell: ["cell"] },
+      },
+      patternProperties: {
+        "^value$": { type: "number", asCell: ["readonly"] },
+      },
+    };
+    expect(() =>
+      localizeWritableDestinationContracts(
+        destination(conflicting, ["value"]),
+        rootCell,
+        2,
+      )
+    ).toThrow(/write destination Cell constraints disagree/);
+
+    const stream: JSONSchema = {
+      type: "object",
+      properties: {
+        channel: {
+          type: "object",
+          properties: { nested: { type: "number" } },
+          asCell: ["stream"],
+        },
+      },
+    };
+    expect(() =>
+      localizeWritableDestinationContracts(
+        destination(stream, ["channel", "nested"]),
+        rootCell,
+        2,
+      )
+    ).toThrow(/stream Cell write destination path is not writable/);
+  });
+
+  it("requires a transaction before reconciling a raw projection alias", () => {
+    const base = runtime.getCell(
+      manager.getSpace(),
+      "projection-base-" + crypto.randomUUID(),
+    );
+    const source = runtime.getCell(
+      manager.getSpace(),
+      "projection-source-" + crypto.randomUUID(),
+    );
+    const raw = source.getAsLink({ base, includeSchema: false });
+
+    expect(() =>
+      omitMissingProjectionAliases(
+        undefined,
+        raw,
+        undefined,
+        base,
+        manager,
+      )
+    ).toThrow(/projection alias reconciliation requires a transaction/);
+  });
+
+  it("fails closed for ambiguous producer and destination Cell contracts", async () => {
+    const ordinarySourceSchema: JSONSchema = {
+      type: "object",
+      properties: { value: { type: "number" } },
+      required: ["value"],
+    };
+    const makeSource = async (schema: JSONSchema) => {
+      const source = await manager.runPersistent(
+        trustPattern(runtime, {
+          argumentSchema: { type: "object", properties: {} },
+          resultSchema: ordinarySourceSchema,
+          result: { value: 7 },
+          nodes: [],
+        }),
+        {},
+        undefined,
+        { start: true },
+      );
+      await runtime.editWithRetry((tx) => {
+        source.withTx(tx).setMetaRaw("schema", schema);
+      });
+      return source;
+    };
+    const base = runtime.getCell(
+      manager.getSpace(),
+      "link-contract-base-" + crypto.randomUUID(),
+    );
+    const supplied = (source: typeof base) => [{
+      path: [],
+      value: source.key("value"),
+    }];
+
+    const ordinary = await makeSource(ordinarySourceSchema);
+    const recursiveTarget = {} as { anyOf?: JSONSchema[] };
+    recursiveTarget.anyOf = [recursiveTarget as JSONSchema];
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        supplied(ordinary),
+        recursiveTarget as JSONSchema,
+        base,
+        manager,
+      )
+    ).toThrow(/recursive Cell schema/);
+
+    const incompatibleOuter: JSONSchema = {
+      type: "object",
+      properties: {
+        value: {
+          anyOf: [
+            { type: "number", asCell: ["readonly"] },
+            { type: "number", asCell: ["writeonly"] },
+          ],
+        },
+      },
+      required: ["value"],
+    };
+    const incompatible = await makeSource(incompatibleOuter);
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        supplied(incompatible),
+        { type: "number" },
+        base,
+        manager,
+      )
+    ).toThrow(/incompatible outer capabilities/);
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        supplied(incompatible),
+        { type: "number", asCell: ["cell"] },
+        base,
+        manager,
+      )
+    ).toThrow(/incompatible outer capabilities/);
+
+    const conflictingOuter: JSONSchema = {
+      type: "object",
+      properties: {
+        value: { type: "number", asCell: ["cell"] },
+      },
+      patternProperties: {
+        "^value$": { type: "number", asCell: ["readonly"] },
+      },
+      required: ["value"],
+    };
+    const conflicting = await makeSource(conflictingOuter);
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        supplied(conflicting),
+        { type: "number" },
+        base,
+        manager,
+      )
+    ).toThrow(/source Cell constraints disagree/);
+    expect(() =>
+      assertSuppliedLinkSchemasCompatible(
+        supplied(conflicting),
+        { type: "number", asCell: ["cell"] },
+        base,
+        manager,
+      )
+    ).toThrow(/source Cell constraints disagree/);
+  });
+
+  it("recovers only producer-owned argument and internal contracts", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const internalCell = piece.key("output").resolveAsCell();
+    const originalInternal = piece.getMetaRaw("internal");
+    expect(Array.isArray(originalInternal)).toBe(true);
+    const unrelated = runtime.getCell(
+      manager.getSpace(),
+      "unrelated-internal-" + crypto.randomUUID(),
+      { type: "number" },
+    );
+    const orphan = runtime.getCell(
+      manager.getSpace(),
+      "orphan-internal-" + crypto.randomUUID(),
+      { type: "number" },
+    );
+
+    await runtime.editWithRetry((tx) => {
+      piece.withTx(tx).setMetaRaw("internal", [
+        null,
+        {},
+        { link: "malformed" },
+        {
+          link: unrelated.withTx(tx).getAsWriteRedirectLink({
+            base: piece.withTx(tx),
+            includeSchema: true,
+          }),
+        },
+        ...(originalInternal as unknown[]),
+      ]);
+      orphan.withTx(tx).setMetaRaw(
+        "result",
+        piece.withTx(tx).getAsWriteRedirectLink({
+          base: orphan.withTx(tx),
+          includeSchema: true,
+        }),
+      );
+    });
+
+    expect(durableSourceContract(internalCell, manager)?.schemas.length)
+      .toBeGreaterThan(0);
+    expect(durableSourceContract(orphan, manager)).toBeUndefined();
+  });
+
+  it("terminates projection reconciliation cycles", async () => {
+    const source = runtime.getCell(
+      manager.getSpace(),
+      "projection-cycle-source-" + crypto.randomUUID(),
+    );
+    const base = runtime.getCell(
+      manager.getSpace(),
+      "projection-cycle-base-" + crypto.randomUUID(),
+    );
+
+    await runtime.editWithRetry((tx) => {
+      source.withTx(tx).setRawUntyped(7);
+      const sourceWithTx = source.withTx(tx);
+      const baseWithTx = base.withTx(tx);
+      const normalized = sourceWithTx.getAsNormalizedFullLink();
+      const resolving = new Set([JSON.stringify([
+        normalized.space,
+        normalized.id,
+        normalized.scope,
+        normalized.path,
+      ])]);
+      expect(
+        omitMissingProjectionAliases(
+          "already-materialized",
+          sourceWithTx.getAsLink({
+            base: baseWithTx,
+            includeSchema: false,
+          }),
+          undefined,
+          baseWithTx,
+          manager,
+          true,
+          [],
+          resolving,
+        ),
+      ).toBe("already-materialized");
+    });
+  });
+
+  it("rejects writes redirected to cells without producer contracts", async () => {
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: { type: "number" } },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: 0 },
+      undefined,
+      { start: true },
+    );
+    const orphan = runtime.getCell(
+      manager.getSpace(),
+      "redirect-without-contract-" + crypto.randomUUID(),
+      { type: "number" },
+    );
+    const argument = manager.getArgument(target);
+    await runtime.editWithRetry((tx) => {
+      const argumentWithTx = argument.withTx(tx);
+      orphan.withTx(tx).set(1);
+      argumentWithTx.key("slot").setRawUntyped(
+        orphan.withTx(tx).getAsWriteRedirectLink({
+          base: argumentWithTx.key("slot"),
+          includeSchema: true,
+        }),
+      );
+    });
+
+    await expect(
+      new PieceController(manager, target).input.set(2, ["slot"]),
+    ).rejects.toThrow(/write destination has no durable schema contract/);
+    expect(orphan.get()).toBe(1);
+  });
+
+  it("exposes source provenance and Piece dependency relationships", async () => {
+    const sourceProgram = compiledMultiplierProgram("source", 2);
+    const source = await manager.runPersistent(
+      await runtime.patternManager.compilePattern(sourceProgram, {
+        space: manager.getSpace(),
+      }),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 1 },
+      undefined,
+      { start: true },
+    );
+    const sourceController = new PieceController(manager, source);
+    const targetController = new PieceController(manager, target);
+
+    expect(await sourceController.getPatternSourceFiles()).toEqual(
+      sourceProgram.files,
+    );
+    expect(await targetController.getPatternSourceFiles()).toBeUndefined();
+
+    await manager.link(
+      sourceController.id,
+      ["output"],
+      targetController.id,
+      ["input"],
+    );
+    const originalGetPieces = manager.getPieces.bind(manager);
+    manager.getPieces = () =>
+      Promise.resolve({
+        get: () => [source, target],
+      } as unknown as Awaited<ReturnType<typeof manager.getPieces>>);
+    try {
+      expect((await targetController.readingFrom()).map((piece) => piece.id))
+        .toEqual([sourceController.id]);
+      expect((await sourceController.readBy()).map((piece) => piece.id))
+        .toEqual([targetController.id]);
+    } finally {
+      manager.getPieces = originalGetPieces;
+    }
   });
 
   it("pulls before reading result values", async () => {
