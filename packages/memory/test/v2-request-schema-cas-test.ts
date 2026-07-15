@@ -140,6 +140,89 @@ Deno.test("request schema CAS definitions respect known hashes and force definit
   assertEquals(Object.keys(forced.schemaDefinitions ?? {}), [hash]);
 });
 
+Deno.test("request schema CAS preserves and merges supplied definitions", () => {
+  const referenced = compressRequestSchemas(graphRequest(), {
+    isKnownSchemaHash: () => true,
+  });
+  const supplied = {
+    ...referenced,
+    schemaDefinitions: { [hash]: schema },
+  };
+
+  assertStrictEquals(
+    compressRequestSchemas(supplied, { isKnownSchemaHash: noKnownSchemas }),
+    supplied,
+  );
+
+  const additionalSchema: JSONSchema = { type: "number" };
+  const additional = internSchema(additionalSchema, true);
+  const withInlineSchema = {
+    ...supplied,
+    query: {
+      ...supplied.query,
+      roots: [...supplied.query.roots, {
+        id: "of:additional",
+        selector: { path: [], schema: additionalSchema },
+      }],
+    },
+  };
+  const compressed = compressRequestSchemas(withInlineSchema, {
+    isKnownSchemaHash: noKnownSchemas,
+  });
+
+  assertEquals(compressed.schemaDefinitions, {
+    [additional.taggedHashString]: additional.schema,
+    [hash]: schema,
+  });
+  assertEquals(
+    schemaAtSelector({ query: { roots: [compressed.query.roots[1]] } }),
+    `schema-cas@1:${additional.taggedHashString}`,
+  );
+  const expanded = expandRequestSchemas(compressed, () => undefined);
+  if (expanded.type !== "graph.query") {
+    throw new Error("expected graph query request");
+  }
+  assertEquals(schemaAtSelector(expanded), internSchema(schema, true).schema);
+  assertEquals(
+    expanded.query.roots[1].selector.schema,
+    additional.schema,
+  );
+});
+
+Deno.test("request schema CAS preserves collisions and combined limits", () => {
+  const canonical = internSchema(schema, true);
+  const colliding = {
+    ...graphRequest(),
+    schemaDefinitions: { [canonical.taggedHashString]: false },
+  };
+  const compressed = compressRequestSchemas(colliding, {
+    isKnownSchemaHash: noKnownSchemas,
+  });
+
+  assertEquals(
+    compressed.schemaDefinitions?.[canonical.taggedHashString],
+    false,
+  );
+  assertThrows(
+    () => expandRequestSchemas(compressed, () => undefined),
+    InvalidRequestSchemaDefinitionsError,
+    "hash mismatch",
+  );
+
+  const atDefinitionLimit = {
+    ...graphRequest(),
+    schemaDefinitions: Object.fromEntries(
+      Array.from({ length: 256 }, (_, index) => [`hash-${index}`, false]),
+    ),
+  };
+  assertStrictEquals(
+    compressRequestSchemas(atDefinitionLimit, {
+      isKnownSchemaHash: noKnownSchemas,
+    }),
+    atDefinitionLimit,
+  );
+});
+
 Deno.test("request schema CAS rewrites only selectors and transact link schemas", () => {
   const graph = compressRequestSchemas(graphRequest(), {
     isKnownSchemaHash: noKnownSchemas,

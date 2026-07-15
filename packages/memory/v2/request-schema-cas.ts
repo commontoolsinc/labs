@@ -91,7 +91,7 @@ const schemaReference = (
   return `${REQUEST_SCHEMA_CAS_REF_PREFIX}${canonical.taggedHashString}`;
 };
 
-const generatedDefinitionsFitLimits = (
+const definitionsFitLimits = (
   definitions: ReadonlyMap<string, JSONSchema>,
 ): boolean => {
   if (definitions.size > MAX_REQUEST_SCHEMA_DEFINITIONS) return false;
@@ -231,13 +231,24 @@ export const compressRequestSchemas = <
   if (rewritten === request && request.schemaDefinitions === undefined) {
     return request;
   }
-  if (!generatedDefinitionsFitLimits(definitions)) return request;
+  if (definitions.size === 0) return rewritten as Request;
 
-  const { schemaDefinitions: _schemaDefinitions, ...withoutDefinitions } =
-    rewritten;
-  const compressed = definitions.size === 0 ? withoutDefinitions as Request : {
-    ...withoutDefinitions,
-    schemaDefinitions: Object.fromEntries(definitions),
+  const suppliedDefinitions = rewritten.schemaDefinitions;
+  if (
+    suppliedDefinitions !== undefined && !isPlainRecord(suppliedDefinitions)
+  ) {
+    return request;
+  }
+  const mergedDefinitions = new Map(definitions);
+  for (const [hash, schema] of Object.entries(suppliedDefinitions ?? {})) {
+    if (!isSchema(schema)) return request;
+    mergedDefinitions.set(hash, schema);
+  }
+  if (!definitionsFitLimits(mergedDefinitions)) return request;
+
+  const compressed = {
+    ...rewritten,
+    schemaDefinitions: Object.fromEntries(mergedDefinitions),
   } as Request;
   try {
     // A generated reference must remain discoverable by bounded server

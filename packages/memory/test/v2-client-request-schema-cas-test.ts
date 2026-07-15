@@ -731,6 +731,70 @@ Deno.test("memory v2 client retries MissingSchemas once with forced definitions"
   }
 });
 
+Deno.test("memory v2 client preserves caller-supplied schema definitions", async () => {
+  const requestSchema = schema("caller supplied definition ");
+  const canonical = internSchema(requestSchema, true);
+  const sent: Record<string, unknown>[] = [];
+  let receiver = (_payload: string) => {};
+  const transport: Transport = {
+    send(payload) {
+      const message = decodeMemoryBoundary(payload) as Record<string, unknown>;
+      sent.push(message);
+      if (message.type === "hello") {
+        receiver(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+          requestSchemaCas: { generation: "generation", audience: "audience" },
+          sessionOpen: {
+            audience: "audience",
+            challenge: { value: "challenge", expiresAt: 1_000_000 },
+          },
+        }));
+      } else if (message.type === "graph.query") {
+        receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: message.requestId,
+          ok: { serverSeq: 0, entities: [] },
+        }));
+      }
+      return Promise.resolve();
+    },
+    close: () => Promise.resolve(),
+    setReceiver(next) {
+      receiver = next;
+    },
+  };
+  const client = await connect({ transport });
+  try {
+    await client.request({
+      type: "graph.query",
+      requestId: "caller-definition",
+      space,
+      sessionId: "session",
+      query: {
+        roots: [{
+          id: "of:root",
+          selector: {
+            path: [],
+            schema: `schema-cas@1:${canonical.taggedHashString}`,
+          },
+        }],
+      },
+      schemaDefinitions: {
+        [canonical.taggedHashString]: canonical.schema,
+      },
+    });
+
+    const request = sent.find((message) => message.type === "graph.query");
+    assertEquals(request?.schemaDefinitions, {
+      [canonical.taggedHashString]: canonical.schema,
+    });
+  } finally {
+    await client.close();
+  }
+});
+
 Deno.test("memory v2 client falls back to one inline retry when the schema store rejects admission", async () => {
   const requestSchema = schema("schema store fallback ");
   const sent: Record<string, unknown>[] = [];
