@@ -232,14 +232,22 @@ const observationMinimumContextRank = (
   }
   if (crossesSpace && rank === 0) return 2;
 
+  // Dynamic reads outside the static read envelopes are admitted (mirroring
+  // the host's context floor): each must itself be same-space and still
+  // contributes its scope rank. Envelope-covered reads keep the certified
+  // summary judgment above. Writes remain strictly bounded by their declared
+  // envelopes.
+  for (const address of [...observation.reads, ...observation.shallowReads]) {
+    if (summary.reads.some((env) => schedulerEnvelopeCovers(env, address))) {
+      continue;
+    }
+    if (address.space !== summary.piece.space) return 2;
+    rank = Math.max(rank, schedulerAddressScopeRank(address));
+  }
   const runtimeGroups: Array<[
     readonly IMemorySpaceAddress[],
     readonly IMemorySpaceAddress[],
   ]> = [
-    [
-      [...observation.reads, ...observation.shallowReads],
-      summary.reads,
-    ],
     [
       [
         ...observation.actualChangedWrites,

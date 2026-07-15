@@ -651,7 +651,9 @@ Deno.test("executor action router carries an accepted builtin claim across async
     }),
     {
       disposition: "unserved",
-      diagnosticCode: "dynamic-read-outside-static-surface",
+      // Dynamic same-space reads are admitted; the unlinked side WRITE is
+      // what must stay outside the claimed surface.
+      diagnosticCode: "dynamic-write-outside-static-surface",
     },
   );
 

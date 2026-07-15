@@ -294,18 +294,23 @@ export function dynamicActionTransactionUnservableReason(
 
   const summary = observation.completeActionScopeSummary;
   if (summary === undefined) return "dynamic-incomplete-static-surface";
-  const readEnvelopes = summary.reads;
   const writeEnvelopes = [
     ...summary.writes,
     ...summary.materializerWriteEnvelopes,
     ...summary.directOutputs,
   ];
+  // Dynamic reads discovered outside the static read envelopes are admitted
+  // as long as each stays same-space and space-scoped (checked per address
+  // below). Real derived state routinely reads entity documents through
+  // links the transformer cannot enumerate; requiring envelope coverage for
+  // reads kept most product derivations permanently client-primary. Reads
+  // need no envelope bound because authority follows writes: wake
+  // correctness follows the per-run actual-read index, and the scope/space
+  // constraint is what claims actually promise. Writes remain strictly
+  // bounded by their declared envelopes.
   for (const address of [...observation.reads, ...observation.shallowReads]) {
     const reason = dynamicAddressReason(address, context.servedSpace, "read");
     if (reason !== undefined) return reason;
-    if (!readEnvelopes.some((envelope) => covers(envelope, address))) {
-      return "dynamic-read-outside-static-surface";
-    }
   }
   for (
     const address of [

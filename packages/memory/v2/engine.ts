@@ -5430,7 +5430,15 @@ function schedulerAddressCoveredBy(
   });
 }
 
-function schedulerRuntimeExceedsSummary(
+/**
+ * Writes must stay inside their declared envelopes: an out-of-envelope write
+ * means the trusted static summary does not bound the action's authority
+ * footprint. Reads are deliberately NOT checked against envelopes — dynamic
+ * link-following reads are admitted as long as they stay same-space and
+ * space-scoped, which the context floor and the execution firewall enforce
+ * per address.
+ */
+function schedulerRuntimeWritesExceedSummary(
   observation: SchedulerActionObservation,
   summary: CompleteActionScopeSummary,
 ): boolean {
@@ -5439,15 +5447,12 @@ function schedulerRuntimeExceedsSummary(
     ...summary.materializerWriteEnvelopes,
     ...summary.directOutputs,
   ];
-  return [...observation.reads, ...observation.shallowReads].some((address) =>
-    !schedulerAddressCoveredBy(address, summary.reads)
-  ) ||
-    [
-      ...observation.actualChangedWrites,
-      ...observation.currentKnownWrites,
-      ...(observation.declaredWrites ?? []),
-      ...(observation.ignoredSchedulingWrites ?? []),
-    ].some((address) => !schedulerAddressCoveredBy(address, writeEnvelopes)) ||
+  return [
+    ...observation.actualChangedWrites,
+    ...observation.currentKnownWrites,
+    ...(observation.declaredWrites ?? []),
+    ...(observation.ignoredSchedulingWrites ?? []),
+  ].some((address) => !schedulerAddressCoveredBy(address, writeEnvelopes)) ||
     observation.materializerWriteEnvelopes.some((address) =>
       !schedulerAddressCoveredBy(
         address,
@@ -5534,10 +5539,10 @@ const assertExecutionActionTransaction = (
       options.scopeContext,
     );
   }
-  if (schedulerRuntimeExceedsSummary(observation, summary)) {
+  if (schedulerRuntimeWritesExceedSummary(observation, summary)) {
     rejectExecutionAction(
       "runtime-exceeds-static-scope",
-      "observed action surfaces exceed the complete static summary",
+      "observed action writes exceed the complete static summary",
     );
   }
 
@@ -5700,10 +5705,18 @@ function schedulerRuntimeContextFloor(
   const ownerSpace = observation.ownerSpace;
   const addresses = schedulerObservationAddresses(observation);
   const summary = trustedSchedulerScopeSummary(observation);
+  // Reads are no longer required to sit inside the static read envelopes, so
+  // the summary alone no longer proves same-space-ness of the observed set:
+  // a dynamic (envelope-uncovered) read must itself be same-space, while an
+  // envelope-covered surface keeps the static floor's certified judgment.
   if (
     ownerSpace === undefined ||
     (summary !== undefined &&
-      schedulerRuntimeExceedsSummary(observation, summary)) ||
+      (schedulerRuntimeWritesExceedSummary(observation, summary) ||
+        [...observation.reads, ...observation.shallowReads].some((address) =>
+          normalizeSchedulerAddress(address).space !== ownerSpace &&
+          !schedulerAddressCoveredBy(address, summary.reads)
+        ))) ||
     (summary === undefined &&
       addresses.some((address) => address.space !== ownerSpace)) ||
     addresses.some((address) =>
