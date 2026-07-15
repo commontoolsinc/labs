@@ -14,6 +14,7 @@ import {
   PiecesController,
 } from "./pieces-controller.ts";
 import { clickCfButton } from "./cfc-browser-helpers.ts";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -84,7 +85,20 @@ describe("instantiate-pattern integration test", () => {
     await clickCfButton(page, "[data-cf-button]");
 
     // Wait for the page to soft navigate
-    await waitForCondition(page, urlChangedFrom, { args: [urlBefore] });
+    try {
+      await waitForCondition(page, urlChangedFrom, { args: [urlBefore] });
+    } catch (cause) {
+      const seen = await page.evaluate(() => ({
+        url: globalThis.location.href,
+        bodyText: (document.body?.innerText ?? "").slice(0, 400),
+      })).catch(() => undefined);
+      throw new Error(
+        `Clicking Add did not navigate away from ${urlBefore}. Last probe: ${
+          toIndentedDebugString(seen)
+        }`,
+        { cause },
+      );
+    }
 
     const urlAfter = await page.evaluate(() => globalThis.location.href);
 

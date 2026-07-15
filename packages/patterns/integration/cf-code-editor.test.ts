@@ -37,6 +37,7 @@ import {
 } from "./pieces-controller.ts";
 import { waitForRuntimeSynced } from "./cfc-browser-helpers.ts";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -173,7 +174,37 @@ describe("cf-code-editor cursor stability", () => {
       },
       identity,
     });
-    await waitForCondition(page, editorReady);
+    try {
+      await waitForCondition(page, editorReady);
+    } catch (cause) {
+      const seen = await page.evaluate(() => {
+        function find(root: Document | ShadowRoot): Element | null {
+          for (const element of root.querySelectorAll("*")) {
+            if (element.matches("cf-code-editor")) return element;
+            if (element.shadowRoot) {
+              const found = find(element.shadowRoot);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+        const editor = find(document) as
+          | (Element & { _editorView?: unknown })
+          | null;
+        return {
+          hostFound: editor !== null,
+          hostUpgraded: customElements.get("cf-code-editor") !== undefined,
+          editorViewReady: editor?._editorView !== undefined,
+          bodyText: (document.body?.innerText ?? "").slice(0, 400),
+        };
+      }).catch(() => undefined);
+      throw new Error(
+        `cf-code-editor never became ready. Last probe: ${
+          toIndentedDebugString(seen)
+        }`,
+        { cause },
+      );
+    }
   });
 
   it("should sync Cell value to editor", async () => {

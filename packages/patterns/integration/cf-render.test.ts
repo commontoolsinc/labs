@@ -1,5 +1,6 @@
 import {
   env,
+  Page,
   type ProbeApi,
   waitForCondition,
 } from "@commonfabric/integration";
@@ -15,6 +16,22 @@ import {
 } from "./pieces-controller.ts";
 import { clickNthCfButton, waitForText } from "./cfc-browser-helpers.ts";
 import { defer, type Deferred } from "@commonfabric/utils/defer";
+import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
+
+/** The text of every rendered `#counter-result`, for failure reporting. */
+function readCounterTexts(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    function collect(root: Document | ShadowRoot, out: Element[]): void {
+      for (const element of root.querySelectorAll("*")) {
+        if (element.matches("#counter-result")) out.push(element);
+        if (element.shadowRoot) collect(element.shadowRoot, out);
+      }
+    }
+    const matches: Element[] = [];
+    collect(document, matches);
+    return matches.map((element) => (element.textContent ?? "").trim());
+  });
+}
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -139,11 +156,22 @@ describe("cf-render integration test", () => {
 
     // The piece renders one counter through cf-render and two others; all
     // three must be present, and the first must show the updated value.
-    await waitForCondition(page, (probe: ProbeApi, expected: string) => {
-      const results = probe.collect("#counter-result");
-      return results.length === 3 &&
-        probe.deepText(results[0]).trim() === expected;
-    }, { args: ["Counter is the 5th number"] });
+    const expected = "Counter is the 5th number";
+    try {
+      await waitForCondition(page, (probe: ProbeApi, want: string) => {
+        const results = probe.collect("#counter-result");
+        return results.length === 3 &&
+          probe.deepText(results[0]).trim() === want;
+      }, { args: [expected] });
+    } catch (cause) {
+      const seen = await readCounterTexts(page).catch(() => undefined);
+      throw new Error(
+        `Expected three #counter-result elements with the first reading ${
+          JSON.stringify(expected)
+        }; saw ${toIndentedDebugString(seen)}`,
+        { cause },
+      );
+    }
   });
 });
 
