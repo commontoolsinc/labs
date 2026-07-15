@@ -1993,7 +1993,7 @@ class SpaceReplica implements ISpaceReplica {
   readonly #shadowLocalSeqsByAction = new WeakMap<object, Set<number>>();
   // Every executor-shadow local commit, across all actions. A shadow version
   // never reaches the host, so an upstream commit's pending read must never
-  // name one (see rebaseShadowPendingReads).
+  // name one (see rebaseUnresolvablePendingReads).
   readonly #shadowLocalSeqs = new Set<number>();
   readonly #executionClaims = new Map<string, ExecutionClaim>();
   readonly #claimedOverlays = new Map<number, ClaimedOverlayGeneration>();
@@ -3106,7 +3106,7 @@ class SpaceReplica implements ISpaceReplica {
       }
     }
     if (route.disposition !== "local") {
-      this.rebaseShadowPendingReads(commit);
+      this.rebaseUnresolvablePendingReads(commit);
     }
     if (route.disposition === "unserved") {
       return await this.publishUnservedAttempt(commit, route);
@@ -3543,11 +3543,9 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
       const { session } = await this.sessionHandle();
-      if (this.#actionTransactionRouter !== undefined) {
-        // A rejection learned during the awaits above may have doomed a
-        // localSeq this commit's pending reads still name.
-        this.rebaseShadowPendingReads(commit);
-      }
+      // A rejection or claimed-overlay recording during the awaits above may
+      // have doomed a localSeq this commit's pending reads still name.
+      this.rebaseUnresolvablePendingReads(commit);
       const applied = await session.transact(commit);
       this.confirmPending(localSeq, operations, applied);
       this.noteSourceCommitConfirmed(localSeq, applied.seq);
@@ -4509,25 +4507,32 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   /**
-   * Rebase pending reads that name executor-shadow versions onto the
-   * confirmed base beneath them before an upstream/unserved transaction
-   * leaves this replica.
+   * Rebase pending reads that name host-unresolvable local versions onto the
+   * confirmed base beneath them before a transaction leaves this replica.
    *
-   * A shadow commit is local-only, so its localSeq never receives a server
-   * resolution; a pending read naming it fails apply with "pending dependency
-   * not resolved" on every retry until the action's inputs move — measured as
-   * the dominant executor conflict storm (a claimed action reading the shadow
-   * output of an unclaimed or unservable producer). Reading the confirmed
-   * base instead is the same optimistic bet an ordinary stale read carries:
-   * normal conflict detection still rejects the commit when the underlying
-   * document moved.
+   * Two version classes never receive a server resolution for their
+   * localSeq: executor-shadow commits (Worker discovery runs, local-only)
+   * and claimed-overlay commits (client speculation for a server-claimed
+   * action, deliberately never sent). A pending read naming either fails
+   * apply with "pending dependency not resolved" on every retry until the
+   * inputs move — measured as the dominant executor conflict storm, and as
+   * a client hang once real product actions stayed claimed (a handler
+   * reading a claimed list overlay could never land its source write).
+   * Reading the confirmed base instead is exactly the §B.3 contract:
+   * conflict detection compares against committed state, and the accepted
+   * optimistic window self-heals through the server's recompute.
    */
-  private rebaseShadowPendingReads(commit: ClientCommit): void {
-    if (this.#shadowLocalSeqs.size === 0) return;
+  private rebaseUnresolvablePendingReads(commit: ClientCommit): void {
+    if (this.#shadowLocalSeqs.size === 0 && this.#claimedOverlays.size === 0) {
+      return;
+    }
     const retained: PendingRead[] = [];
     let rebased = 0;
     for (const read of commit.reads.pending) {
-      if (!this.#shadowLocalSeqs.has(read.localSeq)) {
+      if (
+        !this.#shadowLocalSeqs.has(read.localSeq) &&
+        !this.#claimedOverlays.has(read.localSeq)
+      ) {
         retained.push(read);
         continue;
       }
@@ -4543,8 +4548,8 @@ class SpaceReplica implements ISpaceReplica {
     }
     if (rebased > 0) {
       commit.reads.pending = retained;
-      logger.debug("execution-shadow-read-rebased", () => [
-        "Rebased shadow pending reads onto their confirmed base",
+      logger.debug("execution-unresolvable-read-rebased", () => [
+        "Rebased host-unresolvable pending reads onto their confirmed base",
         { localSeq: commit.localSeq, rebased },
       ]);
     }
