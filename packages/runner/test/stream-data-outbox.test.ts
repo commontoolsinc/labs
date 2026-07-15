@@ -88,7 +88,7 @@ describe("stream-data outbox mechanism", () => {
 
   async function makeAvailabilityAction(
     inputs: {
-      url?: string;
+      url?: any;
       schema?: JSONSchema;
       options?: {
         body?: any;
@@ -329,6 +329,100 @@ describe("stream-data outbox mechanism", () => {
     expect(rawResult(fixture.state.partial)).toBe(
       DataUnavailable.schemaMismatch(),
     );
+  });
+
+  it("propagates unavailable request inputs to final and partial results", async () => {
+    const pendingFixture = await makeAvailabilityAction({
+      url: DataUnavailable.pending(),
+    }, "stream-direct-pending-input");
+    await invokeAvailabilityAction(pendingFixture.action);
+
+    expect(unavailableReason(rawResult(pendingFixture.state.result))).toBe(
+      "pending",
+    );
+    expect(unavailableReason(rawResult(pendingFixture.state.partial))).toBe(
+      "pending",
+    );
+    expect(rawResult(pendingFixture.state.pending)).toBe(true);
+    expect(rawResult(pendingFixture.state.error)).toBeUndefined();
+
+    const upstreamError = new Error("upstream URL failed");
+    const errorFixture = await makeAvailabilityAction({
+      url: DataUnavailable.error(upstreamError),
+    }, "stream-direct-error-input");
+    await invokeAvailabilityAction(errorFixture.action);
+
+    expect(unavailableReason(rawResult(errorFixture.state.result))).toBe(
+      "error",
+    );
+    expect(unavailableReason(rawResult(errorFixture.state.partial))).toBe(
+      "error",
+    );
+    const errorResult = rawResult(errorFixture.state.result);
+    expect(
+      isDataUnavailable(errorResult) && errorResult.reason === "error"
+        ? errorResult.error.message
+        : undefined,
+    ).toBe("upstream URL failed");
+    expect(rawResult(errorFixture.state.pending)).toBe(false);
+    expect(rawResult(errorFixture.state.error)).toBe("upstream URL failed");
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  it("uses runner precedence across unavailable stream inputs", async () => {
+    const fixture = await makeAvailabilityAction({
+      url: DataUnavailable.pending(),
+      options: {
+        body: DataUnavailable.error(new Error("body failed")),
+      },
+    }, "stream-direct-input-precedence");
+    await invokeAvailabilityAction(fixture.action);
+
+    const final = rawResult(fixture.state.result);
+    expect(unavailableReason(final)).toBe("error");
+    expect(unavailableReason(rawResult(fixture.state.partial))).toBe("error");
+    expect(
+      isDataUnavailable(final) && final.reason === "error"
+        ? final.error.message
+        : undefined,
+    ).toBe("body failed");
+    expect(fetchCalls).toHaveLength(0);
+  });
+
+  it("aborts an active stream when an input becomes unavailable", async () => {
+    globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+      fetchCalls.push({ url, init });
+      return Promise.resolve(
+        new Response(new ReadableStream({ start() {} }), { status: 200 }),
+      );
+    };
+
+    const fixture = await makeAvailabilityAction({
+      url: "http://mock-test-server.local/becomes-unavailable",
+      schema: {},
+    }, "stream-direct-becomes-unavailable");
+    await invokeAvailabilityAction(fixture.action);
+    await waitForFetchCount(fetchCalls, 1);
+
+    const signal = fetchCalls[0].init?.signal;
+    expect(signal?.aborted).toBe(false);
+
+    const unavailableTx = runtime.edit();
+    fixture.inputsCell.withTx(unavailableTx).set({
+      url: DataUnavailable.pending(),
+    });
+    fixture.action(unavailableTx);
+    await unavailableTx.commit();
+
+    expect(signal?.aborted).toBe(true);
+    expect(unavailableReason(rawResult(fixture.state.result))).toBe("pending");
+    expect(unavailableReason(rawResult(fixture.state.partial))).toBe("pending");
+    expect(fetchCalls).toHaveLength(1);
   });
 
   it("publishes an error when a stream closes without an event", async () => {

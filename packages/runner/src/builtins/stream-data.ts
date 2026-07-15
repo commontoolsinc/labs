@@ -15,6 +15,7 @@ import {
   validateAgainstSchema,
 } from "../cfc/schema-sanitization.ts";
 import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
+import { selectUnavailableInput } from "../data-unavailability.ts";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -97,7 +98,17 @@ function createStreamDataAction(
 
   return (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
-    const requestSnapshot = snapshotStreamDataInputs(inputsCell.withTx(tx));
+    const inputWithLog = inputsCell.withTx(tx);
+    const unavailableInput = contract === "availability"
+      ? selectUnavailableInput(inputWithLog.getRaw(), {
+        runtime,
+        tx,
+        base: inputsCell,
+      })
+      : undefined;
+    const requestSnapshot = unavailableInput === undefined
+      ? snapshotStreamDataInputs(inputWithLog)
+      : undefined;
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
@@ -170,9 +181,32 @@ function createStreamDataAction(
     const partialWithLog = partial?.withTx(tx);
     const errorWithLog = error.withTx(tx);
 
-    const { url, options, schema } = requestSnapshot;
+    if (unavailableInput !== undefined) {
+      previousCall = "";
+      if (status.controller) {
+        status.controller.abort("Inputs unavailable");
+        status.controller = undefined;
+      }
+      ++status.run;
+      pendingWithLog.set(
+        unavailableInput.reason === "pending" ||
+          unavailableInput.reason === "syncing",
+      );
+      resultWithLog.setRaw(unavailableInput);
+      partialWithLog!.setRaw(unavailableInput);
+      errorWithLog.set(
+        unavailableInput.reason === "error"
+          ? unavailableInput.error.message
+          : undefined,
+      );
+      return;
+    }
 
-    const requestId = hashOf(requestSnapshot).toString();
+    // Unavailable inputs return above, so the request is materialized here.
+    const materializedRequest = requestSnapshot!;
+    const { url, options, schema } = materializedRequest;
+
+    const requestId = hashOf(materializedRequest).toString();
     // Re-entrancy guard: Don't restart the stream if the entire canonical
     // request, including its event schema, is unchanged.
     const currentCall = requestId;
@@ -226,7 +260,7 @@ function createStreamDataAction(
       tx,
       effectNamespace,
       `${effectNamespace}:${requestId}`,
-      requestSnapshot,
+      materializedRequest,
       `${effectNamespace}-start`,
       () => {
         if (thisRun !== status.run) {
