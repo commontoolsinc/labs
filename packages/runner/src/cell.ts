@@ -383,8 +383,6 @@ declare module "@commonfabric/api" {
      * register a dependency that could re-trigger the writing computation.
      */
     setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
-    freeze(reason: string): void;
-    isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -475,8 +473,6 @@ const cellMethods = new Set<
   "setRaw",
   "setRawUntyped",
   "getArgumentCell",
-  "freeze",
-  "isFrozen",
   "setSchema",
   "connect",
   "export",
@@ -639,8 +635,6 @@ interface CauseContainer {
  */
 export class CellImpl<T extends FabricValue>
   implements ICell<T>, IStreamable<T> {
-  private readOnlyReason: string | undefined;
-
   // Stream-specific fields
   private listeners = new Set<
     (event: AnyCellWrapping<T>) => Cancel | undefined
@@ -2176,14 +2170,6 @@ export class CellImpl<T extends FabricValue>
     const link = parseLink(linkObj, this._link);
     if (link === undefined) return undefined;
     return this.runtime.getCellFromLink(link).asSchema<U>(schema);
-  }
-
-  freeze(reason: string): void {
-    this.readOnlyReason = reason;
-  }
-
-  isFrozen(): boolean {
-    return !!this.readOnlyReason;
   }
 
   getMetaRaw(

@@ -96,9 +96,10 @@ export function resolveMountCacheOptions(
  * 5-60 second defaults), and attrcache-timeout=N mounts with every
  * attribute-cache bound (the acreg and acdir minima and maxima) fixed at N
  * seconds, which caps how long stale attributes, negative name entries, and
- * directory listings are served. FUSE-T ignores the entry and attribute timeouts the filesystem
- * returns, so these mount options are the only cache controls available on
- * macOS.
+ * directory listings are served. FUSE-T ignores the entry and attribute
+ * timeouts the filesystem returns, and returns success for
+ * notify_inval_entry and notify_inval_inode without acting on either, so
+ * these mount options are the only cache controls available on macOS.
  *
  * When neither flag is given, FUSE-T mounts default to attrcache-timeout=
  * DEFAULT_FUSE_T_ATTRCACHE_TIMEOUT_SECONDS; an explicit value of 0 leaves

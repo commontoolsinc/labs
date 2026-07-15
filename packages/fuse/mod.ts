@@ -930,11 +930,13 @@ export async function main(argv: string[] = Deno.args) {
     ino: bigint,
     node: ReturnType<typeof tree.getNode>,
   ) {
-    // FUSE-T (macOS NFS translation) ignores notify_inval_entry and
-    // notify_inval_inode, so the only way to ensure reads see fresh data
-    // after writes is to keep cache timeouts short. Piece content inodes
-    // (under pieces/ and entities/) use 0 so every read hits our callbacks.
-    // Static inodes (root, space.json, .status) use 1s.
+    // These timeouts govern the Linux kernel's entry and attribute caches.
+    // Piece content inodes (under pieces/ and entities/) use 0 so every read
+    // hits our callbacks. Static inodes (root, space.json, .status) use 1s.
+    // FUSE-T (macOS NFS translation) ignores the timeouts a reply carries,
+    // along with notify_inval_entry and notify_inval_inode. A macOS mount
+    // bounds staleness with an NFS attribute-cache mount option instead; see
+    // mount-options.ts.
     const isDynamic = bridge?.shouldPrepareDirectory(ino) ||
       bridge?.shouldPrepareLookup(
         tree.parents.get(ino) ?? 0n,
@@ -3293,9 +3295,10 @@ export async function main(argv: string[] = Deno.args) {
                 BigInt(nameBuf.length - 1),
               );
               if (rc === -38) {
-                // ENOSYS — FUSE-T doesn't support notify_inval_entry.
+                // ENOSYS — this libfuse has no entry invalidation. FUSE-T
+                // instead accepts the call and does nothing with it.
                 console.log(
-                  "notify_inval_entry not supported (FUSE-T); relying on short timeouts",
+                  "notify_inval_entry not supported; skipping entry invalidation",
                 );
                 entryNotifySupported = false;
                 break;
@@ -3327,7 +3330,8 @@ export async function main(argv: string[] = Deno.args) {
               -1n,
             );
             if (ret === -38) {
-              // ENOSYS — FUSE-T doesn't support notify_inval_inode.
+              // ENOSYS — this libfuse has no inode invalidation. FUSE-T
+              // instead accepts the call and does nothing with it.
               inodeNotifySupported = false;
               break;
             }
