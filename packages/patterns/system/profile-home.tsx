@@ -509,11 +509,59 @@ const mutateExternalProfileLinks = handler<
   state.url?.set("");
 });
 
-// The only writer for connector-verified identity assertions. Re-publishing a
-// type/value pair refreshes its observation time and leaves other accounts (or
-// other useful identifiers for the same account) intact. Opt-out/logout uses
-// the same writer in revoke mode for the exact prior tuples; consumer freshness
-// remains the fail-safe when explicit revocation cannot complete.
+function verifiedIdentityKey(type: string, value: string): string {
+  return JSON.stringify([type, value]);
+}
+
+function normalizeVerifiedAt(value: string): string | undefined {
+  // Date.parse normalizes impossible dates such as February 31. Validate the
+  // RFC3339 calendar and clock components first, then let Date produce the
+  // canonical UTC representation consumers compare by age.
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/
+      .exec(
+        value,
+      );
+  if (!match) return undefined;
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    ,
+    zone,
+  ] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offset = zone === "Z"
+    ? undefined
+    : zone.slice(1).split(":").map(Number);
+  const daysInMonth = month >= 1 && month <= 12
+    ? new Date(Date.UTC(year, month, 0)).getUTCDate()
+    : 0;
+  if (
+    year < 1 || day < 1 || day > daysInMonth || hour > 23 || minute > 59 ||
+    second > 59 || (offset && (offset[0] > 23 || offset[1] > 59))
+  ) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp)
+    ? new Date(timestamp).toISOString()
+    : undefined;
+}
+
+// The dedicated writer for connector-observed identity assertions under the
+// interim trust model: Loom and code acting as the user's Fabric principal are
+// trusted together. This does not cryptographically distinguish arbitrary
+// owner-run code from Loom's connector path; the documented attested-sandbox
+// design adds that stronger boundary later. Re-publishing a type/value pair
+// refreshes its observation time and leaves other useful identifiers intact.
 const publishVerifiedIdentities = handler<
   MutateVerifiedIdentitiesEvent,
   {
@@ -527,14 +575,15 @@ const publishVerifiedIdentities = handler<
   if (state.mode === "revoke") {
     const revoked = new Set(
       incoming.map((identity) =>
-        `${(identity.type ?? "").trim().toLowerCase()}\u0000${
-          (identity.value ?? "").trim()
-        }`
+        verifiedIdentityKey(
+          (identity.type ?? "").trim().toLowerCase(),
+          (identity.value ?? "").trim(),
+        )
       ),
     );
     state.verifiedIdentities.set(
       state.verifiedIdentities.get().filter((identity) =>
-        !revoked.has(`${identity.type}\u0000${identity.value}`)
+        !revoked.has(verifiedIdentityKey(identity.type, identity.value))
       ),
     );
     return;
@@ -544,13 +593,12 @@ const publishVerifiedIdentities = handler<
   for (const identity of incoming) {
     const type = (identity.type ?? "").trim().toLowerCase();
     const value = (identity.value ?? "").trim();
-    const verifiedAt = (identity.verifiedAt ?? "").trim();
-    const timestamp = new Date(verifiedAt).getTime();
-    if (!type || !value || !Number.isFinite(timestamp)) continue;
+    const verifiedAt = normalizeVerifiedAt((identity.verifiedAt ?? "").trim());
+    if (!type || !value || !verifiedAt) continue;
     normalized.push({
       type,
       value,
-      verifiedAt: new Date(timestamp).toISOString(),
+      verifiedAt,
     });
   }
   if (normalized.length === 0) return;

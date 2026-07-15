@@ -130,11 +130,34 @@ export default pattern(() => {
 
   const action_reject_invalid_verified_identity = action(() => {
     profile.publishVerifiedIdentities.send({
+      identities: [
+        {
+          type: "github.login",
+          value: "unverified",
+          verifiedAt: "not-a-timestamp",
+        },
+        {
+          type: "github.login",
+          value: "impossible-date",
+          verifiedAt: "2026-02-31T00:00:00Z",
+        },
+      ],
+    });
+  });
+
+  const action_publish_delimiter_identity = action(() => {
+    profile.publishVerifiedIdentities.send({
       identities: [{
-        type: "github.login",
-        value: "unverified",
-        verifiedAt: "not-a-timestamp",
+        type: "collision",
+        value: "left\u0000right",
+        verifiedAt: "2026-07-16T12:00:00Z",
       }],
+    });
+  });
+
+  const action_revoke_colliding_but_distinct_identity = action(() => {
+    profile.revokeVerifiedIdentities.send({
+      identities: [{ type: "collision\u0000left", value: "right" }],
     });
   });
 
@@ -193,8 +216,19 @@ export default pattern(() => {
   );
 
   const assert_verified_identity_revoked = computed(() =>
-    profile.verifiedIdentities.length === 1 &&
-    profile.verifiedIdentities[0]?.type === "github.node_id"
+    profile.verifiedIdentities.length === 2 &&
+    profile.verifiedIdentities.some((identity) =>
+      identity.type === "github.node_id"
+    ) &&
+    !profile.verifiedIdentities.some((identity) =>
+      identity.type === "github.login"
+    )
+  );
+
+  const assert_delimiter_identity_preserved = computed(() =>
+    profile.verifiedIdentities.some((identity) =>
+      identity.type === "collision" && identity.value === "left\u0000right"
+    )
   );
 
   const assert_added_element = computed(() => {
@@ -238,6 +272,12 @@ export default pattern(() => {
       // Malformed timestamps can never become authoritative assertions.
       { action: action_reject_invalid_verified_identity },
       { assertion: assert_verified_identity_refreshed },
+      // Tuple keys must remain exact even if either field contains the old
+      // delimiter; revoking a distinct tuple cannot remove this assertion.
+      { action: action_publish_delimiter_identity },
+      { assertion: assert_delimiter_identity_preserved },
+      { action: action_revoke_colliding_but_distinct_identity },
+      { assertion: assert_delimiter_identity_preserved },
       // Opting out or logging out revokes the exact assertions that connector
       // previously published; other verified values remain intact.
       { action: action_revoke_verified_identity },

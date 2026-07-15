@@ -248,7 +248,10 @@ merge: the candidate must remain unambiguous and the profile name should
 corroborate a name-bearing local persona when available.
 
 The initial trust root deliberately trusts Loom acting with the user's Fabric
-principal through this pattern's dedicated writer. A later, stronger design is
+principal through this pattern's dedicated writer. It therefore does not yet
+distinguish arbitrary owner-running pattern code from Loom's connector path;
+the integrity atom means "trusted by this Loom/user trust root," not an
+independent cryptographic proof from the provider. A later, stronger design is
 specified but not implemented here: connectors run in attested cloud
 sandboxes, the assertion says that code hash H observed the login, and verifier
 infrastructure blesses the allowed hashes. That makes the observation
