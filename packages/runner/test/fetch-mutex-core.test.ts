@@ -21,6 +21,17 @@ import type { Schema } from "../src/builder/types.ts";
 const signer = await Identity.fromPassphrase("test fetch mutex");
 const space = signer.did();
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readFetchState(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error("Expected fetch result state");
+  }
+  return value;
+}
+
 describe("fetch-json mutex mechanism: core mutex behavior", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -104,15 +115,15 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     await result.pull();
 
-    const rawData = result.get() as {
-      pending: any;
-      result: any;
-      error: any;
-    };
+    const rawData = readFetchState(result.get());
 
     // Should have result
-    expect(rawData.result).toBeDefined();
-    expect(rawData.result.mocked).toBe(true);
+    const fetchResult = rawData.result;
+    expect(fetchResult).toBeDefined();
+    if (!isRecord(fetchResult)) {
+      throw new Error("Expected fetchJson result object");
+    }
+    expect(fetchResult.mocked).toBe(true);
     expect(rawData.error).toBeUndefined();
     expect(rawData.pending).toBe(false);
 
