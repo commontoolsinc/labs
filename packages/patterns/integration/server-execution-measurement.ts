@@ -1,5 +1,9 @@
-import { env } from "@commonfabric/integration";
+import { env, type Page, waitFor } from "@commonfabric/integration";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import type {
+  ExecutionRoutingDiagnostics,
+  ExecutionRoutingDiagnosticsQuery,
+} from "@commonfabric/runner/shared";
 import { assert, assertEquals } from "@std/assert";
 
 const MEASUREMENT_REQUIRED = Deno.env.get(
@@ -13,7 +17,20 @@ type PlacementCounters = Readonly<{
 }>;
 
 type PoolCounters = Readonly<{
+  activeLanes: number;
+  activeWorkers: number;
+  activeDemands: number;
+  states: Readonly<
+    Record<
+      "waiting" | "excluded" | "starting" | "live" | "draining" | "backoff",
+      number
+    >
+  >;
+  demandSnapshots: number;
+  workerStartAttempts: number;
+  workerStartAborts: number;
   workersStarted: number;
+  workersStopped: number;
   workerStartFailures: number;
   crashes: number;
   placement: PlacementCounters;
@@ -36,12 +53,33 @@ export type ServerExecutionMeasurement = Readonly<{
   startedAt: number;
   pool: PoolCounters | null;
   control: ControlCounters | null;
+  clientRouting?: Readonly<{
+    query: ExecutionRoutingDiagnosticsQuery;
+    read: ExecutionRoutingProbe;
+  }>;
+}>;
+
+type ExecutionRoutingProbe = (
+  query: ExecutionRoutingDiagnosticsQuery,
+) => Promise<ExecutionRoutingDiagnostics>;
+
+export type ServerExecutionRoutingMeasurement = Readonly<{
+  query: ExecutionRoutingDiagnosticsQuery;
+  read: ExecutionRoutingProbe;
 }>;
 
 type HealthStats = {
   timestamp?: number;
   serverExecutionPool?: {
+    activeLanes?: number;
+    activeWorkers?: number;
+    activeDemands?: number;
+    states?: Partial<PoolCounters["states"]>;
+    demandSnapshots?: number;
+    workerStartAttempts?: number;
+    workerStartAborts?: number;
     workersStarted?: number;
+    workersStopped?: number;
     workerStartFailures?: number;
     crashes?: number;
     executionPlacement?: {
@@ -85,9 +123,63 @@ async function readMeasurement(
     : health.serverExecutionPool === undefined
     ? undefined
     : {
+      activeLanes: counter(
+        health.serverExecutionPool.activeLanes,
+        "active execution lanes",
+      ),
+      activeWorkers: counter(
+        health.serverExecutionPool.activeWorkers,
+        "active execution workers",
+      ),
+      activeDemands: counter(
+        health.serverExecutionPool.activeDemands,
+        "active execution demands",
+      ),
+      states: {
+        waiting: counter(
+          health.serverExecutionPool.states?.waiting,
+          "waiting execution lanes",
+        ),
+        excluded: counter(
+          health.serverExecutionPool.states?.excluded,
+          "excluded execution lanes",
+        ),
+        starting: counter(
+          health.serverExecutionPool.states?.starting,
+          "starting execution lanes",
+        ),
+        live: counter(
+          health.serverExecutionPool.states?.live,
+          "live execution lanes",
+        ),
+        draining: counter(
+          health.serverExecutionPool.states?.draining,
+          "draining execution lanes",
+        ),
+        backoff: counter(
+          health.serverExecutionPool.states?.backoff,
+          "backoff execution lanes",
+        ),
+      },
+      demandSnapshots: counter(
+        health.serverExecutionPool.demandSnapshots,
+        "execution demand snapshots",
+      ),
+      workerStartAttempts: counter(
+        health.serverExecutionPool.workerStartAttempts,
+        "worker start attempts",
+      ),
+      workerStartAborts: counter(
+        health.serverExecutionPool.workerStartAborts,
+        "worker start aborts",
+      ),
       workersStarted: counter(
         health.serverExecutionPool.workersStarted,
         "workers started",
+      ),
+      workersStopped: counter(
+        health.serverExecutionPool.workersStopped,
+        "workers stopped",
       ),
       workerStartFailures: counter(
         health.serverExecutionPool.workerStartFailures,
@@ -179,9 +271,43 @@ async function readMeasurement(
 
 export async function beginServerExecutionMeasurement(
   label: string,
+  clientRouting?: ServerExecutionRoutingMeasurement,
 ): Promise<ServerExecutionMeasurement | null> {
   if (!MEASUREMENT_REQUIRED) return null;
-  return await readMeasurement(label);
+  const enabled = experimentalOptionsFromEnv(Deno.env.get)
+    .serverPrimaryExecution === true;
+  if (enabled) {
+    await waitFor(async () => {
+      const measurement = await readMeasurement(label);
+      return measurement.pool !== null &&
+        measurement.control !== null &&
+        measurement.pool.activeWorkers > 0 &&
+        measurement.pool.states.live > 0 &&
+        measurement.pool.workersStarted > 0 &&
+        measurement.control.claimsIssued > 0 &&
+        measurement.control.acceptedActionAttempts > 0 &&
+        measurement.control.settlementsCommitted +
+              measurement.control.settlementsNoOp > 0;
+    });
+    if (clientRouting !== undefined) {
+      await waitFor(async () => {
+        const diagnostics = await clientRouting.read(clientRouting.query);
+        return !diagnostics.snapshotRequired &&
+          diagnostics.truncatedActionRecords === 0 &&
+          diagnostics.claims.length > 0;
+      });
+      const reset = await clientRouting.read({
+        ...clientRouting.query,
+        resetCounters: true,
+      });
+      assertEquals(reset.snapshotRequired, false);
+      assertEquals(reset.truncatedActionRecords, 0);
+    }
+  }
+  return {
+    ...await readMeasurement(label),
+    ...(enabled && clientRouting !== undefined ? { clientRouting } : {}),
+  };
 }
 
 const delta = (after: number, before: number, label: string): number => {
@@ -193,7 +319,32 @@ export async function finishServerExecutionMeasurement(
   before: ServerExecutionMeasurement | null,
 ): Promise<void> {
   if (before === null) return;
-  const after = await readMeasurement(before.label);
+  if (before.clientRouting !== undefined) {
+    await waitFor(async () => {
+      const diagnostics = await before.clientRouting!.read(
+        before.clientRouting!.query,
+      );
+      if (
+        diagnostics.snapshotRequired ||
+        diagnostics.truncatedActionRecords !== 0
+      ) return false;
+      return diagnostics.actions.some((action) =>
+        action.claimedOverlayRoutes > 0 &&
+        action.settlements.committed + action.settlements.noOp > 0 &&
+        action.basisCoveredOverlayDrops >= action.claimedOverlayRoutes &&
+        action.nonAuthoritativeOverlayDrops === 0 &&
+        action.pendingOverlayCount === 0 &&
+        action.unresolvedBasisOverlayCount === 0 &&
+        action.pendingSettlementCount === 0 &&
+        action.settlements.failed === 0 &&
+        action.settlements.unserved === 0
+      );
+    });
+  }
+  const [after, clientRouting] = await Promise.all([
+    readMeasurement(before.label),
+    before.clientRouting?.read(before.clientRouting.query),
+  ]);
   assertEquals(after.enabled, before.enabled, "execution mode changed mid-run");
 
   if (!after.enabled) {
@@ -207,18 +358,105 @@ export async function finishServerExecutionMeasurement(
     }
     console.log(
       `server execution measurement (${before.label}):`,
-      JSON.stringify({ mode: "off", pool: null }),
+      JSON.stringify({
+        mode: "off",
+        elapsedMs: after.startedAt - before.startedAt,
+        pool: null,
+      }),
     );
     return;
   }
 
   assert(before.pool !== null && after.pool !== null);
   assert(before.control !== null && after.control !== null);
+  if (clientRouting !== undefined) {
+    assertEquals(clientRouting.snapshotRequired, false);
+    assertEquals(clientRouting.truncatedActionRecords, 0);
+  }
+  const client = clientRouting === undefined ? undefined : {
+    claims: clientRouting.claims.length,
+    actions: clientRouting.actions.length,
+    upstreamRoutes: clientRouting.actions.reduce(
+      (total, action) => total + action.upstreamRoutes,
+      0,
+    ),
+    claimedOverlayRoutes: clientRouting.actions.reduce(
+      (total, action) => total + action.claimedOverlayRoutes,
+      0,
+    ),
+    settlements: clientRouting.actions.reduce(
+      (totals, action) => ({
+        committed: totals.committed + action.settlements.committed,
+        noOp: totals.noOp + action.settlements.noOp,
+        failed: totals.failed + action.settlements.failed,
+        unserved: totals.unserved + action.settlements.unserved,
+      }),
+      { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+    ),
+    basisCoveredOverlayDrops: clientRouting.actions.reduce(
+      (total, action) => total + action.basisCoveredOverlayDrops,
+      0,
+    ),
+    nonAuthoritativeOverlayDrops: clientRouting.actions.reduce(
+      (total, action) => total + action.nonAuthoritativeOverlayDrops,
+      0,
+    ),
+    pendingOverlays: clientRouting.actions.reduce(
+      (total, action) => total + action.pendingOverlayCount,
+      0,
+    ),
+    pendingSettlements: clientRouting.actions.reduce(
+      (total, action) => total + action.pendingSettlementCount,
+      0,
+    ),
+  };
   const result = {
     mode: "authoritative-server" as const,
     elapsedMs: after.startedAt - before.startedAt,
-    workersStarted: after.pool.workersStarted,
-    claimsIssued: after.control.claimsIssued,
+    pool: {
+      before: {
+        activeLanes: before.pool.activeLanes,
+        activeWorkers: before.pool.activeWorkers,
+        activeDemands: before.pool.activeDemands,
+        states: before.pool.states,
+      },
+      after: {
+        activeLanes: after.pool.activeLanes,
+        activeWorkers: after.pool.activeWorkers,
+        activeDemands: after.pool.activeDemands,
+        states: after.pool.states,
+      },
+      demandSnapshots: delta(
+        after.pool.demandSnapshots,
+        before.pool.demandSnapshots,
+        "execution demand snapshots",
+      ),
+      workerStartAttempts: delta(
+        after.pool.workerStartAttempts,
+        before.pool.workerStartAttempts,
+        "worker start attempts",
+      ),
+      workerStartAborts: delta(
+        after.pool.workerStartAborts,
+        before.pool.workerStartAborts,
+        "worker start aborts",
+      ),
+      workersStarted: delta(
+        after.pool.workersStarted,
+        before.pool.workersStarted,
+        "workers started",
+      ),
+      workersStopped: delta(
+        after.pool.workersStopped,
+        before.pool.workersStopped,
+        "workers stopped",
+      ),
+    },
+    claimsIssued: delta(
+      after.control.claimsIssued,
+      before.control.claimsIssued,
+      "claims issued",
+    ),
     placement: {
       schedulerRuns: delta(
         after.pool.placement.schedulerRuns,
@@ -285,7 +523,13 @@ export async function finishServerExecutionMeasurement(
         "worker crashes",
       ),
     },
+    ...(client === undefined ? {} : { client }),
   };
+
+  console.log(
+    `server execution measurement (${before.label}):`,
+    JSON.stringify(result),
+  );
 
   assert(after.pool.workersStarted > 0, "server execution started no worker");
   assert(after.control.claimsIssued > 0, "server execution issued no claims");
@@ -307,9 +551,39 @@ export async function finishServerExecutionMeasurement(
   assertEquals(result.control.actionFirewallRejects, 0);
   assertEquals(result.workerFailures.starts, 0);
   assertEquals(result.workerFailures.crashes, 0);
+  if (client !== undefined) {
+    assert(client.claimedOverlayRoutes > 0);
+    assert(client.settlements.committed + client.settlements.noOp > 0);
+    assert(client.basisCoveredOverlayDrops >= client.claimedOverlayRoutes);
+    assertEquals(client.settlements.failed, 0);
+    assertEquals(client.settlements.unserved, 0);
+    assertEquals(client.nonAuthoritativeOverlayDrops, 0);
+    assertEquals(client.pendingOverlays, 0);
+    assertEquals(client.pendingSettlements, 0);
+  }
+}
 
-  console.log(
-    `server execution measurement (${before.label}):`,
-    JSON.stringify(result),
-  );
+/** Read one browser runtime's bounded execution-routing state. */
+export function browserExecutionRoutingProbe(
+  page: Page,
+): ExecutionRoutingProbe {
+  return async (query) =>
+    await page.evaluate(
+      async (request: ExecutionRoutingDiagnosticsQuery) => {
+        const runtime = (globalThis as typeof globalThis & {
+          commonfabric?: {
+            rt?: {
+              getExecutionRoutingDiagnostics(
+                query: ExecutionRoutingDiagnosticsQuery,
+              ): Promise<ExecutionRoutingDiagnostics>;
+            };
+          };
+        }).commonfabric?.rt;
+        if (runtime === undefined) {
+          throw new Error("browser execution routing is unavailable");
+        }
+        return await runtime.getExecutionRoutingDiagnostics(request);
+      },
+      { args: [query] },
+    );
 }

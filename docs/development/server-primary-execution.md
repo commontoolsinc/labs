@@ -116,6 +116,15 @@ transactions, accepted claimed attempts, and successful settlements. It also
 rejects a flag-off sample if a server pool exists or execution-control counters
 move. Start a fresh toolshed and shell for each command; for example:
 
+For default-app, the guard also waits until the measured browser has consumed a
+claim, resets its bounded space/branch routing counters, and verifies after the
+interaction that claimed overlays reached successful settlements and were
+dropped only after basis coverage. Its output reports upstream versus claimed-
+overlay routes. A live Worker or executor-side "authoritative transaction"
+counter alone is not enough: claim activation can still be queued, or memory
+can reject the attempt as unserved. A guard failure is therefore measurement
+data, not a timing sample to include in an on/off comparison.
+
 ```sh
 CF_VERIFY_SERVER_EXECUTION_PLACEMENT=1 \
 EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=false \

@@ -20,6 +20,7 @@ import { assert, assertEquals } from "@std/assert";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
 import {
   beginServerExecutionMeasurement,
+  browserExecutionRoutingProbe,
   finishServerExecutionMeasurement,
 } from "./server-execution-measurement.ts";
 
@@ -241,10 +242,7 @@ describe("default-app flow test", () => {
 
   it("should create a note via default app and see it in the space list", async () => {
     identity = await Identity.generate({ implementation: "noble" });
-    const executionMeasurement = await beginServerExecutionMeasurement(
-      "default-app-note-create",
-    );
-
+    const space = await resolveSpaceDid(identity, spaceName);
     const page = shell.page();
 
     // Navigate directly to the new space (no piece creation via cf tools)
@@ -253,6 +251,18 @@ describe("default-app flow test", () => {
       view: { spaceName },
       identity,
     });
+    // Navigation creates the piece demand. In verified server-primary runs,
+    // wait until it has a live Worker, an accepted preflight settlement, and a
+    // claim visible in this browser before sampling the note interactions
+    // below. The post-sample guard proves that this workload then produced
+    // claimed overlays and successful settlements.
+    const executionMeasurement = await beginServerExecutionMeasurement(
+      "default-app-note-create",
+      {
+        query: { space, branch: "" },
+        read: browserExecutionRoutingProbe(page),
+      },
+    );
 
     if (CAPTURE_TRIGGER_TRACE) {
       console.log("Enable trigger trace...");
