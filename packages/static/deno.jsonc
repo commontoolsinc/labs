@@ -14,7 +14,7 @@
     "check-cfc-types": "./scripts/generate-cfc-types.ts --check"
   },
   "imports": {
-    "typescript": "npm:typescript"
+    "typescript": "npm:typescript@6.0.3"
   },
   "exports": {
     ".": "./index.ts",

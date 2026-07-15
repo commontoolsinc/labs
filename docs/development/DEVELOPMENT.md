@@ -390,6 +390,71 @@ apk add --no-cache ca-certificates
 sudo update-ca-certificates
 ```
 
+### The TypeScript compiler dependency
+
+The runtime compiles patterns itself, using the TypeScript compiler API at
+runtime. Eight packages (`js-compiler`, `ts-transformers`, `schema-generator`,
+`runner`, `cli`, `static`, `test-support`, `deno-web-test`) import
+`npm:typescript` and pin the same version in their `deno.jsonc` import maps.
+This npm dependency is separate from the TypeScript that `deno check` uses:
+Deno bundles its own copy of the compiler. Keeping the npm pin on the same
+minor version as the Deno-bundled compiler (`deno --version` prints it) avoids
+the two disagreeing about what type-checks.
+
+To roll the version, update every pin and the lockfile in one step, then verify:
+
+```bash
+deno outdated --update --recursive typescript@<version>
+deno task check
+deno task test
+(cd packages/static && deno task check-cfc-types)
+```
+
+The last of those is a CI gate that `deno task test` does not cover; see the
+note on `cfc.ts` below.
+
+#### Why the pin stops at 6.x
+
+The `typescript` npm package now serves two different compilers. The 6.x line is
+the original JavaScript implementation, developed in `microsoft/TypeScript`. The
+7.x line is the Go rewrite, developed in `microsoft/typescript-go` and intended
+to replace the JavaScript one rather than sit alongside it permanently; upstream
+expects to merge that repository back into `microsoft/TypeScript` in time.
+
+Only the 6.x line works here. The 7.x package ships platform binaries, and its
+main entry point exports nothing but a version constant, so the in-process
+compiler API that our packages are built on is absent. The replacement drives
+the native binary from a separate process, and upstream currently marks that API
+"not ready", meaning not yet worth building against. So this is not a port we
+could choose to do early: until that API is ready there is nothing to port onto.
+Treat 6.x as a holding position, and treat the Go compiler's API reaching a
+usable state as the signal to re-evaluate.
+
+The practical trap is that a bare `npm:typescript` specifier resolves to the
+newest version on npm, which is now the Go line — hence the explicit 6.x pins.
+
+#### The vendored type libraries
+
+Pattern compilation runs outside Node and cannot read the compiler's type
+libraries off disk, so it uses ambient libraries vendored in
+`packages/static/assets/types`. The two have different provenance:
+`es2023.d.ts` is flattened from the `lib` directory of a TypeScript source
+checkout by `packages/static/scripts/compile-type-lib.ts`, while `dom.d.ts` is
+a hand-maintained subset of the web APIs the runtime actually provides.
+
+A compiler roll does not regenerate either one. They declare the API surface
+patterns are allowed to use, which is a product decision rather than a
+compiler-version one, and the compiler type-checks against whatever ambient
+declarations it is handed. The `js-compiler` tests exercise the rolled compiler
+against these files.
+
+The third file in that directory, `cfc.ts`, is different: it comes out of the
+compiler's declaration emit, via `packages/static/scripts/generate-cfc-types.ts`.
+A roll can therefore change it, which is why `check-cfc-types` is part of the
+sequence above. It reports whether the committed file still matches what the new
+compiler emits. If it does not, regenerate with `deno task gen-cfc-types` and
+commit the result.
+
 ### Running Tests
 
 > **Note:** CI enforces that `main` always type-checks and all tests pass, so
