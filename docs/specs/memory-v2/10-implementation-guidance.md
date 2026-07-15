@@ -34,6 +34,17 @@ target. In particular:
 - one-shot `graph.query` now honors `branch` and `atSeq`
 - the public one-shot read surface in this pass is `graph.query`; the older
   simple `query` / wildcard selector shape remains future protocol design
+- server syncs use negotiated frame-local `syncSchemaTableV2` schema tables;
+  query, watch, and transact requests use durable `requestSchemaCasV1` only when
+  both peers advertise it and the server supplies store generation metadata
+- Toolshed owns one bounded service-wide request-schema SQLite store. Schemas in
+  it are non-secret protocol metadata addressed by canonical tagged hash;
+  requests are authorized and fully expanded before definitions are admitted
+  atomically
+- request schema CAS is an optimization, not an availability dependency:
+  negotiated clients begin refs-first, a cold `MissingSchemas` receives one
+  forced-definition retry, store rejection receives one inline retry with CAS
+  disabled for that connection, and old peers stay inline
 - watch installation remains current-state only in this pass; do not treat
   watch specs as historical subscriptions keyed by `atSeq`
 - steady-state topology shrink does not yet drive automatic unwatch/removal
@@ -88,6 +99,23 @@ The `hello.ok` response includes `sessionOpen.audience` and a one-time
 `session.open` invocation, along with `iat` and `exp`. The server rejects a
 missing, expired, reused, or mismatched challenge, and rejects a missing or
 mismatched audience.
+
+The optional request-side schema CAS is negotiated independently of response
+schema tables. It is active only when the client and server both advertise
+`requestSchemaCasV1` and `hello.ok.requestSchemaCas` supplies the durable store
+generation (plus its service audience when present). Supported requests may
+then replace exact query-selector and link-payload schema positions with
+`schema-cas@1:<tagged-hash>` references. Clients optimistically omit
+definitions even on first use. On `MissingSchemas`, they retry once with the
+canonical definitions; a second miss is terminal. Once admitted, the durable
+store serves refs-only requests sequentially across warm requests, same-client
+reconnect and session resume, fresh clients, and server restarts that reopen
+the store. This trades a cold miss for one extra round trip. `SchemaStoreError`
+disables CAS for that connection and causes one exact inline retry. Concurrent
+cold missers may each send the body on their forced retry: exactly-once transfer
+across concurrent clients would require explicit coordination. Reserved wire
+references are expanded before logical handlers and must never persist as
+document data.
 
 ## 4. Session Model
 

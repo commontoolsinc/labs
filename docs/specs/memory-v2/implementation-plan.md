@@ -31,6 +31,17 @@ Implemented on the current branch:
 - one-shot `graph.query` support for `branch` and `atSeq`
 - `session.watch.add` duplicate-id handling: identical definitions are no-ops,
   changed definitions are rejected
+- negotiated schema compaction in both directions: frame-local
+  `syncSchemaTableV2` tables for server syncs and durable `requestSchemaCasV1`
+  refs-first references for query, watch, and transact request schemas
+- one service-wide, bounded SQLite request-schema store in Toolshed, identified
+  by a durable generation and service audience; durable references expand before
+  request processing, while forced-retry definitions are authorized,
+  hash-verified, and admitted atomically
+- compatibility and availability fallbacks: peers without bilateral request-CAS
+  support remain inline, cold missing schemas receive one forced definition
+  retry, and store rejection disables request CAS for that connection before one
+  inline retry; concurrent cold clients may each send a forced definition
 - unsafe store-subject rejection before engine-root path construction
 - shared JSON-pointer/path-overlap helpers reused across memory and runner
 - watch-layer hot-path cleanup:

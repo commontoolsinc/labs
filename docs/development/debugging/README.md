@@ -101,15 +101,46 @@ inside computed(); Stream subscribe doesn't exist; binding the whole item to
   token and passes it to both Toolshed and the test process; Toolshed's
   `/api/storage/memory/wire-accounting/{start,stop}` endpoint is unavailable
   without that token and is allowed only when `ENV` is `development` or `test`.
-  The test prints browser-only aggregate totals and per-direction,
-  per-classification rows. The measured unit is UTF-8 bytes of Memory websocket
-  text payloads produced by `encodeMemoryBoundary`; it excludes the HTTP
+   The test prints browser-only aggregate totals, per-direction/per-classification
+   rows, a protocol-class × semantic-byte cross-tab, and a semantic-byte/repetition
+   table. The measured unit is UTF-8 bytes of Memory websocket
+   text payloads produced by `encodeMemoryBoundary`; it excludes the HTTP
   upgrade, websocket framing and masking, ping/pong/close frames,
   permessage-deflate physical bytes, TLS, and TCP. Interpret the baseline as a
   same-run counterfactual, not a second noisy run: outbound baseline bytes
-  encode the original uncompressed `ServerMessage`, outbound actual bytes encode
-  the negotiated `syncSchemaTableV2` message, and inbound baseline bytes equal
-  inbound actual bytes.
+   encode the original uncompressed `ServerMessage`, outbound actual bytes encode
+   the negotiated `syncSchemaTableV2` message. Inbound baseline bytes encode the
+   equivalent inline logical request and actual bytes encode the negotiated
+   request-side CAS form. An unexpandable cold refs-only miss has raw baseline
+   bytes equal to raw actual bytes, and its `MissingSchemas` response is real
+   additional traffic. A same-run expanded baseline therefore is not an honest
+   aggregate no-CAS counterfactual for a refs-first workload: measure paired
+   CAS-disabled and CAS-enabled runs, and report cold, warm, and reconnect
+   phases separately. Use isolated durable stores for the pair, for example:
+
+   ```sh
+   MEMORY_DIR=file:///tmp/lunch-poll-cas-disabled/ \
+     CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED=false \
+     deno task integration patterns lunch-poll-vote
+
+   MEMORY_DIR=file:///tmp/lunch-poll-cas-enabled/ \
+     CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED=true \
+     deno task integration patterns lunch-poll-vote
+   ```
+
+   The enabled run can omit the override because it is the production default.
+   Other inbound requests remain equal.
+   Each record also partitions both encoded payloads into
+   additive semantic buckets whose sums equal the respective payload bytes.
+   Candidate fingerprints are random-salted and connection-partitioned for each accumulator run and retain
+   only an opaque fingerprint, category, cacheability scope, and encoded size—no
+   values, tokens, signatures, SQL text, paths, or stable content hashes. Repeat
+   Candidates are exact, leaf-most, non-overlapping JSON subtrees; their bytes are
+   reported separately from additive semantic composition. Repeat figures are
+   connection-local diagnostic cache simulations that subtract a compact-reference cost. Repeated protocol-owned identity and
+   session-address scalars are reported as run-local `identityInternable`
+   opportunities; they are diagnostics only and do not change the seq-addressed
+   JSON protocol or claim mutable document revisions are interchangeable.
 - [VDOM Debug Helpers](vdom-debug.md) - `commonfabric.vdom.*` VDOM tree inspection
 - [Logger Internals](../logger-internals.md) - Creating loggers in runtime code (`getLogger`, timing, flags)
 
