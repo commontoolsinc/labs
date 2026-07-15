@@ -1652,6 +1652,26 @@ describe("piece schema compatibility", () => {
     expectRejected({ type: "string" }, { type: "string", pattern: "^x" });
     expectRejected({ type: "string" }, { type: "string", format: "email" });
     expectRejected({ type: "number" }, { type: "number", multipleOf: 2 });
+
+    for (
+      const [source, target] of [
+        [{ type: "string" }, { type: "string", minLength: 1 }],
+        [{ type: "array" }, { type: "array", minItems: 1 }],
+        [{ type: "object" }, { type: "object", minProperties: 1 }],
+        [{ type: "string" }, { type: "string", maxLength: 1 }],
+        [{ type: "array" }, { type: "array", maxItems: 1 }],
+        [{ type: "object" }, { type: "object", maxProperties: 1 }],
+      ] as const
+    ) {
+      expectRejected(source, target);
+    }
+
+    expect(() =>
+      assertSchemaSubset(
+        { type: "string", minLength: 2, maxLength: 4 },
+        { type: "string", minLength: 1, maxLength: 5 },
+      )
+    ).not.toThrow();
   });
 
   it("compares effective inclusive and exclusive numeric bounds", () => {
