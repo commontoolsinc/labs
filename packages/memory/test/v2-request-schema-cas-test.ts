@@ -17,6 +17,7 @@ import type {
   WatchSetRequest,
 } from "../v2.ts";
 import {
+  collectRequestSchemaCasHashes,
   compressRequestSchemas,
   expandRequestSchemas,
   hasRequestSchemaCasPayload,
@@ -535,7 +536,7 @@ Deno.test("request schema CAS measures Fabric defaults by canonical encoded size
   );
 });
 
-Deno.test("request schema CAS bounds preflight traversal", () => {
+Deno.test("request schema CAS detects deep and wide payloads without preflight limits", () => {
   const casLink = {
     "/": {
       [LINK_V1_TAG]: {
@@ -556,35 +557,24 @@ Deno.test("request schema CAS bounds preflight traversal", () => {
       operations: [{ op: "set", id: "of:root", value: nested }],
     },
   };
-  assertThrows(
-    () => hasRequestSchemaCasPayload(request),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
+  assertEquals(hasRequestSchemaCasPayload(request), false);
+  assertEquals(
+    hasRequestSchemaCasPayload({ ...request, schemaDefinitions: {} }),
+    true,
   );
-  assertThrows(
-    () =>
-      hasRequestSchemaCasPayload({
-        ...request,
-        schemaDefinitions: {},
-      }),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
-  );
-  assertThrows(
-    () =>
-      hasRequestSchemaCasPayload({
-        ...request,
-        commit: {
-          ...request.commit,
-          operations: [{
-            op: "set",
-            id: "of:root",
-            value: { casLink, nested },
-          }],
-        },
-      }),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
+  assertEquals(
+    hasRequestSchemaCasPayload({
+      ...request,
+      commit: {
+        ...request.commit,
+        operations: [{
+          op: "set",
+          id: "of:root",
+          value: { nested, casLink },
+        }],
+      },
+    }),
+    true,
   );
 
   const wide = Array.from({ length: 100_001 }, () => null);
@@ -595,51 +585,38 @@ Deno.test("request schema CAS bounds preflight traversal", () => {
       operations: [{ op: "set", id: "of:root", value: wide }],
     },
   };
-  assertThrows(
-    () => hasRequestSchemaCasPayload(wideRequest),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
+  assertEquals(hasRequestSchemaCasPayload(wideRequest), false);
+  assertEquals(
+    hasRequestSchemaCasPayload({ ...wideRequest, schemaDefinitions: {} }),
+    true,
   );
-  assertThrows(
-    () =>
-      hasRequestSchemaCasPayload({
-        ...wideRequest,
-        schemaDefinitions: {},
-      }),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
+  assertEquals(
+    hasRequestSchemaCasPayload({
+      ...request,
+      commit: {
+        ...request.commit,
+        operations: [{
+          op: "set",
+          id: "of:root",
+          value: [...wide, casLink],
+        }],
+      },
+    }),
+    true,
   );
-  assertThrows(
-    () =>
-      hasRequestSchemaCasPayload({
-        ...request,
-        commit: {
-          ...request.commit,
-          operations: [{
-            op: "set",
-            id: "of:root",
-            value: [...wide, casLink],
-          }],
-        },
-      }),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
-  );
-  assertThrows(
-    () =>
-      hasRequestSchemaCasPayload({
-        ...request,
-        commit: {
-          ...request.commit,
-          operations: [{
-            op: "set",
-            id: "of:root",
-            value: { casLink, wide },
-          }],
-        },
-      }),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
+  assertEquals(
+    hasRequestSchemaCasPayload({
+      ...request,
+      commit: {
+        ...request.commit,
+        operations: [{
+          op: "set",
+          id: "of:root",
+          value: { wide, casLink },
+        }],
+      },
+    }),
+    true,
   );
 
   let deepLink: EntityDocument = {
@@ -665,7 +642,7 @@ Deno.test("request schema CAS bounds preflight traversal", () => {
   );
 });
 
-Deno.test("request schema CAS shares traversal limits across transaction operations", () => {
+Deno.test("request schema CAS leaves traversal limits to expansion", () => {
   const wide = Array.from({ length: 50_000 }, () => null);
   const inline: TransactRequest = {
     ...transactRequest(),
@@ -677,15 +654,10 @@ Deno.test("request schema CAS shares traversal limits across transaction operati
       ],
     },
   };
-  assertThrows(
-    () => hasRequestSchemaCasPayload(inline),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
-  );
-  assertThrows(
-    () => hasRequestSchemaCasPayload({ ...inline, schemaDefinitions: {} }),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
+  assertEquals(hasRequestSchemaCasPayload(inline), false);
+  assertEquals(
+    hasRequestSchemaCasPayload({ ...inline, schemaDefinitions: {} }),
+    true,
   );
 
   const casLink = {
@@ -711,11 +683,7 @@ Deno.test("request schema CAS shares traversal limits across transaction operati
       ],
     },
   };
-  assertThrows(
-    () => hasRequestSchemaCasPayload(withCas),
-    InvalidRequestSchemaDefinitionsError,
-    "traversal limit",
-  );
+  assertEquals(hasRequestSchemaCasPayload(withCas), true);
 
   const inlineLink = {
     "/": { [LINK_V1_TAG]: { id: "of:child", path: [], schema } },
@@ -746,6 +714,79 @@ Deno.test("request schema CAS shares traversal limits across transaction operati
       ),
     InvalidRequestSchemaDefinitionsError,
     "traversal limit",
+  );
+});
+
+Deno.test("request schema CAS rejects malformed envelopes and safely detects cycles", () => {
+  const malformed = [
+    [{ ...graphRequest(), query: null }, "Invalid request schema query"],
+    [
+      { ...graphRequest(), query: { roots: [null] } },
+      "Invalid request schema query root",
+    ],
+    [
+      { ...watchRequest("session.watch.set"), watches: null },
+      "Invalid request schema watches",
+    ],
+    [
+      { ...watchRequest("session.watch.add"), watches: [null] },
+      "Invalid request schema watch",
+    ],
+    [
+      { ...transactRequest(), commit: null },
+      "Invalid request schema transaction",
+    ],
+    [{
+      ...transactRequest(),
+      commit: { ...transactRequest().commit, operations: [null] },
+    }, "Invalid request schema operation"],
+  ] as const;
+
+  for (const [request, message] of malformed) {
+    assertThrows(
+      () => expandRequestSchemas(request, () => undefined),
+      InvalidRequestSchemaDefinitionsError,
+      message,
+    );
+  }
+  assertThrows(
+    () => collectRequestSchemaCasHashes({ type: "session.open" }),
+    InvalidRequestSchemaDefinitionsError,
+    "Unsupported request schema table message",
+  );
+
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  assertEquals(
+    hasRequestSchemaCasPayload({
+      ...transactRequest(),
+      commit: {
+        ...transactRequest().commit,
+        operations: [{ op: "set", id: "of:cyclic", value: cyclic }],
+      },
+    }),
+    false,
+  );
+  assertEquals(
+    hasRequestSchemaCasPayload({
+      ...graphRequest(),
+      query: null,
+    }),
+    false,
+  );
+  assertEquals(
+    hasRequestSchemaCasPayload({
+      ...watchRequest("session.watch.set"),
+      watches: null,
+    }),
+    false,
+  );
+  assertEquals(
+    hasRequestSchemaCasPayload({
+      ...transactRequest(),
+      commit: null,
+    }),
+    false,
   );
 });
 

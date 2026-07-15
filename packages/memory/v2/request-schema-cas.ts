@@ -331,16 +331,11 @@ export const compressRequestSchemas = <
     ...rewritten,
     schemaDefinitions: Object.fromEntries(mergedDefinitions),
   } as Request;
-  try {
-    // A generated reference must remain discoverable by bounded server
-    // preflight. Otherwise this optimization would turn a valid inline request
-    // into a ProtocolError instead of degrading transparently.
-    if (rewritten !== request && !hasRequestSchemaCasPayload(compressed)) {
-      return request;
-    }
-  } catch (error) {
-    if (error instanceof InvalidRequestSchemaDefinitionsError) return request;
-    throw error;
+  // A generated reference must remain discoverable by server preflight.
+  // Otherwise this optimization would turn a valid inline request into a
+  // protocol error instead of degrading transparently.
+  if (rewritten !== request && !hasRequestSchemaCasPayload(compressed)) {
+    return request;
   }
   return compressed;
 };
@@ -489,127 +484,77 @@ export const expandRequestSchemas = (
 /** Whether a supported request uses a CAS-only field that requires negotiation. */
 export const hasRequestSchemaCasPayload = (request: unknown): boolean => {
   if (!isSupportedRequest(request)) return false;
-  const hasDefinitions = request.schemaDefinitions !== undefined;
   const hasReference = (value: unknown): boolean =>
     typeof value === "string" &&
     value.startsWith(REQUEST_SCHEMA_CAS_REF_PREFIX);
-  const traversal = createRequestSchemaTraversal();
   const queryHasReference = (query: unknown): boolean => {
-    traversal.visitNode(0);
     if (!isPlainRecord(query) || !Array.isArray(query.roots)) return false;
-    let found = false;
     for (const root of query.roots) {
-      traversal.visitNode(1);
       if (!isPlainRecord(root) || !isPlainRecord(root.selector)) continue;
       if (!Object.hasOwn(root.selector, "schema")) continue;
-      traversal.visitSchemaPosition();
-      found ||= hasReference(root.selector.schema);
+      if (hasReference(root.selector.schema)) return true;
     }
-    return found;
+    return false;
   };
   const watchesHaveReference = (watches: unknown): boolean => {
     if (!Array.isArray(watches)) return false;
-    let found = false;
     for (const watch of watches) {
-      traversal.visitNode(0);
-      if (isPlainRecord(watch)) found ||= queryHasReference(watch.query);
+      if (isPlainRecord(watch) && queryHasReference(watch.query)) return true;
     }
-    return found;
+    return false;
   };
-  const scanValue = (
-    value: unknown,
-  ): { hasReference: boolean; exceeded: boolean } => {
-    const pending: Array<{ value: unknown; depth: number }> = [{
-      value,
-      depth: 0,
-    }];
-    let found = false;
-    let exceeded = false;
+  const scanValue = (value: unknown): boolean => {
+    const pending: unknown[] = [value];
+    const visited = new WeakSet<object>();
     while (pending.length > 0) {
       const current = pending.pop()!;
-      traversal.nodes += 1;
-      if (traversal.nodes > MAX_REQUEST_SCHEMA_TRAVERSAL_NODES) {
-        return { hasReference: found, exceeded: true };
-      }
-      if (current.depth > MAX_REQUEST_SCHEMA_TRAVERSAL_DEPTH) {
-        exceeded = true;
+      if (Array.isArray(current)) {
+        if (visited.has(current)) continue;
+        visited.add(current);
+        for (const child of current) pending.push(child);
         continue;
       }
-      if (Array.isArray(current.value)) {
-        for (let index = current.value.length - 1; index >= 0; index -= 1) {
-          pending.push({
-            value: current.value[index],
-            depth: current.depth + 1,
-          });
-        }
-        continue;
-      }
-      if (!isPlainRecord(current.value)) continue;
+      if (!isPlainRecord(current)) continue;
+      if (visited.has(current)) continue;
+      visited.add(current);
 
-      const linkEnvelope = current.value["/"];
+      const linkEnvelope = current["/"];
       const linkPayload = isPlainRecord(linkEnvelope)
         ? linkEnvelope["link@1"]
         : undefined;
       if (isPlainRecord(linkPayload) && Object.hasOwn(linkPayload, "schema")) {
-        traversal.visitSchemaPosition();
-        found ||= hasReference(linkPayload.schema);
+        if (hasReference(linkPayload.schema)) return true;
       }
-      const alias = current.value.$alias;
+      const alias = current.$alias;
       if (isPlainRecord(alias) && Object.hasOwn(alias, "schema")) {
-        traversal.visitSchemaPosition();
-        found ||= hasReference(alias.schema);
+        if (hasReference(alias.schema)) return true;
       }
-
-      const children = Object.values(current.value);
-      for (let index = children.length - 1; index >= 0; index -= 1) {
-        pending.push({ value: children[index], depth: current.depth + 1 });
-      }
+      for (const child of Object.values(current)) pending.push(child);
     }
-    return { hasReference: found, exceeded };
+    return false;
   };
-  let foundReference = false;
-  let exceeded = false;
-  try {
-    switch (request.type) {
-      case "graph.query":
-        foundReference = queryHasReference(request.query);
-        break;
-      case "session.watch.set":
-      case "session.watch.add":
-        foundReference = watchesHaveReference(request.watches);
-        break;
-      case "transact": {
-        if (
-          !isPlainRecord(request.commit) ||
-          !Array.isArray(request.commit.operations)
-        ) break;
-        for (const operation of request.commit.operations) {
-          traversal.visitNode(0);
-          if (!isPlainRecord(operation)) continue;
-          if (operation.op === "set") {
-            const scan = scanValue(operation.value);
-            foundReference ||= scan.hasReference;
-            exceeded ||= scan.exceeded;
-          }
-          if (operation.op === "patch") {
-            const scan = scanValue(operation.patches);
-            foundReference ||= scan.hasReference;
-            exceeded ||= scan.exceeded;
-          }
-        }
-        break;
+  if (request.schemaDefinitions !== undefined) return true;
+  switch (request.type) {
+    case "graph.query":
+      return queryHasReference(request.query);
+    case "session.watch.set":
+    case "session.watch.add":
+      return watchesHaveReference(request.watches);
+    case "transact": {
+      if (
+        !isPlainRecord(request.commit) ||
+        !Array.isArray(request.commit.operations)
+      ) {
+        return false;
       }
+      for (const operation of request.commit.operations) {
+        if (!isPlainRecord(operation)) continue;
+        if (operation.op === "set" && scanValue(operation.value)) return true;
+        if (operation.op === "patch" && scanValue(operation.patches)) {
+          return true;
+        }
+      }
+      return false;
     }
-  } catch (error) {
-    if (error instanceof InvalidRequestSchemaDefinitionsError) {
-      throw error;
-    }
-    throw error;
   }
-  if (exceeded) {
-    throw new InvalidRequestSchemaDefinitionsError(
-      "Request schema traversal limit exceeded",
-    );
-  }
-  return hasDefinitions || foundReference;
 };
