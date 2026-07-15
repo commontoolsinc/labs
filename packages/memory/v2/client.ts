@@ -938,7 +938,7 @@ export class SpaceSession {
       return;
     }
     this.#connectionState = state;
-    for (const callback of this.#connectionStateSubscribers) {
+    for (const callback of [...this.#connectionStateSubscribers]) {
       this.notifyConnectionStateSubscriber(callback, state);
     }
   }

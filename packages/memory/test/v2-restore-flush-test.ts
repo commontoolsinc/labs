@@ -176,8 +176,15 @@ Deno.test(
       testSessionOpenAuthFactory,
     );
     const states: Array<{ status: string; epoch: number }> = [];
+    let nestedDisconnectedCalls = 0;
+    let nestedUnsubscribe: (() => void) | undefined;
     const unsubscribe = session.subscribeConnectionState((state) => {
       states.push({ status: state.status, epoch: state.epoch });
+      if (state.status === "disconnected" && nestedUnsubscribe === undefined) {
+        nestedUnsubscribe = session.subscribeConnectionState((nested) => {
+          if (nested.status === "disconnected") nestedDisconnectedCalls++;
+        });
+      }
     });
     const suppressDisconnectRejection = (event: PromiseRejectionEvent) => {
       if (
@@ -220,6 +227,7 @@ Deno.test(
         { status: "ready", epoch: 1 },
         { status: "disconnected", epoch: 1 },
       ]);
+      assertEquals(nestedDisconnectedCalls, 1);
 
       await transport.releaseTransacts();
       await pendingCommit;
@@ -237,6 +245,7 @@ Deno.test(
         "unhandledrejection",
         suppressDisconnectRejection,
       );
+      nestedUnsubscribe?.();
       unsubscribe();
       await client.close();
       await server.close();

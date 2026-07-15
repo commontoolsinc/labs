@@ -10,6 +10,7 @@ import {
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
+import type { SessionFactory } from "../src/storage/v2.ts";
 import type {
   IStorageProviderWithReplica,
   StorageNotification,
@@ -248,9 +249,26 @@ Deno.test("storage manager publishes connection state per space", async () => {
     memoryHost: new URL("memory://runner-v2-connection-state"),
   }, sessionFactory);
   const states: Array<{ status: string; epoch: number }> = [];
+  let nestedReadyEpochOneCalls = 0;
+  let nestedUnsubscribe: (() => void) | undefined;
   const unsubscribe = storageManager.subscribeConnectionState(
     space,
-    (state) => states.push({ status: state.status, epoch: state.epoch }),
+    (state) => {
+      states.push({ status: state.status, epoch: state.epoch });
+      if (
+        state.status === "ready" && state.epoch === 1 &&
+        nestedUnsubscribe === undefined
+      ) {
+        nestedUnsubscribe = storageManager.subscribeConnectionState(
+          space,
+          (nested) => {
+            if (nested.status === "ready" && nested.epoch === 1) {
+              nestedReadyEpochOneCalls++;
+            }
+          },
+        );
+      }
+    },
   );
   const provider = storageManager.open(space) as TestProvider;
   let storageClosed = false;
@@ -274,16 +292,87 @@ Deno.test("storage manager publishes connection state per space", async () => {
       { status: "disconnected", epoch: 1 },
       { status: "ready", epoch: 2 },
     ]);
+    assertEquals(nestedReadyEpochOneCalls, 1);
 
     await storageManager.close();
     storageClosed = true;
     assertEquals(states.at(-1), { status: "closed", epoch: 2 });
   } finally {
+    nestedUnsubscribe?.();
     unsubscribe();
     if (!storageClosed) await storageManager.close();
     await server.close();
   }
 });
+
+for (const closeKind of ["close", "closeNow"] as const) {
+  Deno.test(
+    `storage manager ${closeKind} does not publish ready from a late session`,
+    async () => {
+      const server = new MemoryV2Server.Server({
+        ...TEST_MEMORY_SERVER_AUTH,
+        store: new URL(
+          `memory://runner-v2-late-session-${closeKind}-${crypto.randomUUID()}`,
+        ),
+      });
+      const transport = new SabotagedReconnectTransport(server);
+      const client = await MemoryV2Client.connect({ transport });
+      const session = await client.mount(
+        space,
+        {},
+        testSessionOpenAuthFactory,
+      );
+      const pendingSession = defer<{
+        client: MemoryV2Client.Client;
+        session: MemoryV2Client.SpaceSession;
+      }>();
+      const factoryStarted = defer<void>();
+      const sessionFactory: SessionFactory = {
+        create: () => {
+          factoryStarted.resolve();
+          return pendingSession.promise;
+        },
+      };
+      const storageManager = TestStorageManager.create({
+        as: signer,
+        memoryHost: new URL(`memory://runner-v2-late-session-${closeKind}`),
+      }, sessionFactory);
+      const states: Array<{ status: string; epoch: number }> = [];
+      const unsubscribe = storageManager.subscribeConnectionState(
+        space,
+        (state) => states.push({ status: state.status, epoch: state.epoch }),
+      );
+      const provider = storageManager.open(space) as TestProvider;
+      const sync = provider.sync(
+        `of:late-session-${closeKind}-${crypto.randomUUID()}` as URI,
+      ).catch(() => undefined);
+
+      try {
+        await factoryStarted.promise;
+        const closing = storageManager[closeKind]();
+        await waitFor(() => states.at(-1)?.status === "closed");
+        if (closeKind === "closeNow") await closing;
+        const statesAtClose = [...states];
+
+        pendingSession.resolve({ client, session });
+        await closing;
+        await waitFor(() => session.connectionState.status === "closed");
+        await sync;
+
+        assertEquals(states, statesAtClose);
+        assertEquals(states, [
+          { status: "idle", epoch: 0 },
+          { status: "closed", epoch: 0 },
+        ]);
+      } finally {
+        unsubscribe();
+        await storageManager.close();
+        await client.close();
+        await server.close();
+      }
+    },
+  );
+}
 
 Deno.test("memory v2 runner does not integrate its own replayed commit after reconnect", async () => {
   const server = new MemoryV2Server.Server({

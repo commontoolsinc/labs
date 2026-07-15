@@ -904,7 +904,9 @@ export class StorageManager implements IStorageManager {
       return;
     }
     this.#connectionStates.set(space, state);
-    for (const callback of this.#connectionStateSubscribers.get(space) ?? []) {
+    for (
+      const callback of [...this.#connectionStateSubscribers.get(space) ?? []]
+    ) {
       this.#notifyConnectionStateSubscriber(callback, state);
     }
   }
@@ -2260,6 +2262,9 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.sessionHandle();
+      if (this.#closed) {
+        return { error: toConnectionError(new Error("memory replica closed")) };
+      }
       const rawEntries = [...entries];
       const watchEntries = compactWatchEntries(rawEntries);
       if (watchEntries.length === 0) {
@@ -3437,6 +3442,10 @@ class SpaceReplica implements ISpaceReplica {
       // first mount before it can commit.
       const handle = Promise.resolve().then(() => this.#createSession()).then(
         (resolved) => {
+          // Teardown can overtake a lazy session factory. The resolved client
+          // still flows to close()/closeNow() below, but it must never publish
+          // ready or install watches after this replica declared itself closed.
+          if (this.#closed) return resolved;
           this.#sessionClient = resolved.client;
           const subscribeConnectionState = (
             resolved.session as MemoryV2Client.SpaceSession & {
