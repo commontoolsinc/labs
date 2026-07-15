@@ -22,6 +22,11 @@ import { Runtime } from "../src/runtime.ts";
 const signer = await Identity.fromPassphrase("multi-instance-resolution");
 const space = signer.did();
 
+type InstanceResult = {
+  count: number;
+  bump: { by?: number };
+};
+
 const PROGRAM = {
   main: "/main.tsx",
   files: [{
@@ -66,14 +71,13 @@ describe("multi-instance verified-function resolution", () => {
         space,
         tx: tx0,
       });
-      const resultCell = runtime!.getCell<{ count: number }>(
+      const resultCell = runtime!.getCell<InstanceResult>(
         space,
         cause,
         undefined,
         tx0,
       );
-      // deno-lint-ignore no-explicit-any
-      const r = runtime!.run(tx0, pattern, {}, resultCell) as any;
+      const r = runtime!.run(tx0, pattern, {}, resultCell);
       await tx0.commit();
       await r.pull();
       return r;
