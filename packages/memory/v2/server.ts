@@ -372,6 +372,31 @@ type SessionHandle = {
   sessionId: string;
 };
 
+const requestAuthorizationBrand = Symbol("requestAuthorization");
+
+/** A decision bound to one parsed wire request. Its brand is module-private so
+ * callers cannot manufacture an authorization bypass for the public handlers. */
+type RequestAuthorizationContext = {
+  readonly [requestAuthorizationBrand]: true;
+  readonly space: string;
+  readonly sessionId: string;
+  readonly requirement: Capability;
+  readonly aclEpoch: number;
+  readonly sessionInvalidationError: "SessionError" | "SessionRevokedError";
+  readonly session: SessionState;
+  readonly engine?: Engine.Engine;
+};
+
+const requiredCapabilityForRequest = (
+  message: RequestSchemaCasRequest,
+): Capability => {
+  if (message.type !== "transact") return "READ";
+  const operations = Array.isArray(message.commit?.operations)
+    ? message.commit.operations
+    : [];
+  return commitTouchesAclDoc(operations, message.space) ? "OWNER" : "WRITE";
+};
+
 type DirtyOrigin = {
   sessionId: string;
   seq: number;
@@ -389,6 +414,8 @@ class Connection {
   #persistentSchedulerState = false;
   #requestSchemaCasV1 = false;
   #sessions = new Map<string, SessionHandle>();
+  #sessionVersion = 0;
+  #revokedSessions = new Map<string, number>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
   #pendingReceives = 0;
@@ -509,6 +536,15 @@ class Connection {
     return this.#sessions.has(sessionKey(space, sessionId));
   }
 
+  wasSessionRevokedAfter(
+    space: string,
+    sessionId: string,
+    sessionVersion: number,
+  ): boolean {
+    return (this.#revokedSessions.get(sessionKey(space, sessionId)) ?? 0) >
+      sessionVersion;
+  }
+
   private shouldSuppressSessionSend(
     space: string,
     sessionId: string,
@@ -546,6 +582,7 @@ class Connection {
     if (this.#sessions.has(key)) {
       return;
     }
+    this.#revokedSessions.delete(key);
     this.#sessions.set(key, { space, sessionId });
   }
 
@@ -558,6 +595,8 @@ class Connection {
     if (!this.#sessions.delete(key) || this.#closed) {
       return;
     }
+    this.#sessionVersion += 1;
+    this.#revokedSessions.set(key, this.#sessionVersion);
     this.send({
       type: "session/revoked",
       space,
@@ -623,9 +662,10 @@ class Connection {
   async receive(payload: string): Promise<void> {
     this.#pendingReceives += 1;
     try {
+      const sessionVersion = this.#sessionVersion;
       const previous = this.#receiving;
       const current = previous.catch(() => undefined).then(() =>
-        this.receiveOrdered(payload)
+        this.receiveOrdered(payload, sessionVersion)
       );
       this.#receiving = current.then(() => undefined, () => undefined);
       return await current;
@@ -686,7 +726,10 @@ class Connection {
     return false;
   }
 
-  private async receiveOrdered(payload: string): Promise<void> {
+  private async receiveOrdered(
+    payload: string,
+    receivedAtSessionVersion: number,
+  ): Promise<void> {
     if (this.#closed) {
       return;
     }
@@ -742,17 +785,19 @@ class Connection {
         parsed.type === "session.watch.add" || parsed.type === "transact"
       ? parsed as RequestSchemaCasRequest
       : undefined;
+    let authorizationContext: RequestAuthorizationContext | undefined;
     if (casRequest !== undefined) {
       const sessionWasAttached = this.server.isSessionAttached(
         casRequest.space,
         casRequest.sessionId,
         this.id,
       );
-      const authorization = await this.server.authorizeRequestSchemaIngestion(
+      const authorization = await this.server.preflightRequestAuthorization(
         casRequest,
         this,
+        receivedAtSessionVersion,
       );
-      if (authorization !== null) {
+      if ("name" in authorization) {
         this.recordParsedInbound(payload, parsed);
         const response = respondTypedError(casRequest.requestId, authorization);
         if (sessionWasAttached) {
@@ -767,18 +812,9 @@ class Connection {
         }
         return;
       }
+      authorizationContext = authorization;
     }
-    let hasCasPayload: boolean;
-    try {
-      hasCasPayload = hasRequestSchemaCasPayload(parsed);
-    } catch (error) {
-      this.recordParsedInbound(payload, parsed);
-      this.send(respondTypedError(
-        "requestId" in parsed ? parsed.requestId : "invalid",
-        this.server.requestSchemaCasError(error),
-      ));
-      return;
-    }
+    const hasCasPayload = hasRequestSchemaCasPayload(parsed);
     if (hasCasPayload) {
       if (!this.#requestSchemaCasV1) {
         this.recordParsedInbound(payload, parsed);
@@ -829,6 +865,7 @@ class Connection {
       }
       case "transact":
         if (
+          authorizationContext === undefined &&
           !this.requireSession(
             logical.requestId,
             logical.space,
@@ -837,10 +874,11 @@ class Connection {
         ) {
           return;
         }
-        this.send(await this.server.transact(logical));
+        this.send(await this.server.transact(logical, authorizationContext));
         return;
       case "graph.query":
         if (
+          authorizationContext === undefined &&
           !this.requireSession(
             logical.requestId,
             logical.space,
@@ -850,7 +888,10 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.graphQuery(logical);
+          const response = await this.server.graphQuery(
+            logical,
+            authorizationContext,
+          );
           this.sendSessionResponse(
             logical.space,
             logical.sessionId,
@@ -901,6 +942,7 @@ class Connection {
         return;
       case "session.watch.set":
         if (
+          authorizationContext === undefined &&
           !this.requireSession(
             logical.requestId,
             logical.space,
@@ -910,7 +952,10 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.watchSet(logical);
+          const response = await this.server.watchSet(
+            logical,
+            authorizationContext,
+          );
           this.sendSessionResponse(
             logical.space,
             logical.sessionId,
@@ -921,6 +966,7 @@ class Connection {
         return;
       case "session.watch.add":
         if (
+          authorizationContext === undefined &&
           !this.requireSession(
             logical.requestId,
             logical.space,
@@ -930,7 +976,10 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.watchAdd(logical);
+          const response = await this.server.watchAdd(
+            logical,
+            authorizationContext,
+          );
           this.sendSessionResponse(
             logical.space,
             logical.sessionId,
@@ -1033,6 +1082,7 @@ class Connection {
     for (const { space, sessionId } of this.#sessions.values()) {
       this.server.detachSession(space, sessionId, this.id);
     }
+    this.#revokedSessions.clear();
     this.server.disconnect(this);
   }
 }
@@ -1233,28 +1283,35 @@ export class Server {
     );
   }
 
-  async authorizeRequestSchemaIngestion(
+  async preflightRequestAuthorization(
     message: RequestSchemaCasRequest,
     connection: Connection,
-  ): Promise<V2Error | null> {
+    receivedAtSessionVersion: number,
+  ): Promise<V2Error | RequestAuthorizationContext> {
     if (!connection.hasSession(message.space, message.sessionId)) {
+      if (
+        connection.wasSessionRevokedAfter(
+          message.space,
+          message.sessionId,
+          receivedAtSessionVersion,
+        )
+      ) {
+        return toError(
+          "SessionRevokedError",
+          "Session was revoked while the request was in flight",
+        );
+      }
       return toError("SessionError", "Session is not open on this connection");
     }
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
       return toError("SessionError", "Unknown session for space");
     }
-    const operations = message.type === "transact" &&
-        Array.isArray(message.commit?.operations)
-      ? message.commit.operations
-      : [];
-    const requirement: Capability = message.type === "transact"
-      ? commitTouchesAclDoc(operations, message.space) ? "OWNER" : "WRITE"
-      : "READ";
+    const requirement = requiredCapabilityForRequest(message);
     const aclEngine = this.#aclMode() === "off"
       ? undefined
       : await this.openEngine(message.space);
-    return aclEngine === undefined
+    const deny = aclEngine === undefined
       ? await this.#authorizeMessage(
         message.space,
         session.principal,
@@ -1267,6 +1324,95 @@ export class Server {
         session,
         requirement,
       );
+    if (deny) return deny;
+    return {
+      [requestAuthorizationBrand]: true,
+      space: message.space,
+      sessionId: message.sessionId,
+      requirement,
+      aclEpoch: this.#aclEpoch(message.space),
+      sessionInvalidationError: "SessionRevokedError",
+      session,
+      ...(aclEngine === undefined ? {} : { engine: aclEngine }),
+    };
+  }
+
+  async #requestAuthorization(
+    message: RequestSchemaCasRequest,
+    context?: RequestAuthorizationContext,
+  ): Promise<V2Error | RequestAuthorizationContext> {
+    if (context !== undefined) {
+      const invalid = this.#requestAuthorizationContextError(message, context);
+      if (invalid !== null) return invalid;
+      return context;
+    }
+
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return toError("SessionError", "Unknown session for space");
+    }
+    const requirement = requiredCapabilityForRequest(message);
+    const engine = this.#aclMode() === "off"
+      ? undefined
+      : await this.openEngine(message.space);
+    const deny = engine === undefined
+      ? await this.#authorizeMessage(
+        message.space,
+        session.principal,
+        requirement,
+      )
+      : this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        requirement,
+      );
+    if (deny) return deny;
+    return {
+      [requestAuthorizationBrand]: true,
+      space: message.space,
+      sessionId: message.sessionId,
+      requirement,
+      aclEpoch: this.#aclEpoch(message.space),
+      sessionInvalidationError: "SessionError",
+      session,
+      ...(engine === undefined ? {} : { engine }),
+    };
+  }
+
+  #requestAuthorizationContextError(
+    message: RequestSchemaCasRequest,
+    context: RequestAuthorizationContext,
+  ): V2Error | null {
+    if (
+      context[requestAuthorizationBrand] !== true ||
+      context.space !== message.space ||
+      context.sessionId !== message.sessionId ||
+      context.requirement !== requiredCapabilityForRequest(message)
+    ) {
+      return toError("SessionError", "Unknown or replaced session for space");
+    }
+    if (
+      this.#sessions.get(message.space, message.sessionId) !== context.session
+    ) {
+      return toError(
+        context.sessionInvalidationError,
+        context.sessionInvalidationError === "SessionRevokedError"
+          ? "Session was revoked while the request was in flight"
+          : "Unknown or replaced session for space",
+      );
+    }
+    if (
+      this.#aclMode() !== "off" &&
+      context.aclEpoch !== this.#aclEpoch(message.space)
+    ) {
+      return toError(
+        "AuthorizationError",
+        "Space ACL changed while the request was in flight",
+      );
+    }
+    return null;
   }
 
   nowSeconds(): number {
@@ -1298,6 +1444,7 @@ export class Server {
   /** space → (principal key → capability). Invalidated whenever a commit
    *  touches the space's ACL document. */
   #aclCapabilities = new Map<string, Map<string, Capability | null>>();
+  #aclEpochs = new Map<string, number>();
 
   #aclMode(): MemoryAclMode {
     return this.options.acl?.mode ?? "off";
@@ -1309,6 +1456,11 @@ export class Server {
 
   #invalidateAclCapabilities(space: string): void {
     this.#aclCapabilities.delete(space);
+    this.#aclEpochs.set(space, this.#aclEpoch(space) + 1);
+  }
+
+  #aclEpoch(space: string): number {
+    return this.#aclEpochs.get(space) ?? 0;
   }
 
   #aclState(engine: Engine.Engine, space: string): AclState {
@@ -2296,17 +2448,21 @@ export class Server {
     }
   }
 
-  transact(
+  async transact(
     message: TransactRequest,
+    authorizationContext?: RequestAuthorizationContext,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
-    const session = this.#sessions.get(message.space, message.sessionId);
-    if (session === null) {
-      return Promise.resolve(respondTypedError<Engine.AppliedCommit>(
+    const authorization = await this.#requestAuthorization(
+      message,
+      authorizationContext,
+    );
+    if ("name" in authorization) {
+      return respondTypedError<Engine.AppliedCommit>(
         message.requestId,
-        toError("SessionError", "Unknown session for space"),
-      ));
+        authorization,
+      );
     }
-
+    const { engine: authorizedEngine, session } = authorization;
     return tracer.startActiveSpan(
       "memory.transact",
       async (span): Promise<ResponseMessage<Engine.AppliedCommit>> => {
@@ -2335,16 +2491,19 @@ export class Server {
           span.setAttribute("commit.local_seq", message.commit.localSeq);
         }
         try {
-          const engine = await this.openEngine(message.space);
-          // The session may be revoked or replaced while openEngine awaits.
-          // Re-check the exact registry object before using the captured
-          // principal so an old connection cannot commit after takeover.
-          if (
-            this.#sessions.get(message.space, message.sessionId) !== session
-          ) {
+          const engine = authorizedEngine ??
+            await this.openEngine(message.space);
+          // Authorization may become stale while request-schema expansion or
+          // engine opening is in flight. Re-check session identity and the ACL
+          // epoch beside apply without making a duplicate ACL decision.
+          const invalidAuthorization = this.#requestAuthorizationContextError(
+            message,
+            authorization,
+          );
+          if (invalidAuthorization !== null) {
             return respondTypedError<Engine.AppliedCommit>(
               message.requestId,
-              toError("SessionError", "Unknown or replaced session for space"),
+              invalidAuthorization,
             );
           }
           const invalid = this.#validateAclCommit(
@@ -2359,23 +2518,10 @@ export class Server {
               invalid,
             );
           }
-          // ACL-document writes change who may access the space — OWNER only.
           const aclTouched = commitTouchesAclDoc(
             message.commit.operations,
             message.space,
           );
-          const deny = this.#authorizeMessageWithEngine(
-            engine,
-            message.space,
-            session.principal,
-            aclTouched ? "OWNER" : "WRITE",
-          );
-          if (deny) {
-            return respondTypedError<Engine.AppliedCommit>(
-              message.requestId,
-              deny,
-            );
-          }
           // Scheduler ownership is derived from an authenticated principal.
           // An otherwise-authorized anonymous memory session may still commit
           // cell data, but cannot persist scoped scheduler metadata.
@@ -2553,34 +2699,28 @@ export class Server {
 
   async graphQuery(
     message: GraphQueryRequest,
+    authorizationContext?: RequestAuthorizationContext,
   ): Promise<ResponseMessage<GraphQueryResult>> {
-    const session = this.#sessions.get(message.space, message.sessionId);
-    if (session === null) {
+    const authorization = await this.#requestAuthorization(
+      message,
+      authorizationContext,
+    );
+    if ("name" in authorization) {
       return respondTypedError<GraphQueryResult>(
         message.requestId,
-        toError("SessionError", "Unknown session for space"),
+        authorization,
       );
     }
-    const aclEngine = this.#aclMode() === "off"
-      ? undefined
-      : await this.openEngine(message.space);
-    {
-      const deny = aclEngine === undefined
-        ? await this.#authorizeMessage(
-          message.space,
-          session.principal,
-          "READ",
-        )
-        : this.#authorizeCurrentSessionWithEngine(
-          aclEngine,
-          message.space,
-          message.sessionId,
-          session,
-          "READ",
-        );
-      if (deny) {
-        return respondTypedError<GraphQueryResult>(message.requestId, deny);
-      }
+    const { engine: aclEngine, session } = authorization;
+    const invalidAuthorization = this.#requestAuthorizationContextError(
+      message,
+      authorization,
+    );
+    if (invalidAuthorization !== null) {
+      return respondTypedError<GraphQueryResult>(
+        message.requestId,
+        invalidAuthorization,
+      );
     }
     if ((message.query as GraphQuery & { subscribe?: boolean }).subscribe) {
       return respondTypedError<GraphQueryResult>(
@@ -2713,34 +2853,28 @@ export class Server {
 
   async watchSet(
     message: WatchSetRequest,
+    authorizationContext?: RequestAuthorizationContext,
   ): Promise<ResponseMessage<WatchSetResult>> {
-    const session = this.#sessions.get(message.space, message.sessionId);
-    if (session === null) {
+    const authorization = await this.#requestAuthorization(
+      message,
+      authorizationContext,
+    );
+    if ("name" in authorization) {
       return respondTypedError<WatchSetResult>(
         message.requestId,
-        toError("SessionError", "Unknown session for space"),
+        authorization,
       );
     }
-    const aclEngine = this.#aclMode() === "off"
-      ? undefined
-      : await this.openEngine(message.space);
-    {
-      const deny = aclEngine === undefined
-        ? await this.#authorizeMessage(
-          message.space,
-          session.principal,
-          "READ",
-        )
-        : this.#authorizeCurrentSessionWithEngine(
-          aclEngine,
-          message.space,
-          message.sessionId,
-          session,
-          "READ",
-        );
-      if (deny) {
-        return respondTypedError<WatchSetResult>(message.requestId, deny);
-      }
+    const { engine: aclEngine, session } = authorization;
+    const invalidAuthorization = this.#requestAuthorizationContextError(
+      message,
+      authorization,
+    );
+    if (invalidAuthorization !== null) {
+      return respondTypedError<WatchSetResult>(
+        message.requestId,
+        invalidAuthorization,
+      );
     }
 
     try {
@@ -2785,34 +2919,28 @@ export class Server {
 
   async watchAdd(
     message: WatchAddRequest,
+    authorizationContext?: RequestAuthorizationContext,
   ): Promise<ResponseMessage<WatchAddResult>> {
-    const session = this.#sessions.get(message.space, message.sessionId);
-    if (session === null) {
+    const authorization = await this.#requestAuthorization(
+      message,
+      authorizationContext,
+    );
+    if ("name" in authorization) {
       return respondTypedError<WatchAddResult>(
         message.requestId,
-        toError("SessionError", "Unknown session for space"),
+        authorization,
       );
     }
-    const aclEngine = this.#aclMode() === "off"
-      ? undefined
-      : await this.openEngine(message.space);
-    {
-      const deny = aclEngine === undefined
-        ? await this.#authorizeMessage(
-          message.space,
-          session.principal,
-          "READ",
-        )
-        : this.#authorizeCurrentSessionWithEngine(
-          aclEngine,
-          message.space,
-          message.sessionId,
-          session,
-          "READ",
-        );
-      if (deny) {
-        return respondTypedError<WatchAddResult>(message.requestId, deny);
-      }
+    const { engine: aclEngine, session } = authorization;
+    const invalidAuthorization = this.#requestAuthorizationContextError(
+      message,
+      authorization,
+    );
+    if (invalidAuthorization !== null) {
+      return respondTypedError<WatchAddResult>(
+        message.requestId,
+        invalidAuthorization,
+      );
     }
 
     try {

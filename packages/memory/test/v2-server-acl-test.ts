@@ -765,6 +765,87 @@ Deno.test("acl enforce: a concurrent post-revocation write is rejected", async (
   }
 });
 
+Deno.test("acl enforce: an in-flight write cannot survive downgrade to READ", async () => {
+  const server = createAclServer("memory://acl-enforce-downgrade-race", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-space-downgrade-race";
+  const alice = await connect(server);
+  const bob = await connect(server);
+  const authorizationReady = Promise.withResolvers<void>();
+  const releaseAuthorization = Promise.withResolvers<void>();
+  const mutableServer = server as unknown as {
+    preflightRequestAuthorization: Server["preflightRequestAuthorization"];
+  };
+  const originalPreflight = mutableServer.preflightRequestAuthorization.bind(
+    server,
+  );
+  try {
+    await initializeSpaceAcl(server, space, {
+      [ALICE]: "OWNER",
+      [BOB]: "WRITE",
+    });
+    const aliceSession = await openSession(alice, space, ALICE);
+    const bobSession = await openSession(bob, space, BOB);
+    assertExists(aliceSession.ok);
+    assertExists(bobSession.ok);
+
+    mutableServer.preflightRequestAuthorization = async (...args) => {
+      const authorization = await originalPreflight(...args);
+      const [message] = args;
+      if (
+        message.type === "transact" &&
+        message.sessionId === bobSession.ok?.sessionId
+      ) {
+        authorizationReady.resolve();
+        await releaseAuthorization.promise;
+      }
+      return authorization;
+    };
+
+    const staleWrite = transactSet(
+      bob,
+      space,
+      bobSession.ok.sessionId,
+      "of:doc:bob-stale-write",
+      { shouldNotLand: true },
+      1,
+    );
+    await authorizationReady.promise;
+
+    const downgrade = await transactSet(
+      alice,
+      space,
+      aliceSession.ok.sessionId,
+      `of:${space}`,
+      { [ALICE]: "OWNER", [BOB]: "READ" },
+      1,
+    );
+    assertExists(downgrade.ok);
+
+    releaseAuthorization.resolve();
+    const rejected = await staleWrite;
+    assertEquals(rejected.error?.name, "AuthorizationError");
+    assertEquals(
+      await server.readDocument(space, "of:doc:bob-stale-write"),
+      null,
+    );
+    assertExists(
+      (await graphQuery(
+        bob,
+        space,
+        bobSession.ok.sessionId,
+        `of:${space}`,
+      )).ok,
+      "downgraded session should retain READ access",
+    );
+  } finally {
+    releaseAuthorization.resolve();
+    mutableServer.preflightRequestAuthorization = originalPreflight;
+    await server.close();
+  }
+});
+
 Deno.test("acl enforce: a concurrent graph query is evaluated before revocation", async () => {
   const server = createAclServer("memory://acl-enforce-query-race", {
     mode: "enforce",

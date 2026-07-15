@@ -43,18 +43,25 @@ const response = <Result>(message: ServerMessage): ResponseMessage<Result> => {
 const createServer = (
   schemaStore?: SchemaStore,
   wireAccountingObserver?: MemoryWireAccountingAccumulator,
+  acl?: { mode: "observe" },
 ) =>
   new Server({
     store: new URL("memory://request-schema-cas-server"),
     schemaStore,
     wireAccountingObserver,
-    authorizeSessionOpen: () => "did:key:request-schema-cas-principal",
+    authorizeSessionOpen: (message) =>
+      typeof (message.invocation as { iss?: unknown }).iss === "string"
+        ? (message.invocation as { iss: string }).iss
+        : "did:key:request-schema-cas-principal",
     sessionOpenAuth: { audience },
+    ...(acl === undefined ? {} : { acl }),
   });
 
 const open = async (
   server: Server,
   flags: WireMemoryProtocolFlags = getMemoryProtocolFlags(),
+  requestSpace = space,
+  principal?: string,
 ) => {
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
@@ -69,21 +76,22 @@ const open = async (
   await connection.receive(encodeMemoryBoundary({
     type: "session.open",
     requestId: "open",
-    space,
+    space: requestSpace,
     session: {},
     invocation: {
       aud: sessionOpen.audience,
       challenge: sessionOpen.challenge.value,
+      ...(principal === undefined ? {} : { iss: principal }),
     },
   }));
   const opened = response<{ sessionId: string }>(shift(messages));
   return { connection, messages, sessionId: opened.ok!.sessionId, hello };
 };
 
-const query = (sessionId: string) => ({
+const query = (sessionId: string, requestSpace = space) => ({
   type: "graph.query" as const,
   requestId: "query",
-  space,
+  space: requestSpace,
   sessionId,
   query: {
     roots: [{ id: "of:root", selector: { path: [], schema } }],
@@ -132,6 +140,55 @@ Deno.test("server expands authorized definitions, persists them, and accepts lat
     });
     await connection.receive(encodeMemoryBoundary(later));
     assertEquals(response(shift(messages)).error, undefined);
+  } finally {
+    await server.close();
+    store.close();
+  }
+});
+
+Deno.test("server makes one observe-mode ACL decision for a CAS request", async () => {
+  const store = await openSchemaStore({ url: new URL("memory:") });
+  const server = createServer(store, undefined, { mode: "observe" });
+  const aclSpace = "did:key:request-schema-cas-owner";
+  try {
+    const owner = await open(
+      server,
+      getMemoryProtocolFlags(),
+      aclSpace,
+      aclSpace,
+    );
+    await owner.connection.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "initialize-acl",
+      space: aclSpace,
+      sessionId: owner.sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: `of:${aclSpace}`,
+          value: { value: { [aclSpace]: "OWNER" } },
+        }],
+      },
+    }));
+    assertEquals(response(shift(owner.messages)).error, undefined);
+
+    const { connection, messages, sessionId } = await open(
+      server,
+      getMemoryProtocolFlags(),
+      aclSpace,
+      "did:key:request-schema-cas-stranger",
+    );
+    server.aclStats.wouldDeny = 0;
+
+    await connection.receive(encodeMemoryBoundary(compressRequestSchemas(
+      query(sessionId, aclSpace),
+      { isKnownSchemaHash: () => false },
+    )));
+
+    assertEquals(response(shift(messages)).error, undefined);
+    assertEquals(server.aclStats.wouldDeny, 1);
   } finally {
     await server.close();
     store.close();
@@ -364,7 +421,7 @@ Deno.test("server returns protocol errors for malformed request CAS envelopes", 
     }));
     assertEquals(response(shift(messages)).error?.name, "ProtocolError");
     await connection.receive(encodeMemoryBoundary(inlineRequest));
-    assertEquals(response(shift(messages)).error?.name, "ProtocolError");
+    assertEquals(response(shift(messages)).error, undefined);
   } finally {
     await server.close();
     store.close();
