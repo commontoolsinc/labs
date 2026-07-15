@@ -182,7 +182,7 @@ export function qualifyCommonFabricTypeRefs(
   // paired info isn't available — in that case nested ImportType
   // recognition still works (it's purely syntactic), but bare-identifier
   // commonfabric-ref detection is skipped (no false-positive risk).
-  const walk = (
+  const walkNode = (
     node: ts.TypeNode,
     pairedType: ts.Type | undefined,
   ): ts.TypeNode => {
@@ -330,6 +330,21 @@ export function qualifyCommonFabricTypeRefs(
 
     return node;
   };
+
+  // Every lockstep-walked descendant is consumed later by identity through the
+  // shared type registry. Register the complete walk, not only the root:
+  // detached child nodes cannot recover exact aliases or generic instantiations
+  // from checker source positions after emission transforms.
+  function walk(
+    node: ts.TypeNode,
+    pairedType: ts.Type | undefined,
+  ): ts.TypeNode {
+    const result = walkNode(node, pairedType);
+    if (pairedType && context.typeRegistry) {
+      context.typeRegistry.set(result, pairedType);
+    }
+    return result;
+  }
 
   const result = walk(typeNode, rootType);
 

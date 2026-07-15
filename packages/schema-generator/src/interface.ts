@@ -107,6 +107,7 @@ export interface SchemaGenerator {
     options?: { widenLiterals?: boolean },
     schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
   ): SchemaDefinition;
 
   /**

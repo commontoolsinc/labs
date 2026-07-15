@@ -17,6 +17,7 @@ export function createSchemaTransformerV2() {
       options?: { widenLiterals?: boolean },
       schemaHints?: WeakMap<ts.Node, SchemaHint>,
       sourceFile?: ts.SourceFile,
+      typeRegistry?: WeakMap<ts.Node, ts.Type>,
     ) {
       return generator.generateSchema(
         type,
@@ -25,6 +26,7 @@ export function createSchemaTransformerV2() {
         options,
         schemaHints,
         sourceFile,
+        typeRegistry,
       );
     },
 

@@ -63,12 +63,13 @@ export class SchemaGenerator implements ISchemaGenerator {
     options?: { widenLiterals?: boolean },
     schemaHints?: WeakMap<ts.Node, SchemaHint>,
     sourceFile?: ts.SourceFile,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
   ): JSONSchemaMutable {
     return this.generateSchemaInternal(
       type,
       checker,
       typeNode,
-      undefined,
+      typeRegistry,
       options,
       schemaHints,
       sourceFile,
@@ -1023,8 +1024,39 @@ export class SchemaGenerator implements ISchemaGenerator {
       ts.SymbolFlags.Type,
     );
     const symbol = candidates.find((candidate) => candidate.name === typeName);
-    if (!symbol) return undefined;
-    const declared = checker.getDeclaredTypeOfSymbol(symbol);
+    const moduleSource = scopeNode;
+    const moduleSymbol = checker.getSymbolAtLocation(moduleSource) ??
+      (moduleSource as ts.SourceFile & { symbol?: ts.Symbol }).symbol;
+    const exportedSymbol = moduleSymbol
+      ? checker.getExportsOfModule(moduleSymbol).find((candidate) =>
+        candidate.name === typeName
+      )
+      : undefined;
+    // Detached nodes can make getSymbolsInScope return a transient flags=0
+    // placeholder for an exported declaration. Prefer the canonical module
+    // export when both are present.
+    const candidate = exportedSymbol ?? symbol;
+    if (!candidate) return undefined;
+    const resolvedSymbol = (candidate.flags & ts.SymbolFlags.Alias) !== 0
+      ? checker.getAliasedSymbol(candidate)
+      : candidate;
+
+    // A detached synthetic `Box<string>` node cannot be instantiated safely
+    // by asking for the declared `Box<T>` type: doing so silently erases the
+    // concrete argument and emits an open `{}` contract for `T`. Exact generic
+    // instantiations must come from the transformer type registry / paired
+    // semantic wrapper type. Source-scope lookup is only a safe recovery path
+    // for non-generic exports such as `Person` or `CommuteMode`.
+    const declarations = resolvedSymbol.getDeclarations() ?? [];
+    const isGenericDeclaration = declarations.some((declaration) =>
+      (ts.isTypeAliasDeclaration(declaration) ||
+        ts.isInterfaceDeclaration(declaration) ||
+        ts.isClassDeclaration(declaration)) &&
+      (declaration.typeParameters?.length ?? 0) > 0
+    );
+    if (isGenericDeclaration) return undefined;
+
+    const declared = checker.getDeclaredTypeOfSymbol(resolvedSymbol);
     if (!declared || (declared.flags & ts.TypeFlags.Any)) {
       return undefined;
     }

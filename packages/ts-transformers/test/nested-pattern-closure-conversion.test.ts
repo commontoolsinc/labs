@@ -325,6 +325,77 @@ export default pattern<{
   );
 });
 
+Deno.test("nested pattern params retain named schemas inside scoped cell captures", async () => {
+  const output = await transformSource(
+    `
+import { pattern, UI, Writable } from "commonfabric";
+
+export type CommuteMode = "drive" | "transit" | "bike";
+export type Box<T> = { value: T };
+interface ParkingSpot { spotNumber: string }
+
+export default pattern<{
+  people: Array<{ name: string; isEditing: boolean }>;
+}>(({ people }) => {
+  const spots = new Writable<ParkingSpot[]>([]);
+  const editCommuteMode = new Writable.perSession<CommuteMode>("drive");
+  const editBox = new Writable.perSession<Box<string>>({ value: "drive" });
+  return {
+    [UI]: (
+      <div>
+        {people.map((person) => (
+          <span>
+            {person.name} {spots} {editBox}
+            {person.isEditing
+              ? (
+                <cf-select
+                  items={[{ label: "Drive", value: "drive" }]}
+                  $value={editCommuteMode}
+                ></cf-select>
+              )
+              : null}
+          </span>
+        ))}
+      </div>
+    ),
+  };
+});
+`,
+    { ...options, typeCheck: true },
+  );
+  const root = parseModule(output);
+  const wrapper = callsNamed(root, "withPatternParamsSchema")[0];
+  assert(wrapper, output);
+
+  const paramsSchema = literalToValue(wrapper.arguments[1]!) as {
+    properties: Record<string, unknown>;
+    $defs?: Record<string, unknown>;
+  };
+  assertEquals(paramsSchema.properties.editCommuteMode, {
+    $ref: "#/$defs/CommuteMode",
+    asCell: [{ kind: "cell", scope: "session" }],
+  });
+  assertEquals(paramsSchema.$defs?.CommuteMode, {
+    enum: ["drive", "transit", "bike"],
+  });
+  assertEquals(paramsSchema.properties.spots, {
+    type: "array",
+    items: { $ref: "#/$defs/ParkingSpot" },
+    asCell: ["cell"],
+  });
+  assertEquals(paramsSchema.$defs?.ParkingSpot, {
+    type: "object",
+    properties: { spotNumber: { type: "string" } },
+    required: ["spotNumber"],
+  });
+  assertEquals(paramsSchema.properties.editBox, {
+    type: "object",
+    properties: { value: { type: "string" } },
+    required: ["value"],
+    asCell: [{ kind: "cell", scope: "session" }],
+  });
+});
+
 Deno.test("eager calls to captured factories stay inside the hoisted callback", async () => {
   const output = await transformSource(
     `

@@ -876,6 +876,21 @@ root with that schema, and then invoke `callback(argument, params)`. They copy
 the same trusted schema into the base factory's internal state for registration
 and cold resolution.
 
+The private params schema is an independent, self-contained schema document.
+Captured Cells, including scoped Cells, retain their content schema and every
+reachable local `$defs` entry, including concrete generic instantiations, even
+when the callback only forwards or writes the capture and even after earlier
+compiler stages have rebuilt the working source tree. Compiler schema resolution
+therefore uses exact semantic types and the type checker's canonical program
+source scope rather than transient symbols from an emitted working tree.
+Every emitted descendant type node for which the compiler carries an exact
+semantic type remains paired with that type: node syntax is authoritative for
+compiler refinements and wrapper syntax such as `Default`, while the semantic
+pairing supplies concrete generic arguments and named-type identity. Canonical
+source lookup may recover non-generic local or exported declarations, but it
+must never substitute an uninstantiated generic declaration such as `Box<T>`
+for an authored `Box<string>`.
+
 The helper is part of the first argument expression. It does not add a fourth
 argument to `pattern()` and is not author-facing API. The public callback type
 still has one parameter; an authored second parameter is rejected unless the

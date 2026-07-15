@@ -6,6 +6,7 @@ import { parseModule } from "../transformed-ast.ts";
 import {
   buildCaptureTypeElements,
   cloneTypeNodeDeepForEmission,
+  typeToTypeNodeWithRegistry,
 } from "../../src/ast/type-building.ts";
 import { TransformationContext } from "../../src/core/mod.ts";
 import {
@@ -65,6 +66,45 @@ Deno.test("cloneTypeNodeDeepForEmission carries typeRegistry entries onto clones
   const cloned = cloneTypeNodeDeepForEmission(typeNode, typeRegistry);
 
   assertStrictEquals(typeRegistry.get(cloned), fakeType);
+});
+
+Deno.test("typeToTypeNodeWithRegistry registers exact nested generic arguments", () => {
+  const sourceText = `
+interface Box<T> { value: T }
+interface Root { captured: Box<string> }
+`;
+  const { program, sourceFile } = createProgram("nested-types.ts", sourceText);
+  const checker = program.getTypeChecker();
+  const rootDeclaration = sourceFile.statements.find((statement) =>
+    ts.isInterfaceDeclaration(statement) && statement.name.text === "Root"
+  );
+  if (!rootDeclaration || !ts.isInterfaceDeclaration(rootDeclaration)) {
+    throw new Error("Expected Root declaration");
+  }
+  const rootType = checker.getTypeAtLocation(rootDeclaration.name);
+  const captured = rootType.getProperty("captured");
+  if (!captured?.valueDeclaration) {
+    throw new Error("Expected Root.captured declaration");
+  }
+  const capturedType = checker.getTypeOfSymbolAtLocation(
+    captured,
+    captured.valueDeclaration,
+  );
+  const typeRegistry = new WeakMap<ts.Node, ts.Type>();
+  const emitted = typeToTypeNodeWithRegistry(
+    capturedType,
+    { checker, factory: ts.factory, sourceFile },
+    typeRegistry,
+  );
+  if (!ts.isTypeReferenceNode(emitted) || !emitted.typeArguments?.[0]) {
+    throw new Error("Expected emitted Box<string> reference");
+  }
+
+  assertStrictEquals(typeRegistry.get(emitted), capturedType);
+  assertEquals(
+    checker.typeToString(typeRegistry.get(emitted.typeArguments[0])!),
+    "string",
+  );
 });
 
 Deno.test("buildCaptureTypeElements handles destructured keys and renames identifier captures", () => {

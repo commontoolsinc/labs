@@ -34,6 +34,13 @@ export function generateToSchemaValue(
   if (!isToSchemaNode(node)) return { resolved: false };
 
   const { sourceFile, checker } = context;
+  // Earlier transformer stages may rebuild the working SourceFile. Its nodes
+  // are valid for emission, but they are not the SourceFile bound into the
+  // Program and can expose transient or unbound symbols to the checker. Schema
+  // generation needs the canonical source scope so synthetic closure-param
+  // TypeNodes can resolve local aliases and collect their reachable $defs.
+  const schemaSourceFile = context.program.getSourceFile(sourceFile.fileName) ??
+    sourceFile;
   const { logger, state } = context.options;
   const typeRegistry = state?.typeRegistry;
   const schemaHints = state?.schemaHints;
@@ -106,7 +113,7 @@ export function generateToSchemaValue(
       checker,
       typeRegistry,
       schemaHints,
-      sourceFile,
+      schemaSourceFile,
     );
   } else {
     schema = schemaTransformer.generateSchema(
@@ -115,7 +122,8 @@ export function generateToSchemaValue(
       schemaTypeArg,
       generationOptions,
       schemaHints,
-      sourceFile,
+      schemaSourceFile,
+      typeRegistry,
     );
   }
 
