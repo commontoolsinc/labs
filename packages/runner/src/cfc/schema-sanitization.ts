@@ -11,6 +11,8 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { uniqueCfcAtoms } from "./observation.ts";
 import {
+  isEmbeddedCfcSchemaRef,
+  resolveCfcSchemaRef,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
 } from "./schema-refs.ts";
@@ -196,7 +198,7 @@ const schemaHasSafeEnum = (schema: Record<string, unknown>): boolean =>
   schema.enum.every(isPrimitiveJsonValue);
 
 const schemaHasSafeConst = (schema: Record<string, unknown>): boolean =>
-  "const" in schema && isPrimitiveJsonValue(schema.const);
+  Object.hasOwn(schema, "const") && isPrimitiveJsonValue(schema.const);
 
 const primitiveTypeIsInstructionInert = (
   schema: Record<string, unknown>,
@@ -489,6 +491,341 @@ const schemaValueEqual = (left: unknown, right: unknown): boolean => {
   }
 };
 
+const SUPPORTED_SCHEMA_TYPES = new Set([
+  "unknown",
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "null",
+  "undefined",
+  "array",
+  "object",
+]);
+
+const SUPPORTED_SCHEMA_FORMATS = new Set([
+  "email",
+  "uri",
+  "date",
+  "date-time",
+]);
+
+const schemaTypeDefinitionIssue = (type: unknown): string | undefined => {
+  if (type === undefined) return undefined;
+  const types = typeof type === "string"
+    ? [type]
+    : Array.isArray(type)
+    ? type
+    : undefined;
+  if (types === undefined || types.length === 0) {
+    return "schema type must be a non-empty string or string array";
+  }
+  if (!types.every((entry) => typeof entry === "string")) {
+    return "schema type array contains a non-string entry";
+  }
+  if (new Set(types).size !== types.length) {
+    return "schema type array contains duplicate entries";
+  }
+  const unsupported = types.find((entry) =>
+    !SUPPORTED_SCHEMA_TYPES.has(entry as string)
+  );
+  return unsupported === undefined
+    ? undefined
+    : `unsupported schema type ${unsupported}`;
+};
+
+const strictConstraintDefinitionIssue = (
+  schema: Exclude<JSONSchema, boolean>,
+): string | undefined => {
+  const record = schema as Record<string, unknown>;
+  for (
+    const key of [
+      "minimum",
+      "exclusiveMinimum",
+      "maximum",
+      "exclusiveMaximum",
+    ]
+  ) {
+    if (
+      Object.hasOwn(record, key) &&
+      (typeof record[key] !== "number" || !Number.isFinite(record[key]))
+    ) {
+      return `schema ${key} must be a finite number`;
+    }
+  }
+  if (
+    Object.hasOwn(record, "multipleOf") &&
+    (typeof record.multipleOf !== "number" ||
+      !Number.isFinite(record.multipleOf) || record.multipleOf <= 0)
+  ) {
+    return "schema multipleOf must be a positive finite number";
+  }
+  for (
+    const key of [
+      "minLength",
+      "maxLength",
+      "minItems",
+      "maxItems",
+      "minProperties",
+      "maxProperties",
+      "minContains",
+      "maxContains",
+    ]
+  ) {
+    if (
+      Object.hasOwn(record, key) &&
+      (typeof record[key] !== "number" ||
+        !Number.isInteger(record[key]) || (record[key] as number) < 0)
+    ) {
+      return `schema ${key} must be a non-negative integer`;
+    }
+  }
+  if (Object.hasOwn(record, "pattern")) {
+    if (typeof record.pattern !== "string") {
+      return "schema pattern must be a string";
+    }
+    try {
+      new RegExp(record.pattern);
+    } catch {
+      return `schema has invalid pattern ${record.pattern}`;
+    }
+  }
+  if (Object.hasOwn(record, "format")) {
+    if (
+      typeof record.format !== "string" ||
+      !SUPPORTED_SCHEMA_FORMATS.has(record.format)
+    ) {
+      return `schema has unsupported format ${String(record.format)}`;
+    }
+  }
+  for (const source of Object.keys(schema.patternProperties ?? {})) {
+    try {
+      new RegExp(source);
+    } catch {
+      return `schema has invalid property pattern ${source}`;
+    }
+  }
+  return undefined;
+};
+
+interface SchemaDefinitionContext {
+  activeByRoot: WeakMap<object, WeakSet<object>>;
+  activeRefsByRoot: WeakMap<object, Set<string>>;
+}
+
+/** Validate the schema language understood by strict Fabric migration checks. */
+export const validateSchemaDefinition = (
+  schema: JSONSchema,
+  fullSchema: JSONSchema = schema,
+): string | undefined =>
+  validateSchemaDefinitionInternal(schema, fullSchema, "$", {
+    activeByRoot: new WeakMap(),
+    activeRefsByRoot: new WeakMap(),
+  });
+
+const validateSchemaDefinitionInternal = (
+  schema: JSONSchema,
+  fullSchema: JSONSchema,
+  path: string,
+  context: SchemaDefinitionContext,
+): string | undefined => {
+  if (typeof schema === "boolean") return undefined;
+  if (!isRecord(schema) || Array.isArray(schema)) {
+    return `${path}: schema must be an object or boolean`;
+  }
+
+  const rootKey = isRecord(fullSchema) ? fullSchema : schema;
+  let active = context.activeByRoot.get(rootKey);
+  if (active?.has(schema)) return undefined;
+  if (!active) {
+    active = new WeakSet();
+    context.activeByRoot.set(rootKey, active);
+  }
+  active.add(schema);
+
+  try {
+    if (Object.hasOwn(schema, "$ref")) {
+      if (typeof schema.$ref !== "string" || schema.$ref.length === 0) {
+        return `${path}: schema $ref must be a non-empty string`;
+      }
+      let activeRefs = context.activeRefsByRoot.get(rootKey);
+      if (activeRefs?.has(schema.$ref)) return undefined;
+      if (!activeRefs) {
+        activeRefs = new Set();
+        context.activeRefsByRoot.set(rootKey, activeRefs);
+      }
+      activeRefs.add(schema.$ref);
+      const resolved = resolveCfcSchemaRef(fullSchema, schema.$ref);
+      if (resolved === undefined) {
+        activeRefs.delete(schema.$ref);
+        return `${path}: cannot resolve schema reference ${schema.$ref}`;
+      }
+      const resolvedRoot = isEmbeddedCfcSchemaRef(schema.$ref)
+        ? resolved
+        : fullSchema;
+      const issue = validateSchemaDefinitionInternal(
+        resolved,
+        resolvedRoot,
+        `${path}.$ref`,
+        context,
+      );
+      activeRefs.delete(schema.$ref);
+      if (issue !== undefined) return issue;
+    }
+
+    const typeIssue = schemaTypeDefinitionIssue(schema.type);
+    if (typeIssue !== undefined) return `${path}: ${typeIssue}`;
+
+    for (
+      const key of [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+      ] as const
+    ) {
+      const value = schema[key];
+      if (value === undefined) continue;
+      if (!isRecord(value) || Array.isArray(value)) {
+        return `${path}.${key}: must be an object of schemas`;
+      }
+    }
+
+    const constraintIssue = strictConstraintDefinitionIssue(schema);
+    if (constraintIssue !== undefined) return `${path}: ${constraintIssue}`;
+
+    if (schema.required !== undefined) {
+      if (
+        !Array.isArray(schema.required) ||
+        !schema.required.every((entry) => typeof entry === "string") ||
+        new Set(schema.required).size !== schema.required.length
+      ) {
+        return `${path}.required: must be an array of unique strings`;
+      }
+    }
+    if (schema.dependentRequired !== undefined) {
+      if (!isRecord(schema.dependentRequired)) {
+        return `${path}.dependentRequired: must be an object`;
+      }
+      for (
+        const [key, dependencies] of Object.entries(
+          schema.dependentRequired,
+        )
+      ) {
+        if (
+          !Array.isArray(dependencies) ||
+          !dependencies.every((entry) => typeof entry === "string") ||
+          new Set(dependencies).size !== dependencies.length
+        ) {
+          return `${path}.dependentRequired.${key}: must be an array of unique strings`;
+        }
+      }
+    }
+    if (
+      schema.uniqueItems !== undefined &&
+      typeof schema.uniqueItems !== "boolean"
+    ) {
+      return `${path}.uniqueItems: must be a boolean`;
+    }
+    if (schema.enum !== undefined) {
+      if (!Array.isArray(schema.enum) || schema.enum.length === 0) {
+        return `${path}.enum: must be a non-empty array`;
+      }
+      for (let index = 0; index < schema.enum.length; index++) {
+        if (
+          schema.enum.slice(0, index).some((entry) =>
+            schemaValueEqual(entry, schema.enum![index])
+          )
+        ) {
+          return `${path}.enum: values must be unique`;
+        }
+      }
+    }
+
+    for (const key of ["allOf", "anyOf", "oneOf"] as const) {
+      const children = schema[key];
+      if (children === undefined) continue;
+      if (!Array.isArray(children) || children.length === 0) {
+        return `${path}.${key}: must be a non-empty schema array`;
+      }
+      for (let index = 0; index < children.length; index++) {
+        const issue = validateSchemaDefinitionInternal(
+          children[index],
+          fullSchema,
+          `${path}.${key}[${index}]`,
+          context,
+        );
+        if (issue !== undefined) return issue;
+      }
+    }
+    if (schema.prefixItems !== undefined) {
+      if (!Array.isArray(schema.prefixItems)) {
+        return `${path}.prefixItems: must be a schema array`;
+      }
+      for (let index = 0; index < schema.prefixItems.length; index++) {
+        const issue = validateSchemaDefinitionInternal(
+          schema.prefixItems[index],
+          fullSchema,
+          `${path}.prefixItems[${index}]`,
+          context,
+        );
+        if (issue !== undefined) return issue;
+      }
+    }
+
+    for (
+      const key of [
+        "additionalProperties",
+        "contains",
+        "contentSchema",
+        "else",
+        "if",
+        "items",
+        "not",
+        "propertyNames",
+        "then",
+      ] as const
+    ) {
+      const child = schema[key];
+      if (child === undefined) continue;
+      const issue = validateSchemaDefinitionInternal(
+        child,
+        fullSchema,
+        `${path}.${key}`,
+        context,
+      );
+      if (issue !== undefined) return issue;
+    }
+
+    for (
+      const key of [
+        "properties",
+        "patternProperties",
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+      ] as const
+    ) {
+      const children = schema[key];
+      if (children === undefined) continue;
+      for (const [name, child] of Object.entries(children)) {
+        const issue = validateSchemaDefinitionInternal(
+          child,
+          fullSchema,
+          `${path}.${key}.${name}`,
+          context,
+        );
+        if (issue !== undefined) return issue;
+      }
+    }
+
+    return undefined;
+  } finally {
+    active.delete(schema);
+  }
+};
+
 interface SchemaValidationOptions {
   strictConstraints: boolean;
   implicitAdditionalPropertiesOpen: boolean;
@@ -518,6 +855,29 @@ interface SchemaValidationContext {
   activeObjectValues: WeakMap<object, WeakSet<object>>;
   activePrimitiveValues: WeakMap<object, Set<string>>;
 }
+
+interface SchemaValidationFailure {
+  kind: "mismatch" | "indeterminate";
+  message: string;
+}
+
+const mismatch = (message: string): SchemaValidationFailure => ({
+  kind: "mismatch",
+  message,
+});
+
+const indeterminate = (message: string): SchemaValidationFailure => ({
+  kind: "indeterminate",
+  message,
+});
+
+const atValidationPath = (
+  path: string | number,
+  failure: SchemaValidationFailure,
+): SchemaValidationFailure => ({
+  ...failure,
+  message: `${path}: ${failure.message}`,
+});
 
 const createSchemaValidationContext = (): SchemaValidationContext => ({
   activeObjectValues: new WeakMap(),
@@ -586,7 +946,7 @@ export const validateSchemaValue = (
     fullSchema,
     { ...VALUE_VALIDATION, ...validationOptions },
     createSchemaValidationContext(),
-  );
+  )?.message;
 
 export const validateAgainstSchema = (
   schema: JSONSchema,
@@ -600,7 +960,7 @@ export const validateAgainstSchema = (
     fullSchema,
     options,
     createSchemaValidationContext(),
-  );
+  )?.message;
 
 const validateAgainstSchemaInternal = (
   schema: JSONSchema,
@@ -608,15 +968,20 @@ const validateAgainstSchemaInternal = (
   fullSchema: JSONSchema,
   options: SchemaValidationOptions,
   context: SchemaValidationContext,
-): string | undefined => {
+): SchemaValidationFailure | undefined => {
   if (schema === true) return undefined;
-  if (schema === false) return "schema rejects all values";
+  if (schema === false) return mismatch("schema rejects all values");
   if (!markSchemaValueActive(schema, value, context)) {
-    return "recursive schema validation made no progress";
+    return indeterminate("recursive schema validation made no progress");
   }
 
   try {
-    const resolved = resolveSchemaForValidation(schema, fullSchema);
+    const resolved = typeof schema.$ref === "string"
+      ? resolveCfcSchemaRefs(schema, fullSchema)
+      : schema;
+    if (resolved === undefined) {
+      return indeterminate(`cannot resolve schema reference ${schema.$ref}`);
+    }
     if (resolved !== schema) {
       // Keep the original root as `fullSchema` so nested $refs in the resolved
       // branch can still find sibling $defs entries, except when an embedded
@@ -647,29 +1012,43 @@ const validateAgainstSchemaInternal = (
       }
     }
     if (Array.isArray(schema.anyOf)) {
-      const ok = schema.anyOf.some((branch) =>
-        validateAgainstSchemaInternal(
+      let matched = false;
+      let schemaFailure: SchemaValidationFailure | undefined;
+      for (const branch of schema.anyOf) {
+        const failure = validateAgainstSchemaInternal(
           branch,
           value,
           fullSchema,
           options,
           context,
-        ) === undefined
-      );
-      if (!ok) return "value does not match anyOf";
+        );
+        if (failure === undefined) {
+          matched = true;
+          break;
+        }
+        if (failure.kind === "indeterminate") schemaFailure ??= failure;
+      }
+      if (!matched) {
+        return schemaFailure ?? mismatch("value does not match anyOf");
+      }
     }
     if (Array.isArray(schema.oneOf)) {
-      const matches = schema.oneOf.filter((branch) =>
-        validateAgainstSchemaInternal(
+      let matches = 0;
+      let schemaFailure: SchemaValidationFailure | undefined;
+      for (const branch of schema.oneOf) {
+        const failure = validateAgainstSchemaInternal(
           branch,
           value,
           fullSchema,
           options,
           context,
-        ) === undefined
-      ).length;
+        );
+        if (failure === undefined) matches++;
+        else if (failure.kind === "indeterminate") schemaFailure ??= failure;
+      }
+      if (matches <= 1 && schemaFailure !== undefined) return schemaFailure;
       if (matches !== 1) {
-        return "value does not match exactly one oneOf branch";
+        return mismatch("value does not match exactly one oneOf branch");
       }
     }
 
@@ -677,12 +1056,21 @@ const validateAgainstSchemaInternal = (
       Array.isArray(schema.enum) &&
       !schema.enum.some((entry) => schemaValueEqual(entry, value))
     ) {
-      return "value is not in enum";
+      return mismatch("value is not in enum");
     }
-    if ("const" in schema && !schemaValueEqual(schema.const, value)) {
-      return "value does not match const";
+    if (
+      Object.hasOwn(schema, "const") &&
+      !schemaValueEqual(schema.const, value)
+    ) {
+      return mismatch("value does not match const");
     }
 
+    const typeDefinitionIssue = options.strictConstraints
+      ? schemaTypeDefinitionIssue(schema.type)
+      : undefined;
+    if (typeDefinitionIssue !== undefined) {
+      return indeterminate(typeDefinitionIssue);
+    }
     const types = asTypeArray(schema.type);
     const unknownType = options.strictConstraints
       ? types.find((type) =>
@@ -700,13 +1088,13 @@ const validateAgainstSchemaInternal = (
       )
       : undefined;
     if (unknownType !== undefined) {
-      return `unsupported schema type ${unknownType}`;
+      return indeterminate(`unsupported schema type ${unknownType}`);
     }
     if (
       types.length > 0 &&
       !types.some((type) => typeMatches(value, type, options.strictConstraints))
     ) {
-      return `value does not match type ${types.join("|")}`;
+      return mismatch(`value does not match type ${types.join("|")}`);
     }
 
     if (options.strictConstraints) {
@@ -722,12 +1110,12 @@ const validateAgainstSchemaInternal = (
 
     if (isFabricPlainObjectValue(value)) {
       for (const key of schema.required ?? []) {
-        if (!(key in value)) {
-          return `missing required property ${key}`;
+        if (!Object.hasOwn(value, key)) {
+          return mismatch(`missing required property ${key}`);
         }
       }
       for (const [key, child] of Object.entries(schema.properties ?? {})) {
-        if (key in value) {
+        if (Object.hasOwn(value, key)) {
           const failure = validateAgainstSchemaInternal(
             child,
             value[key],
@@ -735,7 +1123,7 @@ const validateAgainstSchemaInternal = (
             options,
             context,
           );
-          if (failure !== undefined) return `${key}: ${failure}`;
+          if (failure !== undefined) return atValidationPath(key, failure);
         }
       }
       const closesAdditionalProperties = options
@@ -752,7 +1140,9 @@ const validateAgainstSchemaInternal = (
         const extra = Object.keys(value).find((key) =>
           !known.has(key) && !patterns.some((pattern) => pattern.test(key))
         );
-        if (extra !== undefined) return `additional property ${extra}`;
+        if (extra !== undefined) {
+          return mismatch(`additional property ${extra}`);
+        }
       } else if (typeof schema.additionalProperties === "object") {
         const known = new Set(Object.keys(schema.properties ?? {}));
         const patterns = options.strictConstraints
@@ -771,7 +1161,7 @@ const validateAgainstSchemaInternal = (
               options,
               context,
             );
-            if (failure !== undefined) return `${key}: ${failure}`;
+            if (failure !== undefined) return atValidationPath(key, failure);
           }
         }
       }
@@ -782,7 +1172,7 @@ const validateAgainstSchemaInternal = (
       typeof schema.items === "object"
     ) {
       for (let index = 0; index < value.length; index++) {
-        if (!(index in value)) continue;
+        if (!Object.hasOwn(value, index)) continue;
         const failure = validateAgainstSchemaInternal(
           schema.items,
           value[index],
@@ -790,7 +1180,7 @@ const validateAgainstSchemaInternal = (
           options,
           context,
         );
-        if (failure !== undefined) return `${index}: ${failure}`;
+        if (failure !== undefined) return atValidationPath(index, failure);
       }
     }
 
@@ -806,27 +1196,33 @@ function validateStrictSchemaConstraints(
   fullSchema: JSONSchema,
   options: SchemaValidationOptions,
   context: SchemaValidationContext,
-): string | undefined {
-  if (
-    schema.not !== undefined &&
-    validateAgainstSchemaInternal(
-        schema.not,
-        value,
-        fullSchema,
-        options,
-        context,
-      ) === undefined
-  ) {
-    return "value matches disallowed not schema";
+): SchemaValidationFailure | undefined {
+  const definitionIssue = strictConstraintDefinitionIssue(schema);
+  if (definitionIssue !== undefined) return indeterminate(definitionIssue);
+
+  if (schema.not !== undefined) {
+    const failure = validateAgainstSchemaInternal(
+      schema.not,
+      value,
+      fullSchema,
+      options,
+      context,
+    );
+    if (failure === undefined) {
+      return mismatch("value matches disallowed not schema");
+    }
+    if (failure.kind === "indeterminate") return failure;
   }
   if (schema.if !== undefined) {
-    const conditionMatches = validateAgainstSchemaInternal(
+    const conditionFailure = validateAgainstSchemaInternal(
       schema.if,
       value,
       fullSchema,
       options,
       context,
-    ) === undefined;
+    );
+    if (conditionFailure?.kind === "indeterminate") return conditionFailure;
+    const conditionMatches = conditionFailure === undefined;
     const selected = conditionMatches ? schema.then : schema.else;
     if (selected !== undefined) {
       const failure = validateAgainstSchemaInternal(
@@ -842,22 +1238,26 @@ function validateStrictSchemaConstraints(
 
   if (typeof value === "number" && Number.isFinite(value)) {
     if (schema.minimum !== undefined && value < schema.minimum) {
-      return `value is below minimum ${schema.minimum}`;
+      return mismatch(`value is below minimum ${schema.minimum}`);
     }
     if (
       schema.exclusiveMinimum !== undefined &&
       value <= schema.exclusiveMinimum
     ) {
-      return `value is not above exclusiveMinimum ${schema.exclusiveMinimum}`;
+      return mismatch(
+        `value is not above exclusiveMinimum ${schema.exclusiveMinimum}`,
+      );
     }
     if (schema.maximum !== undefined && value > schema.maximum) {
-      return `value is above maximum ${schema.maximum}`;
+      return mismatch(`value is above maximum ${schema.maximum}`);
     }
     if (
       schema.exclusiveMaximum !== undefined &&
       value >= schema.exclusiveMaximum
     ) {
-      return `value is not below exclusiveMaximum ${schema.exclusiveMaximum}`;
+      return mismatch(
+        `value is not below exclusiveMaximum ${schema.exclusiveMaximum}`,
+      );
     }
     if (schema.multipleOf !== undefined) {
       const quotient = value / schema.multipleOf;
@@ -866,7 +1266,7 @@ function validateStrictSchemaConstraints(
         schema.multipleOf <= 0 ||
         Math.abs(quotient - Math.round(quotient)) > tolerance
       ) {
-        return `value is not a multiple of ${schema.multipleOf}`;
+        return mismatch(`value is not a multiple of ${schema.multipleOf}`);
       }
     }
   }
@@ -874,49 +1274,52 @@ function validateStrictSchemaConstraints(
   if (typeof value === "string") {
     const length = [...value].length;
     if (schema.minLength !== undefined && length < schema.minLength) {
-      return `value is shorter than minLength ${schema.minLength}`;
+      return mismatch(`value is shorter than minLength ${schema.minLength}`);
     }
     if (schema.maxLength !== undefined && length > schema.maxLength) {
-      return `value is longer than maxLength ${schema.maxLength}`;
+      return mismatch(`value is longer than maxLength ${schema.maxLength}`);
     }
     if (schema.pattern !== undefined) {
       let pattern: RegExp;
       try {
         pattern = new RegExp(schema.pattern);
       } catch {
-        return `schema has invalid pattern ${schema.pattern}`;
+        return indeterminate(`schema has invalid pattern ${schema.pattern}`);
       }
-      if (!pattern.test(value)) return `value does not match pattern`;
+      if (!pattern.test(value)) return mismatch(`value does not match pattern`);
     }
-    if (
-      schema.format !== undefined && !valueMatchesFormat(value, schema.format)
-    ) {
-      return `value does not match format ${schema.format}`;
+    if (schema.format !== undefined) {
+      if (!SUPPORTED_SCHEMA_FORMATS.has(schema.format)) {
+        return indeterminate(`schema has unsupported format ${schema.format}`);
+      }
+      if (!valueMatchesFormat(value, schema.format)) {
+        return mismatch(`value does not match format ${schema.format}`);
+      }
     }
   }
 
   if (Array.isArray(value)) {
     if (schema.minItems !== undefined && value.length < schema.minItems) {
-      return `array has fewer than minItems ${schema.minItems}`;
+      return mismatch(`array has fewer than minItems ${schema.minItems}`);
     }
     if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-      return `array has more than maxItems ${schema.maxItems}`;
+      return mismatch(`array has more than maxItems ${schema.maxItems}`);
     }
     if (schema.uniqueItems === true) {
       for (let index = 0; index < value.length; index++) {
-        if (!(index in value)) continue;
+        if (!Object.hasOwn(value, index)) continue;
         if (
           value.slice(0, index).some((entry) =>
             schemaValueEqual(entry, value[index])
           )
         ) {
-          return "array items are not unique";
+          return mismatch("array items are not unique");
         }
       }
     }
     for (let index = 0; index < (schema.prefixItems?.length ?? 0); index++) {
       if (index >= value.length) break;
-      if (!(index in value)) continue;
+      if (!Object.hasOwn(value, index)) continue;
       const failure = validateAgainstSchemaInternal(
         schema.prefixItems![index],
         value[index],
@@ -924,12 +1327,12 @@ function validateStrictSchemaConstraints(
         options,
         context,
       );
-      if (failure !== undefined) return `${index}: ${failure}`;
+      if (failure !== undefined) return atValidationPath(index, failure);
     }
     if (schema.items !== undefined) {
       const start = schema.prefixItems?.length ?? 0;
       for (let index = start; index < value.length; index++) {
-        if (!(index in value)) continue;
+        if (!Object.hasOwn(value, index)) continue;
         const failure = validateAgainstSchemaInternal(
           schema.items,
           value[index],
@@ -937,23 +1340,42 @@ function validateStrictSchemaConstraints(
           options,
           context,
         );
-        if (failure !== undefined) return `${index}: ${failure}`;
+        if (failure !== undefined) return atValidationPath(index, failure);
       }
     }
     if (schema.contains !== undefined) {
-      const matches = value.filter((entry) =>
-        validateAgainstSchemaInternal(
-          schema.contains!,
-          entry,
+      let matches = 0;
+      let indeterminateMatches = 0;
+      let schemaFailure: SchemaValidationFailure | undefined;
+      for (let index = 0; index < value.length; index++) {
+        if (!Object.hasOwn(value, index)) continue;
+        const failure = validateAgainstSchemaInternal(
+          schema.contains,
+          value[index],
           fullSchema,
           options,
           context,
-        ) === undefined
-      ).length;
+        );
+        if (failure === undefined) matches++;
+        else if (failure.kind === "indeterminate") {
+          indeterminateMatches++;
+          schemaFailure ??= failure;
+        }
+      }
       const minimum = schema.minContains ?? 1;
-      if (matches < minimum) return `array has fewer than ${minimum} matches`;
+      if (matches + indeterminateMatches < minimum) {
+        return mismatch(`array has fewer than ${minimum} matches`);
+      }
       if (schema.maxContains !== undefined && matches > schema.maxContains) {
-        return `array has more than ${schema.maxContains} matches`;
+        return mismatch(`array has more than ${schema.maxContains} matches`);
+      }
+      if (
+        schemaFailure !== undefined &&
+        (matches < minimum ||
+          (schema.maxContains !== undefined &&
+            matches + indeterminateMatches > schema.maxContains))
+      ) {
+        return schemaFailure;
       }
     }
   }
@@ -964,25 +1386,29 @@ function validateStrictSchemaConstraints(
       schema.minProperties !== undefined &&
       propertyCount < schema.minProperties
     ) {
-      return `object has fewer than minProperties ${schema.minProperties}`;
+      return mismatch(
+        `object has fewer than minProperties ${schema.minProperties}`,
+      );
     }
     if (
       schema.maxProperties !== undefined &&
       propertyCount > schema.maxProperties
     ) {
-      return `object has more than maxProperties ${schema.maxProperties}`;
+      return mismatch(
+        `object has more than maxProperties ${schema.maxProperties}`,
+      );
     }
     for (
       const [key, dependencies] of Object.entries(
         schema.dependentRequired ?? {},
       )
     ) {
-      if (key in value) {
+      if (Object.hasOwn(value, key)) {
         const missing = dependencies.find((dependency) =>
-          !(dependency in value)
+          !Object.hasOwn(value, dependency)
         );
         if (missing !== undefined) {
-          return `${key}: missing dependent property ${missing}`;
+          return mismatch(`${key}: missing dependent property ${missing}`);
         }
       }
     }
@@ -991,7 +1417,7 @@ function validateStrictSchemaConstraints(
         schema.dependentSchemas ?? {},
       )
     ) {
-      if (key in value) {
+      if (Object.hasOwn(value, key)) {
         const failure = validateAgainstSchemaInternal(
           dependentSchema,
           value,
@@ -999,7 +1425,7 @@ function validateStrictSchemaConstraints(
           options,
           context,
         );
-        if (failure !== undefined) return `${key}: ${failure}`;
+        if (failure !== undefined) return atValidationPath(key, failure);
       }
     }
     if (schema.propertyNames !== undefined) {
@@ -1011,7 +1437,7 @@ function validateStrictSchemaConstraints(
           options,
           context,
         );
-        if (failure !== undefined) return `${key}: ${failure}`;
+        if (failure !== undefined) return atValidationPath(key, failure);
       }
     }
     for (
@@ -1023,7 +1449,7 @@ function validateStrictSchemaConstraints(
       try {
         pattern = new RegExp(source);
       } catch {
-        return `schema has invalid property pattern ${source}`;
+        return indeterminate(`schema has invalid property pattern ${source}`);
       }
       for (const [key, child] of Object.entries(value)) {
         if (pattern.test(key)) {
@@ -1034,7 +1460,7 @@ function validateStrictSchemaConstraints(
             options,
             context,
           );
-          if (failure !== undefined) return `${key}: ${failure}`;
+          if (failure !== undefined) return atValidationPath(key, failure);
         }
       }
     }
@@ -1045,7 +1471,7 @@ function validateStrictSchemaConstraints(
     schema.contentMediaType !== undefined ||
     schema.contentSchema !== undefined
   ) {
-    return "content validation is not supported";
+    return indeterminate("content validation is not supported");
   }
   return undefined;
 }
@@ -1053,24 +1479,29 @@ function validateStrictSchemaConstraints(
 function valueMatchesFormat(value: string, format: string): boolean {
   switch (format) {
     case "email": {
-      const parts = value.split("@");
-      if (parts.length !== 2) return false;
-      const [local, domain] = parts;
+      const separator = value.lastIndexOf("@");
+      if (separator <= 0 || separator === value.length - 1) return false;
+      const local = value.slice(0, separator);
+      const domain = value.slice(separator + 1);
+      const dotAtom = !local.startsWith(".") && !local.endsWith(".") &&
+        !local.includes("..") &&
+        /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local);
+      const quoted = /^"(?:[\x20-\x21\x23-\x5B\x5D-\x7E]|\\[\x20-\x7E])*"$/
+        .test(
+          local,
+        );
       if (
         local.length === 0 || local.length > 64 || domain.length === 0 ||
-        domain.length > 255 || local.startsWith(".") || local.endsWith(".") ||
-        local.includes("..") || domain.includes("..") ||
-        !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local)
+        domain.length > 255 || (!dotAtom && !quoted) || domain.includes("..")
       ) {
         return false;
       }
       const labels = domain.split(".");
-      return labels.length >= 2 &&
-        labels.every((label) =>
-          label.length > 0 && label.length <= 63 &&
-          !label.startsWith("-") && !label.endsWith("-") &&
-          /^[A-Za-z0-9-]+$/.test(label)
-        );
+      return labels.every((label) =>
+        label.length > 0 && label.length <= 63 &&
+        !label.startsWith("-") && !label.endsWith("-") &&
+        /^[A-Za-z0-9-]+$/.test(label)
+      );
     }
     case "uri":
       try {
@@ -1083,7 +1514,7 @@ function valueMatchesFormat(value: string, format: string): boolean {
       return valueMatchesDate(value);
     case "date-time": {
       const match =
-        /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/
+        /^(\d{4}-\d{2}-\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?([Zz]|[+-](\d{2}):(\d{2}))$/
           .exec(value);
       if (!match || !valueMatchesDate(match[1])) return false;
       const hour = Number(match[2]);
@@ -1091,9 +1522,8 @@ function valueMatchesFormat(value: string, format: string): boolean {
       const second = Number(match[4]);
       const offsetHour = match[6] === undefined ? 0 : Number(match[6]);
       const offsetMinute = match[7] === undefined ? 0 : Number(match[7]);
-      return hour <= 23 && minute <= 59 && second <= 59 &&
-        offsetHour <= 23 && offsetMinute <= 59 &&
-        !Number.isNaN(Date.parse(value));
+      return hour <= 23 && minute <= 59 && second <= 60 &&
+        offsetHour <= 23 && offsetMinute <= 59;
     }
     default:
       return false;

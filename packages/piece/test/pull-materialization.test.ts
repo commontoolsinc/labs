@@ -281,7 +281,7 @@ function linkedSettingsSourcePattern(): Pattern {
 }
 
 function compiledLinkedSettingsProgram(version: 1 | 2): RuntimeProgram {
-  const attempts = version === 1 ? "" : "  attempts?: number | Default<1>;";
+  const attempts = version === 1 ? "" : "  attempts: number | Default<1>;";
   return {
     main: "/main.tsx",
     files: [{
@@ -572,8 +572,8 @@ describe("piece pull materialization", () => {
     await controller.setPattern(compiledLinkedSettingsProgram(2));
 
     expect((await controller.input.getCell()).getRaw()).toEqual(rawBefore);
-    expect(await controller.input.get()).toMatchObject({
-      settings: { mode: "linked" },
+    expect(await controller.input.get()).toEqual({
+      settings: { mode: "linked", attempts: 1 },
     });
     expect(await controller.result.get()).toEqual({ mode: "linked" });
   });
@@ -694,6 +694,14 @@ describe("piece pull materialization", () => {
 
     await expect(
       controller.setPattern(compiledOptionalNumberFieldProgram(2)),
+    ).rejects.toThrow(/updated arguments do not match the candidate schema/);
+
+    const candidate = await runtime.patternManager.compilePattern(
+      compiledOptionalNumberFieldProgram(2),
+      { space: manager.getSpace() },
+    );
+    await expect(
+      manager.runWithPattern(candidate, controller.id),
     ).rejects.toThrow(/updated arguments do not match the candidate schema/);
 
     expect(getPatternIdentityRef(piece)).toEqual(previousRef);
@@ -933,6 +941,157 @@ describe("piece pull materialization", () => {
       releaseWinner.resolve();
       runnerInternals.syncCellsForRunningPattern = originalSync;
       runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
+  it("does not install an older controller mutation after a newer one", async () => {
+    const initialProgram = compiledResultNarrowingProgram(
+      "string | number | boolean",
+    );
+    const firstProgram = compiledResultNarrowingProgram("string | number");
+    const winnerProgram = compiledResultNarrowingProgram("number");
+    const initialPattern = await runtime.patternManager.compilePattern(
+      initialProgram,
+      { space: manager.getSpace() },
+    );
+    const firstPattern = await runtime.patternManager.compilePattern(
+      firstProgram,
+      { space: manager.getSpace() },
+    );
+    const winnerPattern = await runtime.patternManager.compilePattern(
+      winnerProgram,
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      initialPattern,
+      { input: 5 },
+      "controller-update-race-" + crypto.randomUUID(),
+      { start: false },
+    );
+    const controller = new PieceController(manager, piece);
+    const firstRunEntered = defer<void>();
+    const releaseFirstRun = defer<void>();
+    const originalRunWithPattern = manager.runWithPattern;
+    manager.runWithPattern = async (
+      pattern,
+      pieceId,
+      inputs,
+      options,
+    ) => {
+      if (pattern === firstPattern) {
+        firstRunEntered.resolve();
+        await releaseFirstRun.promise;
+        return piece.asSchema(firstPattern.resultSchema);
+      }
+      if (pattern === winnerPattern) {
+        return piece.asSchema(winnerPattern.resultSchema);
+      }
+      return await originalRunWithPattern.call(
+        manager,
+        pattern,
+        pieceId,
+        inputs,
+        options,
+      );
+    };
+    const originalCompile = runtime.patternManager.compilePattern.bind(
+      runtime.patternManager,
+    );
+    runtime.patternManager.compilePattern = (async (program, options) => {
+      if (program === firstProgram) return firstPattern;
+      if (program === winnerProgram) return winnerPattern;
+      return await originalCompile(program, options);
+    }) as typeof runtime.patternManager.compilePattern;
+
+    try {
+      const firstUpdate = controller.setPattern(firstProgram);
+      await firstRunEntered.promise;
+      await controller.setPattern(winnerProgram);
+      releaseFirstRun.resolve();
+      await firstUpdate;
+
+      expect(controller.getCell().getAsNormalizedFullLink().schema).toEqual(
+        winnerPattern.resultSchema,
+      );
+    } finally {
+      releaseFirstRun.resolve();
+      manager.runWithPattern = originalRunWithPattern;
+      runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
+
+  it("rechecks the durable identity after loading the winner's schema", async () => {
+    const initialPattern = await runtime.patternManager.compilePattern(
+      compiledResultNarrowingProgram("string | number | boolean"),
+      { space: manager.getSpace() },
+    );
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledResultNarrowingProgram("string"),
+      { space: manager.getSpace() },
+    );
+    const winnerPattern = await runtime.patternManager.compilePattern(
+      compiledResultNarrowingProgram("number"),
+      { space: manager.getSpace() },
+    );
+    const firstRef = runtime.patternManager.getArtifactEntryRef(firstPattern);
+    const winnerRef = runtime.patternManager.getArtifactEntryRef(winnerPattern);
+    if (!firstRef || !winnerRef) {
+      throw new Error("missing compiled pattern ref");
+    }
+
+    const piece = await manager.runPersistent(
+      initialPattern,
+      { input: 5 },
+      "schema-load-race-" + crypto.randomUUID(),
+      { start: false },
+    );
+    const loadEntered = defer<void>();
+    const releaseLoad = defer<void>();
+    const originalLoad = runtime.patternManager.loadPatternByIdentity.bind(
+      runtime.patternManager,
+    );
+    let heldFirstLoad = false;
+    runtime.patternManager.loadPatternByIdentity = async (
+      identity,
+      symbol,
+      space,
+    ) => {
+      const current = getPatternIdentityRef(piece);
+      if (
+        !heldFirstLoad && identity === firstRef.identity &&
+        current?.identity === firstRef.identity &&
+        current.symbol === firstRef.symbol
+      ) {
+        heldFirstLoad = true;
+        loadEntered.resolve();
+        await releaseLoad.promise;
+      }
+      return await originalLoad(identity, symbol, space);
+    };
+
+    try {
+      const firstRun = runtime.runSynced(piece, firstPattern, { input: 5 });
+      await loadEntered.promise;
+
+      const winnerCell = await runtime.runSynced(
+        piece,
+        winnerPattern,
+        { input: 5 },
+      );
+      expect(getPatternIdentityRef(piece)).toEqual(winnerRef);
+      expect(winnerCell.getAsNormalizedFullLink().schema).toEqual(
+        winnerPattern.resultSchema,
+      );
+
+      releaseLoad.resolve();
+      const firstCell = await firstRun;
+      expect(getPatternIdentityRef(piece)).toEqual(winnerRef);
+      expect(firstCell.getAsNormalizedFullLink().schema).toEqual(
+        winnerPattern.resultSchema,
+      );
+    } finally {
+      releaseLoad.resolve();
+      runtime.patternManager.loadPatternByIdentity = originalLoad;
     }
   });
 

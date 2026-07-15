@@ -7,9 +7,14 @@ import {
 import {
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
+  validateSchemaDefinition,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -62,6 +67,14 @@ const SEMANTIC_EXTENSION_KEYS = [
   "writeOnly",
 ] as const;
 
+const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
+  try {
+    return valueEqual(left as FabricValue, right as FabricValue);
+  } catch {
+    return deepEqual(left, right);
+  }
+};
+
 /**
  * Reject a piece update unless its argument and result schemas preserve the
  * contracts of the currently running pattern.
@@ -76,6 +89,27 @@ export function assertPatternSchemasBackwardCompatible(
   candidate: Pattern,
 ): void {
   const issues: string[] = [];
+  for (
+    const [label, schema] of [
+      ["previous argument", previous.argumentSchema],
+      ["candidate argument", candidate.argumentSchema],
+      ["previous result", previous.resultSchema],
+      ["candidate result", candidate.resultSchema],
+    ] as const
+  ) {
+    const issue = validateSchemaDefinition(schema);
+    if (issue !== undefined) {
+      issues.push(`${label} has an invalid schema: ${issue}`);
+    }
+  }
+  if (issues.length > 0) {
+    throw new Error(
+      `Pattern schemas are not backward compatible:\n${
+        issues.map((issue) => `- ${issue}`).join("\n")
+      }`,
+    );
+  }
+
   const argumentIssue = schemaSubsetIssue(
     previous.argumentSchema,
     candidate.argumentSchema,
@@ -178,7 +212,7 @@ function schemaSubsetIssue(
     if (constraintIssue) return constraintIssue;
 
     for (const key of SEMANTIC_EXTENSION_KEYS) {
-      if (!deepEqual(source[key], target[key])) {
+      if (!fabricAwareEqual(source[key], target[key])) {
         return `${path}: ${key} changed`;
       }
     }
@@ -230,7 +264,7 @@ function objectSubsetIssue(
     : target.patternProperties;
 
   for (const property of Object.keys(previousProperties)) {
-    if (!(property in candidateProperties)) {
+    if (!Object.hasOwn(candidateProperties, property)) {
       return `${path}.${property}: existing ${context.role} field was removed`;
     }
   }
@@ -272,7 +306,7 @@ function objectSubsetIssue(
       // A typed index signature is different: it promised that every unknown
       // property accepted values of that type, including this newly named one.
       if (
-        property in previousProperties ||
+        Object.hasOwn(previousProperties, property) ||
         matchedPatterns.length > 0 ||
         typeof previousAdditional === "boolean"
       ) {
@@ -294,7 +328,7 @@ function objectSubsetIssue(
     }
     for (const property of sourceRequired) {
       if (
-        !(property in targetProperties) &&
+        !Object.hasOwn(targetProperties, property) &&
         !schemaProvidesValidDefault(
           sourceProperties[property],
           context.sourceRoot,
@@ -323,7 +357,8 @@ function objectSubsetIssue(
         if (issue) return issue;
       }
       if (
-        property in previousProperties || matchedPatterns.length > 0 ||
+        Object.hasOwn(previousProperties, property) ||
+        matchedPatterns.length > 0 ||
         previousAdditional === true
       ) {
         continue;
@@ -421,7 +456,9 @@ function literalSubsetIssue(
   }
   if (
     sourceValues.some((sourceValue) =>
-      !targetValues.some((targetValue) => deepEqual(sourceValue, targetValue))
+      !targetValues.some((targetValue) =>
+        fabricAwareEqual(sourceValue, targetValue)
+      )
     )
   ) {
     return `${path}: enum/const no longer accepts every previous value`;
@@ -434,7 +471,7 @@ function allowedLiteralValues(
 ): readonly unknown[] | undefined {
   if (Object.hasOwn(schema, "const")) {
     return schema.enum === undefined ||
-        schema.enum.some((value) => deepEqual(value, schema.const))
+        schema.enum.some((value) => fabricAwareEqual(value, schema.const))
       ? [schema.const]
       : [];
   }
@@ -578,7 +615,7 @@ function schemasResolveEqually(
   target: unknown,
   context: CompatibilityContext,
 ): boolean {
-  if (!deepEqual(source, target)) return false;
+  if (!fabricAwareEqual(source, target)) return false;
 
   const refs = new Set<string>();
   collectSchemaReferences(source, refs, new WeakSet());
@@ -593,7 +630,7 @@ function schemasResolveEqually(
     );
     if (
       sourceResolved === undefined || targetResolved === undefined ||
-      !deepEqual(sourceResolved, targetResolved)
+      !fabricAwareEqual(sourceResolved, targetResolved)
     ) {
       return false;
     }
@@ -677,7 +714,8 @@ function resolveSchema(
   schema: JSONSchema,
   root: JSONSchema,
 ): { schema: JSONSchema | undefined; root: JSONSchema } {
-  const hasRef = typeof schema === "object" && schema !== null && schema.$ref;
+  const hasRef = typeof schema === "object" && schema !== null &&
+    typeof schema.$ref === "string";
   const owningRoot = hasRef ? resolveCfcSchemaRefRoot(schema, root) : root;
   const resolved = hasRef ? resolveCfcSchemaRefs(schema, root) : schema;
   return {
@@ -755,7 +793,7 @@ function unknownKeywordIssue(
   for (const key of keys) {
     if (
       !handled.has(key) &&
-      !deepEqual(sourceRecord[key], targetRecord[key])
+      !fabricAwareEqual(sourceRecord[key], targetRecord[key])
     ) {
       return `${path}: ${key} changed in a way compatibility checking cannot prove safe`;
     }

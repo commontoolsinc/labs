@@ -2035,6 +2035,37 @@ describe("runner utils", () => {
       });
     });
 
+    it("preserves explicitly present undefined values", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        { value: undefined },
+        { value: "fallback" },
+        {
+          type: "object",
+          properties: {
+            value: { type: ["string", "undefined"] },
+          },
+          required: ["value"],
+        },
+      );
+
+      expect(Object.hasOwn(value, "value")).toBe(true);
+      expect(value.value).toBeUndefined();
+    });
+
+    it("does not treat inherited names as existing argument values", () => {
+      const value = mergeSchemaDefaults<Record<string, unknown>>(
+        {},
+        { toString: 1 },
+        {
+          type: "object",
+          properties: { toString: { type: "number" as const } },
+        },
+      );
+
+      expect(Object.hasOwn(value, "toString")).toBe(true);
+      expect(value.toString).toBe(1);
+    });
+
     it("falls back to ordinary object merging for non-object schemas", () => {
       expect(mergeSchemaDefaults<Record<string, unknown>>(
         { existing: true },

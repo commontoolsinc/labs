@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { assertPatternSchemasBackwardCompatible } from "../src/schema-compatibility.ts";
 
 function pattern(
@@ -387,6 +388,23 @@ describe("piece schema compatibility", () => {
       .toThrow(/result\.status: existing result field was removed/);
   });
 
+  it("does not treat prototype properties as prior result fields", () => {
+    const previous = pattern(oldPattern.argumentSchema, {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    });
+    const candidate = pattern(oldPattern.argumentSchema, {
+      type: "object",
+      properties: { toString: { type: "number" as const } },
+      required: ["toString"],
+      additionalProperties: false,
+    });
+
+    expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
+      .toThrow(/result\.toString/);
+  });
+
   it("handles boolean schemas conservatively", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(
@@ -432,7 +450,7 @@ describe("piece schema compatibility", () => {
       oldPattern.resultSchema,
     );
     expect(() => assertPatternSchemasBackwardCompatible(oldPattern, unresolved))
-      .toThrow(/cannot resolve a local schema reference/);
+      .toThrow(/cannot resolve schema reference/);
 
     const previousRecursive = pattern(
       {
@@ -513,6 +531,43 @@ describe("piece schema compatibility", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(unconstrained, introducedConst)
     ).toThrow(/enum\/const became more restrictive/);
+  });
+
+  it("compares Fabric enum and const values canonically", () => {
+    const first = new FabricBytes(new Uint8Array([1]));
+    const second = new FabricBytes(new Uint8Array([2]));
+    const common = new FabricBytes(new Uint8Array([3]));
+    const argumentWith = (value: JSONSchema) =>
+      pattern(
+        {
+          type: "object",
+          properties: { value },
+          required: ["value"],
+        },
+        oldPattern.resultSchema,
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        argumentWith({ enum: [first, common] } as unknown as JSONSchema),
+        argumentWith({ enum: [second, common] } as unknown as JSONSchema),
+      )
+    ).toThrow(/enum\/const/);
+
+    const resultWith = (value: JSONSchema) =>
+      pattern(
+        oldPattern.argumentSchema,
+        {
+          type: "object",
+          properties: { value },
+          required: ["value"],
+        },
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        resultWith({ const: first } as unknown as JSONSchema),
+        resultWith({ const: second } as unknown as JSONSchema),
+      )
+    ).toThrow(/enum\/const/);
   });
 
   it("intersects sibling const and enum constraints", () => {
@@ -686,6 +741,27 @@ describe("piece schema compatibility", () => {
       .toThrow(/argument\.value\[\]/);
     expect(() => assertPatternSchemasBackwardCompatible(previous, widened))
       .not.toThrow();
+
+    const tuple = (first: JSONSchema) =>
+      pattern(
+        {
+          type: "object",
+          properties: {
+            value: {
+              type: "array",
+              prefixItems: [first],
+              items: { type: "number" },
+            },
+          },
+        },
+        oldPattern.resultSchema,
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        tuple({ type: "string" }),
+        tuple({ type: "number" }),
+      )
+    ).toThrow(/prefixItems changed/);
   });
 
   it("treats undefined as a supported schema type", () => {
@@ -1055,5 +1131,53 @@ describe("piece schema compatibility", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(oldPattern, unknownKeyword)
     ).toThrow(/customConstraint changed/);
+  });
+
+  it("rejects malformed schemas before comparing variance", () => {
+    const argumentWith = (value: JSONSchema) =>
+      pattern(
+        {
+          type: "object",
+          properties: { value, format: { type: "string" } },
+          required: ["value"],
+        },
+        oldPattern.resultSchema,
+      );
+    const resultWith = (value: JSONSchema) =>
+      pattern(
+        oldPattern.argumentSchema,
+        {
+          type: "object",
+          properties: { value },
+          required: ["value"],
+        },
+      );
+
+    const malformedCases: Array<[Pattern, Pattern]> = [
+      [
+        argumentWith({ type: [] } as JSONSchema),
+        argumentWith({ type: "number" }),
+      ],
+      [
+        resultWith({ type: ["number", "bogus"] } as JSONSchema),
+        resultWith({ type: "number" }),
+      ],
+      [
+        resultWith({ type: "number", minimum: 0 }),
+        resultWith({ type: "number", minimum: Number.NaN }),
+      ],
+      [
+        argumentWith({ type: "number" }),
+        argumentWith({ type: "number", multipleOf: 0 }),
+      ],
+      [
+        argumentWith({ type: "string" }),
+        argumentWith({ $ref: "" } as JSONSchema),
+      ],
+    ];
+    for (const [previous, candidate] of malformedCases) {
+      expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
+        .toThrow(/invalid schema/i);
+    }
   });
 });

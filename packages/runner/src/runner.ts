@@ -1162,9 +1162,15 @@ export class Runner {
       }
       const materializedArgument = nextArgumentCell.asSchema(undefined)
         .withTx(tx).get();
+      const validationArgument = mergeSchemaDefaults(
+        materializedArgument,
+        defaults,
+        pattern.argumentSchema,
+        { mergeMaterializedLinks: true },
+      );
       const validationFailure = validateSchemaValue(
         pattern.argumentSchema,
-        materializedArgument,
+        validationArgument,
         pattern.argumentSchema,
         { acceptOpaqueValue: isCell },
       );
@@ -2154,14 +2160,14 @@ export class Runner {
         );
       });
       if (error) {
+        if (
+          error.name === "StorageTransactionAborted" &&
+          error.message.startsWith("editWithRetry action threw:") &&
+          error.reason instanceof Error
+        ) {
+          throw error.reason;
+        }
         if (options?.expectedPatternIdentity) {
-          if (
-            error.name === "StorageTransactionAborted" &&
-            error.message.startsWith("editWithRetry action threw:") &&
-            error.reason instanceof Error
-          ) {
-            throw error.reason;
-          }
           throw error;
         }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
@@ -2195,17 +2201,28 @@ export class Runner {
     // commit but before its post-commit dependency sync settles. Return a view
     // typed by the pattern that is actually durable now, not by this caller's
     // stale candidate.
-    const currentRef = getPatternIdentityRef(resultCell);
-    if (currentRef !== undefined) {
+    let currentRef = getPatternIdentityRef(resultCell);
+    while (currentRef !== undefined) {
+      const loadedRef = currentRef;
       const currentPattern = await this.runtime.patternManager
         .loadPatternByIdentity(
-          currentRef.identity,
-          currentRef.symbol,
+          loadedRef.identity,
+          loadedRef.symbol,
           resultCell.space,
         );
-      if (currentPattern?.resultSchema !== undefined) {
-        return resultCell.asSchema(currentPattern.resultSchema);
+      currentRef = getPatternIdentityRef(resultCell);
+      if (
+        currentRef !== undefined &&
+        patternIdentityKey(currentRef) !== patternIdentityKey(loadedRef)
+      ) {
+        continue;
       }
+      if (
+        currentRef === undefined || currentPattern?.resultSchema === undefined
+      ) {
+        return resultCell;
+      }
+      return resultCell.asSchema(currentPattern.resultSchema);
     }
     return pattern?.resultSchema !== undefined
       ? resultCell.asSchema(pattern.resultSchema)

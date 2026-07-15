@@ -257,10 +257,19 @@ export function mergeObjects<T>(
       seen.add(key);
       const merged = mergeObjects<T[keyof T]>(
         ...objects.map((entry) =>
-          (entry as Record<string, unknown>)?.[key] as T[keyof T]
+          isRecord(entry) && Object.hasOwn(entry, key)
+            ? (entry as Record<string, unknown>)[key] as T[keyof T]
+            : undefined
         ),
       );
-      if (merged !== undefined) result[key] = merged;
+      if (merged !== undefined) {
+        Object.defineProperty(result, key, {
+          value: merged,
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
+      }
     }
   }
 
@@ -275,12 +284,15 @@ export function mergeSchemaDefaults<T>(
   value: T | undefined,
   defaults: Partial<T> | undefined,
   schema: JSONSchema,
+  options: { mergeMaterializedLinks?: boolean } = {},
 ): T {
   return mergeSchemaDefaultsInternal(
     value,
     defaults,
     schema,
     schema,
+    value !== undefined,
+    options.mergeMaterializedLinks === true,
   ) as T;
 }
 
@@ -289,19 +301,22 @@ function mergeSchemaDefaultsInternal(
   defaults: unknown,
   schema: JSONSchema,
   fullSchema: JSONSchema,
+  valuePresent: boolean,
+  mergeMaterializedLinks: boolean,
 ): unknown {
   if (defaults === undefined) return value;
   if (
     !isFabricPlainObject(defaults) || isCellLink(defaults)
   ) {
-    return value === undefined ? defaults : value;
+    return valuePresent ? value : defaults;
   }
   // Defaults only fill absent values or recursively merge plain records. A
   // defined scalar, sparse array, Fabric special object, or sigil link is
   // durable user state, not an empty object to replace with defaults.
   if (
-    value !== undefined &&
-    (!isFabricPlainObject(value) || isCellLink(value))
+    valuePresent &&
+    (!isFabricPlainObject(value as FabricValue) ||
+      (isCellLink(value) && !mergeMaterializedLinks))
   ) {
     return value;
   }
@@ -320,24 +335,34 @@ function mergeSchemaDefaultsInternal(
     return mergeObjects(value as object | undefined, defaults);
   }
 
-  const existing = value ?? {};
+  const existing = valuePresent ? value as Record<string, unknown> : {};
   const result: Record<string, unknown> = { ...existing };
   const required = new Set(resolved.required ?? []);
   for (const [key, defaultValue] of Object.entries(defaults)) {
+    const hasExistingValue = Object.hasOwn(existing, key);
     const existingValue = existing[key];
-    const propertySchema = resolved.properties?.[key] ??
-      resolved.additionalProperties ?? true;
+    const propertySchema = resolved.properties !== undefined &&
+        Object.hasOwn(resolved.properties, key)
+      ? resolved.properties[key]
+      : resolved.additionalProperties ?? true;
     const merged = mergeSchemaDefaultsInternal(
       existingValue,
       defaultValue,
       propertySchema,
       resolvedRoot,
+      hasExistingValue,
+      mergeMaterializedLinks,
     );
     if (
-      existingValue !== undefined || required.has(key) ||
+      hasExistingValue || required.has(key) ||
       validateSchemaValue(propertySchema, merged, resolvedRoot) === undefined
     ) {
-      result[key] = merged;
+      Object.defineProperty(result, key, {
+        value: merged,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
   }
   return result;

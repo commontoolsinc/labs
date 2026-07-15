@@ -109,7 +109,8 @@ export const cfcSchemaIsTrue = (schema: JSONSchema): boolean => {
 
 export const cfcSchemaIsFalse = (schema: JSONSchema): boolean =>
   schema === false ||
-  (isRecord(schema) && "not" in schema && cfcSchemaIsTrue(schema["not"]!));
+  (isRecord(schema) && Object.hasOwn(schema, "not") &&
+    cfcSchemaIsTrue(schema["not"]!));
 
 const localDefinitionName = (schemaRef: string): string | undefined => {
   if (!schemaRef.startsWith("#")) return undefined;
@@ -409,13 +410,16 @@ export const resolveCfcSchemaRefRoot = (
 ): JSONSchema => {
   let current = schema;
   let root = fullSchema;
-  const seenRefs = new Set<string>();
-  while (
-    isRecord(current) && typeof current.$ref === "string" &&
-    !seenRefs.has(current.$ref)
-  ) {
+  const seenRefs = new Map<JSONSchema, Set<string>>();
+  while (isRecord(current) && typeof current.$ref === "string") {
     const ref = current.$ref;
-    seenRefs.add(ref);
+    let refsForRoot = seenRefs.get(root);
+    if (refsForRoot?.has(ref)) break;
+    if (!refsForRoot) {
+      refsForRoot = new Set();
+      seenRefs.set(root, refsForRoot);
+    }
+    refsForRoot.add(ref);
     const next = resolveCfcSchemaRef(root, ref);
     if (next === undefined) break;
     if (isEmbeddedCfcSchemaRef(ref)) root = next;
@@ -523,16 +527,21 @@ const resolveCfcSchemaRefsUncached = (
   schemaObj: JSONSchemaObj,
   fullSchema: JSONSchema = schemaObj,
 ): JSONSchema | undefined => {
-  const seenRefs = new Set<string>();
+  const seenRefs = new Map<JSONSchema, Set<string>>();
   while (true) {
     const { $ref, ...rest } = schemaObj;
     if ($ref === undefined) {
       return schemaObj;
     }
-    if (seenRefs.has($ref)) {
+    let refsForRoot = seenRefs.get(fullSchema);
+    if (refsForRoot?.has($ref)) {
       return undefined;
     }
-    seenRefs.add($ref);
+    if (!refsForRoot) {
+      refsForRoot = new Set();
+      seenRefs.set(fullSchema, refsForRoot);
+    }
+    refsForRoot.add($ref);
     const resolved = resolveCfcSchemaRef(fullSchema, $ref);
     if (resolved === undefined) {
       return undefined;
@@ -571,9 +580,11 @@ export const resolveCfcSchemaRefsOrThrow = (
   }
   const resolved = resolveCfcSchemaRefs(schemaObj, fullSchema);
   if (resolved === undefined) {
-    const ref = "$ref" in schemaObj ? schemaObj.$ref : toCompactDebugString(
-      schemaObj,
-    );
+    const ref = Object.hasOwn(schemaObj, "$ref")
+      ? schemaObj.$ref
+      : toCompactDebugString(
+        schemaObj,
+      );
     throw new Error(
       `Failed to resolve $ref: ${ref}. ` +
         (typeof ref === "string" && ref.startsWith("http")

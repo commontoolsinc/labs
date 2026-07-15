@@ -75,6 +75,8 @@ class PiecePropIo implements PieceCellIo {
 export class PieceController<T = unknown> {
   #cell: Cell<T>;
   #manager: PieceManager;
+  #mutationVersion = 0;
+  #failedMutationVersions = new Set<number>();
   readonly id: string;
 
   input: PieceCellIo;
@@ -101,15 +103,18 @@ export class PieceController<T = unknown> {
   }
 
   async setInput(input: object): Promise<void> {
-    const pattern = await this.getPattern();
-    // Use setup/start so we can update inputs without forcing reschedule
-    this.#cell = await execute(
-      this.#manager,
-      this.id,
-      pattern,
-      input,
-      { start: true },
-    ) as Cell<T>;
+    const mutationVersion = ++this.#mutationVersion;
+    await this.#runMutation(mutationVersion, async () => {
+      const pattern = await this.getPattern();
+      // Use setup/start so we can update inputs without forcing reschedule
+      return await execute(
+        this.#manager,
+        this.id,
+        pattern,
+        input,
+        { start: true },
+      ) as Cell<T>;
+    });
   }
 
   async getPattern(): Promise<Pattern> {
@@ -167,25 +172,86 @@ export class PieceController<T = unknown> {
   }
 
   async setPattern(program: RuntimeProgram): Promise<void> {
-    const previousRef = getPatternIdentityRef(this.#cell);
-    if (!previousRef) throw new Error("piece missing pattern identity");
-    const previousPattern = await this.#manager.runtime.patternManager
-      .loadPatternByIdentity(
-        previousRef.identity,
-        previousRef.symbol,
-        this.#manager.getSpace(),
-      );
-    if (!previousPattern) {
-      throw new Error(
-        `could not load pattern ${previousRef.identity}#${previousRef.symbol}`,
-      );
+    const mutationVersion = ++this.#mutationVersion;
+    await this.#runMutation(mutationVersion, async () => {
+      const previousRef = getPatternIdentityRef(this.#cell);
+      if (!previousRef) throw new Error("piece missing pattern identity");
+      const previousPattern = await this.#manager.runtime.patternManager
+        .loadPatternByIdentity(
+          previousRef.identity,
+          previousRef.symbol,
+          this.#manager.getSpace(),
+        );
+      if (!previousPattern) {
+        throw new Error(
+          `could not load pattern ${previousRef.identity}#${previousRef.symbol}`,
+        );
+      }
+      const pattern = await compileProgram(this.#manager, program);
+      assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+      return await execute(this.#manager, this.id, pattern, undefined, {
+        start: true,
+        expectedPatternIdentity: previousRef,
+      }) as Cell<T>;
+    });
+  }
+
+  async #runMutation(
+    mutationVersion: number,
+    operation: () => Promise<Cell<T>>,
+  ): Promise<void> {
+    try {
+      const cell = await operation();
+      if (mutationVersion === this.#mutationVersion) this.#cell = cell;
+      for (const failed of this.#failedMutationVersions) {
+        if (failed <= mutationVersion) {
+          this.#failedMutationVersions.delete(failed);
+        }
+      }
+    } catch (error) {
+      this.#failedMutationVersions.add(mutationVersion);
+      const previousVersion = this.#mutationVersion;
+      while (this.#failedMutationVersions.delete(this.#mutationVersion)) {
+        this.#mutationVersion--;
+      }
+      if (this.#mutationVersion !== previousVersion) {
+        await this.#refreshCellSchema(this.#mutationVersion);
+      }
+      throw error;
     }
-    const pattern = await compileProgram(this.#manager, program);
-    assertPatternSchemasBackwardCompatible(previousPattern, pattern);
-    this.#cell = await execute(this.#manager, this.id, pattern, undefined, {
-      start: true,
-      expectedPatternIdentity: previousRef,
-    }) as Cell<T>;
+  }
+
+  async #refreshCellSchema(refreshVersion: number): Promise<void> {
+    const cell = this.#cell;
+    while (
+      refreshVersion === this.#mutationVersion && cell === this.#cell
+    ) {
+      await cell.sync();
+      const refBeforeLoad = getPatternIdentityRef(cell);
+      if (!refBeforeLoad) return;
+      const pattern = await this.#manager.runtime.patternManager
+        .loadPatternByIdentity(
+          refBeforeLoad.identity,
+          refBeforeLoad.symbol,
+          this.#manager.getSpace(),
+        );
+      if (!pattern) return;
+      await cell.sync();
+      const refAfterLoad = getPatternIdentityRef(cell);
+      if (
+        !refAfterLoad ||
+        refBeforeLoad.identity !== refAfterLoad.identity ||
+        refBeforeLoad.symbol !== refAfterLoad.symbol
+      ) {
+        continue;
+      }
+      if (
+        refreshVersion === this.#mutationVersion && cell === this.#cell
+      ) {
+        this.#cell = cell.asSchema(pattern.resultSchema);
+      }
+      return;
+    }
   }
 
   async readingFrom(): Promise<PieceController[]> {

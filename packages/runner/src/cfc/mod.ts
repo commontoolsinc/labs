@@ -252,6 +252,7 @@ export {
   resolveSchemaForValidation,
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
+  validateSchemaDefinition,
   validateSchemaValue,
 } from "./schema-sanitization.ts";
 export {
