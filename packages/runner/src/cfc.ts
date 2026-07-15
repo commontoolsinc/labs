@@ -63,11 +63,12 @@ const buildSymbolicSchemaAtPathClassifier = (
   active.add(schema);
   try {
     if (schema.$ref !== undefined) {
-      const resolved = resolveCfcSchemaRefs(schema, fullSchema);
+      const refFullSchema = isRecord(schema.$defs) ? schema : fullSchema;
+      const resolved = resolveCfcSchemaRefs(schema, refFullSchema);
       if (resolved === undefined) return undefined;
       const nextFullSchema = isRecord(resolved) && resolved.$defs !== undefined
         ? resolved
-        : fullSchema;
+        : refFullSchema;
       return buildSymbolicSchemaAtPathClassifier(
         resolved,
         nextFullSchema,
@@ -571,6 +572,12 @@ export class ContextualFlowControl {
     defaultEmptyProperties: JSONSchema,
     defaultMissingProperty: JSONSchema,
   ): JSONSchema {
+    // Recursive anyOf/oneOf branches can establish their own local definition
+    // scope even when an outer pruning pass removed the now-redundant root
+    // $defs. Adopt that scope before consuming the first path segment.
+    if (isRecord(schema) && schema.$defs !== undefined) {
+      defs = schema.$defs;
+    }
     const joined = (extraConfidentiality !== undefined)
       ? new Set<unknown>(extraConfidentiality)
       : new Set<unknown>();

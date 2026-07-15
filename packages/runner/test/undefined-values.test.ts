@@ -9,6 +9,7 @@ import { getCellWithStatus } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { wishStateSchemaForResult } from "../src/builtins/wish-schema.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
+import { pruneCfcSchemaDefinitions } from "../src/cfc/schema-refs.ts";
 
 const signer = await Identity.fromPassphrase("undefined values");
 const space = signer.did();
@@ -290,7 +291,12 @@ Deno.test("wish output schema preserves local defs through result paths", () => 
     },
   } as const;
 
-  const stateSchema = wishStateSchemaForResult(pieceSchema)!;
+  // Watch selectors prune definitions independently at every nested schema
+  // boundary. schemaAtPath must therefore adopt the selected anyOf branch's
+  // local definition scope rather than relying on a duplicate root $defs map.
+  const stateSchema = pruneCfcSchemaDefinitions(
+    wishStateSchemaForResult(pieceSchema)!,
+  );
   const allPiecesSchema = new ContextualFlowControl().schemaAtPath(
     stateSchema,
     ["result", "allPieces"],

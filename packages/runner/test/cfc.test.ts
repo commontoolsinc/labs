@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import { getLogger } from "@commonfabric/utils/logger";
 import { cfcAtom, ContextualFlowControl } from "../src/cfc.ts";
 import { schemaHasIfc } from "../src/schema.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -108,6 +109,34 @@ describe("ContextualFlowControl.schemaAtPath", () => {
     expect(cfc.schemaAtPath(schema, ["2000"])).toBe(homogeneous);
     expect(cfc.schemaAtPath(schema, ["named"])).toEqual({ type: "null" });
     expect(cfc.schemaAtPath(schema, ["missing"])).toBe(false);
+  });
+
+  it("classifies frozen union refs against branch-local definitions", () => {
+    const cfc = new ContextualFlowControl();
+    const logger = getLogger("cfc");
+    const warningCount = logger.counts.warn;
+    const schema = deepFreeze({
+      anyOf: [
+        {
+          type: "object",
+          properties: { value: { type: "number" } },
+        },
+        {
+          $ref: "#/$defs/Local",
+          $defs: {
+            Local: {
+              type: "object",
+              properties: { value: { type: "string" } },
+            },
+          },
+        },
+      ],
+    } as JSONSchemaObj);
+
+    expect(cfc.schemaAtPath(schema, ["value"])).toEqual({
+      anyOf: [{ type: "number" }, { type: "string" }],
+    });
+    expect(logger.counts.warn).toBe(warningCount);
   });
 
   it("classifies combined unions with boolean branches", () => {
