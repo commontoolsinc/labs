@@ -2,8 +2,8 @@
 
 Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
 and deterministic failure gates are locally validated, including the accepted
-500-event counterbalanced browser/CPU gate. The deployed-staging enable/disable
-drill remains pending. Phases 3+ remain design. Terminal crash quarantine and
+500-event counterbalanced browser/CPU gate. A deployed flag-off/flag-on drill
+remains pending. Phases 3+ remain design. Terminal crash quarantine and
 hard pool resource caps are later operational hardening tracked as G18, not
 part of the Phase 0–2 acceptance contract.
 Author: design session
@@ -34,8 +34,9 @@ Related PRs: #4288 (scheduler-v2 cutover, assumed baseline);
 
 ## 1. Summary
 
-Without the opt-in, the memory server remains central but passive: every client runs the full
-reactive graph of every open piece, and clients race each other — N clients
+With the global flag off, the memory server remains central but passive: every
+client runs the full reactive graph of every open piece, and clients race each
+other — N clients
 means N redundant executions of the same computations, write-write conflicts
 on shared derived state, async work (fetch, LLM) that dies with a closed tab,
 and a per-session subscription machinery whose cost is
@@ -65,8 +66,8 @@ Four approaches are explored in depth:
 
 - **A — Server catch-up executor**: run a server participant while clients
   remain authoritative. Low risk, helps async fragility, does *not* kill
-  races. It remains a useful diagnostic mode, but background-registry cleanup
-  is not on the critical path.
+  races. It was a useful implementation-validation milestone, not a supported
+  rollout mode; background-registry cleanup is not on the critical path.
 - **B — Positive derived-authority split** (the proposed model): the server
   claims eligible actions individually; clients commit event-driven writes
   and every unclaimed action, while speculative results for claimed actions
@@ -78,9 +79,10 @@ Four approaches are explored in depth:
 - **D — Thin projector**: no client execution at all; the server computes
   everything including VNode docs; clients materialize DOM.
 
-**Recommendation: fix scheduler-state context keys on top of #4288, build
-the shared client-demand executor in shadow mode, then adopt B one eligible
-action at a time.** B matches the product need: races disappear for claimed
+**Recommendation: use B for every compatible eligible piece whenever the
+global flag is on.** The shared executor may run an action without authority
+while discovering its graph, but it claims the action automatically as soon as
+it proves servable. B matches the product need: races disappear for claimed
 derived data, async survives a tab closing, and clients retain instant local
 feedback. Positive `ExecutionClaim`s make fallback local and structural:
 absence or revocation of a matching claim means today's client-authority
@@ -428,13 +430,14 @@ scheduler rehydration without transferring authority.
    worker per eligible active space (§6.3).
 2. The worker uses the full executor-grade provider (§6.2) and reports the
    actions it could claim without yet changing client authority.
-3. Async builtins can be exercised in test/opt-in spaces, but authority is
-   not transferred until the corresponding action claim is live.
+3. Async builtins can be exercised by explicit test capabilities, but authority
+   is not transferred until the corresponding action claim is live.
 
-Raw authenticated demand remains available while the durable execution policy
-is absent or false: Phase 1 needs it to drive observe-only shadow work. That
-policy gates positive claims, not discovery of work clients currently care
-about.
+Observe-only execution was a validation milestone, not a persistent rollout
+mode. With the global flag on, authenticated demand drives discovery and the
+server automatically claims every eligible action. Shadow attempts remain only
+while discovering a graph or when an action is unsupported and therefore stays
+client-primary.
 
 **Identity/CFC.** Unchanged for clients. The worker runs on behalf of an
 eligible requesting user, selected as described in §6.1, rather than an
@@ -506,26 +509,15 @@ space documents. Each session retains only a bounded suffix of control
 history; reconnect always installs a complete claim snapshot plus a coalesced
 successful settlement frontier for each exact live claim. A cursor older than
 the suffix therefore resynchronizes both authority and overlay reconciliation
-instead of growing an unbounded queue. A durable policy may opt a space into
-server-primary execution, but runtime ownership, liveness, generations, and
-exceptions do not belong in mutable user data.
+instead of growing an unbounded queue. Runtime ownership, liveness,
+generations, and exceptions do not belong in mutable user data.
 
-The implemented opt-in is the default-branch, space-scoped document
-`of:${space}:execution-policy`, whose value is exactly
-`{ version: 1, serverPrimaryExecution: boolean }`. It is owner-managed through
-whole-document set/delete policy-only commits. Absent, deleted, disabled, or
-malformed state is client-primary; direct host writes cannot bypass owner
-authorization. OWNER is enforced for this authority switch even when ordinary
-ACL enforcement is configured `off` or `observe`; in those rollout-relaxed
-modes, only the implicit space identity/service owners qualify, so a writer
-cannot first rewrite the ACL to manufacture policy authority. Positive claims
-require an enabled policy; disabling or deleting it revokes every live claim
-while leaving shadow demand intact. The runtime flag remains the
-higher-priority rollback, so a true policy is inert when
-`serverPrimaryExecution` is off. Deployment flag changes take effect on new
-negotiated connections (normally after host restart/redeploy).
-Operators use `cf execution enable|disable|status`; rollout and rollback order
-is documented in the
+The global `serverPrimaryExecution` flag is the sole rollout control. With it
+off, the server starts no execution pool and clients remain primary. With it
+on, compatible sessions export demand and every eligible action is claimed
+automatically; there is no per-space authority document or CLI. Deployment
+flag changes take effect on new negotiated connections (normally after host
+restart/redeploy). Rollout and rollback order is documented in the
 [server-primary execution runbook](../../development/server-primary-execution.md).
 
 The fields from `branch` through `runtimeFingerprint` form the shared
@@ -837,8 +829,9 @@ Per space with C connected clients, piece graph of size G, event rate E:
   actions and immediate local-source overlays remain correct. An exactly
   claimed computation may coalesce remote feed invalidations behind one
   non-sliding 50 ms observation-adoption grace; `idle()` waits for its bounded
-  local fallback. A later, separately gated closure/claim-snapshot optimization
-  may leave remotely owned actions cold until local speculation demands them.
+  local fallback. A later closure/claim-snapshot optimization within the
+  server-primary posture may leave remotely owned actions cold until local
+  speculation demands them.
   First paint therefore retains today's browser compile path; zero-execution
   first paint requires D/projector output.
 - Server subscription serving: today's graph-query path remains for unclaimed
@@ -1359,9 +1352,9 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   conflict rate, multi-client action volume, divergence, revocations, and
   fallback latency. Fallback is claim removal. The operator runbook,
   product-derived/literal multi-client fixtures, and deterministic local
-  enable/disable and failure drills are complete. The parked-worker
+  authority and failure drills are complete. The parked-worker
   claim-readiness failure is fixed, and the 500-event counterbalanced CPU gate
-  passes; only a deployed-staging policy drill remains pending. The initial,
+  passes; only a deployed flag-off/flag-on drill remains pending. The initial,
   superseded
   occupancy-proxy measurement is retained only as a historical snapshot in the
   [initial rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md),
@@ -1391,7 +1384,7 @@ means a design doc/decision is required before implementation.
 | G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | implemented, including atomic lease fencing |
 | G1 | `SchedulerExecutionContextKey` and effective scope-qualified snapshots/state/indexes (§3.2.1) | server reliance on durable state | implemented |
 | G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | implemented, including client root export, one shared Worker lane, sponsor rotation, and durable legacy-background exclusion |
-| G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | implemented and opt-in |
+| G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | implemented behind the global rollout flag |
 | G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | implemented |
 | G5 | Exact-claim client routing, speculative overlay, read layering, revoke-and-rerun | B | implemented |
 | G6 | Transformer/runner enforcement of one direct root result binding; update hand-built tests | producer eligibility | implemented; no migration |

@@ -153,8 +153,9 @@ propagate](#how-flags-propagate).
   capability negotiation, demand, claims, settlements, claim-aware client
   routing, and claimed-builtin passivity. A runtime with the flag off does not
   publish or honor the new control messages. The memory handshake advertises
-  the optional `serverPrimaryExecutionV1` capability; a space policy may
-  require it before opening a session.
+  the optional `serverPrimaryExecutionV1` capability. When the flag is on, the
+  server requires compatible clients and automatically claims every eligible
+  action in every active compatible space; there is no per-space opt-in.
 - **Current default and planned end state.** Off by default in every runtime.
   Both the server process and browser worker must enable it for a negotiated
   connection. The planned end state is to graduate the protocol after the
@@ -162,9 +163,8 @@ propagate](#how-flags-propagate).
   obeys server-primary claims.
 - **Status on 2026-07-14.** Runtime, environment, browser-worker, background-
   worker, memory handshake, connection-owned client root demand, one shared
-  fenced shadow Worker per active branch/space, durable legacy-background
-  exclusion with a synchronously fenced host-local handoff, strict owner
-  policy, and the ordered reconnectable
+  fenced Worker per active branch/space, durable legacy-background exclusion
+  with a synchronously fenced host-local handoff, and the ordered reconnectable
   claim/settlement feed are implemented. Exact claim routing, causal client
   overlays, claimed-builtin passivity, causal-actor gating, canonical
   permanent-builtin failure, failure drills, bounded pool/control health
@@ -177,14 +177,15 @@ propagate](#how-flags-propagate).
   deterministic cold-wake and replacement coverage. The 500-event
   counterbalanced browser/CPU acceptance gate passes; see the
   [accepted Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-13.md).
-  Only the deployed-staging enable/disable drill remains pending. Off remains
-  client-primary behavior. The narrower
+  The flag is the only authority rollout control: off remains client-primary
+  behavior with no execution pool, while on is the final server-primary mode
+  for all eligible compatible pieces. The narrower
   `serverPrimaryExecutionClaimRoutingV1` and
   `serverPrimaryExecutionBuiltinPassivityV1` capabilities now advertise with
-  the main flag. Policy-enabled spaces reject peers missing either graduated
-  promise. Use the
+  the main flag. A server with the flag on rejects peers missing either
+  graduated promise. Use the
   [server-primary execution runbook](./server-primary-execution.md) for
-  opt-in, rollback, metrics, and reproducible measurement commands.
+  rollout, rollback, metrics, and reproducible measurement commands.
 - **Path to removal.** Complete the shadow, positive-claim, reconciliation,
   and builtin-passivity rollout; confirm every supported deployment and client
   speaks the protocol; make it unconditional; then delete the runtime flag,

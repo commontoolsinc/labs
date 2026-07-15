@@ -5,8 +5,8 @@ it into reviewable, red-green work orders.
 
 Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
 and deterministic failure gates are locally validated, including the accepted
-500-event counterbalanced browser/CPU gate. The deployed-staging enable/disable
-drill remains pending. Later background, feed, scoped, and handler work is
+500-event counterbalanced browser/CPU gate. A deployed flag-off/flag-on drill
+remains pending. Later background, feed, scoped, and handler work is
 outlined only. The design's terminal crash quarantine and hard pool resource
 caps are later operational hardening (G18), not additional Phase 0–2 work
 orders.
@@ -94,12 +94,9 @@ where server and clients knowingly duplicate authoritative work.
   including committed, no-op, failed, and unserved outcomes.
 - **ActionExecutionProvenance:** transaction metadata containing action
   identity, onBehalfOf, lease/claim generations, causedBy, and inputBasisSeq.
-- **executionPolicy:** optional owner-managed space policy expressing only
-  whether server-primary execution is allowed. It does not contain liveness,
-  actor, epoch, authority, or unservable-piece state.
 - Runtime experimental option: serverPrimaryExecution, default false.
 - Existing scheduler option: persistentSchedulerState, default true; explicitly
-  setting it false remains the rollback path.
+  setting it false remains its independent scheduler-state rollback path.
 - Protocol capability: server-primary-execution-v1.
 - Protocol messages:
   - session.execution.demand.set
@@ -529,8 +526,8 @@ provenance, hook, and notification path as a remote client.
 
 **Status:** implemented. The base protocol, demand feed, authoritative
 computation routing, and builtin passivity are all gated together by
-`serverPrimaryExecution`; policy-enabled spaces reject peers missing either
-graduated sub-capability.
+`serverPrimaryExecution`; when it is on, every session must advertise the main
+capability and both graduated sub-capabilities.
 
 **Read first:**
 
@@ -542,13 +539,14 @@ graduated sub-capability.
 **Steps:**
 
 1. Add capability negotiation for server-primary-execution-v1. When a
-   deployment/space requires server-primary semantics, reject clients that do
-   not advertise the capability; do not silently mix stale authority rules.
+   deployment enables server-primary semantics, reject clients that do not
+   advertise the capability; do not silently mix stale authority rules.
 2. Add session.execution.demand.set. A demand is bound to the authenticated
    connection, branch, space, and piece result roots. Replacement and disconnect
    remove that connection's references automatically. Host listeners receive
    `{space, branch, order, demands}` so the last empty snapshot remains
-   actionable. Demand remains policy-independent for Phase 1 shadow execution.
+   actionable. With the global flag on, demand drives graph discovery and
+   positive claims for eligible actions.
 3. Add branch-qualified claim set/revoke messages containing ActionClaimKey,
    leaseGeneration, monotonic per-ActionClaimKey claimGeneration, and
    server-controlled expiry. Revoke names the live claimGeneration. A later
@@ -575,24 +573,17 @@ graduated sub-capability.
    server memory or duplicate retained-success delivery.
 6. Authorize demand using the session's existing READ access. Sponsor
    eligibility is a separate WRITE check in W1.1.
-7. Add optional executionPolicy owner doc support at
-   `of:${space}:execution-policy`, default branch and space scope, with exact
-   value `{version:1,serverPrimaryExecution:boolean}`. It only opts a space
-   into server-primary execution; absent/deleted/disabled/malformed means
-   client-primary. Mutations are owner-only, whole-document set/delete,
-   policy-only commits; direct host writes cannot bypass that rule. Enabling is
-   rejected while an incompatible session remains attached. Do not put claims,
-   actor identity, heartbeat, exception lists, or epochs in it.
-   OWNER remains mandatory when ordinary ACL checks are off/observe; because
-   ACL mutation is rollout-relaxed there, only implicit space/service owners
-   qualify. Positive claims require the effective policy; disabling/deleting
-   it revokes all live claims without suppressing shadow demand.
-8. Gate all messages behind serverPrimaryExecution, default off. Negotiate
+7. Use `serverPrimaryExecution`, default off, as the only rollout authority
+   switch. With it off, start no execution pool and preserve client-primary
+   behavior. With it on, automatically claim every eligible action in every
+   active compatible space. Do not add a per-space authority document or CLI;
+   claims, actor identity, heartbeat, exception lists, and epochs remain
+   server control-plane state rather than mutable user data.
+8. Gate all messages behind serverPrimaryExecution. Negotiate
    absent-false `serverPrimaryExecutionClaimRoutingV1` and
    `serverPrimaryExecutionBuiltinPassivityV1` sub-capabilities. Implemented
-   builds advertise both with the main flag; a server publishes only the claim
-   classes the client says it can honor and rejects a stale peer when policy
-   requires the graduated behavior.
+   builds advertise both with the main flag; a server with the flag on rejects
+   stale peers missing either graduated promise.
 
 **Success criteria:**
 
@@ -607,7 +598,7 @@ graduated sub-capability.
 - [x] Spoofed connection id, principal, claim, or settlement is rejected.
 - [x] Revoke/re-claim within one lease gets a new claimGeneration, and a
       reordered old-generation settlement cannot clear the new claim.
-- [x] Expiry or policy disable publishes revoke, removes live/snapshot
+- [x] Expiry or claim replacement publishes revoke, removes live/snapshot
       authority, and rejects stale settlement.
 - [x] A committed settlement delivered before its data frame is buffered until
       the acceptedCommitSeq patch is applied.
@@ -663,7 +654,8 @@ generation. Background-only work gets its service identity later.
    identity is construction-wide; do not switch actor inside a settled graph.
 4. The host retains the authenticated grant and exposes only an opaque lease
    channel to the Worker. Every executor commit checks current generation,
-   expiry, sponsor authorization, and executionPolicy immediately before apply.
+   expiry, sponsor authorization, and the global server-execution flag
+   immediately before apply.
 5. Renew with server time while demand/in-flight work exists. A heartbeat
    document is not a lease and must not be introduced.
 6. On sponsor disconnect/revocation, enter a bounded teardown drain and reject
@@ -721,10 +713,11 @@ and signing authority are separate.
 2. Construct one runtime with persistentSchedulerState enabled and the
    authenticated host provider. Rehydrate the applicable space/user/session
    scheduler rows for its sponsor context.
-   From the first pull, enforce shadow mode: apply computation results only to
-   the Worker's private replica for graph discovery, reject every upstream
-   derived commit, and deny all external builtin broker calls. Source/handler
-   work is not injected into this runtime.
+   From the first pull until an exact action is claim-ready, apply computation
+   results only to the Worker's private replica for graph discovery, reject
+   every upstream derived commit, and deny all external builtin broker calls.
+   This is a transient pre-claim state, not an operator-selected mode.
+   Source/handler work is not injected into this runtime.
 3. Register post-commit buffering before initial load. Worker reports live at
    seq S; release buffered notifications after S so spawn has no gap.
 4. Demand exact piece result roots with pull-per-wake. Do not install a
@@ -828,7 +821,7 @@ only an action it can serve. Clients need not predict unsupported actions.
 
 **Success criteria:**
 
-- [x] Same-space pure computation becomes claim-ready in ordinary shadow mode
+- [x] Same-space pure computation becomes claim-ready during pre-claim discovery
       with zero server data commits.
 - [x] The explicit test capability claims that computation and commits
       server-derived output under its sponsor.
@@ -1138,30 +1131,30 @@ per-action sink authority decision and pre-claim in-flight handoff.
 
 ---
 
-### W2.4 — Measurement and opt-in rollout
+### W2.4 — Measurement and rollout
 
 **Depends on:** W1.5, W2.2, W2.3.
 
-**Status:** implementation and local validation are complete. The
-owner CLI, runbook, bounded-cardinality health/latency signals,
-product-derived/literal multi-client fixtures, and deterministic
-authority/failure drills are present. The parked-worker claim-readiness
+**Status:** implementation and local validation are complete. The runbook,
+bounded-cardinality health/latency signals, product-derived/literal
+multi-client fixtures, and deterministic authority/failure drills are present.
+The parked-worker claim-readiness
 failure is fixed with exact cold-wake, sponsor-preference, settle-watermark,
 and replacement coverage. Process-lifetime placement counters distinguish
 completed server action runs, classified shadow/authoritative action
 transactions, and builtin broker requests, while separate timings identify
 client demand publication, Worker start outcomes, and host stale-reader lookup.
-The counterbalanced rollout fixture records client and server windows without
-conflating their different units. Its process-global server baseline is fenced
-on zero lanes, Workers, and demands under the serial integration runner;
-parallel runs require an isolated Toolshed. Enabled windows close on an exact
-claimed-settlement barrier, while disabled server windows are explicitly
-advisory because they close on the client-upstream barrier. The 500-event
-counterbalanced browser/CPU gate passes; the deployed-staging enable/disable
-drill remains pending.
+The rollout fixture records client and server windows without conflating their
+different units. A valid comparison uses two fresh deployments: explicit flag
+off, which must have no server pool, and flag on, which must prove
+authoritative server transactions and exact successful settlements rather
+than merely observing shadow work. Parallel runs require an isolated
+Toolshed. The earlier 500-event in-process counterbalanced gate remains useful
+historical evidence but must be replaced by this final two-deployment
+measurement before rollout.
 
-**Deliverable:** perf fixtures, operational metrics, and an enable/disable
-runbook using serverPrimaryExecution plus optional executionPolicy.
+**Deliverable:** perf fixtures, operational metrics, and a flag-off/flag-on
+runbook using only serverPrimaryExecution.
 
 **Measure:**
 
@@ -1192,29 +1185,23 @@ runbook using serverPrimaryExecution plus optional executionPolicy.
 - [x] Pure-computation output and derived-wire-commit counts remain identical
       under flag-off/flag-on runs for unclaimed PerSpace, PerUser, PerSession,
       and cross-space cases (`server-execution-rollout-products.test.ts`).
-- [ ] Enabling then disabling a staging space converges without data migration.
-      The deterministic local analogue passes in `executor-claim-e2e.test.ts`
-      ("shared execution pool transitions shadow to claimed and back without
-      migration"); a deployed-staging CLI drill and record are still required.
+- [ ] Fresh flag-off and flag-on staging deployments both converge without
+      data migration. The off run has no server pool and uses client upstream
+      writes; the on run proves authoritative server transactions, successful
+      exact-incarnation settlements, and corresponding client suppression.
 - [x] Kill/restart/sponsor-loss drills demonstrate fail-open authority and no
       duplicate worker commits (`executor-drain-barrier.test.ts`).
-- [x] Browser compute and lazy-client CPU pass the 500-event ABBA + BAAB
-      renderer-process gate. ABBA enabled/disabled is 1.0347, BAAB is 1.0387,
-      and combined is 1.0366 against the 1.10 ceiling; same-policy spreads are
-      at most 0.0586 against the 0.15 ceiling. Every enabled phase suppresses
-      all 500 derived client wire commits and completes exact authority and
-      settlement barriers. Later complete-closure suppression remains tracked
-      explicitly in Phase 3. See the
-      [accepted Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-13.md)
-      and `server-primary-rollout-profile.test.ts`.
-- [x] The counterbalanced browser fixture reports per-window client scheduler
-      runs, suppressed/upstream client transactions, completed server action
-      runs, classified shadow/authoritative server transactions, server builtin
-      requests, settlement outcomes, and the boundary used. Enabled server
-      windows are settlement-bounded; disabled server windows are advisory.
-      These remain separate units because client speculation, unserved
-      transaction attempts, action routing, and settlement coalescing are not
-      one-to-one.
+- [ ] Browser compute and lazy-client CPU pass the final fresh-deployment
+      flag-off/flag-on gate. The earlier 500-event counterbalanced result is
+      retained in the
+      [Phase 2 rollout report](../../history/development/performance/server-primary-rollout-2026-07-13.md),
+      but its per-space authority phases are no longer the rollout model.
+- [x] The browser fixture reports client scheduler runs,
+      suppressed/upstream client transactions, completed server action runs,
+      classified shadow/authoritative server transactions, server builtin
+      requests, and settlement outcomes as separate units. Client speculation,
+      unserved transaction attempts, action routing, and settlement coalescing
+      are not one-to-one.
 
 ---
 
@@ -1234,9 +1221,9 @@ Client demand is P1. Background registry cleanup is lower priority.
 3. Remove the old polling loop only after parity tests pass.
 4. Narrow watch/query refresh toward declared document interest and server
    control/data events. Preserve ACL isolation and ordered catch-up.
-5. Add a separately gated client-compute suppression mode only after the claim
-   snapshot and closure are complete: a client may leave a remotely owned
-   action cold until local dependency or handler speculation demands it.
+5. Add client-compute suppression to the server-primary posture only after the
+   claim snapshot and closure are complete: a client may leave a remotely
+   owned action cold until local dependency or handler speculation demands it.
    Measure first-paint and interaction regressions. This later work removes N×
    client compute; the initial authority split removes duplicate writes and
    external effects, not local speculative computation.
@@ -1281,9 +1268,9 @@ relying on trusted claim compliance.
    creation source is irrelevant.
 7. **No transaction splitting.** Search specifically for per-operation routing
    of a claimed action and reject it.
-8. **No implicit authority docs.** executionPolicy is opt-in only. Claims,
-   leases, heartbeats, actors, and unservable lists do not belong in ordinary
-   writable space state.
+8. **No authority docs.** The global rollout flag selects client-primary or
+   automatic server-primary execution. Claims, leases, heartbeats, actors, and
+   unservable lists do not belong in ordinary writable space state.
 9. **No raw Engine shortcut.** In-process commits pass the same ACL, CFC,
    conflict, provenance, fence, and post-commit hooks as remote commits.
 10. **No ambient network expansion.** Raw SES fetch stays blocked. Builtins
@@ -1307,8 +1294,9 @@ relying on trusted claim compliance.
 - A sticky authenticated requester sponsors the worker; derived commits record
   server-executed on behalf of that user.
 - A fenced lease, not a heartbeat, prevents duplicate server workers.
-- executionPolicy is optional opt-in only; positive per-action claims control
-  authority.
+- The global serverPrimaryExecution flag is the only rollout switch: off starts
+  no pool; on automatically serves every eligible compatible piece. Positive
+  per-action claims control action-level authority within the on mode.
 - Every claim has a per-action claimGeneration distinct from its worker lease
   generation.
 - Client authority is the default for every unclaimed action.

@@ -149,11 +149,11 @@ principal/session execution contexts, and effective target scope keys.
 
 `serverPrimaryExecutionV1` advertises the trusted-client demand and ordered
 control-feed protocol. It is optional and absent means `false`; it is not part
-of global hello equality. When the runtime flag is on and the default-branch,
-space-scoped `of:${space}:execution-policy` document is exactly
-`{ version: 1, serverPrimaryExecution: true }`, `session.open` rejects a peer
-that omitted the capability. With the runtime flag off, the same durable policy
-is inert so operators retain a real client-primary rollback. Negotiated flags
+of global hello equality. When the runtime flag is on, `session.open` rejects a
+peer that omitted the capability and server-primary execution applies
+automatically to every eligible active space. With the runtime flag off, the
+server does not start the execution pool or exchange execution control
+messages, so operators retain a real client-primary rollback. Negotiated flags
 are fixed for one physical connection; applying a changed deployment flag
 requires reconnecting clients (normally by restarting/redeploying the host).
 
@@ -672,8 +672,8 @@ wire request may not contain a connection id, principal, sponsor, or
 `onBehalfOf`. Setting replaces only that connection/session/branch entry, an
 empty list removes it, and disconnect removes every reference owned by that
 connection. Demand requires READ; later sponsor selection separately requires
-WRITE. Demand is policy-independent because Phase 1 consumes it for shadow
-execution while clients remain authoritative. The host subscription publishes
+WRITE. With the global flag on, demand drives automatic graph discovery and
+positive claims for eligible actions. The host subscription publishes
 `{space, branch, order, demands}` so the final empty snapshot still identifies
 the exact worker-pool slot to stop. It is a delta subscription with no initial
 replay; the shared pool MUST install it before the memory host accepts client
@@ -721,9 +721,9 @@ Every claim is branch-qualified, actively host-expiring, and has a per-action mo
 live generation; a reclaim always mints the next generation. Deadline expiry
 removes the live claim, publishes its revoke, excludes it from snapshots, and
 rejects later settlements. Positive claims require both the runtime flag and a
-currently enabled execution policy. Setting that policy false or deleting it
-revokes every live claim for the space; raw demand remains available for shadow
-execution. Settlements must match the exact branch, lease, and claim generation.
+currently authorized sponsor. Turning the runtime flag off and restarting the
+deployment removes the execution pool; it is the only rollout rollback.
+Settlements must match the exact branch, lease, and claim generation.
 `committed` requires `acceptedCommitSeq`; `no-op`, `failed`, and `unserved`
 forbid it. Client frames using these server-only message names are rejected by
 the strict parser. Retained events are filtered through the reconnecting
@@ -811,13 +811,6 @@ concrete (non-`"*"`) OWNER. Patch, deletion, mixed ACL/data commits, and
 last-owner removal are rejected. These shape and genesis rules are hard
 storage invariants in both `observe` and `enforce`; `observe` relaxes only
 ordinary capability shortfalls on an already valid ACL.
-
-Execution-policy mutation is a separate authority invariant. In ACL `enforce`
-mode, the effective principal must hold OWNER. While ACL mutation itself is
-rollout-relaxed in `off` or `observe`, only the immutable implicit owners—the
-space identity and configured service DIDs—may mutate execution policy. This
-prevents a writer from self-granting ACL OWNER and taking over the
-server-primary authority switch.
 
 Genesis remains an explicit transaction. For a fresh named space, the storage
 manager briefly authenticates as the derived space identity, writes
