@@ -5,6 +5,7 @@ import {
   describeMemoryWireAccountingEnv,
   findIntegrationTestFiles,
   integrationTestDir,
+  MEMORY_WIRE_ACCOUNTING_REQUIRED_ENV,
   MEMORY_WIRE_ACCOUNTING_TOKEN_ENV,
   memoryWireAccountingEnvForServerRun,
   runFilteredIntegration,
@@ -185,6 +186,7 @@ Deno.test("memoryWireAccountingEnvForServerRun propagates token and defaults uns
   assertEquals(env.serverEnv[MEMORY_WIRE_ACCOUNTING_TOKEN_ENV], token);
   assertEquals(env.serverEnv.ENV, "development");
   assertEquals(env.testEnv[MEMORY_WIRE_ACCOUNTING_TOKEN_ENV], token);
+  assertEquals(env.testEnv[MEMORY_WIRE_ACCOUNTING_REQUIRED_ENV], "1");
   assertEquals(env.testEnv.ENV, undefined);
 });
 
@@ -201,6 +203,7 @@ Deno.test("memoryWireAccountingEnvForServerRun preserves allowed development ENV
   assertEquals(env.serverEnv[MEMORY_WIRE_ACCOUNTING_TOKEN_ENV], token);
   assertEquals(env.serverEnv.ENV, "development");
   assertEquals(env.testEnv[MEMORY_WIRE_ACCOUNTING_TOKEN_ENV], token);
+  assertEquals(env.testEnv[MEMORY_WIRE_ACCOUNTING_REQUIRED_ENV], "1");
   assertEquals(env.testEnv.ENV, undefined);
 });
 

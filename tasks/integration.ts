@@ -57,6 +57,8 @@ const HEADLESS_PACKAGES = [
 
 export const MEMORY_WIRE_ACCOUNTING_TOKEN_ENV =
   "CF_MEMORY_WIRE_ACCOUNTING_TOKEN";
+export const MEMORY_WIRE_ACCOUNTING_REQUIRED_ENV =
+  "CF_MEMORY_WIRE_ACCOUNTING_REQUIRED";
 const MEMORY_WIRE_ACCOUNTING_ALLOWED_ENVS = new Set(["development", "test"]);
 const MEMORY_WIRE_ACCOUNTING_DEFAULT_ENV = "development";
 
@@ -92,6 +94,7 @@ export function memoryWireAccountingEnvForServerRun(
     },
     testEnv: {
       [MEMORY_WIRE_ACCOUNTING_TOKEN_ENV]: token,
+      [MEMORY_WIRE_ACCOUNTING_REQUIRED_ENV]: "1",
     },
   };
 }
