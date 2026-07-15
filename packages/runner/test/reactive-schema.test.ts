@@ -2,12 +2,43 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Identity } from "@commonfabric/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
+
+type AliasValue = {
+  $alias: {
+    schema?: JSONSchemaObj;
+  };
+};
+type AliasRecord = Record<string, AliasValue | undefined>;
+type UserDetailsInput = {
+  user: {
+    details: {
+      age: number;
+    };
+  };
+};
+
+const aliasValue = (value: unknown): AliasValue => value as AliasValue;
+const aliasRecord = (value: unknown): AliasRecord => value as AliasRecord;
+
+function schemaObject(schema: JSONSchema | undefined): JSONSchemaObj {
+  expect(schema).toBeDefined();
+  expect(typeof schema).toBe("object");
+  return schema as JSONSchemaObj;
+}
+
+function schemaDefs(
+  schema: JSONSchema | undefined,
+): Readonly<Record<string, JSONSchema>> {
+  const defs = schemaObject(schema).$defs;
+  expect(defs).toBeDefined();
+  return defs as Readonly<Record<string, JSONSchema>>;
+}
 
 describe("Reactive Schema Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -274,23 +305,22 @@ describe("Reactive Schema Support", () => {
         },
       );
 
-      expect((testPattern.result as any).$alias).toBeDefined();
-      const alias = (testPattern.result as any).$alias;
+      expect(aliasValue(testPattern.result).$alias).toBeDefined();
+      const alias = aliasValue(testPattern.result).$alias;
 
       // Check that schema was set
       expect(alias.schema).toBeDefined();
-      expect(alias.schema.type).toBe("object");
-      expect(alias.schema.properties?.name).toEqual({ type: "string" });
-      expect(alias.schema.properties?.age).toEqual({ type: "number" });
+      const resultSchema = schemaObject(alias.schema);
+      expect(resultSchema.type).toBe("object");
+      expect(resultSchema.properties?.name).toEqual({ type: "string" });
+      expect(resultSchema.properties?.age).toEqual({ type: "number" });
     });
 
     it("should track schema through pattern bindings", () => {
       // Create a pattern that uses child properties
-      const testPattern = pattern(
+      const testPattern = pattern<UserDetailsInput, { age: number }>(
         (input) => {
-          // Get a nested property
-          // TODO(seefeld): Fix type inference
-          const age = (input as any).user.details.age;
+          const age = input.user.details.age;
 
           // Export both the original ref and nested property
           return {
@@ -316,8 +346,9 @@ describe("Reactive Schema Support", () => {
         } as const satisfies JSONSchema,
       );
 
-      expect((testPattern.result as any).age?.$alias).toBeDefined();
-      const alias = (testPattern.result as any).age.$alias;
+      const result = aliasRecord(testPattern.result);
+      expect(result.age?.$alias).toBeDefined();
+      const alias = aliasValue(result.age).$alias;
 
       // Check the age property schema
       expect(alias.schema).toBeDefined();
@@ -368,9 +399,10 @@ describe("Reactive Schema Support", () => {
 
       // Person and its Address dependency are both still reachable.
       expect(userExport.schema).toBeDefined();
-      expect((userExport.schema as any).$defs).toBeDefined();
-      expect((userExport.schema as any).$defs.Address).toBeDefined();
-      expect((userExport.schema as any).$defs.Person).toBeDefined();
+      const userSchema = schemaObject(userExport.schema);
+      expect(userSchema.$defs).toBeDefined();
+      expect(userSchema.$defs?.Address).toBeDefined();
+      expect(userSchema.$defs?.Person).toBeDefined();
 
       // Navigate further to home (which references Address via $ref)
       const homeRef = userRef.key("home");
@@ -378,9 +410,10 @@ describe("Reactive Schema Support", () => {
 
       // Person is no longer reachable, but Address is needed by the cursor.
       expect(homeExport.schema).toBeDefined();
-      expect((homeExport.schema as any).$defs).toBeDefined();
-      expect((homeExport.schema as any).$defs.Address).toBeDefined();
-      expect((homeExport.schema as any).$defs.Person).toBeUndefined();
+      const homeSchema = schemaObject(homeExport.schema);
+      expect(homeSchema.$defs).toBeDefined();
+      expect(homeSchema.$defs?.Address).toBeDefined();
+      expect(homeSchema.$defs?.Person).toBeUndefined();
 
       // Navigate to street (final property)
       const streetRef = homeRef.key("street");
@@ -432,18 +465,18 @@ describe("Reactive Schema Support", () => {
       // Each step retains the remaining transitive closure and drops definitions
       // that can no longer be reached.
       const outerRef = ref.key("outer");
-      expect(Object.keys((outerRef.export().schema as any).$defs)).toEqual([
+      expect(Object.keys(schemaDefs(outerRef.export().schema))).toEqual([
         "Inner",
         "Middle",
         "Outer",
       ]);
       const middleRef = outerRef.key("middle");
-      expect(Object.keys((middleRef.export().schema as any).$defs)).toEqual([
+      expect(Object.keys(schemaDefs(middleRef.export().schema))).toEqual([
         "Inner",
         "Middle",
       ]);
       const innerRef = middleRef.key("inner");
-      expect(Object.keys((innerRef.export().schema as any).$defs)).toEqual([
+      expect(Object.keys(schemaDefs(innerRef.export().schema))).toEqual([
         "Inner",
       ]);
       const valueRef = innerRef.key("value");
