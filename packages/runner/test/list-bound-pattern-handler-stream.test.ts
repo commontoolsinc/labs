@@ -97,8 +97,8 @@ describe("bound list pattern handler stream lifecycle", () => {
       await waitFor(
         runtime,
         () =>
-          result.key("rows").key(0).key("canManage").get() as unknown as
-            boolean,
+          result.key("rows").key(0).key("canManage")
+            .get() as unknown as boolean,
         (value) => value === true,
         "the mapped row update",
       );
