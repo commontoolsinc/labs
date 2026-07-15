@@ -1,8 +1,10 @@
 import { assertEquals } from "@std/assert";
+import type { BuiltInLLMMessage, RenderNode } from "@commonfabric/api";
 import { createSession, Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import {
+  type CellLink,
   getMetaLink,
   parseLink,
   toMemorySpaceAddress,
@@ -10,7 +12,59 @@ import {
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type Cell, createCell } from "../src/cell.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
-import { type FactoryInput } from "../src/builder/types.ts";
+import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
+
+type JSONSchemaObject = Exclude<JSONSchema, boolean>;
+type CollectionPatternInput<T> = {
+  element: T;
+  index: number;
+  array: T[];
+};
+type PatternCollection = {
+  mapWithPattern<T = unknown>(
+    pattern: unknown,
+    params: Record<string, unknown>,
+  ): T;
+  filterWithPattern<T = unknown>(
+    pattern: unknown,
+    params: Record<string, unknown>,
+  ): T;
+  flatMapWithPattern<T = unknown>(
+    pattern: unknown,
+    params: Record<string, unknown>,
+  ): T;
+};
+type RenderedNode = { children?: unknown[] };
+
+const cellInput = <T>(value: unknown): Cell<T> => value as Cell<T>;
+const factoryInput = <T>(value: unknown): FactoryInput<T> =>
+  value as FactoryInput<T>;
+const valueInput = <T>(value: unknown): T => value as T;
+const patternCollection = (value: unknown): PatternCollection =>
+  value as PatternCollection;
+
+function schemaObject(schema: JSONSchema | undefined): JSONSchemaObject {
+  if (!schema || typeof schema === "boolean") {
+    throw new Error("Expected object schema");
+  }
+
+  return schema;
+}
+
+function schemaScope(schema: JSONSchema | undefined) {
+  return schemaObject(schema).scope;
+}
+
+function asCellScope(schema: JSONSchema | undefined) {
+  const [entry] = schemaObject(schema).asCell ?? [];
+  return typeof entry === "object" && entry !== null ? entry.scope : undefined;
+}
+
+function renderedNode(value: unknown): RenderedNode | undefined {
+  return typeof value === "object" && value !== null
+    ? value as RenderedNode
+    : undefined;
+}
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -60,11 +114,11 @@ Deno.test("Cell.key keeps base scope; schema carries the scope", async () => {
 
     // The scope is carried on the schema of the navigated link.
     assertEquals(
-      (cell.key("name").getAsNormalizedFullLink().schema as any)?.scope,
+      schemaScope(cell.key("name").getAsNormalizedFullLink().schema),
       "user",
     );
     assertEquals(
-      (cell.key("selectedRoom").getAsNormalizedFullLink().schema as any)?.scope,
+      schemaScope(cell.key("selectedRoom").getAsNormalizedFullLink().schema),
       "session",
     );
   } finally {
@@ -137,8 +191,8 @@ Deno.test("handler bindings preserve scoped cells selected from pattern input sc
       conversation,
       newRoomName,
       addRoom: addRoom({
-        conversation: conversation as unknown as Cell<Conversation>,
-        newRoomName: newRoomName as unknown as Cell<string>,
+        conversation: cellInput<Conversation>(conversation),
+        newRoomName: cellInput<string>(newRoomName),
       }),
     }), {
       type: "object",
@@ -336,15 +390,13 @@ Deno.test("per-user pointer can create and update a space-scoped profile cell", 
       myProfile,
       messages,
       saveName: saveName(
-        ({
-          myProfile: myProfile as unknown as Cell<MyProfile>,
-        }) as any,
+        { myProfile: cellInput<MyProfile>(myProfile) },
       ),
       sendMessage: sendMessage(
-        ({
-          myProfile: myProfile as unknown as Cell<MyProfile>,
-          messages: messages as unknown as Cell<Message[]>,
-        }) as any,
+        {
+          myProfile: cellInput<MyProfile>(myProfile),
+          messages: cellInput<Message[]>(messages),
+        },
       ),
     }), {
       type: "object",
@@ -511,7 +563,10 @@ Deno.test("pattern factory .inSpace() routes child pattern result to DID space",
     const childLink = result.key("child").resolveAsCell()
       .getAsNormalizedFullLink();
     assertEquals(childLink?.space, targetSpace);
-    assertEquals(await result.key("child", "value").pull(), "child" as any);
+    assertEquals(
+      (await result.key("child", "value").pull()) as unknown,
+      "child",
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -560,8 +615,8 @@ Deno.test("pattern factory .inSpace() resolves named spaces during action postRu
     const childLink = actionResult.resolveAsCell().getAsNormalizedFullLink();
     assertEquals(childLink?.space, expectedSpace);
     assertEquals(
-      await result.key("child", "value").pull(),
-      "named child" as any,
+      (await result.key("child", "value").pull()) as unknown,
+      "named child",
     );
   } finally {
     await runtime.dispose();
@@ -640,7 +695,10 @@ Deno.test("pattern factory .inSpace() handler side effect can write linked child
 
     const childLink = parseLink(profile.getRaw(), profile);
     assertEquals(childLink?.space, targetSpace);
-    assertEquals(await profile.key("value").pull(), "linked child" as any);
+    assertEquals(
+      (await profile.key("value").pull()) as unknown,
+      "linked child",
+    );
   } finally {
     await runtime.dispose();
     await storageManager.close();
@@ -724,8 +782,8 @@ Deno.test("pattern factory .inSpace() resolves named handler children to DIDs", 
     const childLink = parseLink(target.getRaw(), target);
     assertEquals(childLink?.space, expectedSpace);
     assertEquals(
-      await target.key("value").pull(),
-      "annotated child" as any,
+      (await target.key("value").pull()) as unknown,
+      "annotated child",
     );
   } finally {
     await runtime.dispose();
@@ -816,8 +874,8 @@ Deno.test("pattern factory .inSpace() rewrites named child links through writeon
     const childLink = parseLink(target.getRaw(), target);
     assertEquals(childLink?.space, expectedSpace);
     assertEquals(
-      await target.key("value").pull(),
-      "writeonly child" as any,
+      (await target.key("value").pull()) as unknown,
+      "writeonly child",
     );
   } finally {
     await runtime.dispose();
@@ -867,8 +925,8 @@ Deno.test("pattern factory .inSpace() with a cell uses that cell's space", async
       .getAsNormalizedFullLink();
     assertEquals(childLink?.space, targetSpace);
     assertEquals(
-      await result.key("child", "value").pull(),
-      "anchored child" as any,
+      (await result.key("child", "value").pull()) as unknown,
+      "anchored child",
     );
   } finally {
     await runtime.dispose();
@@ -914,8 +972,8 @@ Deno.test("pattern factory .inSpace() without a space creates a fresh DID space 
     assertEquals(childLink?.space.startsWith("did:key:"), true);
     assertEquals(childLink?.space === space, false);
     assertEquals(
-      await result.key("child", "value").pull(),
-      "random child" as any,
+      (await result.key("child", "value").pull()) as unknown,
+      "random child",
     );
   } finally {
     await runtime.dispose();
@@ -984,9 +1042,9 @@ Deno.test("runtime rejects inherit scope on full normalized links", async () => 
           runtime.getCellFromLink({
             id: "of:unresolved-inherit-scope",
             space,
-            scope: "inherit",
+            scope: "inherit" as "space",
             path: [],
-          } as any);
+          });
           return undefined;
         } catch (error) {
           return error instanceof Error ? error.message : String(error);
@@ -1086,16 +1144,16 @@ Deno.test("key() does not stamp the asCell entry scope onto the container link",
     // the wrong, narrower, empty scoped instance of the container — see CT-1623.
     const current = outer.key("current");
     assertEquals(current.getAsNormalizedFullLink().scope, "space");
-    const currentSchema = current.getAsNormalizedFullLink().schema as any;
     assertEquals(
-      currentSchema?.asCell?.[0]?.scope ?? currentSchema?.scope,
+      asCellScope(current.getAsNormalizedFullLink().schema) ??
+        schemaScope(current.getAsNormalizedFullLink().schema),
       "session",
     );
 
     const plain = outer.key("plain");
     assertEquals(plain.getAsNormalizedFullLink().scope, "space");
     assertEquals(
-      (plain.getAsNormalizedFullLink().schema as any)?.scope,
+      schemaScope(plain.getAsNormalizedFullLink().schema),
       "user",
     );
   } finally {
@@ -1425,9 +1483,9 @@ Deno.test("map keeps outer list scope and narrows per-element result cells", asy
       { type: "number" },
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
-      mapped: (values as any).mapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((value: any) => increment(value)) as any)(element, index, array)
+      mapped: patternCollection(values).mapWithPattern(
+        pattern(({ element }: CollectionPatternInput<unknown>) =>
+          increment(factoryInput<number>(element))
         ),
         {},
       ),
@@ -1440,7 +1498,9 @@ Deno.test("map keeps outer list scope and narrows per-element result cells", asy
       tx,
     );
 
-    const result = runtime.run(tx, Root, { values: [item as any] }, resultCell);
+    const result = runtime.run(tx, Root, {
+      values: [valueInput<number>(item)],
+    }, resultCell);
     runtime.prepareTxForCommit(tx);
     await tx.commit();
     await runtime.idle();
@@ -1536,14 +1596,11 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
           current: { conversation: Conversation; selectedRoom: string },
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
       )({ conversation, selectedRoom });
-      const bodies = (messages as any).mapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((message: any) =>
-            lift((current: Message) => current.body)(message)) as any)(
-              element,
-              index,
-              array,
-            )
+      const bodies = patternCollection(messages).mapWithPattern(
+        pattern(({ element }: CollectionPatternInput<unknown>) =>
+          lift((current: Message) => current.body)(
+            factoryInput<Message>(element),
+          )
         ),
         {},
       );
@@ -1551,7 +1608,7 @@ Deno.test("map updates when derived list is narrowed by session input", async ()
         messages,
         bodies,
         setConversation: setConversation({
-          conversation: conversation as unknown as Cell<Conversation>,
+          conversation: cellInput<Conversation>(conversation),
         }),
       };
     });
@@ -1641,14 +1698,11 @@ Deno.test("map materializes initially populated list selected by session input",
           current: { conversation: Conversation; selectedRoom: string },
         ) => current.conversation.rooms[current.selectedRoom] ?? [],
       )({ conversation, selectedRoom });
-      const bodies = (messages as any).mapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((message: any) =>
-            lift((current: Message) => current.body)(message)) as any)(
-              element,
-              index,
-              array,
-            )
+      const bodies = patternCollection(messages).mapWithPattern(
+        pattern(({ element }: CollectionPatternInput<unknown>) =>
+          lift((current: Message) => current.body)(
+            factoryInput<Message>(element),
+          )
         ),
         {},
       );
@@ -1734,14 +1788,11 @@ Deno.test("ifElse selected branch materializes map over session-derived list", a
       const rendered = ifElse(
         isEmpty,
         [],
-        (messages as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((message: any) =>
-              lift((current: Message) => current.body)(message)) as any)(
-                element,
-                index,
-                array,
-              )
+        patternCollection(messages).mapWithPattern(
+          pattern(({ element }: CollectionPatternInput<unknown>) =>
+            lift((current: Message) => current.body)(
+              factoryInput<Message>(element),
+            )
           ),
           {},
         ),
@@ -1831,14 +1882,15 @@ Deno.test("ifElse selected VNode branch materializes map over session-derived li
         h(
           "div",
           null,
-          (messages as any).mapWithPattern(
-            pattern(({ element, index, array }: FactoryInput<any>) =>
-              (((message: any) =>
-                h(
-                  "span",
-                  null,
-                  lift((current: Message) => current.body)(message),
-                )) as any)(element, index, array)
+          patternCollection(messages).mapWithPattern<RenderNode>(
+            pattern(({ element }: CollectionPatternInput<unknown>) =>
+              h(
+                "span",
+                null,
+                lift((current: Message) => current.body)(
+                  factoryInput<Message>(element),
+                ),
+              )
             ),
             {},
           ),
@@ -1872,11 +1924,15 @@ Deno.test("ifElse selected VNode branch materializes map over session-derived li
       result.key("ui").getRaw({ lastNode: "writeRedirect" }),
       result.key("ui"),
     );
-    const rendered = uiLink && runtime.getCellFromLink(uiLink).getRaw() as any;
+    const rendered = uiLink
+      ? renderedNode(runtime.getCellFromLink(uiLink).getRaw())
+      : undefined;
     const childRaw = Array.isArray(rendered?.children)
       ? rendered.children[0]
       : undefined;
-    const nestedLink = childRaw && parseLink(childRaw, uiLink!);
+    const nestedLink = childRaw === undefined
+      ? undefined
+      : parseLink(valueInput<CellLink>(childRaw), uiLink!);
 
     assertEquals(nestedLink?.scope, "space");
     assertEquals(
@@ -1915,6 +1971,8 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
     interface SelectedRoom {
       room?: Room;
     }
+
+    type SelectedRoomRefInput = { selectedRoomRef: Cell<Room> };
 
     const container = runtime.getCell<{
       conversation: { rooms: Room[] };
@@ -1956,7 +2014,7 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
 
     const Root = pattern<{ selectedRoom: SelectedRoom }>(
       ({ selectedRoom }) => {
-        const selectedRoomRef = (selectedRoom as unknown as Cell<SelectedRoom>)
+        const selectedRoomRef = cellInput<SelectedRoom>(selectedRoom)
           .key("room") as Cell<Room>;
         const selectedRoomRefInputSchema = {
           type: "object",
@@ -1981,7 +2039,7 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
           required: ["selectedRoomRef"],
         } as const;
         const messageCount = lift(
-          (current: any) =>
+          (current: SelectedRoomRefInput) =>
             current.selectedRoomRef.get()?.messages?.length ?? 0,
           selectedRoomRefInputSchema,
           { type: "number" } as const,
@@ -1995,19 +2053,22 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
           h(
             "div",
             null,
-            (lift(
-              (current: any) =>
-                current.selectedRoomRef.get()?.messages as Message[],
-              selectedRoomRefInputSchema,
-              { type: "unknown" } as const,
-            )({ selectedRoomRef }) as any).mapWithPattern(
-              pattern(({ element, index, array }: FactoryInput<any>) =>
-                (((message: any) =>
-                  h(
-                    "span",
-                    null,
-                    lift((current: Message) => current.body)(message),
-                  )) as any)(element, index, array)
+            patternCollection(
+              lift(
+                (current: SelectedRoomRefInput) =>
+                  current.selectedRoomRef.get()?.messages,
+                selectedRoomRefInputSchema,
+                { type: "unknown" } as const,
+              )({ selectedRoomRef }),
+            ).mapWithPattern<RenderNode>(
+              pattern(({ element }: CollectionPatternInput<unknown>) =>
+                h(
+                  "span",
+                  null,
+                  lift((current: Message) => current.body)(
+                    factoryInput<Message>(element),
+                  ),
+                )
               ),
               {},
             ),
@@ -2032,7 +2093,7 @@ Deno.test("map materializes list through session boxed space-scoped reference", 
     await result.pull();
 
     const updateTx = runtime.edit();
-    selectedRoom.withTx(updateTx).set({ room: room as unknown as Room });
+    selectedRoom.withTx(updateTx).set({ room: valueInput<Room>(room) });
     await updateTx.commit();
     await runtime.idle();
     await runtime.storageManager.synced();
@@ -2080,9 +2141,9 @@ Deno.test("filter narrows output list when scoped element controls cardinality",
       { type: "boolean" },
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
-      filtered: (values as any).filterWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((value: any) => positive(value)) as any)(element, index, array)
+      filtered: patternCollection(values).filterWithPattern(
+        pattern(({ element }: CollectionPatternInput<unknown>) =>
+          positive(factoryInput<number>(element))
         ),
         {},
       ),
@@ -2095,7 +2156,9 @@ Deno.test("filter narrows output list when scoped element controls cardinality",
       tx,
     );
 
-    const result = runtime.run(tx, Root, { values: [item as any] }, resultCell);
+    const result = runtime.run(tx, Root, {
+      values: [valueInput<number>(item)],
+    }, resultCell);
     runtime.prepareTxForCommit(tx);
     await tx.commit();
     await runtime.idle();
@@ -2143,9 +2206,9 @@ Deno.test("flatMap narrows output list when scoped element controls cardinality"
       { type: "array", items: { type: "number" } },
     );
     const Root = pattern<{ values: number[] }>(({ values }) => ({
-      expanded: (values as any).flatMapWithPattern(
-        pattern(({ element, index, array }: FactoryInput<any>) =>
-          (((value: any) => expand(value)) as any)(element, index, array)
+      expanded: patternCollection(values).flatMapWithPattern(
+        pattern(({ element }: CollectionPatternInput<unknown>) =>
+          expand(factoryInput<number>(element))
         ),
         {},
       ),
@@ -2158,7 +2221,9 @@ Deno.test("flatMap narrows output list when scoped element controls cardinality"
       tx,
     );
 
-    const result = runtime.run(tx, Root, { values: [item as any] }, resultCell);
+    const result = runtime.run(tx, Root, {
+      values: [valueInput<number>(item)],
+    }, resultCell);
     runtime.prepareTxForCommit(tx);
     await tx.commit();
     await runtime.idle();
@@ -2564,20 +2629,20 @@ Deno.test("llmDialog result cell uses narrowest input scope", async () => {
   try {
     const { pattern, llmDialog } = createTrustedBuilder(runtime).commonfabric;
 
-    const messagesBase = runtime.getCell<any[]>(
+    const messagesBase = runtime.getCell<BuiltInLLMMessage[]>(
       space,
       "llmDialog user scoped messages",
       undefined,
       tx,
     );
-    const messages = createCell<any[]>(
+    const messages = createCell<BuiltInLLMMessage[]>(
       runtime,
       { ...messagesBase.getAsNormalizedFullLink(), scope: "user" },
       tx,
     );
     messages.set([]);
 
-    const Root = pattern<{ messages: any[] }>(({ messages }) => ({
+    const Root = pattern<{ messages: BuiltInLLMMessage[] }>(({ messages }) => ({
       dialog: llmDialog({ messages }),
     }));
 
