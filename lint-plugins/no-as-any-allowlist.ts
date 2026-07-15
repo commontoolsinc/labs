@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/pattern-binding.test.ts",
   "packages/runner/test/pattern-node-alias-schema.test.ts",
   "packages/runner/test/pattern-scope.test.ts",
   "packages/runner/test/pattern.test.ts",

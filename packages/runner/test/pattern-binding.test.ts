@@ -12,8 +12,10 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   areLinksSame,
   areNormalizedLinksSame,
+  type CellLink,
   getDerivedInternalCellLink,
   getMetaCell,
+  isCellLink,
   isLegacyAlias,
   parseLink,
 } from "../src/link-utils.ts";
@@ -24,6 +26,14 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+function expectCellLink(value: unknown): CellLink {
+  expect(isCellLink(value)).toBe(true);
+  if (!isCellLink(value)) {
+    throw new Error("Expected a cell link");
+  }
+  return value;
+}
 
 describe("pattern-binding", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -197,16 +207,19 @@ describe("pattern-binding", () => {
       const scopedRaw = scopedValue.getRaw();
       expect(isCell(scopedRaw)).toBe(false);
       expect(
-        areNormalizedLinksSame(parseLink(scopedRaw as any, scopedValue)!, {
-          ...source.getAsNormalizedFullLink(),
-          path: [],
-        }),
+        areNormalizedLinksSame(
+          parseLink(expectCellLink(scopedRaw), scopedValue),
+          {
+            ...source.getAsNormalizedFullLink(),
+            path: [],
+          },
+        ),
       ).toBe(true);
 
       const broadRaw = output.key("value").getRaw();
       expect(
         areNormalizedLinksSame(
-          parseLink(broadRaw as any, output.key("value"))!,
+          parseLink(expectCellLink(broadRaw), output.key("value")),
           scopedValue.getAsNormalizedFullLink(),
         ),
       ).toBe(true);
@@ -249,7 +262,7 @@ describe("pattern-binding", () => {
       expect(isCell(scopedRaw.nested)).toBe(false);
       expect(
         areNormalizedLinksSame(
-          parseLink(scopedRaw.nested as any, scopedValue)!,
+          parseLink(expectCellLink(scopedRaw.nested), scopedValue),
           {
             ...source.getAsNormalizedFullLink(),
             path: [],
