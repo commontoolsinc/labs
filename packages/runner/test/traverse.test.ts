@@ -2753,7 +2753,19 @@ describe("link schema path narrowing", () => {
     expect(error).toBeDefined();
   });
 
-  it("stops query traversal at an opaque nested cell boundary", () => {
+  // A graph can contain records of one recursive type: for example, every
+  // User has a friends Cell whose elements are links to other Users. Each
+  // link legitimately carries the full User schema, including its required
+  // friends property. A query for "me and my direct friends" must therefore
+  // override that nested friends edge with an opaque boundary; otherwise the
+  // schema carried by each friend link makes traversal continue to friends of
+  // friends (and then onward through the recursive graph).
+  //
+  // The boundary should retain the direct friend's raw friends pointer in the
+  // query result, but must not load or subscribe to the pointer's target. The
+  // non-opaque control at the end proves that the deeper documents are
+  // reachable and are excluded specifically because of the boundary.
+  it("limits a recursive friends query to one hop with an opaque boundary", () => {
     const store = new Map<string, Revision<State>>();
     const rootUri = "of:opaque-friends-root" as URI;
     const directFriendsUri = "of:opaque-direct-friends" as URI;
@@ -2857,6 +2869,8 @@ describe("link schema path narrowing", () => {
       false,
     );
 
+    // Without the explicit boundary, the same schema-bearing graph expands
+    // through the direct friend's friends list to the second-degree friend.
     const nonOpaqueDirectFriendSchema = {
       ...directFriendSchema,
       properties: {
