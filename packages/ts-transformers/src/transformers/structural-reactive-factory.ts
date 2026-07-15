@@ -231,8 +231,10 @@ function returnedExpressionCreatesWish(
     ts.isPropertyAccessExpression(target) ||
     ts.isElementAccessExpression(target)
   ) {
+    const receiver = unwrapExpression(target.expression);
+    if (ts.isIdentifier(receiver)) return false;
     return returnedExpressionCreatesWish(
-      target.expression,
+      receiver,
       checker,
       seenSymbols,
     );

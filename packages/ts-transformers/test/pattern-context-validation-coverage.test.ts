@@ -151,6 +151,10 @@ Deno.test(
 
       export default pattern(() => {
         const request = wish<string>({ query: "#note" });
+        const registry = wish<{
+          submitQuery: (input: { query: string }) => void;
+        }>({ query: "#registry" });
+        const submitHandler = registry.result.submitQuery;
         const match = computed(() =>
           request.candidates.find((candidate) => candidate === "selected")
         );
@@ -160,7 +164,10 @@ Deno.test(
         const helperMatch = computed(() =>
           getFind(request)((candidate) => candidate === "selected")
         );
-        return { match, labels, helperMatch };
+        const submitted = computed(() =>
+          submitHandler({ query: "#selected" })
+        );
+        return { match, labels, helperMatch, submitted };
       });
     `;
     const { diagnostics } = await validateSource(source, {
