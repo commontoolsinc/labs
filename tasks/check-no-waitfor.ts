@@ -17,7 +17,7 @@
 // the ALLOWLIST below.
 //
 // The ALLOWLIST holds the files that are exempt from this check; the reason for
-// each is recorded in the "Where a bounded poll is the right tool" section of
+// each is recorded in the "Where the polling `waitFor` stays" section of
 // docs/development/waiting-in-tests.md.
 //
 // Usage: deno run --allow-read ./tasks/check-no-waitfor.ts
@@ -29,7 +29,7 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
 // Files exempt from this check: they keep the polling `waitFor` from
 // "@commonfabric/integration". Each entry is a repo-relative path; the reason
-// for each is documented under "Where a bounded poll is the right tool" in
+// for each is documented under "Where the polling `waitFor` stays" in
 // docs/development/waiting-in-tests.md.
 export const ALLOWLIST: ReadonlySet<string> = new Set([
   // Headless cell pull: no page to attach an in-page waiter to.
@@ -42,11 +42,13 @@ export const ALLOWLIST: ReadonlySet<string> = new Set([
   // MockDoc rendered-HTML reads and fresh cell.sync() round-trips, with no
   // completion callback the test can hook.
   "packages/runtime-client/integration/client.test.ts",
-  // Instrumentation and profiling one-shots, shared button-click helpers used
-  // both wrapped and bare, and render/source-state probe waits.
+  // Instrumentation one-shots that arm a trace or install a telemetry handler,
+  // plus a piece-link click retry and a wait for the note modal to render.
   "packages/patterns/integration/default-app.test.ts",
+  // A telemetry-handler install, and a wait for the note modal to render.
   "packages/patterns/integration/reload/default-app-notebook.test.ts",
-  // Pre-existing OAuth end-to-end flow, predating the move to event-driven waits.
+  // Human-in-the-loop OAuth flow: a person completes the consent step in a real
+  // browser, and no CI lane runs the file.
   "packages/patterns/google/core/integration/google-calendar-importer.test.ts",
   // Disabled tests: never run, so migrating them only churns dead code.
   "packages/patterns/integration/cf-checkbox.test.disabled.ts",
@@ -155,7 +157,7 @@ function reportViolations(violations: string[]): void {
     "If an event-driven wait genuinely cannot express this (for example a",
     "cross-page condition or a headless cell read), add the file to ALLOWLIST in",
     "tasks/check-no-waitfor.ts with a one-line reason and record it under",
-    '"Where a bounded poll is the right tool" in docs/development/waiting-in-tests.md.',
+    '"Where the polling `waitFor` stays" in docs/development/waiting-in-tests.md.',
     "",
   ];
   console.error(lines.join("\n"));
