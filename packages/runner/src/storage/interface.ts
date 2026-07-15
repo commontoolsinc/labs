@@ -993,6 +993,16 @@ export interface IStorageTransaction {
     space: MemorySpace,
     preparation: NativeStorageCommitPreparation,
   ): void;
+
+  /**
+   * Remove runner-owned wire work that no longer corresponds to the current
+   * transaction draft. The owner remains responsible for settling any
+   * lifecycle callback associated with the removed preparation.
+   */
+  removeNativeCommitPreparation?(
+    space: MemorySpace,
+    key: string,
+  ): void;
 }
 
 export interface IExtendedStorageTransaction

@@ -587,7 +587,13 @@ Publication preserves the memory system's optimistic local-commit contract:
    preparation from its own `commit()` boundary. Calling
    `Runtime.prepareTxForCommit()` earlier remains an idempotent eager path for
    scheduler and CFC work, but correctness never depends on a public
-   transaction caller remembering that separate helper.
+   transaction caller remembering that separate helper. Every eager or final
+   pass reconciles keyed artifact preparations against the transaction's
+   current native operations. If a later write removes a factory or replaces
+   the same identity with provenance from another source, the obsolete
+   preparation is removed and its publication-gate ownership is rejected
+   before the final draft can commit. An overwritten Factory may neither
+   reject an ordinary final write nor publish an orphan closure.
 4. Wire submission for that logical session is held until preparation finishes.
    Later transactions may build on the speculative overlay, but their wire
    commits cannot pass the blocked lower `localSeq`.
@@ -704,19 +710,27 @@ the same space. A fresh runtime must be able to reread a durable Factory and
 write it to another Cell in that space: cold preparation verifies the existing
 closure and carries idempotent ensures before the new containing value reaches
 the wire. Exact-space availability is still granted only after confirmation.
-If the candidate Cell is itself visible only through a speculative containing
-commit, cold source verification waits for that exact `(space, artifact
-identity)` publication to confirm. This dependency is runner-private and shared
-only by runtimes using the same speculative storage manager; it is not derived
-from Factory state. Warm verified or cached source remains synchronous, and a
-pending publication for another identity or space does not serialize the write.
+Cold preparation always probes durable source authority before consulting a
+pending publication. Therefore an unrelated pending rewrite of an identity can
+neither delay nor reject a copy from an already-durable Cell. If the probe
+misses because the candidate Cell is itself visible only through a speculative
+containing commit, verification waits for the applicable `(space, artifact
+identity)` publication generation to confirm. This dependency is runner-private
+and shared only by runtimes using the same speculative storage manager; it is
+not derived from Factory state. Warm verified or cached source remains
+synchronous, and a pending publication for another identity or space does not
+serialize the write.
 Concurrent publishers own the keyed gate by generation: any confirmation makes
 the source usable, while rejection fails dependent preparation only after no
 publisher for that generation can still confirm. Local abort, preparation
 failure, and wire rejection all settle their ownership, so a dependent copy
 fails retryably rather than hanging. A same-space follow-up captures the prior
 generation before registering its own publication and therefore never waits on
-itself.
+itself. Successful confirmation also carries the confirming owner's verified
+in-process module closure across that private gate. A dependent commit can
+therefore build its ensures without racing the local replica's later delivery
+of the already-durable source documents; this proof is never serialized and a
+rejected generation exposes no closure.
 When both a verified runner-owned source and a Cell-read candidate exist, the
 verified source wins. The candidate may be an intermediate destination whose
 containing publication is still speculative; it must not make a causally
@@ -1188,6 +1202,10 @@ borrow `$defs` from its containing value schema. Valid recursive local refs are
 canonicalized as structural back-edges, so independently allocated or
 equivalently inlined recursive documents compare and terminate. Recursion
 structure after ref resolution and every ordinary keyword remain exact.
+Public `Schema<>` inference follows the same independent roots and preserves
+finite nested factory contracts as callable types, subject to its bounded
+recursion guard; it never resolves a factory-public `$ref` from the containing
+value schema's `$defs`.
 Unresolved, external, or malformed refs and direct JavaScript object cycles
 fail closed.
 There is one representability boundary: a factory contract that recursively
@@ -1525,7 +1543,13 @@ every invocation adapter strips them from its authored/model-facing schema,
 injects them from the stable callable or tool instance identity, and overwrites
 any authored value before the synthetic forwarding path carries the trusted
 value to the ultimate call. This includes LLM, CLI, and FUSE entry points.
-Wrapper chains repeat the same transitive forwarding.
+Wrapper chains repeat the same transitive forwarding. A nested shorthand
+proven to originate from callback argument 0 is forwarded as one trusted
+subtree alias. The transformer does not enumerate its static type, so ordinary,
+union-only, and index-signature siblings remain intact while every protected
+leaf comes from the trusted argument exactly once. If that complete alias
+cannot be proven, compilation fails closed rather than reconstructing a partial
+object, inserting a duplicate protected key, or weakening its provenance.
 
 CLI and FUSE materialize the trusted base factory before publishing help or
 parsing arguments, because `FrameworkProvided` paths deliberately do not live

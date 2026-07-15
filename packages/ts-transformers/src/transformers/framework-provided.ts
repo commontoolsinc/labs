@@ -6,7 +6,6 @@ import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import {
   detectCallKind,
-  findEnclosingPatternBuilderCallbackDescriptor,
   getPatternBuilderCallbackDescriptor,
   isPatternBuilderCall,
   updatePatternBuilderCallbackArgument,
@@ -512,7 +511,6 @@ function rewritePatternCallback(
   if (protectedCallPaths.length === 0) {
     return { callback, paths: [] };
   }
-  const publicType = patternPublicInputType(callback, context);
   let root = callback.parameters[0];
   let updated = callback;
   let bindingPrologue: ts.Statement | undefined;
@@ -626,13 +624,26 @@ function rewritePatternCallback(
       });
       return node;
     }
+    const untrustedShorthand = protectedPaths.map((path) =>
+      findUntrustedFrameworkShorthand(object, path, callback, context)
+    ).find((candidate) => candidate !== undefined);
+    if (untrustedShorthand) {
+      context.reportDiagnosticOnce({
+        severity: "error",
+        type: "pattern-callback:framework-provided-wrapper",
+        message: `A shorthand factory input for protected subtree '${
+          untrustedShorthand.path.join(".")
+        }' must be an immutable alias of wrapper argument 0; body-local or mutable authored values cannot supply FrameworkProvided paths.`,
+        node: untrustedShorthand.node,
+      });
+      return node;
+    }
 
     paths.push(...protectedPaths);
     const input = addForwardedPathsToObject(
       object,
       root!.name as ts.Identifier,
       protectedPaths,
-      publicType,
       context,
     );
     return context.factory.updateCallExpression(
@@ -705,7 +716,6 @@ function addForwardedPathsToObject(
   object: ts.ObjectLiteralExpression,
   root: ts.Identifier,
   paths: readonly FrameworkProvidedPath[],
-  publicType: ts.Type | undefined,
   context: TransformationContext,
 ): ts.ObjectLiteralExpression {
   let result = object;
@@ -715,7 +725,6 @@ function addForwardedPathsToObject(
       root,
       path,
       path,
-      publicType,
       context,
     );
   }
@@ -727,7 +736,6 @@ function addForwardedPathToObject(
   root: ts.Identifier,
   remaining: readonly string[],
   complete: readonly string[],
-  publicType: ts.Type | undefined,
   context: TransformationContext,
 ): ts.ObjectLiteralExpression {
   const factory = context.factory;
@@ -745,6 +753,13 @@ function addForwardedPathToObject(
   });
   if (tail.length === 0) {
     if (index >= 0) {
+      const existing = properties[index]!;
+      if (
+        ts.isPropertyAssignment(existing) &&
+        isFrameworkAlias(existing.initializer, root, complete)
+      ) {
+        return object;
+      }
       throw new Error(
         "FrameworkProvided forwarding attempted to emit a duplicate protected key",
       );
@@ -757,9 +772,25 @@ function addForwardedPathToObject(
     const existing = properties[index]!;
     const prefixLength = complete.length - tail.length;
     const prefix = complete.slice(0, prefixLength);
-    const child = ts.isPropertyAssignment(existing)
-      ? asObjectLiteral(existing.initializer)!
-      : publicObjectAliases(root, publicType, prefix, context);
+    if (ts.isShorthandPropertyAssignment(existing)) {
+      properties[index] = factory.createPropertyAssignment(
+        factory.createStringLiteral(head),
+        frameworkAlias(root, prefix, factory),
+      );
+      return factory.updateObjectLiteralExpression(object, properties);
+    }
+    if (!ts.isPropertyAssignment(existing)) {
+      throw new Error(
+        "FrameworkProvided forwarding found an unsupported protected subtree",
+      );
+    }
+    const child = asObjectLiteral(existing.initializer);
+    if (child === undefined) {
+      if (isFrameworkAlias(existing.initializer, root, prefix)) return object;
+      throw new Error(
+        "FrameworkProvided forwarding cannot safely reconstruct an authored protected subtree",
+      );
+    }
     properties[index] = factory.createPropertyAssignment(
       factory.createStringLiteral(head),
       addForwardedPathToObject(
@@ -767,7 +798,6 @@ function addForwardedPathToObject(
         root,
         tail,
         complete,
-        publicType,
         context,
       ),
     );
@@ -779,69 +809,11 @@ function addForwardedPathToObject(
         root,
         tail,
         complete,
-        publicType,
         context,
       ),
     ));
   }
   return factory.updateObjectLiteralExpression(object, properties);
-}
-
-function patternPublicInputType(
-  callback: FunctionExpression,
-  context: TransformationContext,
-): ts.Type | undefined {
-  const original = ts.getOriginalNode(callback) as FunctionExpression;
-  const descriptor = findEnclosingPatternBuilderCallbackDescriptor(
-    original,
-    context.checker,
-  );
-  const source = descriptor?.call.typeArguments?.[0] ??
-    original.parameters[0]?.type ?? original.parameters[0];
-  if (!source) return undefined;
-  try {
-    return context.checker.getTypeAtLocation(source);
-  } catch {
-    return undefined;
-  }
-}
-
-function publicObjectAliases(
-  root: ts.Identifier,
-  publicType: ts.Type | undefined,
-  path: readonly string[],
-  context: TransformationContext,
-): ts.ObjectLiteralExpression {
-  const target = publicType && typeAtPropertyPath(publicType, path, context);
-  if (!target) return context.factory.createObjectLiteralExpression();
-  const properties: ts.ObjectLiteralElementLike[] = [];
-  for (const property of context.checker.getPropertiesOfType(target)) {
-    const name = property.getName();
-    if (name.startsWith("__@")) continue;
-    properties.push(context.factory.createPropertyAssignment(
-      context.factory.createStringLiteral(name),
-      frameworkAlias(root, [...path, name], context.factory),
-    ));
-  }
-  return context.factory.createObjectLiteralExpression(properties, true);
-}
-
-function typeAtPropertyPath(
-  root: ts.Type,
-  path: readonly string[],
-  context: TransformationContext,
-): ts.Type | undefined {
-  let current = root;
-  for (const segment of path) {
-    const property = context.checker.getPropertyOfType(current, segment);
-    const declaration = property?.valueDeclaration ??
-      property?.declarations?.[0];
-    if (!property || !declaration) return undefined;
-    current = context.checker.getNonNullableType(
-      context.checker.getTypeOfSymbolAtLocation(property, declaration),
-    );
-  }
-  return current;
 }
 
 function isSupportedPath(path: readonly string[]): boolean {
@@ -867,6 +839,30 @@ function frameworkAlias(
     );
   }
   return value;
+}
+
+function isFrameworkAlias(
+  expression: ts.Expression,
+  root: ts.Identifier,
+  path: readonly string[],
+): boolean {
+  let value = unwrapExpression(expression);
+  for (let index = path.length - 1; index >= 0; index--) {
+    if (!ts.isCallExpression(value) || value.arguments.length !== 1) {
+      return false;
+    }
+    const argument = value.arguments[0];
+    if (!argument || !ts.isStringLiteralLike(argument)) return false;
+    if (argument.text !== path[index]) return false;
+    const target = unwrapExpression(value.expression);
+    if (
+      !ts.isPropertyAccessExpression(target) || target.name.text !== "key"
+    ) {
+      return false;
+    }
+    value = unwrapExpression(target.expression);
+  }
+  return ts.isIdentifier(value) && value.text === root.text;
 }
 
 function frameworkPathsForFactoryExpression(
@@ -1002,6 +998,228 @@ function asObjectLiteral(
 ): ts.ObjectLiteralExpression | undefined {
   const value = unwrapExpression(expression);
   return ts.isObjectLiteralExpression(value) ? value : undefined;
+}
+
+function findUntrustedFrameworkShorthand(
+  object: ts.ObjectLiteralExpression,
+  path: readonly string[],
+  callback: FunctionExpression,
+  context: TransformationContext,
+):
+  | { node: ts.ShorthandPropertyAssignment; path: readonly string[] }
+  | undefined {
+  let current = object;
+  const prefix: string[] = [];
+  for (const segment of path) {
+    prefix.push(segment);
+    const property = current.properties.find((candidate) => {
+      if (
+        !ts.isPropertyAssignment(candidate) &&
+        !ts.isShorthandPropertyAssignment(candidate)
+      ) return false;
+      const name = candidate.name;
+      return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) &&
+        name.text === segment;
+    });
+    if (property === undefined) return undefined;
+    if (ts.isShorthandPropertyAssignment(property)) {
+      const source = ts.getOriginalNode(
+        property,
+      ) as ts.ShorthandPropertyAssignment;
+      const symbol = context.checker.getShorthandAssignmentValueSymbol(
+        source,
+      ) ?? context.checker.getSymbolAtLocation(source.name);
+      const trustedPath = symbol && frameworkInputPathForSymbol(
+        symbol,
+        callback,
+        context,
+        new Set(),
+      );
+      return pathsEqual(trustedPath, prefix)
+        ? undefined
+        : { node: property, path: [...prefix] };
+    }
+    if (!ts.isPropertyAssignment(property)) return undefined;
+    const child = asObjectLiteral(property.initializer);
+    if (child === undefined) return undefined;
+    current = child;
+  }
+  return undefined;
+}
+
+function frameworkInputPathForIdentifier(
+  identifier: ts.Identifier,
+  callback: FunctionExpression,
+  context: TransformationContext,
+  active: Set<ts.Symbol>,
+): readonly string[] | undefined {
+  const source = ts.getOriginalNode(identifier) as ts.Identifier;
+  const symbol = context.checker.getSymbolAtLocation(source);
+  return symbol && frameworkInputPathForSymbol(
+    symbol,
+    callback,
+    context,
+    active,
+  );
+}
+
+function frameworkInputPathForSymbol(
+  symbol: ts.Symbol,
+  callback: FunctionExpression,
+  context: TransformationContext,
+  active: Set<ts.Symbol>,
+): readonly string[] | undefined {
+  if (active.has(symbol)) return undefined;
+  active.add(symbol);
+  try {
+    const parameter = (ts.getOriginalNode(callback) as FunctionExpression)
+      .parameters[0];
+    if (parameter) {
+      for (const declaration of symbol.getDeclarations() ?? []) {
+        const path = bindingPathToOwner(declaration, parameter);
+        if (path !== undefined) return path;
+      }
+    }
+
+    for (const declaration of symbol.getDeclarations() ?? []) {
+      const alias = immutableAliasInitializer(declaration);
+      if (alias === undefined) continue;
+      const base = frameworkInputPathForExpression(
+        alias.initializer,
+        callback,
+        context,
+        active,
+      );
+      if (base !== undefined) return [...base, ...alias.path];
+    }
+    return undefined;
+  } finally {
+    active.delete(symbol);
+  }
+}
+
+function frameworkInputPathForExpression(
+  expression: ts.Expression,
+  callback: FunctionExpression,
+  context: TransformationContext,
+  active: Set<ts.Symbol>,
+): readonly string[] | undefined {
+  const value = unwrapExpression(expression);
+  if (ts.isIdentifier(value)) {
+    return frameworkInputPathForIdentifier(value, callback, context, active);
+  }
+  if (ts.isPropertyAccessExpression(value)) {
+    const base = frameworkInputPathForExpression(
+      value.expression,
+      callback,
+      context,
+      active,
+    );
+    return base === undefined ? undefined : [...base, value.name.text];
+  }
+  if (ts.isElementAccessExpression(value)) {
+    const argument = value.argumentExpression &&
+      unwrapExpression(value.argumentExpression);
+    if (!argument || !ts.isStringLiteralLike(argument)) return undefined;
+    const base = frameworkInputPathForExpression(
+      value.expression,
+      callback,
+      context,
+      active,
+    );
+    return base === undefined ? undefined : [...base, argument.text];
+  }
+  if (
+    ts.isCallExpression(value) && value.arguments.length === 1 &&
+    ts.isPropertyAccessExpression(value.expression) &&
+    value.expression.name.text === "key"
+  ) {
+    const argument = value.arguments[0];
+    if (!argument || !ts.isStringLiteralLike(argument)) return undefined;
+    const base = frameworkInputPathForExpression(
+      value.expression.expression,
+      callback,
+      context,
+      active,
+    );
+    return base === undefined ? undefined : [...base, argument.text];
+  }
+  return undefined;
+}
+
+function immutableAliasInitializer(
+  declaration: ts.Declaration,
+): { initializer: ts.Expression; path: readonly string[] } | undefined {
+  if (ts.isVariableDeclaration(declaration)) {
+    if (
+      !declaration.initializer || !ts.isVariableDeclarationList(
+        declaration.parent,
+      ) || !(declaration.parent.flags & ts.NodeFlags.Const)
+    ) return undefined;
+    if (ts.isIdentifier(declaration.name)) {
+      return { initializer: declaration.initializer, path: [] };
+    }
+    return undefined;
+  }
+  if (!ts.isBindingElement(declaration)) return undefined;
+  const owner = bindingOwner(declaration);
+  if (
+    !owner || !ts.isVariableDeclaration(owner.owner) ||
+    !owner.owner.initializer ||
+    !ts.isVariableDeclarationList(owner.owner.parent) ||
+    !(owner.owner.parent.flags & ts.NodeFlags.Const)
+  ) return undefined;
+  return { initializer: owner.owner.initializer, path: owner.path };
+}
+
+function bindingPathToOwner(
+  declaration: ts.Declaration,
+  expectedOwner: ts.ParameterDeclaration,
+): readonly string[] | undefined {
+  if (expectedOwner.dotDotDotToken || expectedOwner.initializer) {
+    return undefined;
+  }
+  if (declaration === expectedOwner && ts.isIdentifier(expectedOwner.name)) {
+    return [];
+  }
+  if (!ts.isBindingElement(declaration)) return undefined;
+  const owner = bindingOwner(declaration);
+  return owner?.owner === expectedOwner ? owner.path : undefined;
+}
+
+function bindingOwner(
+  declaration: ts.BindingElement,
+):
+  | { owner: ts.ParameterDeclaration | ts.VariableDeclaration; path: string[] }
+  | undefined {
+  const path: string[] = [];
+  let current = declaration;
+  while (true) {
+    if (current.dotDotDotToken || current.initializer) return undefined;
+    const parent = current.parent;
+    if (!ts.isObjectBindingPattern(parent)) return undefined;
+    const name = current.propertyName ?? current.name;
+    if (!ts.isIdentifier(name) && !ts.isStringLiteralLike(name)) {
+      return undefined;
+    }
+    path.unshift(name.text);
+    const owner = parent.parent;
+    if (ts.isBindingElement(owner)) {
+      current = owner;
+      continue;
+    }
+    return ts.isParameter(owner) || ts.isVariableDeclaration(owner)
+      ? { owner, path }
+      : undefined;
+  }
+}
+
+function pathsEqual(
+  left: readonly string[] | undefined,
+  right: readonly string[],
+): boolean {
+  return left !== undefined && left.length === right.length &&
+    left.every((segment, index) => segment === right[index]);
 }
 
 function objectLiteralSuppliesPath(

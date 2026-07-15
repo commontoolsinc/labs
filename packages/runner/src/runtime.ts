@@ -122,7 +122,10 @@ import {
 } from "./query-result-proxy.ts";
 import { PatternManager } from "./pattern-manager.ts";
 import { PatternUpdater } from "./pattern-updater.ts";
-import type { CompiledModuleArtifact } from "./harness/types.ts";
+import type {
+  CacheableModule,
+  CompiledModuleArtifact,
+} from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
@@ -228,16 +231,27 @@ const collectFactoryArtifactIdentities = (
 };
 
 type PendingFactoryArtifactPublication = {
-  readonly owners: Set<symbol>;
-  readonly promise: Promise<void>;
-  readonly resolve: () => void;
+  readonly owners: Map<symbol, readonly CacheableModule[] | undefined>;
+  readonly promise: Promise<readonly CacheableModule[] | undefined>;
+  readonly resolve: (modules?: readonly CacheableModule[]) => void;
   readonly reject: (reason?: unknown) => void;
 };
 
 type FactoryArtifactPublicationRegistration = {
-  readonly sourceDependency?: Promise<void>;
+  readonly sourceDependency?: Promise<
+    readonly CacheableModule[] | undefined
+  >;
+  readonly onPrepared: (modules: readonly CacheableModule[]) => void;
   readonly onConfirmed: () => void;
   readonly onRejected: (reason: unknown) => void;
+};
+
+type FactoryArtifactPublicationRegistrationRecord = {
+  readonly identity: string;
+  readonly source: MemorySpace;
+  readonly destination: MemorySpace;
+  readonly preparationKey: string;
+  readonly registration: FactoryArtifactPublicationRegistration;
 };
 
 // Runtime-private coordination for Runtimes that share one speculative
@@ -287,12 +301,14 @@ const registerFactoryArtifactPublication = (
     publication = undefined;
   }
   if (publication === undefined) {
-    const pending = Promise.withResolvers<void>();
+    const pending = Promise.withResolvers<
+      readonly CacheableModule[] | undefined
+    >();
     // A publication may have no dependent copy. Own the rejection immediately
     // so a rejected containing commit cannot become an unhandled promise.
     void pending.promise.catch(() => {});
     publication = {
-      owners: new Set(),
+      owners: new Map(),
       promise: pending.promise,
       resolve: pending.resolve,
       reject: pending.reject,
@@ -300,20 +316,27 @@ const registerFactoryArtifactPublication = (
     publications.set(destinationKey, publication);
   }
   const owner = Symbol(destinationKey);
-  publication.owners.add(owner);
+  publication.owners.set(owner, undefined);
 
   return {
     sourceDependency,
+    onPrepared: (modules) => {
+      if (!publication.owners.has(owner)) return;
+      publication.owners.set(owner, modules);
+    },
     onConfirmed: () => {
-      if (!publication.owners.delete(owner)) return;
+      if (!publication.owners.has(owner)) return;
+      const modules = publication.owners.get(owner);
+      publication.owners.delete(owner);
       if (publications.get(destinationKey) === publication) {
         publications.delete(destinationKey);
       }
       publication.owners.clear();
-      publication.resolve();
+      publication.resolve(modules);
     },
     onRejected: (reason) => {
-      if (!publication.owners.delete(owner)) return;
+      if (!publication.owners.has(owner)) return;
+      publication.owners.delete(owner);
       if (publication.owners.size > 0) return;
       if (publications.get(destinationKey) === publication) {
         publications.delete(destinationKey);
@@ -791,7 +814,7 @@ export class Runtime {
   // an overwritten keyed native preparation cannot leave an orphaned gate.
   private factoryArtifactPublicationRegistrations = new WeakMap<
     IStorageTransaction,
-    Map<string, FactoryArtifactPublicationRegistration>
+    Map<string, FactoryArtifactPublicationRegistrationRecord>
   >();
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
@@ -1814,6 +1837,10 @@ export class Runtime {
   private prepareFactoryArtifactPublications(
     tx: IExtendedStorageTransaction,
   ): void {
+    const desiredRegistrations = new Set<string>();
+    let registrations = this.factoryArtifactPublicationRegistrations.get(
+      tx.tx,
+    );
     const spaces = new Set<MemorySpace>();
     for (const attempt of tx.getWriteAttemptLog?.() ?? []) {
       spaces.add(attempt.space);
@@ -1858,13 +1885,9 @@ export class Runtime {
             "storage transaction does not support atomic factory artifact publication",
           );
         }
-        const preparationKey = `factory-artifact:${identity}`;
         const registrationKey = factoryArtifactPublicationKey(
           destination,
           identity,
-        );
-        let registrations = this.factoryArtifactPublicationRegistrations.get(
-          tx.tx,
         );
         if (registrations === undefined) {
           registrations = new Map();
@@ -1873,16 +1896,37 @@ export class Runtime {
             registrations,
           );
         }
-        let registration = registrations.get(registrationKey);
-        if (registration === undefined) {
-          registration = registerFactoryArtifactPublication(
+        const preparationKey = `factory-artifact:${identity}`;
+        desiredRegistrations.add(registrationKey);
+        let record = registrations.get(registrationKey);
+        if (record !== undefined && record.source !== source) {
+          this.removeFactoryArtifactPublicationRegistration(
+            tx.tx,
+            registrationKey,
+            record,
+            new Error(
+              `factory artifact publication source changed before commit for ${identity}`,
+            ),
+          );
+          record = undefined;
+        }
+        if (record === undefined) {
+          const registration = registerFactoryArtifactPublication(
             this.storageManager,
             identity,
             source!,
             destination,
           );
-          registrations.set(registrationKey, registration);
+          record = {
+            identity,
+            source: source!,
+            destination,
+            preparationKey,
+            registration,
+          };
+          registrations.set(registrationKey, record);
         }
+        const activeRecord = record;
         tx.tx.addNativeCommitPreparation(destination, {
           key: preparationKey,
           prepare: () =>
@@ -1890,7 +1934,8 @@ export class Runtime {
               identity,
               source!,
               destination,
-              registration.sourceDependency,
+              activeRecord.registration.sourceDependency,
+              activeRecord.registration.onPrepared,
             ),
           onConfirmed: () => {
             try {
@@ -1899,13 +1944,46 @@ export class Runtime {
                 destination,
               );
             } finally {
-              registration.onConfirmed();
+              activeRecord.registration.onConfirmed();
             }
           },
-          onRejected: registration.onRejected,
+          onRejected: activeRecord.registration.onRejected,
         });
       }
     }
+
+    for (const [key, record] of registrations ?? []) {
+      if (desiredRegistrations.has(key)) continue;
+      this.removeFactoryArtifactPublicationRegistration(
+        tx.tx,
+        key,
+        record,
+        new Error(
+          `factory artifact publication was removed before commit for ${record.identity}`,
+        ),
+      );
+    }
+  }
+
+  private removeFactoryArtifactPublicationRegistration(
+    tx: IStorageTransaction,
+    registrationKey: string,
+    record: FactoryArtifactPublicationRegistrationRecord,
+    reason: Error,
+  ): void {
+    if (tx.removeNativeCommitPreparation === undefined) {
+      throw new Error(
+        "storage transaction does not support reconciling atomic factory artifact publication",
+      );
+    }
+    tx.removeNativeCommitPreparation(
+      record.destination,
+      record.preparationKey,
+    );
+    this.factoryArtifactPublicationRegistrations.get(tx)?.delete(
+      registrationKey,
+    );
+    record.registration.onRejected(reason);
   }
 
   /**

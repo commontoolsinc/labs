@@ -109,8 +109,13 @@ export default pattern<{
     assertEquals(frameworkPathMetadata(output).length, 3);
     assertEquals(
       output.match(/\.key\("request"\)\.key\("sandboxId"\)/g)?.length,
-      2,
-      "each wrapper must forward the same compiler-owned argument-0 alias",
+      1,
+      "the explicit wrapper must forward its protected leaf",
+    );
+    assertMatch(
+      output,
+      /"request":\s*__cf_[A-Za-z0-9_]+\.key\("request"\)/,
+      "the shorthand wrapper must preserve its complete trusted argument-0 subtree",
     );
     assertMatch(
       output,

@@ -10,6 +10,7 @@ import type {
   JSONSchema,
   ModuleFactory,
   PatternFactory,
+  PatternFactorySchema,
   PatternFunction,
   Reactive,
   SELF,
@@ -26,6 +27,9 @@ type MustBeFalse<T extends false> = T;
 type AssertAssignable<T, U> = [T] extends [U] ? true : never;
 type AssertNotAssignable<T, U> = [T] extends [U] ? never : true;
 type IsAny<T> = 0 extends (1 & T) ? true : false;
+type IsUnknown<T> = IsAny<T> extends true ? false
+  : unknown extends T ? true
+  : false;
 
 interface Ship {
   name: string;
@@ -125,19 +129,25 @@ const _schemaWishOverload: MustBeTrue<
 const PATTERN_FACTORY_SCHEMA = {
   asFactory: {
     kind: "pattern",
-    argumentSchema: { $ref: "#/$defs/PatternInput" },
-    resultSchema: { $ref: "#/$defs/PatternResult" },
-  },
-  $defs: {
-    PatternInput: {
-      type: "object",
-      properties: { query: { type: "string" } },
-      required: ["query"],
+    argumentSchema: {
+      $ref: "#/$defs/PatternInput",
+      $defs: {
+        PatternInput: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+      },
     },
-    PatternResult: {
-      type: "object",
-      properties: { count: { type: "number" } },
-      required: ["count"],
+    resultSchema: {
+      $ref: "#/$defs/PatternResult",
+      $defs: {
+        PatternResult: {
+          type: "object",
+          properties: { count: { type: "number" } },
+          required: ["count"],
+        },
+      },
     },
   },
 } as const satisfies JSONSchema;
@@ -172,7 +182,6 @@ const HANDLER_FACTORY_SCHEMA = {
 
 const NESTED_AND_CELL_FACTORY_SCHEMA = {
   type: "object",
-  $defs: PATTERN_FACTORY_SCHEMA.$defs,
   properties: {
     direct: { asFactory: PATTERN_FACTORY_SCHEMA.asFactory },
     boxed: {
@@ -217,6 +226,81 @@ type InferredEmbeddedLocalRefFactory = Schema<
   typeof EMBEDDED_LOCAL_REF_FACTORY_SCHEMA
 >;
 
+const HIGHER_ORDER_FACTORY_SCHEMA = {
+  asFactory: {
+    kind: "pattern",
+    argumentSchema: {
+      type: "object",
+      properties: {
+        operation: {
+          asFactory: {
+            kind: "module",
+            argumentSchema: { type: "number" },
+            resultSchema: { type: "string" },
+          },
+        },
+      },
+      required: ["operation"],
+    },
+    resultSchema: { type: "null" },
+  },
+} as const satisfies JSONSchema;
+type InferredHigherOrderFactory = Schema<typeof HIGHER_ORDER_FACTORY_SCHEMA>;
+type InferredHigherOrderArgument = InferredHigherOrderFactory extends
+  PatternFactory<infer Argument, unknown> ? Argument : never;
+
+type MixedBroadNestedFactorySchema = {
+  readonly asFactory: {
+    readonly kind: "pattern";
+    readonly argumentSchema: {
+      readonly type: "object";
+      readonly properties: {
+        readonly operation: {
+          readonly asFactory:
+            | PatternFactorySchema
+            | typeof MODULE_FACTORY_SCHEMA.asFactory;
+        };
+      };
+      readonly required: readonly ["operation"];
+    };
+    readonly resultSchema: { readonly type: "null" };
+  };
+};
+type InferredMixedBroadNestedFactory = Schema<MixedBroadNestedFactorySchema>;
+type InferredMixedBroadNestedArgument = InferredMixedBroadNestedFactory extends
+  PatternFactory<infer Argument, unknown> ? Argument : never;
+
+type RecursiveFactorySchema = {
+  readonly asFactory: {
+    readonly kind: "pattern";
+    readonly argumentSchema: {
+      readonly type: "object";
+      readonly properties: {
+        readonly recurse: RecursiveFactorySchema;
+      };
+      readonly required: readonly ["recurse"];
+    };
+    readonly resultSchema: { readonly type: "null" };
+  };
+};
+type InferredRecursiveFactory = Schema<RecursiveFactorySchema>;
+
+const OUTER_DEFS_FACTORY_SCHEMA = {
+  asFactory: {
+    kind: "pattern",
+    argumentSchema: { $ref: "#/$defs/BorrowedInput" },
+    resultSchema: { type: "null" },
+  },
+  $defs: {
+    BorrowedInput: {
+      type: "object",
+      properties: { borrowed: { type: "string" } },
+      required: ["borrowed"],
+    },
+  },
+} as const satisfies JSONSchema;
+type InferredOuterDefsFactory = Schema<typeof OUTER_DEFS_FACTORY_SCHEMA>;
+
 const _patternFactoryInference: MustBeTrue<
   AssertAssignable<
     InferredPatternFactory,
@@ -243,6 +327,29 @@ void ((factory: InferredEmbeddedLocalRefFactory) => {
   // @ts-expect-error Embedded factory-local refs retain their input contract.
   factory({ query: 42 });
 });
+void ((factory: InferredHigherOrderFactory) => {
+  const acceptsHigherOrder: PatternFactory<
+    { operation: ModuleFactory<number, string> },
+    null
+  > = factory;
+  void acceptsHigherOrder;
+});
+void ((factory: InferredOuterDefsFactory) => {
+  // @ts-expect-error Factory public schemas are independent documents and
+  // cannot resolve local refs from the containing value schema.
+  factory({ borrowed: "outer" });
+});
+const _higherOrderNestedFactory: MustBeTrue<
+  AssertAssignable<
+    InferredHigherOrderArgument["operation"],
+    ModuleFactory<number, string>
+  >
+> = true;
+const _mixedBroadNestedFactoryFailsClosed: MustBeTrue<
+  IsUnknown<InferredMixedBroadNestedArgument["operation"]>
+> = true;
+const _recursiveFactoryGuard: MustBeFalse<IsAny<InferredRecursiveFactory>> =
+  false;
 const _factoryIsFabricValue: MustBeTrue<
   AssertAssignable<InferredPatternFactory, FabricValue>
 > = true;
@@ -314,6 +421,8 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", asyn
       _moduleFactoryInference,
       _handlerFactoryInference,
       _factoryInferenceIsNotAny,
+      _recursiveFactoryGuard,
+      _mixedBroadNestedFactoryFailsClosed,
       _factoryIsFabricValue,
       _nestedDirectFactory,
       _explicitCellFactory,
@@ -335,6 +444,8 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", asyn
       true,
       true,
       false,
+      false,
+      true,
       true,
       true,
       true,

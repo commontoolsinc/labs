@@ -678,6 +678,41 @@ describe("Factory@1 runner round trips", () => {
     }
   });
 
+  it("drops an eager factory publication when the final transaction value no longer contains it", async () => {
+    const { factories } = await storeFactories();
+    const tx = writer.edit();
+    const destination = writer.getCell<{
+      value: PatternFactory<unknown, unknown> | string;
+    }>(
+      destinationSpace,
+      "overwritten-eager-factory-publication",
+      undefined,
+      tx,
+    );
+    destination.set({ value: factories[0] });
+    writer.prepareTxForCommit(tx);
+    destination.set({ value: "ordinary-final-value" });
+
+    let preparationCalls = 0;
+    const prepareArtifactPublication = writer.patternManager
+      .prepareArtifactPublication.bind(writer.patternManager);
+    writer.patternManager.prepareArtifactPublication = (() => {
+      preparationCalls += 1;
+      throw new Error("stale factory publication ran");
+    }) as typeof writer.patternManager.prepareArtifactPublication;
+
+    try {
+      const result = await tx.commit();
+      expect(result.error).toBeUndefined();
+    } finally {
+      writer.patternManager.prepareArtifactPublication =
+        prepareArtifactPublication;
+    }
+
+    expect(preparationCalls).toBe(0);
+    expect(destination.getRaw()).toEqual({ value: "ordinary-final-value" });
+  });
+
   it("prefers a verified source over a speculative Cell-read candidate", async () => {
     const { identity, factories } = await storeFactories();
     writer.noteFactoryArtifactSource(factories[0], destinationSpace);
@@ -811,6 +846,93 @@ describe("Factory@1 runner round trips", () => {
     ).toBe(true);
   });
 
+  it("does not let an unrelated pending rewrite block a durable source copy", async () => {
+    const { factories } = await storeFactories();
+    const durableTx = writer.edit();
+    writer.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "durable-source-before-unrelated-rewrite",
+      undefined,
+      durableTx,
+    ).set({ factories });
+    expect((await durableTx.commit()).error).toBeUndefined();
+
+    const blocker = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const follower = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    extraRuntimes.push(blocker, follower);
+
+    const blockerValue = blocker.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "durable-source-before-unrelated-rewrite",
+    ).getRaw()! as unknown as { factories: FactoryTuple };
+    const releaseBlocker = Promise.withResolvers<void>();
+    const prepareArtifactPublication = blocker.patternManager
+      .prepareArtifactPublication.bind(blocker.patternManager);
+    blocker.patternManager.prepareArtifactPublication = (async (
+      _identity,
+      _fromSpace,
+      toSpace,
+    ) => {
+      if (toSpace !== destinationSpace) {
+        return prepareArtifactPublication(
+          _identity,
+          _fromSpace,
+          toSpace,
+        );
+      }
+      await releaseBlocker.promise;
+      throw new Error("unrelated pending rewrite rejected");
+    }) as typeof blocker.patternManager.prepareArtifactPublication;
+
+    const blockerTx = blocker.edit();
+    blocker.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "unrelated-pending-factory-rewrite",
+      undefined,
+      blockerTx,
+    ).set(blockerValue);
+    const blockerCommit = blockerTx.commit();
+
+    const durableValue = follower.getCell<{ factories: FactoryTuple }>(
+      destinationSpace,
+      "durable-source-before-unrelated-rewrite",
+    ).getRaw()! as unknown as { factories: FactoryTuple };
+    const followerTx = follower.edit();
+    const copied = follower.getCell<{ factories: FactoryTuple }>(
+      onwardDestinationSpace,
+      "durable-copy-during-unrelated-rewrite",
+      undefined,
+      followerTx,
+    );
+    copied.set(durableValue);
+    const followerCommit = followerTx.commit();
+    const followerSettledBeforeRelease = await Promise.race([
+      followerCommit.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 100)),
+    ]);
+
+    releaseBlocker.resolve();
+    const [blockerResult, followerResult] = await Promise.all([
+      blockerCommit,
+      followerCommit,
+    ]);
+    blocker.patternManager.prepareArtifactPublication =
+      prepareArtifactPublication;
+
+    expect(followerSettledBeforeRelease).toBe(true);
+    expect(blockerResult.error?.message).toContain(
+      "unrelated pending rewrite rejected",
+    );
+    expect(followerResult.error).toBeUndefined();
+    expect(copied.getRaw()).toEqual(durableValue);
+  });
+
   it("waits for a speculative source publication before cold-verifying an onward copy", async () => {
     const { factories } = await storeFactories();
     const sourceTx = writer.edit();
@@ -845,12 +967,26 @@ describe("Factory@1 runner round trips", () => {
       identity,
       fromSpace,
       toSpace,
+      sourcePublication,
+      onPrepared,
     ) => {
       if (toSpace !== destinationSpace) {
-        return prepareArtifactPublication(identity, fromSpace, toSpace);
+        return prepareArtifactPublication(
+          identity,
+          fromSpace,
+          toSpace,
+          sourcePublication,
+          onPrepared,
+        );
       }
       return releaseFirstPreparation.promise.then(() =>
-        prepareArtifactPublication(identity, fromSpace, toSpace)
+        prepareArtifactPublication(
+          identity,
+          fromSpace,
+          toSpace,
+          sourcePublication,
+          onPrepared,
+        )
       );
     }) as typeof publisher.patternManager.prepareArtifactPublication;
 
@@ -870,7 +1006,7 @@ describe("Factory@1 runner round trips", () => {
       "causal-cold-publication-intermediate",
     ).getRaw()! as unknown as { factories: FactoryTuple };
     const loadStarted = Promise.withResolvers<void>();
-    let didStartLoad = false;
+    let loadAttempts = 0;
     const managerInternals = follower.patternManager as unknown as {
       loadVerifiedArtifactClosure: (
         ...args: unknown[]
@@ -880,7 +1016,7 @@ describe("Factory@1 runner round trips", () => {
       .loadVerifiedArtifactClosure.bind(follower.patternManager);
     managerInternals.loadVerifiedArtifactClosure = (...args) => {
       if (args[0] === destinationSpace) {
-        didStartLoad = true;
+        loadAttempts += 1;
         loadStarted.resolve();
       }
       return loadVerifiedArtifactClosure(...args);
@@ -895,8 +1031,17 @@ describe("Factory@1 runner round trips", () => {
     );
     destination.set(onward);
     const secondCommit = secondTx.commit();
-    const racedPredecessor = await Promise.race([
-      loadStarted.promise.then(() => true),
+    await Promise.race([
+      loadStarted.promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("durable source probe did not start")),
+          1_000,
+        )
+      ),
+    ]);
+    const secondSettledBeforeRelease = await Promise.race([
+      secondCommit.then(() => true),
       new Promise<false>((resolve) => setTimeout(() => resolve(false), 20)),
     ]);
 
@@ -907,8 +1052,11 @@ describe("Factory@1 runner round trips", () => {
       prepareArtifactPublication;
     managerInternals.loadVerifiedArtifactClosure = loadVerifiedArtifactClosure;
 
-    expect(racedPredecessor).toBe(false);
-    expect(didStartLoad).toBe(true);
+    expect(secondSettledBeforeRelease).toBe(false);
+    // One durable probe misses while the source is speculative. Confirmation
+    // carries the verified in-process closure proof, so no racy second storage
+    // read is needed before publishing onward.
+    expect(loadAttempts).toBe(1);
     expect(firstResult.error).toBeUndefined();
     expect(secondResult.error).toBeUndefined();
     expect(destination.getRaw()).toEqual(onward);
@@ -970,7 +1118,8 @@ describe("Factory@1 runner round trips", () => {
       destinationSpace,
       "rejected-causal-publication-intermediate",
     ).getRaw()! as unknown as { factories: FactoryTuple };
-    let didStartLoad = false;
+    const loadStarted = Promise.withResolvers<void>();
+    let loadAttempts = 0;
     const managerInternals = follower.patternManager as unknown as {
       loadVerifiedArtifactClosure: (
         ...args: unknown[]
@@ -979,7 +1128,10 @@ describe("Factory@1 runner round trips", () => {
     const loadVerifiedArtifactClosure = managerInternals
       .loadVerifiedArtifactClosure.bind(follower.patternManager);
     managerInternals.loadVerifiedArtifactClosure = (...args) => {
-      if (args[0] === destinationSpace) didStartLoad = true;
+      if (args[0] === destinationSpace) {
+        loadAttempts += 1;
+        loadStarted.resolve();
+      }
       return loadVerifiedArtifactClosure(...args);
     };
 
@@ -991,8 +1143,16 @@ describe("Factory@1 runner round trips", () => {
       secondTx,
     ).set(onward);
     const secondCommit = secondTx.commit();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(didStartLoad).toBe(false);
+    await Promise.race([
+      loadStarted.promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("durable source probe did not start")),
+          1_000,
+        )
+      ),
+    ]);
+    expect(loadAttempts).toBe(1);
 
     releaseRejectedPreparation.resolve();
     const [firstResult, secondResult] = await Promise.race([
@@ -1014,7 +1174,7 @@ describe("Factory@1 runner round trips", () => {
     expect(secondResult.error?.message).toContain(
       "forced source publication rejection",
     );
-    expect(didStartLoad).toBe(false);
+    expect(loadAttempts).toBe(1);
   });
 });
 

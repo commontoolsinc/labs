@@ -1112,6 +1112,16 @@ export class V2StorageTransaction implements IStorageTransaction {
     preparations.set(preparation.key, preparation);
   }
 
+  removeNativeCommitPreparation(space: MemorySpace, key: string): void {
+    this.assertWritable("removeNativeCommitPreparation()");
+    const preparations = this.#nativeCommitPreparations.get(space);
+    if (preparations === undefined) return;
+    preparations.delete(key);
+    if (preparations.size === 0) {
+      this.#nativeCommitPreparations.delete(space);
+    }
+  }
+
   getNativeCommit(space: MemorySpace): NativeStorageCommit | undefined {
     const branch = this.#branches.get(space);
     const schedulerObservation = this.schedulerObservationForNativeCommit(

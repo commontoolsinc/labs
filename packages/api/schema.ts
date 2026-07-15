@@ -20,10 +20,13 @@ import type {
   ComparableCell,
   FactoryInput,
   HandlerFactory,
+  HandlerFactorySchema,
   JSONSchema,
   ModuleFactory,
+  ModuleFactorySchema,
   OpaqueCell,
   PatternFactory,
+  PatternFactorySchema,
   Reactive,
   ReadonlyCell,
   SELF,
@@ -170,32 +173,49 @@ type SchemaArrayItems<
   >
   : unknown[];
 
-type SchemaFactory<
+type FactorySchemaKind =
+  | PatternFactorySchema["kind"]
+  | ModuleFactorySchema["kind"]
+  | HandlerFactorySchema["kind"];
+
+type IsBroadFactorySchema<Factory> = [Factory] extends [{
+  kind: FactorySchemaKind;
+}] ? [PatternFactorySchema] extends [
+    Extract<Factory, { kind: "pattern" }>,
+  ] ? true
+  : [ModuleFactorySchema] extends [
+    Extract<Factory, { kind: "module" }>,
+  ] ? true
+  : [HandlerFactorySchema] extends [
+    Extract<Factory, { kind: "handler" }>,
+  ] ? true
+  : false
+  : true;
+
+type SchemaFactoryContract<
   Factory,
-  Root extends JSONSchema,
   Depth extends DepthLevel,
-  FactoryDepth extends FactoryDepthLevel,
-> = FactoryDepth extends 0 ? unknown
-  : Factory extends {
-    kind: "pattern";
-    argumentSchema: infer Argument extends JSONSchema;
-    resultSchema: infer Result extends JSONSchema;
-  } ? PatternFactory<
-      SchemaInner<
-        Argument,
-        MergeSchemas<Argument, Root>,
-        DecrementDepth<Depth>,
-        false,
-        DecrementFactoryDepth<FactoryDepth>
-      >,
-      SchemaInner<
-        Result,
-        MergeSchemas<Result, Root>,
-        DecrementDepth<Depth>,
-        true,
-        DecrementFactoryDepth<FactoryDepth>
-      >
+  ChildFactoryDepth extends FactoryDepthLevel,
+> = Factory extends {
+  kind: "pattern";
+  argumentSchema: infer Argument extends JSONSchema;
+  resultSchema: infer Result extends JSONSchema;
+} ? PatternFactory<
+    SchemaInner<
+      Argument,
+      Argument,
+      DecrementDepth<Depth>,
+      false,
+      ChildFactoryDepth
+    >,
+    SchemaInner<
+      Result,
+      Result,
+      DecrementDepth<Depth>,
+      true,
+      ChildFactoryDepth
     >
+  >
   : Factory extends {
     kind: "module";
     argumentSchema: infer Argument extends JSONSchema;
@@ -203,17 +223,17 @@ type SchemaFactory<
   } ? ModuleFactory<
       SchemaInner<
         Argument,
-        MergeSchemas<Argument, Root>,
+        Argument,
         DecrementDepth<Depth>,
         false,
-        DecrementFactoryDepth<FactoryDepth>
+        ChildFactoryDepth
       >,
       SchemaInner<
         Result,
-        MergeSchemas<Result, Root>,
+        Result,
         DecrementDepth<Depth>,
         true,
-        DecrementFactoryDepth<FactoryDepth>
+        ChildFactoryDepth
       >
     >
   : Factory extends {
@@ -223,20 +243,33 @@ type SchemaFactory<
   } ? HandlerFactory<
       SchemaInner<
         Context,
-        MergeSchemas<Context, Root>,
+        Context,
         DecrementDepth<Depth>,
         false,
-        DecrementFactoryDepth<FactoryDepth>
+        ChildFactoryDepth
       >,
       SchemaInner<
         Event,
-        MergeSchemas<Event, Root>,
+        Event,
         DecrementDepth<Depth>,
         false,
-        DecrementFactoryDepth<FactoryDepth>
+        ChildFactoryDepth
       >
     >
   : never;
+
+type SchemaFactory<
+  Factory,
+  Depth extends DepthLevel,
+  FactoryDepth extends FactoryDepthLevel,
+> = FactoryDepth extends 0
+  ? IsBroadFactorySchema<Factory> extends true ? unknown
+  : SchemaFactoryContract<Factory, Depth, 0>
+  : SchemaFactoryContract<
+    Factory,
+    Depth,
+    DecrementFactoryDepth<FactoryDepth>
+  >;
 
 type SchemaCore<
   T extends JSONSchema,
@@ -264,7 +297,7 @@ type SchemaCore<
   : T extends { anyOf: infer U extends readonly JSONSchema[] }
     ? SchemaAnyOf<U, Root, Depth, WrapCells, FactoryDepth>
   : T extends { asFactory: infer Factory }
-    ? SchemaFactory<Factory, Root, Depth, FactoryDepth>
+    ? SchemaFactory<Factory, Depth, FactoryDepth>
   : T extends { type: "string" } ? string
   : T extends { type: "number" | "integer" } ? number
   : T extends { type: "boolean" } ? boolean
@@ -455,6 +488,10 @@ type ObjectFromProperties<
 // Restrict Depth to these numeric literal types
 type DepthLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
+// Exact finite higher-order factory literals continue under the ordinary
+// schema-depth bound. This separate gate stops broad factory schema types once
+// they cross a factory boundary; the ordinary depth bound still terminates
+// exact recursive literals.
 type FactoryDepthLevel = 0 | 1;
 
 type DecrementFactoryDepth<_D extends FactoryDepthLevel> = 0;

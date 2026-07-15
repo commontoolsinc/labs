@@ -119,6 +119,197 @@ export default pattern(() => ({
 );
 
 Deno.test(
+  "nested shorthand forwarding preserves one trusted subtree for shared protected paths",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+type Input = {
+  nested: {
+    command: string;
+    credentials: {
+      region: string;
+      authToken: FrameworkProvided<string>;
+      sandboxId: FrameworkProvided<string>;
+    };
+  };
+};
+
+const privileged = pattern<Input, { ok: boolean }>((_input) => ({ ok: true }));
+
+export default pattern<Input>(({ nested }) => ({
+  result: privileged({ nested }),
+}));
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(diagnostics, []);
+    assertEquals(
+      output.match(
+        /"nested": __cf_framework_input\.key\("nested"\)/g,
+      )?.length,
+      1,
+      "the trusted subtree must preserve ordinary siblings and all protected leaves",
+    );
+  },
+);
+
+Deno.test(
+  "union shorthand forwarding preserves the trusted argument-0 subtree",
+  async () => {
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+type Input = {
+  nested:
+    | {
+      kind: "alpha";
+      alphaOnly: string;
+      sandboxId: FrameworkProvided<string>;
+    }
+    | {
+      kind: "beta";
+      betaOnly: number;
+      sandboxId: FrameworkProvided<string>;
+    };
+};
+
+const privileged = pattern<Input, { ok: boolean }>((_input) => ({ ok: true }));
+
+export default pattern<Input>(({ nested }) => ({
+  result: privileged({ nested }),
+}));
+`,
+      { types: COMMONFABRIC_TYPES, typeCheck: true },
+    );
+
+    assertStringIncludes(
+      output,
+      '"nested": __cf_framework_input.key("nested")',
+    );
+  },
+);
+
+Deno.test(
+  "index-signature shorthand forwarding preserves the trusted argument-0 subtree",
+  async () => {
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+type Input = {
+  nested: {
+    [name: string]: string;
+    sandboxId: FrameworkProvided<string>;
+  };
+};
+
+const privileged = pattern<Input, { ok: boolean }>((_input) => ({ ok: true }));
+
+export default pattern<Input>(({ nested }) => ({
+  result: privileged({ nested }),
+}));
+`,
+      { types: COMMONFABRIC_TYPES, typeCheck: true },
+    );
+
+    assertStringIncludes(
+      output,
+      '"nested": __cf_framework_input.key("nested")',
+    );
+  },
+);
+
+for (
+  const [name, setup] of [
+    [
+      "body-local override",
+      'const nested = { command: "local", sandboxId: "authored" };',
+    ],
+    [
+      "mutable alias",
+      `let nested = input.nested;
+  nested = { command: "local", sandboxId: "authored" };`,
+    ],
+  ] as const
+) {
+  Deno.test(
+    `${name} cannot masquerade as a trusted protected-subtree shorthand`,
+    async () => {
+      const { diagnostics } = await validateSource(
+        `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+type Input = {
+  nested: {
+    command: string;
+    sandboxId: FrameworkProvided<string>;
+  };
+};
+
+const privileged = pattern<Input, { ok: boolean }>((_input) => ({ ok: true }));
+
+export default pattern<Input>((input) => {
+  ${setup}
+  return { result: privileged({ nested }) };
+});
+`,
+        { types: COMMONFABRIC_TYPES, typeCheck: true },
+      );
+
+      const failures = frameworkDiagnostics(diagnostics);
+      assertEquals(failures.length, 1);
+      assertStringIncludes(failures[0]!.message, "argument 0");
+    },
+  );
+}
+
+Deno.test(
+  "immutable argument-0 alias remains a trusted protected-subtree shorthand",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+type Input = {
+  nested: {
+    command: string;
+    sandboxId: FrameworkProvided<string>;
+  };
+};
+
+const privileged = pattern<Input, { ok: boolean }>((_input) => ({ ok: true }));
+
+export default pattern<Input>((input) => {
+  const nested = input.nested;
+  return { result: privileged({ nested }) };
+});
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(diagnostics, []);
+    assertStringIncludes(
+      output,
+      '"nested": input.key("nested")',
+    );
+  },
+);
+
+Deno.test(
   "a first-class transitive wrapper carries its compiler-owned schema and path authority",
   async () => {
     const diagnostics: TransformationDiagnostic[] = [];

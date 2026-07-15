@@ -485,7 +485,8 @@ export class PatternManager {
     entryIdentity: string,
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
-    sourcePublication?: Promise<void>,
+    sourcePublication?: Promise<readonly CacheableModule[] | undefined>,
+    onPrepared?: (modules: readonly CacheableModule[]) => void,
   ):
     | readonly NativeStorageCommitOperation[]
     | Promise<readonly NativeStorageCommitOperation[]> {
@@ -495,6 +496,7 @@ export class PatternManager {
       this.artifactPublicationKey(fromSpace, entryIdentity),
     );
     if (cached !== undefined) {
+      onPrepared?.(cached);
       return this.buildArtifactPublicationOperations(
         cached,
         entryIdentity,
@@ -503,19 +505,40 @@ export class PatternManager {
     }
 
     return (async () => {
-      // A Cell read may observe a containing value from the speculative local
-      // overlay before that value's artifact ensures are durable. Await only
-      // the exact source-space/content-identity publication generation; warm
-      // verified closures returned above and unrelated publications remain
-      // synchronous and independent.
-      await sourcePublication;
-      if (this.isArtifactAvailableInSpace(entryIdentity, toSpace)) return [];
-      await Promise.allSettled([...this.pendingCacheWriteBacks]);
-      const closure = await this.loadVerifiedArtifactClosure(
-        fromSpace,
-        entryIdentity,
-        undefined,
-      );
+      const loadFromDurableSource = async () => {
+        await Promise.allSettled([...this.pendingCacheWriteBacks]);
+        return await this.loadVerifiedArtifactClosure(
+          fromSpace,
+          entryIdentity,
+          undefined,
+        );
+      };
+      // A keyed publication is only a fallback for a Cell value visible from
+      // the speculative overlay. Probe durable source authority first: an
+      // unrelated pending rewrite of the same content identity must neither
+      // delay nor reject a copy from an already-durable Cell. If durable proof
+      // misses, the pending generation may make that exact content available;
+      // await it and retry verification once.
+      let closure = await loadFromDurableSource();
+      if (closure === undefined && sourcePublication !== undefined) {
+        const publishedModules = await sourcePublication;
+        if (this.isArtifactAvailableInSpace(entryIdentity, toSpace)) return [];
+        if (publishedModules !== undefined) {
+          const modules = [...publishedModules];
+          this.cacheArtifactPublicationClosures(
+            fromSpace,
+            modules,
+            entryIdentity,
+          );
+          onPrepared?.(modules);
+          return this.buildArtifactPublicationOperations(
+            modules,
+            entryIdentity,
+            toSpace,
+          );
+        }
+        closure = await loadFromDurableSource();
+      }
       if (closure === undefined) {
         throw new Error(
           `Artifact closure ${entryIdentity} is unavailable in source space ${fromSpace}`,
@@ -527,6 +550,7 @@ export class PatternManager {
         modules,
         entryIdentity,
       );
+      onPrepared?.(modules);
       return this.buildArtifactPublicationOperations(
         modules,
         entryIdentity,
