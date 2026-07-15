@@ -70,6 +70,8 @@ Deno.test("buttonDisabledIs skips a hidden stale match", () => {
     };
     const probe = {
       collect: () => [staleHost, activeHost],
+      isRendered: (element: unknown) =>
+        element !== staleHost && element !== staleButton,
       isVisible: (element: unknown) =>
         element !== staleHost && element !== staleButton,
     } as unknown as ProbeApi;
@@ -96,7 +98,31 @@ Deno.test("buttonDisabledIs skips a visible match with stale state", () => {
         { shadowRoot: { querySelector: () => staleButton } },
         { shadowRoot: { querySelector: () => currentButton } },
       ],
+      isRendered: () => true,
       isVisible: () => true,
+    } as unknown as ProbeApi;
+
+    assertEquals(buttonDisabledIs(probe, "cf-button", true), true);
+  } finally {
+    globalThis.HTMLButtonElement = previousButtonClass;
+  }
+});
+
+Deno.test("buttonDisabledIs accepts a rendered control outside the viewport", () => {
+  const previousButtonClass = globalThis.HTMLButtonElement;
+  class FakeButton {
+    constructor(readonly disabled: boolean) {}
+  }
+  (globalThis as unknown as { HTMLButtonElement: typeof FakeButton })
+    .HTMLButtonElement = FakeButton;
+
+  try {
+    const button = new FakeButton(true);
+    const host = { shadowRoot: { querySelector: () => button } };
+    const probe = {
+      collect: () => [host],
+      isRendered: () => true,
+      isVisible: () => false,
     } as unknown as ProbeApi;
 
     assertEquals(buttonDisabledIs(probe, "cf-button", true), true);

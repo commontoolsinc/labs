@@ -44,8 +44,8 @@ export const buttonDisabledIs = (
       ? element
       : element.shadowRoot?.querySelector("button");
     if (
-      button instanceof HTMLButtonElement && probe.isVisible(element) &&
-      probe.isVisible(button) && button.disabled === disabled
+      button instanceof HTMLButtonElement && probe.isRendered(element) &&
+      probe.isRendered(button) && button.disabled === disabled
     ) {
       return true;
     }
