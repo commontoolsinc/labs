@@ -295,13 +295,15 @@ export class AvailabilityAnalysisTransformer extends HelpersOnlyTransformer {
         const reactiveContext = context.getReactiveContext(node);
         if (
           callKind?.kind === "partial-result" &&
-          (!node.arguments[0] ||
+          (reactiveContext.kind !== "pattern" ||
+            !node.arguments[0] ||
             !isDirectPartialResultSource(node.arguments[0], context))
         ) {
           context.reportDiagnosticOnce({
             type: "availability:unsupported-partial-result-source",
-            message:
-              "partialResultOf() currently requires the direct result of generateTextStream(), generateObjectStream(), or streamData() (including stable const aliases). A stream result returned by a subpattern no longer carries its partial-channel association.",
+            message: reactiveContext.kind !== "pattern"
+              ? "partialResultOf() must be called in the pattern body before its value is captured by computed(), lift(), action(), or handler(). Inside those boundaries the argument is the materialized final value and no longer carries the partial-channel association."
+              : "partialResultOf() currently requires the direct result of generateTextStream(), generateObjectStream(), or streamData() (including stable const aliases). A stream result returned by a subpattern no longer carries its partial-channel association.",
             node,
           });
         } else if (

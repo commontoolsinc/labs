@@ -113,9 +113,10 @@ channels atomically, and a terminal failure is visible through `request`. The
 current direct object-generation provider may emit no intermediate text; its
 partial value then remains unavailable while the final object resolves.
 
-`partialResultOf()` must be applied to the direct streaming call or a stable
-const alias. Across a subpattern boundary, return the projected partial value as
-a separate child output alongside the final request.
+Call `partialResultOf()` in the pattern body on the direct streaming call or a
+stable const alias, before passing the projected value into `computed()`,
+`lift()`, an action, or a handler. Across a subpattern boundary, return the
+projected partial value as a separate child output alongside the final request.
 
 The runtime retains legacy persisted generation state internally, but the
 public streaming API does not expose its sibling state fields or metadata.

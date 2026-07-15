@@ -514,6 +514,32 @@ Deno.test("partialResultOf accepts a stable streamData alias", async () => {
   );
 });
 
+Deno.test("partialResultOf rejects direct stream sources inside compute boundaries", async () => {
+  const source = `
+    import {
+      computed,
+      generateTextStream,
+      partialResultOf,
+      pattern,
+    } from "commonfabric";
+
+    export default pattern(() => {
+      const request = generateTextStream({ prompt: "hello" });
+      const partial = computed(() => partialResultOf(request));
+      return { partial };
+    });
+  `;
+  const { diagnostics } = await validateSource(source, {
+    types: { "commonfabric.d.ts": commonfabricTypes },
+  });
+  assertEquals(
+    diagnostics.filter((diagnostic) =>
+      diagnostic.type === "availability:unsupported-partial-result-source"
+    ).length,
+    1,
+  );
+});
+
 Deno.test("partialResultOf does not expose an availability guard surface", async () => {
   const source = `
     import {

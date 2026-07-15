@@ -3098,8 +3098,9 @@ export type ResultOfFunction = <R>(
 /**
  * Returns the usable intermediate value associated with a streaming call.
  * Availability remains observable on the original streaming request.
- * The argument must be the direct producer result or a stable const alias;
- * partial-channel associations do not cross subpattern boundaries.
+ * Call it in the producer's pattern body with the direct result or a stable
+ * const alias, before capturing the projected value in a reactive callback;
+ * partial-channel associations do not cross callback or subpattern boundaries.
  */
 export type PartialResultOfFunction = <Final, Partial>(
   result: PartialResultSource<Final, Partial>,

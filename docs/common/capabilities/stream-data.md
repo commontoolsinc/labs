@@ -54,7 +54,8 @@ const lastUsableEvent = latestComplete(partialResultOf(request));
 keeps its last complete snapshot. Use the original request with `isPending()`,
 `hasError()`, and the other availability guards.
 
-`partialResultOf()` must be applied to the direct `streamData()` result or a
-stable const alias. A child pattern that wants to expose both channels should
-return its projected partial value as a separate output; the association itself
-does not cross a subpattern boundary.
+Call `partialResultOf()` in the pattern body on the direct `streamData()` result
+or a stable const alias, before passing the projected value into `computed()`,
+`lift()`, an action, or a handler. A child pattern that wants to expose both
+channels should return its projected partial value as a separate output; the
+association itself does not cross a subpattern boundary.
