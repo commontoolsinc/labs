@@ -33,18 +33,17 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
 // System space-root patterns, served as raw TSX by the toolshed patterns route.
 export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
 export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
+const LOCAL_HOME_PATTERN_PATH = "/system/home.tsx";
+const LOCAL_DEFAULT_APP_PATTERN_PATH = "/system/default-app.tsx";
 
 /**
  * The system space-root pattern URL a space of this type is created with — the
  * home DID gets home.tsx, every other space the default app. Used to back-fill
  * `patternSource` for spaces created before provenance stamping.
  *
- * Known v1 limitation: an existing *custom-app* space (whose root was seeded
- * from home's `defaultAppUrl`) that carries no stored `patternSource` derives to
- * default-app.tsx here. The auto-update check must therefore only act when a
- * stored `patternSource` is present (or the running identity matches a known
- * system identity) — otherwise it would roll a custom app to the default. See
- * docs/specs/pattern-imports/pattern-updates.md risk list.
+ * This is safe for a newly created system root. Existing roots without stored
+ * provenance must additionally prove that their verified authored entry path
+ * is a known system pattern; see {@link inferLegacySystemPatternSource}.
  */
 export function deriveSystemPatternUrl(
   space: MemorySpace,
@@ -53,6 +52,30 @@ export function deriveSystemPatternUrl(
   return space === runtime.userIdentityDID
     ? HOME_PATTERN_URL
     : DEFAULT_APP_PATTERN_URL;
+}
+
+async function inferLegacySystemPatternSource(
+  root: Cell<unknown>,
+  runtime: Runtime,
+  space: MemorySpace,
+): Promise<string | undefined> {
+  const ref = getPatternIdentityRef(root);
+  if (!ref) return undefined;
+  const program = await runtime.patternManager
+    .getPatternSourceProgramByIdentity(ref.identity, space);
+  const expected = deriveSystemPatternUrl(space, runtime);
+  switch (program?.main) {
+    case HOME_PATTERN_URL:
+    case LOCAL_HOME_PATTERN_PATH:
+      return expected === HOME_PATTERN_URL ? HOME_PATTERN_URL : undefined;
+    case DEFAULT_APP_PATTERN_URL:
+    case LOCAL_DEFAULT_APP_PATTERN_PATH:
+      return expected === DEFAULT_APP_PATTERN_URL
+        ? DEFAULT_APP_PATTERN_URL
+        : undefined;
+    default:
+      return undefined;
+  }
 }
 
 // Same logger as manager.ts's timePiecePhase: timing stats record even while
@@ -67,6 +90,7 @@ const pieceUpdateLogger = getLogger("piece.update", {
 /** The result of a system-pattern update check. */
 export type UpdateOutcome =
   | "updated"
+  | "repaired-provenance"
   | "current"
   | "skipped-skew"
   | "skipped-unknown-build"
@@ -354,6 +378,13 @@ export class PiecesController<T = unknown> {
       // Run pattern setup within same transaction
       this.#manager.runtime.run(tx, pattern, {}, pieceCell);
 
+      // System roots created through the recovery escape hatch must rejoin the
+      // normal auto-update path. Custom programs have no resolvable source
+      // pointer, so deliberately leave those untracked.
+      if (!options?.customProgram) {
+        setPatternSource(pieceCell, tx, patternConfig.urlPath);
+      }
+
       // Link as default pattern within same transaction
       const spaceCellWithTx = spaceCellContents.withTx(tx);
       const defaultPatternCell = spaceCellWithTx.key("defaultPattern");
@@ -395,8 +426,20 @@ export class PiecesController<T = unknown> {
   async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
     this.disposeCheck();
 
-    // Fast path: check if pattern already exists (outside transaction)
-    const existingPattern = await this.#manager.getDefaultPattern();
+    // Fast path: check if the pattern already exists (outside transaction).
+    // A stored system root can become unstartable after the transformer or
+    // runtime advances. Give the auto-update path one chance to swap its
+    // identity in place before surfacing the original start failure.
+    let existingPattern: Cell<NameSchema> | undefined;
+    try {
+      existingPattern = await this.#manager.getDefaultPattern();
+    } catch (startError) {
+      const outcome = await this.checkAndUpdateDefaultPattern();
+      if (outcome !== "updated") {
+        throw startError;
+      }
+      existingPattern = await this.#manager.getDefaultPattern();
+    }
     if (existingPattern) {
       return new PieceController<NameSchema>(this.#manager, existingPattern);
     }
@@ -531,8 +574,10 @@ export class PiecesController<T = unknown> {
    * new pattern onto the SAME result cell (no new piece, state preserved by
    * stable key). Never calls run()/stop()/recreateDefaultPattern.
    *
-   * Call it AFTER {@link ensureDefaultPattern} has resolved (the root must be
-   * running for the watcher to be live).
+   * Usually called after {@link ensureDefaultPattern} has resolved, while the
+   * pattern watcher is live. It may also be called by `ensureDefaultPattern`
+   * after a stored root fails to start; in that recovery path the identity is
+   * swapped first and the following start instantiates the new pattern.
    */
   async checkAndUpdateDefaultPattern(): Promise<UpdateOutcome> {
     const runtime = this.#manager.runtime;
@@ -555,17 +600,18 @@ export class PiecesController<T = unknown> {
 
       // 3. Provenance + per-space host (NOT the global apiUrl — a foreign-homed
       //    space must resolve against its own toolshed). A non-home root
-      //    created before provenance stamping has no patternSource; we must NOT
-      //    derive default-app.tsx for it — a custom-app space (seeded from
-      //    home's defaultAppUrl) would be silently rolled to the default app.
-      //    Deriving is only safe for the home root (definitionally home.tsx).
-      //    Legacy non-home roots stay pinned until re-created stamps them; a
-      //    known-system-identity match could relax this later (spec M2.3).
+      //    created before provenance stamping has no patternSource. Recover it
+      //    only when its verified authored entry path identifies a known system
+      //    pattern; blindly deriving default-app.tsx could roll a custom-app
+      //    space to the wrong root.
       const storedSource = getPatternSource(root);
-      if (storedSource === undefined && !isHomeSpace) {
+      const inferredSource = storedSource === undefined
+        ? await inferLegacySystemPatternSource(root, runtime, space)
+        : undefined;
+      if (storedSource === undefined && inferredSource === undefined) {
         return "current";
       }
-      const url = storedSource ?? deriveSystemPatternUrl(space, runtime);
+      const url = storedSource ?? inferredSource!;
       const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
 
       // The version gate (step 4) validates `host`'s build, and the light
@@ -605,7 +651,24 @@ export class PiecesController<T = unknown> {
 
       // 6. Compare to the running identity.
       const running = getPatternIdentityRef(root)?.identity;
-      if (currentId === running) return "current";
+      if (currentId === running) {
+        if (storedSource !== undefined) return "current";
+        const { error } = await runtime.editWithRetry((tx) => {
+          setPatternSource(root, tx, url);
+        });
+        if (error) {
+          pieceUpdateLogger.warn(
+            "provenance-repair-failed",
+            () => [
+              "checkAndUpdateDefaultPattern: provenance repair failed",
+              space,
+              error,
+            ],
+          );
+          return "current";
+        }
+        return "repaired-provenance";
+      }
 
       // 7. Apply: compile the new source, then swap patternIdentity in place.
       const program = await runtime.harness.resolve(

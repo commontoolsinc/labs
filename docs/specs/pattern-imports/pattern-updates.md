@@ -17,18 +17,17 @@ Home root and published-pattern updates remain design (Phases 2–4).
 
 ## Last Updated
 
-2026-07-08
+2026-07-14
 
 ## Motivation
 
 - **System patterns must self-heal and roll forward.** `home.tsx` /
-  `default-app.tsx` are the most critical patterns to keep current, but today
-  they are **lazy-pinned at creation**: `ensureDefaultPattern`'s fast path
-  returns the existing root piece forever and never re-checks source
-  (`packages/piece/src/ops/pieces-controller.ts:342`). The only roll-forward is
-  a **manual** `recreateDefaultPattern` (shell Debugger button / CLI), which is
-  **not state-preserving** — it mints a new piece (`cause:
-  home-pattern-${Date.now()}`) and relinks (`pieces-controller.ts:222`).
+  `default-app.tsx` are the most critical patterns to keep current. Before
+  Phase 1 they were lazy-pinned at creation and the only roll-forward was a
+  **manual** `recreateDefaultPattern`, which is **not state-preserving** because
+  it mints and links a new root piece. Phase 1 adds the state-preserving update
+  path, including recovery when the stored root cannot start under the current
+  runtime.
 - **Two hazard cases to handle explicitly.** (1) We shipped a broken system
   pattern — once a fix ships, recovery must be automatic. (2) An
   schema-incompatible update slips through — the damage must be *bounded*
@@ -61,7 +60,7 @@ Home root and published-pattern updates remain design (Phases 2–4).
 | Pattern pointer `patternIdentity = {identity, symbol}` on the piece result cell | write `runner.ts:1012`, read `getPatternIdentityRef` `runner.ts:4441` | The thing an update rewrites |
 | **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts:1246` (enabled unless `doNotUpdateOnPatternChange`, `runner.ts:1341`) | **The apply mechanism — already built.** An update is a meta write; the watcher does the rest |
 | Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/manager.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
-| `ensureDefaultPattern` (lazy, pinned-at-creation) / `recreateDefaultPattern` (manual, **not** state-preserving) | `pieces-controller.ts:342` / `:222` | The hook (ensure) and the escape hatch (recreate) |
+| `ensureDefaultPattern` (starts existing roots and retries once after a gated update) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The open/recovery hook (ensure) and the last-resort escape hatch (recreate) |
 | System patterns = **raw TSX served by path**, bundled via `deno compile --include`; **no name→identity manifest** | `packages/toolshed/routes/patterns/patterns-server.ts`, `patterns.routes.ts` | Where the current system source + its identity come from |
 | Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `runtime.ts:1423` / `:1444`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
 | Build identity: `/api/meta` → `{ did, gitSha }` | `packages/toolshed/routes/meta/` | The version-skew signal |
@@ -186,7 +185,15 @@ and `home.tsx`:
 
 **Runtime side (at space open, in the per-space worker).**
 
-1. `url` = home space → `home.tsx`; else the root piece's `patternSource`.
+0. A system root created by `ensureDefaultPattern` or recreated by the manual
+   escape hatch stores `patternSource` in the same transaction as its
+   `patternIdentity`. A supplied `customProgram` remains deliberately
+   untracked. For a legacy root without provenance, a source is inferred only
+   when the verified authored entry path is the official API or local system
+   path appropriate to that space type (home or default-app); an unknown,
+   custom, or mismatched entry is pinned.
+1. `url` = home space → `home.tsx`; else the root piece's stored or safely
+   inferred `patternSource`.
    `host` = `mappedHostFor(space) ?? apiUrl`. *(Change from today:
    `ensureDefaultPattern` builds the URL from the global `apiUrl`,
    `pieces-controller.ts:274` — it must resolve against the space's host, which
@@ -202,6 +209,16 @@ and `home.tsx`:
 5. else → fetch `{host}{url}` source, `compilePattern(program, { space })`,
    write `patternIdentity = { identity: currentId, symbol }`. The watcher
    re-instantiates in place.
+
+The normal space-open path starts the stored root and launches this check in
+the background. If that first start throws (for example because the stored
+artifact predates a transformer/runtime change), `ensureDefaultPattern`
+synchronously runs the same gated update once. It retries the start only after
+an `updated` outcome; disabled, skewed, unknown, or custom roots rethrow the
+original start error instead of masking it or being recreated destructively.
+When an inferred legacy source already resolves to the running identity, the
+check writes only `patternSource` (`repaired-provenance`) so later opens use the
+normal tracked path.
 
 ## Version-skew gate
 
@@ -241,11 +258,13 @@ so no build-dependence and no gate.
   shipping — the primary defense (feasible precisely because the list is short
   and we own the source).
 - **Self-heal from a borked ship**: fix source → new identity → next space open
-  swaps it in place → recovered, automatically.
+  swaps it in place → recovered automatically, even when the old root fails its
+  initial start under the new runtime.
 - **Rollback = redeploy**: ship the prior source → toolshed serves the prior
   identity → the same swap rolls back. No per-piece rollback state needed.
 - **Escape hatch**: manual `recreateDefaultPattern` remains (state-losing; last
-  resort).
+  resort). System recreates stamp provenance so the replacement rejoins future
+  auto-updates; explicit custom-program recreates remain pinned.
 - **Residual**: schema-valid-but-semantically-wrong is not reliably detectable;
   it is *bounded* by fast rollback + golden replay, not gated on.
 

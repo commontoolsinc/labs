@@ -162,6 +162,7 @@ ${pieceEnvStatus()}
 TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
   • After 'set', run 'step' to trigger computed value updates
+  • Each CLI invocation has a fresh session; @session cannot read browser or prior-command state
   • Path format: forward slashes only (items/0/name, not items[0].name)
   • JSON values: strings need quotes: echo '"hello"' | cf piece set ...`);
 
@@ -465,7 +466,9 @@ Name: ${pieceData.name || "<no name>"}
         output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
       });
     } else {
-      output += "\n  (none)";
+      output += pieceData.connectionErrors?.readingFrom
+        ? "\n  (unavailable)"
+        : "\n  (none)";
     }
 
     output += "\n\n--- Read By ---";
@@ -474,7 +477,20 @@ Name: ${pieceData.name || "<no name>"}
         output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
       });
     } else {
-      output += "\n  (none)";
+      output += pieceData.connectionErrors?.readBy
+        ? "\n  (unavailable)"
+        : "\n  (none)";
+    }
+
+    if (pieceData.connectionErrors) {
+      output += "\n\n--- Connection Analysis ---";
+      for (
+        const [direction, message] of Object.entries(
+          pieceData.connectionErrors,
+        )
+      ) {
+        output += `\n  ${direction}: <unavailable: ${message}>`;
+      }
     }
 
     render(output);
@@ -703,7 +719,11 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     `Get a value from a piece at a specific path. Omit path to return the full result.
 
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
-  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name`,
+  ✓ items/0/name    ✓ config/db/host    ✗ items[0].name
+
+SESSION SCOPE: Every CLI invocation creates a fresh runtime session. An
+  @session address sees only this invocation, not a browser tab or an earlier
+  CLI command. Verify browser session state in that browser session.`,
   )
   .usage(pieceUsage)
   .example(
