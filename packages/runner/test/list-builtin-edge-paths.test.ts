@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { OpaqueCell } from "@commonfabric/api";
+import type { PatternFactory } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -18,6 +18,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { Cell, JSONSchema } from "../src/builder/types.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
   testPrincipalSessionOpenAuthFactory,
@@ -25,6 +26,34 @@ import {
 
 const signer = await Identity.fromPassphrase("list builtin edge paths");
 const space = signer.did();
+
+type LegacyListOpInput<T> = {
+  element: T;
+  index: number;
+};
+
+type LegacyListCell<T> = {
+  mapWithPattern<R>(
+    op: PatternFactory<LegacyListOpInput<T>, R>,
+    params: Record<string, unknown>,
+  ): R[];
+  filterWithPattern(
+    op: PatternFactory<LegacyListOpInput<T>, boolean>,
+    params: Record<string, unknown>,
+  ): T[];
+  flatMapWithPattern<R>(
+    op: PatternFactory<LegacyListOpInput<T>, R[]>,
+    params: Record<string, unknown>,
+  ): R[];
+  flatMapWithPattern<R>(
+    op: PatternFactory<LegacyListOpInput<T>, R>,
+    params: Record<string, unknown>,
+  ): R[];
+};
+
+function listBuiltins<T>(values: unknown): LegacyListCell<T> {
+  return values as LegacyListCell<T>;
+}
 
 // These tests exercise edge paths in the three list builtins (map/filter/
 // flatMap) that the resume-preservation tests do not reach:
@@ -51,11 +80,11 @@ describe("list builtin edge paths", () => {
   // params) as used. That makes usesIndex true, so a reused element that shifts
   // position re-runs its op.
   function indexUsingOp(
-    // deno-lint-ignore no-explicit-any
-    fn: (element: any, index: any) => any,
+    fn: (element: number, index: number) => number | boolean,
   ) {
-    // deno-lint-ignore no-explicit-any
-    return pattern(({ element, index }: any) => fn(element, index));
+    return pattern<LegacyListOpInput<number>>(({ element, index }) =>
+      fn(element, index)
+    );
   }
 
   beforeEach(() => {
@@ -102,9 +131,8 @@ describe("list builtin edge paths", () => {
 
     const mapPattern = pattern<{ values: number[] }>(({ values }) => ({
       values,
-      tagged: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
-        // deno-lint-ignore no-explicit-any
-        op as any,
+      tagged: listBuiltins<number>(values).mapWithPattern(
+        op,
         {},
       ),
     }));
@@ -150,9 +178,8 @@ describe("list builtin edge paths", () => {
 
     const filterPattern = pattern<{ values: number[] }>(({ values }) => ({
       values,
-      evens: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
-        // deno-lint-ignore no-explicit-any
-        op as any,
+      evens: listBuiltins<number>(values).filterWithPattern(
+        op,
         {},
       ),
     }));
@@ -196,9 +223,8 @@ describe("list builtin edge paths", () => {
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => ({
       values,
-      indices: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
-        // deno-lint-ignore no-explicit-any
-        op as any,
+      indices: listBuiltins<number>(values).flatMapWithPattern(
+        op,
         {},
       ),
     }));
@@ -229,15 +255,13 @@ describe("list builtin edge paths", () => {
     // flatMap flattens one level: an op returning an array has its entries
     // pushed individually into the aggregate.
     const expand = lift((x: number) => [x, x + 1]);
-    const op = pattern(
-      // deno-lint-ignore no-explicit-any
-      ({ element }: any) => expand(element),
+    const op = pattern<LegacyListOpInput<number>, number[]>(
+      ({ element }) => expand(element),
     );
 
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => ({
-      out: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
-        // deno-lint-ignore no-explicit-any
-        op as any,
+      out: listBuiltins<number>(values).flatMapWithPattern(
+        op,
         {},
       ),
     }));
@@ -264,20 +288,16 @@ describe("list builtin edge paths", () => {
   async function expectNonArrayThrow(
     name: string,
     build: (
-      values: OpaqueCell<number[]>,
-      // deno-lint-ignore no-explicit-any
-      op: any,
-      // deno-lint-ignore no-explicit-any
-    ) => any,
+      values: LegacyListCell<number>,
+      op: PatternFactory<LegacyListOpInput<number>, number>,
+    ) => unknown,
     messageRe: RegExp,
   ): Promise<void> {
-    const op = pattern(
-      // deno-lint-ignore no-explicit-any
-      ({ element }: any) => lift((x: number) => x)(element),
+    const op = pattern<LegacyListOpInput<number>, number>(
+      ({ element }) => lift((x: number) => x)(element),
     );
-    const opPattern = pattern<{ values: number[] }>(({ values }) => ({
-      // deno-lint-ignore no-explicit-any
-      out: build(values as unknown as OpaqueCell<number[]>, op as any),
+    const opPattern = pattern<{ values: unknown }>(({ values }) => ({
+      out: build(listBuiltins<number>(values), op),
     }));
     const resultCell = runtime.getCell<{ out: number[] }>(
       space,
@@ -289,8 +309,7 @@ describe("list builtin edge paths", () => {
     runtime.scheduler.onError((e) => errors.push(String(e?.message ?? e)));
     // Seed the input as a scalar, not an array.
     const result = runtime.run(tx, opPattern, {
-      // deno-lint-ignore no-explicit-any
-      values: 42 as any,
+      values: 42,
     }, resultCell);
     await commitTx();
     tx = runtime.edit();
@@ -534,11 +553,22 @@ const CROSS_SPACE_PROGRAM: RuntimeProgram = {
   }],
 };
 
-const crossSpaceLinkListSchema = {
+type ChildOutput = {
+  name: string;
+  greeting: string;
+};
+
+type ParentOutput = {
+  items?: ChildOutput[];
+  create?: { name?: string };
+};
+
+type ChildOutputCell = Cell<ChildOutput>;
+
+const crossSpaceLinkListSchema: JSONSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+};
 
 describe("cross-space link load kick", () => {
   let server: MemoryV2Server.Server;
@@ -583,22 +613,21 @@ describe("cross-space link load kick", () => {
         CROSS_SPACE_PROGRAM,
         { space: spaceH, tx: tx1 },
       );
-      const resultCell1 = rt1.getCell<Record<string, unknown>>(
+      const resultCell1 = rt1.getCell<ParentOutput>(
         spaceH,
         "edge-paths-cross-space-parent",
         undefined,
         tx1,
       );
-      // deno-lint-ignore no-explicit-any
-      const r1 = rt1.run(tx1, parent as any, {}, resultCell1);
+      const r1 = rt1.run(tx1, parent, {}, resultCell1);
       await tx1.commit();
       await r1.pull();
       r1.key("create").send({ name: "Ada" });
       await r1.pull();
       await rt1.idle();
-      // deno-lint-ignore no-explicit-any
-      const links = r1.key("items").asSchema(crossSpaceLinkListSchema)
-        .get() as any[];
+      const links = r1.key("items").asSchema<ChildOutputCell[]>(
+        crossSpaceLinkListSchema,
+      ).get();
       expect(links.length).toBe(1);
       expect(links[0].getAsNormalizedFullLink().space).toBe(spaceP);
       await rt1.patternManager.flushCompileCacheWrites();
@@ -610,12 +639,11 @@ describe("cross-space link load kick", () => {
       // followPointer, which finds the cross-space child doc absent and kicks
       // the async load via ensureLinkedDocLoaded; the convergence loop awaits
       // it.
-      const parentCell = rt2.getCellFromLink(parentLink);
+      const parentCell = rt2.getCellFromLink<ParentOutput>(parentLink);
       await parentCell.sync();
       const itemsCell = parentCell.key("items");
       await itemsCell.pull();
-      // deno-lint-ignore no-explicit-any
-      const items = itemsCell.get() as any[];
+      const items = itemsCell.get() ?? [];
       expect(Array.isArray(items)).toBe(true);
       expect(items.length).toBe(1);
       expect(items[0]?.name).toBe("Ada");
