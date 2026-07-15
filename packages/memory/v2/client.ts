@@ -33,6 +33,7 @@ import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
+  collectRequestSchemaCasHashes,
   compressRequestSchemas,
   hasRequestSchemaCasPayload,
   type RequestSchemaCasRequest,
@@ -115,7 +116,9 @@ export class Client {
   #clientFlags: MemoryProtocolFlags | null = null;
   #serverFlags: MemoryProtocolFlags | null = null;
   #requestSchemaCas: RequestSchemaCasMetadata | null = null;
+  #confirmedRequestSchemaHashes = new Set<string>();
   #outbound = Promise.resolve();
+  #coldAdmission: PromiseWithResolvers<void> | null = null;
   #reconnecting: Promise<void> | null = null;
   #cancelReconnectDelay: (() => void) | null = null;
   #connected = false;
@@ -145,6 +148,7 @@ export class Client {
     this.#closed = true;
     this.#connected = false;
     this.clearRequestSchemaCas();
+    this.releaseColdAdmission();
     this.#cancelReconnectDelay?.();
     this.rejectPending(new Error("memory client closed"));
     await Promise.all([...this.#spaces].map((space) => space.close()));
@@ -182,54 +186,78 @@ export class Client {
 
   async request<Result>(message: Record<string, unknown>): Promise<Result> {
     await this.ensureConnected();
+    while (true) {
+      await this.waitForColdAdmission();
+      // Another request can claim the barrier while this request resumes from
+      // an already-resolved wait. Recheck before making a CAS decision.
+      if (this.#coldAdmission !== null) continue;
+      if (this.#connected) break;
+      await this.ensureConnected();
+    }
+    // Make the CAS decision only after waiting for a cold admission and
+    // observing the current handshake.
     const requestId = message.requestId as string;
     let schemaAttempt: "refs" | "definitions" | "inline" =
       this.requestSchemaCasActive() ? "refs" : "inline";
-    while (true) {
-      const wireMessage = schemaAttempt === "inline"
-        ? message
-        : this.compressRequestSchemas(message, schemaAttempt === "definitions");
-      const usedRequestSchemaCas = this.usesRequestSchemaCas(wireMessage);
-      const pending = Promise.withResolvers<unknown>();
-      this.#pending.set(requestId, pending);
-      try {
-        await this.send(encodeMemoryBoundary(wireMessage));
-      } catch (error) {
-        this.#pending.delete(requestId);
-        throw error;
-      }
-      const result = await pending.promise as ResponseMessage<Result>;
-      if (
-        result.error?.name === "MissingSchemas" && usedRequestSchemaCas &&
-        schemaAttempt === "refs"
-      ) {
-        schemaAttempt = this.requestSchemaCasActive()
-          ? "definitions"
-          : "inline";
-        continue;
-      }
-      if (
-        result.error?.name === "SchemaStoreError" && usedRequestSchemaCas &&
-        schemaAttempt !== "inline"
-      ) {
-        this.clearRequestSchemaCas();
-        schemaAttempt = "inline";
-        continue;
-      }
-      if (result.error) {
-        const error = new Error(result.error.message);
-        error.name = result.error.name;
-        if (result.error.precondition !== undefined) {
-          (error as Error & { precondition?: string }).precondition =
-            result.error.precondition;
+    const firstWireMessage = schemaAttempt === "inline"
+      ? message
+      : this.compressRequestSchemas(message, false);
+    const referencedHashes = this.requestSchemaCasHashes(firstWireMessage);
+    const admission = this.claimColdAdmission(referencedHashes);
+    try {
+      while (true) {
+        const wireMessage = schemaAttempt === "inline"
+          ? message
+          : schemaAttempt === "refs"
+          ? firstWireMessage
+          : this.compressRequestSchemas(message, true);
+        const usedRequestSchemaCas = this.usesRequestSchemaCas(wireMessage);
+        const pending = Promise.withResolvers<unknown>();
+        this.#pending.set(requestId, pending);
+        try {
+          await this.send(encodeMemoryBoundary(wireMessage));
+        } catch (error) {
+          this.#pending.delete(requestId);
+          throw error;
         }
-        if (result.error.retryAfterSeq !== undefined) {
-          (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
-            result.error.retryAfterSeq;
+        const result = await pending.promise as ResponseMessage<Result>;
+        if (
+          result.error?.name === "MissingSchemas" && usedRequestSchemaCas &&
+          schemaAttempt === "refs"
+        ) {
+          schemaAttempt = this.requestSchemaCasActive()
+            ? "definitions"
+            : "inline";
+          continue;
         }
-        throw error;
+        if (
+          result.error?.name === "SchemaStoreError" && usedRequestSchemaCas &&
+          schemaAttempt !== "inline"
+        ) {
+          this.clearRequestSchemaCas();
+          schemaAttempt = "inline";
+          continue;
+        }
+        if (result.error) {
+          const error = new Error(result.error.message);
+          error.name = result.error.name;
+          if (result.error.precondition !== undefined) {
+            (error as Error & { precondition?: string }).precondition =
+              result.error.precondition;
+          }
+          if (result.error.retryAfterSeq !== undefined) {
+            (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
+              result.error.retryAfterSeq;
+          }
+          throw error;
+        }
+        if (usedRequestSchemaCas && schemaAttempt !== "inline") {
+          this.confirmRequestSchemaHashes(referencedHashes);
+        }
+        return result.ok as Result;
       }
-      return result.ok as Result;
+    } finally {
+      this.releaseColdAdmission(admission);
     }
   }
 
@@ -285,7 +313,6 @@ export class Client {
       await ack.promise;
       this.#connected = true;
     } catch (error) {
-      this.clearRequestSchemaCas();
       throw error;
     } finally {
       this.#helloPending = null;
@@ -416,17 +443,12 @@ export class Client {
       return;
     }
     this.#connected = false;
+    this.releaseColdAdmission();
     for (const session of this.#spaces) {
       session.handleDisconnect();
     }
     this.rejectPending(toConnectionError(error));
     void this.reconnect().catch(() => undefined);
-  }
-
-  private send(payload: string): Promise<void> {
-    const sending = this.#outbound.then(() => this.transport.send(payload));
-    this.#outbound = sending.catch(() => undefined);
-    return sending;
   }
 
   private requestSchemaCasActive(): boolean {
@@ -437,6 +459,7 @@ export class Client {
 
   private clearRequestSchemaCas(): void {
     this.#requestSchemaCas = null;
+    this.#confirmedRequestSchemaHashes.clear();
   }
 
   private updateRequestSchemaCas(
@@ -447,7 +470,64 @@ export class Client {
       this.clearRequestSchemaCas();
       return;
     }
+    if (
+      this.#requestSchemaCas?.generation !== metadata.generation ||
+      this.#requestSchemaCas?.audience !== metadata.audience
+    ) {
+      this.#confirmedRequestSchemaHashes.clear();
+    }
     this.#requestSchemaCas = metadata;
+  }
+
+  private send(payload: string): Promise<void> {
+    const sending = this.#outbound.then(() => this.transport.send(payload));
+    this.#outbound = sending.catch(() => undefined);
+    return sending;
+  }
+
+  private requestSchemaCasHashes(
+    message: Record<string, unknown>,
+  ): ReadonlySet<string> {
+    try {
+      return this.usesRequestSchemaCas(message)
+        ? collectRequestSchemaCasHashes(message)
+        : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  }
+
+  private claimColdAdmission(
+    hashes: ReadonlySet<string>,
+  ): PromiseWithResolvers<void> | null {
+    if (
+      hashes.size === 0 ||
+      [...hashes].every((hash) => this.#confirmedRequestSchemaHashes.has(hash))
+    ) {
+      return null;
+    }
+    const admission = Promise.withResolvers<void>();
+    this.#coldAdmission = admission;
+    return admission;
+  }
+
+  private async waitForColdAdmission(): Promise<void> {
+    while (this.#coldAdmission !== null) {
+      await this.#coldAdmission.promise;
+    }
+  }
+
+  private releaseColdAdmission(
+    admission: PromiseWithResolvers<void> | null = this.#coldAdmission,
+  ): void {
+    if (admission === null) return;
+    if (this.#coldAdmission === admission) this.#coldAdmission = null;
+    admission.resolve();
+  }
+
+  private confirmRequestSchemaHashes(hashes: ReadonlySet<string>): void {
+    if (!this.requestSchemaCasActive()) return;
+    for (const hash of hashes) this.#confirmedRequestSchemaHashes.add(hash);
   }
 
   private compressRequestSchemas(
