@@ -6,10 +6,14 @@ it into reviewable, red-green work orders.
 Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
 and deterministic failure gates are locally validated, including the accepted
 500-event counterbalanced browser/CPU gate. A deployed flag-off/flag-on drill
-remains pending. Later background, feed, scoped, and handler work is
-outlined only. The design's terminal crash quarantine and hard pool resource
-caps are later operational hardening (G18), not additional Phase 0–2 work
-orders.
+remains pending. The
+[2026-07-15 interactive-latency investigation](../../history/development/performance/server-execution-interactive-latency-2026-07-15.md)
+found large flag-on interactive regressions that the CPU gate cannot see;
+Phase 2.5 below turns its findings into work orders and blocks the deployed
+drill until its gates pass. Later background, feed, scoped, and handler work
+is outlined only. The design's terminal crash quarantine and hard pool
+resource caps are later operational hardening (G18), not additional Phase 0–2
+work orders.
 
 Baseline assumption: scheduler-v2 from PR #4288 has landed. Build directly on
 its facade, commit-gated starts, cancellation semantics, bounded settle,
@@ -130,6 +134,13 @@ reconnect snapshots are all branch-qualified.
       W2.1 client routing/overlay ──▶ W2.2 reconciliation
       W1.4 + W2.1 + W2.2 ──────────▶ W2.3 client builtin passivity
       W2.2 + W2.3 + W1.5 ─────────▶ W2.4 measurement/rollout
+
+    Phase 2.5 (interactive performance hardening; entry: W2.4):
+      W2.5 tolerant claim release ──▶ W2.6 demand-shrink scoping
+      W2.6 demand-shrink scoping ───▶ W2.8 wake coalescing (re-measure gate)
+      W2.7 unservable-diagnostic dedup (independent)
+      W2.5 + W2.6 + W2.7 [+ W2.8] ──▶ W2.9 interactive latency gates
+                                       ──▶ deployed flag drill (W2.4 remainder)
 
     Later:
       Phase 3 background demand and feed narrowing
@@ -1202,6 +1213,149 @@ runbook using only serverPrimaryExecution.
       requests, and settlement outcomes as separate units. Client speculation,
       unserved transaction attempts, action routing, and settlement coalescing
       are not one-to-one.
+
+---
+
+## 4.5 Phase 2.5 — interactive performance hardening
+
+The
+[2026-07-15 interactive-latency investigation](../../history/development/performance/server-execution-interactive-latency-2026-07-15.md)
+measured flag-on regressions of +27–81% (default-app note-create,
+lunch-poll multi-client) with per-interaction latency growing as the graph
+grows, settlements lagging 17–27 s, 124 claimed-action conflicts per 34
+accepted attempts, total claim churn (14 issued / 14 revoked per run), ~90
+re-attempts of permanently unservable candidates, and one Worker teardown
+crash. The shared root: `DenoSpaceExecutor.setDemand` treats every demand
+shrink as a whole-lane authority reset, so ordinary navigation rebuilds the
+server graph from scratch while racing the client's commits.
+
+These work orders restore the Phase 2 contract — client-perceived latency
+must stay at flag-off parity because speculation is untouched — before the
+deployed drill. They deliberately do not change protocol shapes, claim
+identity, or settlement semantics.
+
+### W2.5 — Tolerate stale executor claim releases
+
+**Depends on:** W2.4. **Status:** planned.
+
+`DenoSpaceExecutor.#handleClaimRelease` treats a release that does not match
+a live claim as lane-fatal. Releases are inherently racy: the Worker posts
+`unserved-claim`/`invalidated-claim` asynchronously while the host revokes
+claims for its own reasons (demand change, renewal failure, stop). The
+observed crash is "executor claim release does not match a live claim"
+during ordinary demand removal.
+
+**Deliverable:** a stale release (unknown claim, or mismatched lease/claim
+generation) is ignored with a debug diagnostic; an exact match keeps today's
+revoke path. No release may crash the lane.
+
+**Success criteria:**
+
+- [ ] A queued Worker release arriving after the host already revoked that
+      claim leaves the lane live and the pool crash counter unchanged.
+- [ ] A stale-generation release does not revoke a newer incarnation.
+- [ ] An exact-match release still revokes, unregisters renewal, and reports
+      the diagnostic exactly once.
+
+### W2.6 — Scope demand shrink to removed roots
+
+**Depends on:** W2.5. **Status:** planned.
+
+`setDemand` currently revokes every claim and sends `resetClaims` whenever
+any piece leaves the demand set; the Worker then stops every root and clears
+all candidate/claim state. Make shrink surgical:
+
+- Host: stop revoking unrelated claims and stop requesting `resetClaims` on
+  ordinary shrink. The full-reset path remains for lease replacement and
+  explicit reset callers.
+- Worker: stopping a removed root already unsubscribes its actions through
+  the scheduler facade; hook `unregisterExecutionAction` (the storage-manager
+  seam the facade already calls) so an unregistered action holding an exact
+  claim posts one `invalidated-claim` release (diagnostic `demand-removed`)
+  and drops its candidate-index entries. Still-live pieces keep their claims.
+- Claim activation for a candidate whose action died in the shrink window
+  must settle as a claim-scoped release (host revokes that claim), not a
+  lane-fatal Worker error.
+
+**Success criteria:**
+
+- [ ] Shrinking demand from {A, B} to {A} revokes only B's claims; A's
+      claims keep their incarnation (no revoke/reissue) across the shrink.
+- [ ] A claim landing on an action stopped by a concurrent shrink resolves
+      as one claim revoke; the lane stays live and no fatal is posted.
+- [ ] A navigation-shaped sequence (grow, shrink, regrow) issues new claims
+      only for roots that actually left and returned, and the pool
+      claimsIssued/claimsRevoked deltas match exactly that set.
+- [ ] Sub-pieces kept live by another demanded root retain their claims when
+      a sibling root is removed.
+
+### W2.7 — Report repeat unservable diagnostics once
+
+**Depends on:** none (independent). **Status:** planned.
+
+`createExecutorActionTransactionRouter` reports an unservable diagnostic on
+every rerun of the same unclaimed action. Statically unservable verdicts
+cannot change while the implementation and runtime fingerprints are
+unchanged; re-reporting is pure host/feed churn (~90 per default-app run).
+
+**Deliverable:** per-action dedup of unclaimed unservable diagnostics keyed
+by diagnostic code and fingerprints, mirroring the existing `reported`
+candidate dedup. A fingerprint change, claim, or invalidation clears the
+entry. Claimed unserved settlements are untouched — they remain canonical
+per-attempt outcomes.
+
+**Success criteria:**
+
+- [ ] N reruns of one statically unservable action produce one diagnostic
+      callback; a fingerprint change produces exactly one more.
+- [ ] Dynamic unservability (e.g. `dynamic-read-outside-static-surface`)
+      re-reports only when the diagnostic code changes, and never suppresses
+      canonical unserved settlements for claimed attempts.
+
+### W2.8 — Coalesce accepted-commit wake bursts
+
+**Depends on:** W2.6 (re-measure first — shrink scoping may shrink this).
+**Status:** planned; implement only if conflicts persist after W2.6.
+
+The Worker recomputes claimed actions per accepted-commit wave;
+`SelectiveDemandWakeQueue` coalesces only microtask-adjacent pushes, so an
+interactive burst (typing, multi-write handler) triggers a recompute per
+wire push, each racing the next client commit into `ConflictError`. Give the
+queue one bounded trailing window (tens of ms, capped so a continuous stream
+still makes progress) so one recompute covers a burst; a settlement may
+already cover multiple source invalidations, so no protocol change.
+
+**Success criteria:**
+
+- [ ] A burst of source commits inside the window produces one recompute and
+      one settlement covering the latest basis.
+- [ ] A continuous commit stream cannot defer recompute past the cap
+      (deterministic-clock test, no sleeps).
+- [ ] `settle()` still drains the queue deterministically.
+- [ ] Re-measured default-app run shows claimed-action conflicts reduced to
+      near the accepted-attempt count.
+
+### W2.9 — Interactive latency gates
+
+**Depends on:** W2.5–W2.7 (and W2.8 if implemented). **Status:** planned.
+
+The CPU-ratio gate cannot see interaction latency. Add flag-off/flag-on
+latency evidence to the rollout bar:
+
+- default-app note-create series (fresh-deployment pair, placement guard on):
+  flag-on avg/p95 within an agreed budget of flag-off, and no growth trend
+  across the series that flag-off does not show;
+- lunch-poll two-browser step timings under the same pairing (this fixture
+  currently fails its placement guard flag-on — zero successful settlements —
+  and must pass it);
+- record results in a dated `docs/history/development/performance/` report
+  and update the runbook's rollout-limits section to name these gates.
+
+**Success criteria:**
+
+- [ ] Both fixtures pass their placement guards flag-on.
+- [ ] Fresh-pair latency deltas are within the agreed budget and recorded.
+- [ ] The runbook names the latency gates beside the CPU gate.
 
 ---
 

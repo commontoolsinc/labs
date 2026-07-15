@@ -2,7 +2,12 @@
 
 Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
 and deterministic failure gates are locally validated, including the accepted
-500-event counterbalanced browser/CPU gate. A deployed flag-off/flag-on drill
+500-event counterbalanced browser/CPU gate. The
+[2026-07-15 interactive-latency investigation](../../history/development/performance/server-execution-interactive-latency-2026-07-15.md)
+found flag-on interactive regressions invisible to the CPU gate; the
+implementation plan's Phase 2.5 hardening work orders (tolerant claim
+release, demand-shrink scoping, unservable-diagnostic dedup, wake
+coalescing, latency gates) block the deployed flag-off/flag-on drill, which
 remains pending. Phases 3+ remain design. Terminal crash quarantine and
 hard pool resource caps are later operational hardening tracked as G18, not
 part of the Phase 0–2 acceptance contract.
