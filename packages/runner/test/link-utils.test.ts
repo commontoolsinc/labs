@@ -14,6 +14,7 @@ import {
   isSigilLink,
   isWriteRedirectLink,
   KeepAsCell,
+  type NormalizedFullLink,
   type NormalizedLink,
   parseLink,
   parseLinkOrThrow,
@@ -33,6 +34,78 @@ import { createCell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+type SchemaFixture = {
+  [key: string]: unknown;
+  type?: string;
+  asCell?: string[];
+  asStream?: string[];
+  properties?: Record<string, SchemaFixture>;
+  items?: SchemaFixture | null;
+  anyOf?: (SchemaFixture | null)[];
+  oneOf?: (SchemaFixture | null)[];
+  allOf?: (SchemaFixture | null)[];
+  $defs?: Record<string, SchemaFixture>;
+  $ref?: string;
+  description?: string;
+  self?: SchemaFixture;
+  next?: SchemaFixture | null;
+};
+
+type SchemaObject = Record<string, unknown> & {
+  type?: string;
+  asCell?: readonly string[];
+  asStream?: readonly string[];
+  properties?: Record<string, SchemaObject>;
+  items?: SchemaObject;
+  anyOf?: SchemaObject[];
+  oneOf?: SchemaObject[];
+  allOf?: SchemaObject[];
+  $defs?: Record<string, SchemaObject>;
+  $ref?: string;
+  description?: string;
+  next?: SchemaObject;
+  self?: SchemaObject;
+  a?: SchemaObject;
+  b?: SchemaObject;
+  left?: { path: SchemaObject };
+  right?: { path: SchemaObject };
+};
+
+function schemaObject(value: unknown): SchemaObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Expected schema object");
+  }
+  return value as SchemaObject;
+}
+
+function schemaAt(
+  root: unknown,
+  ...path: readonly (string | number)[]
+): SchemaObject {
+  let current: unknown = root;
+  for (const segment of path) {
+    if (Array.isArray(current)) {
+      if (typeof segment !== "number") {
+        throw new Error("Expected numeric schema path segment");
+      }
+      current = current[segment];
+    } else {
+      if (typeof segment !== "string") {
+        throw new Error("Expected string schema path segment");
+      }
+      current = schemaObject(current)[segment];
+    }
+  }
+  return schemaObject(current);
+}
+
+function sanitizeSchemaFixture(
+  schema: SchemaFixture,
+  keepAsCell?: KeepAsCell,
+): SchemaObject {
+  return schemaObject(sanitizeSchemaForLinks(schema as JSONSchema, keepAsCell));
+}
 
 describe("link-utils", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -213,7 +286,12 @@ describe("link-utils", () => {
     });
 
     it("should parse cells with paths to normalized links", () => {
-      const cell = runtime.getCell<any>(space, "test", undefined, tx);
+      const cell = runtime.getCell<{ nested: { value: number } }>(
+        space,
+        "test",
+        undefined,
+        tx,
+      );
       cell.set({ nested: { value: 42 } });
       const nestedCell = cell.key("nested");
       const result = parseLink(nestedCell);
@@ -428,7 +506,7 @@ describe("link-utils", () => {
       // error message, which throws on BigInt and masks the original "not a
       // link" failure. Using `toCompactDebugString` instead handles BigInt
       // safely.
-      expect(() => parseLinkOrThrow(123n as unknown as never)).toThrow(
+      expect(() => parseLinkOrThrow(123n)).toThrow(
         "Cannot parse value as link",
       );
     });
@@ -1080,12 +1158,14 @@ describe("link-utils", () => {
 
       // Result should have flags removed
       expect(result).not.toHaveProperty("asCell");
-      expect((result as any).properties.name).not.toHaveProperty("asCell");
+      expect(schemaAt(result, "properties", "name")).not.toHaveProperty(
+        "asCell",
+      );
     });
 
     it("should handle circular schema references without stack overflow", () => {
       // Create a circular schema like Record pattern has
-      const schema: any = {
+      const schema: SchemaFixture = {
         type: "object",
         asCell: ["cell"],
         properties: {
@@ -1095,166 +1175,183 @@ describe("link-utils", () => {
             items: {
               type: "object",
               properties: {
-                schema: {} as any, // Will be set to parent schema
+                schema: {},
               },
             },
           },
         },
       };
       // Create the circular reference
-      schema.properties.subPieces.items.properties.schema = schema;
+      schemaAt(
+        schema,
+        "properties",
+        "subPieces",
+        "items",
+        "properties",
+      ).schema = schema;
 
       // This should not throw a stack overflow
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       // Should have removed asCell from top level
       expect(result).not.toHaveProperty("asCell");
       // Should have processed nested properties
-      expect((result as any).properties.name.type).toBe("string");
+      expect(schemaAt(result, "properties", "name").type).toBe("string");
       // CT-1142: Result should be JSON-serializable without exponential growth
       expect(() => JSON.stringify(result)).not.toThrow();
       // The circular reference should use $ref
-      const schemaRef = (result as any).properties.subPieces.items.properties
-        .schema;
+      const schemaRef = schemaAt(
+        result,
+        "properties",
+        "subPieces",
+        "items",
+        "properties",
+        "schema",
+      );
       expect(schemaRef.$ref).toBeDefined();
       expect(schemaRef.$ref).toMatch(/^#\/\$defs\//);
     });
 
     it("should handle direct self-reference cycle with $ref", () => {
-      const schema: any = {
+      const schema: SchemaFixture = {
         type: "object",
         asCell: ["cell"],
       };
       schema.self = schema;
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       // Top level asCell ["cell"] flags should be removed
       expect(result).not.toHaveProperty("asCell");
-      const schema2: any = {
+      const schema2: SchemaFixture = {
         type: "object",
         asCell: ["stream"],
       };
-      schema.self = schema;
-      const result2 = sanitizeSchemaForLinks(schema2);
+      schema2.self = schema2;
+      const result2 = sanitizeSchemaFixture(schema2);
 
       // Top level asCell ["stream"] flags should be removed
       expect(result2).not.toHaveProperty("asCell");
 
       // Cycle reference should be replaced with $ref
-      expect((result as any).self.$ref).toBeDefined();
-      expect((result as any).self.$ref).toMatch(/^#\/\$defs\//);
+      expect(schemaAt(result, "self").$ref).toBeDefined();
+      expect(schemaAt(result, "self").$ref).toMatch(/^#\/\$defs\//);
       // Result should have $defs section with the circular schema
-      expect((result as any).$defs).toBeDefined();
+      expect(result.$defs).toBeDefined();
       // Result should be JSON-serializable (no circular object references)
       expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("should handle three-way cycle (A → B → C → A) with $ref", () => {
-      const a: any = { type: "a", asCell: ["cell"], next: null };
-      const b: any = { type: "b", asCell: ["stream"], next: null };
-      const c: any = { type: "c", asCell: ["cell"], next: null };
+      const a: SchemaFixture = { type: "a", asCell: ["cell"], next: null };
+      const b: SchemaFixture = { type: "b", asCell: ["stream"], next: null };
+      const c: SchemaFixture = { type: "c", asCell: ["cell"], next: null };
       a.next = b;
       b.next = c;
       c.next = a;
 
-      const result = sanitizeSchemaForLinks(a);
+      const result = sanitizeSchemaFixture(a);
 
       // All flags should be removed in the processed chain
       expect(result).not.toHaveProperty("asCell");
-      expect((result as any).next).not.toHaveProperty("asStream");
-      expect((result as any).next.next).not.toHaveProperty("asCell");
+      expect(schemaAt(result, "next")).not.toHaveProperty("asStream");
+      expect(schemaAt(result, "next", "next")).not.toHaveProperty("asCell");
       // The cycle back should be a $ref
-      expect((result as any).next.next.next.$ref).toBeDefined();
-      expect((result as any).next.next.next.$ref).toMatch(/^#\/\$defs\//);
+      expect(schemaAt(result, "next", "next", "next").$ref).toBeDefined();
+      expect(schemaAt(result, "next", "next", "next").$ref).toMatch(
+        /^#\/\$defs\//,
+      );
       // Result should be JSON-serializable
       expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("should handle cycle through array items with $ref", () => {
-      const schema: any = {
+      const schema: SchemaFixture = {
         type: "array",
         asCell: ["cell"],
         items: null,
       };
       schema.items = schema;
 
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       expect(result).not.toHaveProperty("asCell");
       // Cycle reference should be a $ref
-      expect((result as any).items.$ref).toBeDefined();
-      expect((result as any).items.$ref).toMatch(/^#\/\$defs\//);
+      expect(schemaAt(result, "items").$ref).toBeDefined();
+      expect(schemaAt(result, "items").$ref).toMatch(/^#\/\$defs\//);
       // Result should be JSON-serializable
       expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("should handle cycle through anyOf with $ref", () => {
-      const schema: any = {
+      const anyOf: (SchemaFixture | null)[] = [{ type: "string" }, null];
+      const schema: SchemaFixture = {
         type: "object",
         asCell: ["cell"],
-        anyOf: [{ type: "string" }, null],
+        anyOf,
       };
-      schema.anyOf[1] = schema;
+      anyOf[1] = schema;
 
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       expect(result).not.toHaveProperty("asCell");
-      expect((result as any).anyOf[0].type).toBe("string");
+      expect(schemaAt(result, "anyOf", 0).type).toBe("string");
       // Cycle reference should be a $ref
-      expect((result as any).anyOf[1].$ref).toBeDefined();
-      expect((result as any).anyOf[1].$ref).toMatch(/^#\/\$defs\//);
+      expect(schemaAt(result, "anyOf", 1).$ref).toBeDefined();
+      expect(schemaAt(result, "anyOf", 1).$ref).toMatch(/^#\/\$defs\//);
       // Result should be JSON-serializable
       expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("should handle multiple independent cycles", () => {
-      const cycle1: any = { type: "cycle1", asCell: ["cell"] };
+      const cycle1: SchemaFixture = { type: "cycle1", asCell: ["cell"] };
       cycle1.self = cycle1;
-      const cycle2: any = { type: "cycle2", asCell: ["stream"] };
+      const cycle2: SchemaFixture = { type: "cycle2", asCell: ["stream"] };
       cycle2.self = cycle2;
-      const schema: any = { a: cycle1, b: cycle2 };
+      const schema: SchemaFixture = { a: cycle1, b: cycle2 };
 
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
-      expect((result as any).a).not.toHaveProperty("asCell");
-      expect((result as any).b).not.toHaveProperty("asCell");
+      expect(schemaAt(result, "a")).not.toHaveProperty("asCell");
+      expect(schemaAt(result, "b")).not.toHaveProperty("asCell");
     });
 
     it("should handle OnlyStream option with circular schemas", () => {
-      const schema: any = {
+      const schema: SchemaFixture = {
         type: "object",
         asCell: ["stream"],
       };
       schema.self = schema;
 
-      const result = sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
+      const result = sanitizeSchemaFixture(schema, KeepAsCell.OnlyStream);
 
       // Expect the new version of asStream (where it's an entry in asCell)
-      expect((result as any).asCell).toEqual(["stream"]);
+      expect(result.asCell).toEqual(["stream"]);
       // asStream should be gone
       expect(result).not.toHaveProperty("asStream");
     });
 
     it("should handle shared references (diamond pattern) correctly", () => {
       // Test that same object referenced from multiple places is handled
-      const shared: any = { type: "shared", asCell: ["cell"] };
-      const schema: any = {
+      const shared: SchemaFixture = { type: "shared", asCell: ["cell"] };
+      const schema: SchemaFixture = {
         left: { path: shared },
         right: { path: shared },
       };
 
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       // First encounter should strip asCell
-      expect((result as any).left.path).not.toHaveProperty("asCell");
+      expect(schemaAt(result, "left", "path")).not.toHaveProperty("asCell");
       // Second encounter returns the same processed result (consistent!)
-      expect((result as any).right.path).toBe((result as any).left.path);
-      expect((result as any).right.path).not.toHaveProperty("asCell");
+      expect(schemaAt(result, "right", "path")).toBe(
+        schemaAt(result, "left", "path"),
+      );
+      expect(schemaAt(result, "right", "path")).not.toHaveProperty("asCell");
     });
 
     it("should process schemas inside existing $defs", () => {
       // Bug fix test: schemas inside $defs should have asCell stripped
-      const schema: any = {
+      const schema: SchemaFixture = {
         type: "object",
         $defs: {
           MyType: {
@@ -1271,22 +1368,22 @@ describe("link-utils", () => {
         $ref: "#/$defs/MyType",
       };
 
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       // $defs schemas should have asCell/asStream stripped
-      expect((result as any).$defs.MyType).not.toHaveProperty("asCell");
-      expect((result as any).$defs.MyType.type).toBe("string");
+      expect(schemaAt(result, "$defs", "MyType")).not.toHaveProperty("asCell");
+      expect(schemaAt(result, "$defs", "MyType").type).toBe("string");
       // Nested properties too
       expect(
-        (result as any).$defs.NestedType.properties.nested,
+        schemaAt(result, "$defs", "NestedType", "properties", "nested"),
       ).not.toHaveProperty("asCell");
       // $ref should be preserved
-      expect((result as any).$ref).toBe("#/$defs/MyType");
+      expect(result.$ref).toBe("#/$defs/MyType");
     });
 
     it("should avoid name collisions with existing $defs", () => {
       // Bug fix test: generated names should not overwrite existing $defs
-      const schema: any = {
+      const schema: SchemaFixture = {
         type: "object",
         $defs: {
           CircularSchema_0: { type: "string", description: "user-defined" },
@@ -1296,18 +1393,22 @@ describe("link-utils", () => {
       // Create a cycle that would normally generate CircularSchema_0
       schema.self = schema;
 
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       // User's definitions should be preserved
-      expect((result as any).$defs.CircularSchema_0.description).toBe(
+      expect(schemaAt(result, "$defs", "CircularSchema_0").description).toBe(
         "user-defined",
       );
-      expect((result as any).$defs.CircularSchema_1.description).toBe(
+      expect(schemaAt(result, "$defs", "CircularSchema_1").description).toBe(
         "user-defined",
       );
       // The cycle should use a different name (CircularSchema_2 or higher)
-      expect((result as any).self.$ref).toBeDefined();
-      const refName = (result as any).self.$ref.replace("#/$defs/", "");
+      const selfRef = schemaAt(result, "self").$ref;
+      expect(selfRef).toBeDefined();
+      if (selfRef === undefined) {
+        throw new Error("Expected generated self reference");
+      }
+      const refName = selfRef.replace("#/$defs/", "");
       expect(refName).not.toBe("CircularSchema_0");
       expect(refName).not.toBe("CircularSchema_1");
       // Result should be JSON-serializable
@@ -1315,42 +1416,45 @@ describe("link-utils", () => {
     });
 
     it("should handle cycles through oneOf", () => {
-      const schema: any = {
+      const oneOf: (SchemaFixture | null)[] = [{ type: "null" }, null];
+      const schema: SchemaFixture = {
         type: "object",
         asCell: ["cell"],
-        oneOf: [{ type: "null" }, null],
+        oneOf,
       };
-      schema.oneOf[1] = schema;
+      oneOf[1] = schema;
 
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       expect(result).not.toHaveProperty("asCell");
-      expect((result as any).oneOf[0].type).toBe("null");
-      expect((result as any).oneOf[1].$ref).toBeDefined();
+      expect(schemaAt(result, "oneOf", 0).type).toBe("null");
+      expect(schemaAt(result, "oneOf", 1).$ref).toBeDefined();
       expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("should handle cycles through allOf", () => {
-      const schema: any = {
+      const allOf: (SchemaFixture | null)[] = [{ type: "object" }, null];
+      const schema: SchemaFixture = {
         type: "object",
         asCell: ["stream"],
-        allOf: [{ type: "object" }, null],
+        allOf,
       };
-      schema.allOf[1] = { properties: { nested: schema } };
+      allOf[1] = { properties: { nested: schema } };
 
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       expect(result).not.toHaveProperty("asCell");
-      expect((result as any).allOf[1].properties.nested.$ref).toBeDefined();
+      expect(schemaAt(result, "allOf", 1, "properties", "nested").$ref)
+        .toBeDefined();
       expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("should handle $defs with internal cycles", () => {
       // A definition that references itself
-      const myDef: any = { type: "object", asCell: ["cell"] };
+      const myDef: SchemaFixture = { type: "object", asCell: ["cell"] };
       myDef.properties = { child: myDef };
 
-      const schema: any = {
+      const schema: SchemaFixture = {
         type: "object",
         $defs: {
           MyRecursiveDef: myDef,
@@ -1358,36 +1462,39 @@ describe("link-utils", () => {
         $ref: "#/$defs/MyRecursiveDef",
       };
 
-      const result = sanitizeSchemaForLinks(schema);
+      const result = sanitizeSchemaFixture(schema);
 
       // asCell should be stripped
-      expect((result as any).$defs.MyRecursiveDef).not.toHaveProperty("asCell");
+      expect(schemaAt(result, "$defs", "MyRecursiveDef")).not.toHaveProperty(
+        "asCell",
+      );
       // The internal cycle should be converted to $ref
       expect(
-        (result as any).$defs.MyRecursiveDef.properties.child.$ref,
+        schemaAt(result, "$defs", "MyRecursiveDef", "properties", "child").$ref,
       ).toBeDefined();
       expect(() => JSON.stringify(result)).not.toThrow();
     });
 
     it("should handle keepAsOpaque option", () => {
-      const schema: any = {
+      const schema: SchemaFixture = {
         type: "object",
         asCell: ["opaque"],
       };
 
       // By default, asCell should be removed
-      const resultDefault = sanitizeSchemaForLinks(schema);
+      const resultDefault = sanitizeSchemaFixture(schema);
       expect(resultDefault).not.toHaveProperty("asCell");
 
       // With keepAsCell: All, it should be preserved
-      const resultKept = sanitizeSchemaForLinks(schema, KeepAsCell.All);
-      expect((resultKept as any).asCell).toEqual(["opaque"]);
+      const resultKept = sanitizeSchemaFixture(schema, KeepAsCell.All);
+      expect(resultKept.asCell).toEqual(["opaque"]);
     });
   });
 
   describe("createDataCellURI", () => {
     it("should throw on circular data", () => {
-      const circular: any = { name: "test" };
+      type CircularData = { name: string; self?: CircularData };
+      const circular: CircularData = { name: "test" };
       circular.self = circular;
 
       expect(() => createDataCellURI(circular)).toThrow(
@@ -1396,8 +1503,9 @@ describe("link-utils", () => {
     });
 
     it("should throw on nested circular data", () => {
-      const obj1: any = { name: "obj1" };
-      const obj2: any = { name: "obj2", ref: obj1 };
+      type ReferencingData = { name: string; ref?: ReferencingData };
+      const obj1: ReferencingData = { name: "obj1" };
+      const obj2: ReferencingData = { name: "obj2", ref: obj1 };
       obj1.ref = obj2;
 
       expect(() => createDataCellURI(obj1)).toThrow(
@@ -1406,7 +1514,8 @@ describe("link-utils", () => {
     });
 
     it("should throw on circular data in arrays", () => {
-      const circular: any = { items: [] };
+      type CircularArrayData = { items: CircularArrayData[] };
+      const circular: CircularArrayData = { items: [] };
       circular.items.push(circular);
 
       expect(() => createDataCellURI(circular)).toThrow(
@@ -1685,60 +1794,61 @@ describe("link-utils", () => {
     const longId = "of:bafyabc12345678901234567890";
 
     it("should create LLM friendly link from normalized link", () => {
-      const link: NormalizedLink = {
+      const link: NormalizedFullLink = {
         id: longId,
         path: ["path", "to", "cell"],
         space: space,
+        scope: "space",
       };
-      // We need to cast to NormalizedFullLink because createLLMFriendlyLink expects it,
-      // but it only uses id and path.
-      const result = createLLMFriendlyLink(link as any);
+      const result = createLLMFriendlyLink(link);
 
       expect(result).toBe(`/${longId}/path/to/cell`);
     });
 
     it("should create LLM friendly links with non-space scope suffixes", () => {
-      const link: NormalizedLink = {
+      const link: NormalizedFullLink = {
         id: longId,
         path: ["path"],
         space: space,
         scope: "user",
       };
-      const result = createLLMFriendlyLink(link as any);
+      const result = createLLMFriendlyLink(link);
 
       expect(result).toBe(`/${longId}@user/path`);
     });
 
     it("should omit explicit space scope when creating LLM friendly links", () => {
-      const link: NormalizedLink = {
+      const link: NormalizedFullLink = {
         id: longId,
         path: ["path"],
         space: space,
         scope: "space",
       };
-      const result = createLLMFriendlyLink(link as any);
+      const result = createLLMFriendlyLink(link);
 
       expect(result).toBe(`/${longId}/path`);
     });
 
     it("should handle empty path", () => {
-      const link: NormalizedLink = {
+      const link: NormalizedFullLink = {
         id: longId,
         path: [],
         space: space,
+        scope: "space",
       };
-      const result = createLLMFriendlyLink(link as any);
+      const result = createLLMFriendlyLink(link);
 
       expect(result).toBe(`/${longId}`);
     });
 
     it("should encode special characters in path", () => {
-      const link: NormalizedLink = {
+      const link: NormalizedFullLink = {
         id: longId,
         path: ["path/with/slash", "path~with~tilde"],
         space: space,
+        scope: "space",
       };
-      const result = createLLMFriendlyLink(link as any);
+      const result = createLLMFriendlyLink(link);
 
       expect(result).toBe(`/${longId}/path~1with~1slash/path~0with~0tilde`);
     });
