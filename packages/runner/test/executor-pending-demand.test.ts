@@ -19,6 +19,7 @@ const FLAGS = {
   schedulerWriterLookup: true,
   serverPrimaryExecutionV1: true,
   serverPrimaryExecutionClaimRoutingV1: false,
+  serverPrimaryExecutionBuiltinPassivityV1: false,
 } as const satisfies Partial<MemoryProtocolFlags>;
 
 const PROGRAM: RuntimeProgram = {
