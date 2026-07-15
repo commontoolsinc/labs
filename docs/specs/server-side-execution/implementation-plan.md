@@ -1410,22 +1410,19 @@ latency evidence to the rollout bar:
   flag-on avg/p95 within an agreed budget of flag-off, and no growth trend
   across the series that flag-off does not show;
 - lunch-poll two-browser step timings under the same pairing. Diagnosed
-  2026-07-15: claims for the poll space now stay stable across the whole run
-  (14 issued, 0 revoked), but the vote-flow commits match no demanded stale
-  reader in the host wake index (5 matches / 182 lookups; 434 of 438
-  accepted-commit notices suppressed as unrelated), so the Worker never
-  recomputes during the vote window and publishes no settlement — the guard
-  correctly fails. The tally computations read per-vote entity documents
-  through links; those reads sit outside the static surface (their unserved
-  diagnostic is `dynamic-read-outside-static-surface`) and are not indexed
-  as demanded readers. Passing this gate therefore requires a decision:
-  either admit same-space dynamic link-following reads to servability and
-  the wake index (the firewall's scope checks already run per attempt; note
-  the spec §B.2 letter constrains reads by space/scope, not by envelope
-  coverage — but the W2.4 product fixture currently certifies nested-entity
-  projections as unserved, so this flips a reviewed criterion), or keep
-  nested projections client-primary in v1 and swap this gate to a workload
-  the v1 boundary covers;
+  2026-07-15 in two layers. First: claims stay stable (14 issued, 0
+  revoked) but vote-flow commits matched no demanded stale reader (5/182
+  index lookups; 434 of 438 notices suppressed), because the tally chains'
+  reads were unindexed. Dynamic same-space reads were then admitted to
+  servability and the context floor (the C0 step of
+  [context-lattice-execution.md](./context-lattice-execution.md)), which
+  removes the read-envelope blocker — and exposed the deeper one: the poll
+  space's durable rows classify 24 space / 13 user / **226 session**
+  context, and only 7 of the 226 read exclusively space-scoped documents.
+  The tally chains read PerSession state (per-viewer clocks, UI state), so
+  they are correctly session-context and a space lane can never serve them.
+  This gate is therefore blocked on context-lattice C2 (session lanes),
+  not on a Phase 2.5 fix; it stays as the acceptance gate for C2.
 - record results in a dated `docs/history/development/performance/` report
   and update the runbook's rollout-limits section to name these gates.
 
@@ -1462,7 +1459,11 @@ Client demand is P1. Background registry cleanup is lower priority.
 
 ### Phase 4 — scoped execution and delegated user keys
 
-Entry requires a separate reviewed design for:
+The draft design is
+[context-lattice-execution.md](./context-lattice-execution.md) (2026-07-15,
+under review); it extends this phase to session context and sequences
+cross-space execution, and its C0 step (dynamic-read admission) is
+implemented. Entry requires that design reviewed, covering:
 
 - principal/session-qualified runtime and replica contexts;
 - one shared space lane plus per-user and per-session lanes without duplicating

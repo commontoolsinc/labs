@@ -1371,11 +1371,15 @@ checklists: [implementation-plan.md](./implementation-plan.md).
   client-compute suppression once claim snapshots and closures are complete;
   that later optimization, not Phase 2, removes N× local compute.
 - **Phase 4 — scoped execution.** User-partition delegation (G16) +
-  per-user demand roots; executor endorsement atom on scoped writes.
+  per-user demand roots; executor endorsement atom on scoped writes. The
+  draft design — extended to session context and cross-space, with
+  dynamic-read admission as its implemented first step — is
+  [context-lattice-execution.md](./context-lattice-execution.md).
 - **Phase 5 — dual handler execution (C).** Signed event envelopes
   (`serialize: "server"` handlers first, then the default event path);
   the server runs handlers authoritatively while clients keep running them
-  speculatively; session-scoped execution rides the event stream.
+  speculatively; handler execution rides the event stream (session-scoped
+  *derivation* moves earlier, with the context lattice).
 
 ---
 
