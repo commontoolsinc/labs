@@ -2,21 +2,6 @@
 set -e
 shopt -s extglob nullglob
 
-DENO_VERSION_MIN="2.8.0"
-DENO_VERSION_MAX="2.9.0"
-# This is more portable than parsing `deno --version`
-DENO_VERSION=$(echo "console.log(Deno.version.deno)" | deno run -)
-IFS='.' read -r DENO_MAJOR DENO_MINOR DENO_PATCH <<<"${DENO_VERSION}"
-if [[ ! "${DENO_MAJOR}" =~ ^[0-9]+$ || ! "${DENO_MINOR}" =~ ^[0-9]+$ || ! "${DENO_PATCH}" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: Unexpected Deno version format: ${DENO_VERSION}"
-  exit 1
-fi
-
-if (( DENO_MAJOR != 2 || DENO_MINOR < 8 || DENO_MINOR >= 9 )); then
-  echo "ERROR: Deno version is ${DENO_VERSION}, expected >= ${DENO_VERSION_MIN} and < ${DENO_VERSION_MAX}."
-  exit 1
-fi
-
 # Figure out the symlink-resolved program name and directory.
 cmdName="$(readlink -f "$0")" || exit "$?"
 cmdDir="${cmdName%/*}"
@@ -27,6 +12,50 @@ baseDir="${cmdDir%/*}" # Parent of `cmdDir`, repo root in this case.
 # `cd`ed anywhere. This is especially useful because the LLM agents often like
 # to do `git commit` (which triggers this) in a project subdirectory.
 cd "${baseDir}"
+
+# The exact Deno version for this repository is pinned in mise.toml, which mise
+# installs (see README.md). Versions inside the range below are accepted, with
+# a warning when the version differs from the pin.
+# tasks/check-deno-pins.ts verifies that the range contains the pin.
+DENO_VERSION_MIN="2.8.0"
+DENO_VERSION_MAX="2.9.0"
+if [[ ! -f mise.toml ]]; then
+  # Checked before the read: `set -e` would otherwise abort on sed's exit
+  # status with only sed's own message.
+  echo "ERROR: mise.toml not found; cannot read the pinned Deno version."
+  exit 1
+fi
+DENO_VERSION_PINNED="$(sed -n 's/^deno = "\([^"]*\)"$/\1/p' mise.toml | head -1)"
+if [[ -z "${DENO_VERSION_PINNED}" ]]; then
+  echo "ERROR: Could not read the pinned Deno version from mise.toml."
+  exit 1
+fi
+# This is more portable than parsing `deno --version`
+DENO_VERSION=$(echo "console.log(Deno.version.deno)" | deno run -)
+IFS='.' read -r DENO_MAJOR DENO_MINOR DENO_PATCH <<<"${DENO_VERSION}"
+if [[ ! "${DENO_MAJOR}" =~ ^[0-9]+$ || ! "${DENO_MINOR}" =~ ^[0-9]+$ || ! "${DENO_PATCH}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: Unexpected Deno version format: ${DENO_VERSION}"
+  exit 1
+fi
+
+# Maps a MAJOR.MINOR.PATCH version to a single integer for range comparison.
+# Components are read as base-10 and must be below 1000.
+version_num() {
+  local major minor patch
+  IFS='.' read -r major minor patch <<<"$1"
+  echo $(( (10#${major} * 1000 + 10#${minor}) * 1000 + 10#${patch} ))
+}
+
+if (( $(version_num "${DENO_VERSION}") < $(version_num "${DENO_VERSION_MIN}") ||
+      $(version_num "${DENO_VERSION}") >= $(version_num "${DENO_VERSION_MAX}") )); then
+  echo "ERROR: Deno version is ${DENO_VERSION}, expected >= ${DENO_VERSION_MIN} and < ${DENO_VERSION_MAX}."
+  exit 1
+fi
+
+if [[ "${DENO_VERSION}" != "${DENO_VERSION_PINNED}" ]]; then
+  echo "WARNING: Deno version is ${DENO_VERSION}; this repository pins ${DENO_VERSION_PINNED} (mise.toml)."
+  echo "WARNING: To use the pinned version, install mise <https://mise.jdx.dev/> and run 'mise install'."
+fi
 
 # Collect all paths to check. Glob patterns will be expanded by bash.
 #

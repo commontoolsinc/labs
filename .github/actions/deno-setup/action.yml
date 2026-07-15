@@ -5,12 +5,41 @@ inputs:
     description: "Load deno dependencies from github cache"
     default: true
   deno-version:
-    description: "Deno version to install"
-    # Keep in sync with `./tasks/check.sh` version
-    default: "2.8.1"
+    description: "Deno version to install. Defaults to the pin in mise.toml."
+    default: ""
 runs:
   using: "composite"
   steps:
+    # The repository's Deno version is pinned once, in mise.toml. This step
+    # reads it so the rest of the action (and any caller that leaves the
+    # deno-version input empty) follows the pin.
+    - name: 📌 Resolve pinned Deno version
+      id: resolve
+      shell: bash
+      env:
+        DENO_VERSION_INPUT: ${{ inputs.deno-version }}
+      run: |
+        version="${DENO_VERSION_INPUT}"
+        if [ -z "$version" ]; then
+          if [ ! -f mise.toml ]; then
+            echo "::error::mise.toml not found; cannot resolve the Deno version. This action requires the repository to be checked out first."
+            exit 1
+          fi
+          version="$(sed -n 's/^deno = "\([^"]*\)"$/\1/p' mise.toml | head -1)"
+        fi
+        if [ -z "$version" ]; then
+          echo "::error::No deno-version input and no Deno pin found in mise.toml."
+          exit 1
+        fi
+        # The toolchain cache below is keyed on this version, so a range would
+        # never hit: setup-deno installs under the version it resolves against
+        # deno.com, not under the range.
+        if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "::error::Deno version '$version' is not an exact MAJOR.MINOR.PATCH version."
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
     # Cache the Deno toolchain binary. denoland/setup-deno resolves the version
     # against deno.com/versions.json and downloads the binary at job time, so a
     # deno.com outage breaks every job. A cache hit installs the binary from disk
@@ -20,29 +49,29 @@ runs:
     # below (which gates the module/dependency cache) so jobs that pass
     # `cache: false` are covered too.
     # Cache version: bump the `deno-bin-v1` token to invalidate all toolchain caches.
-    - name: 💾 Restore Deno toolchain ${{ inputs.deno-version }}
+    - name: 💾 Restore Deno toolchain ${{ steps.resolve.outputs.version }}
       id: deno-toolchain-cache
       uses: actions/cache@v6
       with:
-        path: ${{ runner.tool_cache }}/deno/${{ inputs.deno-version }}
-        key: deno-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}
+        path: ${{ runner.tool_cache }}/deno/${{ steps.resolve.outputs.version }}
+        key: deno-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}
 
-    - name: 🦕 Download Deno ${{ inputs.deno-version }}
+    - name: 🦕 Download Deno ${{ steps.resolve.outputs.version }}
       # Cache miss: download the toolchain from upstream. setup-deno installs it
       # into the cached path above, so actions/cache saves it at job end and
       # later runs hit.
       if: steps.deno-toolchain-cache.outputs.cache-hit != 'true'
       uses: denoland/setup-deno@v2
       with:
-        deno-version: ${{ inputs.deno-version }}
+        deno-version: ${{ steps.resolve.outputs.version }}
 
-    - name: 🦕 Use cached Deno ${{ inputs.deno-version }}
+    - name: 🦕 Use cached Deno ${{ steps.resolve.outputs.version }}
       # Cache hit: add the restored binary to PATH and verify, with no deno.com
       # contact.
       if: steps.deno-toolchain-cache.outputs.cache-hit == 'true'
       shell: bash
       env:
-        TOOLCHAIN_DIR: ${{ runner.tool_cache }}/deno/${{ inputs.deno-version }}
+        TOOLCHAIN_DIR: ${{ runner.tool_cache }}/deno/${{ steps.resolve.outputs.version }}
       run: |
         # setup-deno extracts the binary into <tool_cache>/deno/<version>/<arch>/.
         # The arch subdir name comes from the runner's node arch, so find the
@@ -65,7 +94,7 @@ runs:
           ~/.deno
           ~/.cache/deno
           ~/Library/Caches/deno
-        key: deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}-${{ hashFiles('**/deno.jsonc', '**/deno.lock') }}
+        key: deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}-${{ hashFiles('**/deno.jsonc', '**/deno.lock') }}
         restore-keys: |
-          deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ inputs.deno-version }}-
+          deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}-
           deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-
