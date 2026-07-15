@@ -4,10 +4,14 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import type {
+  Activity,
+  IAttestation,
   IExtendedStorageTransaction,
   ITransactionJournal,
   ITransactionWriteRequest,
+  MemorySpace,
   TransactionReactivityLog,
+  URI,
 } from "../src/storage/interface.ts";
 import {
   ExtendedStorageTransaction,
@@ -24,17 +28,21 @@ import type { NormalizedFullLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("transaction-inspection");
 const space = signer.did();
+const testSpace: MemorySpace = "did:key:test";
+const readId: URI = "of:read";
+const shallowId: URI = "of:shallow";
+const writeId: URI = "of:write";
 
 class EmptyJournal implements ITransactionJournal {
-  activity(): Iterable<any> {
+  activity(): Iterable<Activity> {
     return [];
   }
 
-  novelty(_space: any): Iterable<any> {
+  novelty(_space: MemorySpace): Iterable<IAttestation> {
     return [];
   }
 
-  history(_space: any): Iterable<any> {
+  history(_space: MemorySpace): Iterable<IAttestation> {
     return [];
   }
 }
@@ -46,21 +54,21 @@ describe("transaction inspection", () => {
       journal,
       getReactivityLog: () => ({
         reads: [{
-          space: "did:key:test" as any,
+          space: testSpace,
           scope: "space",
-          id: "of:read" as any,
+          id: readId,
           path: ["field"],
         }],
         shallowReads: [],
         writes: [{
-          space: "did:key:test" as any,
+          space: testSpace,
           scope: "space",
-          id: "of:write" as any,
+          id: writeId,
           path: ["field"],
         }],
       }),
       status: () => ({ status: "done" as const, journal }),
-      tx: {} as any,
+      tx: {} as IExtendedStorageTransaction["tx"],
     } as unknown as IExtendedStorageTransaction;
 
     assertEquals(txToReactivityLog(tx), {
@@ -85,18 +93,18 @@ describe("transaction inspection", () => {
       reactivityLogFromActivities([
         {
           read: {
-            space: "did:key:test" as any,
+            space: testSpace,
             scope: "space",
-            id: "of:read" as any,
+            id: readId,
             path: ["links", "peer"],
             meta: {},
           },
         },
         {
           read: {
-            space: "did:key:test" as any,
+            space: testSpace,
             scope: "space",
-            id: "of:shallow" as any,
+            id: shallowId,
             path: ["value", "items"],
             meta: {},
             nonRecursive: true,
@@ -104,9 +112,9 @@ describe("transaction inspection", () => {
         },
         {
           write: {
-            space: "did:key:test" as any,
+            space: testSpace,
             scope: "space",
-            id: "of:write" as any,
+            id: writeId,
             path: ["meta", "updatedAt"],
           },
         },
