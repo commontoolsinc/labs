@@ -3,13 +3,17 @@ import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPatternIdentityRef,
+  type JSONSchema,
   KeepAsCell,
   NAME,
   Pattern,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
-import { entityRefToString } from "@commonfabric/data-model/cell-rep";
+import {
+  entityRefToString,
+  linkRefPayload,
+} from "@commonfabric/data-model/cell-rep";
 import { defer } from "@commonfabric/utils/defer";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
@@ -17,7 +21,13 @@ import {
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { PieceManager } from "../src/manager.ts";
-import { PieceController } from "../src/ops/piece-controller.ts";
+import {
+  consumeOuterCellContract,
+  consumeStreamEventContract,
+  linkPathContracts,
+  localizeStreamEventContract,
+  PieceController,
+} from "../src/ops/piece-controller.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece pull materialization");
@@ -350,6 +360,111 @@ function trustPattern(runtime: Runtime, pattern: Pattern): Pattern {
     reason: "piece pull materialization test fixture",
   });
 }
+
+describe("piece link contract localization", () => {
+  const contract = (schema: JSONSchema, root: JSONSchema = schema) => ({
+    schema,
+    root,
+  });
+
+  it("fails closed for path ancestors that cannot be localized", () => {
+    const unresolvedRoot: JSONSchema = { $defs: {} };
+    expect(() =>
+      linkPathContracts(
+        [contract({ $ref: "#/$defs/Missing" }, unresolvedRoot)],
+        [],
+      )
+    ).toThrow(/cannot resolve a local schema reference/);
+
+    expect(linkPathContracts([contract(false)], ["child"])[0]?.schema)
+      .toBe(false);
+    expect(linkPathContracts([contract(true)], ["child"])[0]?.schema)
+      .toBe(true);
+
+    expect(() =>
+      linkPathContracts(
+        [contract({ type: "object", items: true })],
+        ["child"],
+      )
+    ).toThrow(/ambiguous object\/array ancestor/);
+    expect(() =>
+      linkPathContracts(
+        [contract({ type: "array", items: true })],
+        ["not-an-index"],
+      )
+    ).toThrow(/array link path contains non-index segment/);
+
+    expect(
+      linkPathContracts([contract({ $defs: {} })], ["child"])[0]?.schema,
+    ).toBe(true);
+    expect(() =>
+      linkPathContracts(
+        [contract({ type: "number" })],
+        ["child"],
+      )
+    ).toThrow(/schema does not describe a container/);
+  });
+
+  it("consumes only well-formed outer Cell wrappers", () => {
+    expect(consumeOuterCellContract(true)).toEqual({
+      kind: "cell",
+      payloadSchema: true,
+    });
+    expect(
+      consumeOuterCellContract({
+        type: "number",
+        asCell: ["stream", "cell"],
+      }),
+    ).toEqual({
+      kind: "stream",
+      payloadSchema: { type: "number", asCell: ["cell"] },
+    });
+    expect(() =>
+      consumeOuterCellContract({
+        type: "number",
+        asCell: [{}],
+      } as unknown as JSONSchema)
+    ).toThrow(/invalid outer Cell kind/);
+  });
+
+  it("fails closed for malformed stream-event compositions", () => {
+    expect(() => consumeStreamEventContract(contract(true))).toThrow(
+      /no stream-bearing alternative/,
+    );
+
+    const cellOnly = localizeStreamEventContract(
+      contract({ type: "number", asCell: ["cell"] }),
+    );
+    expect(cellOnly.consumedStream).toBe(false);
+    expect(cellOnly.issue).toMatch(/uses cell wrapper/);
+
+    expect(() =>
+      consumeStreamEventContract(contract({
+        anyOf: [
+          { type: "number", asCell: ["cell"] },
+          { type: "number" },
+        ],
+      }))
+    ).toThrow(/uses cell wrapper/);
+
+    expect(() =>
+      consumeStreamEventContract(contract({
+        allOf: [
+          { type: "number", asCell: ["stream"] },
+          { type: "number", asCell: ["cell"] },
+        ],
+      }))
+    ).toThrow(/uses cell wrapper/);
+
+    const recursive = {} as { anyOf?: JSONSchema[] };
+    recursive.anyOf = [recursive as JSONSchema];
+    expect(() =>
+      localizeStreamEventContract(
+        contract(recursive as JSONSchema),
+      )
+    ).toThrow(/recursive stream event schema/);
+  });
+});
 
 describe("piece pull materialization", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -1121,6 +1236,91 @@ describe("piece pull materialization", () => {
         }),
       }),
     ).resolves.toBeUndefined();
+
+    await expect(
+      controller.setInput({
+        events: sourcePiece.key("events").getAsLink({
+          base: inputCell.key("events"),
+          includeSchema: false,
+        }),
+      }),
+    ).rejects.toThrow(/does not preserve its durable stream wrapper/);
+  });
+
+  it("rejects conflicting and forged Cell wrapper contracts", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+        result: { value: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+
+    const conflictingTarget = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "number", asCell: ["cell"] },
+          },
+          patternProperties: {
+            "^handle$": { type: "number", asCell: ["readonly"] },
+          },
+          additionalProperties: false,
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      new PieceController(manager, conflictingTarget).input.set(
+        sourcePiece.key("value"),
+        ["handle"],
+      ),
+    ).rejects.toThrow(/destination Cell constraints disagree/);
+
+    const scalarTarget = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: { type: "number" } },
+          required: ["slot"],
+          additionalProperties: false,
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: 0 },
+      undefined,
+      { start: true },
+    );
+    const scalarController = new PieceController(manager, scalarTarget);
+    const scalarInput = await scalarController.input.getCell();
+    const forged = sourcePiece.key("value").getAsLink({
+      base: scalarInput.key("slot"),
+      includeSchema: true,
+    });
+    (linkRefPayload(forged) as { schema?: JSONSchema }).schema = {
+      type: "number",
+      asCell: ["cell"],
+    };
+    await expect(
+      scalarController.input.set(forged, ["slot"]),
+    ).rejects.toThrow(/link carries a non-durable Cell wrapper/);
   });
 
   it("projects nested Cell wrappers with the canonical link schema", async () => {

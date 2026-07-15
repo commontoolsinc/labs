@@ -1149,7 +1149,6 @@ export class Runner {
   ): void {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
     let argumentLink = getMetaLink(resultCell, "argument");
-    const updatesExistingArgument = argumentLink !== undefined;
     const previousInternal = resultCell.getMetaRaw("internal", {
       meta: ignoreReadForScheduling,
     });
@@ -1242,25 +1241,16 @@ export class Runner {
       }
     }
     if (nextArgument !== undefined && !argumentUpdated) {
-      if (updatesExistingArgument && !samePattern) {
-        this.updateAndValidateArgument(
-          tx,
-          argumentLink,
-          nextArgument,
-          pattern.argumentSchema,
-          defaults,
-        );
-      } else {
-        // New argument cells and same-pattern replay retain the historic write
-        // path. Piece API argument mutations validate their exact supplied
-        // value before entering Runner.
-        this.updateArgument(
-          tx,
-          argumentLink,
-          nextArgument,
-          pattern.argumentSchema,
-        );
-      }
+      // A changed pattern with an existing argument either validated above or
+      // produced no value to write, so this branch is only reachable for new
+      // argument cells and same-pattern replay. Piece API argument mutations
+      // validate their exact supplied value before entering Runner.
+      this.updateArgument(
+        tx,
+        argumentLink,
+        nextArgument,
+        pattern.argumentSchema,
+      );
     }
 
     // Record the content-addressed {identity, symbol} reference — the ONLY
@@ -1369,10 +1359,8 @@ export class Runner {
     );
 
     if (validationOptions.validateArgumentLinks !== undefined) {
-      const argumentLink = getMetaLink(resultCell.withTx(tx), "argument");
-      if (argumentLink === undefined) {
-        throw new Error("piece missing argument cell after setup");
-      }
+      // applySetupState() either installs this link or throws.
+      const argumentLink = getMetaLink(resultCell.withTx(tx), "argument")!;
       validationOptions.validateArgumentLinks(
         this.runtime.getCellFromLink(argumentLink, undefined, tx),
         pattern.argumentSchema,

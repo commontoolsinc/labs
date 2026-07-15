@@ -116,6 +116,62 @@ describe("piece schema compatibility", () => {
       .not.toThrow();
   });
 
+  it("reports invalid and unprovable durable-link contracts", () => {
+    const invalid = { type: "not-a-fabric-type" } as unknown as JSONSchema;
+    expect(() => assertSchemaSubset(invalid, true, "link")).toThrow(
+      /source schema is invalid/,
+    );
+    expect(() => assertSchemaSubset(true, invalid, "link")).toThrow(
+      /target schema is invalid/,
+    );
+
+    const namedString: JSONSchema = {
+      type: "object",
+      properties: { x: { type: "string" } },
+      required: ["x"],
+      additionalProperties: false,
+    };
+    expect(() =>
+      assertSchemaSubset(namedString, {
+        type: "object",
+        properties: { x: { type: "number" } },
+        required: ["x"],
+        additionalProperties: false,
+      })
+    ).toThrow(/x.*type/);
+    expect(() =>
+      assertSchemaSubset(namedString, {
+        type: "object",
+        patternProperties: { "^x$": { type: "number" } },
+        required: ["x"],
+        additionalProperties: false,
+      })
+    ).toThrow(/x.*type/);
+    expect(() =>
+      assertSchemaSubset(namedString, {
+        type: "object",
+        additionalProperties: { type: "number" },
+      })
+    ).toThrow(/x.*type/);
+
+    const intersectedSource: JSONSchema = {
+      type: "object",
+      properties: { x: { type: ["number", "string"] } },
+      patternProperties: { "^x$": { type: "number" } },
+      required: ["x"],
+      additionalProperties: false,
+    };
+    expect(() =>
+      assertSchemaSubset(intersectedSource, {
+        type: "object",
+        properties: { x: { type: "number" } },
+        patternProperties: { "^x$": { type: "number" } },
+        required: ["x"],
+        additionalProperties: false,
+      })
+    ).not.toThrow();
+  });
+
   it("uses target defaults as link proofs only under default-stable ancestors", () => {
     const properties = {
       x: { type: "number" as const },

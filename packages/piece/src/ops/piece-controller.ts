@@ -79,7 +79,7 @@ interface SuppliedLink {
 }
 
 interface OuterCellContract {
-  kind: ReturnType<typeof ContextualFlowControl.getAsCellKind>;
+  kind: NonNullable<ReturnType<typeof ContextualFlowControl.getAsCellKind>>;
   payloadSchema: JSONSchema;
 }
 
@@ -167,8 +167,9 @@ function isUnconditionallyType(
       schema.type.every((entry) => entry === type);
 }
 
-function linkPathAncestorIssue(schema: JSONSchema): string | undefined {
-  if (typeof schema !== "object" || schema === null) return undefined;
+function linkPathAncestorIssue(
+  schema: Exclude<JSONSchema, boolean>,
+): string | undefined {
   const key = Object.keys(schema).find((candidate) =>
     !LINK_PATH_SAFE_ANCESTOR_KEYS.has(candidate)
   );
@@ -184,8 +185,10 @@ function linkPathAncestorIssue(schema: JSONSchema): string | undefined {
  * pattern-property intersections and parent/field correlations. A future-value
  * link proof needs the actual conjuncts, and must fail closed when an ancestor
  * constraint cannot be localized to the linked slot.
+ *
+ * @internal Exported for focused contract tests; not part of the Piece API.
  */
-function linkPathContracts(
+export function linkPathContracts(
   initial: readonly PathSchemaContract[],
   path: readonly (string | number)[],
   options: { trackSourcePresence?: boolean } = {},
@@ -296,15 +299,23 @@ function withoutTopLevelScope(schema: JSONSchema): JSONSchema {
   return payload;
 }
 
-/** Consume exactly one wrapper, retaining any nested Cell contract. */
-function consumeOuterCellContract(schema: JSONSchema): OuterCellContract {
+/**
+ * Consume exactly one wrapper, retaining any nested Cell contract.
+ *
+ * @internal Exported for focused contract tests; not part of the Piece API.
+ */
+export function consumeOuterCellContract(
+  schema: JSONSchema,
+): OuterCellContract {
   const entries = ContextualFlowControl.getAsCellValues(schema);
   if (entries.length === 0 || typeof schema !== "object" || schema === null) {
     return { kind: "cell", payloadSchema: schema };
   }
+  const kind = ContextualFlowControl.getAsCellKind(entries[0]);
+  if (kind === undefined) throw new Error("invalid outer Cell kind");
   const { asCell: _asCell, ...payloadSchema } = schema;
   return {
-    kind: ContextualFlowControl.getAsCellKind(entries[0]),
+    kind,
     payloadSchema: entries.length === 1
       ? payloadSchema
       : { ...payloadSchema, asCell: entries.slice(1) },
@@ -319,8 +330,10 @@ function consumeOuterCellContract(schema: JSONSchema): OuterCellContract {
  * mixed unions fail closed because an unwrapped branch may also accept an
  * opaque stream handle. Intersections retain unwrapped sibling constraints on
  * the payload, while an explicit non-stream Cell wrapper is contradictory.
+ *
+ * @internal Exported for focused contract tests; not part of the Piece API.
  */
-function localizeStreamEventContract(
+export function localizeStreamEventContract(
   unresolved: PathSchemaContract,
   active = new WeakSet<object>(),
 ): StreamEventLocalization {
@@ -423,8 +436,12 @@ function localizeStreamEventContract(
   }
 }
 
-/** Consume exactly one stream wrapper from the applicable event contract. */
-function consumeStreamEventContract(
+/**
+ * Consume exactly one stream wrapper from the applicable event contract.
+ *
+ * @internal Exported for focused contract tests; not part of the Piece API.
+ */
+export function consumeStreamEventContract(
   contract: PathSchemaContract,
 ): PathSchemaContract {
   const localized = localizeStreamEventContract(contract);
@@ -636,11 +653,6 @@ function assertSuppliedLinkSchemasCompatible(
 
     if (preservesDirectHandle) {
       const target = consumeOuterCellContract(targetWrapper!);
-      if (target.kind === undefined) {
-        throw new Error(
-          `input link at ${displayPath} schema is not compatible: invalid outer Cell kind`,
-        );
-      }
       const sourceIsStream = isStream(suppliedLink.value);
       const targetIsStream = target.kind === "stream";
       if (sourceIsStream !== targetIsStream) {

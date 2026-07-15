@@ -625,19 +625,10 @@ function objectSubsetIssue(
         propertyPath,
         { ...context, allowEvolutionPolicy: false },
       );
-      if (
-        directIssue !== undefined &&
-        !sourceContracts.slice(1).some((sourceContract) =>
-          schemaSubsetIssue(
-            sourceContract,
-            targetAdditional,
-            propertyPath,
-            { ...context, allowEvolutionPolicy: false },
-          ) === undefined
-        )
-      ) {
-        return directIssue;
-      }
+      // A matching source pattern would have an exact-equal matching target
+      // pattern (proved above), so this no-target-pattern branch cannot borrow
+      // a source-pattern conjunct as an additionalProperties proof.
+      if (directIssue !== undefined) return directIssue;
     }
   }
 
