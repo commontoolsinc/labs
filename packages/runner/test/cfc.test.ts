@@ -110,6 +110,30 @@ describe("ContextualFlowControl.schemaAtPath", () => {
     expect(cfc.schemaAtPath(schema, ["missing"])).toBe(false);
   });
 
+  it("classifies combined unions with boolean branches", () => {
+    const cfc = new ContextualFlowControl();
+    const schema = deepFreeze({
+      anyOf: [{
+        type: "array",
+        items: { type: "string" },
+      }],
+      oneOf: [true],
+    } as JSONSchemaObj);
+
+    expect(cfc.schemaAtPath(schema, ["0"])).toBe(true);
+  });
+
+  it("falls back when a union classifier cannot resolve a ref", () => {
+    const cfc = new ContextualFlowControl();
+    const schema = deepFreeze({
+      anyOf: [{ $ref: "#/$defs/Missing" }],
+      $defs: { Present: { type: "string" } },
+    } as JSONSchemaObj);
+
+    expect(() => cfc.schemaAtPath(schema, ["value"]))
+      .toThrow(/Failed to resolve \$ref/);
+  });
+
   it("considers a schema with only $defs true'", () => {
     const schema: JSONSchema = {
       $defs: { Test: { type: "array", items: { type: "string" } } },
