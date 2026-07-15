@@ -29,10 +29,7 @@ import {
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { VDomRenderer } from "./main/renderer.ts";
-import {
-  ensurePendingRenderStyles,
-  setPendingRenderState,
-} from "./pending-render.ts";
+import { setPendingRenderState } from "./pending-render.ts";
 //import { animate } from "./debug-element.ts";
 
 /** Tracks an active rendering for debug inspection. */
@@ -86,11 +83,6 @@ export const render = (
   view: VNode | CellHandle<VNode>,
   options: RenderOptions = {},
 ): Cancel => {
-  ensurePendingRenderStyles(
-    parent,
-    options.document ?? globalThis.document,
-  );
-
   // Use worker-side rendering for CellHandle inputs (unless legacy mode requested)
   if (isCellHandle(view) && !options.useLegacyRenderer) {
     return renderViaWorker(parent, view as CellHandle<VNode>, options);

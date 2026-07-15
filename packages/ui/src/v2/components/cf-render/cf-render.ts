@@ -94,6 +94,27 @@ export class CFRender extends BaseElement {
       overflow: auto;
     }
 
+    /* The renderer owns pending semantics; cf-render owns their presentation.
+      Ambient custom properties cross the shadow boundary just like the rest of
+      the theme, so hosts can tune the treatment without runtime style tags. */
+    .render-container [data-cf-pending="true"] {
+      opacity: var(--cf-render-pending-opacity, 0.55) !important;
+      filter: var(--cf-render-pending-filter, grayscale(0.8)) !important;
+    }
+
+    .render-container
+      :is(cf-fragment, span[style*="display"][style*="contents"])[data-cf-pending="true"] {
+      opacity: 1 !important;
+      filter: none !important;
+    }
+
+    .render-container
+      :is(cf-fragment, span[style*="display"][style*="contents"])[data-cf-pending="true"]
+      > * {
+      opacity: var(--cf-render-pending-opacity, 0.55) !important;
+      filter: var(--cf-render-pending-filter, grayscale(0.8)) !important;
+    }
+
     :host([variant="chip"]) .render-container {
       display: inline-block;
       width: auto;

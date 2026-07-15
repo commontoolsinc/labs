@@ -689,11 +689,15 @@ renderers recognize concrete `DataUnavailable` values directly. An unavailable
 root or child contributes no visible content before its first usable value.
 After a usable value has rendered, a `pending` update preserves the last
 rendered subtree until another usable value arrives. The retained element is
-marked `data-cf-pending`, made `inert`, exposed as `aria-busy`, and dimmed by a
-renderer-owned style in the active document or shadow root. A bare text node is
-retained but has no interactive surface or element on which to install the
-visual treatment. The marker is never stringified as `{}` and is not reported
-as invalid VDOM.
+marked `data-cf-pending`, made `inert`, and exposed as `aria-busy`. The HTML
+renderer owns those semantics; the enclosing `cf-render` owns their visual
+treatment in its static shadow-root stylesheet. It dims the subtree using the
+inherited `--cf-render-pending-opacity` and `--cf-render-pending-filter`
+component properties, so a theme host can refine the presentation without
+runtime style injection or inline-style mutation. A bare text node is retained
+but has no interactive surface or element on which to install the visual
+treatment. The marker is never stringified as `{}` and is not reported as
+invalid VDOM.
 
 `error`, `syncing`, and `schema-mismatch` do not retain prior content. They
 contribute no visible content unless the authored expression explicitly

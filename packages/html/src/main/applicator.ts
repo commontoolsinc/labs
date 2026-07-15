@@ -15,7 +15,6 @@ import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { provideElementSpace } from "./space-context.ts";
 import {
-  ensurePendingRenderStyles,
   PENDING_RENDER_ATTRIBUTE,
   setPendingRenderState,
 } from "../pending-render.ts";
@@ -214,7 +213,6 @@ export class DomApplicator {
    */
   setContainer(container: HTMLElement): void {
     this.nodes.set(CONTAINER_NODE_ID, container);
-    ensurePendingRenderStyles(container, this.document);
   }
 
   /**
