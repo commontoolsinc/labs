@@ -67,6 +67,7 @@ import type {
   CallbackBoundarySemantics,
   SupportedCallbackBoundaryKind,
 } from "../policy/callback-boundary.ts";
+import { isWishFactoryExpression } from "./structural-reactive-factory.ts";
 
 const EMPTY_OPAQUE_ROOTS = new Set<string>();
 const SES_SELF_CONTAINED_CALLBACK_BOUNDARIES = new Set<
@@ -142,21 +143,18 @@ export class PatternContextValidationTransformer
         return ts.visitEachChild(node, visit, context.tsContext);
       }
 
-      if (
-        ts.isCallExpression(node) &&
-        detectCallKind(node, checker)?.kind === "wish"
-      ) {
+      if (ts.isCallExpression(node)) {
         const reactiveContext = context.getReactiveContext(node);
         if (
-          reactiveContext.owner === "computed" ||
-          reactiveContext.owner === "lift" ||
-          reactiveContext.owner === "lift-applied"
+          reactiveContext.kind === "compute" &&
+          reactiveContext.owner !== "standalone" &&
+          isWishFactoryExpression(node, checker)
         ) {
           context.reportDiagnosticOnce({
             severity: "error",
             type: "compute-context:local-reactive-use",
             message:
-              "wish() creates a reactive factory node and must be called in the pattern body, outside computed() or lift(). Capture its request or resultOf() projection in the callback instead.",
+              "Wish factories must be created in the pattern body, not inside computed(), lift(), action(), or handler() callbacks (including through helper calls). Create the Wish outside the callback and capture its request or resultOf() projection instead.",
             node,
           });
         }

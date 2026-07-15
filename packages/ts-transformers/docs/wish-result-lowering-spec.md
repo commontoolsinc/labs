@@ -109,8 +109,9 @@ Two additions to keep it honest:
 
 ### Nested `computed(() => ...)` factory placement
 
-The `wish()` factory belongs in the pattern body. Capture the request or its
-usable projection in `computed()`:
+The `wish()` factory belongs in the pattern body. It cannot be created directly
+or through a helper inside `computed()`, `lift()`, `action()`, or `handler()`
+callbacks. Capture the request or its usable projection in `computed()`:
 
 ```ts
 const state = wish<T>(...);
@@ -119,7 +120,7 @@ const value = resultOf(request);
 const derived = computed(() => value.items.map(...));
 ```
 
-Creating the Wish inside the callback is rejected with
+Creating the Wish inside an execution callback is rejected with
 `compute-context:local-reactive-use`, including at sites whose downstream array
 method can otherwise be lowered. `map-regains-reactive-aliases` keeps its Wish
 projection outside the compute and verifies that capturing the projection still

@@ -64,6 +64,61 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "wish factories cannot be hidden behind runtime callbacks or helpers",
+  async () => {
+    const source = `
+      import {
+        action,
+        computed,
+        handler,
+        pattern,
+        resultOf,
+        type WishState,
+        wish,
+      } from "commonfabric";
+
+      declare function externalWish<T>(query: string): WishState<T>;
+
+      function buildRequest(query: string) {
+        return wish<string>({ query }).result;
+      }
+
+      const invalidHandler = handler<void, {}>(() => {
+        wish<string>({ query: "#handler" });
+      });
+
+      export default pattern(() => {
+        const invalidAction = action(() => {
+          wish<string>({ query: "#action" });
+        });
+        const invalidComputed = computed(() =>
+          resultOf(buildRequest("#computed"))
+        );
+        const invalidExternal = computed(() =>
+          resultOf(externalWish<string>("#external").result)
+        );
+        return {
+          invalidAction,
+          invalidComputed,
+          invalidExternal,
+          invalidHandler,
+        };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      4,
+    );
+  },
+);
+
 // validateComputationExpression -> findProblematicAccess: a reactive property
 // access used in a bare statement-position arithmetic computation is at a
 // restricted (non-lowerable) site, so it is rejected with

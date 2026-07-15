@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import { detectCallKind } from "../ast/mod.ts";
+import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { isBrandedCellType } from "./cell-type.ts";
 
@@ -121,6 +122,65 @@ export function isStructuralReactiveFactoryExpression(
         checker,
         nextSeenSymbols,
       );
+    },
+    seenSymbols,
+  );
+}
+
+function isWishStateType(
+  type: ts.Type,
+  seen: Set<ts.Type> = new Set(),
+): boolean {
+  if (seen.has(type)) return false;
+  seen.add(type);
+  const symbols = [type.aliasSymbol, type.getSymbol()].filter(
+    (symbol): symbol is ts.Symbol => !!symbol,
+  );
+  if (
+    symbols.some((symbol) =>
+      symbol.getName() === "WishState" && isCommonFabricSymbol(symbol)
+    )
+  ) {
+    return true;
+  }
+  return (type.isUnion() || type.isIntersection()) &&
+    type.types.some((member) => isWishStateType(member, seen));
+}
+
+/**
+ * Follow local helper returns and stable aliases to determine whether evaluating
+ * an expression creates a Wish factory node. The return-type check preserves
+ * the same fail-closed behavior for helpers whose implementation is external.
+ */
+export function isWishFactoryExpression(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seenSymbols = new Set<ts.Symbol>(),
+): boolean {
+  return someResolvedHelperExpressionMatches(
+    expression,
+    checker,
+    (target, nextSeenSymbols) => {
+      if (ts.isCallExpression(target)) {
+        if (detectCallKind(target, checker)?.kind === "wish") return true;
+        if (isWishStateType(checker.getTypeAtLocation(target))) return true;
+        return isWishFactoryExpression(
+          target.expression,
+          checker,
+          nextSeenSymbols,
+        );
+      }
+      if (
+        ts.isPropertyAccessExpression(target) ||
+        ts.isElementAccessExpression(target)
+      ) {
+        return isWishFactoryExpression(
+          target.expression,
+          checker,
+          nextSeenSymbols,
+        );
+      }
+      return false;
     },
     seenSymbols,
   );
