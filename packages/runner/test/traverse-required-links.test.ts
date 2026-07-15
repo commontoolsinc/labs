@@ -1,21 +1,10 @@
 /**
- * Element-level required grace (the B2 reader-blackout fix, #4532) — unit
- * pins for the three contracts, in the fast runner lane:
- *
- * 1. An array-element object whose required property is a link to an ABSENT
- *    target (unwritten / cross-space not loaded / another principal's
- *    partition) degrades that field instead of voiding the element and the
- *    whole array — the multiplayer "rows never load" blackout.
- * 2. The same shape OUTSIDE an array element keeps strict `required`
- *    semantics and voids — the scheduler relies on that invalidation to
- *    defer lifts/handlers until their arguments materialize (the blanket
- *    version of the fix broke auth-manager patterns exactly here).
- * 3. A link target that EXISTS but fails the schema keeps strict semantics
- *    even inside an element — the grace must not mask a genuine schema
- *    error as a silently-missing field (cubic P1 on #4532). Note absence
- *    cannot be distinguished by failure code: both cases surface as
- *    INVALID_TYPE, which is why the fix resolves the link and checks the
- *    target value rather than matching a code.
+ * Required link-valued properties keep ordinary schema semantics regardless
+ * of whether their containing object is an array element. A target that is
+ * absent and a target that is present but fails its schema both make the
+ * property fail. If the property is required, the object and its containing
+ * array fail too. Callers that accept an unavailable scoped target must say so
+ * in their schema by making the property optional or accepting `undefined`.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -109,12 +98,12 @@ function traverseRoot(
   });
 }
 
-describe("element-level required grace for unresolvable links (B2)", () => {
+describe("required link-valued properties", () => {
   const rootUri = "of:chat-root" as URI;
   const profileUri = "of:profile-1" as URI;
   const missingUri = "of:profile-missing" as URI;
 
-  it("degrades a required link field whose target is absent, instead of voiding the array", () => {
+  it("voids an array when a required link field targets an absent value", () => {
     const store = new Map<string, Revision<State>>();
     const rootValue = {
       messages: [
@@ -130,10 +119,8 @@ describe("element-level required grace for unresolvable links (B2)", () => {
       listSchema,
     );
 
-    expect(error).toBeUndefined();
-    const messages = (result as { messages: { author: string }[] }).messages;
-    expect(messages.length).toBe(1);
-    expect(messages[0].author).toBe("alice");
+    expect(result).toBeUndefined();
+    expect(error).toBeDefined();
   });
 
   it("still resolves elements whose link target exists", () => {
@@ -160,11 +147,8 @@ describe("element-level required grace for unresolvable links (B2)", () => {
     expect(messages[0].profile).toEqual({ name: "Alice" });
   });
 
-  it("keeps strict required semantics outside array elements (scheduler deferral contract)", () => {
-    // The same absent-target link, but on an object that is NOT an array
-    // element: the read must void so the scheduler defers consumers until
-    // the argument materializes, rather than running them against an object
-    // with a hole where a required property should be.
+  it("also rejects an absent required link outside an array", () => {
+    // Array nesting must not change whether a required property matches.
     const store = new Map<string, Revision<State>>();
     const rootValue = { author: "alice", profile: linkTo(missingUri) };
     putDoc(store, rootUri, rootValue);
@@ -181,9 +165,8 @@ describe("element-level required grace for unresolvable links (B2)", () => {
   });
 
   it("keeps strict semantics for a target that exists but fails the schema", () => {
-    // The grace is for ABSENT targets only. A present-but-wrong-shaped
-    // target is a genuine schema error; degrading it would silently hide
-    // the mismatch (cubic P1 on #4532).
+    // A present-but-wrong-shaped target and an absent target have the same
+    // schema-level effect: the required property does not match.
     const store = new Map<string, Revision<State>>();
     putDoc(store, profileUri, "not-an-object");
     const rootValue = {
