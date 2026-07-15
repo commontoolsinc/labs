@@ -130,12 +130,11 @@ run directory.
 
 ## Related documentation
 
-- [waitfor-migration.md](waitfor-migration.md) — waiting in tests: prefer
-  primitives that resolve on a real event over polling with a timeout. This
-  doc records the migration off the polling `waitFor` helper, and maintains
-  the list of deliberate exceptions (bounded polls that are the honest
-  observation) plus the remaining migratable tail — read it before adding a
-  poll or re-migrating one of the exceptions.
+- [waiting-in-tests.md](waiting-in-tests.md) — waiting in tests: prefer
+  primitives that resolve on a real event over polling with a timeout. Covers
+  the event-driven primitives, the `check-no-waitfor` CI guard that keeps new
+  polling `waitFor` out of the integration suites, and the deliberate exceptions
+  where a bounded poll is the honest observation — read it before adding a poll.
 - [COVERAGE.md](COVERAGE.md) — how CI measures coverage. It explains the two
   mechanisms (Deno's V8 coverage for runtime code, and transformer-based
   coverage for authored patterns) and how both feed the coverage-debt gate.
