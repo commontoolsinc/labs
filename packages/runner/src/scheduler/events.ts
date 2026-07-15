@@ -397,13 +397,11 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         );
         if (loadedHandler) {
           hydrateLoadPendingEvent(queuedEvent, loadedHandler);
-        } else {
+        } else if (!started) {
           dropQueuedEvent(
             state,
             queuedEvent,
-            started
-              ? `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`
-              : `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
+            `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
           );
         }
       } catch (error) {

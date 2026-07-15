@@ -1472,9 +1472,12 @@ handler registration is live, the scheduler parks the event while starting the
 owning piece. The exact matching registration hydrates that load-pending intent
 immediately, even when the broader piece-start promise is still waiting on
 other startup work; otherwise the parked FIFO head and piece startup can wait
-on each other indefinitely. This rule applies only to an intent that had no
-registration when queued. It does not retarget an event already captured by an
-older handler generation into a replacement registration.
+on each other indefinitely. A successful root piece start is not evidence that
+a nested list/dynamic handler has registered yet: the event remains parked for
+that exact registration. A failed piece start settles it as an error. This rule
+applies only to an intent that had no registration when queued. It does not
+retarget an event already captured by an older handler generation into a
+replacement registration.
 Readiness waiting is distinct from an authored handler attempt and does not
 consume the event's commit-retry budget, call its final callback, or mint a
 receipt. One parked attempt performs one event-driven artifact preparation; it

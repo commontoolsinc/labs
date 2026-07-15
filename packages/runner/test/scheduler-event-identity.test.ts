@@ -8,12 +8,16 @@ import {
 } from "./scheduler-test-utils.ts";
 import { mintEventId } from "../src/scheduler/event-identity.ts";
 import {
+  addSchedulerEventHandler,
   dropQueuedEvent,
   queueSchedulerEvent,
 } from "../src/scheduler/events.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
 import type { Runtime } from "../src/runtime.ts";
-import type { QueuedEvent } from "../src/scheduler/types.ts";
+import type {
+  EventHandlerRegistration,
+  QueuedEvent,
+} from "../src/scheduler/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
@@ -175,6 +179,48 @@ describe("scheduler event identity", () => {
       pieceLoad.resolve(true);
       await disposeSchedulerTestRuntime(env);
     }
+  });
+
+  it("keeps a started piece's event parked until its nested handler registers", async () => {
+    const eventQueue: QueuedEvent[] = [];
+    const eventHandlers: EventHandlerRegistration[] = [];
+    const backgroundTasks = new Set<Promise<unknown>>();
+    let executionWakes = 0;
+    const state = {
+      runtime: {} as Runtime,
+      eventHandlers,
+      eventQueue,
+      backgroundTasks,
+      nextEventSequence: () => 1,
+      loadPieceForEvent: () => Promise.resolve(true),
+      queueExecution: () => executionWakes++,
+      recordLineageEvent: () => {},
+      releaseLineageEvent: () => {},
+    };
+
+    queueSchedulerEvent(state, {
+      eventLink,
+      event: "payload",
+      retries: true,
+      doNotLoadPieceIfNotRunning: false,
+    });
+    await Promise.all([...backgroundTasks]);
+
+    expect(eventQueue.length).toBe(1);
+    expect(eventQueue[0].handlerLoadPending).toBe(true);
+
+    executionWakes = 0;
+    const handler = () => {};
+    addSchedulerEventHandler({
+      eventHandlers,
+      nextEventHandlerGeneration: () => 1,
+      eventQueue,
+      queueExecution: () => executionWakes++,
+    }, { handler, ref: eventLink });
+
+    expect(eventQueue[0].handlerLoadPending).toBeUndefined();
+    expect(eventQueue[0].handler).toBe(handler);
+    expect(executionWakes).toBe(1);
   });
 
   it("settles a piece-start failure exactly once", async () => {
