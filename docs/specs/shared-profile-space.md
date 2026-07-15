@@ -161,6 +161,8 @@ The initial profile default pattern should export this contract:
 
 ```ts
 // Shown at module scope.
+import type { AddIntegrity } from "commonfabric";
+
 type ProfileElement = {
   cell: Cell<unknown>;
   tag: string;
