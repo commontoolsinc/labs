@@ -67,7 +67,7 @@ export function associatePartialResult<Final, Partial>(
   return result as PartialResultSource<Final, Partial>;
 }
 
-/** Return the partial alias associated by a streaming built-in wrapper. */
+/** Return the usable partial projection associated with a streaming call. */
 export const partialResultOf: PartialResultOfFunction = ((value: unknown) => {
   const key = partialResultKey(value);
   if (!partialResults.has(key)) {

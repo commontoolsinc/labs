@@ -3090,10 +3090,13 @@ export type ResultOfFunction = <R>(
   result: R,
 ) => Reactive<AvailableResult<R>>;
 
-/** Returns the intermediate-value request associated with a streaming call. */
+/**
+ * Returns the usable intermediate value associated with a streaming call.
+ * Availability remains observable on the original streaming request.
+ */
 export type PartialResultOfFunction = <Final, Partial>(
   result: PartialResultSource<Final, Partial>,
-) => Reactive<AsyncResult<Partial>>;
+) => Reactive<Partial>;
 
 /**
  * Retains the last recursively complete snapshot of one value or value graph.

@@ -356,8 +356,8 @@ export function generateTextStream(
 
 export function partialResultOf(
   _value: unknown,
-): string | UnavailableResult {
-  return currentGenerateTextValue();
+): string {
+  return currentGenerateTextValue() as string;
 }
 
 export function llmDialog<T>(

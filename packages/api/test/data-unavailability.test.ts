@@ -231,7 +231,7 @@ function directAsyncBuiltinTypecheck(
   const streamedDataIsDirect: Equal<typeof availableStreamedData, Repo> = true;
   const streamedDataPartialIsExact: Equal<
     typeof partialStreamedData,
-    AsyncResult<Repo>
+    Repo
   > = true;
 
   const availableAliasIsExact: Equal<
@@ -257,11 +257,11 @@ function directAsyncBuiltinTypecheck(
   > = true;
   const textPartialIsExact: Equal<
     typeof partialText,
-    AsyncResult<string>
+    string
   > = true;
   const objectPartialIsExact: Equal<
     typeof partialObjectText,
-    AsyncResult<string>
+    string
   > = true;
   const streamHasNoPublicStateWrapper: Equal<
     "result" extends keyof typeof textStream ? true : false,

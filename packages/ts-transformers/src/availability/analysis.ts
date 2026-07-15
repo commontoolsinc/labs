@@ -120,7 +120,7 @@ export function resolveAvailabilityValueProvenance(
       };
     }
     if (callKind?.kind === "partial-result") {
-      return { kind: "async-result", source: target };
+      return { kind: "result-projection", source: target };
     }
     if (callKind?.kind === "generate-text") {
       return { kind: "async-result", source: target };

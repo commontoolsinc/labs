@@ -286,7 +286,7 @@ Deno.test("streaming generation results retain async provenance", async () => {
   );
 });
 
-Deno.test("a partial streaming result retains async provenance", async () => {
+Deno.test("partialResultOf is usable while stream guards retain async provenance", async () => {
   const source = `
     import {
       computed,
@@ -297,12 +297,13 @@ Deno.test("a partial streaming result retains async provenance", async () => {
     } from "commonfabric";
 
     export default pattern(() => {
-      const stream = generateObjectStream<any>({
+      const stream = generateObjectStream<{ name: string }>({
         prompt: "object",
       });
-      const request = partialResultOf(stream);
-      const failed = computed(() => hasError(request));
-      return { failed };
+      const partial = partialResultOf(stream);
+      const upper = computed(() => partial.toUpperCase());
+      const failed = computed(() => hasError(stream));
+      return { failed, upper };
     });
   `;
   const { diagnostics } = await validateSource(source, {
@@ -321,7 +322,35 @@ Deno.test("a partial streaming result retains async provenance", async () => {
   });
   assertStringIncludes(
     output,
-    'unavailableInputPolicy: [{ path: ["request"], reasons: ["error"] }]',
+    'unavailableInputPolicy: [{ path: ["stream"], reasons: ["error"] }]',
+  );
+});
+
+Deno.test("partialResultOf does not expose an availability guard surface", async () => {
+  const source = `
+    import {
+      computed,
+      generateTextStream,
+      hasError,
+      partialResultOf,
+      pattern,
+    } from "commonfabric";
+
+    export default pattern(() => {
+      const stream = generateTextStream({ prompt: "text" });
+      const partial = partialResultOf(stream);
+      const failed = computed(() => hasError(partial));
+      return { failed };
+    });
+  `;
+  const { diagnostics } = await validateSource(source, {
+    types: { "commonfabric.d.ts": commonfabricTypes },
+  });
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:unobserved-compute-guard",
+    ),
+    true,
   );
 });
 

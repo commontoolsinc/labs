@@ -91,7 +91,7 @@ describe("data-unavailability builder helpers", () => {
     }
   });
 
-  it("associates streaming final and partial results without projection nodes", async () => {
+  it("associates final and usable partial results without projection nodes", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -103,9 +103,8 @@ describe("data-unavailability builder helpers", () => {
       const StreamingResults = commonfabric.pattern(() => {
         const request = commonfabric.generateTextStream({ prompt: "hello" });
         const final = commonfabric.resultOf(request);
-        const partialRequest = commonfabric.partialResultOf(request);
-        const partial = commonfabric.resultOf(partialRequest);
-        return { request, final, partialRequest, partial };
+        const partial = commonfabric.partialResultOf(request);
+        return { request, final, partial };
       });
 
       expect(StreamingResults.nodes).toHaveLength(1);
@@ -115,11 +114,9 @@ describe("data-unavailability builder helpers", () => {
       expect((StreamingResults.result as any).final.$alias).toEqual(
         (StreamingResults.result as any).request.$alias,
       );
-      expect((StreamingResults.result as any).partialRequest.$alias.path)
-        .toEqual(["partial"]);
-      expect((StreamingResults.result as any).partial.$alias).toEqual(
-        (StreamingResults.result as any).partialRequest.$alias,
-      );
+      expect((StreamingResults.result as any).partial.$alias.path).toEqual([
+        "partial",
+      ]);
     } finally {
       popFrame(frame);
       await runtime.dispose();

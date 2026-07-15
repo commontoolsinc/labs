@@ -376,7 +376,7 @@ const ChatNote = pattern<Input, Output>(
       model: model,
     });
     const llmResult = resultOf(llmResponse);
-    const llmPartial = resultOf(partialResultOf(llmResponse));
+    const llmPartial = partialResultOf(llmResponse);
 
     // Track content before AI insertion point for streaming display
     const beforeAIInsert = new Writable<string>("");

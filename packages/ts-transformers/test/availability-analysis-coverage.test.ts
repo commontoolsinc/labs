@@ -298,7 +298,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
           initializer(sourceFile, "objectStreamResult"),
           context,
         )?.kind,
-        "async-result",
+        "result-projection",
       );
       for (
         const name of [
@@ -320,7 +320,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
           initializer(sourceFile, "textStreamResult"),
           context,
         )?.kind,
-        "async-result",
+        "result-projection",
       );
       assertEquals(
         resolveAvailabilityValueProvenance(

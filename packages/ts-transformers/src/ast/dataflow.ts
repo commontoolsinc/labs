@@ -378,7 +378,7 @@ export function createDataFlowAnalyzer(
     // Availability aliases are runtime identities. In pattern context they
     // preserve the underlying reactive proxy directly rather than synthesizing
     // a computation node. observeAvailability attaches policy provenance;
-    // resultOf changes only the static usable view and attaches no policy.
+    // resultOf and partialResultOf expose usable views and attach no policy.
     if (
       callKind?.kind === "availability-observer" ||
       callKind?.kind === "availability-result" ||
