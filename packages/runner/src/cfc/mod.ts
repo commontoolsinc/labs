@@ -277,9 +277,11 @@ export {
   cfcSchemaToObject,
   findCfcSchemaRefs,
   isEmbeddedCfcSchemaRef,
+  pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,
   resolveCfcSchemaRefs,
   resolveCfcSchemaRefsOrThrow,
+  selectReferencedCfcSchemaDefs,
 } from "./schema-refs.ts";
 export {
   type SchemaOpaqueLinkSanitizationResult,
