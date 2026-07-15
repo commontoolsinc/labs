@@ -270,6 +270,14 @@ describe("cfc schema sanitization", () => {
     }, 1.1)).toBe("number is not a multiple of 0.25");
     expect(validateAgainstSchema({
       type: "number",
+      multipleOf: 1,
+    }, 1.0000000000000004)).toBe("number is not a multiple of 1");
+    expect(validateAgainstSchema({
+      type: "number",
+      multipleOf: 0.1,
+    }, 0.3)).toBeUndefined();
+    expect(validateAgainstSchema({
+      type: "number",
       maximum: 4,
     }, 5)).toBe("number is greater than maximum 4");
     expect(validateAgainstSchema({
@@ -296,6 +304,14 @@ describe("cfc schema sanitization", () => {
       type: "array",
       uniqueItems: true,
     }, [{ id: 1 }, { id: 1 }])).toBe("array item 1 is not unique");
+    expect(validateAgainstSchema({
+      type: "array",
+      uniqueItems: true,
+    }, [-0, 0])).toBe("array item 1 is not unique");
+    expect(validateAgainstSchema({
+      type: "array",
+      uniqueItems: true,
+    }, [{ value: -0 }, { value: 0 }])).toBe("array item 1 is not unique");
     expect(validateAgainstSchema({
       type: "object",
       maxProperties: 1,

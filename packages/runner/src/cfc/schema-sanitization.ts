@@ -50,6 +50,56 @@ const asTypeArray = (type: unknown): string[] =>
     ? [type]
     : [];
 
+/** JSON Schema compares numbers by mathematical value, so 0 and -0 are equal. */
+const schemaValueEqual = (left: unknown, right: unknown): boolean => {
+  if (typeof left === "number" && typeof right === "number") {
+    return left === right;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((entry, index) => schemaValueEqual(entry, right[index]));
+  }
+  if (isRecord(left) && isRecord(right)) {
+    const leftKeys = Object.keys(left);
+    return leftKeys.length === Object.keys(right).length &&
+      leftKeys.every((key) =>
+        Object.hasOwn(right, key) && schemaValueEqual(left[key], right[key])
+      );
+  }
+  return deepEqual(left, right);
+};
+
+const decimalAsScaledInteger = (
+  value: number,
+): { coefficient: bigint; scale: number } => {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(
+    value.toString(),
+  );
+  if (match === null) {
+    throw new Error(`Cannot represent finite number ${value} as a decimal`);
+  }
+  const fraction = match[3] ?? "";
+  let coefficient = BigInt(`${match[1]}${match[2]}${fraction}`);
+  let scale = fraction.length - Number(match[4] ?? 0);
+  if (scale < 0) {
+    coefficient *= 10n ** BigInt(-scale);
+    scale = 0;
+  }
+  return { coefficient, scale };
+};
+
+const isExactMultiple = (value: number, multiple: number): boolean => {
+  const left = decimalAsScaledInteger(value);
+  const right = decimalAsScaledInteger(multiple);
+  const commonScale = Math.max(left.scale, right.scale);
+  const scaledValue = left.coefficient *
+    10n ** BigInt(commonScale - left.scale);
+  const scaledMultiple = right.coefficient *
+    10n ** BigInt(commonScale - right.scale);
+  return scaledValue % scaledMultiple === 0n;
+};
+
 export const isPrimitiveJsonValue = (value: unknown): boolean =>
   value === null ||
   typeof value === "string" ||
@@ -550,18 +600,18 @@ export const validateAgainstSchema = (
   }
 
   // TODO(danfuzz): Latent — the enum/const equality arm here compares a runtime
-  // value against a schema constraint with `deepEqual`; schemas don't admit
+  // value against a schema constraint with `schemaValueEqual`; schemas don't admit
   // `Fabric*` values today but will, at which point this mishandles a
   // `FabricValue` (same-class `FabricPrimitive`s compare equal regardless of
   // value). Use a Fabric-aware equality when the path becomes live. (The
   // property-walk in this same function is already marked.)
   if (
     Array.isArray(schema.enum) &&
-    !schema.enum.some((entry) => deepEqual(entry, value))
+    !schema.enum.some((entry) => schemaValueEqual(entry, value))
   ) {
     return "value is not in enum";
   }
-  if ("const" in schema && !deepEqual(schema.const, value)) {
+  if ("const" in schema && !schemaValueEqual(schema.const, value)) {
     return "value does not match const";
   }
 
@@ -572,9 +622,7 @@ export const validateAgainstSchema = (
 
   if (typeof value === "number" && Number.isFinite(value)) {
     if (typeof schema.multipleOf === "number" && schema.multipleOf > 0) {
-      const quotient = value / schema.multipleOf;
-      const tolerance = Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;
-      if (Math.abs(quotient - Math.round(quotient)) > tolerance) {
+      if (!isExactMultiple(value, schema.multipleOf)) {
         return `number is not a multiple of ${schema.multipleOf}`;
       }
     }
@@ -629,7 +677,9 @@ export const validateAgainstSchema = (
     if (schema.uniqueItems === true) {
       for (let index = 0; index < value.length; index++) {
         if (
-          value.slice(0, index).some((entry) => deepEqual(entry, value[index]))
+          value.slice(0, index).some((entry) =>
+            schemaValueEqual(entry, value[index])
+          )
         ) {
           return `array item ${index} is not unique`;
         }

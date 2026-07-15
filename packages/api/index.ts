@@ -1708,7 +1708,7 @@ export type JSONSchemaObj = {
   // Subschema for array
   readonly prefixItems?: readonly (JSONSchema)[]; // not always validated
   readonly items?: JSONSchema;
-  readonly contains?: JSONSchema; // not validated
+  readonly contains?: JSONSchema; // contains/minContains/maxContains not validated
   // Subschema for object
   readonly properties?: Readonly<Record<string, JSONSchema>>;
   readonly patternProperties?: Readonly<Record<string, JSONSchema>>; // not validated
@@ -1733,8 +1733,8 @@ export type JSONSchemaObj = {
   readonly maxItems?: number;
   readonly minItems?: number;
   readonly uniqueItems?: boolean;
-  readonly maxContains?: number;
-  readonly minContains?: number;
+  readonly maxContains?: number; // not validated
+  readonly minContains?: number; // not validated
   // Validation for object
   readonly maxProperties?: number;
   readonly minProperties?: number;
