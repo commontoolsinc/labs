@@ -22,6 +22,10 @@ import {
   adminRegistryEveryoneIsAdmin,
   type EmptyAdminRegistryValue,
 } from "../cfc/admin/mod.ts";
+import type {
+  ExternalProfileLink,
+  VerifiedExternalIdentityCell,
+} from "../system/profile-home.tsx";
 
 /**
  * A small shared lobby: people join with their Fabric profile, everyone can
@@ -42,6 +46,9 @@ export interface LobbyProfile {
   readonly name?: string;
   readonly avatar?: string;
   readonly bio?: string;
+  /** Connector-facing identity hints retained on the stored profile link. */
+  readonly externalLinks?: readonly ExternalProfileLink[];
+  readonly verifiedIdentities?: readonly VerifiedExternalIdentityCell[];
 }
 
 /** Stable participant identity: the contributor's live `#profile` cell. */
