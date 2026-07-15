@@ -507,7 +507,10 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     // just the one currently selected as default. A visitor's candidates are
     // all different cells, so this remains a safe UX gate; CFC independently
     // protects the field writes.
-    const viewerProfile = wish<ProfileHomeOutput>({ query: "#profile" });
+    // This lookup only needs the candidate cells' identities. Keeping its
+    // value schema minimal prevents the ownership UX computation from
+    // propagating the full CFC-protected profile result through its branches.
+    const viewerProfile = wish<{ name?: string }>({ query: "#profile" });
     const isOwner = computed(() => {
       return viewerProfile.candidates?.some((profile) =>
         equals(self, profile) === true
