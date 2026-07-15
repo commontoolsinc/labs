@@ -405,6 +405,22 @@ describe("piece link contract localization", () => {
     ).toThrow(/schema does not describe a container/);
   });
 
+  it("localizes tuple prefixItems before falling back to items", () => {
+    const schema: JSONSchema = {
+      type: "array",
+      prefixItems: [{ $ref: "#/$defs/First" }],
+      items: { type: "number" },
+      $defs: { First: { type: "string" } },
+    };
+
+    expect(linkPathContracts([contract(schema)], [0])[0]?.schema).toEqual({
+      type: "string",
+    });
+    expect(linkPathContracts([contract(schema)], [1])[0]?.schema).toEqual({
+      type: "number",
+    });
+  });
+
   it("consumes only well-formed outer Cell wrappers", () => {
     expect(consumeOuterCellContract(true)).toEqual({
       kind: "cell",
@@ -1132,6 +1148,52 @@ describe("piece pull materialization", () => {
     await expect(
       new PieceController(manager, readonlyPiece).input.set(source, ["handle"]),
     ).resolves.toBeUndefined();
+  });
+
+  it("accepts a cold opaque Cell supplied as a path value", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "number", asCell: ["cell"] },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, targetPiece);
+
+    await expect(
+      controller.input.set(sourcePiece.key("value"), ["handle"]),
+    ).resolves.toBeUndefined();
+    expect(await controller.input.get(["handle"])).toBeUndefined();
+    expect(
+      Object.hasOwn(
+        manager.getArgument(targetPiece).getRaw() as object,
+        "handle",
+      ),
+    ).toBe(true);
   });
 
   it("accepts a cold opaque Cell in a whole setInput value", async () => {

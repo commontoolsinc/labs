@@ -192,6 +192,12 @@ describe("piece schema compatibility", () => {
       additionalProperties: false,
     };
     expect(() => assertSchemaSubset(stableSource, stableTarget)).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { ...stableSource, minProperties: 1 },
+        { ...stableTarget, minProperties: 1 },
+      )
+    ).not.toThrow();
 
     expect(() =>
       assertSchemaSubset(
@@ -1646,6 +1652,64 @@ describe("piece schema compatibility", () => {
     expectRejected({ type: "string" }, { type: "string", pattern: "^x" });
     expectRejected({ type: "string" }, { type: "string", format: "email" });
     expectRejected({ type: "number" }, { type: "number", multipleOf: 2 });
+  });
+
+  it("compares effective inclusive and exclusive numeric bounds", () => {
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", exclusiveMinimum: 0 },
+        { type: "number", minimum: 0 },
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", exclusiveMaximum: 10 },
+        { type: "number", maximum: 10 },
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", minimum: 0, exclusiveMinimum: -1 },
+        { type: "number", minimum: 0 },
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", maximum: 10, exclusiveMaximum: 11 },
+        { type: "number", maximum: 10 },
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", minimum: -1, exclusiveMinimum: 0 },
+        { type: "number", minimum: 0 },
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", maximum: 11, exclusiveMaximum: 10 },
+        { type: "number", maximum: 10 },
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", minimum: 0, exclusiveMinimum: 0 },
+        { type: "number", minimum: 0 },
+      )
+    ).not.toThrow();
+
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", minimum: 0 },
+        { type: "number", exclusiveMinimum: 0 },
+      )
+    ).toThrow(/more restrictive/);
+    expect(() =>
+      assertSchemaSubset(
+        { type: "number", maximum: 10 },
+        { type: "number", exclusiveMaximum: 10 },
+      )
+    ).toThrow(/more restrictive/);
   });
 
   it("rejects malformed required fields and unknown keyword changes", () => {

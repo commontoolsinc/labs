@@ -113,6 +113,7 @@ const LINK_PATH_SAFE_ANCESTOR_KEYS = new Set([
   "maxItems",
   "minItems",
   "patternProperties",
+  "prefixItems",
   "properties",
   "readOnly",
   "required",
@@ -215,7 +216,9 @@ export function linkPathContracts(
         schema.properties !== undefined ||
         schema.patternProperties !== undefined ||
         schema.additionalProperties !== undefined;
-      const arrayShaped = schema.type === "array" || schema.items !== undefined;
+      const arrayShaped = schema.type === "array" ||
+        schema.items !== undefined ||
+        schema.prefixItems !== undefined;
       if (objectShaped && arrayShaped) {
         throw new Error(
           "an ambiguous object/array ancestor cannot prove a link path",
@@ -260,7 +263,10 @@ export function linkPathContracts(
             (!isUnconditionallyType(schema, "array") ||
               typeof schema.minItems !== "number" ||
               schema.minItems <= index);
-        const child = schema.items ?? true;
+        const child = Array.isArray(schema.prefixItems) &&
+            index < schema.prefixItems.length
+          ? schema.prefixItems[index]!
+          : schema.items ?? true;
         next.push({
           schema: child,
           root: cfcSchemaChildRoot(child, root),
@@ -528,7 +534,8 @@ function assertSuppliedLinkSchemasCompatible(
     basePath?: readonly (string | number)[];
     destinationIsStream?: boolean;
   } = {},
-): void {
+): Set<SuppliedLink> {
+  const preservedDirectHandles = new Set<SuppliedLink>();
   for (const suppliedLink of links) {
     const basePath = options.basePath ?? [];
     const fullPath = [...basePath, ...suppliedLink.path];
@@ -590,6 +597,7 @@ function assertSuppliedLinkSchemasCompatible(
     }
     const preservesDirectHandle = targetWrapper !== undefined &&
       isCell(suppliedLink.value);
+    if (preservesDirectHandle) preservedDirectHandles.add(suppliedLink);
 
     const sourceRoot = preservesDirectHandle
       ? durableSource.root
@@ -703,6 +711,7 @@ function assertSuppliedLinkSchemasCompatible(
       if (!proved) throw lastError;
     }
   }
+  return preservedDirectHandles;
 }
 
 class PiecePropIo implements PieceCellIo {
@@ -786,7 +795,7 @@ class PiecePropIo implements PieceCellIo {
             writePath.map((segment) => String(segment)),
           );
         const linksToRestore = suppliedLinks(value);
-        assertSuppliedLinkSchemasCompatible(
+        const preservedDirectHandles = assertSuppliedLinkSchemasCompatible(
           linksToRestore,
           schema,
           targetCell,
@@ -803,11 +812,13 @@ class PiecePropIo implements PieceCellIo {
             linkBase = linkBase.key(segment as keyof unknown) as Cell<unknown>;
           }
           const link = parseLinkOrThrow(suppliedLink.value, linkBase);
-          const linkValue = manager.runtime.getCellFromLink(
-            link,
-            sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
-            tx,
-          ).get();
+          const linkValue = preservedDirectHandles.has(suppliedLink)
+            ? suppliedLink.value
+            : manager.runtime.getCellFromLink(
+              link,
+              sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
+              tx,
+            ).get();
           materializedValue = replaceMaterializedValueAtPath(
             materializedValue,
             suppliedLink.path,
@@ -882,7 +893,7 @@ class PiecePropIo implements PieceCellIo {
       } else {
         const schema = targetCell.getAsNormalizedFullLink().schema ?? true;
         const linksToRestore = suppliedLinks(value);
-        assertSuppliedLinkSchemasCompatible(
+        const preservedDirectHandles = assertSuppliedLinkSchemasCompatible(
           linksToRestore,
           schema,
           targetCell,
@@ -899,11 +910,13 @@ class PiecePropIo implements PieceCellIo {
             linkBase = linkBase.key(segment as keyof unknown) as Cell<unknown>;
           }
           const link = parseLinkOrThrow(suppliedLink.value, linkBase);
-          const linkValue = manager.runtime.getCellFromLink(
-            link,
-            sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
-            tx,
-          ).get();
+          const linkValue = preservedDirectHandles.has(suppliedLink)
+            ? suppliedLink.value
+            : manager.runtime.getCellFromLink(
+              link,
+              sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
+              tx,
+            ).get();
           materializedValue = replaceMaterializedValueAtPath(
             materializedValue,
             suppliedLink.path,

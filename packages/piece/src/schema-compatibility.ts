@@ -396,6 +396,7 @@ const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   "maximum",
   "minItems",
   "minLength",
+  "minProperties",
   "minimum",
   "multipleOf",
   "pattern",
@@ -749,9 +750,31 @@ function scalarConstraintSubsetIssue(
   target: SchemaObject,
   path: string,
 ): string | undefined {
+  if (schemaMayProduceType(source, ["number", "integer"])) {
+    const sourceLower = effectiveNumericBound(source, "lower");
+    const targetLower = effectiveNumericBound(target, "lower");
+    if (
+      targetLower !== undefined &&
+      (sourceLower === undefined || targetLower.value > sourceLower.value ||
+        targetLower.value === sourceLower.value && targetLower.exclusive &&
+          !sourceLower.exclusive)
+    ) {
+      return `${path}: numeric lower bound became more restrictive`;
+    }
+
+    const sourceUpper = effectiveNumericBound(source, "upper");
+    const targetUpper = effectiveNumericBound(target, "upper");
+    if (
+      targetUpper !== undefined &&
+      (sourceUpper === undefined || targetUpper.value < sourceUpper.value ||
+        targetUpper.value === sourceUpper.value && targetUpper.exclusive &&
+          !sourceUpper.exclusive)
+    ) {
+      return `${path}: numeric upper bound became more restrictive`;
+    }
+  }
+
   const lowerBounds = [
-    ["minimum", ["number", "integer"]],
-    ["exclusiveMinimum", ["number", "integer"]],
     ["minLength", ["string"]],
     ["minItems", ["array"]],
     ["minProperties", ["object"]],
@@ -769,8 +792,6 @@ function scalarConstraintSubsetIssue(
   }
 
   const upperBounds = [
-    ["maximum", ["number", "integer"]],
-    ["exclusiveMaximum", ["number", "integer"]],
     ["maxLength", ["string"]],
     ["maxItems", ["array"]],
     ["maxProperties", ["object"]],
@@ -817,6 +838,38 @@ function scalarConstraintSubsetIssue(
     }
   }
   return undefined;
+}
+
+interface NumericBound {
+  value: number;
+  exclusive: boolean;
+}
+
+function effectiveNumericBound(
+  schema: SchemaObject,
+  direction: "lower" | "upper",
+): NumericBound | undefined {
+  const inclusive = direction === "lower" ? schema.minimum : schema.maximum;
+  const exclusive = direction === "lower"
+    ? schema.exclusiveMinimum
+    : schema.exclusiveMaximum;
+  if (inclusive === undefined) {
+    return exclusive === undefined
+      ? undefined
+      : { value: exclusive, exclusive: true };
+  }
+  if (exclusive === undefined) {
+    return { value: inclusive, exclusive: false };
+  }
+  if (inclusive === exclusive) {
+    return { value: inclusive, exclusive: true };
+  }
+  const exclusiveIsStricter = direction === "lower"
+    ? exclusive > inclusive
+    : exclusive < inclusive;
+  return exclusiveIsStricter
+    ? { value: exclusive, exclusive: true }
+    : { value: inclusive, exclusive: false };
 }
 
 /** JSON Schema scalar keywords are ignored for values of unrelated types. */

@@ -2402,6 +2402,27 @@ describe("runner utils", () => {
       expect(validateSchemaValue(schema, value)).toBeUndefined();
     });
 
+    it("combines defaults required by simultaneous anyOf and oneOf", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        anyOf: [{
+          type: "object",
+          properties: { fromAny: { type: "number", default: 1 } },
+          required: ["fromAny"],
+        }],
+        oneOf: [{
+          type: "object",
+          properties: { fromOne: { type: "number", default: 2 } },
+          required: ["fromOne"],
+        }],
+      };
+
+      const value = mergeSchemaDefaults({}, undefined, schema);
+
+      expect(value).toEqual({ fromAny: 1, fromOne: 2 });
+      expect(validateSchemaValue(schema, value)).toBeUndefined();
+    });
+
     it("hydrates defaults through present arrays and dynamic object fields", () => {
       const itemSchema: JSONSchema = {
         anyOf: [

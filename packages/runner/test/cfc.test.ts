@@ -587,6 +587,30 @@ describe("CFC schema reference discovery", () => {
     expect(resolveCfcSchemaRefs(schema)).toMatchObject({ type: "string" });
   });
 
+  it("preserves ref-site definitions for sibling constraints", () => {
+    const schema: JSONSchemaObj = {
+      $ref: "#/$defs/Base",
+      $defs: {
+        Base: {
+          $ref: "#/$defs/BaseLocal",
+          $defs: { BaseLocal: { type: "object" } },
+        },
+        RefSiteLocal: { type: "string" },
+      },
+      properties: {
+        value: { $ref: "#/$defs/RefSiteLocal" },
+      },
+    };
+
+    const resolved = resolveCfcSchemaRefs(schema) as JSONSchemaObj;
+    const valueSchema = resolved.properties?.value as JSONSchemaObj;
+
+    expect(resolved).toMatchObject({ type: "object" });
+    expect(resolveCfcSchemaRefs(valueSchema, resolved)).toMatchObject({
+      type: "string",
+    });
+  });
+
   it("preserves nested definition scope boundaries while pruning", () => {
     const cfc = new ContextualFlowControl();
     const schema: JSONSchema = {

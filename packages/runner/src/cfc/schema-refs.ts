@@ -545,10 +545,47 @@ const resolveCfcSchemaRefsUncached = (
   fullSchema: JSONSchema = schemaObj,
 ): JSONSchema | undefined => {
   const seenRefs = new Map<JSONSchema, Set<string>>();
+  const pendingSiblings: JSONSchemaObj[] = [];
+  const mergePendingSiblings = (
+    initial: JSONSchema,
+    initialRoot: JSONSchema,
+  ): JSONSchema => {
+    let resolved = initial;
+    let resolvedRoot = initialRoot;
+    while (pendingSiblings.length > 0) {
+      const siblings = pendingSiblings.pop()!;
+      if (isRecord(resolved)) {
+        const resolvedDefinitions = resolved.$defs ??
+          (isRecord(resolvedRoot) ? resolvedRoot.$defs : undefined);
+        const siblingDefinitions = siblings.$defs;
+        // A flattened resolved view has one `$defs` slot even though refs in
+        // the target and in its ref-site siblings originate in different
+        // document scopes. Keep the target's existing names authoritative for
+        // compatibility, while adding definitions used only by the siblings.
+        const definitions = isRecord(resolvedDefinitions) &&
+            isRecord(siblingDefinitions) &&
+            resolvedDefinitions !== siblingDefinitions
+          ? { ...siblingDefinitions, ...resolvedDefinitions }
+          : resolvedDefinitions ?? siblingDefinitions;
+        resolved = {
+          ...resolved,
+          ...siblings,
+          ...(definitions !== undefined && { $defs: definitions }),
+        } as JSONSchemaObj;
+      } else {
+        resolved = {
+          ...cfcSchemaToObject(resolved),
+          ...siblings,
+        } as JSONSchemaObj;
+      }
+      resolvedRoot = cfcSchemaChildRoot(resolved, resolvedRoot);
+    }
+    return resolved;
+  };
   while (true) {
     const { $ref, ...rest } = schemaObj;
     if ($ref === undefined) {
-      return schemaObj;
+      return mergePendingSiblings(schemaObj, fullSchema);
     }
     let refsForRoot = seenRefs.get(fullSchema);
     if (refsForRoot?.has($ref)) {
@@ -568,27 +605,16 @@ const resolveCfcSchemaRefsUncached = (
       : fullSchema;
     const resolvedRoot = cfcSchemaChildRoot(resolved, inheritedRoot);
     if (Object.keys(rest).length > 0) {
-      if (isRecord(resolved)) {
-        const definitions = resolved.$defs ??
-          (isRecord(resolvedRoot) ? resolvedRoot.$defs : undefined);
-        schemaObj = {
-          ...resolved,
-          ...rest,
-          ...(definitions !== undefined && { $defs: definitions }),
-        } as JSONSchemaObj;
-      } else {
-        schemaObj = {
-          ...cfcSchemaToObject(resolved),
-          ...rest,
-        } as JSONSchemaObj;
-      }
-      fullSchema = cfcSchemaChildRoot(schemaObj, resolvedRoot);
-    } else if (typeof resolved === "boolean") {
-      return resolved;
-    } else {
-      schemaObj = resolved;
-      fullSchema = resolvedRoot;
+      // Delay ref-site siblings until the referenced target's own ref chain is
+      // resolved in its local definition scope. Unwinding then establishes
+      // the ref-site `$defs` scope without rebinding an intermediate target.
+      pendingSiblings.push(rest as JSONSchemaObj);
     }
+    if (typeof resolved === "boolean") {
+      return mergePendingSiblings(resolved, resolvedRoot);
+    }
+    schemaObj = resolved;
+    fullSchema = resolvedRoot;
   }
 };
 

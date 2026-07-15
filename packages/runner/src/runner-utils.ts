@@ -498,9 +498,12 @@ function mergeSchemaDefaultsInternal(
         ...baseSchema
       } = resolved;
       const baseDefaults = extractDefaultValues(baseSchema, resolvedRoot);
-      const candidates: unknown[] = [];
-      for (const branch of [...(anyOf ?? []), ...(oneOf ?? [])]) {
-        let candidate = mergeSchemaDefaultsInternal(
+      type UnionCandidate = {
+        value: unknown;
+        selectedBranches: JSONSchema[];
+      };
+      let candidates: UnionCandidate[] = [{
+        value: mergeSchemaDefaultsInternal(
           value,
           baseDefaults,
           baseSchema,
@@ -510,33 +513,48 @@ function mergeSchemaDefaultsInternal(
           acceptOpaqueValue,
           undefined,
           activePairs,
-        );
-        const branchDefaults = extractDefaultValues(branch, resolvedRoot);
-        candidate = mergeSchemaDefaultsInternal(
-          candidate,
-          branchDefaults,
-          branch,
-          resolvedRoot,
-          true,
-          mergeMaterializedLinks,
-          acceptOpaqueValue,
-          undefined,
-          activePairs,
-        );
-        if (
-          validateSchemaValue(branch, candidate, resolvedRoot, {
-              acceptOpaqueValue,
-            }) === undefined &&
-          validateSchemaValue(resolved, candidate, resolvedRoot, {
-              acceptOpaqueValue,
-            }) === undefined
-        ) {
-          candidates.push(candidate);
+        ),
+        selectedBranches: [],
+      }];
+      const unionConstraints = [anyOf, oneOf].filter(
+        (branches): branches is JSONSchema[] => Array.isArray(branches),
+      );
+      for (const branches of unionConstraints) {
+        const expanded: UnionCandidate[] = [];
+        for (const candidate of candidates) {
+          for (const branch of branches) {
+            const branchDefaults = extractDefaultValues(branch, resolvedRoot);
+            expanded.push({
+              value: mergeSchemaDefaultsInternal(
+                candidate.value,
+                branchDefaults,
+                branch,
+                resolvedRoot,
+                true,
+                mergeMaterializedLinks,
+                acceptOpaqueValue,
+                undefined,
+                activePairs,
+              ),
+              selectedBranches: [...candidate.selectedBranches, branch],
+            });
+          }
         }
+        candidates = expanded;
       }
+      const validCandidates = candidates.filter((candidate) =>
+        candidate.selectedBranches.every((branch) =>
+          validateSchemaValue(branch, candidate.value, resolvedRoot, {
+            acceptOpaqueValue,
+          }) === undefined
+        ) &&
+        validateSchemaValue(resolved, candidate.value, resolvedRoot, {
+            acceptOpaqueValue,
+          }) === undefined
+      ).map((candidate) => candidate.value);
       const acceptedCandidates = acceptUnionCandidate === undefined
-        ? candidates
-        : candidates.filter(acceptUnionCandidate);
+        ? validCandidates
+        : validCandidates.filter(acceptUnionCandidate);
       if (
         acceptedCandidates.length > 0 &&
         acceptedCandidates.every((candidate) =>
