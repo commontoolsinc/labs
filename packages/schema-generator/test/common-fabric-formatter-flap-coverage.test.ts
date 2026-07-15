@@ -190,6 +190,35 @@ describe("Common Fabric formatter flap coverage", () => {
   );
 
   it(
+    "extracts a Default value from a typeof object without a cold pattern compile",
+    async () => {
+      const code = `
+        const DEFAULT_SETTINGS = {
+          retries: 3,
+          enabled: true,
+        } as const;
+
+        interface Default<T, V> {}
+        interface Settings {
+          retries: number;
+          enabled: boolean;
+        }
+        interface SchemaRoot {
+          settings: Default<Settings, typeof DEFAULT_SETTINGS>;
+        }
+      `;
+
+      const { type, checker } = await getTypeFromCode(code, "SchemaRoot");
+      const schema = asObjectSchema(
+        createSchemaTransformerV2().generateSchema(type, checker),
+      );
+
+      const settings = schema.properties?.settings as any;
+      expect(settings.default).toEqual({ retries: 3, enabled: true });
+    },
+  );
+
+  it(
     "preserves an outer cell wrapper via the node-driven array items override with plain items",
     async () => {
       const code = `
