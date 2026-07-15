@@ -22,7 +22,6 @@ import {
   adminRegistryEveryoneIsAdmin,
   type EmptyAdminRegistryValue,
 } from "../cfc/admin/mod.ts";
-
 /**
  * A small shared lobby: people join with their Fabric profile, everyone can
  * see who is present, and trusted admins can remove people or change the admin
@@ -37,11 +36,20 @@ export const TRUSTED_LOBBY_SURFACE = "TrustedLobbySurface";
 export const TRUSTED_LOBBY_ACTION = "TrustedLobbyAction";
 export const LOBBY_ADMIN_INTEGRITY = "lobby-admin" as const;
 
+type LobbyExternalProfileLink = {
+  readonly label: string;
+  readonly url: string;
+};
+
 export interface LobbyProfile {
   readonly initialNameApplied?: string;
   readonly name?: string;
   readonly avatar?: string;
   readonly bio?: string;
+  /** Connector-facing identity hints retained on the stored profile link. */
+  readonly externalLinks?: readonly LobbyExternalProfileLink[];
+  /** Transport original assertion cells; consumers validate their integrity. */
+  readonly verifiedIdentities?: readonly Cell<unknown>[];
 }
 
 /** Stable participant identity: the contributor's live `#profile` cell. */
