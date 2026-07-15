@@ -2277,6 +2277,7 @@ describe("piece pull materialization", () => {
     const producer = await manager.runPersistent(
       trustPattern(runtime, {
         argumentSchema: {
+          description: "correlated numeric choice",
           anyOf: [
             {
               type: "object",
@@ -2344,11 +2345,248 @@ describe("piece pull materialization", () => {
     );
     await expect(
       controller.result.set(futureValue.key("value"), ["value"]),
-    ).rejects.toThrow(/correlated write destination/);
+    ).rejects.toThrow(/write destination/);
     expect(manager.getArgument(producer).getRaw()).toEqual({
       kind: "n",
       value: 2,
     });
+  });
+
+  it("retains selected Cell authority through correlated projections", async () => {
+    const choiceSchema = {
+      anyOf: [{
+        type: "object",
+        properties: {
+          kind: { const: "readonly" },
+          value: { type: "number", asCell: ["readonly"] },
+        },
+        required: ["kind", "value"],
+      }, {
+        type: "object",
+        properties: {
+          kind: { const: "plain" },
+          value: { type: "number" },
+        },
+        required: ["kind", "value"],
+      }],
+    } as const;
+    const createProducer = (kind: "readonly" | "plain") =>
+      manager.runPersistent(
+        trustPattern(runtime, {
+          argumentSchema: {
+            type: "object",
+            properties: { choice: choiceSchema },
+            required: ["choice"],
+          },
+          resultSchema: {
+            type: "object",
+            properties: { value: { type: "number" } },
+            required: ["value"],
+          },
+          result: {
+            value: {
+              $alias: {
+                cell: "argument",
+                path: ["choice", "value"],
+              },
+            },
+          },
+          nodes: [],
+        }),
+        { choice: { kind, value: 1 } },
+        undefined,
+        { start: true },
+      );
+
+    const readonlyProducer = await createProducer("readonly");
+    const readonlyController = new PieceController(manager, readonlyProducer);
+    await expect(readonlyController.result.set(2, ["value"]))
+      .rejects.toThrow(/readonly Cell write destination is not writable/);
+    expect(manager.getArgument(readonlyProducer).getRaw()).toEqual({
+      choice: { kind: "readonly", value: 1 },
+    });
+
+    const plainProducer = await createProducer("plain");
+    const plainController = new PieceController(manager, plainProducer);
+    await plainController.result.set(2, ["value"]);
+    expect(manager.getArgument(plainProducer).getRaw()).toEqual({
+      choice: { kind: "plain", value: 2 },
+    });
+
+    const createProjectedProducer = (kind: "readonly" | "plain") =>
+      manager.runPersistent(
+        trustPattern(runtime, {
+          argumentSchema: { type: "object", properties: {} },
+          resultSchema: {
+            anyOf: [{
+              type: "object",
+              properties: {
+                kind: { const: "readonly" },
+                value: { type: "number", asCell: ["readonly"] },
+              },
+              required: ["kind", "value"],
+            }, {
+              type: "object",
+              properties: {
+                kind: { const: "plain" },
+                value: { type: "number" },
+              },
+              required: ["kind", "value"],
+            }],
+          },
+          derivedInternalCells: [{
+            partialCause: "value",
+            schema: { type: "number" },
+          }],
+          result: {
+            kind,
+            value: { $alias: { partialCause: "value", path: [] } },
+          },
+          nodes: [],
+        }),
+        {},
+        undefined,
+        { start: true },
+      );
+
+    const projectedReadonly = await createProjectedProducer("readonly");
+    await expect(
+      new PieceController(manager, projectedReadonly).result.set(2, ["value"]),
+    ).rejects.toThrow(/readonly Cell write destination is not writable/);
+    expect(projectedReadonly.key("value").resolveAsCell().getRaw()).toBe(
+      undefined,
+    );
+
+    const projectedPlain = await createProjectedProducer("plain");
+    await new PieceController(manager, projectedPlain).result.set(2, ["value"]);
+    expect(projectedPlain.key("value").resolveAsCell().getRaw()).toBe(2);
+  });
+
+  it("validates concrete writes through ambiguous container projections", async () => {
+    const valueSchema = {
+      type: ["object", "array"],
+      properties: { x: { type: "number" } },
+      required: ["x"],
+      items: { type: "number" },
+      uniqueItems: true,
+      maximum: 10,
+    } as const;
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { value: valueSchema },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { value: true },
+          required: ["value"],
+        },
+        result: {
+          value: { $alias: { cell: "argument", path: ["value"] } },
+        },
+        nodes: [],
+      }),
+      { value: { x: 1 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, producer);
+
+    await controller.result.set(2, ["value", "x"]);
+    expect(manager.getArgument(producer).getRaw()).toEqual({
+      value: { x: 2 },
+    });
+
+    await controller.result.set([3], ["value"]);
+    await controller.result.set(4, ["value", 0]);
+    expect(manager.getArgument(producer).getRaw()).toEqual({ value: [4] });
+
+    const futureValue = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+        result: { value: 5 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      controller.result.set(futureValue.key("value"), ["value", 0]),
+    ).rejects.toThrow(/correlated write destination/);
+    expect(manager.getArgument(producer).getRaw()).toEqual({ value: [4] });
+
+    const bareSchema = { type: ["object", "array"] } as const;
+    const bareProducer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { value: bareSchema },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { value: true },
+          required: ["value"],
+        },
+        result: {
+          value: { $alias: { cell: "argument", path: ["value"] } },
+        },
+        nodes: [],
+      }),
+      { value: { x: 1 } },
+      undefined,
+      { start: true },
+    );
+    const bareController = new PieceController(manager, bareProducer);
+    await bareController.result.set(2, ["value", "x"]);
+    expect(manager.getArgument(bareProducer).getRaw()).toEqual({
+      value: { x: 2 },
+    });
+    await bareController.result.set([3], ["value"]);
+    await bareController.result.set(4, ["value", 0]);
+    expect(manager.getArgument(bareProducer).getRaw()).toEqual({ value: [4] });
+
+    const arrayProducer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            value: {
+              type: ["object", "array"],
+              items: { type: "number" },
+              dependentRequired: { x: ["y"] },
+              propertyNames: { type: "string" },
+            },
+          },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { value: true },
+          required: ["value"],
+        },
+        result: {
+          value: { $alias: { cell: "argument", path: ["value"] } },
+        },
+        nodes: [],
+      }),
+      { value: [1] },
+      undefined,
+      { start: true },
+    );
+    await new PieceController(manager, arrayProducer).result.set(
+      2,
+      ["value", 0],
+    );
+    expect(manager.getArgument(arrayProducer).getRaw()).toEqual({ value: [2] });
   });
 
   it("intersects argument and public result destination contracts", async () => {
@@ -2462,6 +2700,61 @@ describe("piece pull materialization", () => {
     await expect(controller.input.set("bad", ["slot", "n"]))
       .rejects.toThrow(/write destination/);
     expect(producer.get()).toEqual({ value: { n: 1 } });
+  });
+
+  it("materializes Cell ancestors when staging descendant result writes", async () => {
+    const eventSchema = {
+      type: "number",
+      asCell: ["stream"],
+    } as const;
+    const payloadSchema = {
+      type: "object",
+      properties: {
+        x: { type: "number" },
+        sibling: eventSchema,
+      },
+      required: ["x", "sibling"],
+      asCell: ["cell"],
+    } as const;
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { payload: payloadSchema, event: eventSchema },
+          required: ["payload", "event"],
+        },
+        derivedInternalCells: [{
+          partialCause: "payload",
+          schema: payloadSchema,
+        }, {
+          partialCause: "event",
+          schema: eventSchema,
+        }],
+        result: {
+          payload: { $alias: { partialCause: "payload", path: [] } },
+          event: { $alias: { partialCause: "event", path: [] } },
+        },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, producer);
+    const payload = producer.key("payload").resolveAsCell();
+
+    await controller.result.set(
+      { x: 1, sibling: producer.key("event") },
+      ["payload"],
+    );
+    const sibling = (payload.getRaw() as { sibling: unknown }).sibling;
+    await controller.result.set(2, ["payload", "x"]);
+
+    expect(payload.getRaw()).toEqual({
+      x: 2,
+      sibling,
+    });
   });
 
   it("ignores opaque nested aliases when identifying Stream capability", async () => {

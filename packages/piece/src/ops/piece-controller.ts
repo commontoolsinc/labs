@@ -75,6 +75,42 @@ function replaceMaterializedValueAtPath(
   return clone;
 }
 
+/** Replace a schema-aware snapshot path, reading through Cell ancestors. */
+function replaceMaterializedCellValueAtPath(
+  current: unknown,
+  path: readonly (string | number)[],
+  value: unknown,
+): unknown {
+  while (isCell(current) && !isStream(current)) {
+    const next = current.get();
+    if (next === current) break;
+    current = next;
+  }
+  if (path.length === 0) return value;
+
+  const [segment, ...remaining] = path;
+  const prototype = current !== null && typeof current === "object"
+    ? Object.getPrototypeOf(current)
+    : undefined;
+  const clone: Record<PropertyKey, unknown> | unknown[] = Array.isArray(current)
+    ? current.slice()
+    : prototype === Object.prototype || prototype === null
+    ? Object.assign(Object.create(prototype), current)
+    : typeof segment === "number"
+    ? []
+    : {};
+  const child = current !== null && typeof current === "object"
+    ? (current as Record<PropertyKey, unknown>)[segment]
+    : undefined;
+  Object.defineProperty(clone, segment, {
+    value: replaceMaterializedCellValueAtPath(child, remaining, value),
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+  return clone;
+}
+
 interface SuppliedLink {
   path: (string | number)[];
   value: unknown;
@@ -361,6 +397,296 @@ export function linkPathContracts(
       }
       : contract
   );
+}
+
+function materializedValueAtPath(
+  root: unknown,
+  path: readonly (string | number)[],
+): unknown {
+  let current = root;
+  const followCell = (): void => {
+    while (isCell(current) && !isStream(current)) {
+      const next = current.get();
+      if (next === current) break;
+      current = next;
+    }
+  };
+  for (const segment of path) {
+    followCell();
+    if (current === null || typeof current !== "object") return undefined;
+    current = (current as Record<PropertyKey, unknown>)[segment];
+  }
+  followCell();
+  return current;
+}
+
+const ARRAY_ONLY_SCHEMA_KEYS = [
+  "contains",
+  "items",
+  "maxContains",
+  "maxItems",
+  "minContains",
+  "minItems",
+  "prefixItems",
+  "unevaluatedItems",
+  "uniqueItems",
+] as const;
+
+const OBJECT_ONLY_SCHEMA_KEYS = [
+  "additionalProperties",
+  "dependencies",
+  "dependentRequired",
+  "dependentSchemas",
+  "maxProperties",
+  "minProperties",
+  "patternProperties",
+  "properties",
+  "propertyNames",
+  "required",
+  "unevaluatedProperties",
+] as const;
+
+const NUMBER_ONLY_SCHEMA_KEYS = [
+  "exclusiveMaximum",
+  "exclusiveMinimum",
+  "maximum",
+  "minimum",
+  "multipleOf",
+] as const;
+
+const STRING_ONLY_SCHEMA_KEYS = [
+  "contentEncoding",
+  "contentMediaType",
+  "contentSchema",
+  "format",
+  "maxLength",
+  "minLength",
+  "pattern",
+] as const;
+
+const OBJECT_WHOLE_VALUE_SCHEMA_KEYS = [
+  "dependentRequired",
+  "maxProperties",
+  "minProperties",
+  "propertyNames",
+] as const;
+
+const ARRAY_WHOLE_VALUE_SCHEMA_KEYS = ["uniqueItems"] as const;
+
+const LINK_PATH_NEUTRAL_ANCESTOR_KEYS = new Set([
+  "$comment",
+  "$defs",
+  "$id",
+  "$schema",
+  "default",
+  "definitions",
+  "description",
+  "examples",
+  "ifc",
+  "readOnly",
+  "scope",
+  "tags",
+  "title",
+  "writeOnly",
+]);
+
+function selectCurrentContainerSchema(
+  schema: Exclude<JSONSchema, boolean>,
+  currentValue: unknown,
+): JSONSchema {
+  const currentType = Array.isArray(currentValue)
+    ? "array"
+    : currentValue !== null && typeof currentValue === "object" &&
+        !isCell(currentValue) && !isStream(currentValue)
+    ? "object"
+    : undefined;
+  if (currentType === undefined) return schema;
+
+  const declaredTypes = schema.type === undefined
+    ? undefined
+    : Array.isArray(schema.type)
+    ? schema.type
+    : [schema.type];
+  if (declaredTypes !== undefined && !declaredTypes.includes(currentType)) {
+    throw new Error(
+      `current producer value is not accepted as a ${currentType} container`,
+    );
+  }
+
+  const keysToRemove = currentType === "object"
+    ? [
+      ...ARRAY_ONLY_SCHEMA_KEYS,
+      ...NUMBER_ONLY_SCHEMA_KEYS,
+      ...OBJECT_WHOLE_VALUE_SCHEMA_KEYS,
+      ...STRING_ONLY_SCHEMA_KEYS,
+    ]
+    : [
+      ...ARRAY_WHOLE_VALUE_SCHEMA_KEYS,
+      ...OBJECT_ONLY_SCHEMA_KEYS,
+      ...NUMBER_ONLY_SCHEMA_KEYS,
+      ...STRING_ONLY_SCHEMA_KEYS,
+    ];
+  const needsSelection = schema.type !== currentType ||
+    keysToRemove.some((key) => Object.hasOwn(schema, key));
+  if (!needsSelection) return schema;
+
+  const selected = { ...schema } as Record<string, unknown>;
+  for (const key of keysToRemove) delete selected[key];
+  selected.type = currentType;
+  return selected as JSONSchema;
+}
+
+/**
+ * Localize a child against the producer's current complete ancestor.
+ *
+ * This is deliberately a current-value proof, not a future-value link proof:
+ * every currently matching anyOf branch remains a separate conjunct so an
+ * overlapping ordinary alternative cannot erase a restricted Cell capability.
+ */
+function currentValuePathContracts(
+  unresolved: PathSchemaContract,
+  segment: string | number,
+  currentValue: unknown,
+  candidateValue: unknown,
+  active = new WeakSet<object>(),
+): PathSchemaContract[] {
+  const contract = resolvePathSchemaContract(unresolved);
+  try {
+    return linkPathContracts([contract], [segment]);
+  } catch (originalError) {
+    const { schema, root } = contract;
+    if (typeof schema !== "object" || schema === null) throw originalError;
+    if (active.has(schema)) {
+      throw new Error("recursive correlated write schema cannot be localized");
+    }
+    active.add(schema);
+    try {
+      const selectedContainer = selectCurrentContainerSchema(
+        schema,
+        candidateValue,
+      );
+      if (selectedContainer !== schema) {
+        return currentValuePathContracts(
+          {
+            ...contract,
+            schema: selectedContainer,
+            root: cfcSchemaChildRoot(selectedContainer, root),
+          },
+          segment,
+          currentValue,
+          candidateValue,
+          active,
+        );
+      }
+
+      const hasComposition = Array.isArray(schema.anyOf) ||
+        Array.isArray(schema.oneOf) || Array.isArray(schema.allOf);
+      if (!hasComposition) throw originalError;
+
+      const {
+        anyOf: _anyOf,
+        oneOf: _oneOf,
+        allOf: _allOf,
+        ...base
+      } = schema;
+      const contracts: PathSchemaContract[] = [];
+      const baseObjectShaped = base.type === "object" ||
+        base.properties !== undefined ||
+        base.patternProperties !== undefined ||
+        base.additionalProperties !== undefined;
+      const baseArrayShaped = base.type === "array" ||
+        base.items !== undefined || base.prefixItems !== undefined;
+      if (baseObjectShaped || baseArrayShaped) {
+        contracts.push(...currentValuePathContracts(
+          {
+            ...contract,
+            schema: base,
+            root: cfcSchemaChildRoot(base, root),
+          },
+          segment,
+          currentValue,
+          candidateValue,
+          active,
+        ));
+      } else if (
+        Object.keys(base).some((key) =>
+          !LINK_PATH_NEUTRAL_ANCESTOR_KEYS.has(key)
+        )
+      ) {
+        throw originalError;
+      }
+
+      const branchContract = (branch: JSONSchema): PathSchemaContract => ({
+        ...contract,
+        schema: branch,
+        root: cfcSchemaChildRoot(branch, root),
+      });
+      const branchMatches = (branch: JSONSchema, value: unknown): boolean => {
+        const branchRoot = cfcSchemaChildRoot(branch, root);
+        return validateSchemaValue(
+          branch,
+          value,
+          branchRoot,
+          { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+        ) === undefined;
+      };
+      for (const key of ["anyOf", "oneOf"] as const) {
+        const alternatives = schema[key];
+        if (!Array.isArray(alternatives)) continue;
+        const candidateMatches = alternatives.filter((branch) =>
+          branchMatches(branch, candidateValue)
+        );
+        if (
+          candidateMatches.length === 0 ||
+          key === "oneOf" && candidateMatches.length !== 1
+        ) {
+          throw new Error(
+            `staged producer value does not select a valid ${key} write contract`,
+          );
+        }
+        const currentMatches = alternatives.filter((branch) =>
+          branchMatches(branch, currentValue)
+        );
+        const selected = [
+          ...new Set([
+            ...candidateMatches,
+            ...(key === "anyOf" || currentMatches.length === 1
+              ? currentMatches
+              : []),
+          ]),
+        ];
+        for (const branch of selected) {
+          contracts.push(...currentValuePathContracts(
+            branchContract(branch),
+            segment,
+            currentValue,
+            candidateValue,
+            active,
+          ));
+        }
+      }
+      if (Array.isArray(schema.allOf)) {
+        for (const branch of schema.allOf) {
+          if (!branchMatches(branch, candidateValue)) {
+            throw new Error(
+              "current producer value does not satisfy an allOf write contract",
+            );
+          }
+          contracts.push(...currentValuePathContracts(
+            branchContract(branch),
+            segment,
+            currentValue,
+            candidateValue,
+            active,
+          ));
+        }
+      }
+      if (contracts.length === 0) throw originalError;
+      return contracts;
+    } finally {
+      active.delete(schema);
+    }
+  }
 }
 
 function withoutTopLevelScope(schema: JSONSchema): JSONSchema {
@@ -1282,15 +1608,24 @@ function assertSuppliedLinkSchemasCompatible(
 function localizeWritableDestinationContracts(
   destination: DurableSchemaPath,
   rootCell: Cell<unknown>,
+  nextValue: unknown,
 ): {
   contracts: PathSchemaContract[];
   declaredStream?: boolean;
   approximatedCorrelatedPath: boolean;
 } {
-  const { root, path, rawBasePath, schemaBaseDepth } = destination;
+  const { root, path, rawBasePath, schemaBaseDepth, validationPath } =
+    destination;
   let contracts: PathSchemaContract[] = [{ schema: root, root }];
   let approximatedCorrelatedPath = false;
   const rawRoot = rootCell.getRawUntyped({ lastNode: "top" });
+  const materializedRoot = destination.validationCell.withTx(rootCell.tx)
+    .asSchema(root).get();
+  const stagedMaterializedRoot = replaceMaterializedCellValueAtPath(
+    materializedRoot,
+    validationPath,
+    nextValue,
+  );
   for (let index = 0; index <= path.length; index++) {
     const rawPrefix = index <= schemaBaseDepth
       ? rawBasePath
@@ -1343,28 +1678,28 @@ function localizeWritableDestinationContracts(
     }
     try {
       contracts = linkPathContracts(payloadContracts, [path[index]!]);
-    } catch (error) {
-      if (
-        !(error instanceof Error) ||
-        !error.message.includes(
-          "correlates the linked field with its parent value",
-        )
-      ) throw error;
-
+    } catch {
       // A concrete write can be checked safely by staging it into every
-      // complete producer root below. Use the conservative path projection to
-      // obtain its local value contract, while remembering that it is not a
-      // future-value proof for a newly supplied durable link.
-      const cfc = new ContextualFlowControl();
-      contracts = payloadContracts.map((contract) => {
-        const child = cfc.schemaAtPath(contract.schema, [
-          String(path[index]!),
-        ]);
-        return {
-          schema: child,
-          root: cfcSchemaChildRoot(child, contract.root),
-        };
-      });
+      // complete producer root below, but Cell authority must be proven before
+      // staging. Select the current complete ancestor's exact branches and
+      // container shape; unlike schemaAtPath(), this retains restricted Cell
+      // wrappers. The proof still cannot authorize a future durable link.
+      const currentValue = materializedValueAtPath(
+        materializedRoot,
+        validationPath.slice(0, index),
+      );
+      const candidateValue = materializedValueAtPath(
+        stagedMaterializedRoot,
+        validationPath.slice(0, index),
+      );
+      contracts = payloadContracts.flatMap((contract) =>
+        currentValuePathContracts(
+          contract,
+          path[index]!,
+          currentValue,
+          candidateValue,
+        )
+      );
       approximatedCorrelatedPath = true;
     }
   }
@@ -1432,17 +1767,26 @@ function omitMissingProjectionAliases(
   cell: Cell<unknown>,
   manager: PieceManager,
   schemaViewPresent = true,
+  changedPaths: readonly (readonly (string | number)[])[] = [],
   resolving = new Set<string>(),
 ): unknown | typeof MISSING_PROJECTION_ALIAS {
   if (isLink(raw)) {
-    if (isCell(schemaView)) {
+    if (
+      isCell(schemaView) &&
+      !changedPaths.some((path) => path.length > 0)
+    ) {
       // Schema-aware reads preserve declared Cell/Stream projections as
       // handles. Keep that opaque proof in the staged producer root instead
       // of replacing it with the target's untyped payload; unrelated Stream
       // siblings otherwise look like malformed event objects while another
-      // linked destination is being validated.
+      // linked destination is being validated. A Cell on the spine of a
+      // descendant write is the exception: materialize that producer value so
+      // staging preserves its unchanged siblings.
       return schemaView;
     }
+    const resolvedSchemaView = isCell(schemaView) && !isStream(schemaView)
+      ? schemaView.get()
+      : schemaView;
     const tx = cell.tx;
     if (tx === undefined) {
       throw new Error("projection alias reconciliation requires a transaction");
@@ -1482,10 +1826,11 @@ function omitMissingProjectionAliases(
       return omitMissingProjectionAliases(
         materialized,
         state.value,
-        schemaView,
+        resolvedSchemaView,
         resolvedCell,
         manager,
         schemaViewPresent,
+        changedPaths,
         resolving,
       );
     } finally {
@@ -1511,6 +1856,9 @@ function omitMissingProjectionAliases(
     const rawChild = rawRecord[key];
     const childViewPresent = viewRecord !== undefined &&
       Object.hasOwn(viewRecord, key);
+    const childChangedPaths = changedPaths.flatMap((path) =>
+      path.length > 0 && String(path[0]) === key ? [path.slice(1)] : []
+    );
     const reconciled = omitMissingProjectionAliases(
       materializedRecord[key],
       rawChild,
@@ -1518,6 +1866,7 @@ function omitMissingProjectionAliases(
       cell.key(key as keyof unknown) as Cell<unknown>,
       manager,
       childViewPresent,
+      childChangedPaths,
       resolving,
     );
     if (reconciled === MISSING_PROJECTION_ALIAS) {
@@ -1578,6 +1927,8 @@ function validateDurableSourceRoots(
       schemaView,
       group.cell,
       manager,
+      true,
+      group.paths,
     );
     if (candidate === MISSING_PROJECTION_ALIAS) candidate = undefined;
     for (const path of group.paths) {
@@ -1693,6 +2044,7 @@ class PiecePropIo implements PieceCellIo {
             localizeWritableDestinationContracts(
               schemaPath,
               destinationRootCell,
+              nextValue,
             )
           );
           const declaredStream = localized.flatMap((entry) =>
@@ -1977,6 +2329,8 @@ class PiecePropIo implements PieceCellIo {
               targetCell.withTx(tx).get(),
               targetCell.withTx(tx),
               manager,
+              true,
+              [writePath],
             ),
             writePath,
             materializedValue,
