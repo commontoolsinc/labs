@@ -5,6 +5,9 @@ import {
   Default,
   handler,
   hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
   nonPrivateRandom,
   pattern,
@@ -434,12 +437,16 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
     >(null);
 
     const nowRequest = wish<number>({ query: "#now" });
-    const nowTimestamp = resultOf(nowRequest.result);
-    const todayStr = computed(() =>
-      toLocalDateStr(
-        hasError(nowRequest.result) ? safeDateNow() : nowTimestamp,
-      )
-    );
+    const fallbackNow = safeDateNow();
+    const todayStr = computed(() => {
+      const requestedNow = nowRequest.result;
+      return toLocalDateStr(
+        hasError(requestedNow) || isPending(requestedNow) ||
+          isSyncing(requestedNow) || hasSchemaMismatch(requestedNow)
+          ? fallbackNow
+          : resultOf(requestedNow),
+      );
+    });
     const weekDatesArr = computed(() => getWeekDates(todayStr));
 
     // User/session UI state

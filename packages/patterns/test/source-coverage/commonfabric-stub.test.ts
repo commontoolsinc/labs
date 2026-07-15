@@ -12,7 +12,7 @@ export type Stream<T = unknown> = {
   lastEvent?: T;
 };
 export type VNode = unknown;
-export type WishState<T> = { result?: T; candidates?: T[] };
+export type WishState<T> = { result: AsyncResult<T>; candidates: T[] };
 
 export const NAME = "__name";
 export const UI = "__ui";
@@ -239,7 +239,12 @@ export function unless<T>(condition: unknown, value: T): T | undefined {
 }
 
 export function wish<T>({ query }: { query: string }): WishState<T> {
-  return { result: wishResults.get(query) as T | undefined };
+  return {
+    result: wishResults.has(query)
+      ? wishResults.get(query) as T
+      : { pending: true },
+    candidates: [],
+  };
 }
 
 export function fetchJson<T>(
@@ -285,6 +290,7 @@ type UnavailableResult =
   | ErrorResult
   | SyncingResult
   | SchemaMismatchResult;
+export type AsyncResult<T> = T | UnavailableResult;
 
 function currentGenerateTextValue(): string | UnavailableResult {
   if (generateTextResult.pending) return { pending: true };
@@ -364,15 +370,30 @@ export function llmDialog<T>(
   _params: Record<string, unknown>,
 ): {
   pending: false;
-  result?: T;
+  result: AsyncResult<T>;
   addMessage: Stream<BuiltInLLMMessage>;
   error?: string;
 } {
   return {
     pending: false,
+    result: { pending: true },
     addMessage: handler<BuiltInLLMMessage, Record<string, never>>(() => {})({}),
   };
 }
+
+// Compile-time contract checks: async state projections are always present
+// and carry either their declared value or an availability marker.
+function assertAvailabilityResultTypes(): void {
+  const wishResult: number | UnavailableResult = wish<number>({
+    query: "#type-check",
+  }).result;
+  const dialogResult: { answer: number } | UnavailableResult = llmDialog<{
+    answer: number;
+  }>({}).result;
+  void wishResult;
+  void dialogResult;
+}
+void assertAvailabilityResultTypes;
 
 export function patternTool<T>(
   patternValue: unknown,

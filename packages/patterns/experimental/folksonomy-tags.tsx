@@ -295,12 +295,13 @@ export const FolksonomyTags = pattern<
     });
 
     // A missing optional aggregator keeps the pattern in local-only mode.
-    const discoveredAggregator = hasError(aggregatorWish.result) ||
-        isPending(aggregatorWish.result) ||
-        isSyncing(aggregatorWish.result) ||
-        hasSchemaMismatch(aggregatorWish.result)
-      ? null
-      : resultOf(aggregatorWish.result);
+    const discoveredAggregator = computed(() => {
+      const result = aggregatorWish.result;
+      return hasError(result) || isPending(result) || isSyncing(result) ||
+          hasSchemaMismatch(result)
+        ? null
+        : resultOf(result);
+    });
     const aggregator = injectedAggregator ?? discoveredAggregator;
 
     // Get the aggregator's postEvent stream for telemetry

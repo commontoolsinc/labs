@@ -18,7 +18,19 @@
  * - Community suggestions show dimmed with usage counts
  * - Events are posted to the aggregator in real-time
  */
-import { type Default, NAME, pattern, UI, wish, Writable } from "commonfabric";
+import {
+  computed,
+  type Default,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
+  NAME,
+  pattern,
+  UI,
+  wish,
+  Writable,
+} from "commonfabric";
 
 // Import the FolksonomyTags sub-pattern
 import { FolksonomyTags } from "./folksonomy-tags.tsx";
@@ -51,7 +63,11 @@ export default pattern<Input, Output>(
       query: "#folksonomyAggregator",
       scope: ["~", "."],
     });
-    const hasAggregator = aggregatorWish.result != null;
+    const hasAggregator = computed(() => {
+      const result = aggregatorWish.result;
+      return !isPending(result) && !hasError(result) && !isSyncing(result) &&
+        !hasSchemaMismatch(result);
+    });
 
     // Shared scope for A and B
     const sharedScope = `https://github.com/commontools/folksonomy-demo/${
