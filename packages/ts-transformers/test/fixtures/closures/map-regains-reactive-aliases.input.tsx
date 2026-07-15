@@ -28,10 +28,10 @@ export default pattern<{ items: string[] }>((state) => {
     return foo.map((item) => item + "!");
   });
 
+  const wishedState = wish<Default<string[], []>>({ query: "#items" });
+  const wishedItems = resultOf(wishedState.result);
   const fromWish = computed(() => {
-    const foo = resultOf(
-      wish<Default<string[], []>>({ query: "#items" }).result,
-    );
+    const foo = wishedItems;
     return foo.map((item) => item + "!");
   });
 

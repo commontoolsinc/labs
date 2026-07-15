@@ -107,10 +107,10 @@ Two additions to keep it honest:
 
 ## Open issues / out-of-scope
 
-### Nested `computed(() => ...)` walker gap
+### Nested `computed(() => ...)` factory placement
 
-Factories such as `wish()` belong outside `computed()` callbacks. Capture the
-request or its usable projection instead:
+The `wish()` factory belongs in the pattern body. Capture the request or its
+usable projection in `computed()`:
 
 ```ts
 const state = wish<T>(...);
@@ -119,8 +119,11 @@ const value = resultOf(request);
 const derived = computed(() => value.items.map(...));
 ```
 
-Creating the Wish inside the callback is a local-reactive-use error; relying on
-the historical walker gap is not supported.
+Creating the Wish inside the callback is rejected with
+`compute-context:local-reactive-use`, including at sites whose downstream array
+method can otherwise be lowered. `map-regains-reactive-aliases` keeps its Wish
+projection outside the compute and verifies that capturing the projection still
+regains the reactive array alias for pattern-owned callback lowering.
 
 ### Element-access terminals with computed keys
 

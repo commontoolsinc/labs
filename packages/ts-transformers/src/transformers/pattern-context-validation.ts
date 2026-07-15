@@ -142,6 +142,20 @@ export class PatternContextValidationTransformer
         return ts.visitEachChild(node, visit, context.tsContext);
       }
 
+      if (
+        ts.isCallExpression(node) &&
+        detectCallKind(node, checker)?.kind === "wish" &&
+        context.getReactiveContext(node).kind === "compute"
+      ) {
+        context.reportDiagnosticOnce({
+          severity: "error",
+          type: "compute-context:local-reactive-use",
+          message:
+            "wish() creates a reactive factory node and must be called in the pattern body, outside computed() or lift(). Capture its request or resultOf() projection in the callback instead.",
+          node,
+        });
+      }
+
       // Check for function creation in pattern context
       if (
         ts.isArrowFunction(node) ||

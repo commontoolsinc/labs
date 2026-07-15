@@ -4421,7 +4421,7 @@ Deno.test("Module-extracted reactive callback bodies (CT-1587)", async (t) => {
   // `cell.result` get lowered to `cell.key("result")` — otherwise the access
   // stays as plain JS and unwraps the cell at runtime.
   await t.step(
-    "lowers property access on opaque roots inside computed() bodies",
+    "rejects Wish factories created inside computed() bodies",
     async () => {
       const source = `
         import { computed, Default, pattern, wish } from "commonfabric";
@@ -4435,22 +4435,19 @@ Deno.test("Module-extracted reactive callback bodies (CT-1587)", async (t) => {
           return { result };
         });
       `;
-      const { diagnostics, output } = await validateSource(source, {
+      const { diagnostics } = await validateSource(source, {
         types: COMMONFABRIC_TYPES,
       });
-      const errors = getErrors(diagnostics);
+      const errors = getErrors(diagnostics).filter((diagnostic) =>
+        diagnostic.type === "compute-context:local-reactive-use"
+      );
       assertEquals(
         errors.length,
-        0,
-        `Should produce clean output (got: ${
-          errors.map((e) => e.message).join("; ")
+        1,
+        `Expected one Wish factory placement diagnostic (got: ${
+          getErrors(diagnostics).map((error) => error.message).join("; ")
         })`,
       );
-      // `fooWish.result!` inside computed() lowers to `fooWish.key("result")`
-      // and `foo[0]` lowers to `foo.key("0")`.
-      const root = parseModule(output);
-      assert(hasKeyPathRead(root, "result", "fooWish"));
-      assert(hasKeyPathRead(root, "0", "foo"));
     },
   );
 });

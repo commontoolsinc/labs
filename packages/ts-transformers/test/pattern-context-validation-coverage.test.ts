@@ -14,6 +14,33 @@ function errorsOfType(
   return getErrors(diagnostics).filter((d) => d.type === type);
 }
 
+Deno.test(
+  "wish factories inside computed callbacks are rejected",
+  async () => {
+    const source = `
+      import { computed, pattern, resultOf, wish } from "commonfabric";
+
+      export default pattern(() => {
+        const result = computed(() => {
+          const request = wish<string[]>({ query: "#items" });
+          return resultOf(request.result).length;
+        });
+        return { result };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      1,
+    );
+  },
+);
+
 // validateComputationExpression -> findProblematicAccess: a reactive property
 // access used in a bare statement-position arithmetic computation is at a
 // restricted (non-lowerable) site, so it is rejected with
