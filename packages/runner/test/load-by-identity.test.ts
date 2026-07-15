@@ -10,6 +10,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
+import { isPattern, type Pattern } from "../src/builder/types.ts";
 import type { Source } from "@commonfabric/js-compiler";
 import type { CachedCompiledModule } from "../src/sandbox/module-record-compiler.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -25,6 +26,13 @@ import {
 
 const signer = await Identity.fromPassphrase("load-by-identity");
 const space = signer.did();
+
+const expectPattern = (value: unknown): Pattern => {
+  if (!isPattern(value)) {
+    throw new Error("Expected evaluated default export to be a pattern");
+  }
+  return value;
+};
 
 // The load-by-identity warm path: build + evaluate a pattern directly from
 // cached compiled modules (no TS source, no resolve, no recompile), and the
@@ -75,15 +83,14 @@ describe("load by module identity (warm + version-bump recovery)", () => {
     value: number,
     cause: string,
   ): Promise<unknown> => {
-    const pattern = (main as { default?: unknown })?.default;
+    const pattern = expectPattern((main as { default?: unknown })?.default);
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       cause,
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const result = runtime.run(tx, pattern as any, { value }, resultCell);
+    const result = runtime.run(tx, pattern, { value }, resultCell);
     await tx.commit();
     tx = runtime.edit();
     await result.pull();
@@ -91,19 +98,13 @@ describe("load by module identity (warm + version-bump recovery)", () => {
   };
 
   const toCached = (
-    modules: {
-      identity: string;
-      filename: string;
-      js: string;
-      imports: unknown;
-    }[],
+    modules: CacheableModule[],
   ): CachedCompiledModule[] =>
     modules.map((m) => ({
       identity: m.identity,
       filename: m.filename,
       code: m.js,
-      // deno-lint-ignore no-explicit-any
-      imports: m.imports as any,
+      imports: m.imports,
     }));
 
   it("evaluates a pattern from cached compiled modules (no resolve/compile)", async () => {
@@ -342,11 +343,12 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
 
   const runPattern = async (
     runtime: Runtime,
-    pattern: unknown,
+    valueToRun: unknown,
     value: number,
     cause: string,
     inSpace = space,
   ): Promise<unknown> => {
+    const pattern = expectPattern(valueToRun);
     const tx = runtime.edit();
     const resultCell = runtime.getCell<{ result: number }>(
       inSpace,
@@ -354,8 +356,7 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const result = runtime.run(tx, pattern as any, { value }, resultCell);
+    const result = runtime.run(tx, pattern, { value }, resultCell);
     await tx.commit();
     await result.pull();
     return result.getAsQueryResult();
