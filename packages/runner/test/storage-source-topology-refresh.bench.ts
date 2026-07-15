@@ -4,7 +4,10 @@ import {
   entityRefFrom,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+import type { Result, Unit, URI } from "@commonfabric/memory/interface";
+import type { EntityDocument } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 
 // Select the cell-rep regime from the env flag, mirroring how the product reads
 // EXPERIMENTAL_MODERN_CELL_REP: unset means "accept the default" (a no-op, since
@@ -30,20 +33,21 @@ const idHash = (name: string) =>
 
 const PROCESS_HASH = idHash("process");
 const BASE_HASHES = [idHash("base-1"), idHash("base-2")] as const;
-const PROCESS_URI = `of:${PROCESS_HASH.taggedHashString}`;
-const BASE_URIS = BASE_HASHES.map((hash) => `of:${hash.taggedHashString}`);
+const PROCESS_URI: URI = `of:${PROCESS_HASH.taggedHashString}`;
+const BASE_URIS = BASE_HASHES.map((hash): URI => `of:${hash.taggedHashString}`);
 const PATTERN_ID = "bench-pattern:source-topology";
-const PATTERN_URI = `of:${
+const PATTERN_URI: URI = `of:${
   hashOf({ causal: { patternId: PATTERN_ID, type: "pattern" } })
     .taggedHashString
 }`;
 
-type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
-  open(space: string): infer T;
-} ? T
-  : never;
+type TestProvider = IStorageProviderWithReplica & {
+  send(
+    batch: { uri: URI; value: EntityDocument | undefined }[],
+  ): Promise<Result<Unit, Error>>;
+};
 
-const pieceUri = (index: number) =>
+const pieceUri = (index: number): URI =>
   `of:${idHash(`piece-${index}`).taggedHashString}`;
 
 const pieceValue = (withPatternLink: boolean) =>
@@ -60,9 +64,9 @@ const setup = async (withPatternLink: boolean) => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider = storageManager.open(space) as TestProvider;
 
-  await (provider as any).send([
+  await provider.send([
     {
       uri: BASE_URIS[0],
       value: {
@@ -96,7 +100,7 @@ const setup = async (withPatternLink: boolean) => {
   ]);
 
   for (let index = 0; index < SUBSCRIPTION_COUNT; index++) {
-    await (provider as any).sync(pieceUri(index), {
+    await provider.sync(pieceUri(index), {
       path: [],
       schema: false,
     });
@@ -117,7 +121,7 @@ const runRetargetLoop = async (
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) => {
   for (let version = 0; version < UPDATE_COUNT; version++) {
-    await (provider as any).send([{
+    await provider.send([{
       uri: PROCESS_URI,
       value: {
         source: entityRefFrom(
