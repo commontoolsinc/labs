@@ -31,13 +31,13 @@ const PLAYER_COLORS = [
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
 const colorForIndex = (i: number) => PLAYER_COLORS[i % PLAYER_COLORS.length];
 
-const joinAs = handler<JoinEvent, {
+export const joinAsParticipant = handler<JoinEvent, {
   users: ParticipantIdentityUsersCell;
   myName: ParticipantIdentityNameCell;
   adminName: ParticipantIdentityNameCell;
   joinName: ParticipantIdentityNameCell;
-  profileName: string;
-  profileAvatar: string;
+  profileName?: string;
+  profileAvatar?: string;
 }>(
   (
     { name },
@@ -151,7 +151,7 @@ export default pattern<
 
     const profileName = computed(() => profileNameWish.result ?? "");
     const profileAvatar = computed(() => profileAvatarWish.result ?? "");
-    const boundJoin = joinAs({
+    const boundJoin = joinAsParticipant({
       users,
       myName,
       adminName,

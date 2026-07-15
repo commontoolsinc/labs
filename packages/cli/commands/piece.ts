@@ -262,7 +262,10 @@ export const piece = new Command()
         mainExport: options.mainExport,
         rootPath: options.root ? absPath(options.root) : undefined,
       },
-      { start: options.start, slug: options.slug },
+      {
+        start: options.start,
+        slug: options.slug,
+      },
     );
     render(pieceId);
     const browserPieceRef = options.slug ?? pieceId;

@@ -30,6 +30,24 @@ class PiecePropIo implements PieceCellIo {
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
     await targetCell.pull();
+
+    // A concrete root schema can contain a narrower-scope write redirect
+    // (PerUser / PerSession). Pulling the root only syncs its declared address;
+    // key() then inherits that "synced" bit even though resolving the redirect
+    // reaches a different scope that a cold replica has not loaded. Explicitly
+    // sync the resolved requested cell before the synchronous path read.
+    if (path?.length) {
+      let requestedCell = targetCell;
+      for (const segment of path) {
+        requestedCell = requestedCell.key(
+          segment as keyof unknown,
+        ) as Cell<unknown>;
+      }
+      const resolvedCell = requestedCell.resolveAsCell();
+      await resolvedCell.sync();
+      await resolvedCell.pull();
+    }
+
     return resolveCellPath(targetCell, path ?? []);
   }
 

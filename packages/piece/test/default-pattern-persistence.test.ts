@@ -119,6 +119,31 @@ describe("PieceManager default pattern persistence", () => {
     await storageManager?.close();
   });
 
+  it("preflights the default pattern's actual addPiece stream", async () => {
+    const { commonfabric } = createBuilder();
+    const { pattern } = commonfabric;
+    const rootWithoutRegistration = pattern(() => ({
+      allPieces: [] as Cell<unknown>[],
+    }));
+    const rootPiece = await manager.runPersistent(
+      rootWithoutRegistration,
+      {},
+      "root-without-registration",
+    );
+    await manager.linkDefaultPattern(rootPiece);
+    await manager.runtime.idle();
+    await manager.synced();
+
+    await expect(manager.assertCanAddPieces()).rejects.toThrow(
+      "addPiece handler not found on default pattern",
+    );
+  });
+
+  it("preflight resolves once the default pattern registers pieces", async () => {
+    await createDefaultPatternPieceWithResult(manager);
+    await manager.assertCanAddPieces();
+  });
+
   it("reads persisted allPieces without restarting the default pattern", async () => {
     const { commonfabric } = createBuilder();
     const { handler, pattern } = commonfabric;

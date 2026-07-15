@@ -12,6 +12,7 @@ import {
   runtimePresets,
   RuntimeProgram,
   UI,
+  validateSlug,
   VNode,
 } from "@commonfabric/runner";
 import type { CellScope } from "@commonfabric/api";
@@ -388,22 +389,56 @@ export async function resolveLinkEndpointAddress(
   }
 }
 
+export interface NewPieceOptions {
+  start?: boolean;
+  slug?: string;
+}
+
+export interface NewPieceDependencies {
+  loadManager?: typeof loadManager;
+  createController?: (manager: PieceManager) => PiecesController;
+  getProgram?: (
+    manager: PieceManager,
+    entry: EntryConfig,
+  ) => Promise<RuntimeProgram>;
+  assignSlug?: typeof assignSlug;
+}
+
+function shellQuoteCliArgument(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 // Creates a new piece from source code and optional input.
 export async function newPiece(
   config: SpaceConfig,
   entry: EntryConfig,
-  options?: { start?: boolean; slug?: string },
+  options: NewPieceOptions = {},
+  deps: NewPieceDependencies = {},
 ): Promise<string> {
+  const slug = options.slug === undefined
+    ? undefined
+    : validateSlug(options.slug);
+
   const manager = await timeCliPhase(
     "newPiece.loadManager",
-    () => loadManager(config),
+    () => (deps.loadManager ?? loadManager)(config),
   );
-  const pieces = new PiecesController(manager);
+  const isHomeSpace = manager.getSpace() === manager.runtime.userIdentityDID;
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
 
-  // The default pattern is a hard requirement for this command: even when the
-  // user's pattern doesn't use it, registration below (manager.add) sends an
-  // event to the default pattern's addPiece stream. Proceeding past a failure
-  // here can only end in "Cannot add pieces" — fail now, with the real cause.
+  const homeSpaceHint =
+    `The home space is not a piece registry. Target a named space instead: ` +
+    cliCommand(["piece", "new", "--space", "<space-name>", "<main>"]);
+  const nonHomeRepairHint = `Repair the non-home space root with: ` +
+    cliCommand(["piece", "recreate-root"]);
+
+  // Registration is a hard requirement. Initialize the root first, then
+  // separately validate its actual addPiece stream before resolving source or
+  // creating the piece. A healthy system home intentionally has no addPiece;
+  // ordinary pieces belong in a named space whose default-app root registers
+  // them.
   try {
     await timeCliPhase(
       "newPiece.ensureDefaultPattern",
@@ -411,20 +446,34 @@ export async function newPiece(
     );
   } catch (error) {
     throw new Error(
-      `Could not initialize the space's default pattern: ${
+      `Could not initialize the space's root pattern: ${
         error instanceof Error ? error.message : String(error)
       }\n` +
-        `The new piece cannot be registered in the space's piece list ` +
-        `without it.\n` +
-        `If this space's root pattern predates a runtime format change, ` +
-        `repair it with: ${cliCommand(["piece", "recreate-root"])}`,
+        `No new piece was created.\n` +
+        (isHomeSpace ? homeSpaceHint : nonHomeRepairHint),
+      { cause: error },
+    );
+  }
+
+  try {
+    await timeCliPhase(
+      "newPiece.assertCanAddPieces",
+      () => manager.assertCanAddPieces(),
+    );
+  } catch (error) {
+    throw new Error(
+      `The space's root pattern cannot register a new piece: ${
+        error instanceof Error ? error.message : String(error)
+      }\n` +
+        `No new piece was created.\n` +
+        (isHomeSpace ? homeSpaceHint : nonHomeRepairHint),
       { cause: error },
     );
   }
 
   const program = await timeCliPhase(
     "newPiece.getProgramFromFile",
-    () => getPinnedProgramFromFile(manager, entry),
+    () => (deps.getProgram ?? getPinnedProgramFromFile)(manager, entry),
   );
   const PIECE_START_TIMEOUT_MS = 60_000;
   const piece = await timeCliPhase("newPiece.create", () => {
@@ -446,18 +495,71 @@ export async function newPiece(
     );
   });
 
-  if (options?.slug) {
+  const directUrl = `${config.apiUrl.replace(/\/+$/, "")}/` +
+    `${config.space}/${piece.id}`;
+
+  // Registration is the supported durability/discovery path. Do it before
+  // optional slug assignment so a slug write failure never leaves behind an
+  // otherwise-successful piece that is absent from the space's piece list.
+  try {
     await timeCliPhase(
-      "newPiece.assignSlug",
-      () => assignSlug(manager, piece.getCell(), options.slug!),
+      "newPiece.addToDefaultPattern",
+      () => manager.add([piece.getCell()]),
+    );
+  } catch (error) {
+    const inspectCommand = cliCommand([
+      "piece",
+      "ls",
+      "--identity",
+      shellQuoteCliArgument(config.identity),
+      "--api-url",
+      shellQuoteCliArgument(config.apiUrl),
+      "--space",
+      shellQuoteCliArgument(config.space),
+    ]);
+    throw new Error(
+      `The piece was created as ${piece.id}, but registration did not ` +
+        `complete cleanly: ${
+          error instanceof Error ? error.message : String(error)
+        }\n` +
+        `The registration outcome is unknown because the add may have ` +
+        `committed before settling failed.\n` +
+        `The piece remains addressable by ID at ${directUrl}\n` +
+        `Inspect the space's piece list before retrying:\n  ${inspectCommand}`,
+      { cause: error },
     );
   }
 
-  // Explicitly add the piece to the space's allPieces list
-  await timeCliPhase(
-    "newPiece.addToDefaultPattern",
-    () => manager.add([piece.getCell()]),
-  );
+  if (slug !== undefined) {
+    try {
+      await timeCliPhase(
+        "newPiece.assignSlug",
+        () => (deps.assignSlug ?? assignSlug)(manager, piece.getCell(), slug),
+      );
+    } catch (error) {
+      const recoveryCommand = cliCommand([
+        "piece",
+        "set-slug",
+        "--identity",
+        shellQuoteCliArgument(config.identity),
+        "--api-url",
+        shellQuoteCliArgument(config.apiUrl),
+        "--space",
+        shellQuoteCliArgument(config.space),
+        shellQuoteCliArgument(slug),
+        shellQuoteCliArgument(piece.id),
+      ]);
+      throw new Error(
+        `The piece was created and registered as ${piece.id}, but assigning ` +
+          `slug "${slug}" failed: ${
+            error instanceof Error ? error.message : String(error)
+          }\n` +
+          `The piece remains registered and addressable by ID at ${directUrl}\n` +
+          `Retry slug assignment with:\n  ${recoveryCommand}`,
+        { cause: error },
+      );
+    }
+  }
 
   return piece.id;
 }
