@@ -1811,9 +1811,9 @@ export class CellImpl<T extends FabricValue>
         ? this.runtime.cfc.getSchemaAtPath(currentLink.schema, [key.toString()])
         : undefined;
 
-      // Create a child link with extended path
-      // When we have a childSchema, we need to preserve the schema that contains $defs
-      // for resolving $ref references. If schema wasn't set, fall back to the parent schema.
+      // Create a child link with an extended path. schemaAtPath retains the
+      // reachable $defs closure needed for later key() calls while dropping
+      // definitions the child can no longer reach.
       //
       // key() only extends the path and walks the schema. It must NOT change the
       // link's scope: scope lives in the schema (top-level and asCell entries)

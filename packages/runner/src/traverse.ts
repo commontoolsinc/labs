@@ -179,6 +179,24 @@ function pathKey(path: readonly string[]): string {
   return key;
 }
 
+const keyComponent = (value: string): string => `${value.length}:${value}`;
+
+/**
+ * Full address identity for the shared schema-result memo.
+ *
+ * A document id is only unique within its space and scope. Omitting those
+ * fields let a shared query memo return another partition's result when the
+ * same id/path/schema appeared in both. Length prefixes keep the key
+ * injective without paying for JSON serialization on every schema visit.
+ */
+function schemaMemoAddressKey(address: IMemorySpaceAddress): string {
+  return `s${keyComponent(address.space)}c${
+    keyComponent(address.scope ?? "space")
+  }i${keyComponent(address.id)}t${
+    keyComponent(address.type ?? "application/json")
+  }p${pathKey(address.path)}`;
+}
+
 /**
  * Memoized `narrowSchema()` + `combineOptionalSchema()` for link hops
  * (`followPointer` / `isLinkedDocumentCovered`).
@@ -258,11 +276,12 @@ function narrowAndCombineSelectorForLink(
 
 /**
  * Memoized, canonicalizing wrapper around `cfc.schemaAtPath()` for the hot
- * traversal seams (object properties, array items). `schemaAtPath()` mints a
- * fresh schema object on every call, which defeats every identity-keyed hash
- * cache downstream (most notably the `traverseWithSchema` memo key). This
- * returns one interned (canonical, deep-frozen) result per (schema identity,
- * path, marker variant).
+ * traversal seams (object properties, array items). The core method now
+ * symbolically memoizes its common boolean-default derivations; this seam also
+ * covers the marker-object variant used below, which is intentionally outside
+ * that cache. It returns one interned (canonical, deep-frozen) result per
+ * (schema identity, path, marker variant), so downstream identity-keyed hash
+ * caches (most notably the `traverseWithSchema` memo) hit.
  *
  * Only memoizes when `schema` is a memoizable input (interned or deep-frozen
  * — see `isMemoizableSchemaInput()`), so the identity key cannot go stale.
@@ -311,9 +330,9 @@ function schemaAtPathCanonical(
   const key = (markers ? "m|" : "d|") + pathKey(path);
   const cached = byPath.get(key);
   if (cached !== undefined) return cached;
-  // `schemaAtPath()`'s object results are freshly-spread tops over the (deep-
-  // frozen, since `schema` is interned) children, so interning here freezes
-  // only owned objects.
+  // Marker-bearing calls return freshly-spread tops over the (deep-frozen,
+  // since `schema` is interned) children. Default calls may already be the
+  // core method's canonical result; interning is idempotent in that case.
   const result = internSchema(compute());
   if (byPath.size >= INTERN_CACHE_MAX) byPath.clear();
   byPath.set(key, result);
@@ -3089,7 +3108,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // so the result is fully determined by address + schema.
       if (this.traverseCells) {
         const memo = this.activeMemo;
-        const memoKey = docId + "|" + doc.address.path.join("/") + "|" +
+        const memoKey = schemaMemoAddressKey(doc.address) + "|" +
           hashSchema(schema);
         const cached = memo.get(memoKey);
         if (cached !== undefined) {
