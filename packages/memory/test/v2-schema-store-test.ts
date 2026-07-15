@@ -1,6 +1,7 @@
 import {
   assert,
   assertEquals,
+  assertRejects,
   assertStrictEquals,
   assertThrows,
 } from "@std/assert";
@@ -195,6 +196,103 @@ Deno.test("schema store fails closed for malformed Fabric JSON", async () => {
   });
 });
 
+Deno.test("schema store rejects invalid quota limits", async () => {
+  const invalidLimits = [
+    ["maxSchemaBytes", -1],
+    ["maxEntries", Number.NaN],
+    ["maxTotalBytes", Number.POSITIVE_INFINITY],
+  ] as const;
+
+  for (const [limit, value] of invalidLimits) {
+    await assertRejects(
+      () => openSchemaStore({ url: new URL("memory:"), [limit]: value }),
+      Error,
+      `${limit} must be a non-negative safe integer`,
+    );
+  }
+});
+
+Deno.test("schema store fails closed for non-schema values and byte corruption", async () => {
+  await withStore(async (url) => {
+    const store = await openSchemaStore({ url });
+    const stored = store.put({ type: "string" });
+    store.close();
+
+    const database = await new Database(url.pathname, { create: true });
+    try {
+      const nonSchema = "fvj1:42";
+      database.prepare(
+        "UPDATE schema_store_entries SET canonical_json = ?, byte_length = ? WHERE hash = ?",
+      ).run(
+        nonSchema,
+        new TextEncoder().encode(nonSchema).byteLength,
+        stored.hash,
+      );
+    } finally {
+      database.close();
+    }
+
+    const reopened = await openSchemaStore({ url });
+    try {
+      assertThrows(
+        () => reopened.get(stored.hash),
+        SchemaStoreCorruptionError,
+        "non-schema Fabric value",
+      );
+    } finally {
+      reopened.close();
+    }
+  });
+
+  await withStore(async (url) => {
+    const store = await openSchemaStore({ url });
+    const stored = store.put({ type: "string" });
+    store.close();
+
+    const database = await new Database(url.pathname, { create: true });
+    try {
+      database.prepare(
+        "UPDATE schema_store_entries SET byte_length = byte_length + 1 WHERE hash = ?",
+      ).run(stored.hash);
+    } finally {
+      database.close();
+    }
+
+    const reopened = await openSchemaStore({ url });
+    try {
+      assertThrows(
+        () => reopened.get(stored.hash),
+        SchemaStoreCorruptionError,
+        "byte length does not match stored JSON",
+      );
+    } finally {
+      reopened.close();
+    }
+  });
+});
+
+Deno.test("schema store rejects missing generation metadata", async () => {
+  await withStore(async (url) => {
+    const database = await new Database(url.pathname, { create: true });
+    try {
+      database.exec(
+        "CREATE TABLE schema_store_metadata (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL);",
+      );
+      database.prepare(
+        "INSERT INTO schema_store_metadata (key, value) VALUES (?, ?)",
+      ).run("generation", "");
+    } finally {
+      database.close();
+    }
+
+    await assertRejects(
+      () => openSchemaStore({ url }),
+      Error,
+      "schema store generation metadata is missing",
+    );
+  });
+});
+
 Deno.test("schema store quotas permit duplicates without consuming capacity", async () => {
   await withStore(async (url) => {
     const store = await openSchemaStore({ url, maxEntries: 1 });
@@ -260,6 +358,22 @@ Deno.test("schema store inserts schema batches atomically", async () => {
       );
       assertEquals(store.putAll([]), []);
       assertEquals(store.put({ type: "boolean" }).schema, { type: "boolean" });
+    } finally {
+      store.close();
+    }
+  });
+});
+
+Deno.test("schema store resolves duplicate schemas within one batch", async () => {
+  await withStore(async (url) => {
+    const store = await openSchemaStore({ url, maxEntries: 1 });
+    try {
+      const [first, duplicate] = store.putAll([
+        { type: "string" },
+        { type: "string" },
+      ]);
+      assertStrictEquals(first, duplicate);
+      assertEquals(store.get(first.hash), first);
     } finally {
       store.close();
     }
