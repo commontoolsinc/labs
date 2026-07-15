@@ -18,21 +18,22 @@ type ProgressEvent = {
 
 const request = streamData<ProgressEvent>({ url });
 const finalEvent = resultOf(request);
-const liveRequest = partialResultOf(request);
-const liveEvent = resultOf(liveRequest);
+const liveEvent = partialResultOf(request);
 
-return isPending(liveRequest)
-  ? <p>Connecting...</p>
-  : hasError(liveRequest)
-  ? <p>Stream failed: {liveRequest.error.message}</p>
-  : <p>{liveEvent.data.completed} / {liveEvent.data.total}</p>;
+return hasError(request)
+  ? <p>Stream failed: {request.error.message}</p>
+  : isPending(request)
+  ? <p>Live: {liveEvent.data.completed} / {liveEvent.data.total}</p>
+  : <p>Closed: {finalEvent.data.completed} / {finalEvent.data.total}</p>;
 ```
 
-Both the direct request and partial request begin pending. Each decoded event
-updates the partial request. The direct request remains pending until the
-stream closes cleanly, then becomes the last decoded event. A stream which is
-expected to remain open normally consumes only `partialResultOf(request)`;
-`finalEvent` is useful only after a clean close.
+Both the direct request and partial value begin pending at runtime. Each decoded
+event updates the partial value. A computation consuming `liveEvent` waits for
+the first event; the pending branch above distinguishes an open stream from a
+closed one, rather than making the partial value optional. The direct request
+remains pending until the stream closes cleanly, then becomes the last decoded
+event. A stream which is expected to remain open normally consumes only
+`partialResultOf(request)`; `finalEvent` is useful only after a clean close.
 
 A clean close before the first event, an unsuccessful HTTP response, a
 connection failure, malformed event data, or invalid JSON produces an error on
@@ -50,5 +51,5 @@ const lastUsableEvent = latestComplete(partialResultOf(request));
 ```
 
 `latestComplete()` starts pending until the first complete event and thereafter
-keeps its last complete snapshot. The original request remains available for
-`isPending()`, `hasError()`, and the other availability guards.
+keeps its last complete snapshot. Use the original request with `isPending()`,
+`hasError()`, and the other availability guards.

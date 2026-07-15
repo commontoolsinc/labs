@@ -759,22 +759,26 @@ rather than leaving an unwakeable `syncing` value.
 
 `generateTextStream()` and `generateObjectStream<T>()` return their final
 `AsyncResult<T>` directly, like their non-streaming counterparts. The request
-also has an associated intermediate-text channel selected with
+also has an associated usable intermediate-text projection selected with
 `partialResultOf()`:
 
 ```typescript
 // Shown for illustration only.
 const request = generateTextStream({ prompt });
 const finalText = resultOf(request);
-const partialText = resultOf(partialResultOf(request));
+const partialText = partialResultOf(request);
 ```
 
-`partialResultOf()` is a zero-node reactive alias. Its channel is pending until
-the first provider text arrives, is cleared back to pending atomically with a
-replacement request, and carries the terminal unavailable marker on failure.
-Direct object generation may produce no intermediate text; in that case its
-partial channel remains pending while the final object becomes usable. The
-object API never casts incomplete provider text to `Partial<T>`.
+`partialResultOf()` is a zero-node usable projection. Its authoring type is the
+partial value itself, while the underlying channel remains pending until the
+first provider text arrives and downstream computations wait at their normal
+availability boundary. A replacement request clears the channel back to
+pending atomically, and a terminal failure is also published to the original
+request. Availability guards therefore stay on the original request rather
+than the partial projection. Direct object generation may produce no
+intermediate text; in that case its partial projection remains unavailable
+while the final object becomes usable. The object API never casts incomplete
+provider text to `Partial<T>`.
 
 The persisted operation state still contains pending, result, error, partial,
 messages, grounding sources, and request hashes as applicable. Those fields are
@@ -799,7 +803,7 @@ type Event = {
 
 const request = streamData<Event>({ url });
 const closedEvent = resultOf(request);
-const currentEvent = resultOf(partialResultOf(request));
+const currentEvent = partialResultOf(request);
 ```
 
 Both channels begin pending. Each decoded event updates only the partial

@@ -97,20 +97,21 @@ result exists.
 
 Use `generateTextStream` or `generateObjectStream<T>` when a pattern needs
 intermediate provider text. The stream call returns the final request directly;
-`partialResultOf()` selects its associated partial request:
+`partialResultOf()` returns its usable partial value:
 
 ```typescript
 // Shown for illustration only.
 const request = generateTextStream({ prompt });
 const finalText = resultOf(request);
-const partialText = resultOf(partialResultOf(request));
+const partialText = partialResultOf(request);
 ```
 
-Both values use the ordinary availability guards. Before the first chunk,
-`partialResultOf(request)` is pending. A replacement request resets both final
-and partial channels atomically, and a terminal failure is visible on both.
-The current direct object-generation provider may emit no intermediate text;
-its partial channel then remains pending while the final object resolves.
+Use the ordinary availability guards on `request`. Before the first chunk, a
+computation that consumes `partialText` waits just as one consuming
+`resultOf(request)` would. A replacement request resets both final and partial
+channels atomically, and a terminal failure is visible through `request`. The
+current direct object-generation provider may emit no intermediate text; its
+partial value then remains unavailable while the final object resolves.
 
 The runtime retains legacy persisted generation state internally, but the
 public streaming API does not expose its sibling state fields or metadata.
