@@ -990,7 +990,7 @@ export interface ExecutionLeaseFence {
   /** Sampled after BEGIN IMMEDIATE and the fresh authority callback. */
   nowMs: number | (() => number);
   /**
-   * Canonical current WRITE and execution-policy check. It is invoked after
+   * Canonical current server-execution and WRITE check. It is invoked after
    * exact replay detection but before first-application mutation, inside the
    * same IMMEDIATE transaction.
    */

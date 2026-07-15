@@ -137,15 +137,6 @@ Deno.test("legacy background acquisition fences broker authority and waits for t
 
   pool.start();
   try {
-    await sponsor.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${SPACE}:execution-policy`,
-        value: { value: { version: 1, serverPrimaryExecution: true } },
-      }],
-    });
     assertEquals(
       await sponsor.setExecutionDemand(BRANCH, ["piece:legacy-transition"]),
       true,

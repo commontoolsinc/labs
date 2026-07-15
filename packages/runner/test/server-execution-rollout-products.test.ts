@@ -664,16 +664,6 @@ for (const product of PRODUCT_CASES) {
         return pending.promise;
       };
 
-      await observer.transact({
-        localSeq: 1,
-        reads: { confirmed: [], pending: [] },
-        operations: [{
-          op: "set",
-          id: `of:${space}:execution-policy`,
-          value: { value: { version: 1, serverPrimaryExecution: true } },
-        }],
-      });
-
       const executorCommits: ClientCommit[] = [];
       const selectedCandidate = Promise.withResolvers<void>();
       const denoFactory = new DenoSpaceExecutorFactory({

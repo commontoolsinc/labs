@@ -1087,8 +1087,8 @@ export function resetPersistentSchedulerStateConfig(): void {
 
 /**
  * Ambient runtime flag for the server-primary execution protocol. The
- * capability is optional and defaults off; a space policy may require it at
- * session-open time once both peers advertise support.
+ * capability is optional and defaults off; when enabled, compatible peers
+ * use server-primary authority for every eligible claimed action.
  */
 export function setServerPrimaryExecutionConfig(enabled?: boolean): void {
   serverPrimaryExecutionEnabled = enabled ?? false;
@@ -1319,13 +1319,6 @@ export const toDocumentPath = (path: readonly string[]): DocumentPath =>
 
 export const toValuePath = (path: readonly string[]): ValuePath =>
   path as ValuePath;
-
-export {
-  executionPolicyId,
-  type ExecutionPolicyV1,
-  isExecutionPolicyEnabled,
-  parseExecutionPolicy,
-} from "./v2/execution-policy.ts";
 
 /**
  * Builds a document-level selector (path rooted under `"value"`) from a schema

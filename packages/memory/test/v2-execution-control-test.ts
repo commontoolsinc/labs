@@ -25,7 +25,7 @@ import {
 } from "./v2-auth-test-helpers.ts";
 import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
 
-const POLICY_SPACE = "did:key:z6Mk-server-execution-policy-space";
+const CONTROL_SPACE = "did:key:z6Mk-server-execution-control-space";
 
 type ExecutionClientOptions = MemoryClient.ConnectOptions & {
   protocolFlags?: {
@@ -119,6 +119,9 @@ type ExecutionServer = Server & {
     space: string,
     branch: string,
     options?: { preferredOriginSessionId?: string },
+  ): Promise<ExecutionLeaseHandle | null>;
+  renewExecutionLease(
+    lease: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null>;
   beginExecutionLeaseDrain(
     lease: ExecutionLeaseHandle,
@@ -355,31 +358,13 @@ class ReconnectableExecutionTransport implements MemoryClient.Transport {
 
 const mount = async (
   client: MemoryClient.Client,
-  space = POLICY_SPACE,
+  space = CONTROL_SPACE,
 ): Promise<ExecutionSession> =>
   await client.mount(
     space,
     {},
     testSessionOpenAuthFactory,
   ) as ExecutionSession;
-
-const setPolicy = async (
-  session: MemoryClient.SpaceSession,
-  enabled: boolean,
-  localSeq = 1,
-): Promise<void> => {
-  await session.transact({
-    localSeq,
-    reads: { confirmed: [], pending: [] },
-    operations: [{
-      op: "set",
-      id: `of:${session.space}:execution-policy`,
-      value: {
-        value: { version: 1, serverPrimaryExecution: enabled },
-      },
-    }],
-  });
-};
 
 const demandAndAcquireLease = async (
   server: ExecutionServer,
@@ -397,66 +382,30 @@ const demandAndAcquireLease = async (
   return lease;
 };
 
-Deno.test("enabled execution policy rejects a stale client but disabled policy does not", async () => {
+Deno.test("server-primary mode rejects an incompatible client without per-space opt-in", async () => {
   const server = createServer(
-    "memory-v2-execution-policy-capability",
+    "memory-v2-server-primary-capability-required",
     true,
   );
-  const capable = await connectClient(server, true);
-  const owner = await mount(capable);
+  const stale = await connectClient(server, false);
   try {
-    await setPolicy(owner, true);
-
-    const stale = await connectClient(server, false);
-    try {
-      await assertRejects(
-        () => mount(stale),
-        Error,
-        "requires memory capabilities server-primary-execution-v1",
-      );
-    } finally {
-      await stale.close();
-    }
-
-    await owner.transact({
-      localSeq: 2,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${owner.space}:execution-policy`,
-        value: {
-          value: { version: 1, serverPrimaryExecution: false },
-        },
-      }],
-    });
-
-    const legacy = await connectClient(server, false);
-    try {
-      const session = await mount(legacy);
-      assertEquals(session.space, POLICY_SPACE);
-    } finally {
-      await legacy.close();
-    }
+    await assertRejects(
+      () => mount(stale),
+      Error,
+      "requires memory capabilities server-primary-execution-v1",
+    );
   } finally {
-    await capable.close();
+    await stale.close();
     await server.close();
   }
 });
 
-Deno.test("flag off is a rollback even when execution policy remains enabled", async () => {
-  const server = createServer("memory-v2-execution-policy-rollback", false);
+Deno.test("flag off admits a client without server-primary capabilities", async () => {
+  const server = createServer("memory-v2-execution-flag-off", false);
   const legacy = await connectClient(server, false);
   try {
-    const owner = await mount(legacy);
-    await setPolicy(owner, true);
-
-    const second = await connectClient(server, false);
-    try {
-      const session = await mount(second);
-      assertEquals(session.space, POLICY_SPACE);
-    } finally {
-      await second.close();
-    }
+    const session = await mount(legacy);
+    assertEquals(session.space, CONTROL_SPACE);
   } finally {
     await legacy.close();
     await server.close();
@@ -479,7 +428,7 @@ Deno.test("execution demand is connection-owned and reference-counted", async ()
       true,
     );
 
-    const both = server.listExecutionDemands(POLICY_SPACE, "feature");
+    const both = server.listExecutionDemands(CONTROL_SPACE, "feature");
     assertEquals(both.length, 2);
     assertEquals(both.map((entry) => entry.pieces), [
       ["piece:one"],
@@ -489,13 +438,13 @@ Deno.test("execution demand is connection-owned and reference-counted", async ()
 
     await firstClient.close();
     assertEquals(
-      server.listExecutionDemands(POLICY_SPACE, "feature").length,
+      server.listExecutionDemands(CONTROL_SPACE, "feature").length,
       1,
     );
 
     await secondClient.close();
     assertEquals(
-      server.listExecutionDemands(POLICY_SPACE, "feature"),
+      server.listExecutionDemands(CONTROL_SPACE, "feature"),
       [],
     );
   } finally {
@@ -518,11 +467,11 @@ Deno.test("demand snapshots identify a branch after its last reference is remove
     await session.setExecutionDemand("feature", []);
 
     assertEquals(snapshots.length, 2);
-    assertEquals(snapshots[0].space, POLICY_SPACE);
+    assertEquals(snapshots[0].space, CONTROL_SPACE);
     assertEquals(snapshots[0].branch, "feature");
     assertEquals(snapshots[0].demands.length, 1);
     assertEquals(snapshots[1], {
-      space: POLICY_SPACE,
+      space: CONTROL_SPACE,
       branch: "feature",
       order: snapshots[0].order + 1,
       demands: [],
@@ -543,7 +492,7 @@ Deno.test("flag-off clients do not send execution demand messages", async () => 
       await session.setExecutionDemand("", ["piece:off"]),
       false,
     );
-    assertEquals(server.listExecutionDemands(POLICY_SPACE, ""), []);
+    assertEquals(server.listExecutionDemands(CONTROL_SPACE, ""), []);
   } finally {
     await client.close();
     await server.close();
@@ -558,17 +507,17 @@ Deno.test("one connection replaces demand independently on each branch", async (
     await session.setExecutionDemand("", ["piece:main"]);
     await session.setExecutionDemand("feature", ["piece:feature-v1"]);
     await session.setExecutionDemand("feature", ["piece:feature-v2"]);
-    assertEquals(server.listExecutionDemands(POLICY_SPACE, "")[0].pieces, [
+    assertEquals(server.listExecutionDemands(CONTROL_SPACE, "")[0].pieces, [
       "piece:main",
     ]);
     assertEquals(
-      server.listExecutionDemands(POLICY_SPACE, "feature")[0].pieces,
+      server.listExecutionDemands(CONTROL_SPACE, "feature")[0].pieces,
       ["piece:feature-v2"],
     );
 
     await session.setExecutionDemand("feature", []);
-    assertEquals(server.listExecutionDemands(POLICY_SPACE, "feature"), []);
-    assertEquals(server.listExecutionDemands(POLICY_SPACE, "").length, 1);
+    assertEquals(server.listExecutionDemands(CONTROL_SPACE, "feature"), []);
+    assertEquals(server.listExecutionDemands(CONTROL_SPACE, "").length, 1);
   } finally {
     await client.close();
     await server.close();
@@ -584,15 +533,14 @@ Deno.test("claims are action-qualified and reclaim mints a fresh generation", as
     events.push(event)
   );
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const main = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     const sibling = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:sibling"),
+      claimKey(CONTROL_SPACE, "", "action:sibling"),
     );
     assertEquals(main.claimGeneration, 1);
     assertEquals(sibling.claimGeneration, 1);
@@ -607,7 +555,7 @@ Deno.test("claims are action-qualified and reclaim mints a fresh generation", as
     assertEquals(server.hasLiveExecutionClaim(main), false);
     const reclaimed = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     assertEquals(reclaimed.claimGeneration, 2);
     assertEquals(server.executionStats.claimsReissued, 1);
@@ -660,7 +608,6 @@ Deno.test("execution stats count only conflicts from exact claimed action attemp
   const session = await mount(client) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const basis = await session.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },
@@ -720,15 +667,15 @@ Deno.test("execution stats count only conflicts from exact claimed action attemp
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:claimed-conflict"),
+      claimKey(CONTROL_SPACE, "", "action:claimed-conflict"),
     );
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
     const claimedRead = {
-      space: POLICY_SPACE,
+      space: CONTROL_SPACE,
       scope: "space" as const,
       id: "of:claimed-conflict-source",
       path: ["value", "count"],
@@ -810,7 +757,7 @@ Deno.test("claims, revokes, and settlements remain independent across branches",
   const store = toFileUrl(`${directory}/`);
   await Deno.mkdir(new URL("./engine-v3/", store), { recursive: true });
   const engine = await Engine.open({
-    url: resolveSpaceStoreUrl(store, POLICY_SPACE),
+    url: resolveSpaceStoreUrl(store, CONTROL_SPACE),
   });
   Engine.createBranch(engine, "feature");
   Engine.close(engine);
@@ -831,7 +778,6 @@ Deno.test("claims, revokes, and settlements remain independent across branches",
     events.push(event);
   });
   try {
-    await setPolicy(session, true);
     const mainLease = await demandAndAcquireLease(server, session, "");
     const featureLease = await demandAndAcquireLease(
       server,
@@ -840,11 +786,11 @@ Deno.test("claims, revokes, and settlements remain independent across branches",
     );
     const main = await server.setExecutionClaim(
       mainLease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     const feature = await server.setExecutionClaim(
       featureLease,
-      claimKey(POLICY_SPACE, "feature"),
+      claimKey(CONTROL_SPACE, "feature"),
     );
     assertEquals(session.executionClaims.map((claim) => claim.branch), [
       "",
@@ -889,199 +835,23 @@ Deno.test("claims, revokes, and settlements remain independent across branches",
   }
 });
 
-Deno.test("positive claims require enabled policy and disabling it revokes authority", async () => {
-  const server = createControlServer("memory-v2-execution-claim-policy");
+Deno.test("server-primary mode claims eligible work without per-space opt-in", async () => {
+  const server = createControlServer(
+    "memory-v2-server-primary-claim-by-default",
+  );
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
-  const events: ExecutionControlEvent[] = [];
-  const unsubscribe = session.subscribeExecutionControl((event) => {
-    events.push(event);
-  });
   try {
     const lease = await demandAndAcquireLease(server, session);
-    assertEquals(
-      await server.trySetExecutionClaim(
-        lease,
-        claimKey(POLICY_SPACE, ""),
-      ),
-      null,
-    );
-    await assertRejects(
-      () =>
-        server.setExecutionClaim(
-          lease,
-          claimKey(POLICY_SPACE, ""),
-        ),
-      Error,
-      "execution policy",
-    );
-
-    await setPolicy(session, true);
-    assertEquals(
-      (await server.currentExecutionLease(POLICY_SPACE, ""))?.state,
-      "draining",
-    );
-    await server.finishExecutionLeaseDrain(lease);
-    const promotedLease = await server.acquireExecutionLease(
-      POLICY_SPACE,
-      "",
-    );
-    if (promotedLease === null) {
-      throw new Error("expected a replacement execution lease after enable");
-    }
     const claim = await server.setExecutionClaim(
-      promotedLease,
-      claimKey(POLICY_SPACE, ""),
+      lease,
+      claimKey(CONTROL_SPACE, ""),
     );
-    assertEquals(session.executionClaims.length, 1);
-
-    await setPolicy(session, false, 2);
-    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
-    assertEquals(session.executionClaims, []);
-    assertEquals(
-      server.publishActionSettlement({
-        branch: "",
-        claim,
-        inputBasisSeq: 1,
-        outcome: "no-op",
-      }),
-      false,
-    );
-    assertEquals(
-      events.filter((event) => event.type === "session.execution.claim.revoke")
-        .length,
-      1,
-    );
-    assertEquals(server.executionStats.policyInactiveClaimAttempts, 2);
-    assertEquals(server.executionStats.claimsIssued, 1);
-    assertEquals(server.executionStats.claimsRevoked, 1);
+    assertEquals(server.listExecutionClaims(CONTROL_SPACE), [claim]);
+    assertEquals(session.executionClaims, [claim]);
   } finally {
-    unsubscribe();
     await client.close();
     await server.close();
-  }
-});
-
-Deno.test("out-of-band inactive policy revokes claims without removing shadow demand", async () => {
-  for (
-    const testCase of [
-      {
-        name: "disabled",
-        operation: {
-          op: "set" as const,
-          id: `of:${POLICY_SPACE}:execution-policy`,
-          value: {
-            value: { version: 1, serverPrimaryExecution: false },
-          },
-        },
-        probe: "claim" as const,
-      },
-      {
-        name: "deleted",
-        operation: {
-          op: "delete" as const,
-          id: `of:${POLICY_SPACE}:execution-policy`,
-        },
-        probe: "listing" as const,
-      },
-      {
-        name: "malformed",
-        operation: {
-          op: "set" as const,
-          id: `of:${POLICY_SPACE}:execution-policy`,
-          value: {
-            value: { version: 2, serverPrimaryExecution: true },
-          },
-        },
-        probe: "settlement" as const,
-      },
-    ]
-  ) {
-    const directory = await Deno.makeTempDir();
-    const store = toFileUrl(`${directory}/`);
-    const server = new Server({
-      ...testSessionOpenServerOptions,
-      store,
-      protocolFlags: {
-        serverPrimaryExecutionV1: true,
-        serverPrimaryExecutionClaimRoutingV1: true,
-        serverPrimaryExecutionBuiltinPassivityV1: true,
-      },
-      acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
-    }) as ExecutionServer;
-    const client = await connectControlClient(server);
-    const session = await mount(client) as ExecutionSession;
-    const events: ExecutionControlEvent[] = [];
-    const unsubscribe = session.subscribeExecutionControl((event) => {
-      events.push(event);
-    });
-    try {
-      await setPolicy(session, true);
-      const lease = await demandAndAcquireLease(server, session);
-      const claim = await server.setExecutionClaim(
-        lease,
-        claimKey(POLICY_SPACE, ""),
-      );
-
-      const external = await Engine.open({
-        url: resolveSpaceStoreUrl(store, POLICY_SPACE),
-      });
-      try {
-        Engine.applyCommit(external, {
-          sessionId: `external-policy-${testCase.name}`,
-          space: POLICY_SPACE,
-          commit: {
-            localSeq: 1,
-            reads: { confirmed: [], pending: [] },
-            operations: [testCase.operation],
-          },
-        });
-      } finally {
-        Engine.close(external);
-      }
-
-      if (testCase.probe === "claim") {
-        await assertRejects(
-          () =>
-            server.setExecutionClaim(
-              lease,
-              claimKey(POLICY_SPACE, "", "action:after-policy-loss"),
-            ),
-          Error,
-          "execution policy",
-        );
-      } else if (testCase.probe === "settlement") {
-        assertEquals(
-          await server.publishActionSettlement({
-            branch: "",
-            claim,
-            inputBasisSeq: 1,
-            outcome: "no-op",
-          }),
-          false,
-        );
-      } else {
-        assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
-      }
-
-      assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
-      assertEquals(session.executionClaims, []);
-      assertEquals(
-        events.filter((event) =>
-          event.type === "session.execution.claim.revoke"
-        ).length,
-        1,
-      );
-      assertEquals(
-        server.listExecutionDemands(POLICY_SPACE, "").length,
-        1,
-      );
-    } finally {
-      unsubscribe();
-      await client.close();
-      await server.close();
-      await Deno.remove(directory, { recursive: true });
-    }
   }
 });
 
@@ -1098,15 +868,14 @@ Deno.test("claim expiry timer revokes clients and rejects stale settlement", asy
     if (event.type === "session.execution.claim.revoke") expired.resolve();
   });
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     await expired.promise;
 
-    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+    assertEquals(server.listExecutionClaims(CONTROL_SPACE), []);
     assertEquals(session.executionClaims, []);
     assertEquals(
       server.publishActionSettlement({
@@ -1141,11 +910,10 @@ Deno.test("live executors renew an exact claim without changing its incarnation"
     events.push(event);
   });
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     assertEquals(claim.expiresAt, 1_010);
 
@@ -1155,7 +923,7 @@ Deno.test("live executors renew an exact claim without changing its incarnation"
     assertEquals(renewed.claimGeneration, claim.claimGeneration);
     assertEquals(renewed.leaseGeneration, claim.leaseGeneration);
     assertEquals(renewed.expiresAt, 1_015);
-    assertEquals(server.listExecutionClaims(POLICY_SPACE), [renewed]);
+    assertEquals(server.listExecutionClaims(CONTROL_SPACE), [renewed]);
     assertEquals(server.expireExecutionClaims(1_010), 0);
     assertEquals(
       events.filter((event) => event.type === "session.execution.claim.set")
@@ -1195,7 +963,6 @@ Deno.test("claim issuance rejects a lease deadline crossed while opening the eng
   const openStarted = Promise.withResolvers<void>();
   const releaseOpen = Promise.withResolvers<void>();
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     let pauseNextOpen = true;
     mutableServer.openEngine = async (space) => {
@@ -1210,7 +977,7 @@ Deno.test("claim issuance rejects a lease deadline crossed while opening the eng
     nowMs = lease.expiresAt - 1;
     const issuance = server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     await openStarted.promise;
     nowMs = lease.expiresAt;
@@ -1221,7 +988,7 @@ Deno.test("claim issuance rejects a lease deadline crossed while opening the eng
       Error,
       "execution lease is not active and authorized",
     );
-    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+    assertEquals(server.listExecutionClaims(CONTROL_SPACE), []);
   } finally {
     releaseOpen.resolve();
     mutableServer.openEngine = originalOpenEngine;
@@ -1229,6 +996,70 @@ Deno.test("claim issuance rejects a lease deadline crossed while opening the eng
     await server.close();
   }
 });
+
+for (const operation of ["claim issuance", "lease renewal"] as const) {
+  Deno.test(`${operation} rejects a flag reset while opening the engine`, async () => {
+    const protocolFlags = {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+    };
+    const operationSlug = operation.replaceAll(" ", "-");
+    const server = new Server(
+      {
+        ...testSessionOpenServerOptions,
+        store: new URL(
+          `memory://memory-v2-execution-${operationSlug}-flag-await`,
+        ),
+        protocolFlags,
+        acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
+      } as ConstructorParameters<typeof Server>[0],
+    ) as ExecutionServer;
+    const client = await connectControlClient(server);
+    const session = await mount(client) as ExecutionSession;
+    const mutableServer = server as unknown as {
+      openEngine: (space: string) => Promise<Engine.Engine>;
+    };
+    const originalOpenEngine = mutableServer.openEngine.bind(server);
+    const openStarted = Promise.withResolvers<void>();
+    const releaseOpen = Promise.withResolvers<void>();
+    try {
+      const lease = await demandAndAcquireLease(server, session);
+      let pauseNextOpen = true;
+      mutableServer.openEngine = async (space) => {
+        if (pauseNextOpen) {
+          pauseNextOpen = false;
+          openStarted.resolve();
+          await releaseOpen.promise;
+        }
+        return await originalOpenEngine(space);
+      };
+
+      const pending = operation === "claim issuance"
+        ? server.setExecutionClaim(lease, claimKey(CONTROL_SPACE, ""))
+        : server.renewExecutionLease(lease);
+      await openStarted.promise;
+      protocolFlags.serverPrimaryExecutionV1 = false;
+      releaseOpen.resolve();
+
+      if (operation === "claim issuance") {
+        await assertRejects(
+          () => pending,
+          Error,
+          "server-primary-execution-v1 is disabled",
+        );
+      } else {
+        assertEquals(await pending, null);
+      }
+      assertEquals(server.listExecutionClaims(CONTROL_SPACE), []);
+    } finally {
+      releaseOpen.resolve();
+      mutableServer.openEngine = originalOpenEngine;
+      await client.close();
+      await server.close();
+    }
+  });
+}
 
 for (const operation of ["issuance", "renewal"] as const) {
   Deno.test(`claim ${operation} rejects authority drained while opening the engine`, async () => {
@@ -1254,12 +1085,11 @@ for (const operation of ["issuance", "renewal"] as const) {
     const drainOpenStarted = Promise.withResolvers<void>();
     const releaseDrainOpen = Promise.withResolvers<void>();
     try {
-      await setPolicy(session, true);
       const lease = await demandAndAcquireLease(server, session);
       const existing = operation === "renewal"
         ? await server.setExecutionClaim(
           lease,
-          claimKey(POLICY_SPACE, ""),
+          claimKey(CONTROL_SPACE, ""),
         )
         : undefined;
       let openCount = 0;
@@ -1279,7 +1109,7 @@ for (const operation of ["issuance", "renewal"] as const) {
       const action = operation === "issuance"
         ? server.setExecutionClaim(
           lease,
-          claimKey(POLICY_SPACE, ""),
+          claimKey(CONTROL_SPACE, ""),
         )
         : server.renewExecutionClaim(lease, existing!);
       await actionOpenStarted.promise;
@@ -1296,7 +1126,7 @@ for (const operation of ["issuance", "renewal"] as const) {
       } else {
         assertEquals(await action, null);
       }
-      assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+      assertEquals(server.listExecutionClaims(CONTROL_SPACE), []);
 
       releaseDrainOpen.resolve();
       assertExists(await drain);
@@ -1327,11 +1157,10 @@ Deno.test("claim renewal rejects a deadline crossed while opening the engine", a
   const openStarted = Promise.withResolvers<void>();
   const releaseOpen = Promise.withResolvers<void>();
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     let pauseNextOpen = true;
     mutableServer.openEngine = async (space) => {
@@ -1350,7 +1179,7 @@ Deno.test("claim renewal rejects a deadline crossed while opening the engine", a
     releaseOpen.resolve();
 
     assertEquals(await renewal, null);
-    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+    assertEquals(server.listExecutionClaims(CONTROL_SPACE), []);
   } finally {
     releaseOpen.resolve();
     mutableServer.openEngine = originalOpenEngine;
@@ -1377,11 +1206,10 @@ for (const mutation of ["removed", "replaced"] as const) {
     const openStarted = Promise.withResolvers<void>();
     const releaseOpen = Promise.withResolvers<void>();
     try {
-      await setPolicy(session, true);
       const lease = await demandAndAcquireLease(server, session);
       const claim = await server.setExecutionClaim(
         lease,
-        claimKey(POLICY_SPACE, ""),
+        claimKey(CONTROL_SPACE, ""),
       );
       let pauseNextOpen = true;
       mutableServer.openEngine = async (space) => {
@@ -1400,14 +1228,14 @@ for (const mutation of ["removed", "replaced"] as const) {
       const replacement = mutation === "replaced"
         ? await server.setExecutionClaim(
           lease,
-          claimKey(POLICY_SPACE, ""),
+          claimKey(CONTROL_SPACE, ""),
         )
         : undefined;
       releaseOpen.resolve();
 
       assertEquals(await renewal, null);
       assertEquals(
-        server.listExecutionClaims(POLICY_SPACE),
+        server.listExecutionClaims(CONTROL_SPACE),
         replacement === undefined ? [] : [replacement],
       );
     } finally {
@@ -1426,10 +1254,9 @@ Deno.test("closing a control server cancels a live claim deadline", async () => 
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
-    await server.setExecutionClaim(lease, claimKey(POLICY_SPACE, ""));
-    assertEquals(server.listExecutionClaims(POLICY_SPACE).length, 1);
+    await server.setExecutionClaim(lease, claimKey(CONTROL_SPACE, ""));
+    assertEquals(server.listExecutionClaims(CONTROL_SPACE).length, 1);
   } finally {
     await client.close();
     await server.close();
@@ -1451,7 +1278,6 @@ Deno.test("committed settlement waits for its accepted data patch", async () => 
     }
   });
   try {
-    await setPolicy(observer, true);
     const lease = await demandAndAcquireLease(server, observer);
     await observer.watchSet([{
       id: "derived",
@@ -1465,7 +1291,7 @@ Deno.test("committed settlement waits for its accepted data patch", async () => 
     }]);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     const commit = await writer.transact({
       localSeq: 1,
@@ -1520,7 +1346,6 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
   });
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     await session.watchSet([{
       id: "provenance-output",
@@ -1534,7 +1359,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
     }]);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:provenance"),
+      claimKey(CONTROL_SPACE, "", "action:provenance"),
     );
     const source = await session.transact({
       localSeq: 2,
@@ -1546,13 +1371,13 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       }],
     });
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
     const observation = {
       version: 2 as const,
-      ownerSpace: POLICY_SPACE,
+      ownerSpace: CONTROL_SPACE,
       branch: "",
       pieceId: claim.pieceId,
       processGeneration: 1,
@@ -1574,26 +1399,26 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
         implementationFingerprint: claim.implementationFingerprint,
         runtimeFingerprint: claim.runtimeFingerprint,
         piece: {
-          space: POLICY_SPACE,
+          space: CONTROL_SPACE,
           scope: "space" as const,
           id: claim.pieceId.slice("space:".length),
           path: [],
         },
         reads: [{
-          space: POLICY_SPACE,
+          space: CONTROL_SPACE,
           scope: "space" as const,
           id: "of:provenance-source",
           path: ["value", "count"],
         }],
         writes: [{
-          space: POLICY_SPACE,
+          space: CONTROL_SPACE,
           scope: "space" as const,
           id: "of:provenance-output",
           path: ["value"],
         }],
         materializerWriteEnvelopes: [],
         directOutputs: [{
-          space: POLICY_SPACE,
+          space: CONTROL_SPACE,
           scope: "space" as const,
           id: "of:provenance-output",
           path: ["value"],
@@ -1613,20 +1438,20 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       },
       transactionKind: "action-run" as const,
       reads: [{
-        space: POLICY_SPACE,
+        space: CONTROL_SPACE,
         scope: "space" as const,
         id: "of:provenance-source",
         path: ["value", "count"],
       }],
       shallowReads: [],
       actualChangedWrites: [{
-        space: POLICY_SPACE,
+        space: CONTROL_SPACE,
         scope: "space" as const,
         id: "of:provenance-output",
         path: ["value", "answer"],
       }],
       currentKnownWrites: [{
-        space: POLICY_SPACE,
+        space: CONTROL_SPACE,
         scope: "space" as const,
         id: "of:provenance-output",
         path: ["value"],
@@ -1671,7 +1496,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
     };
     assertEquals(stored.inputBasisSeq, source.seq);
     assertEquals(stored.executionProvenance, {
-      claim: claimKey(POLICY_SPACE, "", "action:provenance"),
+      claim: claimKey(CONTROL_SPACE, "", "action:provenance"),
       onBehalfOf: TEST_SESSION_OPEN_PRINCIPAL,
       leaseGeneration: claim.leaseGeneration,
       claimGeneration: claim.claimGeneration,
@@ -1718,7 +1543,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
 
     const failedClaim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:provenance-failed"),
+      claimKey(CONTROL_SPACE, "", "action:provenance-failed"),
     );
     const failedObservation = {
       ...observation,
@@ -1755,7 +1580,7 @@ Deno.test("accepted claimed runs derive provenance and settlements on the host",
       "failed claimed actions must not include semantic operations",
     );
     assertEquals(
-      await server.readDocument(POLICY_SPACE, "of:failed-must-not-land"),
+      await server.readDocument(CONTROL_SPACE, "of:failed-must-not-land"),
       null,
     );
     await session.transact({
@@ -1796,14 +1621,13 @@ Deno.test("stale claimed no-op is rejected instead of silently dropped", async (
   const session = await mount(client) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:stale-noop"),
+      claimKey(CONTROL_SPACE, "", "action:stale-noop"),
     );
     const sourceAddress = {
-      space: POLICY_SPACE,
+      space: CONTROL_SPACE,
       scope: "space" as const,
       id: "of:stale-noop-source",
       path: ["value", "count"],
@@ -1827,7 +1651,7 @@ Deno.test("stale claimed no-op is rejected instead of silently dropped", async (
       }],
     });
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -1879,14 +1703,13 @@ Deno.test("claimed provenance retains every source commit after the read surface
   const writer = await mount(writerClient) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:caused-by"),
+      claimKey(CONTROL_SPACE, "", "action:caused-by"),
     );
     const sourceAddress = {
-      space: POLICY_SPACE,
+      space: CONTROL_SPACE,
       scope: "space" as const,
       id: "of:caused-by-source",
       path: ["value", "count"],
@@ -1955,7 +1778,7 @@ Deno.test("claimed provenance retains every source commit after the read surface
     });
 
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2007,7 +1830,7 @@ Deno.test("claimed provenance retains every source commit after the read surface
       }],
     });
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2123,7 +1946,7 @@ Deno.test("claimed provenance retains every source commit after the read surface
       }],
     });
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2196,7 +2019,7 @@ Deno.test("claimed provenance retains every source commit after the read surface
       });
     }
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2225,7 +2048,7 @@ Deno.test("claimed provenance retains every source commit after the read surface
       }],
     });
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2307,14 +2130,13 @@ Deno.test("claimed transactions reject non-space surfaces atomically", async () 
   const session = await mount(client) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:scope-firewall"),
+      claimKey(CONTROL_SPACE, "", "action:scope-firewall"),
     );
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2322,7 +2144,7 @@ Deno.test("claimed transactions reject non-space surfaces atomically", async () 
     const spaceOutput = "of:scope-firewall-space";
     const userOutput = "of:scope-firewall-user";
     const userSurface = {
-      space: POLICY_SPACE,
+      space: CONTROL_SPACE,
       scope: "user" as const,
       id: userOutput,
       path: ["value"],
@@ -2367,8 +2189,8 @@ Deno.test("claimed transactions reject non-space surfaces atomically", async () 
       (error as Error & { diagnosticCode?: string }).diagnosticCode,
       "non-space-scope",
     );
-    assertEquals(await server.readDocument(POLICY_SPACE, spaceOutput), null);
-    assertEquals(await server.readDocument(POLICY_SPACE, userOutput), null);
+    assertEquals(await server.readDocument(CONTROL_SPACE, spaceOutput), null);
+    assertEquals(await server.readDocument(CONTROL_SPACE, userOutput), null);
   } finally {
     unbind();
     await client.close();
@@ -2382,17 +2204,16 @@ Deno.test("claimed transactions reject foreign and unsupported surfaces", async 
   const session = await mount(client) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
 
     const foreignClaim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:foreign-firewall"),
+      claimKey(CONTROL_SPACE, "", "action:foreign-firewall"),
     );
     const output = "of:foreign-firewall-output";
     const base = claimedSpaceObservation(foreignClaim, output);
@@ -2430,11 +2251,11 @@ Deno.test("claimed transactions reject foreign and unsupported surfaces", async 
       (foreignError as Error & { diagnosticCode?: string }).diagnosticCode,
       "foreign-space-surface",
     );
-    assertEquals(await server.readDocument(POLICY_SPACE, output), null);
+    assertEquals(await server.readDocument(CONTROL_SPACE, output), null);
 
     const sqliteClaim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:sqlite-firewall"),
+      claimKey(CONTROL_SPACE, "", "action:sqlite-firewall"),
     );
     const sqliteError = await assertRejects(() =>
       session.transact({
@@ -2469,7 +2290,7 @@ Deno.test("claimed transactions reject foreign and unsupported surfaces", async 
 
     const mergeClaim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:merge-firewall"),
+      claimKey(CONTROL_SPACE, "", "action:merge-firewall"),
     );
     const mergeOutput = "of:merge-firewall-output";
     const mergeError = await assertRejects(() =>
@@ -2502,7 +2323,7 @@ Deno.test("claimed transactions reject foreign and unsupported surfaces", async 
       "merge-commit",
     );
     assertEquals(
-      await server.readDocument(POLICY_SPACE, mergeOutput),
+      await server.readDocument(CONTROL_SPACE, mergeOutput),
       null,
     );
   } finally {
@@ -2526,11 +2347,10 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
   });
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:unserved-attempt"),
+      claimKey(CONTROL_SPACE, "", "action:unserved-attempt"),
     );
     const confirmed = await session.transact({
       localSeq: 2,
@@ -2551,7 +2371,7 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
       }],
     });
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2561,19 +2381,19 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
       "of:unserved-output",
     );
     const confirmedRead = {
-      space: POLICY_SPACE,
+      space: CONTROL_SPACE,
       scope: "space" as const,
       id: "of:unserved-confirmed",
       path: ["value"],
     };
     const pendingRead = {
-      space: POLICY_SPACE,
+      space: CONTROL_SPACE,
       scope: "space" as const,
       id: "of:unserved-pending",
       path: ["value"],
     };
     const rejectedUserSurface = {
-      space: POLICY_SPACE,
+      space: CONTROL_SPACE,
       scope: "user" as const,
       id: "of:unserved-user-surface",
       path: ["value"],
@@ -2612,7 +2432,7 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
       localSeq: 4,
       claim,
       provenance: {
-        claim: claimKey(POLICY_SPACE, "", "action:unserved-attempt"),
+        claim: claimKey(CONTROL_SPACE, "", "action:unserved-attempt"),
         onBehalfOf: TEST_SESSION_OPEN_PRINCIPAL,
         leaseGeneration: claim.leaseGeneration,
         claimGeneration: claim.claimGeneration,
@@ -2671,21 +2491,20 @@ Deno.test("bound executor rejects a delayed attempt after claim replacement", as
   const session = await mount(client) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const first = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:stale-attempt"),
+      claimKey(CONTROL_SPACE, "", "action:stale-attempt"),
     );
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
     assertEquals(server.revokeExecutionClaim(first), true);
     const replacement = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:stale-attempt"),
+      claimKey(CONTROL_SPACE, "", "action:stale-attempt"),
     );
     assertEquals(replacement.claimGeneration, first.claimGeneration + 1);
 
@@ -2710,7 +2529,7 @@ Deno.test("bound executor rejects a delayed attempt after claim replacement", as
     assertEquals(staleError.name, "ExecutionLeaseFenceError");
     assertEquals(
       await server.readDocument(
-        POLICY_SPACE,
+        CONTROL_SPACE,
         "of:stale-attempt-must-not-land",
       ),
       null,
@@ -2728,14 +2547,13 @@ Deno.test("bound executor never downgrades a revoked attempt to an ordinary writ
   const session = await mount(client) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:revoked-attempt"),
+      claimKey(CONTROL_SPACE, "", "action:revoked-attempt"),
     );
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2761,7 +2579,7 @@ Deno.test("bound executor never downgrades a revoked attempt to an ordinary writ
     );
     assertEquals(
       await server.readDocument(
-        POLICY_SPACE,
+        CONTROL_SPACE,
         "of:revoked-attempt-must-not-land",
       ),
       null,
@@ -2781,10 +2599,9 @@ Deno.test("bound executor semantic writes require an exact claimed action assert
   const session = await mount(client) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2806,7 +2623,7 @@ Deno.test("bound executor semantic writes require an exact claimed action assert
     assertEquals(error.name, "ExecutionLeaseFenceError");
     assertEquals(
       await server.readDocument(
-        POLICY_SPACE,
+        CONTROL_SPACE,
         "of:bound-assertion-free-must-not-land",
       ),
       null,
@@ -2824,14 +2641,13 @@ Deno.test("claimed executor rejects an effective context narrower than its claim
   const session = await mount(client) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:context-fence"),
+      claimKey(CONTROL_SPACE, "", "action:context-fence"),
     );
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2858,7 +2674,10 @@ Deno.test("claimed executor rejects an effective context narrower than its claim
       "execution claim context",
     );
     assertEquals(
-      await server.readDocument(POLICY_SPACE, "of:context-fence-must-not-land"),
+      await server.readDocument(
+        CONTROL_SPACE,
+        "of:context-fence-must-not-land",
+      ),
       null,
     );
   } finally {
@@ -2874,11 +2693,10 @@ Deno.test("detached resumable sessions cannot acquire executor authority", async
   const session = await mount(client) as ExecutionSession;
   const sessionId = session.sessionId;
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     await client.close();
     assertThrows(
-      () => server.bindExecutionSession(POLICY_SPACE, sessionId, lease),
+      () => server.bindExecutionSession(CONTROL_SPACE, sessionId, lease),
       Error,
       "sponsor is no longer attached",
     );
@@ -2893,14 +2711,13 @@ Deno.test("an accepted claim replay stays idempotent after revoke", async () => 
   const session = await mount(client) as ExecutionSession;
   let unbind = () => {};
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const firstClaim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:replay-fence"),
+      claimKey(CONTROL_SPACE, "", "action:replay-fence"),
     );
     unbind = server.bindExecutionSession(
-      POLICY_SPACE,
+      CONTROL_SPACE,
       session.sessionId,
       lease,
     );
@@ -2927,7 +2744,7 @@ Deno.test("an accepted claim replay stays idempotent after revoke", async () => 
 
     const replacement = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:replay-fence"),
+      claimKey(CONTROL_SPACE, "", "action:replay-fence"),
     );
     await assertRejects(
       () =>
@@ -2953,11 +2770,10 @@ Deno.test("an unbound client claim assertion cannot create executor provenance",
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, "", "action:unbound-assertion"),
+      claimKey(CONTROL_SPACE, "", "action:unbound-assertion"),
     );
     await assertRejects(
       () =>
@@ -2979,7 +2795,7 @@ Deno.test("an unbound client claim assertion cannot create executor provenance",
     );
     assertEquals(
       await server.readDocument(
-        POLICY_SPACE,
+        CONTROL_SPACE,
         "of:unbound-assertion-must-not-land",
       ),
       null,
@@ -3002,7 +2818,7 @@ Deno.test("clients cannot spoof server execution claims or settlements", () => {
       parseClientMessage(encodeMemoryBoundary({
         type,
         requestId: "spoof",
-        space: POLICY_SPACE,
+        space: CONTROL_SPACE,
         sessionId: "session:spoof",
         branch: "",
         principal: "did:key:spoof",
@@ -3015,7 +2831,7 @@ Deno.test("clients cannot spoof server execution claims or settlements", () => {
     parseClientMessage(encodeMemoryBoundary({
       type: "session.execution.demand.set",
       requestId: "spoof-demand",
-      space: POLICY_SPACE,
+      space: CONTROL_SPACE,
       sessionId: "session:spoof",
       branch: "",
       pieces: ["piece:one"],
@@ -3033,10 +2849,10 @@ Deno.test("host cannot acquire claim authority while the rollout flag is off", a
   try {
     const session = await mount(client);
     await session.setExecutionDemand("", ["piece:off"]);
-    assertEquals(server.listExecutionDemands(POLICY_SPACE, "").length, 1);
+    assertEquals(server.listExecutionDemands(CONTROL_SPACE, "").length, 1);
     server.options.protocolFlags = { serverPrimaryExecutionV1: false };
     assertEquals(
-      await server.acquireExecutionLease(POLICY_SPACE, ""),
+      await server.acquireExecutionLease(CONTROL_SPACE, ""),
       null,
     );
   } finally {
@@ -3073,11 +2889,10 @@ Deno.test("reconnect restores demand before a replacement sponsor claim", async 
     }
   });
   try {
-    await setPolicy(session, true);
     const firstLease = await demandAndAcquireLease(server, session);
     const first = await server.setExecutionClaim(
       firstLease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     assertEquals(first.claimGeneration, 1);
 
@@ -3085,7 +2900,7 @@ Deno.test("reconnect restores demand before a replacement sponsor claim", async 
     await server.flushExecutionLeaseTasks();
     const revoked = await server.finishExecutionLeaseDrain(firstLease);
     assertEquals(revoked?.state, "revoked");
-    assertEquals(server.listExecutionClaims(POLICY_SPACE), []);
+    assertEquals(server.listExecutionClaims(CONTROL_SPACE), []);
 
     await transport.reconnected;
     await demandRestored.promise;
@@ -3098,7 +2913,7 @@ Deno.test("reconnect restores demand before a replacement sponsor claim", async 
     );
     const second = await server.setExecutionClaim(
       secondLease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     assertEquals(second.claimGeneration, 1);
     assertEquals(server.hasLiveExecutionClaim(first), false);
@@ -3117,7 +2932,7 @@ Deno.test("reconnect restores demand before a replacement sponsor claim", async 
     assertEquals(settlements.length, 1);
     assertEquals(settlements[0].claim.claimGeneration, 1);
     assertEquals(
-      server.listExecutionDemands(POLICY_SPACE, "").length,
+      server.listExecutionDemands(CONTROL_SPACE, "").length,
       1,
     );
   } finally {
@@ -3133,13 +2948,12 @@ Deno.test("control-only claim frames advance one feed sequence without advancing
   const client = await connectControlClient(server);
   const session = await mount(client) as ExecutionSession;
   try {
-    await setPolicy(session, true);
     const lease = await demandAndAcquireLease(server, session);
     const view = await session.watchSet([]);
     const syncs = view.subscribeSync();
     const claim = await server.setExecutionClaim(
       lease,
-      claimKey(POLICY_SPACE, ""),
+      claimKey(CONTROL_SPACE, ""),
     );
     const setFrame = await syncs.next();
     assertEquals(setFrame.done, false);
@@ -3171,11 +2985,8 @@ Deno.test("control-only claim frames advance one feed sequence without advancing
   }
 });
 
-Deno.test("enabled policy rejects clients missing graduated execution subcapabilities", async () => {
+Deno.test("server-primary mode rejects clients missing graduated subcapabilities", async () => {
   const server = createControlServer("memory-v2-execution-subcapabilities");
-  const ownerClient = await connectControlClient(server);
-  const owner = await mount(ownerClient);
-  await setPolicy(owner, true);
   const noRoutingClient = await MemoryClient.connect({
     transport: MemoryClient.loopback(server),
     protocolFlags: {
@@ -3204,7 +3015,6 @@ Deno.test("enabled policy rejects clients missing graduated execution subcapabil
       "requires memory capabilities",
     );
   } finally {
-    await ownerClient.close();
     await noRoutingClient.close();
     await computationOnlyClient.close();
     await server.close();

@@ -356,15 +356,6 @@ Deno.test("executor host provider binds accepted action provenance to its authen
     },
   };
   await observer.setExecutionDemand("", [baseObservation.pieceId]);
-  await observer.transact({
-    localSeq: 1,
-    reads: { confirmed: [], pending: [] },
-    operations: [{
-      op: "set",
-      id: `of:${space}:execution-policy`,
-      value: { value: { version: 1, serverPrimaryExecution: true } },
-    }],
-  });
   const lease = await server.acquireExecutionLease(space, "");
   assertExists(lease);
   assertEquals(lease.onBehalfOf, principal.did());

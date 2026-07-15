@@ -4,7 +4,6 @@ export type ServerExecutionPoolMetricsProvider = () =>
   | ExecutionPoolMetricsSnapshot
   | null;
 export type ServerExecutionControlMetrics = Readonly<{
-  policyInactiveClaimAttempts: number;
   claimsIssued: number;
   claimsReissued: number;
   claimsRevoked: number;

@@ -122,11 +122,6 @@ import {
 } from "./server-sync.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
-import {
-  executionPolicyId,
-  isExecutionPolicyEnabled,
-  parseExecutionPolicy,
-} from "./execution-policy.ts";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -324,16 +319,6 @@ const commitTouchesAclDoc = (
   space: string,
 ): boolean => {
   const id = aclDocId(space);
-  return operations.some((operation) =>
-    "id" in operation && operation.id === id
-  );
-};
-
-const commitTouchesExecutionPolicy = (
-  operations: readonly Operation[],
-  space: string,
-): boolean => {
-  const id = executionPolicyId(space);
   return operations.some((operation) =>
     "id" in operation && operation.id === id
   );
@@ -1386,6 +1371,27 @@ export class Server {
     return flags;
   }
 
+  #assertExecutionClaimCapabilityEnabled(
+    actionKind: ExecutionClaimInput["actionKind"],
+  ): void {
+    const flags = this.memoryProtocolFlags();
+    if (!flags.serverPrimaryExecutionV1) {
+      throw new Error("server-primary-execution-v1 is disabled");
+    }
+    if (
+      actionKind === "computation" &&
+      !flags.serverPrimaryExecutionClaimRoutingV1
+    ) {
+      throw new Error("server-primary computation claim routing is disabled");
+    }
+    if (
+      actionKind === "effect" &&
+      !flags.serverPrimaryExecutionBuiltinPassivityV1
+    ) {
+      throw new Error("server-primary builtin passivity is disabled");
+    }
+  }
+
   sessionOpenAudience(): string {
     return this.options.sessionOpenAuth.audience;
   }
@@ -1409,7 +1415,6 @@ export class Server {
 
   /** Bounded-cardinality rollout counters for server-primary authority. */
   readonly executionStats = {
-    policyInactiveClaimAttempts: 0,
     claimsIssued: 0,
     claimsReissued: 0,
     claimsRevoked: 0,
@@ -1541,32 +1546,6 @@ export class Server {
     );
   }
 
-  /** Execution policy changes authority, so OWNER is an invariant rather than
-   * an ACL-rollout observation. Enforce it even while ordinary ACL checks are
-   * configured off or observe-only. */
-  #authorizeExecutionPolicyOwner(
-    engine: Engine.Engine,
-    space: string,
-    principal: string | undefined,
-  ): V2Error | null {
-    // While ACL mutation authorization itself is rollout-relaxed, a writer
-    // could rewrite the ACL to self-grant OWNER. Do not let that manufacture
-    // authority over the server-primary switch: outside enforce mode, only
-    // non-mutable implicit owners (space identity/service DIDs) qualify.
-    let owner = principal !== undefined &&
-      (principal === space || this.#isServicePrincipal(principal));
-    if (this.#aclMode() === "enforce") {
-      const capability = this.#resolveCapability(engine, space, principal);
-      owner = capability !== null && isCapable(capability, "OWNER");
-    }
-    if (owner) return null;
-    this.aclStats.denied += 1;
-    return toError(
-      "AuthorizationError",
-      `Principal ${principal ?? "<anonymous>"} lacks OWNER on space ${space}`,
-    );
-  }
-
   async #authorizeMessage(
     space: string,
     principal: string | undefined,
@@ -1666,91 +1645,6 @@ export class Server {
       return toError(
         "AuthorizationError",
         `Only the space identity or a service DID may initialize ${space}`,
-      );
-    }
-    return null;
-  }
-
-  #executionPolicyEnabled(
-    engine: Engine.Engine,
-    space: string,
-  ): boolean {
-    return isExecutionPolicyEnabled(
-      Engine.read(engine, {
-        id: executionPolicyId(space),
-        branch: "",
-        scope: "space",
-      }),
-    );
-  }
-
-  /** Reconcile ephemeral claim authority with the durable opt-in. Any
-   * inactive shape (absent, deleted, disabled, or malformed) is fail-open to
-   * client authority and therefore revokes every live server claim. Demand is
-   * deliberately independent and remains available for shadow execution. */
-  #reconcileExecutionPolicy(
-    engine: Engine.Engine,
-    space: string,
-  ): boolean {
-    const enabled = this.#executionPolicyEnabled(engine, space);
-    if (!enabled) this.#revokeExecutionClaimsForSpace(space);
-    return enabled;
-  }
-
-  /** Validate the owner-managed opt-in policy as one isolated whole-document
-   * mutation. Claims, actors, leases, and liveness never belong in this doc. */
-  #validateExecutionPolicyCommit(
-    space: string,
-    commit: ClientCommit,
-  ): V2Error | null {
-    if (!commitTouchesExecutionPolicy(commit.operations, space)) return null;
-    if (commit.branch !== undefined && commit.branch !== "") {
-      return toError(
-        "ProtocolError",
-        "execution policy mutations are only valid on the default branch",
-      );
-    }
-    if (commit.operations.length !== 1) {
-      return toError(
-        "ProtocolError",
-        "execution policy mutations must be policy-only commits",
-      );
-    }
-    const operation = commit.operations[0];
-    if (
-      (operation.op !== "set" && operation.op !== "delete") ||
-      operation.id !== executionPolicyId(space) ||
-      (operation.scope !== undefined && operation.scope !== "space")
-    ) {
-      return toError(
-        "ProtocolError",
-        "execution policy mutations must replace or delete the space-scoped policy document",
-      );
-    }
-    const policy = operation.op === "set"
-      ? parseExecutionPolicy(operation.value)
-      : null;
-    if (operation.op === "set" && policy === null) {
-      return toError(
-        "ProtocolError",
-        "execution policy must be exactly {version:1,serverPrimaryExecution:boolean}",
-      );
-    }
-    const requiredExecutionCapabilities = this.memoryProtocolFlags();
-    if (
-      policy?.serverPrimaryExecution === true &&
-      requiredExecutionCapabilities.serverPrimaryExecutionV1 &&
-      this.#sessions.sessionsForSpace(space).some((session) =>
-        session.ownerConnectionId !== null &&
-        missesRequiredExecutionCapability(
-          requiredExecutionCapabilities,
-          session,
-        )
-      )
-    ) {
-      return toError(
-        "ProtocolError",
-        "cannot enable server-primary execution while an incompatible session is attached",
       );
     }
     return null;
@@ -2032,6 +1926,7 @@ export class Server {
     session: SessionState,
   ): boolean {
     if (
+      !this.memoryProtocolFlags().serverPrimaryExecutionV1 ||
       this.#sessions.get(demand.space, demand.sessionId) !== session ||
       session.ownerConnectionId !== demand.connectionId ||
       session.principal !== demand.principal ||
@@ -2059,6 +1954,7 @@ export class Server {
   ): boolean {
     const lease = authority.handle;
     if (
+      !this.memoryProtocolFlags().serverPrimaryExecutionV1 ||
       this.#sessions.get(lease.space, authority.sponsorSessionId) !== session ||
       session.sessionToken !== authority.sponsorSessionToken ||
       session.ownerConnectionId !== authority.sponsorConnectionId ||
@@ -2116,11 +2012,8 @@ export class Server {
     );
   }
 
-  /**
-   * Acquire one durable branch/space lease from an authenticated requesting
-   * session. The execution policy intentionally does not gate this shadow
-   * coordination primitive; claims and first-application commits do.
-   */
+  /** Acquire one durable branch/space lease from an authenticated requesting
+   * session while server-primary execution is enabled. */
   async acquireExecutionLease(
     space: string,
     branch: BranchName,
@@ -2129,6 +2022,7 @@ export class Server {
     if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) return null;
     const nowMs = () => this.#executionNowMs();
     const engine = await this.openEngine(space);
+    if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) return null;
     const slot = executionLeaseKey(space, branch);
     const owned = this.#ownedExecutionLeases.get(slot);
     if (owned !== undefined) {
@@ -2406,9 +2300,27 @@ export class Server {
       authority === undefined || authority !== owned ||
       authority.drainRequested
     ) return null;
+    if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
+      await this.beginExecutionLeaseDrain(lease);
+      return null;
+    }
     const sponsor = this.#sessions.get(lease.space, authority.sponsorSessionId);
     if (sponsor === null) return null;
     const engine = await this.openEngine(lease.space);
+    if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
+      await this.beginExecutionLeaseDrain(lease);
+      return null;
+    }
+    if (
+      this.#executionLeaseAuthorities.get(lease) !== authority ||
+      this.#ownedExecutionLeases.get(
+          executionLeaseKey(lease.space, lease.branch),
+        ) !== authority ||
+      authority.drainRequested ||
+      this.#sessions.get(lease.space, authority.sponsorSessionId) !== sponsor
+    ) {
+      return null;
+    }
     const renewed = Engine.renewExecutionLease(engine, {
       lease: authority.handle,
       nowMs: () => this.#executionNowMs(),
@@ -2585,7 +2497,6 @@ export class Server {
   async #drainIneligibleExecutionLeases(
     engine: Engine.Engine,
     space: string,
-    options: { policyDisabled?: boolean; rotateActive?: boolean } = {},
   ): Promise<ReadonlySet<BranchName>> {
     const affectedBranches = new Set<BranchName>();
     const drains: Promise<void>[] = [];
@@ -2597,7 +2508,7 @@ export class Server {
       ) continue;
       const sponsor = this.#sessions.get(space, authority.sponsorSessionId);
       if (
-        !options.policyDisabled && !options.rotateActive && sponsor !== null &&
+        sponsor !== null &&
         this.#executionLeaseSponsorCanWrite(engine, authority, sponsor)
       ) continue;
       authority.drainRequested = true;
@@ -2606,7 +2517,7 @@ export class Server {
       this.#trackExecutionLeaseTask(drain);
       drains.push(drain);
     }
-    // The policy/ACL commit is already durable, so lifecycle failures remain
+    // The ACL commit is already durable, so lifecycle failures remain
     // contained by the tracked-task logger. Successful drains, however, must
     // reach durable `draining` before replacement demand is reconciled.
     await Promise.allSettled(drains);
@@ -3101,8 +3012,8 @@ export class Server {
           space,
           session.principal,
         );
-        return capability !== null && isCapable(capability, "WRITE") &&
-          this.#executionPolicyEnabled(transactionEngine, space);
+        return this.memoryProtocolFlags().serverPrimaryExecutionV1 &&
+          capability !== null && isCapable(capability, "WRITE");
       },
     };
   }
@@ -3356,47 +3267,15 @@ export class Server {
     lease: ExecutionLeaseHandle,
     claimInput: ExecutionClaimInput,
   ): Promise<ExecutionClaim> {
-    const claim = await this.#trySetExecutionClaim(lease, claimInput);
-    if (claim === null) {
-      throw new Error(
-        `server-primary execution policy is not enabled for ${claimInput.space}`,
-      );
-    }
-    return claim;
+    return await this.#setExecutionClaim(lease, claimInput);
   }
 
-  /** Attempt to publish claim authority while preserving an ordinary shadow
-   * run when the owner-managed policy is inactive. Invalid capabilities,
-   * inputs, and lease authority remain errors; only an inactive policy is a
-   * non-error absence of authority. */
-  trySetExecutionClaim(
+  async #setExecutionClaim(
     lease: ExecutionLeaseHandle,
     claimInput: ExecutionClaimInput,
-  ): Promise<ExecutionClaim | null> {
-    return this.#trySetExecutionClaim(lease, claimInput);
-  }
-
-  async #trySetExecutionClaim(
-    lease: ExecutionLeaseHandle,
-    claimInput: ExecutionClaimInput,
-  ): Promise<ExecutionClaim | null> {
-    const flags = this.memoryProtocolFlags();
-    if (!flags.serverPrimaryExecutionV1) {
-      throw new Error("server-primary-execution-v1 is disabled");
-    }
+  ): Promise<ExecutionClaim> {
     this.#validateExecutionClaimInput(claimInput);
-    if (
-      claimInput.actionKind === "computation" &&
-      !flags.serverPrimaryExecutionClaimRoutingV1
-    ) {
-      throw new Error("server-primary computation claim routing is disabled");
-    }
-    if (
-      claimInput.actionKind === "effect" &&
-      !flags.serverPrimaryExecutionBuiltinPassivityV1
-    ) {
-      throw new Error("server-primary builtin passivity is disabled");
-    }
+    this.#assertExecutionClaimCapabilityEnabled(claimInput.actionKind);
     const authority = this.#executionLeaseAuthorities.get(lease);
     const owned = this.#ownedExecutionLeases.get(
       executionLeaseKey(claimInput.space, claimInput.branch),
@@ -3413,6 +3292,7 @@ export class Server {
     // Engine setup is an authority boundary: the lease may expire or host
     // lifecycle may begin draining/replacing this slot while the open awaits.
     // Re-sample and re-read every host/durable authority input afterwards.
+    this.#assertExecutionClaimCapabilityEnabled(claimInput.actionKind);
     const claimNow = this.#executionNowMs();
     if (
       this.#executionLeaseAuthorities.get(lease) !== authority ||
@@ -3422,10 +3302,6 @@ export class Server {
       authority.drainRequested
     ) {
       throw new Error("execution claim requires the current owned lease");
-    }
-    if (!this.#reconcileExecutionPolicy(engine, claimInput.space)) {
-      this.executionStats.policyInactiveClaimAttempts += 1;
-      return null;
     }
     const current = Engine.currentExecutionLease(engine, {
       space: claimInput.space,
@@ -3454,6 +3330,7 @@ export class Server {
     this.expireExecutionClaims(claimNow);
     // Expiry publication can synchronously notify lifecycle listeners. Fence a
     // drain requested by that notification before installing new authority.
+    this.#assertExecutionClaimCapabilityEnabled(claimInput.actionKind);
     if (
       this.#executionLeaseAuthorities.get(lease) !== authority ||
       this.#ownedExecutionLeases.get(
@@ -3492,8 +3369,8 @@ export class Server {
 
   /** Extend one exact live claim without minting a new authority incarnation.
    * The executor still holds the same lease/claim generations, while the host
-   * revalidates the durable lease, sponsor, demand, policy, and WRITE authority
-   * before moving the server-authored deadline. */
+   * revalidates the durable lease, sponsor, demand, rollout flag, and WRITE
+   * authority before moving the server-authored deadline. */
   async renewExecutionClaim(
     lease: ExecutionLeaseHandle,
     claim: ExecutionClaim,
@@ -3543,7 +3420,7 @@ export class Server {
       this.revokeExecutionClaim(live);
       return null;
     }
-    if (!this.#reconcileExecutionPolicy(engine, claim.space)) {
+    if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
       this.revokeExecutionClaim(live);
       return null;
     }
@@ -3607,6 +3484,10 @@ export class Server {
 
   /** Read-only host gate for executor broker work and async continuations. */
   hasLiveExecutionClaim(claim: ExecutionClaim): boolean {
+    if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
+      this.#revokeExecutionClaimsForSpace(claim.space);
+      return false;
+    }
     this.expireExecutionClaims();
     const live = this.#executionClaims.get(actionClaimMapKey(claim));
     return live !== undefined &&
@@ -3640,14 +3521,8 @@ export class Server {
     ) {
       return false;
     }
-    const engine = this.#openedEngines.get(live.space);
-    if (
-      engine === undefined ||
-      !this.#reconcileExecutionPolicy(engine, live.space)
-    ) {
-      if (engine === undefined) {
-        this.#revokeExecutionClaimsForSpace(live.space);
-      }
+    if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
+      this.#revokeExecutionClaimsForSpace(live.space);
       return false;
     }
     this.executionStats.settlementsPublished += 1;
@@ -3736,11 +3611,11 @@ export class Server {
 
   listExecutionClaims(space: string): readonly ExecutionClaim[] {
     this.expireExecutionClaims();
-    const engine = this.#openedEngines.get(space);
-    if (engine === undefined) {
+    if (
+      !this.memoryProtocolFlags().serverPrimaryExecutionV1 ||
+      this.#openedEngines.get(space) === undefined
+    ) {
       this.#revokeExecutionClaimsForSpace(space);
-    } else {
-      this.#reconcileExecutionPolicy(engine, space);
     }
     return Object.freeze(
       [...this.#executionClaims.values()]
@@ -3967,11 +3842,6 @@ export class Server {
     value: EntityDocument["value"],
   ): Promise<Engine.AppliedCommit> {
     const engine = await this.openEngine(space);
-    if (id === executionPolicyId(space)) {
-      throw new Engine.ProtocolError(
-        "direct writes may not mutate the execution policy document",
-      );
-    }
     if (this.#aclMode() !== "off") {
       if (id === aclDocId(space)) {
         throw new Engine.ProtocolError(
@@ -4552,14 +4422,9 @@ export class Server {
       if (deny) {
         return respondTypedError<SessionOpenResult>(message.requestId, deny);
       }
-      const executionPolicyEnabled = this.#reconcileExecutionPolicy(
-        engine,
-        message.space,
-      );
       const requiredExecutionCapabilities = this.memoryProtocolFlags();
       if (
         requiredExecutionCapabilities.serverPrimaryExecutionV1 &&
-        executionPolicyEnabled &&
         missesRequiredExecutionCapability(
           requiredExecutionCapabilities,
           connection,
@@ -4769,40 +4634,17 @@ export class Server {
               invalid,
             );
           }
-          const invalidExecutionPolicy = this.#validateExecutionPolicyCommit(
-            message.space,
-            message.commit,
-          );
-          if (invalidExecutionPolicy) {
-            return respondTypedError<Engine.AppliedCommit>(
-              message.requestId,
-              invalidExecutionPolicy,
-            );
-          }
-          // ACL and execution-policy documents change authorization/authority
-          // rules and are OWNER-only.
+          // ACL documents change authorization rules and are OWNER-only.
           const aclTouched = commitTouchesAclDoc(
             message.commit.operations,
             message.space,
           );
-          const executionPolicyTouched = commitTouchesExecutionPolicy(
-            message.commit.operations,
+          const deny = this.#authorizeMessageWithEngine(
+            engine,
             message.space,
+            session.principal,
+            aclTouched ? "OWNER" : "WRITE",
           );
-          const executionPolicyWasEnabled = executionPolicyTouched &&
-            this.#executionPolicyEnabled(engine, message.space);
-          const deny = executionPolicyTouched
-            ? this.#authorizeExecutionPolicyOwner(
-              engine,
-              message.space,
-              session.principal,
-            )
-            : this.#authorizeMessageWithEngine(
-              engine,
-              message.space,
-              session.principal,
-              aclTouched ? "OWNER" : "WRITE",
-            );
           if (deny) {
             return respondTypedError<Engine.AppliedCommit>(
               message.requestId,
@@ -4947,31 +4789,7 @@ export class Server {
               reconciledExecutionBranches.add(branch);
             }
           }
-          if (executionPolicyTouched) {
-            const executionPolicyEnabled = this.#reconcileExecutionPolicy(
-              engine,
-              message.space,
-            );
-            if (executionPolicyEnabled !== executionPolicyWasEnabled) {
-              for (
-                const branch of await this.#drainIneligibleExecutionLeases(
-                  engine,
-                  message.space,
-                  executionPolicyEnabled
-                    ? { rotateActive: true }
-                    : { policyDisabled: true },
-                )
-              ) {
-                reconciledExecutionBranches.add(branch);
-              }
-            }
-            for (const demand of this.#executionDemands.values()) {
-              if (demand.space === message.space) {
-                reconciledExecutionBranches.add(demand.branch);
-              }
-            }
-          }
-          // A policy/ACL response is the client-visible transition boundary.
+          // An ACL response is the client-visible transition boundary.
           // Do not release it while a host-local pool can still retain the
           // fenced lease and Worker: the awaited snapshot makes the pool
           // observe renewal loss, stop that realm, and acquire a fresh shadow

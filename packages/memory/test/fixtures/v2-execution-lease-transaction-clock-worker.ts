@@ -125,15 +125,6 @@ const initializeExecutor = async (
 
   sponsorClient = await connect();
   const sponsor = await sponsorClient.mount(command.space, {}, sessionAuth);
-  await sponsor.transact({
-    localSeq: 1,
-    reads: { confirmed: [], pending: [] },
-    operations: [{
-      op: "set",
-      id: `of:${command.space}:execution-policy`,
-      value: { value: { version: 1, serverPrimaryExecution: true } },
-    }],
-  });
   await sponsor.setExecutionDemand("", ["space:of:piece"]);
   lease = await server.acquireExecutionLease(command.space, "") ?? undefined;
   if (lease === undefined) throw new Error("executor lease was not acquired");

@@ -52,7 +52,6 @@ const poolMetrics = {
 };
 
 const controlMetrics = {
-  policyInactiveClaimAttempts: 0,
   claimsIssued: 2,
   claimsReissued: 1,
   claimsRevoked: 1,

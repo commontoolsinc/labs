@@ -51,7 +51,6 @@ export const ServerExecutionPoolMetricsSchema = z.object({
 }).strict();
 
 export const ServerExecutionControlMetricsSchema = z.object({
-  policyInactiveClaimAttempts: nonNegativeIntegerSchema,
   claimsIssued: nonNegativeIntegerSchema,
   claimsReissued: nonNegativeIntegerSchema,
   claimsRevoked: nonNegativeIntegerSchema,

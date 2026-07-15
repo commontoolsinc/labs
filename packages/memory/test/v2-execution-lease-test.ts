@@ -151,22 +151,6 @@ const setAcl = async (
   });
 };
 
-const setPolicy = async (
-  owner: MemoryClient.SpaceSession,
-  localSeq: number,
-  enabled = true,
-): Promise<void> => {
-  await owner.transact({
-    localSeq,
-    reads: { confirmed: [], pending: [] },
-    operations: [{
-      op: "set",
-      id: `of:${SPACE}:execution-policy`,
-      value: { value: { version: 1, serverPrimaryExecution: enabled } },
-    }],
-  });
-};
-
 Deno.test("one WRITE-capable requester acquires one sticky durable execution lease", async () => {
   const directory = await Deno.makeTempDir();
   const server = createLeaseServer(toFileUrl(`${directory}/`), "host:one");
@@ -410,7 +394,6 @@ Deno.test("sponsor disconnect drains before a remaining writer can replace it", 
       [WRITER_A]: "WRITE",
       [WRITER_B]: "WRITE",
     });
-    await setPolicy(owner, 2);
     firstClient = await connect(server);
     const first = await mount(firstClient, WRITER_A);
     await first.setExecutionDemand("", ["space:first"]);
@@ -482,7 +465,6 @@ Deno.test("stale host relinquishes claims after another host acquires the next g
     events.push(event);
   });
   try {
-    await setPolicy(sponsorA, 1);
     await sponsorA.setExecutionDemand("", ["space:piece-a"]);
     await sponsorB.setExecutionDemand("", ["space:piece-b"]);
     const first = await serverA.acquireExecutionLease(SPACE, "");
@@ -537,7 +519,6 @@ Deno.test("draining lease rejects work started after sponsor disconnect", async 
   const executorClient = await connect(server);
   const executor = await mount(executorClient, OWNER);
   try {
-    await setPolicy(sponsor, 1);
     await sponsor.setExecutionDemand("", ["space:piece"]);
     const acquired = await server.acquireExecutionLease(SPACE, "");
     assertExists(acquired);
@@ -587,7 +568,6 @@ Deno.test("a lease-bound session cannot commit after its generation is replaced"
     await sponsor.setExecutionDemand("", ["space:piece"]);
     const first = await server.acquireExecutionLease(SPACE, "");
     assertExists(first);
-    await setPolicy(sponsor, 1);
     server.bindExecutionSession(SPACE, executor.sessionId, first);
 
     assertExists(await server.finishExecutionLeaseDrain(first));
@@ -620,64 +600,6 @@ Deno.test("a lease-bound session cannot commit after its generation is replaced"
   }
 });
 
-Deno.test("policy disable revokes claims and immediately fences a draining executor", async () => {
-  const directory = await Deno.makeTempDir();
-  const server = createLeaseServer(toFileUrl(`${directory}/`), "host:policy");
-  const sponsorClient = await connect(server);
-  const sponsor = await mount(sponsorClient, OWNER);
-  const executorClient = await connect(server);
-  const executor = await mount(executorClient, OWNER);
-  try {
-    await setPolicy(sponsor, 1);
-    await sponsor.setExecutionDemand("", ["space:piece"]);
-    const lease = await server.acquireExecutionLease(SPACE, "");
-    assertExists(lease);
-    server.bindExecutionSession(SPACE, executor.sessionId, lease);
-    await server.setExecutionClaim(lease, {
-      branch: "",
-      space: SPACE,
-      contextKey: "space",
-      pieceId: "of:piece",
-      actionId: "action:policy-disable",
-      actionKind: "computation",
-      implementationFingerprint: "impl:v1",
-      runtimeFingerprint: "runtime:v1",
-    });
-    assertEquals(server.listExecutionClaims(SPACE).length, 1);
-
-    await setPolicy(sponsor, 2, false);
-    await server.flushExecutionLeaseTasks();
-    assertEquals(server.listExecutionClaims(SPACE), []);
-    assertEquals(
-      (await server.currentExecutionLease(SPACE, ""))?.state,
-      "draining",
-    );
-    const fenced = await assertRejects(
-      () =>
-        executor.transact({
-          localSeq: 1,
-          reads: { confirmed: [], pending: [] },
-          operations: [{
-            op: "set",
-            id: "of:disabled-policy-output",
-            value: { value: { forbidden: true } },
-          }],
-        }),
-      Error,
-    );
-    assertEquals(fenced.name, "ExecutionLeaseFenceError");
-    assertEquals(
-      await server.readDocument(SPACE, "of:disabled-policy-output"),
-      null,
-    );
-  } finally {
-    await executorClient.close();
-    await sponsorClient.close();
-    await server.close();
-    await Deno.remove(directory, { recursive: true });
-  }
-});
-
 Deno.test("sponsor WRITE loss fences commits before replacement", async () => {
   const directory = await Deno.makeTempDir();
   const server = createLeaseServer(
@@ -696,7 +618,6 @@ Deno.test("sponsor WRITE loss fences commits before replacement", async () => {
       [WRITER_A]: "WRITE",
       [WRITER_B]: "WRITE",
     });
-    await setPolicy(owner, 2);
     sponsorClient = await connect(server);
     const sponsor = await mount(sponsorClient, WRITER_A);
     await sponsor.setExecutionDemand("", ["space:first"]);
@@ -816,7 +737,6 @@ Deno.test("lease-bound execution reads and mirrors sponsor PerSession scope", as
         value: { value: { lane: "sibling" } },
       }],
     });
-    await setPolicy(sponsor, 2);
     await sponsor.setExecutionDemand("", ["space:piece"]);
     const lease = await server.acquireExecutionLease(SPACE, "");
     assertExists(lease);
@@ -1122,7 +1042,6 @@ Deno.test("scheduler mirrors retain sponsor scope across executor disconnect", a
   };
 
   try {
-    await setPolicy(sponsor, 1);
     await sponsor.setExecutionDemand("", ["space:piece"]);
     const lease = await server.acquireExecutionLease(SPACE, "");
     assertExists(lease);

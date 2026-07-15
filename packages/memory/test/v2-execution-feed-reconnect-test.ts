@@ -132,34 +132,6 @@ const open = async (
   return message as ResponseMessage<SessionOpenResult>;
 };
 
-const enablePolicy = async (
-  connection: ReturnType<Server["connect"]>,
-  messages: ServerMessage[],
-  sessionId: string,
-): Promise<void> => {
-  await connection.receive(encodeMemoryBoundary({
-    type: "transact",
-    requestId: "enable-policy",
-    space: SPACE,
-    sessionId,
-    commit: {
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${SPACE}:execution-policy`,
-        scope: "space",
-        value: {
-          value: { version: 1, serverPrimaryExecution: true },
-        },
-      }],
-    },
-  }));
-  const response = shiftMessage(messages);
-  assertEquals(response.type, "response");
-  assertEquals((response as ResponseMessage<unknown>).error, undefined);
-};
-
 const claimInput = (
   actionId: string,
   actionKind: "computation" | "effect",
@@ -258,7 +230,6 @@ Deno.test("resumed open suppresses live execution effects until its response ins
     const opened = await open(first, firstMessages, "open", firstAuth, {});
     assertExists(opened.ok);
     assertExists(opened.ok.sync?.execution);
-    await enablePolicy(first, firstMessages, opened.ok.sessionId);
     sponsor = await acquireSponsorLease(server);
     const feedSeq = opened.ok.sync.execution.toFeedSeq;
     first.close();
@@ -411,7 +382,6 @@ Deno.test("resume behind a bounded execution suffix installs an exact snapshot a
     const opened = await open(first, firstMessages, "open", firstAuth, {});
     assertExists(opened.ok);
     assertExists(opened.ok.sync?.execution);
-    await enablePolicy(first, firstMessages, opened.ok.sessionId);
     sponsor = await acquireSponsorLease(server);
     const acknowledgedFeedSeq = opened.ok.sync.execution.toFeedSeq;
     first.close();
@@ -510,7 +480,6 @@ Deno.test("resume carries a successful settlement frontier evicted from the boun
     const firstAuth = await hello(first, firstMessages);
     const opened = await open(first, firstMessages, "open", firstAuth, {});
     assertExists(opened.ok?.sync?.execution);
-    await enablePolicy(first, firstMessages, opened.ok.sessionId);
     sponsor = await acquireSponsorLease(server);
     const acknowledgedFeedSeq = opened.ok.sync.execution.toFeedSeq;
     first.close();
@@ -591,7 +560,7 @@ Deno.test("resume carries a successful settlement frontier evicted from the boun
   }
 });
 
-Deno.test("policy-enabled resume rejects missing graduated execution subcapabilities", async () => {
+Deno.test("server-primary resume rejects missing graduated execution subcapabilities", async () => {
   const server = createServer("memory-v2-execution-feed-resume-subcaps");
   const firstMessages: ServerMessage[] = [];
   const first = server.connect((message) => firstMessages.push(message));
@@ -601,7 +570,6 @@ Deno.test("policy-enabled resume rejects missing graduated execution subcapabili
     const opened = await open(first, firstMessages, "open", firstAuth, {});
     assertExists(opened.ok);
     assertExists(opened.ok.sync?.execution);
-    await enablePolicy(first, firstMessages, opened.ok.sessionId);
     sponsor = await acquireSponsorLease(server);
     const acknowledgedFeedSeq = opened.ok.sync.execution.toFeedSeq;
 

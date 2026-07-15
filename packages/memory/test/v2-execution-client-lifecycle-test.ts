@@ -1,5 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
-import { FakeTime } from "@std/testing/time";
+import { assertEquals } from "@std/assert";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import * as MemoryClient from "../v2/client.ts";
 import { Server, SessionRegistry } from "../v2/server.ts";
@@ -12,17 +11,12 @@ import {
   toInputBasisSeq,
 } from "../v2.ts";
 import {
-  TEST_SESSION_OPEN_AUDIENCE,
   TEST_SESSION_OPEN_PRINCIPAL,
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,
 } from "./v2-auth-test-helpers.ts";
 
 const CONTROL_SPACE = "did:key:z6Mk-execution-client-lifecycle";
-const POLICY_SPACE = "did:key:z6Mk-execution-reopen-policy";
-const CLIENT_PRIMARY_SPACE = "did:key:z6Mk-execution-reopen-client-primary";
-const OWNER = "did:key:z6Mk-execution-reopen-owner";
-const READER = "did:key:z6Mk-execution-reopen-reader";
 const realSetTimeout = globalThis.setTimeout;
 const realClearTimeout = globalThis.clearTimeout;
 
@@ -76,17 +70,6 @@ Deno.test("buffered settlements are dropped when their claim is replaced before 
   });
 
   try {
-    await observer.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${CONTROL_SPACE}:execution-policy`,
-        value: {
-          value: { version: 1, serverPrimaryExecution: true },
-        },
-      }],
-    });
     await observer.setExecutionDemand("", ["piece:one"]);
     const lease = await server.acquireExecutionLease(CONTROL_SPACE, "");
     if (lease === null) throw new Error("expected an execution lease");
@@ -143,23 +126,12 @@ Deno.test("buffered settlements are dropped when their claim is replaced before 
   }
 });
 
-const authFactory =
-  (principal: string): MemoryClient.SessionOpenAuthFactory =>
-  (_space, _session, context) => ({
-    invocation: {
-      aud: context.audience,
-      challenge: context.challenge.value,
-    },
-    authorization: { principal },
-  });
-
 class GatedReconnectTransport implements MemoryClient.Transport {
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #connection: ReturnType<Server["connect"]> | null = null;
   #releaseReconnect = Promise.withResolvers<void>();
   readonly reconnectStarted = Promise.withResolvers<void>();
-  readonly clientPrimaryReopened = Promise.withResolvers<void>();
   helloCount = 0;
 
   constructor(private readonly server: Server) {}
@@ -185,13 +157,6 @@ class GatedReconnectTransport implements MemoryClient.Transport {
       }
     }
     await this.#getConnection().receive(payload);
-    if (
-      message.type === "session.open" &&
-      message.space === CLIENT_PRIMARY_SPACE &&
-      this.helloCount >= 2
-    ) {
-      this.clientPrimaryReopened.resolve();
-    }
   }
 
   disconnect(): void {
@@ -278,15 +243,6 @@ Deno.test("client reconnect delivers an evicted successful settlement frontier e
   });
 
   try {
-    await observer.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${CONTROL_SPACE}:execution-policy`,
-        value: { value: { version: 1, serverPrimaryExecution: true } },
-      }],
-    });
     await sponsor.setExecutionDemand("", ["piece:one"]);
     const lease = await server.acquireExecutionLease(CONTROL_SPACE, "");
     if (lease === null) throw new Error("expected execution lease");
@@ -330,101 +286,6 @@ Deno.test("client reconnect delivers an evicted successful settlement frontier e
     unsubscribe();
     await observerClient.close();
     await sponsorClient.close();
-    await server.close();
-  }
-});
-
-Deno.test("a reopen ProtocolError closes only the incompatible space session", async () => {
-  using time = new FakeTime();
-  const server = new Server({
-    store: new URL("memory://execution-client-protocol-terminal"),
-    authorizeSessionOpen(message) {
-      const principal = (message.authorization as { principal?: unknown })
-        ?.principal;
-      return typeof principal === "string" ? principal : undefined;
-    },
-    sessionOpenAuth: { audience: TEST_SESSION_OPEN_AUDIENCE },
-    acl: { mode: "enforce", serviceDids: [OWNER] },
-    protocolFlags: executionProtocolFlags,
-  });
-  const ownerClient = await MemoryClient.connect({
-    transport: MemoryClient.loopback(server),
-    protocolFlags: executionProtocolFlags,
-  });
-  const ownerAuth = authFactory(OWNER);
-  const policyOwner = await ownerClient.mount(POLICY_SPACE, {}, ownerAuth);
-  const clientPrimaryOwner = await ownerClient.mount(
-    CLIENT_PRIMARY_SPACE,
-    {},
-    ownerAuth,
-  );
-  const installAcl = (
-    session: MemoryClient.SpaceSession,
-    space: string,
-  ) =>
-    session.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${space}`,
-        value: { value: { [OWNER]: "OWNER", [READER]: "READ" } },
-      }],
-    });
-  await installAcl(policyOwner, POLICY_SPACE);
-  await installAcl(clientPrimaryOwner, CLIENT_PRIMARY_SPACE);
-
-  const transport = new GatedReconnectTransport(server);
-  const staleClient = await MemoryClient.connect({
-    transport,
-    protocolFlags: { serverPrimaryExecutionV1: false },
-  });
-  const readerAuth = authFactory(READER);
-  const policySession = await staleClient.mount(
-    POLICY_SPACE,
-    {},
-    readerAuth,
-  );
-  const clientPrimarySession = await staleClient.mount(
-    CLIENT_PRIMARY_SPACE,
-    {},
-    readerAuth,
-  );
-
-  try {
-    transport.disconnect();
-    await transport.reconnectStarted.promise;
-    await policyOwner.transact({
-      localSeq: 2,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${POLICY_SPACE}:execution-policy`,
-        value: {
-          value: { version: 1, serverPrimaryExecution: true },
-        },
-      }],
-    });
-    transport.releaseReconnect();
-
-    await transport.clientPrimaryReopened.promise;
-    const protocolError = await assertRejects(
-      () => policySession.queryGraph({ roots: [] }),
-      Error,
-      "requires memory capabilities server-primary-execution-v1",
-    );
-    assertEquals(protocolError.name, "ProtocolError");
-    const query = await clientPrimarySession.queryGraph({ roots: [] });
-    assertEquals(query.entities, []);
-
-    time.tick(60_000);
-    await time.runMicrotasks();
-    assertEquals(transport.helloCount, 3);
-    assertEquals(staleClient.isConnected(), true);
-  } finally {
-    transport.releaseReconnect();
-    await staleClient.close();
-    await ownerClient.close();
     await server.close();
   }
 });

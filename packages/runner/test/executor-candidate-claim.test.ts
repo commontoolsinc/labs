@@ -253,33 +253,11 @@ class ClaimRecordingServer {
   }[] = [];
   readonly revoked: ExecutionClaim[] = [];
   readonly renewRequests: ExecutionClaim[] = [];
-  claimAvailable = true;
-
-  trySetExecutionClaim(
-    lease: ExecutionLeaseHandle,
-    claimKey: ActionClaimKey,
-  ): Promise<ExecutionClaim | null> {
-    this.claimRequests.push({ lease, claimKey });
-    return Promise.resolve(
-      this.claimAvailable
-        ? {
-          ...claimKey,
-          leaseGeneration: LEASE.leaseGeneration,
-          claimGeneration: CLAIM.claimGeneration,
-          expiresAt: CLAIM.expiresAt,
-        }
-        : null,
-    );
-  }
-
   setExecutionClaim(
     lease: ExecutionLeaseHandle,
     claimKey: ActionClaimKey,
   ): Promise<ExecutionClaim> {
     this.claimRequests.push({ lease, claimKey });
-    if (!this.claimAvailable) {
-      return Promise.reject(new Error("execution policy is not enabled"));
-    }
     return Promise.resolve(CLAIM);
   }
 
@@ -472,59 +450,6 @@ Deno.test("executor host rejects execution placement counters that move backward
       ["executor Worker execution metrics moved backwards"],
     );
     assertEquals(worker.terminated, true);
-  } finally {
-    await executor.stop();
-  }
-});
-
-Deno.test("policy-inactive candidates remain shadow and later acquire authority", async () => {
-  const diagnostics: CandidateDiagnostic[] = [];
-  const { worker, server, crashes, executor } = await startExecutor({
-    routing: true,
-    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
-  });
-  server.claimAvailable = false;
-  try {
-    worker.candidate(CLAIM_KEY);
-    await flushClaimControl();
-
-    assertEquals(server.claimRequests, [{
-      lease: LEASE,
-      claimKey: CLAIM_KEY,
-    }]);
-    assertEquals(diagnostics, [{
-      claimKey: CLAIM_KEY,
-      diagnosticCode: "execution-policy-disabled",
-    }]);
-    assertEquals(
-      worker.messages.some((message) =>
-        (message as { type?: string }).type === "run-claimed-action"
-      ),
-      false,
-    );
-    assertEquals(crashes, []);
-
-    server.claimAvailable = true;
-    worker.candidate(CLAIM_KEY);
-    await flushClaimControl();
-    assertEquals(server.claimRequests, [{
-      lease: LEASE,
-      claimKey: CLAIM_KEY,
-    }, {
-      lease: LEASE,
-      claimKey: CLAIM_KEY,
-    }]);
-    assertEquals(worker.messages.at(-1), {
-      type: "run-claimed-action",
-      requestId: 2,
-      claim: CLAIM,
-      assertion: {
-        contextKey: "space",
-        leaseGeneration: LEASE.leaseGeneration,
-        claimGeneration: CLAIM.claimGeneration,
-      },
-    });
-    assertEquals(crashes, []);
   } finally {
     await executor.stop();
   }

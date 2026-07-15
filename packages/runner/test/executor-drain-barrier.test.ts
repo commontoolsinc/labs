@@ -410,15 +410,6 @@ Deno.test("real executor recovers a source commit accepted between settle and te
       protocolFlags: FLAGS,
     });
     const observer = await observerClient.mount(space, {}, authorize);
-    await observer.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${space}:execution-policy`,
-        value: { value: { version: 1, serverPrimaryExecution: true } },
-      }],
-    });
     await observer.watchSet([{
       id: "executor-drain-barrier-piece",
       kind: "graph",
@@ -626,15 +617,6 @@ Deno.test("persistent host restart rehydrates one fenced replacement without dup
       protocolFlags: FLAGS,
     });
     const observerA = await observerClientA.mount(space, {}, authorize);
-    await observerA.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${space}:execution-policy`,
-        value: { value: { version: 1, serverPrimaryExecution: true } },
-      }],
-    });
     await observerA.watchSet([{
       id: "executor-host-restart-piece-a",
       kind: "graph",
@@ -783,14 +765,6 @@ Deno.test("persistent host restart rehydrates one fenced replacement without dup
       (await hostB.readDocument(space, outputId) as { value?: unknown })?.value,
       12,
     );
-    assertEquals(
-      (await hostB.readDocument(
-        space,
-        `of:${space}:execution-policy`,
-      ) as { value?: unknown })?.value,
-      { version: 1, serverPrimaryExecution: true },
-    );
-
     observerClientB = await MemoryClient.connect({
       transport: MemoryClient.loopback(hostB),
       protocolFlags: FLAGS,
@@ -1117,15 +1091,6 @@ Deno.test("real executor crash rejects stale work and converges once through cli
       protocolFlags: FLAGS,
     });
     const observer = await observerClient.mount(space, {}, authorize);
-    await observer.transact({
-      localSeq: 1,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${space}:execution-policy`,
-        value: { value: { version: 1, serverPrimaryExecution: true } },
-      }],
-    });
     await observer.watchSet([{
       id: "executor-crash-drill-piece",
       kind: "graph",
@@ -1564,16 +1529,6 @@ Deno.test("real sponsor loss fences A and resumes exactly once on behalf of B", 
         },
       }],
     });
-    await observer.transact({
-      localSeq: 2,
-      reads: { confirmed: [], pending: [] },
-      operations: [{
-        op: "set",
-        id: `of:${space}:execution-policy`,
-        value: { value: { version: 1, serverPrimaryExecution: true } },
-      }],
-    });
-
     const compiled = await seedRuntime.patternManager.compilePattern(PROGRAM, {
       space,
     });
