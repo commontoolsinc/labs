@@ -7,9 +7,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { defer } from "@commonfabric/utils/defer";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { waitForCellValue } from "./support/wait-for-cell-value.ts";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -73,10 +75,10 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     const result = runtime.run(tx, queryPattern, {}, resultCell);
     tx.commit();
 
-    const q = await waitUntil<QueryState>(
+    const q = await waitForCellValue<QueryState>(
       runtime,
       result,
-      (v) => v.pending === false,
+      (v) => v?.pending === false,
     );
     expect(q.error).toBeUndefined();
     expect(q.result).toEqual([]);
@@ -165,8 +167,10 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
     };
     const original = provider.sqliteQuery.bind(provider);
     let seenScope: unknown = "<<unset>>";
+    const issued = defer<void>();
     provider.sqliteQuery = (db, ...rest) => {
       seenScope = db?.scope;
+      issued.resolve();
       return original(db, ...rest);
     };
     try {
@@ -184,13 +188,12 @@ describe("sqlite builtins (Phase 0 wiring)", () => {
         queryPattern.resultSchema,
         tx,
       );
-      const result = runtime.run(tx, queryPattern, {}, resultCell);
+      runtime.run(tx, queryPattern, {}, resultCell);
       tx.commit();
-      await waitUntil<QueryState>(
-        runtime,
-        result,
-        () => seenScope !== "<<unset>>",
-      );
+      // The wire call is the event here, not a result value: the spy above
+      // resolves `issued` when `db.query` reaches the provider, which the
+      // post-commit flush drives without the result being observed.
+      await issued.promise;
       return seenScope;
     } finally {
       provider.sqliteQuery = original;
@@ -398,28 +401,3 @@ type QueryState = {
   error?: unknown;
   requestHash?: string;
 };
-
-// Wait until `pred(cell value)` holds. A `sink` keeps the effect chain live so
-// reactOn re-runs are driven (pull-mode runs effects only while observed); the
-// loop is fully awaited and the sink is cancelled in `finally`, so nothing runs
-// after the test disposes the engine (avoids an FFI-after-dispose segfault).
-// deno-lint-ignore no-explicit-any
-async function waitUntil<T>(
-  runtime: Runtime,
-  cell: any,
-  pred: (v: T) => boolean,
-  iterations = 400,
-): Promise<T> {
-  const cancel = cell.sink(() => {}) as () => void;
-  try {
-    for (let i = 0; i < iterations; i++) {
-      await runtime.idle();
-      const v = cell.get() as T;
-      if (pred(v)) return v;
-      await new Promise((r) => setTimeout(r, 15));
-    }
-    throw new Error("timeout waiting for sqlite result");
-  } finally {
-    cancel?.();
-  }
-}

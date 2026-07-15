@@ -59,11 +59,63 @@ click.
 (from `packages/utils/src/defer.ts`) inside a callback the test already registers
 — a cell `sink`/`subscribe`, a storage subscription's `next`, a scheduler
 `onError`, a telemetry listener, or a counter incremented inside a test-owned
-transport. A read of a cell that a sink already observes belongs here too: record
-the latest value in the sink callback and resolve the waiter when it reaches the
-target. Because the sink fires once on registration and then on every committed
-change, the waiter can resolve immediately when the value is already there and
-otherwise on the next change the sink reports.
+transport. A read of a cell that a sink already observes belongs here too: the
+sink wakes the waiter, and the waiter compares the cell against the target.
+Because the sink fires once on registration and then on every committed change,
+the waiter can resolve immediately when the value is already there and otherwise
+on the next change the sink reports.
+
+The runner's in-process tests have that last shape packaged as
+`waitForCellValue` in `packages/runner/test/support/wait-for-cell-value.ts`. It
+sleeps on the sink and applies its predicate to the cell only after
+`runtime.idle()`, so the wait has neither a poll interval under it nor an
+iteration cap over it. Its predicate takes `T | undefined`, since a cell holds
+no value until its piece writes one.
+
+Some traps are worth knowing before you hand-roll one of these against a
+runtime. They cost real debugging to find, and they are why the helper takes a
+runtime.
+
+Where a runtime is in reach, test the value the cell holds once the scheduler
+is quiescent, not the one the sink handed the callback. A cell passes through
+states that exist only until the scheduler drains, and a predicate can accept
+one that is about to be superseded — a query that has not yet re-run against
+new inputs still holds its previous settled result, so "settled and without
+error" matches the stale value. Waking on the sink but reading after
+`runtime.idle()` keeps those states away from the predicate. The waits above
+that have no runtime to idle, such as the shell's result-cell reads, do compare
+the callback's value, and have to keep their predicates specific enough that no
+passing state is a stale one.
+
+A cell's value is a live view either way, so whatever a wait returns can still
+move afterwards, and a test that accepts a value and then awaits something else
+before reading it can assert against a state the predicate never approved.
+Reading at quiescence narrows that window rather than closing it: there is no
+pending reactive work left to drive the value on, but `runtime.idle()` settles
+reactivity only, not storage sync, so a value arriving from another runtime can
+still land late. Read what a wait hands back before awaiting anything else.
+
+Cancelling the sink is a trap of its own. Resolving from inside the callback
+wakes the waiting code while the action that reported the value is still
+finishing, and finalizing an action resubscribes it, so a cancel issued from
+that continuation is undone and the sink goes on firing afterwards. Await
+`runtime.idle()` before cancelling.
+
+An in-process wait like this needs no timeout backstop. When the value never
+arrives and the runtime goes quiet, Deno's test runner reports `Promise
+resolution is still pending but the event loop has already resolved` and fails
+the test at once, rather than hanging. The message names the test, not the wait
+inside it, so a test holding several waits needs the last step printed without
+an `ok` to place the failure. It still beats a deadline, which reports only that
+time ran out, and reports it later.
+
+That argument covers the in-process waits in this section and nothing else. It
+holds because nothing in these tests keeps the event loop alive by itself: the
+runner's one repeating timer is unref'd and gated behind `CF_TRAVERSE_CAPTURE`,
+and an unsatisfiable wait still fails in seconds in the heaviest setup we have,
+two runtimes over an in-process memory server. It does not carry over to the
+browser waits above, where a live DevTools Protocol connection holds the loop
+open and a waiter that never fires would hang instead.
 
 ## Guard against new usage
 
