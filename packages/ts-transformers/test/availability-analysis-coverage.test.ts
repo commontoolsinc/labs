@@ -796,6 +796,36 @@ Deno.test("explicit helper guards preserve stable caller paths", () => {
   );
 });
 
+Deno.test("explicit guard capture rejects mutable local aliases", () => {
+  withContext(
+    `
+      import { AsyncResult, hasError } from "commonfabric";
+      type Repo = { name: string };
+      declare const input: {
+        first: AsyncResult<Repo>;
+        second: AsyncResult<Repo>;
+      };
+      const guard = () => {
+        let selected = input.first;
+        selected = input.second;
+        return hasError(selected);
+      };
+    `,
+    ({ context, sourceFile }) => {
+      const guard = initializer(sourceFile, "guard") as ts.ArrowFunction;
+      assert(ts.isBlock(guard.body));
+      assertEquals(
+        collectExplicitAvailabilityGuardCaptures(guard.body, context),
+        [],
+      );
+      assertEquals(
+        context.diagnostics.map((diagnostic) => diagnostic.type),
+        ["availability:unsupported-guard-operand"],
+      );
+    },
+  );
+});
+
 Deno.test("availability analysis propagates observations through composite lift bindings", () => {
   withContext(
     `
@@ -834,6 +864,9 @@ Deno.test("availability analysis propagates observations through composite lift 
       const arrayLift = lift(([first, , third]) => ({ first, third }))(tuple);
       declare const declaredTuple: readonly [AsyncResult<Repo>];
       const declaredArrayLift = lift(([declared]) => declared)(declaredTuple);
+      const cyclicTupleA = cyclicTupleB;
+      const cyclicTupleB = cyclicTupleA;
+      const cyclicArrayLift = lift(([cyclic]) => cyclic)(cyclicTupleA);
     `,
     ({ context, sourceFile }) => {
       const objectLift = initializer(sourceFile, "objectLift");
@@ -867,6 +900,7 @@ Deno.test("availability analysis propagates observations through composite lift 
       assertEquals(reasonsFor("arrayLift", "third"), ["error"]);
       assertEquals(reasonsFor("objectLift", "missing"), undefined);
       assertEquals(reasonsFor("declaredObjectLift", "declared"), undefined);
+      assertEquals(reasonsFor("cyclicArrayLift", "cyclic"), undefined);
     },
   );
 });
