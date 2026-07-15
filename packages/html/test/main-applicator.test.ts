@@ -327,6 +327,41 @@ Deno.test("DomApplicator - create elements", async (t) => {
     },
   );
 
+  await t.step(
+    "retains default aria attribute updates made while pending",
+    () => {
+      const doc = createMockDocument();
+      const applicator = createDomApplicator({
+        document: doc,
+        runtimeClient: createMockRuntimeClient(),
+        onEvent: () => {},
+      });
+
+      applicator.applyBatch({
+        batchId: 1,
+        ops: [
+          { op: "create-element", nodeId: 1, tagName: "button" },
+          { op: "set-prop", nodeId: 1, key: "aria-busy", value: false },
+          {
+            op: "set-prop",
+            nodeId: 1,
+            key: "data-cf-pending",
+            value: true,
+          },
+          { op: "set-prop", nodeId: 1, key: "aria-busy", value: "mixed" },
+          {
+            op: "remove-prop",
+            nodeId: 1,
+            key: "data-cf-pending",
+          },
+        ],
+      });
+
+      const button = applicator.getNode(1) as any;
+      assertEquals(button.getAttribute("aria-busy"), "mixed");
+    },
+  );
+
   await t.step("updates text nodes without DOM globals", () => {
     const doc = createMockDocument();
     const applicator = createDomApplicator({
