@@ -12,6 +12,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager as CutoverStorageManager } from "../src/storage/cache.deno.ts";
 import type {
   IStorageProviderWithReplica,
+  IStorageTransaction,
   StorageNotification,
 } from "../src/storage/interface.ts";
 import {
@@ -29,6 +30,14 @@ const signer = await Identity.fromPassphrase("memory-v2-reconnect-race");
 const space = signer.did();
 const DOCUMENT_MIME = "application/json" as const;
 
+const emulatedServer = (storageManager: object): MemoryV2Server.Server => {
+  const server = Reflect.get(storageManager, "server");
+  if (typeof server !== "function") {
+    throw new Error("Expected a memory/v2 emulated storage manager");
+  }
+  return (server as () => MemoryV2Server.Server).call(storageManager);
+};
+
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
   send(
@@ -44,6 +53,25 @@ type TestProvider = IStorageProviderWithReplica & {
     selector?: { path: string[]; schema: unknown },
   ): Promise<unknown>;
 };
+
+type CommitReadSource = Pick<IStorageTransaction, "getReadActivities">;
+type NativeCommit = Parameters<
+  NonNullable<IStorageProviderWithReplica["replica"]["commitNative"]>
+>[0];
+type NativeCommitResult = ReturnType<
+  NonNullable<IStorageProviderWithReplica["replica"]["commitNative"]>
+>;
+type ReplicaWithReadSourceCommit =
+  & Omit<
+    IStorageProviderWithReplica["replica"],
+    "commitNative"
+  >
+  & {
+    commitNative(
+      transaction: NativeCommit,
+      source?: CommitReadSource,
+    ): NativeCommitResult;
+  };
 
 class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   connectionCount = 0;
@@ -554,13 +582,7 @@ Deno.test("memory v2 runner confirms its own watched commit without an integrate
     assertEquals(result, { ok: {} });
     await storageManager.synced();
 
-    const candidate = storageManager as unknown as {
-      server?: () => MemoryV2Server.Server;
-    };
-    if (typeof candidate.server !== "function") {
-      throw new Error("Expected a memory/v2 emulated storage manager");
-    }
-    await candidate.server().idle();
+    await emulatedServer(storageManager).idle();
 
     const state = provider.replica.get(address) as
       | { since?: number }
@@ -592,14 +614,8 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
     if (!provider.replica.commitNative) {
       throw new Error("Expected memory v2 replica to support commitNative()");
     }
-    return provider.replica.commitNative({
-      operations: [{
-        op: "set",
-        id: uri,
-        type: DOCUMENT_MIME,
-        value: { value: { version: value } },
-      }],
-    }, {
+    const replica = provider.replica as ReplicaWithReadSourceCommit;
+    const source: CommitReadSource = {
       getReadActivities() {
         return [{
           space,
@@ -609,19 +625,22 @@ Deno.test("memory v2 runner can retry immediately after a conflict revert", asyn
           meta: { seq },
         }];
       },
-    } as any);
+    };
+
+    return replica.commitNative({
+      operations: [{
+        op: "set",
+        id: uri,
+        type: DOCUMENT_MIME,
+        value: { value: { version: value } },
+      }],
+    }, source);
   };
 
   let remoteClient: MemoryV2Client.Client | undefined;
   try {
-    const candidate = storageManager as unknown as {
-      server?: () => MemoryV2Server.Server;
-    };
-    if (typeof candidate.server !== "function") {
-      throw new Error("Expected a memory/v2 emulated storage manager");
-    }
     remoteClient = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(candidate.server()),
+      transport: MemoryV2Client.loopback(emulatedServer(storageManager)),
     });
     const remoteSession = await remoteClient.mount(
       space,
