@@ -29,7 +29,7 @@ was last checked against the code.
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (#3646) | graduate to always-on | implemented, on by default, rollback override retained |
-| [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
+| [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, on by default, explicit-false rollback retained |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
@@ -156,11 +156,11 @@ propagate](#how-flags-propagate).
   the optional `serverPrimaryExecutionV1` capability. When the flag is on, the
   server requires compatible clients and automatically claims every eligible
   action in every active compatible space; there is no per-space opt-in.
-- **Current default and planned end state.** Off by default in every runtime.
-  Both the server process and browser worker must enable it for a negotiated
-  connection. The planned end state is to graduate the protocol after the
-  phased authority rollout, then remove the flag once every supported client
-  obeys server-primary claims.
+- **Current default and planned end state.** On by default in every runtime.
+  An unset value enables the negotiated protocol; explicit `false` remains the
+  fleet-wide rollback override and must be deployed to both the server process
+  and browser worker. The planned end state is to remove the flag once every
+  supported client obeys server-primary claims.
 - **Status on 2026-07-14.** Runtime, environment, browser-worker, background-
   worker, memory handshake, connection-owned client root demand, one shared
   fenced Worker per active branch/space, durable legacy-background exclusion
@@ -177,9 +177,11 @@ propagate](#how-flags-propagate).
   deterministic cold-wake and replacement coverage. The 500-event
   counterbalanced browser/CPU acceptance gate passes; see the
   [accepted Phase 2 rollout report](../history/development/performance/server-primary-rollout-2026-07-13.md).
-  The flag is the only authority rollout control: off remains client-primary
-  behavior with no execution pool, while on is the final server-primary mode
-  for all eligible compatible pieces. The narrower
+  The protocol now defaults on with an explicit-false rollback; the deployed
+  flag-off/flag-on drill remains pending. The flag is the only authority rollout
+  control: off remains client-primary behavior with no execution pool, while on
+  is the final server-primary mode for all eligible compatible pieces. The
+  narrower
   `serverPrimaryExecutionClaimRoutingV1` and
   `serverPrimaryExecutionBuiltinPassivityV1` capabilities now advertise with
   the main flag. A server with the flag on rejects peers missing either

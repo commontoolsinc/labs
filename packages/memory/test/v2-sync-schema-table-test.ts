@@ -569,6 +569,11 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
       modernCellRep: flags.modernCellRep,
       persistentSchedulerState: flags.persistentSchedulerState,
       commitPreconditions: flags.commitPreconditions,
+      serverPrimaryExecutionV1: flags.serverPrimaryExecutionV1,
+      serverPrimaryExecutionClaimRoutingV1:
+        flags.serverPrimaryExecutionClaimRoutingV1,
+      serverPrimaryExecutionBuiltinPassivityV1:
+        flags.serverPrimaryExecutionBuiltinPassivityV1,
       ...(mode === "legacy" ? { syncSchemaTable: true } : {}),
     };
 

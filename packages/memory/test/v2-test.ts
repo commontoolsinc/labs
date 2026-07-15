@@ -18,9 +18,11 @@ import {
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetServerPrimaryExecutionConfig,
   resetSyncSchemaTableConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
+  setServerPrimaryExecutionConfig,
   setSyncSchemaTableConfig,
   toDocumentPath,
   toDocumentSelector,
@@ -129,10 +131,12 @@ describe("memory v2 flags", () => {
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
+    resetServerPrimaryExecutionConfig();
     resetSyncSchemaTableConfig();
     setModernCellRepConfig(false);
     setPersistentSchedulerStateConfig(false);
     setCommitPreconditionsConfig(false);
+    setServerPrimaryExecutionConfig(false);
     setSyncSchemaTableConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
@@ -152,14 +156,15 @@ describe("memory v2 flags", () => {
     setModernCellRepConfig(true);
     setPersistentSchedulerStateConfig(true);
     setCommitPreconditionsConfig(true);
+    setServerPrimaryExecutionConfig(true);
     setSyncSchemaTableConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
       persistentSchedulerState: true,
-      serverPrimaryExecutionV1: false,
-      serverPrimaryExecutionClaimRoutingV1: false,
-      serverPrimaryExecutionBuiltinPassivityV1: false,
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
       schedulerWriterLookup: true,
       commitPreconditions: true,
       syncSchemaTable: false,
@@ -170,6 +175,7 @@ describe("memory v2 flags", () => {
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
+    resetServerPrimaryExecutionConfig();
     resetSyncSchemaTableConfig();
   });
 

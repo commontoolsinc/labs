@@ -233,7 +233,7 @@ export interface ExperimentalOptions {
   persistentSchedulerState?: boolean | undefined;
   /** Enforce scheduler-v2 lineage and event-receipt commit preconditions (default on). */
   commitPreconditions?: boolean | undefined;
-  /** Enable the trusted-client server-primary execution protocol (default off). */
+  /** Enable the trusted-client server-primary execution protocol (default on). */
   serverPrimaryExecution?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at

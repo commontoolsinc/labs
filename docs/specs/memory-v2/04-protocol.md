@@ -31,9 +31,11 @@ rewrite. In particular:
 - the public one-shot read surface is currently `graph.query`
 - watch-set mutations return inline `sync` payloads, and steady-state topology
   shrink does not yet guarantee automatic `removes`
-- server-primary execution is an optional, default-off capability. Compatible
-  sessions carry connection-owned demand and receive claims/settlements inside
-  the existing ordered logical-session sync stream; no parallel control socket
+- server-primary execution is an optional capability that defaults on with an
+  explicit-false deployment rollback. Compatible sessions carry
+  connection-owned demand and receive claims/settlements inside the existing
+  ordered logical-session sync stream; positive authority still requires the
+  owner-managed per-space execution policy, and no parallel control socket
   exists
 
 ## 4.1 Transport
@@ -56,9 +58,9 @@ The client MUST declare its protocol version in the first WebSocket message:
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "schedulerWriterLookup": true,
-    "serverPrimaryExecutionV1": false,
-    "serverPrimaryExecutionClaimRoutingV1": false,
-    "serverPrimaryExecutionBuiltinPassivityV1": false
+    "serverPrimaryExecutionV1": true,
+    "serverPrimaryExecutionClaimRoutingV1": true,
+    "serverPrimaryExecutionBuiltinPassivityV1": true
   }
 }
 ```
@@ -73,9 +75,9 @@ If the server accepts the protocol, it returns:
     "modernCellRep": true,
     "persistentSchedulerState": true,
     "schedulerWriterLookup": true,
-    "serverPrimaryExecutionV1": false,
-    "serverPrimaryExecutionClaimRoutingV1": false,
-    "serverPrimaryExecutionBuiltinPassivityV1": false
+    "serverPrimaryExecutionV1": true,
+    "serverPrimaryExecutionClaimRoutingV1": true,
+    "serverPrimaryExecutionBuiltinPassivityV1": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -160,9 +162,10 @@ requires reconnecting clients (normally by restarting/redeploying the host).
 The two narrower capabilities are positive promises by the client:
 `serverPrimaryExecutionClaimRoutingV1` says it can route computation writes by
 claim, and `serverPrimaryExecutionBuiltinPassivityV1` says it can keep claimed
-async builtins passive. Both are absent-false and remain false in ordinary
-builds until W2.1 and W2.3 respectively. The server only sends a claim class to
-sessions that advertised the matching promise.
+async builtins passive. Both are absent-false for compatibility with older or
+explicitly disabled peers. Current builds advertise both with the main
+default-on capability; the server only sends a claim class to sessions that
+advertised the matching promise.
 
 ### 4.1.2 Logical Sessions and Resume
 

@@ -629,7 +629,7 @@ Deno.test("unserved settlement dirties the claimed producer before exact revoke"
 });
 
 Deno.test("flag off keeps an otherwise matching claimed computation upstream", async () => {
-  resetServerPrimaryExecutionConfig();
+  setServerPrimaryExecutionConfig(false);
   const factory = new OverlaySessionFactory();
   const storage = OverlayStorageManager.connect(factory);
   try {

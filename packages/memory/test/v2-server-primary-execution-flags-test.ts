@@ -10,11 +10,33 @@ type ServerPrimaryExecutionFlagApi = {
 
 const api = MemoryV2 as unknown as ServerPrimaryExecutionFlagApi;
 
-Deno.test("server-primary execution is an optional protocol capability that defaults off", () => {
+Deno.test("server-primary execution defaults on with an explicit rollback override", () => {
   api.resetServerPrimaryExecutionConfig();
   try {
     assertEquals(
       api.getMemoryProtocolFlags().serverPrimaryExecutionV1,
+      true,
+    );
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionClaimRoutingV1,
+      true,
+    );
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionBuiltinPassivityV1,
+      true,
+    );
+
+    api.setServerPrimaryExecutionConfig(false);
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionV1,
+      false,
+    );
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionClaimRoutingV1,
+      false,
+    );
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionBuiltinPassivityV1,
       false,
     );
 

@@ -90,7 +90,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: true,
         commitPreconditions: true,
-        serverPrimaryExecution: false,
+        serverPrimaryExecution: true,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -229,7 +229,7 @@ describe("ExperimentalOptions", () => {
       expect(getModernCellRepConfig()).toBe(initial);
       expect(getPersistentSchedulerStateConfig()).toBe(true);
       expect(getCommitPreconditionsConfig()).toBe(true);
-      expect(getServerPrimaryExecutionConfig()).toBe(false);
+      expect(getServerPrimaryExecutionConfig()).toBe(true);
     });
   });
 });

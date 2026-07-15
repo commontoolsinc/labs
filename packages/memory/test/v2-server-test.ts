@@ -2792,6 +2792,11 @@ Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", as
       upserts: [],
       removes: [],
       caughtUpLocalSeq: 2,
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [],
+      },
     });
     assertEquals(messages.length, 0);
   } finally {

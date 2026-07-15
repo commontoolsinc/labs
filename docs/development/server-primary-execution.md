@@ -1,7 +1,7 @@
 # Server-Primary Execution Rollout
 
 Server-primary execution is implemented through the trusted-client authority
-split and remains off by default. It moves claimed derived writes and supported
+split and is on by default. It moves claimed derived writes and supported
 fetch/generate effects to one user-sponsored server Worker while clients keep
 speculatively computing for UI latency. It does not yet reduce browser action
 runs. There is one rollout switch: when it is off, clients remain primary and
@@ -12,8 +12,8 @@ within that final server-primary posture, not another authority mode.
 ## Prerequisites
 
 - Deploy toolshed and shell/client builds from the same revision.
-- Enable persistent scheduler state (the current default) and
-  `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true` on the toolshed and clients.
+- Leave persistent scheduler state and server-primary execution at their
+  current defaults, or explicitly set both true on the toolshed and clients.
 - Restart/redeploy both sides so the memory handshake advertises
   `serverPrimaryExecutionV1`, claim routing, and builtin passivity together.
 - Verify first with staging pieces whose active computations are same-space and
@@ -32,12 +32,12 @@ within that final server-primary posture, not another authority mode.
 
 ## Enable server-primary execution
 
-Set `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true` in both the toolshed and
-client build, then restart/redeploy both sides. Compatible clients publish
-demand and the shared pool starts one Worker per active eligible branch/space.
-The Worker discovers the graph and claims each servable action automatically.
-Actions that are not yet servable remain client-primary; their server discovery
-attempts may be reported as shadow or unserved diagnostics.
+Leave `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` unset, or set it to `true`, in
+both the toolshed and client build, then restart/redeploy both sides. Compatible
+clients publish demand and the shared pool starts one Worker per active eligible
+branch/space. The Worker discovers the graph and claims each servable action
+automatically. Actions that are not yet servable remain client-primary; their
+server discovery attempts may be reported as shadow or unserved diagnostics.
 
 Verify:
 
@@ -203,8 +203,9 @@ latency without a shared trace or timestamp.
 
 ## Deployment rollback
 
-1. Disable `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` on the server and restart it.
-2. Rebuild/restart clients with the flag disabled.
+1. Set `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=false` on the server and restart
+   it.
+2. Rebuild/restart clients with the same explicit-false override.
 
 Do not disable only the clients. A server-primary host rejects an incompatible
 client because falling back silently would let stale clients duplicate claimed
@@ -212,8 +213,9 @@ writes or effects. No data migration or overlay cleanup command is required.
 
 ## Validation and rollout limits
 
-Run the repository gates in both authority modes. Persistent scheduler state is
-on in both; only the server-primary flag changes:
+Run the repository gates in both supported postures: the explicit-false
+rollback and the default-on server-primary mode. Persistent scheduler state is
+on in both:
 
 ```sh
 EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=false \
@@ -222,11 +224,16 @@ EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true deno task test
 EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=false \
 EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true deno task integration
 
-EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true \
-EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true deno task test
+deno task test
 
-EXPERIMENTAL_SERVER_PRIMARY_EXECUTION=true \
-EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true deno task integration
+deno task integration
+```
+
+The focused flag tests also pin the explicit-false rollback:
+
+```sh
+deno test -A packages/memory/test/v2-server-primary-execution-flags-test.ts \
+  packages/runner/test/experimental-options.test.ts
 ```
 
 The three-client executor fixtures cover claimed pure actions and supported
