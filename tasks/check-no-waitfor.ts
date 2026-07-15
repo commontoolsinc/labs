@@ -42,6 +42,9 @@ export const ALLOWLIST: ReadonlySet<string> = new Set([
   // Process-global Toolshed pool health has no subscription or page event; the
   // rollout profile must fence asynchronous drains before creating its demand.
   "packages/patterns/integration/server-primary-rollout-profile.test.ts",
+  // Cross-process rollout instrumentation reads server health and browser
+  // routing snapshots, neither of which exposes a completion notification.
+  "packages/patterns/integration/server-execution-measurement.ts",
   // MockDoc rendered-HTML reads and fresh cell.sync() round-trips, with no
   // completion callback the test can hook.
   "packages/runtime-client/integration/client.test.ts",

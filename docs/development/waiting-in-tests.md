@@ -184,6 +184,15 @@ present. These observe runtime API readiness, not a UI condition, and are
 env-gated profiling scaffolding rather than assertions. If converted, await a
 runtime-ready signal directly rather than installing a DOM waiter.
 
+`packages/patterns/integration/server-execution-measurement.ts` fences a
+profiling sample on two cross-process snapshot APIs: Toolshed server-health
+counters and browser runtime routing diagnostics. Neither API publishes a
+completion notification to the test process, and a DOM mutation does not imply
+that either snapshot changed, so a bounded poll is the honest readiness and
+drain check. The workload itself still uses the browser runtime's deterministic
+settling barriers; this exception covers only starting and finishing the
+instrumentation window.
+
 ### A shared state primitive
 
 `packages/integration/shell-utils.ts`'s `waitForState` compares the shell's
