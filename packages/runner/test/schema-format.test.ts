@@ -1,17 +1,18 @@
 import { assert, assertEquals } from "@std/assert";
 import { schemaToTypeString } from "../src/schema-format.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 // Tests for schemaToTypeString - TypeScript-like schema representation
 
 Deno.test("schemaToTypeString converts basic types", () => {
-  assertEquals(schemaToTypeString({ type: "string" } as any), "string");
-  assertEquals(schemaToTypeString({ type: "number" } as any), "number");
-  assertEquals(schemaToTypeString({ type: "boolean" } as any), "boolean");
-  assertEquals(schemaToTypeString({ type: "null" } as any), "null");
+  assertEquals(schemaToTypeString({ type: "string" }), "string");
+  assertEquals(schemaToTypeString({ type: "number" }), "number");
+  assertEquals(schemaToTypeString({ type: "boolean" }), "boolean");
+  assertEquals(schemaToTypeString({ type: "null" }), "null");
 });
 
 Deno.test("schemaToTypeString converts arrays", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "array",
     items: { type: "string" },
   };
@@ -19,7 +20,7 @@ Deno.test("schemaToTypeString converts arrays", () => {
 });
 
 Deno.test("schemaToTypeString converts objects with properties", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       name: { type: "string" },
@@ -34,7 +35,7 @@ Deno.test("schemaToTypeString converts objects with properties", () => {
 });
 
 Deno.test("schemaToTypeString marks required fields without ?", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       name: { type: "string" },
@@ -48,7 +49,7 @@ Deno.test("schemaToTypeString marks required fields without ?", () => {
 });
 
 Deno.test("schemaToTypeString converts Stream to function syntax", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     asCell: ["stream"],
     properties: {
@@ -62,7 +63,7 @@ Deno.test("schemaToTypeString converts Stream to function syntax", () => {
 });
 
 Deno.test("schemaToTypeString converts Cell to Cell<T> syntax", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     asCell: ["cell"],
     properties: {
@@ -79,13 +80,13 @@ Deno.test("schemaToTypeString converts opaque cells to FactoryInput", () => {
     schemaToTypeString({
       type: "string",
       asCell: ["opaque"],
-    } as any),
+    }),
     "FactoryInput",
   );
 });
 
 Deno.test('schemaToTypeString formats asCell: ["stream", "cell"] as Stream<Cell<T>>', () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "number",
     asCell: ["stream", "cell"],
   };
@@ -99,27 +100,27 @@ Deno.test("schemaToTypeString restores scope wrappers", () => {
     schemaToTypeString({
       type: "string",
       scope: "user",
-    } as any),
+    }),
     "PerUser<string>",
   );
   assertEquals(
     schemaToTypeString({
       type: "string",
       scope: "any",
-    } as any),
+    }),
     "PerAny<string>",
   );
   assertEquals(
     schemaToTypeString({
       type: "string",
       asCell: [{ kind: "cell", scope: "session" }],
-    } as any),
+    }),
     "PerSession<Cell<string>>",
   );
 });
 
 Deno.test("schemaToTypeString handles enums as union literals", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     enum: ["open", "closed", "pending"],
   };
   const result = schemaToTypeString(schema);
@@ -127,10 +128,10 @@ Deno.test("schemaToTypeString handles enums as union literals", () => {
 });
 
 Deno.test("schemaToTypeString resolves $ref from $defs", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     $ref: "#/$defs/MyType",
   };
-  const defs: any = {
+  const defs: Record<string, JSONSchema> = {
     MyType: { type: "string" },
   };
   const result = schemaToTypeString(schema, { defs });
@@ -138,10 +139,10 @@ Deno.test("schemaToTypeString resolves $ref from $defs", () => {
 });
 
 Deno.test("schemaToTypeString uses type name for large $ref definitions", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     $ref: "#/$defs/LargeType",
   };
-  const defs: any = {
+  const defs: Record<string, JSONSchema> = {
     LargeType: {
       type: "object",
       properties: {
@@ -158,7 +159,7 @@ Deno.test("schemaToTypeString uses type name for large $ref definitions", () => 
 });
 
 Deno.test("schemaToTypeString skips $-prefixed properties", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       $UI: { type: "object" },
@@ -173,7 +174,7 @@ Deno.test("schemaToTypeString skips $-prefixed properties", () => {
 });
 
 Deno.test("schemaToTypeString handles anyOf as union", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     anyOf: [{ type: "string" }, { type: "number" }],
   };
   const result = schemaToTypeString(schema);
@@ -181,7 +182,7 @@ Deno.test("schemaToTypeString handles anyOf as union", () => {
 });
 
 Deno.test("schemaToTypeString limits recursion depth", () => {
-  const deepSchema: any = {
+  const deepSchema: JSONSchema = {
     type: "object",
     properties: {
       a: {
@@ -208,7 +209,7 @@ Deno.test("schemaToTypeString limits recursion depth", () => {
 
 Deno.test("schemaToTypeString produces compact output for complex schema", () => {
   // This is the example from the user's request
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       test: { type: "string" },
@@ -252,7 +253,7 @@ Deno.test("schemaToTypeString produces compact output for complex schema", () =>
 
 Deno.test("schemaToTypeString converts PatternToolResult to function syntax", () => {
   // PatternToolResult<{ content: string }> schema
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       pattern: {
@@ -284,7 +285,7 @@ Deno.test("schemaToTypeString converts PatternToolResult to function syntax", ()
 
 Deno.test("schemaToTypeString handles nested PatternToolResult in object", () => {
   // Schema for a piece output with handler properties
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       name: { type: "string" },
@@ -327,7 +328,7 @@ Deno.test("schemaToTypeString handles nested PatternToolResult in object", () =>
 });
 
 Deno.test("schemaToTypeString formats fixture-style PatternToolResult without leaking internals", () => {
-  const schema: any = {
+  const schema: JSONSchema = {
     type: "object",
     properties: {
       search: {
