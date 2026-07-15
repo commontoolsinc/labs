@@ -29,7 +29,10 @@ import {
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { VDomRenderer } from "./main/renderer.ts";
-import { setPendingRenderState } from "./pending-render.ts";
+import {
+  applyPendingRenderAuthoredAttributeUpdate,
+  setPendingRenderState,
+} from "./pending-render.ts";
 //import { animate } from "./debug-element.ts";
 
 /** Tracks an active rendering for debug inspection. */
@@ -613,10 +616,17 @@ function bindProps(
   }
 
   for (const [key, value] of Object.entries(props as Props)) {
-    const setProperty = <T>(element: T, key: string, value: unknown) =>
-      key === "style" && value && typeof value === "object"
-        ? setProp(element, key, styleObjectToCssString(value))
-        : setProp(element, key, value);
+    const setProperty = (
+      element: HTMLElement,
+      key: string,
+      value: unknown,
+    ) => {
+      applyPendingRenderAuthoredAttributeUpdate(element, key, () => {
+        key === "style" && value && typeof value === "object"
+          ? setProp(element, key, styleObjectToCssString(value))
+          : setProp(element, key, value);
+      });
+    };
 
     if (!isCellHandle(value)) {
       setProperty(element, key, value);

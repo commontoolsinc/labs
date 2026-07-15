@@ -1323,6 +1323,51 @@ describe("children rendering", () => {
     cancel();
   });
 
+  it("keeps legacy reactive prop updates inert while the child is pending", async () => {
+    const { renderOptions, document } = mock;
+    const options = {
+      ...renderOptions,
+      setProp<T>(element: T, key: string, value: unknown) {
+        if (key === "inert") {
+          const node = element as unknown as HTMLElement;
+          if (value) node.setAttribute(key, "");
+          else node.removeAttribute(key);
+          return;
+        }
+        renderOptions.setProp!(element, key, value);
+      },
+    };
+    const inert = reactiveChild(true);
+    const child = reactiveChild<VNode | DataUnavailable>(
+      DataUnavailable.pending(),
+    );
+    const vnode = {
+      type: "vnode" as const,
+      name: "div",
+      props: {},
+      children: [child],
+    };
+    const parent = document.getElementById("root")!;
+
+    const cancel = renderImpl(parent, vnode as unknown as VNode, options);
+    await child.set({
+      type: "vnode",
+      name: "button",
+      props: { inert },
+      children: ["Ready"],
+    });
+    const button = parent.getElementsByTagName("button")[0]!;
+    assert.equal(button.getAttribute("inert"), "");
+
+    await child.set(DataUnavailable.pending());
+    await inert.set(false);
+    assert.equal(button.getAttribute("data-cf-pending"), "true");
+    assert.equal(button.getAttribute("inert"), "");
+    assert.equal(button.getAttribute("aria-busy"), "true");
+
+    cancel();
+  });
+
   it("renders children in correct order [A, B]", () => {
     const { renderOptions, document } = mock;
     const vnode = {
