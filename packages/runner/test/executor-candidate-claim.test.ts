@@ -96,9 +96,11 @@ type CandidateAwareFactoryOptions = DenoSpaceExecutorFactoryOptions & {
 class FakeWorker extends EventTarget implements ExecutorWorkerLike {
   readonly messages: unknown[] = [];
   readonly pendingClaimedRunIds: number[] = [];
+  readonly pendingSetDemandIds: number[] = [];
   terminated = false;
   settledSeq = 41;
   acknowledgeClaimedRuns = true;
+  acknowledgeSetDemand = true;
 
   boot(): void {
     this.dispatchEvent(
@@ -169,6 +171,16 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
     }
   }
 
+  acknowledgeLatestSetDemand(): void {
+    const requestId = this.pendingSetDemandIds.pop();
+    if (requestId === undefined) throw new Error("set-demand request missing");
+    this.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "complete", requestId },
+      }),
+    );
+  }
+
   writerDiscovery(discovery: WriterDiscovery): void {
     this.dispatchEvent(
       new MessageEvent("message", {
@@ -220,6 +232,13 @@ class FakeWorker extends EventTarget implements ExecutorWorkerLike {
         throw new Error("claimed run request missing");
       }
       this.pendingClaimedRunIds.push(request.requestId);
+    } else if (
+      request.type === "set-demand" && !this.acknowledgeSetDemand
+    ) {
+      if (request.requestId === undefined) {
+        throw new Error("set-demand request missing");
+      }
+      this.pendingSetDemandIds.push(request.requestId);
     } else if (
       request.type === "set-demand" || request.type === "wake" ||
       request.type === "stop" ||
@@ -862,6 +881,51 @@ Deno.test("the explicit routing capability turns an exact CandidateClaim into an
     });
     assertEquals(crashes, []);
   } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("candidate authority waits until the Worker finishes activating demand", async () => {
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+  });
+  try {
+    worker.acknowledgeSetDemand = false;
+    const changing = executor.setDemand([
+      CLAIM_KEY.pieceId,
+      "space:of:another-piece",
+    ]);
+    await flushClaimControl();
+    assertEquals(worker.pendingSetDemandIds.length, 1);
+
+    // The real Worker emits candidates while set-demand is still traversing
+    // the newly demanded roots. It cannot process run-claimed-action until
+    // that same serialized traversal returns.
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+    assertEquals(server.claimRequests, []);
+    assertEquals(
+      worker.messages.some((message) =>
+        (message as { type?: string }).type === "run-claimed-action"
+      ),
+      false,
+    );
+
+    worker.acknowledgeLatestSetDemand();
+    await changing;
+    await flushClaimControl();
+
+    assertEquals(server.claimRequests, [{
+      lease: LEASE,
+      claimKey: CLAIM_KEY,
+    }]);
+    assertEquals(
+      worker.messages.map((message) => (message as { type?: string }).type),
+      ["initialize", "set-demand", "run-claimed-action"],
+    );
+    assertEquals(crashes, []);
+  } finally {
+    worker.acknowledgeSetDemand = true;
     await executor.stop();
   }
 });

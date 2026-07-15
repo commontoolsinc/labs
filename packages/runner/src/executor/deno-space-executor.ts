@@ -279,6 +279,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
     PromiseWithResolvers<WorkerResponse>
   >();
   readonly #booted = Promise.withResolvers<void>();
+  #candidateAdmissionControl = Promise.resolve();
   #claimControl = Promise.resolve();
   #requestId = 0;
   #demandGeneration = 0;
@@ -358,21 +359,23 @@ class DenoSpaceExecutor implements SpaceExecutor {
     const startup = (async () => {
       await this.#booted.promise;
       options.signal?.throwIfAborted();
-      await this.#request("initialize", {
-        space: this.#startOptions.space,
-        branch: this.#startOptions.branch,
-        principal: this.#startOptions.lease.onBehalfOf,
-        leaseGeneration: this.#startOptions.lease.leaseGeneration,
-        pieces: [...this.#startOptions.pieces],
-        port: this.#provider.port,
-        builtinBrokerPort: this.#builtinBrokerPort,
-        apiUrl: options.apiUrl.href,
-        patternApiUrl: (options.patternApiUrl ?? options.apiUrl).href,
-        experimental: options.experimental ?? {},
-        ...(options.protocolFlags !== undefined
-          ? { protocolFlags: options.protocolFlags }
-          : {}),
-      }, [this.#provider.port, this.#builtinBrokerPort]);
+      await this.#serializeCandidateAdmission(() =>
+        this.#request("initialize", {
+          space: this.#startOptions.space,
+          branch: this.#startOptions.branch,
+          principal: this.#startOptions.lease.onBehalfOf,
+          leaseGeneration: this.#startOptions.lease.leaseGeneration,
+          pieces: [...this.#startOptions.pieces],
+          port: this.#provider.port,
+          builtinBrokerPort: this.#builtinBrokerPort,
+          apiUrl: options.apiUrl.href,
+          patternApiUrl: (options.patternApiUrl ?? options.apiUrl).href,
+          experimental: options.experimental ?? {},
+          ...(options.protocolFlags !== undefined
+            ? { protocolFlags: options.protocolFlags }
+            : {}),
+        }, [this.#provider.port, this.#builtinBrokerPort])
+      );
     })();
     await this.#awaitStartup(startup, options.signal);
   }
@@ -410,19 +413,23 @@ class DenoSpaceExecutor implements SpaceExecutor {
 
   async setDemand(pieces: readonly string[]): Promise<void> {
     const next = new Set(pieces);
-    const shrunk = [...this.#demandedPieces].some((piece) => !next.has(piece));
-    if (shrunk) {
-      this.#demandGeneration++;
-      await this.#claimControl;
-      this.#revokeClaims();
-    }
-    await this.#request("set-demand", {
-      pieces: [...next],
-      demandGeneration: this.#demandGeneration,
-      resetClaims: shrunk,
+    await this.#serializeCandidateAdmission(async () => {
+      const shrunk = [...this.#demandedPieces].some((piece) =>
+        !next.has(piece)
+      );
+      if (shrunk) {
+        this.#demandGeneration++;
+        await this.#claimControl;
+        this.#revokeClaims();
+      }
+      await this.#request("set-demand", {
+        pieces: [...next],
+        demandGeneration: this.#demandGeneration,
+        resetClaims: shrunk,
+      });
+      this.#demandedPieces.clear();
+      for (const piece of next) this.#demandedPieces.add(piece);
     });
-    this.#demandedPieces.clear();
-    for (const piece of next) this.#demandedPieces.add(piece);
   }
 
   executionMetrics(): ExecutorExecutionMetricsSnapshot {
@@ -430,7 +437,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
   }
 
   async wake(): Promise<void> {
-    await this.#request("wake");
+    await this.#serializeCandidateAdmission(() => this.#request("wake"));
   }
 
   async settle(): Promise<number> {
@@ -450,6 +457,7 @@ class DenoSpaceExecutor implements SpaceExecutor {
         this.#booted.reject(error);
         this.#rejectPending(error);
       } else {
+        await this.#candidateAdmissionControl;
         await this.#claimControl;
         if (!this.#failed) await this.#request("stop");
       }
@@ -488,6 +496,18 @@ class DenoSpaceExecutor implements SpaceExecutor {
     return pending.promise;
   }
 
+  #serializeCandidateAdmission<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.#candidateAdmissionControl.then(operation);
+    // Keep the serialization lane usable after a failed operation. The caller
+    // still observes the original rejection and applies the relevant failure
+    // policy.
+    this.#candidateAdmissionControl = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
   #onMessage = (event: Event): void => {
     const message = (event as MessageEvent<unknown>).data;
     if (!isWorkerResponse(message)) {
@@ -504,9 +524,8 @@ class DenoSpaceExecutor implements SpaceExecutor {
     }
     if (message.type === "candidate-claim") {
       const candidate = message.candidate!;
-      this.#claimControl = this.#claimControl.then(
-        () => this.#handleCandidate(candidate),
-        () => this.#handleCandidate(candidate),
+      void this.#serializeCandidateAdmission(() =>
+        this.#handleCandidate(candidate)
       ).catch((error) => this.#fail(error));
       return;
     }
@@ -600,7 +619,10 @@ class DenoSpaceExecutor implements SpaceExecutor {
         (this.#protocolFlags.serverPrimaryExecutionBuiltinPassivityV1 ===
             true && isServerExecutableBuiltinId(candidate.builtinId)));
     const mapKey = candidateKey(candidate);
-    if (!routingEnabled || this.#claims.has(mapKey) || this.#stopped) return;
+    if (
+      !routingEnabled || this.#claims.has(mapKey) || this.#stopped ||
+      this.#failed
+    ) return;
 
     const claim = await this.#server.setExecutionClaim(
       this.#startOptions.lease,
