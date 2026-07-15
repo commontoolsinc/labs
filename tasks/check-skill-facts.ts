@@ -11,8 +11,8 @@
 //   1. Every `@commonfabric/...` import specifier resolves. A bare package
 //      reference needs a root (".") export; a subpath needs that subpath in the
 //      package's `exports`.
-//   2. Every repo path cited inline in backticks exists. `citedPath` and
-//      `isRooted` below define what counts as a path citation.
+//   2. Every repo path cited in backticks exists. `citedPath` and `isRooted`
+//      below define what counts as a path citation.
 //
 // Semantic drift — a canonical home that moved or was renamed, advice that is
 // now wrong, something missing — is the job of the LLM audit
@@ -263,8 +263,12 @@ export function skillDirOf(docPath: string): string {
   return parts.length > 2 ? `${parts[0]}/${parts[1]}` : parts[0];
 }
 
-/** Subpath segments allow PascalCase and dots (e.g. data-model/SchemaAndHash). */
-const SPECIFIER_RE = /@commonfabric\/[a-z0-9-]+(?:\/[\w.-]+)*/g;
+/**
+ * A `@commonfabric/...` specifier, capturing the package name and the subpath
+ * after it, which is empty for a bare reference. Subpath segments allow
+ * PascalCase and dots (e.g. data-model/SchemaAndHash).
+ */
+const SPECIFIER_RE = /(@commonfabric\/[a-z0-9-]+)((?:\/[\w.-]+)*)/g;
 const BACKTICKED_RE = /`([^`\n]+)`/g;
 
 /**
@@ -281,10 +285,8 @@ export function collectDrift(
     const skillDir = skillDirOf(doc.path);
 
     for (const match of doc.text.matchAll(SPECIFIER_RE)) {
-      const spec = match[0];
-      const parts = spec.match(/^(@commonfabric\/[a-z0-9-]+)(?:\/(.+))?$/);
-      if (!parts) continue;
-      const [, base, sub] = parts;
+      const [spec, base, subpath] = match;
+      const sub = subpath.slice(1); // drop the leading "/"; empty when bare
       const line = lineAt(doc.text, match.index);
       if (!exportsByName.has(base)) {
         drift.push({

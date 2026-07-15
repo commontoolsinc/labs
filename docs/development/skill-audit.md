@@ -28,10 +28,10 @@ reviewed its own PR). The audit is just cf-review pointed at a skill.
 
 ## What the tripwire treats as a citation
 
-Skills use backticks for far more than paths, so the tripwire only checks an
-inline backticked token when it is shaped like a path and is rooted at a
-directory that really exists — either at the repo root or inside the citing
-skill's own directory. Both rootings are in use: `skills/cf` names
+Skills use backticks for far more than paths, so the tripwire only checks a
+backticked token when it is shaped like a path and is rooted at a directory that
+really exists — either at the repo root or inside the citing skill's own
+directory. Both rootings are in use: `skills/cf` names
 `scripts/check-local-dev.sh` at the repo root, while `skills/agent-browser` names
 `scripts/form-automation.sh`, which lives in `skills/agent-browser/scripts/`.
 
@@ -40,7 +40,11 @@ than a path. A token with no directory separator has nothing to root it. Prose
 (`async/await`), flags (`-s/--space`), module specifiers
 (`lit/directives/class-map.js`) and paths inside a mounted filesystem
 (`input/contacts.json`) do not start with a real directory, so they are skipped.
-Fenced code blocks are not scanned at all.
+
+The backticks are what mark a token as a citation, wherever it sits. A path
+written bare is not checked, which is why the paths in fenced code blocks mostly
+go unseen — fenced content is rarely backticked. Backtick one inside a fence and
+it is checked like any other.
 
 The rooting requirement cuts both ways: a real path written in an abbreviated
 form that omits the directory rooting it is skipped as well, so it rots unseen.
