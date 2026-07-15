@@ -3,9 +3,7 @@ import {
   computed,
   Default,
   entityRefToString,
-  handler,
   NAME,
-  navigateTo,
   pattern,
   type PerSession,
   type PerUser,
@@ -18,8 +16,10 @@ import {
 
 import Topic, {
   asArray,
+  crossrefChipRow,
   crossrefJoin,
   fidPayload,
+  openTopic,
   snippet,
   topicCorpus,
   type TopicPiece,
@@ -85,43 +85,10 @@ export interface TopicsOutput {
   submitTopic: Stream<void>;
 }
 
-/** Row navigation, bound per topic card. Module-scope handler (not an inline
- * closure) so embedders and tests can bind and drive it directly. */
-export const openTopic = handler<void, { topic: TopicPiece }>(
-  (_, { topic }) => {
-    navigateTo(topic);
-  },
-);
-
-/** One row of crossref chips ("references →" / "← referenced by"): each chip
- * names a sibling topic and navigates to it. Chips bind against direct
- * elements of the board's `topics` list — a handler bound to a piece nested
- * inside a derived wrapper object silently keeps the consuming UI computed
- * from ever running. Module-scope and pure so the single-runtime suite can
- * also drive the exact markup directly (pinning the no-edges → null branch)
- * alongside the real card path it renders via continuous UI demand. */
-export const crossrefChipRow = (
-  caption: string,
-  accent: boolean,
-  list: TopicPiece[],
-  indices: number[],
-) =>
-  indices.length === 0
-    ? null
-    : (
-      <cf-hstack gap="1" align="center" style="flex-wrap: wrap;">
-        <cf-text variant="caption" tone="muted">{caption}</cf-text>
-        {indices.map((j) => (
-          <cf-chip
-            label={snippet(list[j]?.title || "(untitled topic)", 40)}
-            size="xs"
-            color={accent ? "accent" : "neutral"}
-            interactive
-            oncf-click={openTopic({ topic: list[j] })}
-          />
-        ))}
-      </cf-hstack>
-    );
+// Navigation + chip-row live with the other shared pieces in topic.tsx (the
+// detail page renders the same chips); re-exported here so embedders and
+// tests keep importing them from the tracker.
+export { crossrefChipRow, openTopic } from "./topic.tsx";
 
 export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const newTitle = new Writable.perSession("");
@@ -134,6 +101,10 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       createdAt: safeDateNow(),
       createdByName: (myName.get() ?? "").trim() || "someone",
       myName,
+      // The board's own list, so the detail page can derive its connections
+      // and the editor has a mention universe (backfilled as a one-time
+      // link-bind on pieces created before this input existed).
+      mentionable: topics,
     });
     // Mergeable append: concurrent creates from different users all land.
     topics.push(piece);

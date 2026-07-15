@@ -10,7 +10,10 @@ The board also surfaces the corpus's **prose reference graph**: any topic fid
 pasted in a body, comment, or link URL (bare, `of:`-prefixed, page URL, or
 percent-encoded share link) becomes a navigable "references →" / "← referenced
 by" chip on the topic's card, and the graph is exported as the `crossrefs`
-output for headless consumers.
+output for headless consumers. Each topic also derives its own row of the graph
+on its detail page (a **Connections** card) from the `mentionable` input — a
+reference to the board's own topics list, wired at creation like `myName` and
+backfillable as a one-time link-bind on pre-existing pieces.
 
 Deliberately absent until reached for: statuses (not even open/closed), labels,
 assignees, attachments, nesting. What a topic grows next is part of the
@@ -33,6 +36,11 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   Edit→Save toggle rather than a live-bound textarea.
 - **`myName` is `PerUser` on the shared piece** — one tracker, one name per
   authenticated identity, shared with every topic the tracker creates.
+- **`mentionable` is a structural reference, not derived data.** The board
+  passes its own topics list at creation; the topic derives its Connections
+  read-side from it (SELF + equals to find its own row). Requires the
+  path-scoped wildcard fix (#4714) — the derive combines a resolveAsCell chain
+  with an equals-only SELF capture in one computed.
 - **Cross-references are derived at read time, never persisted.** The board
   rescans the whole corpus per render (trivial at board scale) instead of
   materializing backlinks into topics: an index pattern that writes derived

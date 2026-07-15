@@ -2,11 +2,16 @@ import {
   action,
   computed,
   Default,
+  entityRefToString,
+  equals,
+  handler,
   NAME,
+  navigateTo,
   pattern,
   type PerSession,
   type PerUser,
   safeDateNow,
+  SELF,
   Stream,
   UI,
   type VNode,
@@ -46,6 +51,12 @@ export interface TopicInput {
    * own value on the same shared piece. The tracker passes its cell down so one
    * name covers the whole board. */
   myName?: PerUser<Writable<string | Default<"">>>;
+  /** The board's own topics list — the sibling set for this topic's derived
+   * crossrefs and the mention universe for authoring. A reference to the
+   * tracker's array, wired at creation like `myName` (and backfillable as a
+   * one-time link-bind on pieces created before it existed). Absent, the
+   * detail page simply derives no connections. */
+  mentionable?: Writable<TopicPiece[] | Default<[]>>;
 }
 
 /**
@@ -71,6 +82,10 @@ export interface TopicPiece {
   commentCount: number;
   /** Max of createdAt and the newest comment — the tracker sorts by this. */
   lastActivityAt: number;
+  /** This topic's own place in the board's prose graph, derived read-side
+   * from `mentionable` (indices into it, so chips can bind its direct
+   * elements). Both sets stay empty until `mentionable` is wired. */
+  crossrefs: { refsOut: number[]; referencedBy: number[] };
   addComment: Stream<{ body: string }>;
   addLink: Stream<{ kind: TopicLinkKind; url: string; label: string }>;
   setBody: Stream<{ body: string }>;
@@ -235,6 +250,45 @@ export const crossrefJoin = (
   return { refsOut, referencedBy };
 };
 
+/** Row navigation, bound per topic card and per crossref chip. Module-scope
+ * handler (not an inline closure) so embedders and tests can bind and drive
+ * it directly. */
+export const openTopic = handler<void, { topic: TopicPiece }>(
+  (_, { topic }) => {
+    navigateTo(topic);
+  },
+);
+
+/** One row of crossref chips ("references →" / "← referenced by"): each chip
+ * names a sibling topic and navigates to it. Chips bind against direct
+ * elements of a topics list — a handler bound to a piece nested inside a
+ * derived wrapper object silently keeps the consuming UI computed from ever
+ * running. Module-scope and pure so the single-runtime suite can also drive
+ * the exact markup directly (pinning the no-edges → null branch) alongside
+ * the real card path it renders via continuous UI demand. */
+export const crossrefChipRow = (
+  caption: string,
+  accent: boolean,
+  list: TopicPiece[],
+  indices: number[],
+) =>
+  indices.length === 0
+    ? null
+    : (
+      <cf-hstack gap="1" align="center" style="flex-wrap: wrap;">
+        <cf-text variant="caption" tone="muted">{caption}</cf-text>
+        {indices.map((j) => (
+          <cf-chip
+            label={snippet(list[j]?.title || "(untitled topic)", 40)}
+            size="xs"
+            color={accent ? "accent" : "neutral"}
+            interactive
+            oncf-click={openTopic({ topic: list[j] })}
+          />
+        ))}
+      </cf-hstack>
+    );
+
 const LINK_KIND_ITEMS = [
   { label: "Web", value: "web" },
   { label: "PR", value: "pr" },
@@ -245,7 +299,19 @@ const LINK_KIND_ITEMS = [
 // ===== The pattern =====
 
 export default pattern<TopicInput, TopicOutput>(
-  ({ title, body, comments, links, createdAt, createdByName, myName }) => {
+  (
+    {
+      title,
+      body,
+      comments,
+      links,
+      createdAt,
+      createdByName,
+      myName,
+      mentionable,
+      [SELF]: self,
+    },
+  ) => {
     // Session-local UI state (new-tab test: none of this should carry over).
     const commentDraft = new Writable.perSession("");
     const editingBody = new Writable.perSession(false);
@@ -344,6 +410,32 @@ export default pattern<TopicInput, TopicOutput>(
     );
 
     const linksView = computed(() => asArray(links.get()).filter((l) => l));
+
+    // This topic's own place in the board's prose graph, derived read-side
+    // from the mentionable siblings — the same join the board's cards use,
+    // reduced to this piece's row (identified via SELF). Nothing persisted;
+    // pre-rev pieces without `mentionable` simply derive empty sets.
+    const crossrefs = computed(() => {
+      const sibs = asArray(mentionable.get());
+      if (sibs.length === 0) return { refsOut: [], referencedBy: [] };
+      // Each sibling's own fid payload ("" while unresolved — such entries
+      // hold no edges this render). Cell-runtime surface cast, as in notes'
+      // appendLink.
+      const payloads = sibs.map((t, i) => {
+        if (!t) return "";
+        const ref = (mentionable.key(i) as any).resolveAsCell?.()?.entityId;
+        return ref ? fidPayload(entityRefToString(ref)) : "";
+      });
+      const joined = crossrefJoin(sibs.map((t) => topicCorpus(t)), payloads);
+      // Self-identification via SELF + equals: needs #4714's path-scoped
+      // wildcard fix — before it, the resolveAsCell chain above silently
+      // erased self's comparable marking and this computed never ran.
+      const me = sibs.findIndex((t) => t && equals(t, self));
+      return me < 0 ? { refsOut: [], referencedBy: [] } : {
+        refsOut: joined.refsOut[me],
+        referencedBy: joined.referencedBy[me],
+      };
+    });
 
     const hasLinks = computed(() => linksView.length > 0);
     const hasComments = computed(() => commentsView.length > 0);
@@ -479,6 +571,28 @@ export default pattern<TopicInput, TopicOutput>(
                 </cf-vstack>
               </cf-card>
 
+              {/* ── Connections (derived crossrefs; nothing persisted) ── */}
+              {computed(() => {
+                const sibs = asArray(mentionable.get());
+                const { refsOut, referencedBy } = crossrefs;
+                return refsOut.length === 0 && referencedBy.length === 0
+                  ? null
+                  : (
+                    <cf-card>
+                      <cf-vstack gap="2">
+                        <cf-heading level={5}>Connections</cf-heading>
+                        {crossrefChipRow("references →", false, sibs, refsOut)}
+                        {crossrefChipRow(
+                          "← referenced by",
+                          true,
+                          sibs,
+                          referencedBy,
+                        )}
+                      </cf-vstack>
+                    </cf-card>
+                  );
+              })}
+
               {/* ── The thread ── */}
               <cf-card>
                 <cf-vstack gap="2">
@@ -549,6 +663,7 @@ export default pattern<TopicInput, TopicOutput>(
       createdByName,
       commentCount,
       lastActivityAt,
+      crossrefs,
       addComment,
       addLink,
       setBody,

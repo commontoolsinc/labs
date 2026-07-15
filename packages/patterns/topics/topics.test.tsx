@@ -36,6 +36,10 @@ export default pattern(() => {
     body: "line one\nline two",
   });
 
+  // Branch pin for the detail derive: a piece with no `mentionable` wired
+  // (the pre-rev corpus, until backfilled) derives empty connection sets.
+  const lone = Topic({ title: "Lone", createdAt: 1, createdByName: "t" });
+
   // --- actions ---
 
   const action_add_blank_topic = action(() => {
@@ -281,6 +285,22 @@ export default pattern(() => {
     (board.crossrefs?.[0]?.refsOut ?? []).length === 0
   );
 
+  // Detail-page view of the same edge: each board-created topic derives its
+  // own row from the mentionable siblings wired at creation (indices into
+  // `mentionable` = the board's own list), while a piece with no mentionable
+  // derives empty sets.
+  const assert_detail_edges = computed(() => {
+    return (board.topics?.[1]?.crossrefs?.refsOut ?? []).join(",") === "0" &&
+      (board.topics?.[1]?.crossrefs?.referencedBy ?? []).length === 0 &&
+      (board.topics?.[0]?.crossrefs?.referencedBy ?? []).join(",") === "1" &&
+      (board.topics?.[0]?.crossrefs?.refsOut ?? []).length === 0;
+  });
+
+  const assert_lone_edgeless = computed(() => {
+    return (lone.crossrefs?.refsOut ?? []).length === 0 &&
+      (lone.crossrefs?.referencedBy ?? []).length === 0;
+  });
+
   // Drives the exact chip markup the card map emits, independent of UI
   // demand timing: a populated row yields the hstack vnode — navigation
   // binds included — and an edgeless row collapses to null so the card
@@ -394,6 +414,11 @@ export default pattern(() => {
   });
 
   return {
+    // Continuous UI demand (#4715) over the board: its card list — including
+    // the in-card crossref chip rows — renders through the real reconciler
+    // while the suite runs. A board list element is the shared-safe
+    // TopicPiece projection and exposes no [UI]; the topic detail page is
+    // driven directly through the `render` steps below.
     [UI]: board[UI],
     tests: [
       { assertion: assert_initial },
@@ -420,6 +445,8 @@ export default pattern(() => {
       { assertion: assert_crossrefs_baseline },
       { action: action_body_ref_first },
       { assertion: assert_body_edge },
+      { assertion: assert_detail_edges },
+      { assertion: assert_lone_edgeless },
       { assertion: assert_chip_row_markup },
       { action: action_comment_first_again },
       { action: action_submit_topic_via_composer },

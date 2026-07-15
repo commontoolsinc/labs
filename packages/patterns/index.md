@@ -209,6 +209,8 @@ interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
   myName?: PerUser<Writable<string | Default<"">>>;
 }
+// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
+// board's own list, wired at creation, for detail-page Connections.
 ```
 
 ### Output Schema
