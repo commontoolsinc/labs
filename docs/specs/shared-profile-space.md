@@ -174,6 +174,12 @@ type ExternalProfileLink = {
   url: string;
 };
 
+type VerifiedExternalIdentity = AddIntegrity<{
+  type: string;
+  value: string;
+  verifiedAt: string;
+}, readonly ["loom-verified-external-identity"]>;
+
 type ProfileDefaultPattern = {
   [NAME]: string;
   [UI]: VNode;
@@ -181,9 +187,20 @@ type ProfileDefaultPattern = {
   avatar: string;
   bio: string;
   externalLinks: ExternalProfileLink[];
+  verifiedIdentities: VerifiedExternalIdentity[];
   elements: ProfileElement[];
   addExternalLink: Stream<{ label?: string; url?: string }>;
   removeExternalLink: Stream<{ url?: string }>;
+  publishVerifiedIdentities: Stream<{
+    identities?: readonly {
+      type: string;
+      value: string;
+      verifiedAt: string;
+    }[];
+  }>;
+  revokeVerifiedIdentities: Stream<{
+    identities?: readonly { type: string; value: string }[];
+  }>;
   addElement: Stream<AddProfileElementEvent>;
   removeElement: Stream<{ cell: Cell<unknown> }>;
   setBio: Stream<SetProfileBioEvent>;
@@ -205,6 +222,35 @@ outside Common Fabric, such as GitHub, LinkedIn, or a personal site. Entries
 contain a display label and an `http(s)` URL; unsafe schemes are rejected before
 storage and never render as live anchors. The list is owner-protected and is
 mutated only through `addExternalLink` / `removeExternalLink`.
+
+`verifiedIdentities` is an opt-in list of identifiers that Loom observed only
+after a connector successfully authenticated as the profile owner. Each
+assertion has exactly three integrity-covered fields: a namespaced `type`, its
+`value`, and the ISO timestamp `verifiedAt`. A provider can publish multiple
+assertions for one account: GitHub, for example, publishes both
+`github.node_id` and `github.login`. This preserves the stable provider ID for
+exact matching while retaining the login a local owner-authored person record
+may use. Multiple accounts may also contribute assertions of the same type.
+
+The list is owner-protected and writable only through
+`publishVerifiedIdentities`; each item adds the
+`loom-verified-external-identity` CFC integrity atom over the complete tuple.
+Re-publishing a `type` + `value` pair refreshes `verifiedAt`. Disabling
+publication or logging out calls `revokeVerifiedIdentities` for the exact
+assertions that connector previously published; stale assertions are a second
+line of defense, not the primary revocation mechanism. Consumers MUST ignore
+assertions older than their configured freshness window (48 hours by default)
+and MUST fail closed when the item-level integrity label cannot be read. Fresh verified identities are
+high-authority reconciliation evidence, but do not by themselves force a
+merge: the candidate must remain unambiguous and the profile name should
+corroborate a name-bearing local persona when available.
+
+The initial trust root deliberately trusts Loom acting with the user's Fabric
+principal through this pattern's dedicated writer. A later, stronger design is
+specified but not implemented here: connectors run in attested cloud
+sandboxes, the assertion says that code hash H observed the login, and verifier
+infrastructure blesses the allowed hashes. That makes the observation
+end-to-end verifiable without hard-coding a closed set of connector providers.
 
 `elements` is the profile-space analog of favorites and mentionables. Each
 entry points at a piece that lives in the profile space. `tag` stores the

@@ -101,9 +101,56 @@ export default pattern(() => {
     });
   });
 
+  const action_publish_verified_identities = action(() => {
+    profile.publishVerifiedIdentities.send({
+      identities: [
+        {
+          type: "github.node_id",
+          value: "MDQ6VXNlcjY2NTc3",
+          verifiedAt: "2026-07-15T12:00:00.000Z",
+        },
+        {
+          type: "github.login",
+          value: "gracehopper",
+          verifiedAt: "2026-07-15T12:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  const action_refresh_verified_identity = action(() => {
+    profile.publishVerifiedIdentities.send({
+      identities: [{
+        type: "github.login",
+        value: "gracehopper",
+        verifiedAt: "2026-07-16T12:00:00.000Z",
+      }],
+    });
+  });
+
+  const action_reject_invalid_verified_identity = action(() => {
+    profile.publishVerifiedIdentities.send({
+      identities: [{
+        type: "github.login",
+        value: "unverified",
+        verifiedAt: "not-a-timestamp",
+      }],
+    });
+  });
+
+  const action_revoke_verified_identity = action(() => {
+    profile.revokeVerifiedIdentities.send({
+      identities: [{
+        type: "github.login",
+        value: "gracehopper",
+      }],
+    });
+  });
+
   const assert_initial_state = computed(() =>
     profile.initialNameApplied === "Ada Lovelace" &&
     profile.externalLinks.length === 0 &&
+    profile.verifiedIdentities.length === 0 &&
     profile.elements.length === 0
   );
 
@@ -129,6 +176,25 @@ export default pattern(() => {
 
   const assert_external_profile_link_removed = computed(() =>
     profile.externalLinks.length === 0
+  );
+
+  const assert_verified_identities_published = computed(() =>
+    profile.verifiedIdentities.length === 2 &&
+    profile.verifiedIdentities[0]?.type === "github.node_id" &&
+    profile.verifiedIdentities[0]?.value === "MDQ6VXNlcjY2NTc3" &&
+    profile.verifiedIdentities[1]?.type === "github.login" &&
+    profile.verifiedIdentities[1]?.value === "gracehopper"
+  );
+
+  const assert_verified_identity_refreshed = computed(() =>
+    profile.verifiedIdentities.length === 2 &&
+    profile.verifiedIdentities[1]?.verifiedAt ===
+      "2026-07-16T12:00:00.000Z"
+  );
+
+  const assert_verified_identity_revoked = computed(() =>
+    profile.verifiedIdentities.length === 1 &&
+    profile.verifiedIdentities[0]?.type === "github.node_id"
   );
 
   const assert_added_element = computed(() => {
@@ -162,6 +228,20 @@ export default pattern(() => {
       { assertion: assert_unsafe_external_profile_link_rejected },
       { action: action_remove_external_profile_link },
       { assertion: assert_external_profile_link_removed },
+      // A successful connector login publishes separately useful stable and
+      // human-facing identifiers. Re-publishing the same tuple refreshes its
+      // timestamp without collapsing other identities of that provider.
+      { action: action_publish_verified_identities },
+      { assertion: assert_verified_identities_published },
+      { action: action_refresh_verified_identity },
+      { assertion: assert_verified_identity_refreshed },
+      // Malformed timestamps can never become authoritative assertions.
+      { action: action_reject_invalid_verified_identity },
+      { assertion: assert_verified_identity_refreshed },
+      // Opting out or logging out revokes the exact assertions that connector
+      // previously published; other verified values remain intact.
+      { action: action_revoke_verified_identity },
+      { assertion: assert_verified_identity_revoked },
       // CT-1748: the avatar the badge binds resolves.
       { action: action_set_avatar },
       { assertion: assert_avatar_set },

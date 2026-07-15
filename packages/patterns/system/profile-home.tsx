@@ -1,4 +1,5 @@
 import {
+  AddIntegrity,
   Cfc,
   computed,
   Default,
@@ -118,6 +119,38 @@ export type MutateExternalProfileLinksEvent = {
   url?: string;
 };
 
+/**
+ * An external account identifier observed by Loom after that connector
+ * successfully authenticated as the profile owner. Stable and human-facing
+ * identifiers are separate assertions (for example `github.node_id` and
+ * `github.login`) so consumers can use either without weakening provenance.
+ *
+ * Keep this tuple deliberately small: the integrity label covers the identity
+ * type, value, and observation time together. Connector/provider metadata that
+ * is not part of the assertion belongs in the writer event, not this record.
+ */
+export type ExternalIdentityAssertion = {
+  type: string;
+  value: string;
+  verifiedAt: string;
+};
+
+export const LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY =
+  "loom-verified-external-identity" as const;
+
+export type VerifiedExternalIdentity = AddIntegrity<
+  ExternalIdentityAssertion,
+  readonly [typeof LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY]
+>;
+
+export type MutateVerifiedIdentitiesEvent = {
+  identities?: readonly {
+    type: string;
+    value: string;
+    verifiedAt?: string;
+  }[];
+};
+
 export type ProfileHomeOutput = {
   [NAME]: string;
   [UI]: unknown;
@@ -142,12 +175,25 @@ export type ProfileHomeOutput = {
     >,
     []
   >;
+  // Connector-observed account identifiers. Each item carries a CFC integrity
+  // label over type + value + verifiedAt; the surrounding owner protection
+  // also ensures the assertion was written while acting as this profile's
+  // principal and through the dedicated publication handler.
+  verifiedIdentities: Default<
+    OwnerProtectedProfileWrite<
+      VerifiedExternalIdentity[],
+      typeof publishVerifiedIdentities
+    >,
+    []
+  >;
   elements: OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>;
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
   setBio: Stream<SetProfileBioEvent>;
   addExternalLink: Stream<MutateExternalProfileLinksEvent>;
   removeExternalLink: Stream<MutateExternalProfileLinksEvent>;
+  publishVerifiedIdentities: Stream<MutateVerifiedIdentitiesEvent>;
+  revokeVerifiedIdentities: Stream<MutateVerifiedIdentitiesEvent>;
   // Both element streams accept the full mutation event (the union shape of
   // the one authorized writer); `AddProfileElementEvent` /
   // `RemoveProfileElementEvent` remain the documented per-stream subsets.
@@ -443,6 +489,66 @@ const mutateExternalProfileLinks = handler<
   state.url?.set("");
 });
 
+// The only writer for connector-verified identity assertions. Re-publishing a
+// type/value pair refreshes its observation time and leaves other accounts (or
+// other useful identifiers for the same account) intact. Opt-out/logout uses
+// the same writer in revoke mode for the exact prior tuples; consumer freshness
+// remains the fail-safe when explicit revocation cannot complete.
+const publishVerifiedIdentities = handler<
+  MutateVerifiedIdentitiesEvent,
+  {
+    verifiedIdentities: Writable<VerifiedExternalIdentity[]>;
+    mode: "publish" | "revoke";
+  }
+>((event, state) => {
+  const incoming = event.identities ?? [];
+  if (incoming.length === 0) return;
+
+  if (state.mode === "revoke") {
+    const revoked = new Set(
+      incoming.map((identity) =>
+        `${(identity.type ?? "").trim().toLowerCase()}\u0000${
+          (identity.value ?? "").trim()
+        }`
+      ),
+    );
+    state.verifiedIdentities.set(
+      state.verifiedIdentities.get().filter((identity) =>
+        !revoked.has(`${identity.type}\u0000${identity.value}`)
+      ),
+    );
+    return;
+  }
+
+  const normalized: ExternalIdentityAssertion[] = [];
+  for (const identity of incoming) {
+    const type = (identity.type ?? "").trim().toLowerCase();
+    const value = (identity.value ?? "").trim();
+    const verifiedAt = (identity.verifiedAt ?? "").trim();
+    const timestamp = new Date(verifiedAt).getTime();
+    if (!type || !value || !Number.isFinite(timestamp)) continue;
+    normalized.push({
+      type,
+      value,
+      verifiedAt: new Date(timestamp).toISOString(),
+    });
+  }
+  if (normalized.length === 0) return;
+
+  const next = [...state.verifiedIdentities.get()];
+  for (const identity of normalized) {
+    const existingIndex = next.findIndex((candidate) =>
+      candidate.type === identity.type && candidate.value === identity.value
+    );
+    if (existingIndex === -1) {
+      next.push(identity);
+    } else {
+      next[existingIndex] = identity;
+    }
+  }
+  state.verifiedIdentities.set(next);
+});
+
 // View/edit toggle for the rendered profile view (CT-1748). Plain (un-protected)
 // UI state: visiting a profile shows the read-only presentation; this flips to
 // the edit form. The flag itself is not owner-protected — anyone can flip their
@@ -478,6 +584,12 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
         typeof mutateExternalProfileLinks
       >
     >([]).for("externalLinks");
+    const verifiedIdentities = new Writable<
+      OwnerProtectedProfileWrite<
+        VerifiedExternalIdentity[],
+        typeof publishVerifiedIdentities
+      >
+    >([]).for("verifiedIdentities");
     // Unprotected draft backing the bio textarea; saved into the protected
     // `bio` cell through `setBio` (CT-1648).
     const bioDraft = new Writable("").for("bioDraft");
@@ -557,6 +669,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       avatar,
       bio,
       externalLinks,
+      verifiedIdentities,
       elements,
       setName: setName({ name }),
       setAvatar: setAvatar({ avatar }),
@@ -570,6 +683,14 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       removeExternalLink: mutateExternalProfileLinks({
         externalLinks,
         mode: "remove",
+      }),
+      publishVerifiedIdentities: publishVerifiedIdentities({
+        verifiedIdentities,
+        mode: "publish",
+      }),
+      revokeVerifiedIdentities: publishVerifiedIdentities({
+        verifiedIdentities,
+        mode: "revoke",
       }),
       // Both exported streams are instances of the one authorized writer,
       // pinned to their declared purpose via the bound mode.

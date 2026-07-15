@@ -534,7 +534,15 @@ describe("profile owner CFC policy", () => {
         (rootSchema as { properties?: Record<string, JSONSchema> })
           .properties ?? {};
 
-      for (const field of ["name", "avatar", "externalLinks", "elements"]) {
+      for (
+        const field of [
+          "name",
+          "avatar",
+          "externalLinks",
+          "verifiedIdentities",
+          "elements",
+        ]
+      ) {
         const fieldSchema = resolveLocalSchemaRef(
           rootSchema,
           properties[field],
@@ -549,6 +557,19 @@ describe("profile owner CFC policy", () => {
         });
         expect(ifc?.writeAuthorizedBy).toBeDefined();
       }
+
+      const verifiedIdentitiesSchema = resolveLocalSchemaRef(
+        rootSchema,
+        properties.verifiedIdentities,
+      ) as { type?: string; items?: JSONSchema };
+      expect(verifiedIdentitiesSchema.type).toBe("array");
+      const verifiedIdentitySchema = resolveLocalSchemaRef(
+        rootSchema,
+        verifiedIdentitiesSchema.items ?? {},
+      ) as { ifc?: { addIntegrity?: unknown[] } };
+      expect(verifiedIdentitySchema.ifc?.addIntegrity).toContain(
+        "loom-verified-external-identity",
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
