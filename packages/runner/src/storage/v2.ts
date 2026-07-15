@@ -3416,10 +3416,23 @@ class SpaceReplica implements ISpaceReplica {
       const handle = Promise.resolve().then(() => this.#createSession()).then(
         (resolved) => {
           this.#sessionClient = resolved.client;
-          this.#cancelConnectionState = resolved.session
-            .subscribeConnectionState((state) => {
-              this.#onConnectionState?.(state);
-            });
+          const subscribeConnectionState = (
+            resolved.session as MemoryV2Client.SpaceSession & {
+              subscribeConnectionState?:
+                MemoryV2Client.SpaceSession["subscribeConnectionState"];
+            }
+          ).subscribeConnectionState;
+          if (typeof subscribeConnectionState === "function") {
+            this.#cancelConnectionState = subscribeConnectionState.call(
+              resolved.session,
+              (state) => this.#onConnectionState?.(state),
+            );
+          } else {
+            // Lightweight/test session factories may implement only the RPCs
+            // they exercise and have no reconnect lifecycle. Creation itself
+            // is their ready boundary.
+            this.#onConnectionState?.({ status: "ready", epoch: 1 });
+          }
           return resolved;
         },
       ).catch((error) => {
