@@ -271,6 +271,9 @@ export default pattern(() => {
       { assertion: assert_edit_saved },
       { action: action_submit_blank_link_draft },
       { action: action_submit_link_draft },
+      // Materialize the direct Topic after its comment and link exist so the
+      // nested row renderers are exercised without putting UI into TopicPiece.
+      { render: directTopic[UI] },
       { assertion: assert_link_draft_flow },
       { action: action_open_topic },
       { assertion: assert_pure_helpers },
