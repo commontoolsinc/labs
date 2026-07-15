@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import ts from "typescript";
+import { SchemaGenerator } from "@commonfabric/schema-generator";
 
 import { parseModule } from "../transformed-ast.ts";
 
@@ -66,6 +67,56 @@ Deno.test("cloneTypeNodeDeepForEmission carries typeRegistry entries onto clones
   const cloned = cloneTypeNodeDeepForEmission(typeNode, typeRegistry);
 
   assertStrictEquals(typeRegistry.get(cloned), fakeType);
+});
+
+Deno.test("detached generic unknown references remain unknown schemas", () => {
+  const sourceText = `
+type Identity<T> = T;
+type Result = Identity<unknown>;
+`;
+  const { program, sourceFile } = createProgram("unknown.ts", sourceText);
+  const checker = program.getTypeChecker();
+  const result = sourceFile.statements.find((statement) =>
+    ts.isTypeAliasDeclaration(statement) && statement.name.text === "Result"
+  );
+  if (!result || !ts.isTypeAliasDeclaration(result)) {
+    throw new Error("Expected Result alias");
+  }
+  const type = checker.getTypeFromTypeNode(result.type);
+  const cloned = cloneTypeNodeDeepForEmission(result.type);
+  const schema = new SchemaGenerator().generateSchema(
+    type,
+    checker,
+    cloned,
+    undefined,
+    undefined,
+    sourceFile,
+  );
+
+  assertEquals(schema, { type: "unknown" });
+});
+
+Deno.test("detached type-parameter references remain unknown schemas", () => {
+  const sourceText = "function f<T>(arg: T): void {}";
+  const { program, sourceFile } = createProgram("type-param.ts", sourceText);
+  const checker = program.getTypeChecker();
+  const declaration = sourceFile.statements[0];
+  if (!declaration || !ts.isFunctionDeclaration(declaration)) {
+    throw new Error("Expected function declaration");
+  }
+  const typeNode = declaration.parameters[0]?.type;
+  if (!typeNode) throw new Error("Expected parameter type");
+  const cloned = cloneTypeNodeDeepForEmission(typeNode);
+  const schema = new SchemaGenerator().generateSchema(
+    checker.getUnknownType(),
+    checker,
+    cloned,
+    undefined,
+    undefined,
+    sourceFile,
+  );
+
+  assertEquals(schema, { type: "unknown" });
 });
 
 Deno.test("typeToTypeNodeWithRegistry registers exact nested generic arguments", () => {

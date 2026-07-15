@@ -195,6 +195,16 @@ const ARRAY_IDENTITY_WRITER_METHODS = new Set([
   ...mergeableMethods("array-identity-writer"),
 ]);
 const ARRAY_IDENTITY_PRESERVING_CHAIN_METHODS = new Set(["slice"]);
+// Non-mutating array methods whose result retains complete source elements.
+// A callback returning that result can observe or publish every element field,
+// so root-only reads are insufficient even when no field is accessed directly.
+const FULL_SHAPE_ARRAY_COPY_METHODS = new Set([
+  "concat",
+  "slice",
+  "toReversed",
+  "toSpliced",
+  "with",
+]);
 // The mergeable tail-append op. Only `push` commits as a mergeable `append`
 // that drops the op's own array read from conflict detection; a handler that
 // also reads the same collection then has a fragile read-then-push shape. The
@@ -1418,7 +1428,7 @@ function assignParameterBindingAlias(
 }
 
 function toCapability(state: MutableCapabilityState): ReactiveCapability {
-  const hasReads = state.reads.size > 0;
+  const hasReads = state.reads.size > 0 || state.fullShapeReads.size > 0;
   const hasWrites = state.writes.size > 0;
 
   if (hasReads && hasWrites) return "writable";
@@ -1644,7 +1654,9 @@ export function analyzeFunctionCapabilities(
       path: readonly string[],
     ): void => {
       const state = ensureState(name);
-      state.fullShapeReads.add(encodePath(path));
+      const encoded = encodePath(path);
+      state.reads.add(encoded);
+      state.fullShapeReads.add(encoded);
       state.hasNonIdentityUse = true;
     };
 
@@ -1750,6 +1762,43 @@ export function analyzeFunctionCapabilities(
         return false;
       }
       return isCellLikeType(checker.getTypeAtLocation(expr), checker);
+    };
+
+    const isArrayLikeExpression = (expr: ts.Expression): boolean => {
+      if (!checker) return false;
+      const seen = new Set<ts.Type>();
+      const isArrayLikeType = (type: ts.Type): boolean => {
+        if (seen.has(type)) return false;
+        seen.add(type);
+        try {
+          if (checker.isArrayType(type) || checker.isTupleType(type)) {
+            return true;
+          }
+          if (type.isUnion()) {
+            return type.types.length > 0 && type.types.every(isArrayLikeType);
+          }
+          if (type.isIntersection()) {
+            return type.types.some(isArrayLikeType);
+          }
+          if ((type.flags & ts.TypeFlags.TypeParameter) !== 0) {
+            const constraint = checker.getBaseConstraintOfType(type);
+            return !!constraint && constraint !== type &&
+              isArrayLikeType(constraint);
+          }
+          const symbolName = type.aliasSymbol?.name ?? type.getSymbol()?.name;
+          if (symbolName === "Array" || symbolName === "ReadonlyArray") {
+            return true;
+          }
+          const apparent = checker.getApparentType(type);
+          return apparent !== type && isArrayLikeType(apparent);
+        } finally {
+          seen.delete(type);
+        }
+      };
+
+      return isArrayLikeType(
+        typeRegistry?.get(expr) ?? checker.getTypeAtLocation(expr),
+      );
     };
 
     const isPrimitiveLikeExpression = (expr: ts.Expression): boolean => {
@@ -2315,6 +2364,69 @@ export function analyzeFunctionCapabilities(
         return;
       }
       trackFullShapeRead(ref.root, ref.path);
+    };
+
+    const trackRetainedPayloadExpression = (
+      expression: ts.Expression,
+    ): boolean => {
+      const current = unwrapExpression(expression);
+      if (ts.isSpreadElement(current)) {
+        return trackRetainedPayloadExpression(current.expression);
+      }
+
+      const direct = resolveSourceRef(current);
+      if (direct) {
+        trackFullShapeReadRef(direct);
+        return true;
+      }
+
+      if (ts.isConditionalExpression(current)) {
+        const whenTrue = trackRetainedPayloadExpression(current.whenTrue);
+        const whenFalse = trackRetainedPayloadExpression(current.whenFalse);
+        return whenTrue || whenFalse;
+      }
+      if (
+        ts.isBinaryExpression(current) &&
+        FALLBACK_OPERATORS.has(current.operatorToken.kind)
+      ) {
+        const left = trackRetainedPayloadExpression(current.left);
+        const right = trackRetainedPayloadExpression(current.right);
+        return left || right;
+      }
+      if (
+        ts.isBinaryExpression(current) &&
+        current.operatorToken.kind ===
+          ts.SyntaxKind.AmpersandAmpersandToken
+      ) {
+        // The truthy RHS can become the retained payload; the LHS remains a
+        // normal control read (its falsy values are primitive payloads).
+        return trackRetainedPayloadExpression(current.right);
+      }
+      if (ts.isArrayLiteralExpression(current)) {
+        let tracked = false;
+        for (const element of current.elements) {
+          if (ts.isOmittedExpression(element)) continue;
+          tracked = trackRetainedPayloadExpression(element) || tracked;
+        }
+        return tracked;
+      }
+      if (ts.isObjectLiteralExpression(current)) {
+        let tracked = false;
+        for (const property of current.properties) {
+          const value = ts.isPropertyAssignment(property)
+            ? property.initializer
+            : ts.isShorthandPropertyAssignment(property)
+            ? property.name
+            : ts.isSpreadAssignment(property)
+            ? property.expression
+            : undefined;
+          if (value) {
+            tracked = trackRetainedPayloadExpression(value) || tracked;
+          }
+        }
+        return tracked;
+      }
+      return false;
     };
 
     const assignBindingAlias = (
@@ -3341,14 +3453,38 @@ export function analyzeFunctionCapabilities(
               // so write-exhaustiveness is poisoned — fail closed. Value
               // receivers (e.g. array methods on a `.get()` snapshot) cannot
               // write through the cell and stay reads.
+              const receiverIsCellLike = !checker ||
+                isCellLikeExpression(node.expression.expression);
+              const copiesCompleteArrayElements =
+                FULL_SHAPE_ARRAY_COPY_METHODS.has(methodName) &&
+                isArrayLikeExpression(node.expression.expression);
               if (
                 !checker ||
-                isCellLikeExpression(node.expression.expression)
+                receiverIsCellLike
               ) {
                 markUnverifiedCellUse(receiver.root);
               }
-              if (shouldTrackFullShape) {
+              if (shouldTrackFullShape || copiesCompleteArrayElements) {
+                // Array copy methods such as `snapshot.toSpliced(...)` retain
+                // complete source elements in their result. Keep the complete
+                // payload schema; root-only shrinking would materialize holes.
                 trackFullShapeReadRef(receiver);
+                if (copiesCompleteArrayElements) {
+                  for (let index = 0; index < node.arguments.length; index++) {
+                    const argument = node.arguments[index];
+                    if (!argument) continue;
+                    const isSpread = ts.isSpreadElement(argument);
+                    const retainsArgumentPayload = methodName === "concat" ||
+                      (methodName === "toSpliced" &&
+                        (index >= 2 || isSpread)) ||
+                      (methodName === "with" &&
+                        (index === 1 || isSpread));
+                    if (!retainsArgumentPayload) continue;
+                    if (trackRetainedPayloadExpression(argument)) {
+                      capabilityHandledArgs.add(index);
+                    }
+                  }
+                }
               } else if (directReceiver) {
                 trackReadRef(receiver);
               }
@@ -3435,7 +3571,15 @@ export function analyzeFunctionCapabilities(
         if (spreadExpr) {
           const ref = resolveSourceRef(spreadExpr);
           if (ref) {
-            trackReadRef(ref);
+            if (node.parent && ts.isArrayLiteralExpression(node.parent)) {
+              // `[...snapshot]` observes every element value. Treating this as
+              // an array-root-only read lets type shrinking replace the item
+              // schema with `unknown`, so the runner materializes holes even
+              // though the callback immediately consumes the copied items.
+              trackFullShapeReadRef(ref);
+            } else {
+              trackReadRef(ref);
+            }
             const identityArrayLocal = getIdentityArrayLocalNameForElementUsage(
               node,
             );

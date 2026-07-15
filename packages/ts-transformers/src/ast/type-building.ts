@@ -455,6 +455,11 @@ export function expressionToTypeNode(
   );
   if (declaredTypeNode) {
     const type = context.checker.getTypeFromTypeNode(declaredTypeNode);
+    registerSourceTypeNodeTree(
+      declaredTypeNode,
+      context.checker,
+      context.options.state?.typeRegistry,
+    );
     // Deep position-stripped clone: the declaration may live in another
     // source file, and a shallow clone keeps child positions — the printer
     // would slice the EMIT file's text at those offsets, corrupting literal
@@ -479,6 +484,27 @@ export function expressionToTypeNode(
     context,
     context.options.state?.typeRegistry,
   );
+}
+
+function registerSourceTypeNodeTree(
+  root: ts.TypeNode,
+  checker: ts.TypeChecker,
+  typeRegistry?: WeakMap<ts.Node, ts.Type>,
+): void {
+  if (!typeRegistry) return;
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isTypeNode(node) && !typeRegistry.has(node)) {
+      try {
+        typeRegistry.set(node, checker.getTypeFromTypeNode(node));
+      } catch {
+        // A source child that the checker cannot resolve stays unregistered;
+        // downstream node analysis will retain its conservative fallback.
+      }
+    }
+    node.forEachChild(visit);
+  };
+  visit(root);
 }
 
 function getDestructuredBindingDeclaredTypeNode(

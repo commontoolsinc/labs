@@ -396,6 +396,59 @@ export default pattern<{
   });
 });
 
+Deno.test("read-write action captures retain named array element schemas", async () => {
+  const output = await transformSource(
+    `
+import { action, Default, pattern, Writable } from "commonfabric";
+
+interface Item {
+  text: string;
+  indented: boolean | Default<false>;
+}
+interface Input {
+  items?: Writable<Item[] | Default<[]>>;
+}
+
+export default pattern<Input>(({ items }) => {
+  const toggle = action(({ index }: { index: number }) => {
+    const current = items.get() || [];
+    if (index < current.length) items.set([...current]);
+  });
+  const remove = action(({ index }: { index: number }) => {
+    const current = items.get() || [];
+    if (index < current.length) items.set(current.toSpliced(index, 1));
+  });
+  return { toggle, remove };
+});
+`,
+    { ...options, typeCheck: true },
+  );
+  const root = parseModule(output);
+  const handlers = callsNamed(root, "handler");
+  assertEquals(handlers.length, 2, output);
+
+  for (const handler of handlers) {
+    const captureSchema = literalToValue(handler.arguments[1]!) as {
+      properties: Record<string, unknown>;
+      $defs?: Record<string, unknown>;
+    };
+    assertEquals(captureSchema.properties.items, {
+      type: "array",
+      items: { $ref: "#/$defs/Item" },
+      default: [],
+      asCell: ["cell"],
+    });
+    assertEquals(captureSchema.$defs?.Item, {
+      type: "object",
+      properties: {
+        text: { type: "string" },
+        indented: { type: "boolean", default: false },
+      },
+      required: ["text", "indented"],
+    });
+  }
+});
+
 Deno.test("eager calls to captured factories stay inside the hoisted callback", async () => {
   const output = await transformSource(
     `

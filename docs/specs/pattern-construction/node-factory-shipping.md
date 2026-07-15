@@ -889,7 +889,25 @@ compiler refinements and wrapper syntax such as `Default`, while the semantic
 pairing supplies concrete generic arguments and named-type identity. Canonical
 source lookup may recover non-generic local or exported declarations, but it
 must never substitute an uninstantiated generic declaration such as `Box<T>`
-for an authored `Box<string>`.
+for an authored `Box<string>`. When a detached concrete node such as `Item`
+outlives a paired semantic type that has degraded to `unknown`, only that
+detached named reference and its concrete canonical source declaration remain
+authoritative. Generic declarations and type-parameter references are not
+concrete recovery sources. Authored unions collapsed to `unknown`, and explicit
+`unknown` keywords or declarations, emit the runtime-dropping unknown schema. A
+materialized snapshot spread into an array is a full-shape read: its element
+schema must not be shrunk to `unknown`, because the callback observes every
+copied element. Calling a materialized array-snapshot method whose result
+retains complete elements (`concat`, `slice`, `toReversed`, `toSpliced`, or
+`with`) is likewise a full-shape read, including when the receiver is a union
+of array, tuple, and branded-intersection forms. Element or array arguments
+retained by `concat`, `toSpliced`, and `with` are full-shape reads as well,
+including tracked payloads carried through spreads, conditional/fallback
+branches, the retained right side of `&&`, and array or object literals;
+control-only expressions remain path-precise. A full-shape
+observation is a read capability and a retained schema path even when no
+separate property access is recorded. Compiler-modeled projection and traversal
+methods, such as `map`, retain their precise path semantics.
 A detached synthetic node only adds structure when it still carries every
 syntax-only obligation needed by that structure. In particular, an inferred
 CFC alias that retains `ownerPrincipal` or a `TrustedActionWrite` UI contract

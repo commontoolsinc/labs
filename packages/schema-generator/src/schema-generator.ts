@@ -184,7 +184,7 @@ export class SchemaGenerator implements ISchemaGenerator {
 
     // Auto-detect: Should we use node-based or type-based analysis?
     let schema: JSONSchemaMutable;
-    if (this.shouldUseNodeBasedAnalysis(type, typeNode, checker)) {
+    if (this.shouldUseNodeBasedAnalysis(type, typeNode, context)) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
       schema = this.analyzeTypeNodeStructure(
         typeNode!,
@@ -221,9 +221,23 @@ export class SchemaGenerator implements ISchemaGenerator {
   private shouldUseNodeBasedAnalysis(
     type: ts.Type,
     typeNode: ts.TypeNode | undefined,
-    checker: ts.TypeChecker,
+    context: GenerationContext,
   ): boolean {
-    if (!typeNode || !(type.flags & ts.TypeFlags.Any)) {
+    if (!typeNode) {
+      return false;
+    }
+
+    const checker = context.typeChecker;
+    const unreliableAny = (type.flags & ts.TypeFlags.Any) !== 0;
+    const recoveredUnknownReference =
+      (type.flags & ts.TypeFlags.Unknown) !== 0 &&
+        ts.isTypeReferenceNode(typeNode) &&
+        typeNode.pos < 0
+        ? this.resolveTypeReferenceFromScope(typeNode, checker, context)
+        : undefined;
+    const unreliableUnknown = !!recoveredUnknownReference &&
+      (recoveredUnknownReference.flags & ts.TypeFlags.Unknown) === 0;
+    if (!unreliableAny && !unreliableUnknown) {
       return false;
     }
 
@@ -258,7 +272,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     const useNodeBased = this.shouldUseNodeBasedAnalysis(
       type,
       typeNode,
-      context.typeChecker,
+      childContext,
     );
     if (useNodeBased) {
       // Use node-based analysis (for synthetic nodes or when type is unreliable)
@@ -941,6 +955,12 @@ export class SchemaGenerator implements ISchemaGenerator {
         context,
       );
       if (resolved) {
+        if ((resolved.flags & ts.TypeFlags.Unknown) !== 0) {
+          // A source alias explicitly declared as `unknown` is authoritative.
+          // Re-entering formatChildType with the detached reference would
+          // select node analysis again and recurse indefinitely.
+          return { type: "unknown" };
+        }
         return this.formatChildType(resolved, context, typeNode);
       }
 
@@ -996,13 +1016,37 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (!ts.isIdentifier(typeNode.typeName)) {
       return undefined;
     }
+    const resolveNonGenericDeclaredType = (
+      symbol: ts.Symbol,
+    ): ts.Type | undefined => {
+      const resolvedSymbol = (symbol.flags & ts.SymbolFlags.Alias) !== 0
+        ? checker.getAliasedSymbol(symbol)
+        : symbol;
+      if ((resolvedSymbol.flags & ts.SymbolFlags.TypeParameter) !== 0) {
+        return undefined;
+      }
+      const declarations = resolvedSymbol.getDeclarations() ?? [];
+      const isGenericDeclaration = declarations.some((declaration) =>
+        (ts.isTypeAliasDeclaration(declaration) ||
+          ts.isInterfaceDeclaration(declaration) ||
+          ts.isClassDeclaration(declaration)) &&
+        (declaration.typeParameters?.length ?? 0) > 0
+      );
+      if (isGenericDeclaration) return undefined;
+
+      const declared = checker.getDeclaredTypeOfSymbol(resolvedSymbol);
+      return declared &&
+          (declared.flags & (ts.TypeFlags.Any | ts.TypeFlags.TypeParameter)) ===
+            0
+        ? declared
+        : undefined;
+    };
+
     const typeName = typeNode.typeName.text;
     const symbolAtNode = checker.getSymbolAtLocation(typeNode.typeName);
     if (symbolAtNode) {
-      const declared = checker.getDeclaredTypeOfSymbol(symbolAtNode);
-      if (declared && !(declared.flags & ts.TypeFlags.Any)) {
-        return declared;
-      }
+      const declared = resolveNonGenericDeclaredType(symbolAtNode);
+      if (declared) return declared;
     }
 
     const checkerWithProgram = checker as ts.TypeChecker & {
@@ -1037,9 +1081,6 @@ export class SchemaGenerator implements ISchemaGenerator {
     // export when both are present.
     const candidate = exportedSymbol ?? symbol;
     if (!candidate) return undefined;
-    const resolvedSymbol = (candidate.flags & ts.SymbolFlags.Alias) !== 0
-      ? checker.getAliasedSymbol(candidate)
-      : candidate;
 
     // A detached synthetic `Box<string>` node cannot be instantiated safely
     // by asking for the declared `Box<T>` type: doing so silently erases the
@@ -1047,20 +1088,7 @@ export class SchemaGenerator implements ISchemaGenerator {
     // instantiations must come from the transformer type registry / paired
     // semantic wrapper type. Source-scope lookup is only a safe recovery path
     // for non-generic exports such as `Person` or `CommuteMode`.
-    const declarations = resolvedSymbol.getDeclarations() ?? [];
-    const isGenericDeclaration = declarations.some((declaration) =>
-      (ts.isTypeAliasDeclaration(declaration) ||
-        ts.isInterfaceDeclaration(declaration) ||
-        ts.isClassDeclaration(declaration)) &&
-      (declaration.typeParameters?.length ?? 0) > 0
-    );
-    if (isGenericDeclaration) return undefined;
-
-    const declared = checker.getDeclaredTypeOfSymbol(resolvedSymbol);
-    if (!declared || (declared.flags & ts.TypeFlags.Any)) {
-      return undefined;
-    }
-    return declared;
+    return resolveNonGenericDeclaredType(candidate);
   }
 
   /**

@@ -55,6 +55,47 @@ function createProgramWithSource(source: string): {
   });
 }
 
+function createProgramWithRealLib(source: string): {
+  program: ts.Program;
+  sourceFile: ts.SourceFile;
+} {
+  const fileName = "/v.ts";
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+    strict: true,
+  };
+  const defaultHost = ts.createCompilerHost(options);
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    options.target!,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const host: ts.CompilerHost = {
+    ...defaultHost,
+    fileExists: (name) => name === fileName || defaultHost.fileExists(name),
+    readFile: (name) => name === fileName ? source : defaultHost.readFile(name),
+    getSourceFile: (
+      name,
+      languageVersion,
+      onError,
+      shouldCreateNewSourceFile,
+    ) =>
+      name === fileName ? sourceFile : defaultHost.getSourceFile(
+        name,
+        languageVersion,
+        onError,
+        shouldCreateNewSourceFile,
+      ),
+  };
+  return {
+    program: ts.createProgram([fileName], options, host),
+    sourceFile,
+  };
+}
+
 function createProgramWithFiles(
   files: Record<string, string>,
   entryFileName = "/test.ts",
@@ -2951,6 +2992,123 @@ Deno.test(
     assert(input.identityPaths.includes("right"));
     assert(input.identityCellPaths.includes("left"));
     assert(input.identityCellPaths.includes("right"));
+  },
+);
+
+Deno.test(
+  "Capability analysis keeps retained-element array copies full-shape while map stays precise",
+  () => {
+    const { program, sourceFile } = createProgramWithSource(
+      `
+      interface Array<T> {
+        concat(): T[];
+        map<U>(callback: (value: T) => U): U[];
+        slice(): T[];
+        toReversed(): T[];
+        toSpliced(start?: number, deleteCount?: number): T[];
+        with(index: number, value: T): T[];
+      }
+
+      type Item = { id: string; unused: string };
+      type ArrayOrTuple = Item[] | [Item];
+
+      const concatCopy = (input: { items: Item[]; other: Item[] }) => input.items.concat(input.other);
+      const concatSpread = (input: { items: Item[]; groups: Item[][] }) => input.items.concat(...input.groups);
+      const sliceCopy = (input: { items: Item[] }) => input.items.slice();
+      const reversedCopy = (input: { items: Item[] }) => input.items.toReversed();
+      const splicedCopy = (input: { items: Item[]; replacement: Item }) => input.items.toSpliced(0, 1, input.replacement);
+      const splicedSpread = (input: { items: Item[]; replacements: Item[] }) => input.items.toSpliced(0, 1, ...input.replacements);
+      const spreadCopy = (input: { items: Item[] }) => [...input.items];
+      const withCopy = (input: { items: Item[]; replacement: Item }) => input.items.with(0, input.replacement);
+      const withSpread = (input: { items: Item[]; args: [number, Item] }) => input.items.with(...input.args);
+      const withConditional = (input: { items: Item[]; flag: boolean; a: Item; b: Item }) => input.items.with(0, input.flag ? input.a : input.b);
+      const concatAnd = (input: { items: (Item | false)[]; flag: boolean; replacement: Item }) => input.items.concat(input.flag && input.replacement);
+      const unionCopy = (input: { items: ArrayOrTuple }) => input.items.toSpliced(0, 1);
+      const mapped = (input: { items: Item[] }) => input.items.map((item) => item.id);
+      `,
+    );
+    const checker = program.getTypeChecker();
+
+    const fullShapeByName = new Map<string, string[]>([
+      ["concatCopy", ["items", "other"]],
+      ["concatSpread", ["items", "groups"]],
+      ["sliceCopy", ["items"]],
+      ["reversedCopy", ["items"]],
+      ["splicedCopy", ["items", "replacement"]],
+      ["splicedSpread", ["items", "replacements"]],
+      ["spreadCopy", ["items"]],
+      ["withCopy", ["items", "replacement"]],
+      ["withSpread", ["items", "args"]],
+      ["withConditional", ["items", "a", "b"]],
+      ["concatAnd", ["items", "replacement"]],
+      ["unionCopy", ["items"]],
+    ]);
+    for (const [name, expectedPaths] of fullShapeByName) {
+      const summary = analyzeFunctionCapabilities(
+        findArrowByVariableName(sourceFile, name),
+        { checker },
+      );
+      const paths = getPaths(summary, "input");
+      assertEquals(paths.capability, "readonly");
+      for (const expectedPath of expectedPaths) {
+        assert(paths.readPaths.includes(expectedPath));
+        assert(
+          paths.fullShapePaths.includes(expectedPath),
+          `${name} must preserve the complete '${expectedPath}' payload`,
+        );
+      }
+    }
+
+    const withConditional = getPaths(
+      analyzeFunctionCapabilities(
+        findArrowByVariableName(sourceFile, "withConditional"),
+        { checker },
+      ),
+      "input",
+    );
+    assertEquals(withConditional.fullShapePaths.includes("flag"), false);
+    const concatAnd = getPaths(
+      analyzeFunctionCapabilities(
+        findArrowByVariableName(sourceFile, "concatAnd"),
+        { checker },
+      ),
+      "input",
+    );
+    assertEquals(concatAnd.fullShapePaths.includes("flag"), false);
+
+    const mapped = getPaths(
+      analyzeFunctionCapabilities(
+        findArrowByVariableName(sourceFile, "mapped"),
+        { checker },
+      ),
+      "input",
+    );
+    assertEquals(mapped.fullShapePaths.includes("items"), false);
+    assert(mapped.readPaths.includes("items.0.id"));
+    assertEquals(mapped.readPaths.includes("items.0.unused"), false);
+  },
+);
+
+Deno.test(
+  "Capability analysis recognizes reused array constituents across union branches",
+  () => {
+    const { program, sourceFile } = createProgramWithRealLib(
+      `
+      interface Item { id: string; secret: string }
+      type Tagged = Item[] & { tag: string };
+      type Mixed = Item[] | Tagged;
+      const copy = (input: { items: Mixed }) => input.items.toSpliced(0, 1);
+      `,
+    );
+    assertEquals(program.getSemanticDiagnostics().length, 0);
+    const summary = analyzeFunctionCapabilities(
+      findArrowByVariableName(sourceFile, "copy"),
+      { checker: program.getTypeChecker() },
+    );
+    const input = getPaths(summary, "input");
+
+    assert(input.readPaths.includes("items"));
+    assert(input.fullShapePaths.includes("items"));
   },
 );
 
