@@ -127,6 +127,15 @@ Deno.test("cursorScreenPos: null when the cursor column is past the content widt
   assertEquals(cursorScreenPos(doc, view), null);
 });
 
+Deno.test("cursorScreenPos: null when a dialog covers the content", () => {
+  const doc = parseDocument(SAMPLE);
+  const view = baseView({
+    cursor: { line: 1, col: 2 },
+    dialog: { title: "Save", body: ["Save?"], buttons: [] },
+  });
+  assertEquals(cursorScreenPos(doc, view), null);
+});
+
 // --- notice rows -------------------------------------------------------------
 
 Deno.test("renderFrame: notice overwrites the bottom content rows", () => {
@@ -691,6 +700,41 @@ Deno.test("renderStatus: a long left label is head-truncated to fit", () => {
   const status = stripAnsi(rows[rows.length - 1]);
   assertEquals(status.length, 40, "the bar is exactly the terminal width");
   assert(status.includes("…"), `the label is truncated: "${status}"`);
+});
+
+Deno.test("renderStatus: control characters in the current file are shown as glyphs", () => {
+  const doc = parseDocument(SAMPLE);
+  const rows = renderFrame(
+    doc,
+    baseView({ width: 60, color: false, currentFile: "a\x1b[31mb\x07.ts" }),
+  );
+  const status = rows[rows.length - 1];
+  assert(!status.includes("\x1b"), `no escape reaches the terminal: ${status}`);
+  assert(!status.includes("\x07"), "no bell reaches the terminal");
+  assert(status.includes("␛[31mb␇.ts"), `control pictures shown: ${status}`);
+  assertEquals(status.length, 60, "the bar is exactly the terminal width");
+});
+
+Deno.test("dialog: control characters in the body are shown as glyphs", () => {
+  const rows = renderFrame(
+    parseDocument("x\n"),
+    baseView({
+      width: 60,
+      height: 18,
+      color: false,
+      dialog: {
+        title: "Save Changes",
+        body: ["Save a\x1b[31mb\x07.ts?"],
+        buttons: [],
+      },
+    }),
+  );
+  // The frame carries its own resets even without colour, so the check is that
+  // the body's own escape and bell are not among what reaches the terminal.
+  const joined = rows.join("\n");
+  assert(!joined.includes("\x1b[31m"), "the body's escape is not passed on");
+  assert(!joined.includes("\x07"), "no bell reaches the terminal");
+  assert(joined.includes("Save a␛[31mb␇.ts?"), `control pictures: ${joined}`);
 });
 
 Deno.test("renderStatus: an over-wide input line is returned as-is", () => {

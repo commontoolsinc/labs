@@ -123,6 +123,7 @@ export class Session {
   private foldFileCache?: { doc: Document; files: DiffFileRange[] };
   private foldPlanCache?: { doc: Document; version: number; plan: FoldPlan };
   private nonPrintCache?: { doc: Document; value: boolean };
+  private fileLineCache?: { doc: Document; value: (number | null)[] | null };
 
   width: number;
   height: number;
@@ -772,7 +773,9 @@ export class Session {
       this.message = this.query ? `Pattern not found: ${this.query}` : "";
       return;
     }
-    const idx = nextMatchIndex(this.matches, this.top - 1, -1, jumpForward);
+    // The viewport anchor is a display row; match lines are document lines.
+    const anchor = this.toDoc(this.top) - 1;
+    const idx = nextMatchIndex(this.matches, anchor, -1, jumpForward);
     this.currentMatch = idx < 0 ? 0 : idx;
     this.revealMatch();
   }
@@ -1886,8 +1889,20 @@ export class Session {
 
   /** For a diff, each document line's underlying line: a context/added line's
    * new-file line, a commit-message line's position within the message, else
-   * null. Null for a non-diff view (no distinct underlying file). */
+   * null. Null for a non-diff view (no distinct underlying file). Cached against
+   * the document, since every frame draws the gutter and the map costs a parse
+   * of the whole diff. */
   private fileLineNumbers(): (number | null)[] | null {
+    if (this.fileLineCache?.doc !== this.currentDoc) {
+      this.fileLineCache = {
+        doc: this.currentDoc,
+        value: this.computeFileLineNumbers(),
+      };
+    }
+    return this.fileLineCache.value;
+  }
+
+  private computeFileLineNumbers(): (number | null)[] | null {
     if (!this.source?.isDiff) return null;
     const texts = this.currentDoc.lines.map((l) => l.text);
     const out: (number | null)[] = new Array(texts.length).fill(null);

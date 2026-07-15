@@ -1756,6 +1756,63 @@ Deno.test("diffedit: refuses to save an all-blank commit message", () => {
   }
 });
 
+Deno.test("diffedit: refuses to save when every commit-message line is deleted", () => {
+  const { root, ws, done } = tempWorkspace();
+  const before = Deno.readTextFileSync(join(root, "m.ts"));
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    // Remove the three message lines: blank each one, then Backspace at its
+    // start takes the line away. Each removal leaves the cursor on the line
+    // above, so the next message line is again at row 4.
+    for (let i = 0; i < 3; i++) {
+      toLine(s, 4);
+      press(s, "ctrl-a");
+      press(s, "ctrl-k");
+      press(s, "backspace");
+    }
+    assertEquals(s.doc.lines[4].text, "", "no message lines are left");
+    press(s, "f3");
+    assert(s.view().message.includes("would be empty"), s.view().message);
+    assertEquals(fg.amended(), null, "the commit was not amended");
+    assertEquals(s.view().dialog, null, "no prompt is left open");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      before,
+      "the refused save wrote no file",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: a SHA-256 repository's commit message is editable and amends", () => {
+  const { ws, done } = tempWorkspace();
+  const sha256 = "0".repeat(24) + SHOW_SHA; // a 64-character object id
+  const fg = fakeGit(sha256);
+  try {
+    const s = diffSessionFrom(
+      ws,
+      GIT_SHOW.replace(SHOW_SHA, sha256),
+      20,
+      fg.git,
+    );
+    toLine(s, 4);
+    press(s, "end");
+    type(s, " EDIT");
+    assertEquals(s.doc.lines[4].text, "    Subject line of the commit EDIT");
+    press(s, "f3");
+    assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
+    press(s, "y");
+    assertEquals(
+      fg.amended(),
+      "Subject line of the commit EDIT\n\nA body paragraph of the message.",
+    );
+  } finally {
+    done();
+  }
+});
+
 Deno.test("diffedit: does not amend (or write files) when HEAD moved since the diff was shown", () => {
   const { root, ws, done } = tempWorkspace();
   const before = Deno.readTextFileSync(join(root, "m.ts"));

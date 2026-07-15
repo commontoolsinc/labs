@@ -6,7 +6,7 @@ import {
   identityFold,
   isTestPath,
 } from "../lib/view/fold.ts";
-import type { Line } from "../lib/view/model.ts";
+import type { Document, Line } from "../lib/view/model.ts";
 import { Session } from "../lib/view/session.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { parseDocument } from "../lib/view/parse.ts";
@@ -474,6 +474,97 @@ Deno.test("line numbers: file mode shows new-file lines and blanks for structure
   assertEquals(file[5], null, "the removed line has no new-file line");
   assertEquals(file[6], 41, "'+new41' is new-file line 41");
   assertEquals(file[8], 43, "' keep43' is new-file line 43");
+});
+
+Deno.test("line numbers: file mode parses the diff once per document", () => {
+  const diff = [
+    "diff --git a/m.ts b/m.ts",
+    "--- a/m.ts",
+    "+++ b/m.ts",
+    "@@ -40,3 +40,4 @@",
+    " keep40",
+    "-old",
+    "+new41",
+    "+new42",
+    " keep43",
+    "",
+  ].join("\n");
+  const ws: DiffWorkspace = { resolve: () => null, read: () => null };
+  const model = parseDiff(diff)!;
+  const { doc, edit } = buildDiffDocument(diff, model, ws);
+  // A document that counts the reads of its text, which is what the file-line
+  // map parses.
+  let reads = 0;
+  const counting: Document = { ...doc };
+  Object.defineProperty(counting, "text", {
+    get() {
+      reads++;
+      return doc.text;
+    },
+  });
+  const s = new Session(
+    counting,
+    { color: false, showLineNumbers: false },
+    { width: 80, height: 30 },
+    undefined,
+    diffSource(ws, edit),
+  );
+  press(s, "#", "#"); // → file / message line
+  assertEquals(s.view().lineNumbers![4], 40);
+  const settled = reads;
+  for (let i = 0; i < 5; i++) assertEquals(s.view().lineNumbers![6], 41);
+  assertEquals(reads, settled, "redrawing does not re-parse the diff");
+});
+
+Deno.test("line numbers: file mode follows an edit that adds a line", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "m.ts"),
+      "x\n".repeat(39) + "keep40\nnew41\nnew42\nkeep43\n",
+    );
+    const ws: DiffWorkspace = {
+      resolve: (p) => join(root, p),
+      read: (a) => {
+        try {
+          return Deno.readTextFileSync(a);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const diff = [
+      "diff --git a/m.ts b/m.ts",
+      "--- a/m.ts",
+      "+++ b/m.ts",
+      "@@ -40,3 +40,4 @@",
+      " keep40",
+      "-old",
+      "+new41",
+      "+new42",
+      " keep43",
+      "",
+    ].join("\n");
+    const model = parseDiff(diff)!;
+    const { doc, edit } = buildDiffDocument(diff, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 30 },
+      undefined,
+      diffSource(ws, edit),
+    );
+    press(s, "#", "#"); // → file / message line
+    assertEquals(s.view().lineNumbers![7], 42, "'+new42' is new-file line 42");
+    press(s, "e"); // reveal the cursor
+    for (let i = 0; i < 6; i++) press(s, "down"); // onto '+new41'
+    press(s, "end", "enter"); // split it, adding a line after it
+    const nums = s.view().lineNumbers!;
+    assertEquals(nums[7], 42, "the added blank line is new-file line 42");
+    assertEquals(nums[8], 43, "'+new42' moved to new-file line 43");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
 });
 
 Deno.test("line numbers: file mode numbers a commit message from one", () => {

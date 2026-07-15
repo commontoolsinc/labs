@@ -197,7 +197,7 @@ export function hasNonPrintable(text: string): boolean {
  * Pictures block glyph. C0 codes map to U+2400+code (so tab → ␉, CR → ␍), DEL to
  * ␡, and the C1 codes — which have no pictures of their own — to the block's
  * substitute glyph. */
-function glyphFor(cp: string): string {
+export function glyphFor(cp: string): string {
   if (!isNonPrintable(cp)) return cp;
   const c = cp.codePointAt(0)!;
   if (c < 0x20) return String.fromCodePoint(0x2400 + c);
@@ -352,7 +352,6 @@ function xterm256(index: number): Rgb {
 export const _internal = {
   applySgr,
   matchCsi,
-  glyphFor,
   xterm256,
   sourcePoints,
 };

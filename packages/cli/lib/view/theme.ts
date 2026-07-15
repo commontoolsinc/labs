@@ -100,43 +100,13 @@ export function styleFor(cls: TokenClass): Style {
   return TOKEN_STYLES[cls];
 }
 
-/** Token colours for content shown inside a dialog. A dialog is a slightly
- * lighter panel than the editor, so the same light-on-dark accents read well;
+/** Token colours for content shown inside a dialog. A dialog panel is only a
+ * shade lighter than the editor, so it takes the editor's colours unchanged;
  * only the key column (builderCall) differs, drawn red to match the status bar's
  * shortcut keys rather than the editor's builder-call purple. */
 const DIALOG_TOKEN_STYLES: Record<TokenClass, Style> = {
-  plain: { fg: C.fg },
-  whitespace: {},
-  keyword: { fg: C.purple, bold: true },
-  controlKeyword: { fg: C.purple, bold: true },
-  storageKeyword: { fg: C.purple, bold: true },
-  operator: { fg: C.cyan },
-  punctuation: { fg: C.fgDim },
-  bracket: { fg: C.fg },
-  string: { fg: C.green },
-  template: { fg: C.green },
-  number: { fg: C.orange },
-  boolean: { fg: C.orange },
-  regex: { fg: C.cyan },
-  comment: { fg: C.fgDim },
-  docComment: { fg: C.fgDim },
-  sectionHeader: { fg: C.fgBright, bold: true, underline: true },
-  typeName: { fg: C.yellow },
-  typeKeyword: { fg: C.yellow },
-  interfaceName: { fg: C.yellow, bold: true },
-  functionName: { fg: C.blue, bold: true },
-  callName: { fg: C.blue },
+  ...TOKEN_STYLES,
   builderCall: { fg: C.red, bold: true },
-  cfHelper: { fg: C.cyan },
-  schemaKey: { fg: C.red },
-  propertyName: { fg: C.red },
-  parameter: { fg: C.fg },
-  binding: { fg: C.fg },
-  identifier: { fg: C.fg },
-  diffAdd: { fg: C.green, bold: true },
-  diffDel: { fg: C.red, bold: true },
-  diffHunk: { fg: C.cyan, bold: true },
-  diffMeta: { fg: C.fgDim },
 };
 
 /** The dialog-palette style for a token class (bracket depth is ignored: a

@@ -8,7 +8,9 @@
 /** The indent git puts before every commit-message line. */
 export const MESSAGE_INDENT = "    ";
 
-const COMMIT_RE = /^commit ([0-9a-f]{7,40})\b/;
+// An object id is 40 hex characters in a SHA-1 repository and 64 in a SHA-256
+// one; git also prints abbreviated ids, of at least seven characters.
+const COMMIT_RE = /^commit ([0-9a-f]{7,64})\b/;
 
 export interface CommitMessage {
   /** The commit hash, as printed after `commit `. */

@@ -30,6 +30,20 @@ Deno.test("findCommitMessages: the indented block after the header, ending at th
   assertEquals(msgs[0].end, 6, "ends at the last indented line");
 });
 
+Deno.test("findCommitMessages: a SHA-256 repository's 64-character object id", () => {
+  const sha = "a".repeat(64);
+  const lines = [`commit ${sha}`, "Author: A B <a@b>", "", "    Subject", ""];
+  const msgs = findCommitMessages(lines);
+  assertEquals(msgs.length, 1);
+  assertEquals(msgs[0].sha, sha);
+  assertEquals([msgs[0].start, msgs[0].end], [3, 3]);
+});
+
+Deno.test("findCommitMessages: a commit line without an object id yields no region", () => {
+  const lines = ["commit not-a-sha", "Author: A", "", "    Subject", ""];
+  assertEquals(findCommitMessages(lines).length, 0);
+});
+
 Deno.test("findCommitMessages: a Merge header line is skipped", () => {
   const lines = [
     "commit abcdef1234567",

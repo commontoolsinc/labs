@@ -11,7 +11,7 @@
  */
 import { cpLen, paint, RESET, type Style } from "./ansi.ts";
 import type { Document, Line, StructureNode } from "./model.ts";
-import { displayLine, type DisplayMode } from "./display.ts";
+import { displayLine, type DisplayMode, glyphFor } from "./display.ts";
 import { overlaySpanStyle, spanStyle } from "./highlight.ts";
 import { lineBg, ui } from "./theme.ts";
 
@@ -98,14 +98,14 @@ function layout(
 
 /**
  * 1-based terminal (row, col) for the text cursor, or null when there is no
- * cursor, it is scrolled off screen, or an overlay covers the content. Mirrors
- * the layout `renderFrame` uses (gutter + guide + horizontal scroll).
+ * cursor, it is scrolled off screen, or an overlay or dialog covers the content.
+ * Mirrors the layout `renderFrame` uses (gutter + guide + horizontal scroll).
  */
 export function cursorScreenPos(
   doc: Document,
   view: ViewState,
 ): { row: number; col: number } | null {
-  if (!view.cursor || view.overlay) return null;
+  if (!view.cursor || view.overlay || view.dialog) return null;
   const { line, col } = view.cursor;
   const contentHeight = view.height - 1;
   const r = line - view.top;
@@ -403,7 +403,7 @@ function renderStatus(doc: Document, view: ViewState): string {
   // file is capped so it never crowds out the position or the left hints.
   const fileMax = Math.max(8, Math.floor(view.width / 2) - visibleLen(pos) - 2);
   const file = view.currentFile
-    ? truncate(view.currentFile, fileMax, false)
+    ? truncate(showControls(view.currentFile), fileMax, false)
     : "";
   const rightPlain = file ? `${file}  ${pos}` : pos;
   const rightW = visibleLen(rightPlain);
@@ -441,6 +441,17 @@ function fitHints(
     if (visibleLen(hintsPlain([...out, h])) > budget) break;
     out.push(h);
   }
+  return out;
+}
+
+/** Replace the control characters in `text` with their Control Pictures glyphs,
+ * the same substitution the content rows use. This is applied to the strings
+ * that reach the terminal outside `displayLine` — the status bar's file name and
+ * the dialog body — which can carry a file name a user chose. One code point in
+ * gives one code point out, so the callers' width arithmetic is unchanged. */
+function showControls(text: string): string {
+  let out = "";
+  for (const cp of text) out += glyphFor(cp);
   return out;
 }
 
@@ -779,7 +790,7 @@ function applyDialog(
 /** Write `text` centred in `cells`, one blank margin column inside each edge. */
 function placeCentered(cells: Cell[], text: string, style: Style): void {
   const innerW = cells.length;
-  const chars = [...text];
+  const chars = [...showControls(text)];
   const start = 1 + Math.max(0, Math.floor((innerW - 2 - chars.length) / 2));
   for (let j = 0; j < chars.length; j++) {
     const col = start + j;

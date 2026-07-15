@@ -6,6 +6,7 @@ import {
   displayLine,
   type DisplayMode,
   displayModeLabel,
+  glyphFor,
 } from "../lib/view/display.ts";
 import type { Line } from "../lib/view/model.ts";
 
@@ -156,14 +157,10 @@ Deno.test("displayColumnOf: ansi skips a hidden colour sequence", () => {
 
 // --- internals ---------------------------------------------------------------
 
-Deno.test("internal glyphFor: DEL and C1 codes have block glyphs", () => {
-  assertEquals(_internal.glyphFor("\x7f"), "␡");
-  assertEquals(
-    _internal.glyphFor("\x85"),
-    "␦",
-    "a C1 code uses the substitute glyph",
-  );
-  assertEquals(_internal.glyphFor("x"), "x", "printable is itself");
+Deno.test("glyphFor: DEL and C1 codes have block glyphs", () => {
+  assertEquals(glyphFor("\x7f"), "␡");
+  assertEquals(glyphFor("\x85"), "␦", "a C1 code uses the substitute glyph");
+  assertEquals(glyphFor("x"), "x", "printable is itself");
 });
 
 Deno.test("internal applySgr: the full code range folds into a style", () => {

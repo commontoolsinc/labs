@@ -163,19 +163,25 @@ export function diffSource(
   };
 }
 
-/** The commit whose message a save would amend: the HEAD message region exists
- * and its text differs from the baseline. Null otherwise. */
+/** The commit whose message a save would amend: the HEAD message region differs
+ * from the baseline, or has been deleted outright. Null otherwise. */
 function pendingAmend(
   editableMessage: (lines: readonly string[]) => CommitMessage | null,
   baseline: string,
   current: string,
 ): { sha: string; subject: string } | null {
   const curLines = current.split("\n");
+  const baseLines = baseline.split("\n");
   const msg = editableMessage(curLines);
-  if (!msg) return null;
-  const baseMsg = editableMessage(baseline.split("\n"));
+  const baseMsg = editableMessage(baseLines);
+  if (!msg) {
+    // Every line of the region was deleted, so there is no region left to read
+    // the new message from. The message the save would write is empty, and the
+    // caller refuses an empty subject.
+    return baseMsg ? { sha: baseMsg.sha, subject: "" } : null;
+  }
   const newText = extractMessage(curLines, msg);
-  if (baseMsg && extractMessage(baseline.split("\n"), baseMsg) === newText) {
+  if (baseMsg && extractMessage(baseLines, baseMsg) === newText) {
     return null; // the message is unchanged
   }
   // The subject is the first non-blank line — git strips leading blanks — so an
