@@ -12,56 +12,18 @@
  */
 
 import { action, computed, pattern, safeDateNow, UI } from "commonfabric";
+import { findNode, propsOf, readValue } from "../test/vnode-helpers.ts";
 import CozyPoll, { dayKeyOf, type Option, type Vote } from "./main.tsx";
-
-const isRecord = (value: unknown): value is Record<PropertyKey, unknown> =>
-  typeof value === "object" && value !== null;
-
-const readValue = (value: unknown): unknown => {
-  if (!isRecord(value) || typeof value.get !== "function") {
-    return value;
-  }
-  return (value.get as () => unknown)();
-};
-
-const propsOf = (node: unknown): Record<PropertyKey, unknown> | undefined => {
-  const value = readValue(node);
-  if (!isRecord(value)) return undefined;
-  const props = readValue(value.props);
-  return isRecord(props) ? props : undefined;
-};
-
-const childrenArray = (children: unknown): unknown[] => {
-  const value = readValue(children);
-  if (Array.isArray(value)) return value;
-  return value === undefined || value === null || typeof value === "boolean"
-    ? []
-    : [value];
-};
-
-const childNodes = (node: unknown): unknown[] => {
-  const value = readValue(node);
-  if (Array.isArray(value)) return value;
-  if (!isRecord(value)) return [];
-  const ui = value[UI];
-  return [
-    ...(ui === undefined || ui === value ? [] : [ui]),
-    ...childrenArray(value.children),
-  ];
-};
 
 const findNodeByProp = (
   root: unknown,
   prop: string,
   expected: unknown,
-): unknown | undefined => {
-  const value = readValue(root);
-  const props = propsOf(value);
-  if (props && readValue(props[prop]) === expected) return value;
-  return childNodes(value)
-    .map((child) => findNodeByProp(child, prop, expected))
-    .find((child) => child !== undefined);
-};
+): unknown | undefined =>
+  findNode(root, (node) => {
+    const props = propsOf(node);
+    return props !== undefined && readValue(props[prop]) === expected;
+  });
 
 const SEEDED_OPTION: Option = {
   id: "opt-seeded",
