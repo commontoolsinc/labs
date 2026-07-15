@@ -185,6 +185,56 @@ export const fidPayload = (fid: string): string => {
   return m ? m[1] : "";
 };
 
+/** The prose surfaces of one topic that count as reference edges: the body,
+ * every comment body, and every link URL (the design's scan ∪ TopicLink).
+ * Structurally typed so pure tests can drive it with literals. */
+export const topicCorpus = (
+  t:
+    | {
+      body?: string;
+      comments?: readonly { body?: string }[];
+      links?: readonly { url?: string }[];
+    }
+    | undefined
+    | null,
+): string => {
+  if (!t) return "";
+  const parts = [t.body ?? ""];
+  for (const c of asArray(t.comments ?? [])) parts.push(c?.body ?? "");
+  for (const l of asArray(t.links ?? [])) parts.push(l?.url ?? "");
+  return parts.join("\n");
+};
+
+/** Join each corpus against the set of entry payloads: one shared
+ * payload→index map, one scan per text — the shape a second consumer (notes,
+ * when backlinks-index's write path retires) imports rather than forks.
+ * refsOut[i] lists, in first-mention order, the entries whose fids appear in
+ * corpus i; referencedBy is the inverse view (ascending by referrer).
+ * Self-references, repeat mentions, and payloads no entry owns all drop;
+ * "" payloads (unresolved entries) own nothing. */
+export const crossrefJoin = (
+  corpora: string[],
+  payloads: string[],
+): { refsOut: number[][]; referencedBy: number[][] } => {
+  const byPayload = new Map<string, number>();
+  payloads.forEach((p, i) => {
+    if (p) byPayload.set(p, i);
+  });
+  const refsOut: number[][] = corpora.map(() => []);
+  const referencedBy: number[][] = corpora.map(() => []);
+  corpora.forEach((text, i) => {
+    const seen = new Set<number>();
+    for (const p of extractFidPayloads(text)) {
+      const j = byPayload.get(p);
+      if (j === undefined || j === i || seen.has(j)) continue;
+      seen.add(j);
+      refsOut[i].push(j);
+      referencedBy[j].push(i);
+    }
+  });
+  return { refsOut, referencedBy };
+};
+
 const LINK_KIND_ITEMS = [
   { label: "Web", value: "web" },
   { label: "PR", value: "pr" },

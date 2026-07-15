@@ -18,9 +18,10 @@ import {
 
 import Topic, {
   asArray,
-  extractFidPayloads,
+  crossrefJoin,
   fidPayload,
   snippet,
+  topicCorpus,
   type TopicPiece,
   TOPICS_THEME,
   whenLabel,
@@ -173,30 +174,15 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       const ref = (topics.key(i) as any).resolveAsCell?.()?.entityId;
       return ref ? fidPayload(entityRefToString(ref)) : "";
     });
-    // Every fid payload each topic's prose mentions.
-    const mentions = list.map((t) => {
-      if (!t) return new Set<string>();
-      const parts = [t.body ?? ""];
-      for (const c of asArray(t.comments)) parts.push(c?.body ?? "");
-      for (const l of asArray(t.links)) parts.push(l?.url ?? "");
-      return new Set(extractFidPayloads(parts.join("\n")));
-    });
-    return list.map((t, i) => {
-      const refsOut: number[] = [];
-      const referencedBy: number[] = [];
-      if (t) {
-        for (let j = 0; j < list.length; j++) {
-          if (j === i || !list[j]) continue;
-          if (payloads[j] && mentions[i].has(payloads[j])) refsOut.push(j);
-          if (payloads[i] && mentions[j].has(payloads[i])) referencedBy.push(j);
-        }
-      }
-      return {
-        fid: payloads[i] ? `fid1:${payloads[i]}` : "",
-        refsOut,
-        referencedBy,
-      };
-    });
+    const { refsOut, referencedBy } = crossrefJoin(
+      list.map((t) => topicCorpus(t)),
+      payloads,
+    );
+    return list.map((_t, i) => ({
+      fid: payloads[i] ? `fid1:${payloads[i]}` : "",
+      refsOut: refsOut[i],
+      referencedBy: referencedBy[i],
+    }));
   });
 
   // Piece-valued view of the graph for consumers (tests, embedders, headless

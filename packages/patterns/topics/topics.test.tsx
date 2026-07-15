@@ -17,10 +17,12 @@ import Topics, {
   type TopicPiece,
 } from "./main.tsx";
 import Topic, {
+  crossrefJoin,
   extractFidPayloads,
   fidPayload,
   isSafeLinkUrl,
   snippet,
+  topicCorpus,
   whenLabel,
 } from "./topic.tsx";
 
@@ -361,6 +363,36 @@ export default pattern(() => {
     fidPayload("") === ""
   );
 
+  // The shared join (the piece notes imports when backlinks-index's write
+  // path retires): one payload→entry map, one scan per corpus. First-mention
+  // order out, ascending referrers in; repeats, self-mentions, and payloads
+  // no entry owns all drop.
+  const assert_crossref_join = computed(() => {
+    const P3 = "C".repeat(43);
+    const joined = crossrefJoin(
+      [
+        `self fid1:${P1} then fid1:${P2}`,
+        "",
+        `fid1:${P2} twice fid1:${P2} then fid1:${P1} unknown fid1:${
+          "Z".repeat(43)
+        }`,
+      ],
+      [P1, P2, P3],
+    );
+    return joined.refsOut[0].join(",") === "1" &&
+      joined.refsOut[1].join(",") === "" &&
+      joined.refsOut[2].join(",") === "1,0" &&
+      joined.referencedBy[0].join(",") === "2" &&
+      joined.referencedBy[1].join(",") === "0,2" &&
+      joined.referencedBy[2].join(",") === "" &&
+      topicCorpus({
+          body: "b",
+          comments: [{ body: "c" }],
+          links: [{ url: "u" }],
+        }) === "b\nc\nu" &&
+      topicCorpus(undefined) === "";
+  });
+
   return {
     [UI]: board[UI],
     tests: [
@@ -420,6 +452,7 @@ export default pattern(() => {
       { action: action_remove_body_ref },
       { assertion: assert_edge_removed },
       { assertion: assert_crossref_helpers },
+      { assertion: assert_crossref_join },
     ],
   };
 });
