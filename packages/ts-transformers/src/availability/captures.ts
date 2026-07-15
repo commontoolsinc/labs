@@ -1,6 +1,7 @@
 import ts from "typescript";
 
 import { detectCallKind } from "../ast/call-kind.ts";
+import { getStableConstAliasInitializer } from "../ast/stable-const-alias.ts";
 import { getTypeAtLocationWithFallback } from "../ast/utils.ts";
 import type { TransformationContext } from "../core/context.ts";
 import { parseCaptureExpression } from "../utils/capture-tree.ts";
@@ -71,9 +72,17 @@ function captureRootIdentifier(
   let current = unwrapAvailabilityExpression(expression);
   while (
     ts.isPropertyAccessExpression(current) ||
-    ts.isElementAccessExpression(current)
+    ts.isElementAccessExpression(current) ||
+    (ts.isCallExpression(current) &&
+      ts.isPropertyAccessExpression(current.expression) &&
+      current.expression.name.text === "key")
   ) {
-    current = unwrapAvailabilityExpression(current.expression);
+    if (ts.isCallExpression(current)) {
+      const callee = current.expression as ts.PropertyAccessExpression;
+      current = unwrapAvailabilityExpression(callee.expression);
+    } else {
+      current = unwrapAvailabilityExpression(current.expression);
+    }
   }
   return ts.isIdentifier(current) ? current : undefined;
 }
@@ -107,15 +116,25 @@ function parseExplicitAvailabilityCaptureExpression(
   const symbol = context.checker.getSymbolAtLocation(root);
   if (!symbol || seen.has(symbol)) return parsed;
   const declaration = symbol.valueDeclaration ?? symbol.declarations?.[0];
-  if (
-    !declaration || !ts.isVariableDeclaration(declaration) ||
-    !declaration.initializer || !nodeIsWithin(declaration, boundary)
-  ) {
+  if (!declaration || !nodeIsWithin(declaration, boundary)) {
     return parsed;
+  }
+  const initializer = getStableConstAliasInitializer(
+    symbol,
+    context.factory,
+  );
+  if (!initializer) {
+    context.reportDiagnosticOnce({
+      type: "availability:unsupported-guard-operand",
+      message:
+        "Availability guards inside computed()/lift() can follow only stable const aliases. Use a const alias with a static property, element, or key() path.",
+      node: expression,
+    });
+    return undefined;
   }
   seen.add(symbol);
   const source = parseExplicitAvailabilityCaptureExpression(
-    declaration.initializer,
+    initializer,
     boundary,
     context,
     seen,

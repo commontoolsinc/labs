@@ -144,6 +144,96 @@ Deno.test("a computed-local alias retains its captured availability path", async
   );
 });
 
+Deno.test("a key access through a computed-local const alias keeps the source path", async () => {
+  const output = await transformSource(
+    `
+    import { AsyncResult, computed, hasError, pattern } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: { request: AsyncResult<Repo> }) => {
+      const failed = computed(() => {
+        const local = input as typeof input & {
+          key(name: "request"): AsyncResult<Repo>;
+        };
+        return hasError(local.key("request"));
+      });
+      return { failed };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["input", "request"], reasons: ["error"] }]',
+  );
+  assertEquals(
+    output.includes('path: ["local", "request"], reasons: ["error"]'),
+    false,
+  );
+});
+
+Deno.test("a destructured computed-local const alias keeps the source path", async () => {
+  const output = await transformSource(
+    `
+    import { AsyncResult, computed, hasError, pattern } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: { request: AsyncResult<Repo> }) => {
+      const failed = computed(() => {
+        const { request } = input;
+        return hasError(request);
+      });
+      return { failed };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+      typeCheck: true,
+    },
+  );
+
+  assertStringIncludes(
+    output,
+    'unavailableInputPolicy: [{ path: ["input", "request"], reasons: ["error"] }]',
+  );
+  assertEquals(
+    output.includes('path: ["request"], reasons: ["error"]'),
+    false,
+  );
+});
+
+Deno.test("a mutable computed-local guard alias is rejected", async () => {
+  const { diagnostics } = await validateSource(`
+    import { AsyncResult, computed, hasError, pattern } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: {
+      first: AsyncResult<Repo>;
+      second: AsyncResult<Repo>;
+    }) => {
+      const failed = computed(() => {
+        let request = input.first;
+        request = input.second;
+        return hasError(request);
+      });
+      return { failed };
+    });
+  `);
+
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:unsupported-guard-operand",
+    ),
+    true,
+  );
+});
+
 Deno.test("reports a helper guard whose caller path cannot be represented", async () => {
   const { diagnostics } = await validateSource(
     `
@@ -489,6 +579,74 @@ Deno.test("reports observeAvailability inside the compute boundary it tries to w
       "availability:observation-inside-compute",
     ),
     true,
+  );
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "compute-context:local-reactive-use",
+    ),
+    false,
+  );
+});
+
+Deno.test("reports a dead nullish fallback after resultOf", async () => {
+  const { diagnostics } = await validateSource(`
+    import {
+      AsyncResult,
+      pattern,
+      resultOf,
+    } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: { request: AsyncResult<Repo> }) => {
+      const repo = resultOf(input.request) ?? { name: "fallback" };
+      return { repo };
+    });
+  `);
+
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:dead-result-fallback",
+    ),
+    true,
+  );
+});
+
+Deno.test("an in-compute observation reports only its availability diagnostic", async () => {
+  const { diagnostics } = await validateSource(`
+    import {
+      AsyncResult,
+      computed,
+      hasError,
+      observeAvailability,
+      pattern,
+      resultOf,
+    } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: { request: AsyncResult<Repo> }) => {
+      const content = computed(() => {
+        const observed = observeAvailability(input.request, "error");
+        return hasError(observed)
+          ? observed.error.message
+          : resultOf(observed).name;
+      });
+      return { content };
+    });
+  `);
+
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:observation-inside-compute",
+    ),
+    true,
+  );
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "compute-context:local-reactive-use",
+    ),
+    false,
   );
 });
 

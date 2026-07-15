@@ -10,7 +10,57 @@ import {
   guardOperandExposesAvailability,
   parseAvailabilityObservation,
   resolveAvailabilityObservation,
+  unwrapAvailabilityExpression,
 } from "./analysis.ts";
+import { getStableConstAliasInitializer } from "../ast/stable-const-alias.ts";
+
+function captureRootIdentifier(
+  expression: ts.Expression,
+): ts.Identifier | undefined {
+  let current = unwrapAvailabilityExpression(expression);
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current) ||
+    (ts.isCallExpression(current) &&
+      ts.isPropertyAccessExpression(current.expression) &&
+      current.expression.name.text === "key")
+  ) {
+    if (ts.isCallExpression(current)) {
+      const callee = current.expression as ts.PropertyAccessExpression;
+      current = unwrapAvailabilityExpression(callee.expression);
+    } else {
+      current = unwrapAvailabilityExpression(current.expression);
+    }
+  }
+  return ts.isIdentifier(current) ? current : undefined;
+}
+
+function nearestFunctionBody(node: ts.Node): ts.ConciseBody | undefined {
+  for (
+    let current: ts.Node | undefined = node.parent;
+    current;
+    current = current.parent
+  ) {
+    if (
+      (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) &&
+      current.body
+    ) {
+      return current.body;
+    }
+  }
+  return undefined;
+}
+
+function nodeIsWithin(node: ts.Node, boundary: ts.Node): boolean {
+  for (
+    let current: ts.Node | undefined = node;
+    current;
+    current = current.parent
+  ) {
+    if (current === boundary) return true;
+  }
+  return false;
+}
 
 function bindingPropertyName(
   element: ts.BindingElement,
@@ -189,7 +239,24 @@ export class AvailabilityAnalysisTransformer extends HelpersOnlyTransformer {
     propagateVariableObservations();
 
     const diagnose = (node: ts.Node): void => {
-      if (ts.isCallExpression(node)) {
+      if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+      ) {
+        const left = resolveCompositeInput(node.left, context);
+        if (
+          ts.isCallExpression(left) &&
+          detectCallKind(left, context.checker)?.kind ===
+            "availability-result"
+        ) {
+          context.reportDiagnosticOnce({
+            type: "availability:dead-result-fallback",
+            message:
+              "A nullish fallback after resultOf() never handles unavailable data: the marker propagates and skips the surrounding computation. Guard the original AsyncResult for explicit states, or use latestComplete() to retain the last usable value.",
+            node,
+          });
+        }
+      } else if (ts.isCallExpression(node)) {
         const callKind = detectCallKind(node, context.checker);
         const reactiveContext = context.getReactiveContext(node);
         if (
@@ -207,6 +274,25 @@ export class AvailabilityAnalysisTransformer extends HelpersOnlyTransformer {
           reactiveContext.kind === "compute"
         ) {
           const operand = node.arguments[0];
+          const root = operand ? captureRootIdentifier(operand) : undefined;
+          const rootSymbol = root
+            ? context.checker.getSymbolAtLocation(root)
+            : undefined;
+          const rootDeclaration = rootSymbol?.valueDeclaration ??
+            rootSymbol?.declarations?.[0];
+          const functionBody = nearestFunctionBody(node);
+          if (
+            rootDeclaration && functionBody &&
+            nodeIsWithin(rootDeclaration, functionBody) &&
+            !getStableConstAliasInitializer(rootSymbol, context.factory)
+          ) {
+            context.reportDiagnosticOnce({
+              type: "availability:unsupported-guard-operand",
+              message:
+                "Availability guards inside computed()/lift() can follow only stable const aliases. Use a const alias with a static property, element, or key() path.",
+              node,
+            });
+          }
           const observation = operand
             ? resolveAvailabilityObservation(operand, context)
             : undefined;

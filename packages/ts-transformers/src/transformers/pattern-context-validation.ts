@@ -386,6 +386,41 @@ export class PatternContextValidationTransformer
     }
 
     const diagnosticsSeen = new Set<number>();
+    const invalidObserverSymbols = new Set<ts.Symbol>();
+
+    const collectInvalidObservers = (node: ts.Node): void => {
+      if (node !== func.body && ts.isFunctionLike(node)) return;
+      if (
+        ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+        node.initializer && ts.isCallExpression(node.initializer) &&
+        detectCallKind(node.initializer, context.checker)?.kind ===
+          "availability-observer"
+      ) {
+        const symbol = context.checker.getSymbolAtLocation(node.name);
+        if (symbol) invalidObserverSymbols.add(symbol);
+      }
+      ts.forEachChild(node, collectInvalidObservers);
+    };
+    collectInvalidObservers(func.body);
+
+    const referencesInvalidObserver = (node: ts.Node): boolean => {
+      let found = false;
+      const visit = (child: ts.Node): void => {
+        if (found) return;
+        if (
+          ts.isIdentifier(child) &&
+          invalidObserverSymbols.has(
+            context.checker.getSymbolAtLocation(child) as ts.Symbol,
+          )
+        ) {
+          found = true;
+          return;
+        }
+        ts.forEachChild(child, visit);
+      };
+      visit(node);
+      return found;
+    };
 
     const findProblematicUse = (
       expression: ts.Expression,
@@ -407,6 +442,10 @@ export class PatternContextValidationTransformer
             context,
           )
         ) {
+          if (referencesInvalidObserver(node)) {
+            ts.forEachChild(node, visit);
+            return;
+          }
           culprit = node;
           return;
         }
@@ -422,6 +461,10 @@ export class PatternContextValidationTransformer
             context,
           )
         ) {
+          if (referencesInvalidObserver(node)) {
+            ts.forEachChild(node, visit);
+            return;
+          }
           culprit = node;
           return;
         }
@@ -436,6 +479,13 @@ export class PatternContextValidationTransformer
             context,
           )
         ) {
+          if (
+            invalidObserverSymbols.has(
+              context.checker.getSymbolAtLocation(node) as ts.Symbol,
+            )
+          ) {
+            return;
+          }
           culprit = node;
           return;
         }
