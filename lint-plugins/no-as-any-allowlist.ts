@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/storage-subscription-filter.bench.ts",
   "packages/runner/test/storage-subscription-refresh.bench.ts",
   "packages/runner/test/transaction-inspection.test.ts",
   "packages/runner/test/transaction-notfound.test.ts",

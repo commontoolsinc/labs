@@ -1,5 +1,8 @@
 import { Identity } from "@commonfabric/identity";
+import type { Result, Unit, URI } from "@commonfabric/memory/interface";
+import type { EntityDocument } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase(
   "bench subscription filter refresh",
@@ -14,10 +17,11 @@ const PATTERN_B_URI = "of:subscription-filter-pattern-b" as const;
 const TARGET_A_URI = "of:subscription-filter-target-a" as const;
 const TARGET_B_URI = "of:subscription-filter-target-b" as const;
 
-type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
-  open(space: string): infer T;
-} ? T
-  : never;
+type TestProvider = IStorageProviderWithReplica & {
+  send(
+    batch: { uri: URI; value: EntityDocument | undefined }[],
+  ): Promise<Result<Unit, Error>>;
+};
 
 const coldUri = (index: number) =>
   `of:subscription-filter-cold-${index}` as const;
@@ -76,9 +80,9 @@ const setup = async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider = storageManager.open(space) as TestProvider;
 
-  await (provider as any).send([
+  await provider.send([
     {
       uri: PATTERN_A_URI,
       value: { value: { name: "Pattern A" } },
@@ -97,9 +101,9 @@ const setup = async () => {
     })),
   ]);
 
-  await (provider as any).sync(HOT_URI, selector);
+  await provider.sync(HOT_URI, selector);
   for (let index = 0; index < SUBSCRIPTION_COUNT - 1; index++) {
-    await (provider as any).sync(coldUri(index), selector);
+    await provider.sync(coldUri(index), selector);
   }
 
   await storageManager.synced();
@@ -123,9 +127,9 @@ const setupScoped = async () => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider = storageManager.open(space) as TestProvider;
 
-  await (provider as any).send([
+  await provider.send([
     {
       uri: TARGET_A_URI,
       value: { value: { name: "Target A" } },
@@ -144,9 +148,9 @@ const setupScoped = async () => {
     })),
   ]);
 
-  await (provider as any).sync(HOT_SCOPED_URI, scopedSelector);
+  await provider.sync(HOT_SCOPED_URI, scopedSelector);
   for (let index = 0; index < SUBSCRIPTION_COUNT - 1; index++) {
-    await (provider as any).sync(coldUri(index), scopedSelector);
+    await provider.sync(coldUri(index), scopedSelector);
   }
 
   await storageManager.synced();
@@ -164,7 +168,7 @@ const runValueUpdateLoop = async (
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) => {
   for (let version = 1; version <= UPDATE_COUNT; version++) {
-    await (provider as any).send([{
+    await provider.send([{
       uri: HOT_URI,
       value: buildDoc(version, PATTERN_A_URI),
     }]);
@@ -177,7 +181,7 @@ const runSigilRetargetLoop = async (
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) => {
   for (let version = 1; version <= UPDATE_COUNT; version++) {
-    await (provider as any).send([{
+    await provider.send([{
       uri: HOT_URI,
       value: buildDoc(
         version,
@@ -193,7 +197,7 @@ const runScopedSigilRetargetLoop = async (
   storageManager: ReturnType<typeof StorageManager.emulate>,
 ) => {
   for (let version = 1; version <= UPDATE_COUNT; version++) {
-    await (provider as any).send([{
+    await provider.send([{
       uri: HOT_SCOPED_URI,
       value: buildScopedDoc(
         "Hot",
