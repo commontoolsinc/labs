@@ -91,6 +91,11 @@ Top-level `$ref` is resolved before traversal decisions. Defaults are applied fr
 - Arrays validate per item schema
 - Objects validate per property schema
 - Required properties must be present in the filtered result
+- When an explicit property schema rejects a value, an optional property is
+  omitted from the filtered result, while a required property causes the
+  containing object to reject. In particular, an optional `false` property
+  excludes a link without loading or tracking its target; making that property
+  required makes the object unsatisfiable when the property is present.
 
 `additionalProperties` handling is intentionally specialized:
 
@@ -121,8 +126,14 @@ Defaults:
 
 `SchemaObjectTraverser.hasAsCell(schema)` controls boundary behavior.
 
-- With `traverseCells = false` (runtime transforms), `asCell` boundaries produce cell/stream objects without deep traversal of nested content
-- With `traverseCells = true` (query traversal), linked content is traversed to register dependencies
+- With `traverseCells = false` (runtime transforms), ordinary `asCell`
+  boundaries produce cell/stream objects without deep traversal of nested
+  content.
+- With `traverseCells = true` (query traversal), ordinary `asCell` content is
+  traversed to register dependencies.
+- `asCell: ["opaque"]` is a hard boundary in both modes. Inline values are not
+  descended into; pointer targets are not loaded, traversed, or added to
+  `schemaTracker`.
 
 ### Detection Rules
 
@@ -142,7 +153,8 @@ Notes:
 | Value shape | `traverseCells = false` (runtime transform path) | `traverseCells = true` (query path) |
 | --- | --- | --- |
 | Primitive value with `asCell/asStream` | Boundary at current node. Traverser calls `createObject(link, value)` and does not descend. In runtime object creator this yields a cell-like wrapper. | No boundary shortcut from `traverseCells`; traversal still resolves value normally and query object creator returns plain traversed data. |
-| Object property, inline non-link value, schema has `asCell | Boundary at property. Property value is replaced by `createObject(propertyLink, undefined)` and nested fields are not traversed. | No boundary shortcut; traverses/validates nested object content. |
+| Any value with `asCell: ["opaque"]` | Hard boundary before nested traversal. Produces the runtime's opaque cell representation. | Same hard boundary. The query object creator preserves the raw inline value or pointer; linked targets are neither loaded nor tracked. |
+| Object property, inline non-link value, schema has `asCell` | Boundary at property. Property value is replaced by `createObject(propertyLink, undefined)` and nested fields are not traversed. | No boundary shortcut; traverses/validates nested object content. |
 | Object property, link value, schema has `asCell` | Follows write redirects to stable target, then creates boundary object from resolved link (`getNextCellLink` path). | Follows redirects and continues traversal into resolved target content. |
 | Array element, link value, schema has `asCell` | Resolves write redirects first, then follows one additional link step for array semantics, then emits boundary object for the resolved target link. | Performs same link resolution, then continues schema traversal into the resolved element value. |
 | Array element, inline non-link object, schema has `asCell` | Boundary at element index. Emits `createObject(indexLink, undefined)`; no nested traversal for element fields. | No boundary shortcut; element object is traversed against element schema. |
@@ -150,7 +162,13 @@ Notes:
 
 ### Pointer and Redirect Details at Boundaries
 
-For pointer values, boundary behavior is based on the write-redirect-resolved document:
+For a pointer whose first `asCell` entry is `"opaque"`, traversal calls the
+active object creator at the boundary before resolving write redirects or
+reading the target. Runtime transforms produce an opaque cell representation;
+query traversal preserves the raw pointer. This rule applies in both modes.
+
+For ordinary, non-opaque `asCell` pointer values, runtime boundary behavior is
+based on the write-redirect-resolved document:
 
 1. Resolve only write-redirect links (`lastNode = "writeRedirect"`).
 2. If runtime boundary mode (`traverseCells = false`) and schema is `asCell`, compute cell link from that resolved location:
@@ -160,11 +178,17 @@ For pointer values, boundary behavior is based on the write-redirect-resolved do
 
 Broken redirect case:
 
-- If redirect target is `undefined` and schema is `asCell`, traversal returns an error/invalid result (no boundary object is emitted).
+- If a non-opaque redirect target is `undefined` and schema is `asCell`,
+  traversal returns an error/invalid result (no boundary object is emitted).
+- An opaque pointer's target is not read, so its existence is not validated at
+  the boundary.
 
 ### Missing Values and Defaults at `asCell` Paths
 
-- Missing linked value + `asCell`: treated as invalid for boundary creation.
+- Missing linked value + non-opaque `asCell`: treated as invalid for boundary
+  creation.
+- Opaque pointer targets are not read and therefore are not checked for a
+  missing value.
 - Property defaults with `asCell`:
   - when a property schema default exists, traversal enters `traverseWithSchema({ value: undefined }, propSchema)`
   - default application uses the resolved schema, including defaults behind top-level `$ref`

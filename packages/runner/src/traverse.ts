@@ -4278,7 +4278,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // not by error code: an absent target surfaces as INVALID_TYPE (the
         // undefined value fails the target schema's type check), the same
         // code a present-but-wrong-shaped target produces.
+        // A false property schema deliberately excludes this subtree. Do not
+        // resolve its link merely to distinguish an absent target from a type
+        // mismatch: that would load and track the very document the selector
+        // excludes. False optional properties are simply omitted below;
+        // false required properties still fail the required check.
         const absentLinkTarget = elementGrace && error !== undefined &&
+          !ContextualFlowControl.isFalseSchema(propSchema) &&
           isSigilLink(propValue) &&
           this.linkTargetAbsent(propDoc, propSchema);
         if (absentLinkTarget) {
