@@ -137,10 +137,11 @@ reconnect snapshots are all branch-qualified.
 
     Phase 2.5 (interactive performance hardening; entry: W2.4):
       W2.5 tolerant claim release ──▶ W2.6 demand-shrink scoping
-      W2.6 demand-shrink scoping ───▶ W2.8 wake coalescing (re-measure gate)
+      W2.6 demand-shrink scoping ───▶ W2.8 conflict-storm fix (re-measured)
       W2.7 unservable-diagnostic dedup (independent)
-      W2.5 + W2.6 + W2.7 [+ W2.8] ──▶ W2.9 interactive latency gates
-                                       ──▶ deployed flag drill (W2.4 remainder)
+      W2.8 ─────────────────────────▶ W2.10 client-side interactive residual
+      W2.5 + W2.6 + W2.7 + W2.8 ────▶ W2.9 interactive latency gates
+      W2.9 + W2.10 ─────────────────▶ deployed flag drill (W2.4 remainder)
 
     Later:
       Phase 3 background demand and feed narrowing
@@ -1329,36 +1330,60 @@ per-attempt outcomes.
       claimed unserved paths are untouched and keep their existing
       `executor-action-router.test.ts` coverage).
 
-### W2.8 — Coalesce accepted-commit wake bursts
+### W2.8 — Kill the claimed-action conflict storm
 
 **Depends on:** W2.6 (re-measure first — shrink scoping may shrink this).
-**Status:** implemented. The post-W2.6 re-measurement showed the conflict
-storm essentially unchanged (114 conflicts / 30 accepted attempts;
-settlements still 13–23 s late; the 14 claim revocations turned out to be
-conflict-retry exhaustion, not demand churn), so this work order proceeded.
+**Status:** implemented, with the root cause revised by measurement. The
+post-W2.6 re-measurement showed the storm unchanged (114 conflicts / 30
+accepted attempts; settlements still 13–23 s late; the 14 claim revocations
+were conflict-retry exhaustion, not demand churn). A wake-coalescing window
+(the original hypothesis) was implemented, measured, and **rejected**: a
+25/100 ms window left conflicts unchanged and made interactive latency worse
+(avg 791 ms → 1416 ms), so its default is zero and the injectable mechanism
+remains only for future tuning.
 
-The Worker recomputes claimed actions per accepted-commit wave;
-`SelectiveDemandWakeQueue` coalesces only microtask-adjacent pushes, so an
-interactive burst (typing, multi-write handler) triggers a recompute per
-wire push, each racing the next client commit into `ConflictError`. Give the
-queue one bounded trailing window (tens of ms, capped so a continuous stream
-still makes progress) so one recompute covers a burst; a settlement may
-already cover multiple source invalidations, so no protocol change.
+Per-conflict evidence capture then identified the real cause: **76 of 90
+conflicts were "pending dependency not resolved"** — a claimed action
+reading the shadow output of an unclaimed/unservable producer emitted a
+pending read naming a shadow commit's localSeq, which never reaches the host
+and can never resolve; single localSeqs were retried up to 28 times. The fix
+(`rebaseShadowPendingReads`, `packages/runner/src/storage/v2.ts`) rebases
+such reads onto the confirmed base beneath the shadow version before an
+upstream/unserved transaction leaves the Worker replica — the same
+optimistic bet an ordinary stale read carries, still checked by normal
+conflict detection.
 
 **Success criteria:**
 
-- [x] A burst of source commits inside the window produces one flush
-      (`selective-demand-wake.test.ts` "wake pushes inside the coalescing
-      window flush as one batch").
-- [x] A continuous commit stream cannot defer recompute past the cap
-      (deterministic-clock test "a continuous push stream flushes at the
-      window cap"; pushes arriving mid-drain keep the existing immediate
-      backpressure batching).
-- [x] `settle()` still drains the queue deterministically ("settled waits
-      through an armed coalescing window"; the Worker settle barrier awaits
-      the same promise).
-- [ ] Re-measured default-app run shows claimed-action conflicts reduced to
-      near the accepted-attempt count.
+- [x] Wake-window mechanics are deterministic and capped
+      (`selective-demand-wake.test.ts`, deterministic-clock tests; default
+      window zero preserves flush-per-push).
+- [x] Re-measured default-app run shows claimed-action conflicts reduced to
+      near the accepted-attempt count: pending-dependency conflicts 76 → 9
+      (the rest name rejected attempts' localSeqs), total 108 → 43 against
+      35 accepted attempts, with the remainder ordinary stale-confirmed-read
+      races on hot documents; settlement latency avg 20.5 s → 8.8 s.
+- [ ] A deterministic replica-level fixture for the shadow-read rebase (a
+      claimed consumer of an unservable producer's output) is still owed.
+- [ ] Follow-up: rebase reads naming rejected attempts' localSeqs the same
+      way (the residual 9), and reduce the stale-confirmed-read retry cost.
+
+### W2.10 — Client-side interactive residual
+
+**Depends on:** W2.8. **Status:** open; evidence gathered.
+
+With the executor storm fixed, split-phase timing (`viewConditionMs` /
+`viewIdleWaitMs` / `homeIdleWaitMs` in the default-app fixture) attributes
+the remaining flag-on regression (~+39% avg, down from ~+63%) mostly to
+**viewConditionMs** — click until the app state names the new note view,
+before any idle wait — which grows with note count flag-on (156 → 895 ms)
+but stays flat flag-off (~160 ms). The suspect set is client-local claim
+machinery on the interactive path: per-commit overlay recording and its
+linear overlay scans while settlements are outstanding, claim-routing
+bookkeeping per action commit, and execution-feed processing during piece
+creation. Profile the interactive path with overlays pending, fix the
+scans/bookkeeping that scale with outstanding overlays or note count, and
+re-run the split-phase pair until viewConditionMs is flat flag-on.
 
 ### W2.9 — Interactive latency gates
 
