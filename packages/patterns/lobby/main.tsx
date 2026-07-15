@@ -22,11 +22,6 @@ import {
   adminRegistryEveryoneIsAdmin,
   type EmptyAdminRegistryValue,
 } from "../cfc/admin/mod.ts";
-import type {
-  ExternalProfileLink,
-  VerifiedExternalIdentityCell,
-} from "../system/profile-types.ts";
-
 /**
  * A small shared lobby: people join with their Fabric profile, everyone can
  * see who is present, and trusted admins can remove people or change the admin
@@ -41,14 +36,30 @@ export const TRUSTED_LOBBY_SURFACE = "TrustedLobbySurface";
 export const TRUSTED_LOBBY_ACTION = "TrustedLobbyAction";
 export const LOBBY_ADMIN_INTEGRITY = "lobby-admin" as const;
 
+type LobbyExternalProfileLink = {
+  readonly label: string;
+  readonly url: string;
+};
+
+type LobbyVerifiedExternalIdentityCell = Cell<
+  RequiresIntegrity<
+    {
+      readonly type: string;
+      readonly value: string;
+      readonly verifiedAt: string;
+    },
+    readonly ["loom-verified-external-identity"]
+  >
+>;
+
 export interface LobbyProfile {
   readonly initialNameApplied?: string;
   readonly name?: string;
   readonly avatar?: string;
   readonly bio?: string;
   /** Connector-facing identity hints retained on the stored profile link. */
-  readonly externalLinks?: readonly ExternalProfileLink[];
-  readonly verifiedIdentities?: readonly VerifiedExternalIdentityCell[];
+  readonly externalLinks?: readonly LobbyExternalProfileLink[];
+  readonly verifiedIdentities?: readonly LobbyVerifiedExternalIdentityCell[];
 }
 
 /** Stable participant identity: the contributor's live `#profile` cell. */
