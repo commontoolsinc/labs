@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { Cell, Stream } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -14,6 +15,26 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+interface SelfReferentialItem {
+  title: string;
+  items: SelfReferentialItem[];
+}
+type SelfReferentialItemsResult = {
+  items: SelfReferentialItem[];
+  stream: Stream<unknown>;
+};
+interface RecursingItem {
+  readonly items: readonly RecursingItem[];
+}
+
+type PieceValue = { value: number };
+type PieceListResult = {
+  list: Cell<PieceValue>[];
+  stream: Stream<unknown>;
+};
+
+type HandlerAResult = { streamA: Stream<unknown> };
 
 describe("Pattern Runner - Miscellaneous", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -123,14 +144,15 @@ describe("Pattern Runner - Miscellaneous", () => {
     );
 
     const itemsPattern = pattern<
-      { items: Array<{ title: string; items: any[] }> }
+      { items: SelfReferentialItem[] },
+      SelfReferentialItemsResult
     >(
       ({ items }) => {
         return { items, stream: addItemHandler({ items }) };
       },
     );
 
-    const resultCell = runtime.getCell<{ items: any[]; stream: any }>(
+    const resultCell = runtime.getCell<SelfReferentialItemsResult>(
       space,
       "should handle pushing objects that reference their containing array",
       undefined,
@@ -164,7 +186,7 @@ describe("Pattern Runner - Miscellaneous", () => {
     // And triple check that it actually refers to the same underlying array
     expect(value.items[0].items[1].title).toBe("Second Item");
 
-    const recurse = ({ items }: { items: { items: any[] }[] }): any =>
+    const recurse = ({ items }: RecursingItem): unknown[] =>
       items.map((item) => recurse(item));
 
     // `toThrow()` mis-classifies stack overflows in @std/expect here, and the
@@ -172,7 +194,7 @@ describe("Pattern Runner - Miscellaneous", () => {
     // Assert on the behavior we care about: recursion does not complete.
     let error: unknown;
     try {
-      recurse(value as any);
+      recurse(value);
     } catch (thrown) {
       error = thrown;
     }
@@ -181,13 +203,13 @@ describe("Pattern Runner - Miscellaneous", () => {
 
   it("should allow sending cells to an event handler", async () => {
     const addToList = handler(
-      // == { piece: Cell<any> }
+      // == { piece: Cell<PieceValue> }
       {
         type: "object",
         properties: { piece: { type: "object", asCell: ["cell"] } },
         required: ["piece"],
       },
-      // == { list: Cell<any>[] }
+      // == { list: Cell<PieceValue>[] }
       {
         type: "object",
         properties: {
@@ -204,7 +226,10 @@ describe("Pattern Runner - Miscellaneous", () => {
       },
     );
 
-    const listPattern = pattern<{ list: any[] }>(
+    const listPattern = pattern<
+      { list: Cell<PieceValue>[] },
+      PieceListResult
+    >(
       ({ list }) => {
         return { list, stream: addToList({ list }) };
       },
@@ -233,7 +258,7 @@ describe("Pattern Runner - Miscellaneous", () => {
     await piece.pull();
 
     // Add schema so we get the entry as a cell and can compare the two
-    const listCell = piece.key("list").asSchema({
+    const listCell = piece.key("list").asSchema<Cell<PieceValue>[]>({
       type: "array",
       items: { type: "object", asCell: ["cell"] },
     });
@@ -307,7 +332,7 @@ describe("Pattern Runner - Miscellaneous", () => {
       },
     );
 
-    const resultCell = runtime.getCell<{ streamA: any }>(
+    const resultCell = runtime.getCell<HandlerAResult>(
       space,
       "should wait for lift before handler that reads lift output from event",
       undefined,
