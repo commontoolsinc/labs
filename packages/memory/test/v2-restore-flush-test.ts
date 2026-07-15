@@ -170,6 +170,7 @@ Deno.test(
     });
 
     try {
+      assertEquals(session.connectionState, { status: "ready", epoch: 1 });
       assertEquals(states, [{ status: "ready", epoch: 1 }]);
 
       transport.delayTransacts = true;
