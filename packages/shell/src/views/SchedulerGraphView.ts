@@ -10,6 +10,7 @@ import {
   parseActionLocation,
   type SourceViewNode,
 } from "./SchedulerSourceView.ts";
+import { entityUriFromActionId } from "../lib/scheduler-graph-identity.ts";
 
 interface LayoutNode {
   id: string;
@@ -54,9 +55,6 @@ const NODE_HEIGHT = 36;
 // entity kind cannot leave a stale `of|computed` alternation here.
 const ENTITY_SCHEME_ALT = ENTITY_URI_SCHEMES.join("|");
 const ENTITY_SCHEME_PART_RE = new RegExp(`^(?:${ENTITY_SCHEME_ALT}):(.*)$`);
-const ENTITY_SCHEME_SEGMENT_RE = new RegExp(
-  `/(?:${ENTITY_SCHEME_ALT}):([^/]+)`,
-);
 
 export class XSchedulerGraph extends LitElement {
   static override styles = css`
@@ -1432,11 +1430,8 @@ export class XSchedulerGraph extends LitElement {
    * - action:pattern:did:key:.../computed:entityId/path
    */
   private extractEntityId(actionId: string): string | undefined {
-    // Look for an entity URI scheme which precedes the entity ID
-    const ofMatch = actionId.match(ENTITY_SCHEME_SEGMENT_RE);
-    if (ofMatch) {
-      return ofMatch[1];
-    }
+    const entityUri = entityUriFromActionId(actionId);
+    if (entityUri) return entityUri;
 
     // Fallback: look for entity ID pattern after space identifier
     // Pattern: did:key:.../entityId/...

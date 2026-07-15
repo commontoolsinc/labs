@@ -7,14 +7,18 @@ export function cellRefToKey(cell: CellRef): string {
   // docs for the same cause — stripping the scheme would conflate their
   // subscriptions.
   const id = cell.id;
-  const schema = cell.schema ? `:${JSON.stringify(cell.schema)}` : "";
-  const cfcLabelView = cell.cfcLabelView
-    ? `:${JSON.stringify(cloneCfcLabelView(cell.cfcLabelView))}`
-    : "";
-  // JSON.stringify the path: a `.` join is ambiguous (["."] and ["", ""]
-  // both join to "."), so segments containing dots or empty strings would
-  // collide keys for distinct paths.
-  return `${cell.space}:${id}:${
-    JSON.stringify(cell.path)
-  }${schema}${cfcLabelView}`;
+  // Scope is part of a cell's address: the same space/id/path can name
+  // distinct space-, user-, and session-scoped documents. Encode the whole
+  // key structurally so neither scope nor separator-like path segments can
+  // collide.
+  return JSON.stringify({
+    space: cell.space,
+    scope: cell.scope,
+    id,
+    path: cell.path,
+    ...(cell.schema !== undefined && { schema: cell.schema }),
+    ...(cell.cfcLabelView !== undefined && {
+      cfcLabelView: cloneCfcLabelView(cell.cfcLabelView),
+    }),
+  });
 }

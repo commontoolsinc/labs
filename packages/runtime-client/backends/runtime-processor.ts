@@ -178,10 +178,11 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
  * the scheme is part of the identity, so stripping `computed:` would
  * silently alias a different entity.
  */
-function pageEntityId(pageId: string) {
-  return entityIdFrom(
-    pageId.startsWith("of:") ? pageId.slice("of:".length) : pageId,
-  );
+function pageIdForRouting(pageId: string): string {
+  if (pageId.startsWith("computed:")) {
+    throw new Error("Computed ids are not valid page ids.");
+  }
+  return pageId.startsWith("of:") ? pageId.slice("of:".length) : pageId;
 }
 
 function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
@@ -1226,9 +1227,10 @@ export class RuntimeProcessor {
     request: PageGetRequest,
   ): Promise<PageResponse> {
     const { pieceManager, cc } = this.getSpaceCtx(request.space);
+    const pageId = pageIdForRouting(request.pageId);
     const requestedCell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      pageEntityId(request.pageId),
+      entityIdFrom(pageId),
     );
     await requestedCell.sync();
     const redirect = parseLink(
@@ -1265,7 +1267,7 @@ export class RuntimeProcessor {
     }
 
     const cell = await cc.manager().get(
-      request.pageId,
+      pageId,
       request.runIt ?? false,
     );
 
@@ -1280,7 +1282,7 @@ export class RuntimeProcessor {
     const { pieceManager } = this.getSpaceCtx(request.space);
     const cell = this.runtime.getCellFromEntityId(
       pieceManager.getSpace(),
-      pageEntityId(request.pageId),
+      entityIdFrom(pageIdForRouting(request.pageId)),
     );
     await cell.sync();
     const slug = cell.getMetaRaw("slug");

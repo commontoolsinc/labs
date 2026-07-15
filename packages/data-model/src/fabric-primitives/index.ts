@@ -13,11 +13,8 @@ export {
   entityKindOfIdString,
   type EntityUriScheme,
   entityUriSchemePrefix,
-  getComputedCellIdsConfig,
   hasEntityUriScheme,
   isEntityKind,
-  resetComputedCellIdsConfig,
-  setComputedCellIdsConfig,
   stripEntityUriScheme,
   uriSchemeForEntityKind,
 } from "./entity-kind.ts";

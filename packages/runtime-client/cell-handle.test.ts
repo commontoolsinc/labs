@@ -254,6 +254,17 @@ describe("CellHandle CFC label IPC", () => {
       cellRefToKey(refFor("fid1:abc")),
     );
 
+    // Scope is part of the address: equal space/id/path values in different
+    // scopes refer to different documents and need independent subscriptions.
+    expect(cellRefToKey(refFor("of:fid1:abc"))).not.toEqual(
+      cellRefToKey({ ...refFor("of:fid1:abc"), scope: "user" }),
+    );
+    expect(
+      cellRefToKey({ ...refFor("of:fid1:abc"), scope: "user" }),
+    ).not.toEqual(
+      cellRefToKey({ ...refFor("of:fid1:abc"), scope: "session" }),
+    );
+
     // Paths are JSON-encoded in keys: a "." join would conflate ["."] with
     // ["", ""].
     const withPath = (path: string[]): CellRef => ({

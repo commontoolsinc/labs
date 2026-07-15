@@ -20,7 +20,7 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-09. Each flag's section carries the date its status
+**Last reviewed:** 2026-07-15. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -256,6 +256,37 @@ propagate](#how-flags-propagate).
 - **Path to removal.** Complete the audit, default the home root on, and delete
   both flags when the check becomes unconditional.
 
+### `computedCellIds`
+
+- **Toggle via.** `EXPERIMENTAL_COMPUTED_CELL_IDS` environment variable
+  (through the canonical env registry) or
+  `RuntimeOptions.experimental.computedCellIds`.
+- **Added by.** Robin McCollum, on the computed-cell-identity branch (spec:
+  [`docs/specs/computed-cell-identity.md`](../specs/computed-cell-identity.md)).
+- **Purpose.** Mints kind-schemed entity ids (`computed:fid1:<hash>`, the
+  `computed:` URI scheme replacing `of:`) for derived internal cells. The
+  builder classifies written internals as computed by default, then applies
+  conservative writer- and input-side disqualifiers. These include streams;
+  handler, writable-proxy, effect, opaque, and non-replayable writers; and
+  roots handed writable to handlers, sub-patterns, sub-pattern operations, or
+  non-replayable builtins. The linked spec is the exhaustive classifier
+  reference. The flag gates minting only; readers accept both id forms
+  unconditionally, so it can flip either way without a migration — but see the
+  version-skew note below.
+- **Current default and planned end state.** Off by default. Graduates to
+  always-on together with the computed-cell write-conflict policy (ack-and-drop
+  for stale all-computed commits), then the flag is deleted. The flag is the
+  rollout gate for version skew: clients predating the `computed:` scheme
+  throw on such ids arriving via sync, so it must not graduate until every
+  syncing client carries the readers (old servers are safe — an unknown
+  scheme parses as no kind and stays strict).
+- **Status on 2026-07-15.** In development on
+  `robin/feat-computed-cell-identity-p2`: phase 1 (kind-schemed minting,
+  redesigned from a retired kind-in-hash-tag format that never shipped)
+  implemented behind the flag. Phase 2 (ack-and-drop of stale all-computed
+  commits) is split into its own follow-up PR with its own flag, so this
+  branch changes no conflict semantics.
+
 ---
 
 ## Category 2: Contextual Flow Control enforcement rollout dials
@@ -291,33 +322,6 @@ makes adding a new one a compile error until it is classified across every
 preset. The staging plan is tracked in the CFC design docs under
 [`docs/specs/`](../specs/) (for example the S16 default-transition design and
 the per-epic implementation notes).
-
-### `computedCellIds`
-
-- **Toggle via.** `EXPERIMENTAL_COMPUTED_CELL_IDS` environment variable
-  (through the canonical env registry) or `RuntimeOptions.experimental`.
-- **Added by.** Robin McCollum, on the computed-cell-identity branch (spec:
-  `docs/specs/computed-cell-identity.md`).
-- **Purpose.** Mints kind-schemed entity ids (`computed:fid1:<hash>`, the
-  `computed:` URI scheme replacing `of:`) for derived internal cells. The
-  builder classifies internals as computed by default, disqualifying only
-  cells written by (or handed writable into) handlers, streams, and
-  non-replayable builtins. Gates minting only; readers accept both id forms
-  unconditionally, so the flag can flip either way without a migration —
-  but see the version-skew note below.
-- **Current default and planned end state.** Off by default. Graduates to
-  always-on together with the computed-cell write-conflict policy (ack-and-drop
-  for stale all-computed commits), then the flag is deleted. The flag is the
-  rollout gate for version skew: clients predating the `computed:` scheme
-  throw on such ids arriving via sync, so it must not graduate until every
-  syncing client carries the readers (old servers are safe — an unknown
-  scheme parses as no kind and stays strict).
-- **Status on 2026-07-12.** In development on
-  `robin/feat-computed-cell-identity-p2`: phase 1 (kind-schemed minting,
-  redesigned from a retired kind-in-hash-tag format that never shipped)
-  implemented behind the flag. Phase 2 (ack-and-drop of stale all-computed
-  commits) is split into its own follow-up PR with its own flag, so this
-  branch changes no conflict semantics.
 
 ### `cfcEnforcementMode`
 

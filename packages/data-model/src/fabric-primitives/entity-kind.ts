@@ -113,22 +113,3 @@ export function entityKindOfIdString(id: string): EntityKind | undefined {
   const scheme = id.slice(0, colon);
   return scheme === COMPUTED_URI_SCHEME ? "computed" : undefined;
 }
-
-let computedCellIdsEnabled = false;
-
-/**
- * Ambient runtime flag gating the MINTING of kind-schemed computed-cell ids.
- * Readers accept both forms unconditionally regardless of this flag — new-form
- * ids are a data-compatibility event, so only creation is gated.
- */
-export function setComputedCellIdsConfig(enabled?: boolean): void {
-  computedCellIdsEnabled = enabled ?? false;
-}
-
-export function getComputedCellIdsConfig(): boolean {
-  return computedCellIdsEnabled;
-}
-
-export function resetComputedCellIdsConfig(): void {
-  computedCellIdsEnabled = false;
-}

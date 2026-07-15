@@ -56,7 +56,6 @@ import {
   isCellResultForDereferencing,
 } from "../query-result-proxy.ts";
 import { isCell, setCellUnlinkedSpace } from "../cell.ts";
-import { getComputedCellIdsConfig } from "@commonfabric/data-model/fabric-primitives";
 import { createRef } from "../create-ref.ts";
 import { toURI } from "../uri-utils.ts";
 import { closureCaptureErrorMessage } from "./closure-capture-diagnostic.ts";
@@ -520,16 +519,10 @@ function factoryFromPattern<T, R>(
     true,
   )!;
 
-  // Deliberately AMBIENT (module-global, last Runtime constructor wins)
-  // rather than threaded through the building frame: the flag exists to
-  // switch a whole process over at once during rollout, and no supported
-  // topology runs two runtimes with opposite settings in one process — a
-  // mixed-flag process would mint different ids for the same causes and
-  // diverge on identity, so per-runtime scoping would legitimize a
-  // configuration that must not exist. (Tests that construct runtimes with
-  // different flags sequentially see last-constructed-wins; that is the
-  // accepted trade.)
-  if (getComputedCellIdsConfig()) {
+  // Pattern modules are evaluated under a runtime-carrying builder frame.
+  // Read the flag from that runtime so constructing or disposing another
+  // Runtime in the same process cannot change this pattern's identity.
+  if (getTopFrame()?.runtime?.experimental.computedCellIds === true) {
     assignComputedCellKinds(
       allNodes,
       derivedInternalPartialCausesByRoot,
@@ -818,7 +811,7 @@ function assignComputedCellKinds(
     value: unknown,
     schema: unknown,
     out: Set<OpaqueCell<any>>,
-    seen: Set<unknown> = new Set(),
+    seen: Map<object, Set<object>> = new Map(),
   ): void => {
     // Provably handle-free subschema (no writable `asCell` grant inline and
     // no `$ref` a grant could hide behind): nothing to collect. This is the
@@ -851,8 +844,15 @@ function assignComputedCellKinds(
       return;
     }
     if (target === null || typeof target !== "object") return; // Primitives hold no roots.
-    if (seen.has(target)) return;
-    seen.add(target);
+    // A shared value can be bound at multiple schema positions with different
+    // capabilities. Deduplicate only the same value/schema pair: deduplicating
+    // by value alone can let an earlier read-only path suppress a later
+    // writable path. The pair guard still terminates actual value/schema
+    // cycles.
+    const seenSchemas = seen.get(target);
+    if (seenSchemas?.has(schema)) return;
+    if (seenSchemas) seenSchemas.add(schema);
+    else seen.set(target, new Set([schema]));
     if (Array.isArray(target)) {
       const items = schema.items;
       if (items === undefined) {

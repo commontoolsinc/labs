@@ -5,10 +5,7 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import {
   COMPUTED_URI_SCHEME,
   entityKindOfIdString,
-  getComputedCellIdsConfig,
   isEntityKind,
-  resetComputedCellIdsConfig,
-  setComputedCellIdsConfig,
   uriSchemeForEntityKind,
 } from "@/fabric-primitives/entity-kind.ts";
 import { hashOf } from "@/value-hash.ts";
@@ -58,13 +55,5 @@ describe("entity-kind", () => {
     expect(isEntityKind("computed")).toBe(true);
     expect(isEntityKind("state")).toBe(false);
     expect(isEntityKind(undefined)).toBe(false);
-  });
-
-  it("exposes the ambient minting flag with a false default", () => {
-    expect(getComputedCellIdsConfig()).toBe(false);
-    setComputedCellIdsConfig(true);
-    expect(getComputedCellIdsConfig()).toBe(true);
-    resetComputedCellIdsConfig();
-    expect(getComputedCellIdsConfig()).toBe(false);
   });
 });

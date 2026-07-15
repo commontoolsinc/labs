@@ -352,6 +352,62 @@ describe("computed cell kinds", () => {
         { partialCause: "doubled" },
       ]);
     });
+
+    it("reads the flag from the active runtime frame", async () => {
+      const otherStorageManager = StorageManager.emulate({ as: signer });
+      const otherRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: otherStorageManager,
+        experimental: { computedCellIds: false },
+      });
+      const otherFrame = pushFrame({
+        space,
+        generatedIdCounter: 0,
+        reactives: new Set(),
+        runtime: otherRuntime,
+      });
+
+      try {
+        const double = lift((x: number) => x * 2);
+        const flagOffPattern = pattern<{ x: number }>(({ x }) => ({
+          doubled: double(x),
+        }));
+        expect(descriptorFor(flagOffPattern, "doubled")?.kind).toBeUndefined();
+      } finally {
+        popFrame(otherFrame);
+        await otherRuntime.dispose();
+        await otherStorageManager.close();
+      }
+
+      // The original flag-on runtime remains the active frame. Constructing
+      // and disposing the flag-off runtime above must not change its behavior.
+      const double = lift((x: number) => x * 2);
+      const flagOnPattern = pattern<{ x: number }>(({ x }) => ({
+        doubled: double(x),
+      }));
+      expect(descriptorFor(flagOnPattern, "doubled")?.kind).toBe("computed");
+    });
+
+    it("a failed Runtime construction cannot change active classification", async () => {
+      const failedStorageManager = StorageManager.emulate({ as: signer });
+      try {
+        expect(() =>
+          new Runtime({
+            apiUrl: "not a valid URL" as unknown as URL,
+            storageManager: failedStorageManager,
+            experimental: { computedCellIds: false },
+          })
+        ).toThrow();
+
+        const double = lift((x: number) => x * 2);
+        const testPattern = pattern<{ x: number }>(({ x }) => ({
+          doubled: double(x),
+        }));
+        expect(descriptorFor(testPattern, "doubled")?.kind).toBe("computed");
+      } finally {
+        await failedStorageManager.close();
+      }
+    });
   });
 
   // Negative battery for the fail-closed fallbacks: every branch here exists
@@ -578,6 +634,47 @@ describe("computed cell kinds", () => {
         const shared = { v: doubled };
         return { doubled, on: bump({ target: { a: shared, b: shared } }) };
       });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("walks a shared subtree once per schema position", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "object",
+              properties: {
+                // This path may grant a handle, but only through a property the
+                // shared value does not contain. It visits the shared object
+                // without collecting its `v` root.
+                a: {
+                  type: "object",
+                  properties: {
+                    absent: { type: "number", asCell: ["cell"] },
+                  },
+                },
+                // The same shared object is writable at this schema position.
+                b: {
+                  type: "object",
+                  properties: {
+                    v: { type: "number", asCell: ["cell"] },
+                  },
+                },
+              },
+            },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        const shared = { v: doubled };
+        return { doubled, on: bump({ target: { a: shared, b: shared } }) };
+      });
+
       expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
     });
 

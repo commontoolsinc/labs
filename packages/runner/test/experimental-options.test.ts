@@ -8,10 +8,6 @@ import {
   resetModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import {
-  getComputedCellIdsConfig,
-  resetComputedCellIdsConfig,
-} from "@commonfabric/data-model/fabric-primitives";
-import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   resetCommitPreconditionsConfig,
@@ -22,15 +18,14 @@ const signer = await Identity.fromPassphrase("test experimental");
 
 /**
  * Tests for the `ExperimentalOptions` feature-flag system: verifies that
- * `Runtime` construction/disposal correctly propagates flags to all the ambient
- * configs.
+ * `Runtime` construction/disposal correctly resolves flags and propagates the
+ * flags whose consumers are ambient.
  */
 describe("ExperimentalOptions", () => {
   afterEach(() => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
     resetPersistentSchedulerStateConfig();
-    resetComputedCellIdsConfig();
   });
 
   describe("Runtime construction", () => {
@@ -98,7 +93,7 @@ describe("ExperimentalOptions", () => {
     });
   });
 
-  describe("Runtime sets and resets global config", () => {
+  describe("Runtime sets and resets ambient config", () => {
     it("constructing Runtime with modernCellRep sets global config", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
@@ -144,23 +139,6 @@ describe("ExperimentalOptions", () => {
       expect(getCommitPreconditionsConfig()).toBe(true);
 
       await runtime.dispose();
-      await sm.close();
-    });
-
-    it("constructing Runtime with computedCellIds sets global config", async () => {
-      const sm = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: sm,
-        experimental: {
-          computedCellIds: true,
-        },
-      });
-
-      expect(getComputedCellIdsConfig()).toBe(true);
-
-      await runtime.dispose();
-      expect(getComputedCellIdsConfig()).toBe(false);
       await sm.close();
     });
 
