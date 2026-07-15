@@ -1304,7 +1304,7 @@ all candidate/claim state. Make shrink surgical:
 
 ### W2.7 — Report repeat unservable diagnostics once
 
-**Depends on:** none (independent). **Status:** planned.
+**Depends on:** none (independent). **Status:** implemented.
 
 `createExecutorActionTransactionRouter` reports an unservable diagnostic on
 every rerun of the same unclaimed action. Statically unservable verdicts
@@ -1319,11 +1319,15 @@ per-attempt outcomes.
 
 **Success criteria:**
 
-- [ ] N reruns of one statically unservable action produce one diagnostic
-      callback; a fingerprint change produces exactly one more.
-- [ ] Dynamic unservability (e.g. `dynamic-read-outside-static-surface`)
+- [x] N reruns of one statically unservable action produce one diagnostic
+      callback; a fingerprint change produces exactly one more
+      (`executor-action-router.test.ts` "executor action router reports a
+      repeated unservable verdict once").
+- [x] Dynamic unservability (e.g. `dynamic-read-outside-static-surface`)
       re-reports only when the diagnostic code changes, and never suppresses
-      canonical unserved settlements for claimed attempts.
+      canonical unserved settlements for claimed attempts (same test;
+      claimed unserved paths are untouched and keep their existing
+      `executor-action-router.test.ts` coverage).
 
 ### W2.8 — Coalesce accepted-commit wake bursts
 

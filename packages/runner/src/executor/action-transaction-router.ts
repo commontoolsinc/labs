@@ -102,11 +102,37 @@ export function createExecutorActionTransactionRouter(
   options: ExecutorActionTransactionRouterOptions,
 ): ActionTransactionRouter {
   const reported = new WeakMap<object, string>();
+  // An unclaimed unservable verdict is stable per diagnostic code and
+  // fingerprints; the same action rerunning to the same verdict is pure
+  // host/feed churn. Cleared when the action becomes a candidate or its
+  // claim is invalidated, so a later regression re-reports once.
+  const reportedUnservable = new WeakMap<object, string>();
   const builtinSummaries = new WeakMap<object, CompleteActionScopeSummary>();
   const builtinObservationTemplates = new WeakMap<
     object,
     SchedulerActionObservation
   >();
+  const reportUnservable = (
+    sourceAction: object,
+    diagnosticCode: string,
+    observation: {
+      implementationFingerprint?: unknown;
+      runtimeFingerprint?: unknown;
+    },
+    claimKey?: ActionClaimKey,
+  ): void => {
+    const encoded = [
+      diagnosticCode,
+      String(observation.implementationFingerprint ?? ""),
+      String(observation.runtimeFingerprint ?? ""),
+    ].join("\0");
+    if (reportedUnservable.get(sourceAction) === encoded) return;
+    reportedUnservable.set(sourceAction, encoded);
+    options.onDiagnostic?.({
+      diagnosticCode,
+      ...(claimKey !== undefined ? { claimKey } : {}),
+    });
+  };
   const local = {
     disposition: "local",
     kind: "executor-shadow",
@@ -144,6 +170,8 @@ export function createExecutorActionTransactionRouter(
           sourceAction,
           "malformed-action-observation",
         );
+      } else if (sourceAction !== undefined) {
+        reportUnservable(sourceAction, "malformed-action-observation", {});
       } else {
         options.onDiagnostic?.({
           diagnosticCode: "malformed-action-observation",
@@ -187,7 +215,7 @@ export function createExecutorActionTransactionRouter(
           diagnosticCode,
         );
       } else {
-        options.onDiagnostic?.({ diagnosticCode });
+        reportUnservable(sourceAction, diagnosticCode, routedObservation);
       }
       return local;
     }
@@ -236,7 +264,12 @@ export function createExecutorActionTransactionRouter(
           diagnosticCode,
         );
       }
-      options.onDiagnostic?.({ diagnosticCode, claimKey });
+      reportUnservable(
+        sourceAction,
+        diagnosticCode,
+        routedObservation,
+        claimKey,
+      );
       return local;
     }
     const dynamicReason = dynamicActionTransactionUnservableReason(
@@ -255,7 +288,12 @@ export function createExecutorActionTransactionRouter(
           dynamicReason,
         );
       }
-      options.onDiagnostic?.({ diagnosticCode: dynamicReason, claimKey });
+      reportUnservable(
+        sourceAction,
+        dynamicReason,
+        routedObservation,
+        claimKey,
+      );
       return local;
     }
     if (liveClaim === undefined) {
@@ -270,6 +308,9 @@ export function createExecutorActionTransactionRouter(
       return {
         ...local,
         afterLocalApply: () => {
+          // The action proved servable; a later unservable regression is new
+          // information and must report again.
+          reportedUnservable.delete(sourceAction);
           if (reported.get(sourceAction) === encoded) return;
           reported.set(sourceAction, encoded);
           options.onCandidate({

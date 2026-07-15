@@ -808,3 +808,84 @@ Deno.test("malformed observation invalidates an already live claim", async () =>
   );
   assertEquals(invalidated, ["malformed-action-observation"]);
 });
+
+Deno.test("executor action router reports a repeated unservable verdict once", async () => {
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    claimForAction: () => undefined,
+    onCandidate: () => {
+      throw new Error("an unservable action must not become a candidate");
+    },
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  // A statically unservable verdict cannot change while the implementation
+  // and runtime fingerprints are unchanged; reruns must not re-report it.
+  const untrusted = () => {
+    const rerun = commit();
+    const stamped = rerun.schedulerObservation as {
+      implementationFingerprint: string;
+      completeActionScopeSummary: { implementationFingerprint: string };
+    };
+    stamped.implementationFingerprint = "action:router-untrusted";
+    stamped.completeActionScopeSummary.implementationFingerprint =
+      "action:router-untrusted";
+    return rerun;
+  };
+  for (let rerun = 0; rerun < 3; rerun++) {
+    assertEquals(
+      await router({ space: SPACE, commit: untrusted(), sourceAction: action }),
+      { disposition: "local", kind: "executor-shadow" },
+    );
+  }
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "untrusted-implementation",
+  ]);
+
+  // A fingerprint change is a new implementation: exactly one more report.
+  const restamped = () => {
+    const rerun = commit();
+    const stamped = rerun.schedulerObservation as {
+      implementationFingerprint: string;
+      completeActionScopeSummary: { implementationFingerprint: string };
+    };
+    stamped.implementationFingerprint = "action:router-untrusted-v2";
+    stamped.completeActionScopeSummary.implementationFingerprint =
+      "action:router-untrusted-v2";
+    return rerun;
+  };
+  await router({ space: SPACE, commit: restamped(), sourceAction: action });
+  await router({ space: SPACE, commit: restamped(), sourceAction: action });
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "untrusted-implementation",
+    "untrusted-implementation",
+  ]);
+
+  // A dynamic verdict re-reports only when its diagnostic code changes.
+  const scoped = () => {
+    const rerun = commit();
+    rerun.reads.confirmed[0]!.scope = "user";
+    return rerun;
+  };
+  await router({ space: SPACE, commit: scoped(), sourceAction: action });
+  await router({ space: SPACE, commit: scoped(), sourceAction: action });
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "untrusted-implementation",
+    "untrusted-implementation",
+    "dynamic-non-space-read-scope",
+  ]);
+  const foreignWrite = () => {
+    const rerun = commit();
+    (rerun.operations[0] as { scope?: "space" | "user" }).scope = "user";
+    return rerun;
+  };
+  await router({ space: SPACE, commit: foreignWrite(), sourceAction: action });
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "untrusted-implementation",
+    "untrusted-implementation",
+    "dynamic-non-space-read-scope",
+    "dynamic-non-space-write-scope",
+  ]);
+});
