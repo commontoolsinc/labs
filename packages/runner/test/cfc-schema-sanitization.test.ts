@@ -312,6 +312,22 @@ describe("cfc schema sanitization", () => {
     );
     expect(validateAgainstSchema({
       type: "object",
+      required: ["toString"],
+    }, {})).toBe("missing required property toString");
+    expect(validateAgainstSchema({
+      type: "object",
+      dependentRequired: { cardNumber: ["toString"] },
+    }, { cardNumber: "1234" })).toBe(
+      "property cardNumber requires property toString",
+    );
+    expect(validateAgainstSchema({
+      type: "object",
+      properties: Object.fromEntries([
+        ["toString", { type: "number" }],
+      ]) as Record<string, JSONSchema>,
+    }, {})).toBeUndefined();
+    expect(validateAgainstSchema({
+      type: "object",
       properties: {
         score: {
           type: "number",

@@ -656,7 +656,7 @@ export const validateAgainstSchema = (
       return `object has fewer than minProperties ${schema.minProperties}`;
     }
     for (const key of schema.required ?? []) {
-      if (!(key in value)) {
+      if (!Object.hasOwn(value, key)) {
         return `missing required property ${key}`;
       }
     }
@@ -665,9 +665,9 @@ export const validateAgainstSchema = (
         schema.dependentRequired ?? {},
       )
     ) {
-      if (key in value) {
+      if (Object.hasOwn(value, key)) {
         const missing = dependencies.find((dependency) =>
-          !(dependency in value)
+          !Object.hasOwn(value, dependency)
         );
         if (missing !== undefined) {
           return `property ${key} requires property ${missing}`;
@@ -675,7 +675,7 @@ export const validateAgainstSchema = (
       }
     }
     for (const [key, child] of Object.entries(schema.properties ?? {})) {
-      if (key in value) {
+      if (Object.hasOwn(value, key)) {
         const failure = validateAgainstSchema(child, value[key], fullSchema);
         if (failure !== undefined) return `${key}: ${failure}`;
       }
