@@ -4,14 +4,39 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { OpaqueCell } from "@commonfabric/api";
+import type { Cell } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema, type PatternFactory } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+type DynamicGroup = { values: number[] };
+type DynamicGroupsCell = Cell<DynamicGroup[]>;
+type ListOpInput<T> = {
+  element: T;
+  index: number;
+  array: T[];
+};
+type CollectionPatternHelpers<T> = {
+  mapWithPattern<S>(
+    op: PatternFactory<ListOpInput<T>, S>,
+    params: Record<string, unknown>,
+  ): S[];
+  filterWithPattern(
+    op: PatternFactory<ListOpInput<T>, boolean>,
+    params: Record<string, unknown>,
+  ): T[];
+  flatMapWithPattern<S>(
+    op: PatternFactory<ListOpInput<T>, S | S[]>,
+    params: Record<string, unknown>,
+  ): S[];
+};
+
+const collectionPattern = <T>(value: unknown): CollectionPatternHelpers<T> =>
+  value as CollectionPatternHelpers<T>;
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -52,12 +77,11 @@ describe("Pattern Runner - Dynamic Patterns", () => {
   let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
 
-  function unaryNumberListOpPattern(
-    // deno-lint-ignore no-explicit-any
-    fn: (element: any) => any,
+  function unaryNumberListOpPattern<Result>(
+    fn: (element: number) => Result,
     resultSchema: JSONSchema,
-  ) {
-    return pattern<{ element: number }, unknown>(
+  ): PatternFactory<ListOpInput<number>, Result> {
+    return pattern<ListOpInput<number>, Result>(
       ({ element }) => fn(element),
       numberElementArgumentSchema,
       resultSchema,
@@ -144,12 +168,12 @@ describe("Pattern Runner - Dynamic Patterns", () => {
 
     // Lift that dynamically instantiates itemCountPattern for each group
     const instantiateGroups = lift(
-      ({ groups }: any) => {
+      ({ groups }: { groups: DynamicGroupsCell }) => {
         const raw = groups.get();
         const list = Array.isArray(raw) ? raw : [];
-        const children = [];
+        const children: Array<ReturnType<typeof itemCountPattern>> = [];
         for (let index = 0; index < list.length; index++) {
-          const groupCell = groups.key(index)!;
+          const groupCell = groups.key(index);
           const valuesCell = groupCell.key("values");
           const child = itemCountPattern({
             values: valuesCell,
@@ -305,9 +329,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const doubleArray = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
-          doublePattern as any,
+        doubled: collectionPattern<number>(values).mapWithPattern(
+          doublePattern,
           {},
         ),
       };
@@ -376,9 +399,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const doubleArray = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
-          doublePattern as any,
+        doubled: collectionPattern<number>(values).mapWithPattern(
+          doublePattern,
           {},
         ),
       };
@@ -446,9 +468,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const doubleArray = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
-          doublePattern as any,
+        doubled: collectionPattern<number>(values).mapWithPattern(
+          doublePattern,
           {},
         ),
       };
@@ -484,19 +505,20 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       numberSchema,
     );
 
-    const mapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return {
-        values,
-        // deno-lint-ignore no-explicit-any
-        doubled: (values as unknown as OpaqueCell<number[]>).mapWithPattern(
-          doublePattern as any,
-          {},
-        ),
-      };
-    });
+    const mapPattern = pattern<{ values: number[] | undefined }>(
+      ({ values }) => {
+        return {
+          values,
+          doubled: collectionPattern<number>(values).mapWithPattern(
+            doublePattern,
+            {},
+          ),
+        };
+      },
+    );
 
     const resultCell = runtime.getCell<
-      { values: number[]; doubled: number[] }
+      { values: number[] | undefined; doubled: number[] }
     >(
       space,
       "map-undef-cleanup",
@@ -514,7 +536,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(runCount).toBe(3);
 
     // Set list to undefined — should clean up and produce empty output
-    result.withTx(tx).key("values").set(undefined as any);
+    result.withTx(tx).key("values").set(undefined);
     await commitTx();
     tx = runtime.edit();
 
@@ -544,9 +566,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        evens: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
-          isEvenPattern as any,
+        evens: collectionPattern<number>(values).filterWithPattern(
+          isEvenPattern,
           {},
         ),
       };
@@ -577,10 +598,9 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>)
+        positives: collectionPattern<number>(values)
           .filterWithPattern(
-            isPositivePattern as any,
+            isPositivePattern,
             {},
           ),
       };
@@ -650,10 +670,9 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>)
+        positives: collectionPattern<number>(values)
           .filterWithPattern(
-            isPositivePattern as any,
+            isPositivePattern,
             {},
           ),
       };
@@ -749,10 +768,9 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>)
+        positives: collectionPattern<number>(values)
           .filterWithPattern(
-            isPositivePattern as any,
+            isPositivePattern,
             {},
           ),
       };
@@ -788,9 +806,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        evens: (values as unknown as OpaqueCell<number[]>).filterWithPattern(
-          isEvenPattern as any,
+        evens: collectionPattern<number>(values).filterWithPattern(
+          isEvenPattern,
           {},
         ),
       };
@@ -822,20 +839,21 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       booleanSchema,
     );
 
-    const filterPattern = pattern<{ values: number[] }>(({ values }) => {
-      return {
-        values,
-        // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>)
-          .filterWithPattern(
-            isPositivePattern as any,
-            {},
-          ),
-      };
-    });
+    const filterPattern = pattern<{ values: number[] | undefined }>(
+      ({ values }) => {
+        return {
+          values,
+          positives: collectionPattern<number>(values)
+            .filterWithPattern(
+              isPositivePattern,
+              {},
+            ),
+        };
+      },
+    );
 
     const resultCell = runtime.getCell<
-      { values: number[]; positives: number[] }
+      { values: number[] | undefined; positives: number[] }
     >(
       space,
       "filter-undef-cleanup",
@@ -853,7 +871,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(predRunCount).toBe(3);
 
     // Set list to undefined — should clean up and produce empty output
-    result.withTx(tx).key("values").set(undefined as any);
+    result.withTx(tx).key("values").set(undefined);
     await commitTx();
     tx = runtime.edit();
 
@@ -885,10 +903,9 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const filterPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        positives: (values as unknown as OpaqueCell<number[]>)
+        positives: collectionPattern<number>(values)
           .filterWithPattern(
-            isPositivePattern as any,
+            isPositivePattern,
             {},
           ),
       };
@@ -928,9 +945,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
-          duplicatePattern as any,
+        flat: collectionPattern<number>(values).flatMapWithPattern(
+          duplicatePattern,
           {},
         ),
       };
@@ -964,9 +980,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
-          expandPattern as any,
+        flat: collectionPattern<number>(values).flatMapWithPattern(
+          expandPattern,
           {},
         ),
       };
@@ -1026,9 +1041,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
-          duplicatePattern as any,
+        flat: collectionPattern<number>(values).flatMapWithPattern(
+          duplicatePattern,
           {},
         ),
       };
@@ -1120,9 +1134,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
-          maybeExpandPattern as any,
+        flat: collectionPattern<number>(values).flatMapWithPattern(
+          maybeExpandPattern,
           {},
         ),
       };
@@ -1158,9 +1171,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
-          expandOrPassthroughPattern as any,
+        flat: collectionPattern<number>(values).flatMapWithPattern(
+          expandOrPassthroughPattern,
           {},
         ),
       };
@@ -1195,9 +1207,8 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
-          duplicatePattern as any,
+        flat: collectionPattern<number>(values).flatMapWithPattern(
+          duplicatePattern,
           {},
         ),
       };
@@ -1234,18 +1245,21 @@ describe("Pattern Runner - Dynamic Patterns", () => {
       numberArraySchema,
     );
 
-    const flatMapPattern = pattern<{ values: number[] }>(({ values }) => {
-      return {
-        values,
-        // deno-lint-ignore no-explicit-any
-        flat: (values as unknown as OpaqueCell<number[]>).flatMapWithPattern(
-          duplicatePattern as any,
-          {},
-        ),
-      };
-    });
+    const flatMapPattern = pattern<{ values: number[] | undefined }>(
+      ({ values }) => {
+        return {
+          values,
+          flat: collectionPattern<number>(values).flatMapWithPattern(
+            duplicatePattern,
+            {},
+          ),
+        };
+      },
+    );
 
-    const resultCell = runtime.getCell<{ values: number[]; flat: number[] }>(
+    const resultCell = runtime.getCell<
+      { values: number[] | undefined; flat: number[] }
+    >(
       space,
       "flatmap-undef-cleanup",
       undefined,
@@ -1262,7 +1276,7 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     expect(runCount).toBe(3);
 
     // Set list to undefined — should clean up and produce empty output
-    result.withTx(tx).key("values").set(undefined as any);
+    result.withTx(tx).key("values").set(undefined);
     await commitTx();
     tx = runtime.edit();
 
@@ -1299,8 +1313,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const outerPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        evens: (values as any).filterWithPattern(isEvenPattern as any, {}),
+        evens: collectionPattern<number>(values).filterWithPattern(
+          isEvenPattern,
+          {},
+        ),
       };
     });
 
@@ -1338,8 +1354,10 @@ describe("Pattern Runner - Dynamic Patterns", () => {
     const outerPattern = pattern<{ values: number[] }>(({ values }) => {
       return {
         values,
-        // deno-lint-ignore no-explicit-any
-        flat: (values as any).flatMapWithPattern(duplicatePattern as any, {}),
+        flat: collectionPattern<number>(values).flatMapWithPattern(
+          duplicatePattern,
+          {},
+        ),
       };
     });
 
