@@ -156,9 +156,10 @@ Every supplied definition must be referenced by that request. The receiver
 resolves the complete request before atomically inserting its verified
 definitions, so a missing reference or quota failure cannot partially advance
 durable schema availability.
-The server materializes this encoding only after a request has passed its open
-session and authorization boundary, then persists verified definitions and
-normalizes logical handlers, replay, and watch state back to inline schemas.
+The server checks the open session and authorization boundary before traversing
+a supported request for this encoding. It then materializes references,
+persists verified definitions, and normalizes logical handlers, replay, and
+watch state back to inline schemas.
 Servers advertise the capability whenever their host injects a `SchemaStore`;
 `hello.ok.requestSchemaCas.generation` identifies that store, and its optional
 audience identifies the service that owns it. Toolshed injects a shared,
@@ -177,6 +178,14 @@ reopen it. The cold miss costs one extra round trip. A `SchemaStoreError`
 instead disables request CAS for that connection and retries the original
 request inline once.
 
+A refs-first retry is a continuation of its original logical request, not a
+later request. A client must preserve that request's ordering position relative
+to requests submitted after it: later requests cannot overtake a cold
+refs/definitions/inline lifecycle. This is compatibility semantics of the
+request protocol, not an implementation detail; requests using hashes already
+confirmed for the negotiated store may remain concurrent when no cold admission
+is active.
+
 This is a sequential reuse guarantee, not a global exactly-once transfer
 guarantee. Concurrent cold clients can independently observe a missing hash and
 each send its canonical body on their forced retry; preventing that would
@@ -186,12 +195,14 @@ Schema hashes are addresses, not authorization capabilities. A Toolshed-wide
 store intentionally allows any authorized Memory request at that service to
 resolve a known schema hash, so schemas admitted to this CAS MUST be treated as
 non-secret protocol metadata. The store has no public list or fetch endpoint.
-The protocol bounds definition count, individual schema size, and hash length.
-Toolshed also bounds store entry count and total bytes; other hosts are
-responsible for equivalent capacity policy. If the schema store rejects a
-request, the client disables request CAS for that connection and retries the
-original inline request once; schema-store exhaustion must degrade the
-optimization, not deny the underlying Memory operation.
+The protocol bounds definition count, individual and cumulative definition
+bytes, hash length, schema-bearing positions, and aggregate traversal nodes and
+depth across the whole request. Repeated references to one hash are resolved
+once per request. Toolshed also bounds store entry count and total bytes; other
+hosts are responsible for equivalent capacity policy. If the schema store
+rejects a request, the client disables request CAS for that connection and
+retries the original inline request once; schema-store exhaustion must degrade
+the optimization, not deny the underlying Memory operation.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -411,7 +422,7 @@ For example, the compact wire form can contain:
             "link@1": {
               "id": "of:contact",
               "path": [],
-              "schema": "schema-ref@2:sha256:..."
+              "schema": "schema-ref@2:fid1:..."
             }
           }
         }
@@ -420,7 +431,7 @@ For example, the compact wire form can contain:
   }],
   "removes": [],
   "schemaTable": {
-    "sha256:...": {
+    "fid1:...": {
       "type": "object",
       "properties": { "name": { "type": "string" } }
     }
