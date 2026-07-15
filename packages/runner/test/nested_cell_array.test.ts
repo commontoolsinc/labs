@@ -76,7 +76,7 @@ describe("Nested Cell Array", () => {
     // Add the same data to both
     const testData = { name: "test", value: 42 };
     normalArray.push(testData);
-    cellArray.push(testData as any);
+    cellArray.push(testData);
 
     // Compare behavior
     const normalItems = normalArray.get();
@@ -125,7 +125,7 @@ describe("Nested Cell Array", () => {
       [ID]: "test/id",
       name: "with-id",
       value: 2,
-    } as any);
+    });
 
     const items = arrayCell.get();
     expect(isCell(items[0])).toBe(true);
