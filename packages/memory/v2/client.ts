@@ -11,6 +11,7 @@ import {
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
+  type RequestSchemaCasMetadata,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
   type SchedulerSnapshotListResult,
@@ -31,6 +32,11 @@ import {
 import type { Server } from "./server.ts";
 import type { AppliedCommit } from "./engine.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import {
+  compressRequestSchemas,
+  hasRequestSchemaCasPayload,
+  type RequestSchemaCasRequest,
+} from "./request-schema-cas.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 
 export interface Transport {
@@ -106,7 +112,10 @@ export class Client {
   #nextRequest = 1;
   #helloPending: PromiseWithResolvers<void> | null = null;
   #sessionOpenAuthContext: SessionOpenAuthContext | null = null;
+  #clientFlags: MemoryProtocolFlags | null = null;
   #serverFlags: MemoryProtocolFlags | null = null;
+  #requestSchemaCas: RequestSchemaCasMetadata | null = null;
+  #outbound = Promise.resolve();
   #reconnecting: Promise<void> | null = null;
   #cancelReconnectDelay: (() => void) | null = null;
   #connected = false;
@@ -135,6 +144,7 @@ export class Client {
   async close(): Promise<void> {
     this.#closed = true;
     this.#connected = false;
+    this.clearRequestSchemaCas();
     this.#cancelReconnectDelay?.();
     this.rejectPending(new Error("memory client closed"));
     await Promise.all([...this.#spaces].map((space) => space.close()));
@@ -173,24 +183,54 @@ export class Client {
   async request<Result>(message: Record<string, unknown>): Promise<Result> {
     await this.ensureConnected();
     const requestId = message.requestId as string;
-    const pending = Promise.withResolvers<unknown>();
-    this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundary(message));
-    const result = await pending.promise as ResponseMessage<Result>;
-    if (result.error) {
-      const error = new Error(result.error.message);
-      error.name = result.error.name;
-      if (result.error.precondition !== undefined) {
-        (error as Error & { precondition?: string }).precondition =
-          result.error.precondition;
+    let schemaAttempt: "refs" | "definitions" | "inline" =
+      this.requestSchemaCasActive() ? "refs" : "inline";
+    while (true) {
+      const wireMessage = schemaAttempt === "inline"
+        ? message
+        : this.compressRequestSchemas(message, schemaAttempt === "definitions");
+      const usedRequestSchemaCas = this.usesRequestSchemaCas(wireMessage);
+      const pending = Promise.withResolvers<unknown>();
+      this.#pending.set(requestId, pending);
+      try {
+        await this.send(encodeMemoryBoundary(wireMessage));
+      } catch (error) {
+        this.#pending.delete(requestId);
+        throw error;
       }
-      if (result.error.retryAfterSeq !== undefined) {
-        (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
-          result.error.retryAfterSeq;
+      const result = await pending.promise as ResponseMessage<Result>;
+      if (
+        result.error?.name === "MissingSchemas" && usedRequestSchemaCas &&
+        schemaAttempt === "refs"
+      ) {
+        schemaAttempt = this.requestSchemaCasActive()
+          ? "definitions"
+          : "inline";
+        continue;
       }
-      throw error;
+      if (
+        result.error?.name === "SchemaStoreError" && usedRequestSchemaCas &&
+        schemaAttempt !== "inline"
+      ) {
+        this.clearRequestSchemaCas();
+        schemaAttempt = "inline";
+        continue;
+      }
+      if (result.error) {
+        const error = new Error(result.error.message);
+        error.name = result.error.name;
+        if (result.error.precondition !== undefined) {
+          (error as Error & { precondition?: string }).precondition =
+            result.error.precondition;
+        }
+        if (result.error.retryAfterSeq !== undefined) {
+          (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
+            result.error.retryAfterSeq;
+        }
+        throw error;
+      }
+      return result.ok as Result;
     }
-    return result.ok as Result;
   }
 
   async openSession(
@@ -235,14 +275,18 @@ export class Client {
   private async hello(): Promise<void> {
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
-    await this.transport.send(encodeMemoryBoundary({
+    this.#clientFlags = getMemoryProtocolFlags();
+    await this.send(encodeMemoryBoundary({
       type: "hello",
       protocol: MEMORY_PROTOCOL,
-      flags: getMemoryProtocolFlags(),
+      flags: this.#clientFlags,
     }));
     try {
       await ack.promise;
       this.#connected = true;
+    } catch (error) {
+      this.clearRequestSchemaCas();
+      throw error;
     } finally {
       this.#helloPending = null;
     }
@@ -285,6 +329,10 @@ export class Client {
         // consumers (e.g. the runner's sqlite write-gate relaxation) read
         // these; absent-on-old-server keys parse to false — fail closed.
         this.#serverFlags = helloOk.flags;
+        this.updateRequestSchemaCas(
+          helloOk.flags,
+          parseRequestSchemaCasMetadata(helloOk.requestSchemaCas),
+        );
         try {
           this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
             helloOk.sessionOpen,
@@ -373,6 +421,55 @@ export class Client {
     }
     this.rejectPending(toConnectionError(error));
     void this.reconnect().catch(() => undefined);
+  }
+
+  private send(payload: string): Promise<void> {
+    const sending = this.#outbound.then(() => this.transport.send(payload));
+    this.#outbound = sending.catch(() => undefined);
+    return sending;
+  }
+
+  private requestSchemaCasActive(): boolean {
+    return this.#clientFlags?.requestSchemaCasV1 === true &&
+      this.#serverFlags?.requestSchemaCasV1 === true &&
+      this.#requestSchemaCas !== null;
+  }
+
+  private clearRequestSchemaCas(): void {
+    this.#requestSchemaCas = null;
+  }
+
+  private updateRequestSchemaCas(
+    flags: MemoryProtocolFlags,
+    metadata: RequestSchemaCasMetadata | null,
+  ): void {
+    if (flags.requestSchemaCasV1 !== true || metadata === null) {
+      this.clearRequestSchemaCas();
+      return;
+    }
+    this.#requestSchemaCas = metadata;
+  }
+
+  private compressRequestSchemas(
+    message: Record<string, unknown>,
+    forceDefinitions: boolean,
+  ): Record<string, unknown> {
+    if (!this.requestSchemaCasActive() || !isRequestSchemaCasRequest(message)) {
+      return message;
+    }
+    return compressRequestSchemas(message, {
+      isKnownSchemaHash: () => true,
+      forceDefinitions,
+    });
+  }
+
+  private usesRequestSchemaCas(message: Record<string, unknown>): boolean {
+    try {
+      return isRequestSchemaCasRequest(message) &&
+        hasRequestSchemaCasPayload(message);
+    } catch {
+      return false;
+    }
   }
 
   private async reconnect(): Promise<void> {
@@ -1430,6 +1527,7 @@ const parseHelloOk = (
 ): {
   flags: MemoryProtocolFlags;
   sessionOpen?: unknown;
+  requestSchemaCas?: unknown;
 } | null => {
   if (typeof message !== "object" || message === null) {
     return null;
@@ -1439,6 +1537,7 @@ const parseHelloOk = (
     protocol?: unknown;
     flags?: unknown;
     sessionOpen?: unknown;
+    requestSchemaCas?: unknown;
   };
   if (obj.type !== "hello.ok" || obj.protocol !== MEMORY_PROTOCOL) {
     return null;
@@ -1447,8 +1546,36 @@ const parseHelloOk = (
   if (parsed === null) {
     return null;
   }
-  return { flags: parsed, sessionOpen: obj.sessionOpen };
+  return {
+    flags: parsed,
+    sessionOpen: obj.sessionOpen,
+    requestSchemaCas: obj.requestSchemaCas,
+  };
 };
+
+const parseRequestSchemaCasMetadata = (
+  value: unknown,
+): RequestSchemaCasMetadata | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const metadata = value as { generation?: unknown; audience?: unknown };
+  if (
+    typeof metadata.generation !== "string" ||
+    (metadata.audience !== undefined && typeof metadata.audience !== "string")
+  ) {
+    return null;
+  }
+  return metadata.audience === undefined
+    ? { generation: metadata.generation }
+    : { generation: metadata.generation, audience: metadata.audience };
+};
+
+const isRequestSchemaCasRequest = (
+  message: Record<string, unknown>,
+): message is Record<string, unknown> & RequestSchemaCasRequest =>
+  message.type === "graph.query" || message.type === "session.watch.set" ||
+  message.type === "session.watch.add" || message.type === "transact";
 
 const isSessionEffect = (
   message: unknown,

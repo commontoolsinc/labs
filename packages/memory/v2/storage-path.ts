@@ -82,6 +82,25 @@ export const resolveSpaceStoreDirUrl = (store: URL): URL => {
 };
 
 /**
+ * Resolves the service-wide schema content-addressed store. It deliberately
+ * lives beside, rather than inside, the per-space `engine-v3` databases.
+ * Non-file stores have no durable filesystem location and therefore use SQLite
+ * in-memory storage.
+ */
+export const resolveSchemaStoreUrl = (store: URL): URL => {
+  if (store.protocol !== "file:") return new URL("memory:");
+
+  const storePath = Path.fromFileUrl(store);
+  if (!isSingleFileStore(store)) {
+    return new URL("./schema-store-v1.sqlite", store);
+  }
+
+  const ext = Path.extname(storePath);
+  const stem = storePath.slice(0, -ext.length);
+  return Path.toFileUrl(`${stem}.schema-store-v1.sqlite`);
+};
+
+/**
  * Mode-aware inverse of the filename encoding in `resolveSpaceStoreUrl`: map an
  * on-disk `.sqlite` filename stem (from the store's space dir) back to the
  * space id. Directory-mode stems are the LITERAL id (the URL resolution already

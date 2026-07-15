@@ -1,17 +1,21 @@
 import { LINK_V1_TAG } from "@commonfabric/data-model/cell-rep";
 import { isPlainObject } from "@commonfabric/utils/types";
+import { REQUEST_SCHEMA_CAS_REF_PREFIX } from "./schema-table-links.ts";
 
 export const SYNC_SCHEMA_REF_PREFIX = "schema-ref@2:";
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   isPlainObject(value);
 
+const isReservedSchemaRef = (value: string): boolean =>
+  value.startsWith(SYNC_SCHEMA_REF_PREFIX) ||
+  value.startsWith(REQUEST_SCHEMA_CAS_REF_PREFIX);
+
 const schemaRefInPayload = (
   payload: Record<string, unknown>,
 ): string | undefined => {
   const schema = payload.schema;
-  return typeof schema === "string" &&
-      schema.startsWith(SYNC_SCHEMA_REF_PREFIX)
+  return typeof schema === "string" && isReservedSchemaRef(schema)
     ? schema
     : undefined;
 };
@@ -93,7 +97,7 @@ export const containsSyncSchemaRefString = (value: unknown): boolean => {
   while (pending.length > 0) {
     const current = pending.pop();
     if (typeof current === "string") {
-      if (current.startsWith(SYNC_SCHEMA_REF_PREFIX)) {
+      if (isReservedSchemaRef(current)) {
         return true;
       }
       continue;

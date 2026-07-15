@@ -5997,7 +5997,7 @@ const validateStoredSyncSchemaRefs = (
     const ref = findSyncSchemaRef(document);
     if (ref !== undefined) {
       throw new ProtocolError(
-        `memory v2 documents may not persist reserved sync schema reference: ${ref}`,
+        `memory v2 documents may not persist reserved wire schema reference: ${ref}`,
       );
     }
   }

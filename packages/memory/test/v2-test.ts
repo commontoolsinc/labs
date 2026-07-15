@@ -18,9 +18,11 @@ import {
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
+  resetRequestSchemaCasConfig,
   resetSyncSchemaTableConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
+  setRequestSchemaCasConfig,
   setSyncSchemaTableConfig,
   toDocumentPath,
   toDocumentSelector,
@@ -130,10 +132,12 @@ describe("memory v2 flags", () => {
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetSyncSchemaTableConfig();
+    resetRequestSchemaCasConfig();
     setModernCellRepConfig(false);
     setPersistentSchedulerStateConfig(false);
     setCommitPreconditionsConfig(false);
     setSyncSchemaTableConfig(false);
+    setRequestSchemaCasConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: false,
@@ -143,12 +147,14 @@ describe("memory v2 flags", () => {
       // Build-inherent capability, not configuration: always advertised.
       sqliteCommitRowLabelEval: true,
       syncSchemaTableV2: false,
+      requestSchemaCasV1: false,
     });
 
     setModernCellRepConfig(true);
     setPersistentSchedulerStateConfig(true);
     setCommitPreconditionsConfig(true);
     setSyncSchemaTableConfig(true);
+    setRequestSchemaCasConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
       modernCellRep: true,
@@ -157,12 +163,14 @@ describe("memory v2 flags", () => {
       syncSchemaTable: false,
       sqliteCommitRowLabelEval: true,
       syncSchemaTableV2: true,
+      requestSchemaCasV1: true,
     });
 
     resetModernCellRepConfig();
     resetPersistentSchedulerStateConfig();
     resetCommitPreconditionsConfig();
     resetSyncSchemaTableConfig();
+    resetRequestSchemaCasConfig();
   });
 
   it("treats non-wire-shape flags as optional capabilities", () => {
@@ -199,6 +207,7 @@ describe("parseMemoryProtocolFlags", () => {
       syncSchemaTable: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
+      requestSchemaCasV1: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
@@ -207,6 +216,7 @@ describe("parseMemoryProtocolFlags", () => {
       syncSchemaTable: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
+      requestSchemaCasV1: false,
     });
   });
 
@@ -222,6 +232,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        requestSchemaCasV1: false,
       },
     );
   });
@@ -238,6 +249,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        requestSchemaCasV1: false,
       },
     );
   });
@@ -254,6 +266,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: true,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        requestSchemaCasV1: false,
       },
     );
   });
@@ -270,6 +283,22 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: false,
+        requestSchemaCasV1: false,
+      },
+    );
+  });
+
+  it("accepts the durable requestSchemaCasV1 key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({ requestSchemaCasV1: true }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+        syncSchemaTable: false,
+        syncSchemaTableV2: false,
+        sqliteCommitRowLabelEval: false,
+        requestSchemaCasV1: true,
       },
     );
   });
@@ -286,6 +315,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: true,
+        requestSchemaCasV1: false,
       },
     );
   });

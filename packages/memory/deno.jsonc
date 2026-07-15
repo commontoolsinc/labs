@@ -37,6 +37,8 @@
     "./v2/wire-accounting": "./v2/wire-accounting.ts",
     "./v2/session-open-auth": "./v2/session-open-auth.ts",
     "./v2/storage-path": "./v2/storage-path.ts",
+    "./v2/schema-store": "./v2/schema-store.ts",
+    "./v2/request-schema-cas": "./v2/request-schema-cas.ts",
     "./v2/dump": "./v2/dump.ts",
     "./sqlite": "./v2/sqlite/mod.ts",
     "./sqlite/columns": "./v2/sqlite/columns.ts",

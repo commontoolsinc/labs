@@ -1,5 +1,6 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
+import type { JSONSchema } from "@commonfabric/api";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
 import {
   type CellScope,
@@ -9,6 +10,7 @@ import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
+  getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryRequest,
@@ -81,10 +83,25 @@ import {
 import { respondToHello } from "./handshake.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
+  expandRequestSchemas,
+  hasRequestSchemaCasPayload,
+  InvalidRequestSchemaDefinitionsError,
+  MissingRequestSchemaDefinitionError,
+  type RequestSchemaCasRequest,
+} from "./request-schema-cas.ts";
+import {
+  type SchemaStore,
+  SchemaStoreCorruptionError,
+  SchemaStoreQuotaError,
+} from "./schema-store.ts";
+import {
+  accountMemoryWirePayload,
   classifyClientMessage,
   classifyServerMessage,
   type MemoryWireAccountingObserver,
+  type MemoryWireCandidate,
   type MemoryWireConnectionMetadata,
+  type MemoryWireSemanticBytes,
   memoryWireUtf8Bytes,
 } from "./wire-accounting.ts";
 import {
@@ -369,6 +386,7 @@ class Connection {
   // clients' action runs instead of re-running them
   // (docs/specs/scheduler-v2/incremental-observation-adoption.md §4).
   #persistentSchedulerState = false;
+  #requestSchemaCasV1 = false;
   #sessions = new Map<string, SessionHandle>();
   #sessionOpenChallenge: SessionOpenChallengeState | null = null;
   #receiving: Promise<void> = Promise.resolve();
@@ -394,21 +412,35 @@ class Connection {
     const observer = this.server.activeWireAccountingObserver();
     if (observer === undefined) {
       this.sendRaw(
-        this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
+        this.#syncSchemaTable
+          ? this.server.compressServerMessageSchemas(message)
+          : message,
       );
       return;
     }
 
     const actualMessage = this.#syncSchemaTable
-      ? compressServerMessageSchemas(message)
+      ? this.server.compressServerMessageSchemas(message)
       : message;
+    const baselinePayload = encodeMemoryBoundary(message);
+    const actualPayload = encodeMemoryBoundary(actualMessage);
+    const baselineAccounting = this.accountPayload(observer, baselinePayload);
+    const actualAccounting = this.accountPayload(observer, actualPayload);
     this.server.recordWireAccounting(observer, {
       direction: "outbound",
       connectionId: this.id,
       metadata: this.metadata,
       classification: classifyServerMessage(message, originatingRequestType),
-      baselineBytes: memoryWireUtf8Bytes(encodeMemoryBoundary(message)),
-      actualBytes: memoryWireUtf8Bytes(encodeMemoryBoundary(actualMessage)),
+      baselineBytes: memoryWireUtf8Bytes(baselinePayload),
+      actualBytes: memoryWireUtf8Bytes(actualPayload),
+      ...(baselineAccounting === undefined ? {} : {
+        baselineSemanticBytes: baselineAccounting.semanticBytes,
+        baselineCandidates: baselineAccounting.candidates,
+      }),
+      ...(actualAccounting === undefined ? {} : {
+        actualSemanticBytes: actualAccounting.semanticBytes,
+        actualCandidates: actualAccounting.candidates,
+      }),
     });
     this.sendRaw(actualMessage);
   }
@@ -416,24 +448,62 @@ class Connection {
   private recordParsedInbound(
     payload: string,
     parsed: ClientMessage | null,
+    logical: ClientMessage | null = parsed,
+    expandedRequestSchemas = false,
   ): void {
     const observer = this.server.activeWireAccountingObserver();
     if (observer === undefined) {
       return;
     }
-    const bytes = memoryWireUtf8Bytes(payload);
+    const actualBytes = memoryWireUtf8Bytes(payload);
+    const baselinePayload = !expandedRequestSchemas || logical === null
+      ? payload
+      : encodeMemoryBoundary(logical);
+    const baselineAccounting = this.accountPayload(observer, baselinePayload);
+    const actualAccounting = this.accountPayload(observer, payload);
     this.server.recordWireAccounting(observer, {
       direction: "inbound",
       connectionId: this.id,
       metadata: this.metadata,
-      classification: classifyClientMessage(parsed),
-      baselineBytes: bytes,
-      actualBytes: bytes,
+      classification: classifyClientMessage(logical),
+      baselineBytes: memoryWireUtf8Bytes(baselinePayload),
+      actualBytes,
+      ...(baselineAccounting === undefined ? {} : {
+        baselineSemanticBytes: baselineAccounting.semanticBytes,
+        baselineCandidates: baselineAccounting.candidates,
+      }),
+      ...(actualAccounting === undefined ? {} : {
+        actualSemanticBytes: actualAccounting.semanticBytes,
+        actualCandidates: actualAccounting.candidates,
+      }),
     });
-    if (parsed !== null) {
-      if ("requestId" in parsed) {
-        this.#requestTypesById.set(parsed.requestId, parsed.type);
+    if (logical !== null) {
+      if ("requestId" in logical) {
+        this.#requestTypesById.set(logical.requestId, logical.type);
       }
+    }
+  }
+
+  private accountPayload(
+    observer: MemoryWireAccountingObserver,
+    payload: string,
+  ): {
+    semanticBytes: MemoryWireSemanticBytes;
+    candidates: MemoryWireCandidate[];
+  } | undefined {
+    try {
+      if (observer.accountPayload !== undefined) {
+        return observer.accountPayload(payload, this.id);
+      }
+      const { semanticBytes } = accountMemoryWirePayload(
+        payload,
+        "inactive",
+        this.id,
+      );
+      return { semanticBytes, candidates: [] };
+    } catch (error) {
+      console.warn("Memory wire accounting observer failed:", error);
+      return undefined;
     }
   }
 
@@ -624,8 +694,8 @@ class Connection {
     }
 
     const parsed = parseClientMessage(payload);
-    this.recordParsedInbound(payload, parsed);
     if (parsed === null) {
+      this.recordParsedInbound(payload, null);
       this.send({
         type: "response",
         requestId: "invalid",
@@ -638,6 +708,7 @@ class Connection {
     }
 
     if (!this.#ready) {
+      this.recordParsedInbound(payload, parsed);
       if (parsed.type !== "hello") {
         this.send({
           type: "response",
@@ -646,7 +717,7 @@ class Connection {
         });
         return;
       }
-      const response = respondToHello(parsed);
+      const response = respondToHello(parsed, this.server.helloOptions());
       if (response.type === "hello.ok") {
         response.sessionOpen = this.issueSessionOpenAuth();
       }
@@ -661,11 +732,67 @@ class Connection {
       this.#persistentSchedulerState =
         clientFlags?.persistentSchedulerState === true &&
         serverFlags?.persistentSchedulerState === true;
+      this.#requestSchemaCasV1 = clientFlags?.requestSchemaCasV1 === true &&
+        serverFlags?.requestSchemaCasV1 === true;
       this.#ready = true;
       return;
     }
 
-    switch (parsed.type) {
+    let logical = parsed;
+    let hasCasPayload: boolean;
+    try {
+      hasCasPayload = hasRequestSchemaCasPayload(parsed);
+    } catch (error) {
+      this.recordParsedInbound(payload, parsed);
+      this.send(respondTypedError(
+        "requestId" in parsed ? parsed.requestId : "invalid",
+        this.server.requestSchemaCasError(error),
+      ));
+      return;
+    }
+    if (hasCasPayload) {
+      const casRequest = parsed as RequestSchemaCasRequest;
+      const authorization = await this.server.authorizeRequestSchemaIngestion(
+        casRequest,
+        this,
+      );
+      if (authorization !== null) {
+        this.recordParsedInbound(payload, parsed);
+        this.send(respondTypedError(casRequest.requestId, authorization));
+        return;
+      }
+      if (!this.#requestSchemaCasV1) {
+        this.recordParsedInbound(payload, parsed);
+        this.send(respondTypedError(
+          casRequest.requestId,
+          toError(
+            "ProtocolError",
+            "request schema CAS was not negotiated",
+          ),
+        ));
+        return;
+      }
+      try {
+        logical = this.server.expandRequestSchemas(
+          casRequest,
+        );
+      } catch (error) {
+        this.recordParsedInbound(payload, parsed);
+        this.send(respondTypedError(
+          casRequest.requestId,
+          this.server.requestSchemaCasError(error),
+        ));
+        return;
+      }
+    }
+    this.recordParsedInbound(
+      payload,
+      parsed,
+      logical,
+      logical !== parsed,
+    );
+
+    switch (logical.type) {
       case "hello":
         this.send({
           type: "response",
@@ -674,9 +801,9 @@ class Connection {
         });
         return;
       case "session.open": {
-        const response = await this.server.openSession(parsed, this);
+        const response = await this.server.openSession(logical, this);
         if (response.ok?.sessionId) {
-          this.addSession(parsed.space, response.ok.sessionId);
+          this.addSession(logical.space, response.ok.sessionId);
         }
         this.send(response);
         return;
@@ -684,63 +811,71 @@ class Connection {
       case "transact":
         if (
           !this.requireSession(
-            parsed.requestId,
-            parsed.space,
-            parsed.sessionId,
+            logical.requestId,
+            logical.space,
+            logical.sessionId,
           )
         ) {
           return;
         }
-        this.send(await this.server.transact(parsed));
+        this.send(await this.server.transact(logical));
         return;
       case "graph.query":
         if (
           !this.requireSession(
-            parsed.requestId,
-            parsed.space,
-            parsed.sessionId,
+            logical.requestId,
+            logical.space,
+            logical.sessionId,
           )
         ) {
           return;
         }
         {
-          const response = await this.server.graphQuery(parsed);
+          const response = await this.server.graphQuery(logical);
           this.sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
+            logical.space,
+            logical.sessionId,
+            logical.requestId,
             response,
           );
         }
         return;
       case "sqlite.query":
         if (
-          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
+          !this.requireSession(
+            logical.requestId,
+            logical.space,
+            logical.sessionId,
+          )
         ) {
           return;
         }
         {
-          const response = await this.server.sqliteQuery(parsed);
+          const response = await this.server.sqliteQuery(logical);
           this.sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
+            logical.space,
+            logical.sessionId,
+            logical.requestId,
             response,
           );
         }
         return;
       case "sqlite.register-disk-source":
         if (
-          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
+          !this.requireSession(
+            logical.requestId,
+            logical.space,
+            logical.sessionId,
+          )
         ) {
           return;
         }
         {
-          const response = await this.server.sqliteRegisterDiskSource(parsed);
+          const response = await this.server.sqliteRegisterDiskSource(logical);
           this.sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
+            logical.space,
+            logical.sessionId,
+            logical.requestId,
             response,
           );
         }
@@ -748,19 +883,19 @@ class Connection {
       case "session.watch.set":
         if (
           !this.requireSession(
-            parsed.requestId,
-            parsed.space,
-            parsed.sessionId,
+            logical.requestId,
+            logical.space,
+            logical.sessionId,
           )
         ) {
           return;
         }
         {
-          const response = await this.server.watchSet(parsed);
+          const response = await this.server.watchSet(logical);
           this.sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
+            logical.space,
+            logical.sessionId,
+            logical.requestId,
             response,
           );
         }
@@ -768,19 +903,19 @@ class Connection {
       case "session.watch.add":
         if (
           !this.requireSession(
-            parsed.requestId,
-            parsed.space,
-            parsed.sessionId,
+            logical.requestId,
+            logical.space,
+            logical.sessionId,
           )
         ) {
           return;
         }
         {
-          const response = await this.server.watchAdd(parsed);
+          const response = await this.server.watchAdd(logical);
           this.sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
+            logical.space,
+            logical.sessionId,
+            logical.requestId,
             response,
           );
         }
@@ -788,21 +923,21 @@ class Connection {
       case "scheduler.snapshot.list":
         if (
           !this.requireSession(
-            parsed.requestId,
-            parsed.space,
-            parsed.sessionId,
+            logical.requestId,
+            logical.space,
+            logical.sessionId,
           )
         ) {
           return;
         }
         {
           const response = await this.server.listSchedulerActionSnapshots(
-            parsed,
+            logical,
           );
           this.sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
+            logical.space,
+            logical.sessionId,
+            logical.requestId,
             response,
           );
         }
@@ -810,19 +945,19 @@ class Connection {
       case "session.ack":
         if (
           !this.requireSession(
-            parsed.requestId,
-            parsed.space,
-            parsed.sessionId,
+            logical.requestId,
+            logical.space,
+            logical.sessionId,
           )
         ) {
           return;
         }
         {
-          const response = await this.server.ackSession(parsed);
+          const response = await this.server.ackSession(logical);
           this.sendSessionResponse(
-            parsed.space,
-            parsed.sessionId,
-            parsed.requestId,
+            logical.space,
+            logical.sessionId,
+            logical.requestId,
             response,
           );
         }
@@ -901,6 +1036,7 @@ export class Server {
   #schedulerSideEffectsByOwnerSpace = new Map<string, Promise<void>>();
   #lastRefreshDurationMs = 0;
   #store?: URL;
+  #schemaStore?: SchemaStore;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
   // cell-derived per-(space,id) file. v1 in-memory; persistence is deferred (see
@@ -933,6 +1069,8 @@ export class Server {
     readonly options: {
       sessions?: SessionRegistry;
       store?: URL;
+      /** Shared durable request-schema CAS store owned by the host process. */
+      schemaStore?: SchemaStore;
       subscriptionRefreshDelayMs?: number;
       authorizeSessionOpen: (
         message: SessionOpenRequest,
@@ -982,6 +1120,120 @@ export class Server {
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
+    this.#schemaStore = options.schemaStore;
+  }
+
+  helloOptions(): Parameters<typeof respondToHello>[1] {
+    const flags = {
+      ...getMemoryProtocolFlags(),
+      requestSchemaCasV1: this.#schemaStore !== undefined &&
+        getMemoryProtocolFlags().requestSchemaCasV1 === true,
+    };
+    return {
+      flags,
+      ...(flags.requestSchemaCasV1
+        ? {
+          requestSchemaCas: {
+            generation: this.#schemaStore!.generation,
+            audience: this.sessionOpenAudience(),
+          },
+        }
+        : {}),
+    };
+  }
+
+  compressServerMessageSchemas(message: ServerMessage): ServerMessage {
+    const store = this.#schemaStore;
+    if (store === undefined) return compressServerMessageSchemas(message);
+    const schemas: JSONSchema[] = [];
+    const compressed = compressServerMessageSchemas(
+      message,
+      (schema) => schemas.push(schema),
+    );
+    try {
+      store.putAll(schemas);
+      return compressed;
+    } catch (error) {
+      console.warn(
+        "Memory request schema CAS could not seed outbound schemas",
+        error,
+      );
+      return message;
+    }
+  }
+
+  requestSchemaCasError(error: unknown): V2Error {
+    if (error instanceof MissingRequestSchemaDefinitionError) {
+      return toError(
+        "MissingSchemas",
+        "Referenced request schemas are unavailable",
+      );
+    }
+    if (
+      error instanceof SchemaStoreQuotaError ||
+      error instanceof SchemaStoreCorruptionError
+    ) {
+      return toError(
+        "SchemaStoreError",
+        "Request schema store rejected schema",
+      );
+    }
+    if (error instanceof InvalidRequestSchemaDefinitionsError) {
+      return toError("ProtocolError", "Invalid request schema CAS payload");
+    }
+    return toError("SchemaStoreError", "Request schema store is unavailable");
+  }
+
+  expandRequestSchemas(
+    request: RequestSchemaCasRequest,
+  ): RequestSchemaCasRequest {
+    const store = this.#schemaStore;
+    if (store === undefined) {
+      throw new InvalidRequestSchemaDefinitionsError(
+        "request schema CAS store is unavailable",
+      );
+    }
+    return expandRequestSchemas(
+      request,
+      (hash) => store.get(hash)?.schema,
+      (schemas) => store.putAll(schemas),
+    );
+  }
+
+  async authorizeRequestSchemaIngestion(
+    message: RequestSchemaCasRequest,
+    connection: Connection,
+  ): Promise<V2Error | null> {
+    if (!connection.hasSession(message.space, message.sessionId)) {
+      return toError("SessionError", "Session is not open on this connection");
+    }
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return toError("SessionError", "Unknown session for space");
+    }
+    const operations = message.type === "transact" &&
+        Array.isArray(message.commit?.operations)
+      ? message.commit.operations
+      : [];
+    const requirement: Capability = message.type === "transact"
+      ? commitTouchesAclDoc(operations, message.space) ? "OWNER" : "WRITE"
+      : "READ";
+    const aclEngine = this.#aclMode() === "off"
+      ? undefined
+      : await this.openEngine(message.space);
+    return aclEngine === undefined
+      ? await this.#authorizeMessage(
+        message.space,
+        session.principal,
+        requirement,
+      )
+      : this.#authorizeCurrentSessionWithEngine(
+        aclEngine,
+        message.space,
+        message.sessionId,
+        session,
+        requirement,
+      );
   }
 
   nowSeconds(): number {
@@ -3277,7 +3529,7 @@ export class Server {
   respond(payload: string): Promise<string | null> {
     const parsed = parseClientMessage(payload);
     if (parsed?.type === "hello") {
-      const response = respondToHello(parsed);
+      const response = respondToHello(parsed, this.helloOptions());
       if (response.type !== "hello.ok") {
         return Promise.resolve(encodeMemoryBoundary(response));
       }
@@ -3657,6 +3909,11 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       commit: parsed.commit as unknown as TransactRequest["commit"],
+      ...(parsed.schemaDefinitions === undefined ? {} : {
+        schemaDefinitions: parsed.schemaDefinitions as TransactRequest[
+          "schemaDefinitions"
+        ],
+      }),
     };
   }
 
@@ -3674,6 +3931,11 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       query: parsed.query as unknown as GraphQueryRequest["query"],
+      ...(parsed.schemaDefinitions === undefined ? {} : {
+        schemaDefinitions: parsed.schemaDefinitions as GraphQueryRequest[
+          "schemaDefinitions"
+        ],
+      }),
     };
   }
 
@@ -3745,6 +4007,11 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+      ...(parsed.schemaDefinitions === undefined ? {} : {
+        schemaDefinitions: parsed.schemaDefinitions as WatchSetRequest[
+          "schemaDefinitions"
+        ],
+      }),
     };
   }
 
@@ -3761,6 +4028,11 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+      ...(parsed.schemaDefinitions === undefined ? {} : {
+        schemaDefinitions: parsed.schemaDefinitions as WatchAddRequest[
+          "schemaDefinitions"
+        ],
+      }),
     };
   }
 

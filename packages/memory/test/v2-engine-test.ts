@@ -143,7 +143,7 @@ Deno.test("memory v2 engine reserves sync schema reference strings", async () =>
           },
         }),
       ProtocolError,
-      "reserved sync schema reference",
+      "reserved wire schema reference",
     );
 
     applyCommit(engine, {
@@ -182,7 +182,7 @@ Deno.test("memory v2 engine reserves sync schema reference strings", async () =>
           },
         }),
       ProtocolError,
-      "reserved sync schema reference",
+      "reserved wire schema reference",
     );
 
     for (
@@ -210,7 +210,7 @@ Deno.test("memory v2 engine reserves sync schema reference strings", async () =>
             },
           }),
         ProtocolError,
-        "reserved sync schema reference",
+        "reserved wire schema reference",
       );
     }
 
@@ -239,7 +239,7 @@ Deno.test("memory v2 engine reserves sync schema reference strings", async () =>
           },
         }),
       ProtocolError,
-      "reserved sync schema reference",
+      "reserved wire schema reference",
     );
     assertEquals(
       read(engine, { id: "entity:reserved-sync-schema-ref-hidden-by-set" }),
@@ -268,7 +268,7 @@ Deno.test("memory v2 engine reserves sync schema reference strings", async () =>
           },
         }),
       ProtocolError,
-      "reserved sync schema reference",
+      "reserved wire schema reference",
     );
 
     assertEquals(
@@ -291,6 +291,43 @@ Deno.test("memory v2 engine reserves sync schema reference strings", async () =>
           schema: "opaque-legacy-schema-name",
         },
       }),
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine reserves request CAS schema reference strings", async () => {
+  const { engine, path } = await createEngine();
+  const reservedRef = "schema-cas@1:sha256:user-controlled";
+  try {
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-request-schema-ref",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "entity:reserved-request-schema-ref",
+              value: toEntityDocument({
+                $alias: {
+                  id: "of:target",
+                  path: [],
+                  schema: reservedRef,
+                },
+              }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+    assertEquals(
+      read(engine, { id: "entity:reserved-request-schema-ref" }),
+      null,
     );
   } finally {
     close(engine);

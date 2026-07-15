@@ -1,5 +1,8 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
+import {
+  resolveSchemaStoreUrl,
+  resolveSpaceStoreUrl,
+} from "../v2/storage-path.ts";
 
 Deno.test("resolveSpaceStoreUrl uses a dedicated engine subdirectory in directory mode", () => {
   const root = new URL("file:///tmp/cf-memory/");
@@ -22,6 +25,21 @@ Deno.test("resolveSpaceStoreUrl uses a sibling engine directory in single-file m
         encodeURIComponent(encodeURIComponent(subject))
       }.sqlite`,
     ).href,
+  );
+});
+
+Deno.test("resolveSchemaStoreUrl keeps the durable store outside per-space databases", () => {
+  assertEquals(
+    resolveSchemaStoreUrl(new URL("file:///tmp/cf-memory/")).href,
+    "file:///tmp/cf-memory/schema-store-v1.sqlite",
+  );
+  assertEquals(
+    resolveSchemaStoreUrl(new URL("file:///tmp/cf-memory/space.sqlite")).href,
+    "file:///tmp/cf-memory/space.schema-store-v1.sqlite",
+  );
+  assertEquals(
+    resolveSchemaStoreUrl(new URL("memory:")).href,
+    "memory:",
   );
 });
 

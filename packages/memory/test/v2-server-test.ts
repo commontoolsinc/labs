@@ -971,7 +971,12 @@ Deno.test("memory v2 server rejects handshakes when modernCellRep flags disagree
           JSON.stringify({
             modernCellRep: !HELLO_FLAGS.modernCellRep,
           })
-        } server=${JSON.stringify(HELLO_FLAGS)}`,
+        } server=${
+          JSON.stringify({
+            ...HELLO_FLAGS,
+            requestSchemaCasV1: false,
+          })
+        }`,
       },
     });
   } finally {

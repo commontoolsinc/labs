@@ -1,5 +1,4 @@
 import type { JSONSchema } from "@commonfabric/api";
-import { LINK_V1_TAG } from "@commonfabric/data-model/cell-rep";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type {
@@ -12,6 +11,7 @@ import {
   findSyncSchemaRef,
   SYNC_SCHEMA_REF_PREFIX,
 } from "./sync-schema-ref.ts";
+import { mapLinkSchemas } from "./schema-table-links.ts";
 
 type SchemaTable = Record<string, JSONSchema>;
 
@@ -22,6 +22,7 @@ export type SchemaTableSessionSync = SessionSync & {
 type RewriteState = {
   schemas: Map<string, JSONSchema>;
   changed: boolean;
+  onSchema?: (schema: JSONSchema) => void;
 };
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -36,6 +37,7 @@ const schemaRefFor = (
 ): string => {
   const schemaAndHash = internSchema(schema, true);
   const hash = schemaAndHash.taggedHashString;
+  state.onSchema?.(schemaAndHash.schema);
   if (!state.schemas.has(hash)) {
     state.schemas.set(hash, schemaAndHash.schema);
   }
@@ -45,6 +47,7 @@ const schemaRefFor = (
 const expandSchemaRef = (
   value: unknown,
   schemas: SchemaTable | undefined,
+  onSchema?: (schema: JSONSchema) => void,
 ): JSONSchema | undefined => {
   if (
     typeof value !== "string" ||
@@ -66,6 +69,7 @@ const expandSchemaRef = (
       `Invalid sync schema table content for reference: ${value}`,
     );
   }
+  onSchema?.(schemaAndHash.schema);
   return schemaAndHash.schema;
 };
 
@@ -83,145 +87,30 @@ const rewriteSchemaValue = (
 const expandSchemaValue = (
   value: unknown,
   schemas: SchemaTable | undefined,
-): unknown => expandSchemaRef(value, schemas) ?? value;
+  onSchema?: (schema: JSONSchema) => void,
+): unknown => expandSchemaRef(value, schemas, onSchema) ?? value;
 
-const rewriteLinkPayload = (
-  payload: Record<string, unknown>,
-  state: RewriteState,
-): Record<string, unknown> => {
-  if (!Object.hasOwn(payload, "schema")) {
-    return payload;
-  }
-  const schema = rewriteSchemaValue(payload.schema, state);
-  return schema === payload.schema ? payload : { ...payload, schema };
-};
-
-const expandLinkPayload = (
-  payload: Record<string, unknown>,
-  schemas: SchemaTable | undefined,
-): Record<string, unknown> => {
-  if (!Object.hasOwn(payload, "schema")) {
-    return payload;
-  }
-  const schema = expandSchemaValue(payload.schema, schemas);
-  return schema === payload.schema ? payload : { ...payload, schema };
-};
-
-const rewriteValue = (value: unknown, state: RewriteState): unknown => {
-  if (Array.isArray(value)) {
-    let changed = false;
-    const rewritten = value.map((item) => {
-      const next = rewriteValue(item, state);
-      changed ||= next !== item;
-      return next;
-    });
-    return changed ? rewritten : value;
-  }
-
-  if (!isPlainRecord(value)) {
-    return value;
-  }
-
-  const linkEnvelope = value["/"];
-  let rewrittenValue = value;
-  let changed = false;
-  if (isPlainRecord(linkEnvelope)) {
-    const payload = linkEnvelope[LINK_V1_TAG];
-    if (isPlainRecord(payload)) {
-      const nextPayload = rewriteLinkPayload(payload, state);
-      if (nextPayload !== payload) {
-        rewrittenValue = {
-          ...rewrittenValue,
-          "/": {
-            ...linkEnvelope,
-            [LINK_V1_TAG]: nextPayload,
-          },
-        };
-        changed = true;
-      }
-    }
-  }
-
-  const legacyAlias = value.$alias;
-  if (isPlainRecord(legacyAlias)) {
-    const nextAlias = rewriteLinkPayload(legacyAlias, state);
-    if (nextAlias !== legacyAlias) {
-      rewrittenValue = { ...rewrittenValue, $alias: nextAlias };
-      changed = true;
-    }
-  }
-
-  const rewritten: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(rewrittenValue)) {
-    const next = rewriteValue(child, state);
-    changed ||= next !== child;
-    rewritten[key] = next;
-  }
-  return changed ? rewritten : value;
-};
+const rewriteValue = (value: unknown, state: RewriteState): unknown =>
+  mapLinkSchemas(value, (schema) => rewriteSchemaValue(schema, state));
 
 const expandValue = (
   value: unknown,
   schemas: SchemaTable | undefined,
-): unknown => {
-  if (Array.isArray(value)) {
-    let changed = false;
-    const expanded = value.map((item) => {
-      const next = expandValue(item, schemas);
-      changed ||= next !== item;
-      return next;
-    });
-    return changed ? expanded : value;
-  }
-
-  if (!isPlainRecord(value)) {
-    return value;
-  }
-
-  const linkEnvelope = value["/"];
-  let expandedValue = value;
-  let changed = false;
-  if (isPlainRecord(linkEnvelope)) {
-    const payload = linkEnvelope[LINK_V1_TAG];
-    if (isPlainRecord(payload)) {
-      const nextPayload = expandLinkPayload(payload, schemas);
-      if (nextPayload !== payload) {
-        expandedValue = {
-          ...expandedValue,
-          "/": {
-            ...linkEnvelope,
-            [LINK_V1_TAG]: nextPayload,
-          },
-        };
-        changed = true;
-      }
-    }
-  }
-
-  const legacyAlias = value.$alias;
-  if (isPlainRecord(legacyAlias)) {
-    const nextAlias = expandLinkPayload(legacyAlias, schemas);
-    if (nextAlias !== legacyAlias) {
-      expandedValue = { ...expandedValue, $alias: nextAlias };
-      changed = true;
-    }
-  }
-
-  const expanded: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(expandedValue)) {
-    const next = expandValue(child, schemas);
-    changed ||= next !== child;
-    expanded[key] = next;
-  }
-  return changed ? expanded : value;
-};
+  onSchema?: (schema: JSONSchema) => void,
+): unknown =>
+  mapLinkSchemas(
+    value,
+    (schema) => expandSchemaValue(schema, schemas, onSchema),
+  );
 
 export const compressSessionSyncSchemas = (
   sync: SessionSync,
+  onSchema?: (schema: JSONSchema) => void,
 ): SessionSync | SchemaTableSessionSync => {
   const state: RewriteState = {
     schemas: new Map(),
     changed: false,
+    onSchema,
   };
   const upserts = sync.upserts.map((upsert) => {
     if (upsert.doc === undefined) {
@@ -247,13 +136,14 @@ export const compressSessionSyncSchemas = (
 
 export const expandSessionSyncSchemas = (
   sync: SessionSync | SchemaTableSessionSync,
+  onSchema?: (schema: JSONSchema) => void,
 ): SessionSync => {
   const schemas = (sync as SchemaTableSessionSync).schemaTable;
   if (schemas === undefined || Object.keys(schemas).length === 0) {
     for (const upsert of sync.upserts) {
       const ref = findSyncSchemaRef(upsert.doc);
       if (ref !== undefined) {
-        expandSchemaRef(ref, schemas);
+        expandSchemaRef(ref, schemas, onSchema);
       }
     }
     return sync;
@@ -263,7 +153,7 @@ export const expandSessionSyncSchemas = (
     if (upsert.doc === undefined) {
       return upsert;
     }
-    const doc = expandValue(upsert.doc, schemas);
+    const doc = expandValue(upsert.doc, schemas, onSchema);
     return doc === upsert.doc ? upsert : {
       ...upsert,
       doc: doc as typeof upsert.doc,
@@ -278,7 +168,10 @@ export const expandSessionSyncSchemas = (
   return deepFreeze(expanded as SessionSync);
 };
 
-const compressResponseSync = (message: ServerMessage): ServerMessage => {
+const compressResponseSync = (
+  message: ServerMessage,
+  onSchema?: (schema: JSONSchema) => void,
+): ServerMessage => {
   if (message.type !== "response" || message.ok === undefined) {
     return message;
   }
@@ -294,12 +187,18 @@ const compressResponseSync = (message: ServerMessage): ServerMessage => {
     ...message,
     ok: {
       ...message.ok,
-      sync: compressSessionSyncSchemas(sync as unknown as SessionSync),
+      sync: compressSessionSyncSchemas(
+        sync as unknown as SessionSync,
+        onSchema,
+      ),
     },
   };
 };
 
-const expandResponseSync = (message: unknown): unknown => {
+const expandResponseSync = (
+  message: unknown,
+  onSchema?: (schema: JSONSchema) => void,
+): unknown => {
   if (!isPlainRecord(message) || message.type !== "response") {
     return message;
   }
@@ -317,6 +216,7 @@ const expandResponseSync = (message: unknown): unknown => {
       ...message.ok,
       sync: expandSessionSyncSchemas(
         sync as unknown as SchemaTableSessionSync,
+        onSchema,
       ),
     },
   };
@@ -324,24 +224,29 @@ const expandResponseSync = (message: unknown): unknown => {
 
 export const compressServerMessageSchemas = (
   message: ServerMessage,
+  onSchema?: (schema: JSONSchema) => void,
 ): ServerMessage => {
   if (message.type === "session/effect") {
     return {
       ...message,
-      effect: compressSessionSyncSchemas(message.effect),
+      effect: compressSessionSyncSchemas(message.effect, onSchema),
     } as SessionEffectMessage;
   }
-  return compressResponseSync(message);
+  return compressResponseSync(message, onSchema);
 };
 
-export const expandServerMessageSchemas = (message: unknown): unknown => {
+export const expandServerMessageSchemas = (
+  message: unknown,
+  onSchema?: (schema: JSONSchema) => void,
+): unknown => {
   if (isPlainRecord(message) && message.type === "session/effect") {
     return {
       ...message,
       effect: expandSessionSyncSchemas(
         message.effect as SchemaTableSessionSync,
+        onSchema,
       ),
     };
   }
-  return expandResponseSync(message);
+  return expandResponseSync(message, onSchema);
 };

@@ -16,6 +16,7 @@ import {
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
 import {
+  accountMemoryWirePayload,
   MemoryWireAccountingAccumulator,
   type MemoryWireAccountingObserver,
   type MemoryWireAccountingRecord,
@@ -236,6 +237,408 @@ Deno.test("memory wire accounting records inbound payload bytes exactly", async 
   }
 });
 
+Deno.test("memory wire payload accounting conserves bytes and salts candidates per run", () => {
+  const payload = encodeMemoryBoundary({
+    type: "response",
+    requestId: "not-an-identity-candidate",
+    space: "space-identity",
+    sessionId: "session-identity",
+    ok: {
+      invocation: {
+        iss: "issuer",
+        aud: "audience",
+        sub: "subject",
+        iat: 1,
+        exp: 2,
+      },
+      sync: {
+        type: "sync",
+        schemaTable: { "schema-ref@2:hash": { type: "object" } },
+        fromSeq: 1,
+        toSeq: 2,
+        upserts: [{
+          id: "entity",
+          branch: "main",
+          scope: "space",
+          seq: 2,
+          doc: {
+            value: {
+              id: "user-data",
+              seq: 7,
+              schema: { userOwned: true },
+              message: "user-owned",
+              link: { "/": { "link@1": { schema: "schema-ref@2:link" } } },
+              inlineLink: {
+                "/": { "link@1": { schema: { type: "string" } } },
+              },
+            },
+            schema: { type: "object" },
+          },
+        }],
+      },
+    },
+  });
+  const first = accountMemoryWirePayload(payload, "run-one");
+  const repeated = accountMemoryWirePayload(payload, "run-one");
+  const secondRun = accountMemoryWirePayload(payload, "run-two");
+
+  assertEquals(
+    Object.values(first.semanticBytes).reduce((sum, bytes) => sum + bytes, 0),
+    memoryWireUtf8Bytes(payload),
+  );
+  assert(first.semanticBytes.schema > 0);
+  assert(first.semanticBytes.documentValue > 0);
+  assert(first.semanticBytes.identity > 0);
+  assert(first.semanticBytes.sequence > 0);
+  assert(first.semanticBytes.sessionControl > 0);
+  assert(first.semanticBytes.authCapability > 0);
+  assert(first.candidates.length > 0);
+  assertEquals(
+    first.candidates.filter((candidate) =>
+      candidate.scope === "identityInternable"
+    ).length,
+    5,
+  );
+  assertEquals(first.candidates, repeated.candidates);
+  assert(
+    first.candidates.some((candidate, index) =>
+      candidate.fingerprint !== secondRun.candidates[index]?.fingerprint
+    ),
+  );
+  assertEquals(
+    JSON.stringify(first.candidates).includes("user-data"),
+    false,
+  );
+  assertEquals(
+    first.candidates.some((candidate) =>
+      candidate.scope === "identityInternable" &&
+      candidate.fingerprint.includes("not-an-identity-candidate")
+    ),
+    false,
+  );
+  assertEquals(
+    first.candidates.filter((candidate) =>
+      candidate.category === "schema" &&
+      candidate.scope === "alreadyContentAddressed"
+    ).length,
+    2,
+  );
+  assert(
+    first.candidates.some((candidate) =>
+      candidate.category === "schema" &&
+      candidate.scope === "immutableInternable"
+    ),
+  );
+  assertEquals(
+    first.candidates
+      .filter((candidate) =>
+        candidate.category === "schema" &&
+        candidate.scope === "alreadyContentAddressed"
+      )
+      .map((candidate) => candidate.encodedBytes)
+      .sort((left, right) => left - right),
+    [
+      memoryWireUtf8Bytes(JSON.stringify({ type: "object" })),
+      memoryWireUtf8Bytes(JSON.stringify("schema-ref@2:link")),
+    ].sort((left, right) => left - right),
+  );
+  assert(
+    first.candidates.reduce(
+      (sum, candidate) => sum + candidate.encodedBytes,
+      0,
+    ) <=
+      memoryWireUtf8Bytes(payload),
+  );
+});
+
+Deno.test("memory wire accounting classifies request CAS definitions and refs as content-addressed schemas", () => {
+  const payload = encodeMemoryBoundary({
+    type: "graph.query",
+    requestId: "query",
+    space: "did:key:space",
+    sessionId: "session",
+    query: {
+      roots: [{
+        id: "of:root",
+        selector: { path: [], schema: "schema-cas@1:sha256:test" },
+      }],
+    },
+    schemaDefinitions: {
+      "sha256:test": { type: "string" },
+    },
+  });
+  const accounting = accountMemoryWirePayload(payload, "run");
+  const schemaCandidates = accounting.candidates.filter((candidate) =>
+    candidate.category === "schema"
+  );
+
+  assert(accounting.semanticBytes.schema > 0);
+  assertEquals(schemaCandidates.length, 2);
+  assert(
+    schemaCandidates.every((candidate) =>
+      candidate.scope === "alreadyContentAddressed"
+    ),
+  );
+});
+
+Deno.test("memory wire accounting treats noncanonical payloads as opaque and partitions fingerprints", () => {
+  const canonical = encodeMemoryBoundary({
+    type: "response",
+    ok: {
+      sync: {
+        type: "sync",
+        upserts: [{ id: "entity", doc: { value: { title: "x" } } }],
+      },
+    },
+  });
+  const noncanonical = canonical.replace('{"type"', '{ "type"');
+  const opaque = accountMemoryWirePayload(noncanonical, "run", "connection-a");
+  const first = accountMemoryWirePayload(canonical, "run", "connection-a");
+  const second = accountMemoryWirePayload(canonical, "run", "connection-a");
+  const otherConnection = accountMemoryWirePayload(
+    canonical,
+    "run",
+    "connection-b",
+  );
+
+  assertEquals(
+    opaque.semanticBytes.encoding,
+    memoryWireUtf8Bytes(noncanonical),
+  );
+  assertEquals(opaque.candidates, []);
+  assertEquals(first.candidates, second.candidates);
+  assert(
+    first.candidates.some((candidate, index) =>
+      candidate.fingerprint !== otherConnection.candidates[index]?.fingerprint
+    ),
+  );
+});
+
+Deno.test("memory wire accounting bounds opaque work and consumes retained state", () => {
+  const payload = encodeMemoryBoundary({
+    type: "response",
+    ok: {
+      sync: {
+        type: "sync",
+        upserts: [{
+          id: "entity",
+          doc: { value: { value: { value: "x" } } },
+        }],
+      },
+    },
+  });
+  for (
+    const limits of [
+      { maxPayloadBytes: 1 },
+      { maxDepth: 1 },
+      { maxNodes: 1 },
+      { maxCandidates: 0 },
+    ]
+  ) {
+    const accounting = accountMemoryWirePayload(payload, "run", "connection", {
+      maxPayloadBytes: 1_000_000,
+      maxDepth: 64,
+      maxNodes: 100_000,
+      maxCandidates: 10_000,
+      ...limits,
+    });
+    assertEquals(
+      accounting.semanticBytes.encoding,
+      memoryWireUtf8Bytes(payload),
+    );
+    assertEquals(accounting.candidates, []);
+  }
+
+  const accumulator = new MemoryWireAccountingAccumulator({ maxRecords: 1 });
+  accumulator.start();
+  accumulator.observe({
+    direction: "inbound",
+    connectionId: "a",
+    classification: "client.hello",
+    baselineBytes: 1,
+    actualBytes: 1,
+    metadata: { nested: { value: 1 } },
+  });
+  const detached = accumulator.snapshot();
+  detached.records[0].metadata = { changed: true };
+  accumulator.observe({
+    direction: "inbound",
+    connectionId: "a",
+    classification: "client.hello",
+    baselineBytes: 1,
+    actualBytes: 1,
+  });
+  assertEquals(accumulator.isActive(), false);
+  assertExists(accumulator.snapshot().truncated);
+  assertEquals(
+    (accumulator.snapshot().records[0].metadata as {
+      nested: { value: number };
+    }).nested.value,
+    1,
+  );
+  const stopped = accumulator.stop();
+  assertExists(stopped.truncated);
+  assertEquals(accumulator.snapshot().records, []);
+});
+
+Deno.test("memory wire accounting ignores user keys that resemble candidate roots", () => {
+  const payload = encodeMemoryBoundary({
+    type: "response",
+    ok: {
+      sync: {
+        type: "sync",
+        upserts: [{
+          id: "entity",
+          doc: {
+            value: {
+              value: { nested: true },
+              patches: [{ op: "replace" }],
+              tables: [{ name: "user" }],
+              columns: ["user"],
+              codeCID: "user-owned",
+            },
+          },
+        }],
+      },
+    },
+  });
+  const accounting = accountMemoryWirePayload(payload, "adversarial");
+
+  assertEquals(accounting.candidates.length, 2);
+  assertEquals(
+    accounting.candidates.filter((candidate) =>
+      candidate.category === "documentValue"
+    ).length,
+    1,
+  );
+  assertEquals(
+    accounting.candidates.filter((candidate) =>
+      candidate.scope === "identityInternable"
+    ).length,
+    1,
+  );
+  assertEquals(
+    accounting.candidates.reduce(
+      (sum, candidate) => sum + candidate.encodedBytes,
+      0,
+    ) <= accounting.semanticBytes.documentValue,
+    true,
+  );
+});
+
+Deno.test("memory wire accounting candidates ignore nested protocol lookalikes", () => {
+  const payload = encodeMemoryBoundary({
+    type: "response",
+    ok: {
+      sync: {
+        type: "sync",
+        upserts: [{
+          id: "entity",
+          doc: {
+            value: {
+              doc: { value: { nested: true } },
+              commit: {
+                codeCID: "not-a-protocol-code-cid",
+                operations: [{
+                  value: { nested: true },
+                  patches: [{ op: "replace", path: [], value: true }],
+                }],
+              },
+              revisions: [{
+                patches: [{ op: "replace", path: [], value: true }],
+              }],
+              link: { "link@1": { schema: { fake: true } } },
+              $alias: { nested: { schema: { fake: true } } },
+              query: {
+                roots: [{ selector: { schema: { fake: true } } }],
+              },
+              sync: {
+                schemaTable: { fake: { type: "object" } },
+              },
+            },
+          },
+        }],
+      },
+    },
+  });
+  const accounting = accountMemoryWirePayload(payload, "lookalikes");
+
+  assertEquals(
+    accounting.candidates.filter((candidate) =>
+      candidate.category === "documentValue"
+    ).length,
+    1,
+  );
+  assertEquals(
+    accounting.candidates.some((candidate) =>
+      candidate.scope === "alreadyContentAddressed"
+    ),
+    false,
+  );
+  assertEquals(
+    accounting.candidates.some((candidate) => candidate.category === "schema"),
+    false,
+  );
+  assert(
+    accounting.candidates.reduce(
+      (sum, candidate) => sum + candidate.encodedBytes,
+      0,
+    ) <= memoryWireUtf8Bytes(payload),
+  );
+});
+
+Deno.test("memory wire accounting patch candidates use exact subtree bytes", () => {
+  const patches = [{
+    op: "replace",
+    path: "/choice",
+    value: { nested: true },
+  }];
+  const payload = encodeMemoryBoundary({
+    type: "transact",
+    requestId: "patch-size",
+    space: "did:key:z6Mk-patch-size",
+    sessionId: "session",
+    commit: { operations: [{ id: "entity", patches }] },
+  });
+  const accounting = accountMemoryWirePayload(payload, "patch-size");
+  const patchCandidate = accounting.candidates.find((candidate) =>
+    candidate.category === "patchOperation"
+  );
+
+  assertExists(patchCandidate);
+  assertEquals(
+    patchCandidate.encodedBytes,
+    memoryWireUtf8Bytes(JSON.stringify(patches)),
+  );
+  assert(
+    accounting.candidates.reduce(
+      (sum, candidate) => sum + candidate.encodedBytes,
+      0,
+    ) <= memoryWireUtf8Bytes(payload),
+  );
+});
+
+Deno.test("memory wire accounting keeps handshake flags and challenges in control categories", () => {
+  const payload = encodeMemoryBoundary({
+    type: "hello.ok",
+    protocol: "memory",
+    flags: {
+      commitPreconditions: true,
+      sqliteCommitRowLabelEval: true,
+    },
+    sessionOpen: {
+      audience: "did:key:z6Mk-server",
+      challenge: { value: "nonce", expiresAt: 123 },
+    },
+  });
+  const accounting = accountMemoryWirePayload(payload, "handshake-run");
+
+  assert(accounting.semanticBytes.sessionControl > 0);
+  assert(accounting.semanticBytes.authCapability > 0);
+  assertEquals(accounting.semanticBytes.patchOperation, 0);
+  assertEquals(accounting.semanticBytes.sqliteScheduler, 0);
+});
+
 Deno.test("memory wire accounting reports negotiated server sync schema savings", async () => {
   const accounting = new MemoryWireAccountingAccumulator();
   accounting.start();
@@ -259,6 +662,20 @@ Deno.test("memory wire accounting reports negotiated server sync schema savings"
     );
     assertExists(watched);
     assert(watched.actualBytes < watched.baselineBytes);
+    assertEquals(
+      Object.values(watched.actualSemanticBytes ?? {}).reduce(
+        (sum, bytes) => sum + bytes,
+        0,
+      ),
+      watched.actualBytes,
+    );
+    assertEquals(
+      Object.values(watched.baselineSemanticBytes ?? {}).reduce(
+        (sum, bytes) => sum + bytes,
+        0,
+      ),
+      watched.baselineBytes,
+    );
   } finally {
     await server.close();
   }
@@ -383,7 +800,7 @@ Deno.test("memory wire accounting accumulator supports reset start stop snapshot
   assertEquals(accounting.stop().totals.frames, 1);
 
   accounting.observe(record);
-  assertEquals(accounting.snapshot().totals.frames, 1);
+  assertEquals(accounting.snapshot().totals.frames, 0);
 });
 
 Deno.test("memory wire accounting accumulator starts request bookkeeping only when active", async () => {
@@ -450,7 +867,7 @@ Deno.test("memory wire accounting accumulator stops connection records immediate
     }));
     assertResponse<unknown>(shiftMessage(messages));
 
-    assertEquals(accounting.snapshot().totals.frames, 2);
+    assertEquals(accounting.snapshot().totals.frames, 0);
   } finally {
     await server.close();
   }
@@ -545,6 +962,35 @@ Deno.test("memory wire accounting observer exceptions are non-fatal", async () =
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
     assertEquals(shiftMessage(messages).type, "hello.ok");
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory wire accounting payload callback exceptions are non-fatal", async () => {
+  const records: MemoryWireAccountingRecord[] = [];
+  const observer: MemoryWireAccountingObserver = {
+    accountPayload() {
+      throw new Error("payload accounting failed");
+    },
+    observe(record) {
+      records.push(record);
+    },
+  };
+  const server = createServer(
+    "memory://wire-accounting-payload-error",
+    observer,
+  );
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    assertEquals(shiftMessage(messages).type, "hello.ok");
+    assertEquals(records.length, 2);
+    assertEquals(
+      records.every((record) => record.actualSemanticBytes === undefined),
+      true,
+    );
   } finally {
     await server.close();
   }

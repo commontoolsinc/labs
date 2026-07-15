@@ -4,7 +4,9 @@ import {
   type HelloMessage,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
+  type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
+  type RequestSchemaCasMetadata,
   type ServerMessage,
   wireMemoryProtocolFlags,
 } from "../v2.ts";
@@ -20,8 +22,16 @@ const toError = (name: string, message: string): TypedError => ({
   message,
 });
 
-export const respondToHello = (message: HelloMessage): ServerMessage => {
-  const expectedFlags = getMemoryProtocolFlags();
+export interface ServerHelloOptions {
+  flags?: MemoryProtocolFlags;
+  requestSchemaCas?: RequestSchemaCasMetadata;
+}
+
+export const respondToHello = (
+  message: HelloMessage,
+  options: ServerHelloOptions = {},
+): ServerMessage => {
+  const expectedFlags = options.flags ?? getMemoryProtocolFlags();
   if (message.protocol !== MEMORY_PROTOCOL) {
     return {
       type: "response",
@@ -53,6 +63,10 @@ export const respondToHello = (message: HelloMessage): ServerMessage => {
     type: "hello.ok",
     protocol: MEMORY_PROTOCOL,
     flags: wireMemoryProtocolFlags(expectedFlags),
+    ...(expectedFlags.requestSchemaCasV1 === true &&
+        options.requestSchemaCas !== undefined
+      ? { requestSchemaCas: options.requestSchemaCas }
+      : {}),
   };
   return response;
 };

@@ -227,7 +227,14 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
     ).schema,
     undefined,
   );
-  assertEquals(expandSessionSyncSchemas(compressed), sync);
+  const expandedSchemas: JSONSchema[] = [];
+  assertEquals(
+    expandSessionSyncSchemas(compressed, (expanded) => {
+      expandedSchemas.push(expanded);
+    }),
+    sync,
+  );
+  assertEquals(expandedSchemas, [internSchema(schema, true).schema]);
 });
 
 Deno.test("sync schema table continues through sibling fields after link payloads", () => {

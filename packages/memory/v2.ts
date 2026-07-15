@@ -7,7 +7,11 @@ import {
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import type {
+  FabricValue,
+  JSONSchema,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -250,6 +254,8 @@ export interface MemoryProtocolFlags {
   syncSchemaTable: boolean;
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
+  /** Hash-keyed durable request schema CAS for request-side schema elision. */
+  requestSchemaCasV1?: boolean;
   /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
    * rule-bearing tables are re-derived through the shared row-label evaluator
@@ -272,6 +278,7 @@ export type WireMemoryProtocolFlags = {
   commitPreconditions?: boolean;
   syncSchemaTable?: boolean;
   syncSchemaTableV2?: boolean;
+  requestSchemaCasV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
 };
 
@@ -285,7 +292,16 @@ export interface HelloOkMessage {
   type: "hello.ok";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
+  /** Present only when the negotiated request schema CAS store is durable. */
+  requestSchemaCas?: RequestSchemaCasMetadata;
   sessionOpen?: SessionOpenAuthMetadata;
+}
+
+/** Identifies the durable store backing negotiated request-schema CAS. */
+export interface RequestSchemaCasMetadata {
+  generation: string;
+  /** The service identity that owns this store, when the host has one. */
+  audience?: string;
 }
 
 export interface SessionOpenChallenge {
@@ -406,6 +422,7 @@ export interface TransactRequest {
   space: string;
   sessionId: SessionId;
   commit: ClientCommit;
+  schemaDefinitions?: Record<string, JSONSchema>;
 }
 
 export interface GraphQueryRequest {
@@ -414,6 +431,7 @@ export interface GraphQueryRequest {
   space: string;
   sessionId: SessionId;
   query: GraphQuery;
+  schemaDefinitions?: Record<string, JSONSchema>;
 }
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
@@ -534,6 +552,7 @@ export interface WatchSetRequest {
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
+  schemaDefinitions?: Record<string, JSONSchema>;
 }
 
 export interface WatchAddRequest {
@@ -542,6 +561,7 @@ export interface WatchAddRequest {
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
+  schemaDefinitions?: Record<string, JSONSchema>;
 }
 
 export interface SessionAckRequest {
@@ -678,6 +698,7 @@ const memoryReconstructionContext = new EmptyReconstructionContext(
 let persistentSchedulerStateEnabled = false;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let requestSchemaCasEnabled = true;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -730,6 +751,22 @@ export function resetSyncSchemaTableConfig(): void {
   syncSchemaTableEnabled = true;
 }
 
+/**
+ * Build capability for request-side schema CAS. A server additionally requires
+ * an injected durable SchemaStore before advertising the capability.
+ */
+export function setRequestSchemaCasConfig(enabled?: boolean): void {
+  requestSchemaCasEnabled = enabled ?? true;
+}
+
+export function getRequestSchemaCasConfig(): boolean {
+  return requestSchemaCasEnabled;
+}
+
+export function resetRequestSchemaCasConfig(): void {
+  requestSchemaCasEnabled = true;
+}
+
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   persistentSchedulerState: getPersistentSchedulerStateConfig(),
@@ -741,6 +778,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // write gate failing closed.
   sqliteCommitRowLabelEval: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
+  requestSchemaCasV1: getRequestSchemaCasConfig(),
 });
 
 /**
@@ -804,6 +842,13 @@ export const parseMemoryProtocolFlags = (
   ) {
     return null;
   }
+  const requestSchemaCasV1 = value.requestSchemaCasV1;
+  if (
+    requestSchemaCasV1 !== undefined &&
+    typeof requestSchemaCasV1 !== "boolean"
+  ) {
+    return null;
+  }
 
   const sqliteCommitRowLabelEval = value.sqliteCommitRowLabelEval;
   if (
@@ -819,6 +864,7 @@ export const parseMemoryProtocolFlags = (
     commitPreconditions: commitPreconditions === true,
     syncSchemaTable: syncSchemaTable === true,
     syncSchemaTableV2: syncSchemaTableV2 === true,
+    requestSchemaCasV1: requestSchemaCasV1 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
@@ -836,6 +882,7 @@ export const wireMemoryProtocolFlags = (
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTable: flags.syncSchemaTable,
   syncSchemaTableV2: flags.syncSchemaTableV2,
+  requestSchemaCasV1: flags.requestSchemaCasV1,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
 });
 
