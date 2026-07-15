@@ -545,6 +545,13 @@ type BoundExecutionSession = {
   readonly lease: ExecutionLeaseHandle;
 };
 
+/** Expected host-authority loss while a lane is changing demand or sponsor.
+ * Strict host APIs still reject it; the executor's race-tolerant claim path
+ * converts only this class to a non-fatal `null`. */
+class ExecutionLeaseAuthorityError extends Error {
+  override name = "ExecutionLeaseAuthorityError";
+}
+
 const isPositiveSafeInteger = (value: number): boolean =>
   Number.isSafeInteger(value) && value > 0;
 
@@ -3270,6 +3277,22 @@ export class Server {
     return await this.#setExecutionClaim(lease, claimInput);
   }
 
+  /** Attempt claim admission from a live executor. Demand and lease lifecycle
+   * can change while engine setup awaits; that expected authority race is a
+   * declined claim, while malformed candidates and duplicate claims remain
+   * hard failures. */
+  async trySetExecutionClaim(
+    lease: ExecutionLeaseHandle,
+    claimInput: ExecutionClaimInput,
+  ): Promise<ExecutionClaim | null> {
+    try {
+      return await this.#setExecutionClaim(lease, claimInput);
+    } catch (error) {
+      if (error instanceof ExecutionLeaseAuthorityError) return null;
+      throw error;
+    }
+  }
+
   async #setExecutionClaim(
     lease: ExecutionLeaseHandle,
     claimInput: ExecutionClaimInput,
@@ -3285,7 +3308,9 @@ export class Server {
       authority.drainRequested || lease.space !== claimInput.space ||
       lease.branch !== claimInput.branch
     ) {
-      throw new Error("execution claim requires the current owned lease");
+      throw new ExecutionLeaseAuthorityError(
+        "execution claim requires the current owned lease",
+      );
     }
     const key = actionClaimMapKey(claimInput);
     const engine = await this.openEngine(claimInput.space);
@@ -3301,7 +3326,9 @@ export class Server {
         ) !== authority ||
       authority.drainRequested
     ) {
-      throw new Error("execution claim requires the current owned lease");
+      throw new ExecutionLeaseAuthorityError(
+        "execution claim requires the current owned lease",
+      );
     }
     const current = Engine.currentExecutionLease(engine, {
       space: claimInput.space,
@@ -3325,7 +3352,9 @@ export class Server {
       demand === undefined || demand.principal !== current.onBehalfOf ||
       !this.#executionSponsorCanWrite(engine, demand, sponsor)
     ) {
-      throw new Error("execution lease is not active and authorized");
+      throw new ExecutionLeaseAuthorityError(
+        "execution lease is not active and authorized",
+      );
     }
     this.expireExecutionClaims(claimNow);
     // Expiry publication can synchronously notify lifecycle listeners. Fence a
@@ -3338,7 +3367,9 @@ export class Server {
         ) !== authority ||
       authority.drainRequested
     ) {
-      throw new Error("execution claim requires the current owned lease");
+      throw new ExecutionLeaseAuthorityError(
+        "execution claim requires the current owned lease",
+      );
     }
     const existing = this.#executionClaims.get(key);
     if (existing !== undefined) {

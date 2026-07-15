@@ -624,10 +624,17 @@ class DenoSpaceExecutor implements SpaceExecutor {
       this.#failed
     ) return;
 
-    const claim = await this.#server.setExecutionClaim(
+    const claim = await this.#server.trySetExecutionClaim(
       this.#startOptions.lease,
       key,
     );
+    if (claim === null) {
+      this.#onCandidateDiagnostic?.({
+        claimKey: key,
+        diagnosticCode: "claim-authority-lost",
+      });
+      return;
+    }
     if (this.#stopped || this.#failed) {
       this.#revokeClaim(claim);
       return;
@@ -750,7 +757,14 @@ class DenoSpaceExecutor implements SpaceExecutor {
       if (
         !this.#claimIsCurrent(expected) || this.#stopped || this.#failed
       ) return;
-      throw new Error("executor claim renewal lost authority");
+      this.#revokeClaim(live);
+      this.#claims.delete(key);
+      this.#cancelClaimRenewal(key);
+      this.#onCandidateDiagnostic?.({
+        claim: live,
+        diagnosticCode: "claim-authority-lost",
+      });
+      return;
     }
     const current = this.#claims.get(key);
     if (

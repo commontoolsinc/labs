@@ -942,6 +942,35 @@ Deno.test("live executors renew an exact claim without changing its incarnation"
   }
 });
 
+Deno.test("executor claim admission declines a transient demand gap without weakening the strict API", async () => {
+  const server = createControlServer(
+    "memory-v2-execution-claim-demand-gap",
+  );
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  try {
+    const lease = await demandAndAcquireLease(server, session);
+    await session.setExecutionDemand("", []);
+
+    assertEquals(
+      await server.trySetExecutionClaim(
+        lease,
+        claimKey(CONTROL_SPACE, ""),
+      ),
+      null,
+    );
+    await assertRejects(
+      () => server.setExecutionClaim(lease, claimKey(CONTROL_SPACE, "")),
+      Error,
+      "execution lease is not active and authorized",
+    );
+    assertEquals(server.listExecutionClaims(CONTROL_SPACE), []);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("claim issuance rejects a lease deadline crossed while opening the engine", async () => {
   let nowMs = 1_000;
   const server = createControlServer(

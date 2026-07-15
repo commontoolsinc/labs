@@ -272,12 +272,25 @@ class ClaimRecordingServer {
   }[] = [];
   readonly revoked: ExecutionClaim[] = [];
   readonly renewRequests: ExecutionClaim[] = [];
+  claimResult: ExecutionClaim | null = CLAIM;
   setExecutionClaim(
     lease: ExecutionLeaseHandle,
     claimKey: ActionClaimKey,
   ): Promise<ExecutionClaim> {
     this.claimRequests.push({ lease, claimKey });
-    return Promise.resolve(CLAIM);
+    return this.claimResult === null
+      ? Promise.reject(
+        new Error("execution lease is not active and authorized"),
+      )
+      : Promise.resolve(this.claimResult);
+  }
+
+  trySetExecutionClaim(
+    lease: ExecutionLeaseHandle,
+    claimKey: ActionClaimKey,
+  ): Promise<ExecutionClaim | null> {
+    this.claimRequests.push({ lease, claimKey });
+    return Promise.resolve(this.claimResult);
   }
 
   revokeExecutionClaim(claim: ExecutionClaim): boolean {
@@ -715,6 +728,87 @@ Deno.test("claim renewal tolerates an exact release while storage is open", asyn
     assertEquals(worker.terminated, false);
   } finally {
     finishRenewal.resolve(null);
+    await executor.stop();
+  }
+});
+
+Deno.test("claim renewal authority loss releases the route without crashing the Worker", async () => {
+  let nextTimer = 0;
+  const timers = new Map<
+    number,
+    { callback: () => void; delayMs: number }
+  >();
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    claimTimers: {
+      now: () => 0,
+      setTimer(callback, delayMs) {
+        const timer = ++nextTimer;
+        timers.set(timer, { callback, delayMs });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        timers.delete(timer);
+      },
+    },
+  });
+  server.renewExecutionClaim = (
+    _lease: ExecutionLeaseHandle,
+    claim: ExecutionClaim,
+  ) => {
+    server.renewRequests.push(claim);
+    return Promise.resolve(null);
+  };
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+
+    const renewal = [...timers.entries()].find(([, timer]) =>
+      timer.delayMs === 40_000
+    );
+    if (renewal === undefined) throw new Error("renewal timer missing");
+    timers.delete(renewal[0]);
+    renewal[1].callback();
+    await flushClaimControl();
+
+    assertEquals(server.renewRequests, [CLAIM]);
+    assertEquals(server.revoked, [CLAIM]);
+    assertEquals(diagnostics, [{
+      claim: CLAIM,
+      diagnosticCode: "claim-authority-lost",
+    }]);
+    assertEquals(crashes, []);
+    assertEquals(worker.terminated, false);
+    assertEquals(timers.size, 0);
+  } finally {
+    await executor.stop();
+  }
+});
+
+Deno.test("candidate claim authority loss is ignored during a demand transition", async () => {
+  const diagnostics: CandidateDiagnostic[] = [];
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    onCandidateDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+  server.claimResult = null;
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+
+    assertEquals(server.claimRequests, [{
+      lease: LEASE,
+      claimKey: CLAIM_KEY,
+    }]);
+    assertEquals(diagnostics, [{
+      claimKey: CLAIM_KEY,
+      diagnosticCode: "claim-authority-lost",
+    }]);
+    assertEquals(crashes, []);
+    assertEquals(worker.terminated, false);
+  } finally {
     await executor.stop();
   }
 });
