@@ -4,7 +4,10 @@ import {
   entityRefFrom,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
+import type { Result, Unit, URI } from "@commonfabric/memory/interface";
+import type { EntityDocument } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 
 // Select the cell-rep regime from the env flag, mirroring how the product reads
 // EXPERIMENTAL_MODERN_CELL_REP: unset means "accept the default" (a no-op, since
@@ -27,10 +30,11 @@ const SOURCE_LINK = entityRefFrom(
   hashOf({ causal: { bench: "subscription-refresh", source: true } }),
 );
 
-type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
-  open(space: string): infer T;
-} ? T
-  : never;
+type TestProvider = IStorageProviderWithReplica & {
+  send(
+    batch: { uri: URI; value: EntityDocument | undefined }[],
+  ): Promise<Result<Unit, Error>>;
+};
 
 const buildPayload = (version: number) => ({
   meta: {
@@ -57,16 +61,16 @@ const setup = async (sourceBacked: boolean) => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
-  const uri = `of:subscription-refresh-${crypto.randomUUID()}` as const;
+  const provider = storageManager.open(space) as TestProvider;
+  const uri: URI = `of:subscription-refresh-${crypto.randomUUID()}`;
 
-  await (provider as any).send([{
+  await provider.send([{
     uri,
     value: buildStoredValue(0, sourceBacked),
   }]);
 
   for (let index = 0; index < SUBSCRIPTION_COUNT; index++) {
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, {
       path: ["items", String(index), "count"],
       schema: false,
     });
@@ -90,11 +94,11 @@ const cleanup = async (
 const runUpdateLoop = async (
   provider: TestProvider,
   storageManager: ReturnType<typeof StorageManager.emulate>,
-  uri: string,
+  uri: URI,
   sourceBacked: boolean,
 ) => {
   for (let version = 1; version <= UPDATE_COUNT; version++) {
-    await (provider as any).send([{
+    await provider.send([{
       uri,
       value: buildStoredValue(version, sourceBacked),
     }]);
