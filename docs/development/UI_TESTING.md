@@ -264,11 +264,13 @@ Pattern integration tests can reach for the higher-level wrappers in
 `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
 `fillCfInput`, `clickCfButton`, `clickCfButtonAndWaitForText` — which bundle
 "settle the view, act once, wait for the effect" on top of these primitives.
-The button helpers select the first **visible, enabled** matching control after
-settling, rather than blindly using the first DOM match. Worker replacement can
-briefly leave a hidden or disabled node from a retired render alongside the
-current control; disabled-state waits and the single click must both observe
-the live interactive match.
+The click helpers select a **visible, enabled** matching control after settling,
+rather than blindly using the first DOM match. Disabled-state waits likewise
+search the visible matches for the requested state instead of letting the first
+stale duplicate decide the result. Worker replacement can briefly leave a
+hidden, disabled, or otherwise stale node from a retired render alongside the
+current control; the state wait and the single click must both observe a live
+matching control.
 
 ### Do not reach for these instead
 

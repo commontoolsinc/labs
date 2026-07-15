@@ -79,3 +79,28 @@ Deno.test("buttonDisabledIs skips a hidden stale match", () => {
     globalThis.HTMLButtonElement = previousButtonClass;
   }
 });
+
+Deno.test("buttonDisabledIs skips a visible match with stale state", () => {
+  const previousButtonClass = globalThis.HTMLButtonElement;
+  class FakeButton {
+    constructor(readonly disabled: boolean) {}
+  }
+  (globalThis as unknown as { HTMLButtonElement: typeof FakeButton })
+    .HTMLButtonElement = FakeButton;
+
+  try {
+    const staleButton = new FakeButton(false);
+    const currentButton = new FakeButton(true);
+    const probe = {
+      collect: () => [
+        { shadowRoot: { querySelector: () => staleButton } },
+        { shadowRoot: { querySelector: () => currentButton } },
+      ],
+      isVisible: () => true,
+    } as unknown as ProbeApi;
+
+    assertEquals(buttonDisabledIs(probe, "cf-button", true), true);
+  } finally {
+    globalThis.HTMLButtonElement = previousButtonClass;
+  }
+});
