@@ -682,28 +682,34 @@ export class SharedExecutionPool {
       actionTransactions: { shadow: 0, authoritative: 0 },
     };
     try {
-      const executor = await this.#factory.start({
-        space: slot.space,
-        branch: slot.branch,
-        lease: acquired,
-        pieces: nextPieces,
-        signal: startupAbort.signal,
-        onExecutionMetrics: (snapshot) => {
-          startupExecutionMetrics = snapshot;
-        },
-        onCrash: (error) => {
-          if (
-            slot.generationToken !== token || slot.crashToken === token
-          ) return;
-          this.#metrics.crashes++;
-          slot.crashToken = token;
-          console.warn(
-            `executor Worker crashed for ${slot.space}/${slot.branch}`,
-            error,
-          );
-          void this.#enqueue(slot, () => this.#reconcile(slot));
-        },
-      });
+      const executor = await this.#startWhileRenewing(
+        slot,
+        token,
+        startupAbort,
+        () =>
+          this.#factory.start({
+            space: slot.space,
+            branch: slot.branch,
+            lease: acquired,
+            pieces: nextPieces,
+            signal: startupAbort.signal,
+            onExecutionMetrics: (snapshot) => {
+              startupExecutionMetrics = snapshot;
+            },
+            onCrash: (error) => {
+              if (
+                slot.generationToken !== token || slot.crashToken === token
+              ) return;
+              this.#metrics.crashes++;
+              slot.crashToken = token;
+              console.warn(
+                `executor Worker crashed for ${slot.space}/${slot.branch}`,
+                error,
+              );
+              void this.#enqueue(slot, () => this.#reconcile(slot));
+            },
+          }),
+      );
       factoryReturned = true;
       if (slot.startupAbort === startupAbort) slot.startupAbort = null;
       if (
@@ -755,6 +761,83 @@ export class SharedExecutionPool {
       }
       logger.time(workerStartedAt, "worker-start");
       logger.time(workerStartedAt, `worker-start-${startOutcome}`);
+    }
+  }
+
+  /** Keep the lane's durable authority alive while factory startup occupies
+   * the serialized reconciliation lane. Large pieces can legitimately take
+   * longer than one lease TTL to discover and activate their computations;
+   * the normal live-worker renewal task cannot be enqueued until start()
+   * returns. */
+  async #startWhileRenewing(
+    slot: Slot,
+    token: object,
+    startupAbort: AbortController,
+    start: () => Promise<SpaceExecutor>,
+  ): Promise<SpaceExecutor> {
+    let running = true;
+    let renewalTimer: number | null = null;
+    let renewalTask: Promise<void> | null = null;
+    let renewalFailed = false;
+
+    const failRenewal = (error?: unknown): void => {
+      if (
+        renewalFailed || !running || slot.generationToken !== token ||
+        this.#closed
+      ) return;
+      renewalFailed = true;
+      this.#metrics.leaseLosses++;
+      if (error !== undefined) {
+        console.warn("execution lease renewal failed during startup", error);
+      }
+      startupAbort.abort(
+        new Error("execution lease renewal lost during Worker startup", {
+          ...(error !== undefined ? { cause: error } : {}),
+        }),
+      );
+    };
+
+    const scheduleRenewal = (): void => {
+      if (
+        !running || renewalFailed || this.#closed ||
+        slot.generationToken !== token || slot.lease === null ||
+        slot.lease.state !== "active"
+      ) return;
+      const remaining = Math.max(1, slot.lease.expiresAt - this.#now());
+      renewalTimer = this.#setTimer(() => {
+        renewalTimer = null;
+        const current = slot.lease;
+        if (
+          !running || renewalFailed || this.#closed ||
+          slot.generationToken !== token || current === null ||
+          current.state !== "active"
+        ) return;
+        renewalTask = this.#control.renewExecutionLease(current).then(
+          (renewed) => {
+            if (renewed === null) {
+              failRenewal();
+              return;
+            }
+            if (slot.generationToken === token && slot.lease !== null) {
+              slot.lease = renewed;
+            }
+            scheduleRenewal();
+          },
+          (error) => failRenewal(error),
+        ).finally(() => {
+          renewalTask = null;
+        });
+      }, Math.max(1, Math.floor(remaining / 2)));
+    };
+
+    scheduleRenewal();
+    try {
+      return await start();
+    } finally {
+      running = false;
+      if (renewalTimer !== null) this.#clearTimer(renewalTimer);
+      const inFlightRenewal = renewalTask;
+      if (inFlightRenewal !== null) await inFlightRenewal;
     }
   }
 

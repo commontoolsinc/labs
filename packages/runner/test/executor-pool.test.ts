@@ -909,6 +909,54 @@ Deno.test("shared execution pool treats a rejected scheduled renewal as lease lo
   }
 });
 
+Deno.test("shared execution pool renews authority while a Worker is still starting", async () => {
+  const control = new FakeExecutionControl();
+  const renewalStarted = Promise.withResolvers<void>();
+  const originalRenew = control.renewExecutionLease.bind(control);
+  control.renewExecutionLease = (current) => {
+    const renewal = originalRenew(current);
+    renewalStarted.resolve();
+    return renewal;
+  };
+  const timers = new ManualTimers();
+  const startEntered = Promise.withResolvers<void>();
+  const releaseStart = Promise.withResolvers<void>();
+  const executor = new FakeExecutor();
+  const factory: SpaceExecutorFactory = {
+    async start(): Promise<SpaceExecutor> {
+      startEntered.resolve();
+      await releaseStart.promise;
+      return executor;
+    },
+  };
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  pool.start();
+
+  try {
+    const addingDemand = control.emit(1, [demand(1, ["piece:a"])]);
+    await startEntered.promise;
+
+    timers.fire((delayMs) => delayMs > 2_000);
+    await renewalStarted.promise;
+    assertEquals(control.renewals, 1);
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "starting");
+
+    releaseStart.resolve();
+    await addingDemand;
+    await pool.idle();
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+    assertEquals(pool.metrics().leaseLosses, 0);
+  } finally {
+    releaseStart.resolve();
+    await pool.close();
+  }
+});
+
 Deno.test("shared execution pool settles before fencing a graceful drain", async () => {
   const events: string[] = [];
   const control = new FakeExecutionControl(events);
