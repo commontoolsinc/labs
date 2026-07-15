@@ -636,6 +636,171 @@ Deno.test("memory v2 client keeps schemas inline when its advertised CAS capabil
   }
 });
 
+Deno.test("memory v2 client ignores malformed CAS negotiation metadata", async () => {
+  const sent: Record<string, unknown>[] = [];
+  let receiver = (_payload: string) => {};
+  const transport: Transport = {
+    send(payload) {
+      const message = decodeMemoryBoundary(payload) as Record<string, unknown>;
+      sent.push(message);
+      if (message.type === "hello") {
+        receiver(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+          requestSchemaCas: { generation: 1, audience: false },
+          sessionOpen: {
+            audience: "audience",
+            challenge: { value: "challenge", expiresAt: 1_000_000 },
+          },
+        }));
+      } else if (message.type === "graph.query") {
+        receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: message.requestId,
+          ok: { serverSeq: 0, entities: [] },
+        }));
+      }
+      return Promise.resolve();
+    },
+    close: () => Promise.resolve(),
+    setReceiver(next) {
+      receiver = next;
+    },
+  };
+  const client = await connect({ transport });
+  try {
+    await client.request({
+      type: "graph.query",
+      requestId: "malformed-negotiation",
+      space,
+      sessionId: "session",
+      query: {
+        roots: [{
+          id: "of:root",
+          selector: { path: [], schema: schema("malformed negotiation ") },
+        }],
+      },
+    });
+    const request = sent.find((message) =>
+      message.requestId === "malformed-negotiation"
+    )!;
+    assertEquals(Object.hasOwn(request, "schemaDefinitions"), false);
+    assertEquals(
+      (request.query as { roots: Array<{ selector: { schema: JSONSchema } }> })
+        .roots[0].selector.schema,
+      schema("malformed negotiation "),
+    );
+  } finally {
+    await client.close();
+  }
+});
+
+Deno.test("memory v2 client degrades malformed CAS request shapes to ordinary sends", async () => {
+  const sent: Record<string, unknown>[] = [];
+  let receiver = (_payload: string) => {};
+  const transport: Transport = {
+    send(payload) {
+      const message = decodeMemoryBoundary(payload) as Record<string, unknown>;
+      sent.push(message);
+      if (message.type === "hello") {
+        receiver(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+          requestSchemaCas: { generation: "generation" },
+          sessionOpen: {
+            audience: "audience",
+            challenge: { value: "challenge", expiresAt: 1_000_000 },
+          },
+        }));
+      } else if (message.type === "graph.query") {
+        receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: message.requestId,
+          ok: { serverSeq: 0, entities: [] },
+        }));
+      }
+      return Promise.resolve();
+    },
+    close: () => Promise.resolve(),
+    setReceiver(next) {
+      receiver = next;
+    },
+  };
+  const client = await connect({ transport });
+  try {
+    const malformed = {
+      type: "graph.query",
+      requestId: "malformed-request",
+      space,
+      sessionId: "session",
+      query: {
+        roots: [{
+          id: "of:root",
+          selector: { path: [], schema: "schema-cas@1:known" },
+        }, "not-a-query-root"],
+      },
+    };
+    await client.request(malformed);
+    assertEquals(
+      sent.find((message) => message.requestId === "malformed-request"),
+      malformed,
+    );
+  } finally {
+    await client.close();
+  }
+});
+
+Deno.test("memory v2 client removes a pending request when transport send fails", async () => {
+  let receiver = (_payload: string) => {};
+  let failRequest = true;
+  const transport: Transport = {
+    send(payload) {
+      const message = decodeMemoryBoundary(payload) as Record<string, unknown>;
+      if (message.type === "hello") {
+        receiver(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+          sessionOpen: {
+            audience: "audience",
+            challenge: { value: "challenge", expiresAt: 1_000_000 },
+          },
+        }));
+      } else if (message.type === "graph.query" && failRequest) {
+        failRequest = false;
+        return Promise.reject(new Error("send failed"));
+      } else if (message.type === "graph.query") {
+        receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: message.requestId,
+          ok: { serverSeq: 0, entities: [] },
+        }));
+      }
+      return Promise.resolve();
+    },
+    close: () => Promise.resolve(),
+    setReceiver(next) {
+      receiver = next;
+    },
+  };
+  const client = await connect({ transport });
+  const request = {
+    type: "graph.query",
+    requestId: "reusable-after-send-failure",
+    space,
+    sessionId: "session",
+    query: { roots: [] },
+  };
+  try {
+    await assertRejects(() => client.request(request), Error, "send failed");
+    await client.request(request);
+  } finally {
+    await client.close();
+  }
+});
+
 Deno.test("memory v2 client retries MissingSchemas once with forced definitions", async () => {
   const requestSchema = schema("missing schema retry ");
   const sent: Record<string, unknown>[] = [];
