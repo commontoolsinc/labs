@@ -8,7 +8,7 @@ import ts from "typescript";
 import { validateSource } from "./utils.ts";
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
-import { collect, hasKeyPathRead, parseModule } from "./transformed-ast.ts";
+import { collect, parseModule } from "./transformed-ast.ts";
 
 function getErrors(diagnostics: readonly TransformationDiagnostic[]) {
   return diagnostics.filter((d) => d.severity === "error");
