@@ -48,6 +48,23 @@ describe("host embedding contract: profile pinning is owner-gated", () => {
     expect(home).toContain('mode: "addPiece"');
   });
 
+  it("recognizes every one of the viewer's profiles as owner-editable", () => {
+    // `#profile.result` is just the viewer's selected default profile. The
+    // candidate list contains every profile linked from their home, so an
+    // owner visiting a non-default profile must compare SELF against it.
+    expect(home).toContain("viewerProfile.candidates?.some");
+    expect(home).toContain("equals(self, profile) === true");
+  });
+
+  it("hides the current-links section until a link exists", () => {
+    // The empty form should invite an owner to add a link without presenting a
+    // misleading empty "Current links" heading. The section itself, not just
+    // its rows, is gated by the reactive list predicate.
+    expect(home).toContain(
+      'hasExternalLinks,\n                    <cf-vstack\n                      gap="1"\n                      data-ui-region="profile-external-links"',
+    );
+  });
+
   it("the create surface (profile-create.tsx) DOES carry a uiContract", () => {
     // Creating a profile is correctly gesture-gated — the opposite seam.
     expect(create).toContain("export type TrustedProfileLink");

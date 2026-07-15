@@ -81,8 +81,29 @@ export default pattern(() => {
     profile.setName.send({ name: "Grace Hopper" });
   });
 
+  const action_add_external_profile_link = action(() => {
+    profile.addExternalLink.send({
+      label: "GitHub",
+      url: "https://github.com/gracehopper",
+    });
+  });
+
+  const action_add_unsafe_external_profile_link = action(() => {
+    profile.addExternalLink.send({
+      label: "Unsafe",
+      url: "javascript:alert(1)",
+    });
+  });
+
+  const action_remove_external_profile_link = action(() => {
+    profile.removeExternalLink.send({
+      url: "https://github.com/gracehopper",
+    });
+  });
+
   const assert_initial_state = computed(() =>
     profile.initialNameApplied === "Ada Lovelace" &&
+    profile.externalLinks.length === 0 &&
     profile.elements.length === 0
   );
 
@@ -94,6 +115,20 @@ export default pattern(() => {
   // whitespace-only send.
   const assert_name_unchanged_after_empty = computed(() =>
     profile.initialNameApplied === "Grace Hopper"
+  );
+
+  const assert_external_profile_link_added = computed(() =>
+    profile.externalLinks.length === 1 &&
+    profile.externalLinks[0]?.label === "GitHub" &&
+    profile.externalLinks[0]?.url === "https://github.com/gracehopper"
+  );
+
+  const assert_unsafe_external_profile_link_rejected = computed(() =>
+    profile.externalLinks.length === 1
+  );
+
+  const assert_external_profile_link_removed = computed(() =>
+    profile.externalLinks.length === 0
   );
 
   const assert_added_element = computed(() => {
@@ -119,6 +154,14 @@ export default pattern(() => {
       { assertion: assert_name_unchanged_after_empty },
       { action: action_whitespace_name },
       { assertion: assert_name_unchanged_after_empty },
+      // External profile links are owner-authored public https links. Unsafe
+      // schemes are rejected at write time, then the owner can remove a link.
+      { action: action_add_external_profile_link },
+      { assertion: assert_external_profile_link_added },
+      { action: action_add_unsafe_external_profile_link },
+      { assertion: assert_unsafe_external_profile_link_rejected },
+      { action: action_remove_external_profile_link },
+      { assertion: assert_external_profile_link_removed },
       // CT-1748: the avatar the badge binds resolves.
       { action: action_set_avatar },
       { assertion: assert_avatar_set },
