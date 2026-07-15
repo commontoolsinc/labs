@@ -11,6 +11,7 @@ import type {
 
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 import {
+  addRequiredSchemaPaths,
   cloneSchemaMutable,
   emptySchemaObject,
   factorySchemasEqual,
@@ -25,6 +26,90 @@ import {
 import { internSchema, isInternedSchema } from "@/schema-hash.ts";
 
 describe("schema-utils", () => {
+  describe("addRequiredSchemaPaths()", () => {
+    it("adds nested required fields without weakening existing leaves", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          command: { type: "string" },
+          identity: {
+            type: "object",
+            properties: { tenant: { type: "string", minLength: 1 } },
+          },
+        },
+        required: ["command"],
+      };
+
+      expect(addRequiredSchemaPaths(schema, [
+        ["identity", "tenant"],
+        ["identity", "sandboxId"],
+      ])).toEqual({
+        type: "object",
+        properties: {
+          command: { type: "string" },
+          identity: {
+            type: "object",
+            properties: {
+              tenant: { type: "string", minLength: 1 },
+              sandboxId: true,
+            },
+            required: ["tenant", "sandboxId"],
+          },
+        },
+        required: ["command", "identity"],
+      });
+      expect(schema).toEqual({
+        type: "object",
+        properties: {
+          command: { type: "string" },
+          identity: {
+            type: "object",
+            properties: { tenant: { type: "string", minLength: 1 } },
+          },
+        },
+        required: ["command"],
+      });
+    });
+
+    it("preserves an impossible root schema", () => {
+      expect(addRequiredSchemaPaths(false, [["sandboxId"]])).toBe(false);
+    });
+
+    it("intersects an incompatible nested child instead of replacing it", () => {
+      expect(addRequiredSchemaPaths({
+        type: "object",
+        properties: { identity: { type: "string", minLength: 1 } },
+      }, [["identity", "sandboxId"]])).toEqual({
+        type: "object",
+        properties: {
+          identity: {
+            allOf: [
+              { type: "string", minLength: 1 },
+              {
+                type: "object",
+                properties: { sandboxId: true },
+                required: ["sandboxId"],
+              },
+            ],
+          },
+        },
+        required: ["identity"],
+      });
+    });
+
+    it("narrows a type union containing object without discarding constraints", () => {
+      expect(addRequiredSchemaPaths({
+        type: ["object", "null"],
+        description: "optional identity",
+      }, [["sandboxId"]])).toEqual({
+        type: "object",
+        description: "optional identity",
+        properties: { sandboxId: true },
+        required: ["sandboxId"],
+      });
+    });
+  });
+
   describe("toDeepFrozenSchema()", () => {
     for (const prim of [false, true, undefined]) {
       describe(`on primitive \`${prim}\``, () => {

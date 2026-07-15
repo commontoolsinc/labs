@@ -1,4 +1,7 @@
 import ts from "typescript";
+import type { JSONSchema } from "@commonfabric/api";
+import { addRequiredSchemaPaths } from "@commonfabric/data-model/schema-utils";
+import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import {
@@ -8,6 +11,10 @@ import {
   isPatternBuilderCall,
   updatePatternBuilderCallbackArgument,
 } from "../ast/mod.ts";
+import {
+  type FactoryContractHint,
+  factoryContractProvenanceFromTypeNode,
+} from "../ast/factory-contract-hints.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import {
   extractBindingNames,
@@ -19,12 +26,12 @@ import {
   findFrameworkProvidedPaths,
   type FrameworkProvidedPath,
 } from "../policy/framework-provided.ts";
+import { resolvePatternFactorySchemaContract } from "./schema-injection.ts";
 
 type FunctionExpression = ts.ArrowFunction | ts.FunctionExpression;
 type ResolvedFunction =
   | FunctionExpression
   | (ts.FunctionDeclaration & { readonly body: ts.Block });
-
 /** Structurally forward protected aliases before symbolic call lowering. */
 export class FrameworkProvidedForwardingTransformer
   extends HelpersOnlyTransformer {
@@ -47,14 +54,298 @@ export class FrameworkProvidedForwardingTransformer
         rewritten.callback,
         context.factory,
       );
-      return context.factory.updateCallExpression(
+      const updated = context.factory.updateCallExpression(
         visited,
         visited.expression,
         visited.typeArguments,
         [updatedArgument, ...visited.arguments.slice(1)],
       );
+      recordTransitiveFactoryContract(
+        visited,
+        updated,
+        rewritten.callback,
+        rewritten.paths,
+        context,
+      );
+      return updated;
     };
-    return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
+    const transformed = ts.visitNode(
+      context.sourceFile,
+      visit,
+    ) as ts.SourceFile;
+    annotateFactoryContractTypeNodes(transformed, context);
+    return transformed;
+  }
+}
+
+function recordTransitiveFactoryContract(
+  authored: ts.CallExpression,
+  generated: ts.CallExpression,
+  callback: FunctionExpression,
+  paths: readonly FrameworkProvidedPath[],
+  context: TransformationContext,
+): void {
+  const authoritative = buildTransitiveFactoryContract(
+    authored,
+    callback,
+    paths,
+    context,
+  );
+  if (!authoritative) return;
+  context.recordSchemaHint(authored, { factoryContracts: [authoritative] });
+  context.recordSchemaHint(generated, { factoryContracts: [authoritative] });
+
+  const owner = factoryContractOwnerSymbol(authored, context.checker);
+  if (owner) {
+    context.recordFactoryContractForSymbol(owner, authoritative);
+  }
+}
+
+function buildTransitiveFactoryContract(
+  authored: ts.CallExpression,
+  callback: FunctionExpression,
+  paths: readonly FrameworkProvidedPath[],
+  context: TransformationContext,
+): FactoryContractHint | undefined {
+  if (paths.length === 0) return undefined;
+  const contract = resolvePatternFactorySchemaContract(
+    authored,
+    callback,
+    context,
+  );
+  if (!contract) return undefined;
+
+  const inputType = contract.inputType ?? typeAtNode(
+    contract.inputTypeNode,
+    context,
+  );
+  if (!inputType && contract.inputSchema === undefined) return undefined;
+  const baseSchema = contract.inputSchema as JSONSchema | undefined ??
+    createSchemaTransformerV2().generateSchema(
+      inputType!,
+      context.checker,
+      contract.inputTypeNode,
+      undefined,
+      context.options.state?.schemaHints,
+      context.sourceFile,
+    );
+  return {
+    ...contract,
+    inputSchema: addRequiredSchemaPaths(baseSchema, paths),
+    frameworkProvidedPaths: paths,
+  };
+}
+
+function annotateFactoryContractTypeNodes(
+  sourceFile: ts.SourceFile,
+  context: TransformationContext,
+): void {
+  const visitedTypes = new Set<ts.Node>();
+  const annotateQueries = (node: ts.Node): void => {
+    const original = ts.getOriginalNode(node);
+    if (visitedTypes.has(node) || visitedTypes.has(original)) return;
+    visitedTypes.add(node);
+    visitedTypes.add(original);
+    if (ts.isTypeQueryNode(node)) {
+      const symbol = canonicalSymbol(
+        context.checker.getSymbolAtLocation(node.exprName),
+        context.checker,
+      );
+      const contracts = symbol && (
+        context.lookupFactoryContractsForSymbol(symbol) ??
+          discoverFactoryContractsForSymbol(symbol, context, new Set())
+      );
+      if (contracts?.length) {
+        context.recordSchemaHint(node, { factoryContracts: contracts });
+      }
+    }
+    if (ts.isTypeReferenceNode(node)) {
+      let symbol = context.checker.getSymbolAtLocation(node.typeName);
+      symbol = canonicalSymbol(symbol, context.checker);
+      const alias = symbol?.declarations?.find(ts.isTypeAliasDeclaration);
+      if (alias) annotateQueries(alias.type);
+    }
+    ts.forEachChild(node, annotateQueries);
+  };
+  annotateQueries(sourceFile);
+
+  const annotateAliasesAndUnions = (node: ts.Node): void => {
+    if (
+      ts.isTypeReferenceNode(node) || ts.isUnionTypeNode(node) ||
+      ts.isIntersectionTypeNode(node) || ts.isParenthesizedTypeNode(node) ||
+      ts.isTypeOperatorNode(node)
+    ) {
+      const provenance = factoryContractProvenanceFromTypeNode(node, context);
+      if (provenance.complete && provenance.contracts.length > 0) {
+        context.recordSchemaHint(node, {
+          factoryContracts: provenance.contracts,
+        });
+      }
+    }
+    ts.forEachChild(node, annotateAliasesAndUnions);
+  };
+  annotateAliasesAndUnions(sourceFile);
+}
+
+function discoverFactoryContractsForSymbol(
+  symbol: ts.Symbol,
+  context: TransformationContext,
+  activeSymbols: Set<ts.Symbol>,
+): readonly FactoryContractHint[] | undefined {
+  const canonical = canonicalSymbol(symbol, context.checker) ?? symbol;
+  const existing = context.lookupFactoryContractsForSymbol(canonical);
+  if (existing?.length || activeSymbols.has(canonical)) return existing;
+  activeSymbols.add(canonical);
+  try {
+    for (const declaration of canonical.getDeclarations() ?? []) {
+      const initializer = ts.isVariableDeclaration(declaration)
+        ? isConstVariableDeclaration(declaration)
+          ? declaration.initializer
+          : undefined
+        : ts.isExportAssignment(declaration)
+        ? declaration.expression
+        : undefined;
+      if (!initializer) continue;
+      const declarationContext = contextForDeclaration(declaration, context);
+      const contracts = discoverFactoryContractsForExpression(
+        initializer,
+        declarationContext,
+        activeSymbols,
+      );
+      if (!contracts?.length) continue;
+      for (const contract of contracts) {
+        declarationContext.recordFactoryContractForSymbol(canonical, contract);
+      }
+      return contracts;
+    }
+    return undefined;
+  } finally {
+    activeSymbols.delete(canonical);
+  }
+}
+
+function discoverFactoryContractsForExpression(
+  expression: ts.Expression,
+  context: TransformationContext,
+  activeSymbols: Set<ts.Symbol>,
+): readonly FactoryContractHint[] | undefined {
+  const target = unwrapExpression(expression);
+  if (ts.isIdentifier(target)) {
+    const symbol = canonicalSymbol(
+      context.checker.getSymbolAtLocation(target),
+      context.checker,
+    );
+    return symbol
+      ? discoverFactoryContractsForSymbol(symbol, context, activeSymbols)
+      : undefined;
+  }
+  if (!ts.isCallExpression(target)) return undefined;
+  if (isPatternBuilderCall(target, context.checker)) {
+    const descriptor = getPatternBuilderCallbackDescriptor(
+      target,
+      context.checker,
+    );
+    if (!descriptor) return undefined;
+    const rewritten = rewritePatternCallback(descriptor.callback, context);
+    const contract = buildTransitiveFactoryContract(
+      target,
+      rewritten.callback,
+      rewritten.paths,
+      context,
+    );
+    if (!contract) return undefined;
+    context.recordSchemaHint(target, { factoryContracts: [contract] });
+    return [contract];
+  }
+  const callee = unwrapExpression(target.expression);
+  if (
+    ts.isPropertyAccessExpression(callee) &&
+    (callee.name.text === "asScope" || callee.name.text === "inSpace")
+  ) {
+    return discoverFactoryContractsForExpression(
+      callee.expression,
+      context,
+      activeSymbols,
+    );
+  }
+  return undefined;
+}
+
+function contextForDeclaration(
+  declaration: ts.Declaration,
+  context: TransformationContext,
+): TransformationContext {
+  const sourceFile = declaration.getSourceFile();
+  return sourceFile === context.sourceFile
+    ? context
+    : new TransformationContext({
+      program: context.program,
+      sourceFile,
+      tsContext: context.tsContext,
+      options: context.options,
+    });
+}
+
+function factoryContractOwnerSymbol(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  let current: ts.Node | undefined = node.parent;
+  while (current && !ts.isSourceFile(current)) {
+    if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name)) {
+      if (!isConstVariableDeclaration(current)) return undefined;
+      const initializer = current.initializer &&
+        unwrapExpression(current.initializer);
+      if (
+        !initializer ||
+        (initializer !== node &&
+          ts.getOriginalNode(initializer) !== ts.getOriginalNode(node))
+      ) {
+        // A nested factory in an object/array-valued initializer does not
+        // grant that containing variable the nested factory's authority.
+        return undefined;
+      }
+      return canonicalSymbol(
+        checker.getSymbolAtLocation(current.name),
+        checker,
+      );
+    }
+    current = current.parent;
+  }
+  return undefined;
+}
+
+function isConstVariableDeclaration(
+  declaration: ts.VariableDeclaration,
+): boolean {
+  return ts.isVariableDeclarationList(declaration.parent) &&
+    (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
+}
+
+function canonicalSymbol(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  if (!symbol || (symbol.flags & ts.SymbolFlags.Alias) === 0) return symbol;
+  try {
+    return checker.getAliasedSymbol(symbol);
+  } catch {
+    return symbol;
+  }
+}
+
+function typeAtNode(
+  node: ts.Node,
+  context: TransformationContext,
+): ts.Type | undefined {
+  const original = ts.getOriginalNode(node);
+  const registered = context.options.state?.typeRegistry.get(node) ??
+    context.options.state?.typeRegistry.get(original);
+  if (registered) return registered;
+  try {
+    return context.checker.getTypeAtLocation(original);
+  } catch {
+    return undefined;
   }
 }
 
@@ -639,7 +930,15 @@ function frameworkPathsForFactoryExpression(
         activeSymbols.delete(active);
       }
     }
-    if (ts.isPropertyAccessExpression(target)) {
+    if (
+      ts.isPropertyAccessExpression(target) &&
+      (target.name.text === "asScope" || target.name.text === "inSpace")
+    ) {
+      // The modifier callable itself is not a factory type, but derives one
+      // from its receiver and must preserve that receiver's trusted paths.
+      // Do not recurse through arbitrary methods: a containing input object
+      // may have a privileged factory in one sibling while an unrelated call
+      // such as `input.text.toUpperCase()` uses another.
       return frameworkPathsForFactoryExpression(
         target.expression,
         context,

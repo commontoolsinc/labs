@@ -240,6 +240,59 @@ export const apply = lift(callback);
   },
 );
 
+for (
+  const [boundary, source] of [
+    [
+      "eager pattern",
+      `export default pattern<{ operation: Privileged; text: string }>(
+        (input) => ({ upper: input.text.toUpperCase() }),
+      );`,
+    ],
+    [
+      "scheduled lift",
+      `export const apply = lift((input: {
+        operation: Privileged;
+        text: string;
+      }) => input.text.toUpperCase());`,
+    ],
+  ] as const
+) {
+  Deno.test(
+    `an unrelated method call in an ${boundary} does not invoke a sibling privileged factory`,
+    async () => {
+      const { diagnostics } = await validateSource(
+        `
+import {
+  lift,
+  pattern,
+  type FrameworkProvided,
+  type PatternFactory,
+} from "commonfabric";
+
+type Privileged = PatternFactory<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>;
+
+${source}
+`,
+        {
+          types: COMMONFABRIC_TYPES,
+          typeCheck: true,
+        },
+      );
+
+      assertEquals(
+        diagnostics.filter((diagnostic) =>
+          diagnostic.type === FRAMEWORK_PROVIDED_WRAPPER ||
+          diagnostic.type === SCHEDULED_FACTORY_CALL
+        ),
+        [],
+      );
+    },
+  );
+}
+
 Deno.test(
   "a widened scheduled factory boundary emits an explicitly unprivileged call contract",
   async () => {

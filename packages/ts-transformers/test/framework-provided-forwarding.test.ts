@@ -1,9 +1,9 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 
 import type { TransformationDiagnostic } from "../src/mod.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { callsNamed, literalToValue, parseModule } from "./transformed-ast.ts";
-import { transformSource, validateSource } from "./utils.ts";
+import { transformFiles, transformSource, validateSource } from "./utils.ts";
 
 const FRAMEWORK_PROVIDED_WRAPPER =
   "pattern-callback:framework-provided-wrapper";
@@ -22,7 +22,10 @@ Deno.test(
     const diagnostics: TransformationDiagnostic[] = [];
     const output = await transformSource(
       `
-import { pattern, type FrameworkProvided } from "commonfabric";
+import {
+  pattern,
+  type FrameworkProvided,
+} from "commonfabric";
 
 const privileged = pattern<{
   command: string;
@@ -112,6 +115,475 @@ export default pattern(() => ({
       3,
       "the obligation must remain artifact metadata at every layer",
     );
+  },
+);
+
+Deno.test(
+  "a first-class transitive wrapper carries its compiler-owned schema and path authority",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+const privileged = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+
+export const wrapper = pattern<
+  { command: string },
+  { ok: boolean }
+>(({ command }) => privileged({ command } as any));
+
+export default pattern<{
+  operation: typeof wrapper;
+  command: string;
+}>(({ operation, command }) => operation({ command }));
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(diagnostics, []);
+    const root = parseModule(output);
+    const invoke = callsNamed(root, "invokeFactory")[0];
+    assert(invoke, output);
+    const expected = literalToValue(invoke.arguments[2]!) as {
+      argumentSchema: {
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+      frameworkProvidedPaths?: string[][];
+    };
+    assertEquals(expected.argumentSchema.properties?.sandboxId, true);
+    assert(expected.argumentSchema.required?.includes("sandboxId"));
+    assertEquals(expected.frameworkProvidedPaths, [["sandboxId"]]);
+
+    const rootPattern = callsNamed(root, "pattern").find((call) => {
+      const schema = call.arguments[1];
+      if (!schema) return false;
+      const value = literalToValue(schema) as {
+        properties?: Record<string, unknown>;
+      };
+      return Object.hasOwn(value.properties ?? {}, "operation");
+    });
+    assert(rootPattern?.arguments[1], output);
+    const rootSchema = literalToValue(rootPattern.arguments[1]) as {
+      properties: {
+        operation: {
+          asFactory: {
+            argumentSchema: {
+              properties?: Record<string, unknown>;
+              required?: string[];
+            };
+            frameworkProvidedPaths?: unknown;
+          };
+        };
+      };
+    };
+    const storedContract = rootSchema.properties.operation.asFactory;
+    assertEquals(storedContract.argumentSchema.properties?.sandboxId, true);
+    assert(storedContract.argumentSchema.required?.includes("sandboxId"));
+    assertEquals(storedContract.frameworkProvidedPaths, undefined);
+
+    const schemas = callsNamed(root, "pattern").flatMap((call) => {
+      const schema = call.arguments[1];
+      if (!schema) return [];
+      return [literalToValue(schema) as {
+        properties?: Record<string, unknown>;
+      }];
+    });
+    assertEquals(
+      schemas.filter((schema) =>
+        Object.hasOwn(schema.properties ?? {}, "sandboxId")
+      ).length,
+      2,
+      "the base and transitive wrapper runtime contracts both require the protected path",
+    );
+  },
+);
+
+Deno.test(
+  "same-shaped first-class wrappers keep distinct compiler-owned path authority",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import {
+  pattern,
+  type FrameworkProvided,
+  type PatternFactory,
+} from "commonfabric";
+
+const sandboxed = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+const authenticated = pattern<{
+  command: string;
+  authToken: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+
+export const sandboxWrapper: PatternFactory<
+  { command: string },
+  { ok: boolean }
+> = pattern(({ command }) => sandboxed({ command } as any));
+export const authWrapper: PatternFactory<
+  { command: string },
+  { ok: boolean }
+> = pattern(({ command }) => authenticated({ command } as any));
+
+type SandboxOperation = typeof sandboxWrapper;
+type AuthOperation = typeof authWrapper;
+
+export default pattern<{
+  sandboxOperation: SandboxOperation;
+  authOperation: AuthOperation;
+}>((input) => {
+  const sandboxOperation = input.sandboxOperation;
+  return {
+    sandbox: sandboxOperation({ command: "sandbox" }),
+    auth: input["authOperation"]({ command: "auth" }),
+  };
+});
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(diagnostics, []);
+    const root = parseModule(output);
+    const invokes = callsNamed(root, "invokeFactory");
+    assertEquals(invokes.length, 2, output);
+    const pathsByCommand = Object.fromEntries(invokes.map((invoke) => {
+      const input = literalToValue(invoke.arguments[1]!) as { command: string };
+      const contract = literalToValue(invoke.arguments[2]!) as {
+        argumentSchema: {
+          properties?: Record<string, unknown>;
+          required?: string[];
+        };
+        frameworkProvidedPaths?: string[][];
+      };
+      return [input.command, contract];
+    }));
+
+    assertEquals(pathsByCommand.sandbox.frameworkProvidedPaths, [[
+      "sandboxId",
+    ]]);
+    assertEquals(
+      pathsByCommand.sandbox.argumentSchema.properties?.sandboxId,
+      true,
+    );
+    assertEquals(
+      pathsByCommand.sandbox.argumentSchema.properties?.authToken,
+      undefined,
+    );
+    assertEquals(pathsByCommand.auth.frameworkProvidedPaths, [["authToken"]]);
+    assertEquals(
+      pathsByCommand.auth.argumentSchema.properties?.authToken,
+      true,
+    );
+    assertEquals(
+      pathsByCommand.auth.argumentSchema.properties?.sandboxId,
+      undefined,
+    );
+
+    const rootPattern = callsNamed(root, "pattern").find((call) => {
+      const schema = call.arguments[1];
+      if (!schema) return false;
+      const value = literalToValue(schema) as {
+        properties?: Record<string, unknown>;
+      };
+      return Object.hasOwn(value.properties ?? {}, "sandboxOperation");
+    });
+    assert(rootPattern?.arguments[1], output);
+    const rootSchema = literalToValue(rootPattern.arguments[1]) as {
+      properties: Record<
+        "sandboxOperation" | "authOperation",
+        {
+          asFactory: {
+            argumentSchema: { properties?: Record<string, unknown> };
+          };
+        }
+      >;
+    };
+    assertEquals(
+      rootSchema.properties.sandboxOperation.asFactory.argumentSchema
+        .properties?.sandboxId,
+      true,
+    );
+    assertEquals(
+      rootSchema.properties.sandboxOperation.asFactory.argumentSchema
+        .properties?.authToken,
+      undefined,
+    );
+    assertEquals(
+      rootSchema.properties.authOperation.asFactory.argumentSchema.properties
+        ?.authToken,
+      true,
+    );
+    assertEquals(
+      rootSchema.properties.authOperation.asFactory.argumentSchema.properties
+        ?.sandboxId,
+      undefined,
+    );
+  },
+);
+
+Deno.test(
+  "a factory union cannot borrow protected paths from only one provenanced arm",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import {
+  pattern,
+  type FrameworkProvided,
+  type PatternFactory,
+} from "commonfabric";
+
+const privileged = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+export const wrapper = pattern<
+  { command: string },
+  { ok: boolean }
+>(({ command }) => privileged({ command } as any));
+
+type Plain = PatternFactory<{ command: string }, { ok: boolean }>;
+export default pattern<{
+  operation: typeof wrapper | Plain;
+}>(({ operation }) => operation({ command: "run" }));
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(
+      diagnostics.map((diagnostic) => diagnostic.type),
+      ["factory-call:framework-provided-mismatch-union"],
+    );
+    assertEquals(callsNamed(parseModule(output), "invokeFactory").length, 0);
+  },
+);
+
+Deno.test(
+  "repeated provenanced aliases do not look like a partial factory union",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+const privileged = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+export const wrapper = pattern<
+  { command: string },
+  { ok: boolean }
+>(({ command }) => privileged({ command } as any));
+
+type Operation = typeof wrapper;
+export default pattern<{
+  operation: Operation | Operation;
+}>(({ operation }) => operation({ command: "run" }));
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(diagnostics, []);
+    const invoke = callsNamed(parseModule(output), "invokeFactory")[0];
+    assert(invoke, output);
+    const contract = literalToValue(invoke.arguments[2]!) as {
+      frameworkProvidedPaths?: string[][];
+    };
+    assertEquals(contract.frameworkProvidedPaths, [["sandboxId"]]);
+  },
+);
+
+Deno.test(
+  "an imported type alias preserves wrapper provenance in either source order",
+  async () => {
+    const consumerSource = `
+import { pattern } from "commonfabric";
+import type { Operation } from "./wrapper.tsx";
+
+export default pattern<{ operation: Operation }>(({ operation }) =>
+  operation({ command: "run" })
+);
+`;
+    const wrapperSource = `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+const privileged = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+export const wrapper = pattern<
+  { command: string },
+  { ok: boolean }
+>(({ command }) => privileged({ command } as any));
+export type Operation = typeof wrapper;
+`;
+
+    for (
+      const files of [
+        {
+          "/consumer.tsx": consumerSource,
+          "/wrapper.tsx": wrapperSource,
+        },
+        {
+          "/wrapper.tsx": wrapperSource,
+          "/consumer.tsx": consumerSource,
+        },
+      ]
+    ) {
+      const diagnostics: TransformationDiagnostic[] = [];
+      const output = await transformFiles(files, {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      });
+
+      assertEquals(diagnostics, []);
+      const consumer = output["/consumer.tsx"]!;
+      const root = parseModule(consumer);
+      const invoke = callsNamed(root, "invokeFactory")[0];
+      assert(invoke, consumer);
+      const contract = literalToValue(invoke.arguments[2]!) as {
+        argumentSchema: { properties?: Record<string, unknown> };
+        frameworkProvidedPaths?: string[][];
+      };
+      assertEquals(contract.argumentSchema.properties?.sandboxId, true);
+      assertEquals(contract.frameworkProvidedPaths, [["sandboxId"]]);
+
+      const rootPattern = callsNamed(root, "pattern")[0];
+      assert(rootPattern?.arguments[1], consumer);
+      const rootSchema = literalToValue(rootPattern.arguments[1]) as {
+        properties: {
+          operation: {
+            asFactory: {
+              argumentSchema: { properties?: Record<string, unknown> };
+            };
+          };
+        };
+      };
+      assertEquals(
+        rootSchema.properties.operation.asFactory.argumentSchema.properties
+          ?.sandboxId,
+        true,
+      );
+    }
+  },
+);
+
+Deno.test(
+  "direct aliases and supported modifier derivations preserve wrapper provenance",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+const privileged = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+const wrapper = pattern<
+  { command: string },
+  { ok: boolean }
+>(({ command }) => privileged({ command } as any));
+const alias = wrapper;
+const scoped = wrapper.asScope("space").inSpace();
+
+export default pattern<{
+  aliasedOperation: typeof alias;
+  scopedOperation: typeof scoped;
+}>(({ aliasedOperation, scopedOperation }) => ({
+  aliased: aliasedOperation({ command: "alias" }),
+  scoped: scopedOperation({ command: "scoped" }),
+}));
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(diagnostics, []);
+    const invokes = callsNamed(parseModule(output), "invokeFactory");
+    assertEquals(invokes.length, 2, output);
+    for (const invoke of invokes) {
+      const contract = literalToValue(invoke.arguments[2]!) as {
+        argumentSchema: { properties?: Record<string, unknown> };
+        frameworkProvidedPaths?: string[][];
+      };
+      assertEquals(contract.argumentSchema.properties?.sandboxId, true);
+      assertEquals(contract.frameworkProvidedPaths, [["sandboxId"]]);
+    }
+  },
+);
+
+Deno.test(
+  "a mutable alias cannot retain initializer-only protected-path provenance",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+const privileged = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+const wrapper = pattern<
+  { command: string },
+  { ok: boolean }
+>(({ command }) => privileged({ command } as any));
+const ordinary = pattern<
+  { command: string },
+  { ok: boolean }
+>((_input) => ({ ok: true }));
+let mutable = wrapper;
+mutable = ordinary;
+
+export default pattern<{
+  operation: typeof mutable;
+}>(({ operation }) => operation({ command: "run" }));
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(diagnostics, []);
+    const invoke = callsNamed(parseModule(output), "invokeFactory")[0];
+    assert(invoke, output);
+    const contract = literalToValue(invoke.arguments[2]!) as {
+      argumentSchema: { properties?: Record<string, unknown> };
+      frameworkProvidedPaths?: string[][];
+    };
+    assertEquals(contract.argumentSchema.properties?.sandboxId, undefined);
+    assertEquals(contract.frameworkProvidedPaths, []);
   },
 );
 

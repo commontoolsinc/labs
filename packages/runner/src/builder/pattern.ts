@@ -3,6 +3,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { addRequiredSchemaPaths } from "@commonfabric/data-model/schema-utils";
 import {
   isAdmittedFabricFactory,
   registerFabricFactory,
@@ -253,35 +254,7 @@ function addFrameworkPathsToSchema(
   schema: JSONSchema,
   paths: readonly FrameworkProvidedPath[],
 ): JSONSchema {
-  let result = schema;
-  for (const path of normalizeFrameworkPaths(paths)) {
-    result = addFrameworkPathToSchema(result, path);
-  }
-  return result;
-}
-
-function addFrameworkPathToSchema(
-  schema: JSONSchema,
-  path: readonly string[],
-): JSONSchema {
-  const [head, ...tail] = path;
-  if (!head) return schema;
-  const base: Record<string, unknown> = isRecord(schema)
-    ? { ...schema }
-    : { type: "object" };
-  const oldProperties = isRecord(base.properties) ? base.properties : {};
-  const child = oldProperties[head] as JSONSchema | undefined;
-  const nextChild = tail.length === 0
-    ? child ?? true
-    : addFrameworkPathToSchema(child ?? true, tail);
-  const required = Array.isArray(base.required) ? [...base.required] : [];
-  if (!required.includes(head)) required.push(head);
-  return {
-    ...base,
-    type: "object",
-    properties: { ...oldProperties, [head]: nextChild },
-    required,
-  } as JSONSchema;
+  return addRequiredSchemaPaths(schema, normalizeFrameworkPaths(paths));
 }
 
 type PatternParamsRoot = {

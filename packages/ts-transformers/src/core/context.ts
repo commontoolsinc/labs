@@ -240,6 +240,19 @@ export class TransformationContext {
     return this.options.state?.lookupSchemaHint(node);
   }
 
+  recordFactoryContractForSymbol(
+    symbol: ts.Symbol,
+    contract: NonNullable<SchemaHint["factoryContracts"]>[number],
+  ): void {
+    this.options.state?.recordFactoryContractForSymbol(symbol, contract);
+  }
+
+  lookupFactoryContractsForSymbol(
+    symbol: ts.Symbol,
+  ): NonNullable<SchemaHint["factoryContracts"]> | undefined {
+    return this.options.state?.lookupFactoryContractsForSymbol(symbol);
+  }
+
   /**
    * Record a per-function capability summary computed by
    * PatternCallbackLoweringTransformer (expensive interprocedural analysis;

@@ -57,7 +57,7 @@ import {
   printTypeNode,
 } from "./type-shrinking.ts";
 import { isPatternFactoryCalleeExpression } from "./structural-reactive-factory.ts";
-import { generateToSchemaValue } from "./schema-generator.ts";
+import { createSchemaAst, generateToSchemaValue } from "./schema-generator.ts";
 
 type UiContractHint = NonNullable<SchemaHint["cfcUiContract"]>;
 type FactoryContractHint = NonNullable<
@@ -3585,6 +3585,11 @@ function handlePatternSchemaInjection(
     expression: callbackDescriptor?.argument ?? callbackArgument,
     callback: builderFunction,
   };
+  const carriedContract = context.lookupSchemaHint(node)?.factoryContracts
+    ?.find((contract) =>
+      contract.kind === "pattern" &&
+      (contract.frameworkProvidedPaths?.length ?? 0) > 0
+    );
   const patternReturnExpr = getCallbackReturnExpression(builderFunction);
   const unwrappedPatternReturnExpr = patternReturnExpr
     ? unwrapExpression(patternReturnExpr)
@@ -3621,17 +3626,30 @@ function handlePatternSchemaInjection(
     // call also carries generic type arguments. Type arguments may help us
     // retain semantic type information, but must never replace authored
     // descriptions, constraints, defaults, or other schema metadata.
-    const exactContract = resolvePatternFactorySchemaContract(
-      node,
-      builderFunction,
-      context,
-    );
+    const exactContract = carriedContract ??
+      resolvePatternFactorySchemaContract(
+        node,
+        builderFunction,
+        context,
+      );
     if (exactContract) {
       recordFactorySchemaContract(
         node,
         node,
         exactContract,
         context,
+      );
+    }
+    if (carriedContract?.inputSchema !== undefined) {
+      return factory.updateCallExpression(
+        node,
+        node.expression,
+        node.typeArguments,
+        [
+          builderFunctionArg.expression,
+          createSchemaAst(carriedContract.inputSchema, factory),
+          ...node.arguments.slice(2),
+        ],
       );
     }
     return undefined;
@@ -3809,14 +3827,19 @@ function handlePatternSchemaInjection(
   }
 
   // Create both schemas
-  const inputSchemaExpression = authoredInputSchema ??
+  const carriedInputSchema = carriedContract?.inputSchema === undefined
+    ? undefined
+    : createSchemaAst(carriedContract.inputSchema, factory);
+  const inputSchemaExpression = carriedInputSchema ?? authoredInputSchema ??
     createSchemaCallWithRegistryTransfer(
       context,
       inputTypeNode,
       checker,
       typeRegistry,
     );
-  if (!authoredInputSchema && inputType && typeRegistry) {
+  if (
+    !carriedInputSchema && !authoredInputSchema && inputType && typeRegistry
+  ) {
     typeRegistry.set(inputSchemaExpression, inputType);
   }
 
@@ -3844,7 +3867,7 @@ function handlePatternSchemaInjection(
   }
 
   const updated = buildCallExpression(inputSchemaExpression, resultSchemaCall);
-  const exactContract = resolvePatternFactorySchemaContract(
+  const exactContract = carriedContract ?? resolvePatternFactorySchemaContract(
     node,
     builderFunction,
     context,

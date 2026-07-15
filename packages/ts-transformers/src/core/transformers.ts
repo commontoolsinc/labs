@@ -25,6 +25,8 @@ export interface SchemaHint {
     readonly outputTypeNode: ts.TypeNode;
     readonly outputType?: ts.Type;
     readonly outputSchema?: unknown;
+    /** Trusted compiler metadata; never emitted inside authored `asFactory`. */
+    readonly frameworkProvidedPaths?: readonly (readonly string[])[];
   }[];
   readonly cfcUiContract?: {
     readonly helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";

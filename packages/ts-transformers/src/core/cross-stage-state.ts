@@ -33,6 +33,8 @@ export interface NodeTypeLinks {
   schemaInjected?: true;
 }
 
+type FactoryContractHint = NonNullable<SchemaHint["factoryContracts"]>[number];
+
 /**
  * CrossStageState — the single owner of the pipeline's cross-transformer
  * communication registries.
@@ -91,6 +93,18 @@ export class CrossStageState {
    */
   readonly typeRegistry: TypeRegistry = new WeakMap();
   readonly schemaHints: SchemaHints = new WeakMap();
+  /**
+   * Compiler-owned exact factory contracts keyed by their declaration symbol.
+   * Structural checker types are deliberately insufficient here: two wrappers
+   * can expose the same public PatternFactory type while carrying different
+   * protected-path authority. Unlike `schemaHints`, this channel is
+   * transformer-internal and is never visible to authored schemas or
+   * serialized Factory state.
+   */
+  readonly factoryContractsBySymbol = new WeakMap<
+    ts.Symbol,
+    readonly FactoryContractHint[]
+  >();
 
   /**
    * NodeLinks-shaped side table for the transformer-internal,
@@ -197,6 +211,21 @@ export class CrossStageState {
   lookupSchemaHint(node: ts.Node): SchemaHint | undefined {
     return this.schemaHints.get(node) ??
       this.schemaHints.get(ts.getOriginalNode(node));
+  }
+
+  recordFactoryContractForSymbol(
+    symbol: ts.Symbol,
+    contract: FactoryContractHint,
+  ): void {
+    const existing = this.factoryContractsBySymbol.get(symbol) ?? [];
+    if (existing.includes(contract)) return;
+    this.factoryContractsBySymbol.set(symbol, [...existing, contract]);
+  }
+
+  lookupFactoryContractsForSymbol(
+    symbol: ts.Symbol,
+  ): readonly FactoryContractHint[] | undefined {
+    return this.factoryContractsBySymbol.get(symbol);
   }
 
   // --- capabilitySummary (nodeLinks-backed) ---

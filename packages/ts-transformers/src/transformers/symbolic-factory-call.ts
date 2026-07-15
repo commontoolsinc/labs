@@ -11,8 +11,15 @@ import { findFrameworkProvidedPaths } from "../policy/framework-provided.ts";
 import {
   classifyFactoryCallee,
   classifyFactoryCallExposure,
+  type FactoryCalleeClassification,
 } from "../ast/factory-callee.ts";
+import {
+  factoryContractDeclaredTypeNode,
+  type FactoryContractProvenance,
+  factoryContractProvenanceFromTypeNode,
+} from "../ast/factory-contract-hints.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
+import { unwrapExpression } from "../utils/expression.ts";
 import { createSchemaAst } from "./schema-generator.ts";
 
 interface EmittedFactoryContract {
@@ -89,7 +96,8 @@ export class SymbolicFactoryCallTransformer extends HelpersOnlyTransformer {
       }
 
       const contract = buildCompatibleContract(
-        classification.members,
+        classification,
+        node.expression,
         context,
         schemaGenerator,
         node,
@@ -130,21 +138,78 @@ function isFactoryModifierDerivation(node: ts.CallExpression): boolean {
 }
 
 function buildCompatibleContract(
-  members: readonly FactoryTypeInfo[],
+  classification: FactoryCalleeClassification,
+  expression: ts.Expression,
   context: TransformationContext,
   schemaGenerator: ReturnType<typeof createSchemaTransformerV2>,
   diagnosticNode: ts.Node,
 ): EmittedFactoryContract | undefined {
+  const { members } = classification;
   const [first, ...rest] = members;
   if (!first) return undefined;
 
-  const firstSchemas = generateMemberSchemas(first, context, schemaGenerator);
-  const firstFrameworkPaths = findFrameworkProvidedPaths(
-    first.inputType,
-    context.checker,
+  const provenance = collectCompilerOwnedFactoryContracts(
+    expression,
+    context,
+    new Set(),
   );
+  if (provenance.contracts.length > 0 && !provenance.complete) {
+    context.reportDiagnosticOnce({
+      type: "factory-call:framework-provided-mismatch-union",
+      message:
+        "Every callable factory in a union must carry its own compiler-owned FrameworkProvided provenance; one provenanced arm cannot authorize another.",
+      node: diagnosticNode,
+    });
+    return undefined;
+  }
+  if (provenance.contracts.length > 0) {
+    const generated = generateMemberSchemas(first, context, schemaGenerator);
+    const contracts = provenance.contracts.map(
+      (contract): EmittedFactoryContract => ({
+        kind: contract.kind,
+        inputSchema: contract.inputSchema as JSONSchema | undefined ??
+          generated.inputSchema,
+        outputSchema: contract.outputSchema as JSONSchema | undefined ??
+          generated.outputSchema,
+        frameworkProvidedPaths: contract.frameworkProvidedPaths ?? [],
+      }),
+    );
+    return requireCompatibleContracts(contracts, context, diagnosticNode);
+  }
+
+  const firstSchemas = generateMemberSchemas(first, context, schemaGenerator);
+  const firstContract: EmittedFactoryContract = {
+    kind: first.kind,
+    ...firstSchemas,
+    frameworkProvidedPaths: findFrameworkProvidedPaths(
+      first.inputType,
+      context.checker,
+    ),
+  };
+  const contracts = [firstContract];
   for (const member of rest) {
-    if (member.kind !== first.kind) {
+    const schemas = generateMemberSchemas(member, context, schemaGenerator);
+    contracts.push({
+      kind: member.kind,
+      ...schemas,
+      frameworkProvidedPaths: findFrameworkProvidedPaths(
+        member.inputType,
+        context.checker,
+      ),
+    });
+  }
+  return requireCompatibleContracts(contracts, context, diagnosticNode);
+}
+
+function requireCompatibleContracts(
+  contracts: readonly EmittedFactoryContract[],
+  context: TransformationContext,
+  diagnosticNode: ts.Node,
+): EmittedFactoryContract | undefined {
+  const [first, ...rest] = contracts;
+  if (!first) return undefined;
+  for (const contract of rest) {
+    if (contract.kind !== first.kind) {
       context.reportDiagnosticOnce({
         type: "factory-call:cross-kind-union",
         message:
@@ -153,21 +218,9 @@ function buildCompatibleContract(
       });
       return undefined;
     }
-
-    const schemas = generateMemberSchemas(member, context, schemaGenerator);
-    const frameworkPaths = findFrameworkProvidedPaths(
-      member.inputType,
-      context.checker,
-    );
     if (
-      !factorySchemasEqual(
-        firstSchemas.inputSchema,
-        schemas.inputSchema,
-      ) ||
-      !factorySchemasEqual(
-        firstSchemas.outputSchema,
-        schemas.outputSchema,
-      )
+      !factorySchemasEqual(first.inputSchema, contract.inputSchema) ||
+      !factorySchemasEqual(first.outputSchema, contract.outputSchema)
     ) {
       context.reportDiagnosticOnce({
         type: "factory-call:schema-mismatch-union",
@@ -178,7 +231,8 @@ function buildCompatibleContract(
       return undefined;
     }
     if (
-      JSON.stringify(frameworkPaths) !== JSON.stringify(firstFrameworkPaths)
+      JSON.stringify(contract.frameworkProvidedPaths) !==
+        JSON.stringify(first.frameworkProvidedPaths)
     ) {
       context.reportDiagnosticOnce({
         type: "factory-call:framework-provided-mismatch-union",
@@ -189,13 +243,79 @@ function buildCompatibleContract(
       return undefined;
     }
   }
+  return first;
+}
 
-  return {
-    kind: first.kind,
-    inputSchema: firstSchemas.inputSchema,
-    outputSchema: firstSchemas.outputSchema,
-    frameworkProvidedPaths: firstFrameworkPaths,
-  };
+function collectCompilerOwnedFactoryContracts(
+  expression: ts.Expression,
+  context: TransformationContext,
+  seen: Set<ts.Node>,
+): FactoryContractProvenance {
+  const current = unwrapExpression(expression);
+  const original = ts.getOriginalNode(current);
+  if (seen.has(current) || seen.has(original)) {
+    return { contracts: [], complete: false };
+  }
+  seen.add(current);
+  seen.add(original);
+
+  const direct = context.lookupSchemaHint(current)?.factoryContracts;
+  if (direct?.length) return { contracts: direct, complete: true };
+
+  const declaration = factoryValueDeclaration(current, context.checker);
+  const declaredType = declaration && factoryContractDeclaredTypeNode(
+    declaration,
+    context.checker,
+  );
+  const fromType = declaredType
+    ? factoryContractProvenanceFromTypeNode(declaredType, context, seen)
+    : undefined;
+  if (fromType?.contracts.length) return fromType;
+
+  if (declaration && ts.isVariableDeclaration(declaration)) {
+    const initializer = declaration.initializer;
+    if (initializer) {
+      return collectCompilerOwnedFactoryContracts(initializer, context, seen);
+    }
+  }
+  return { contracts: [], complete: false };
+}
+
+function factoryValueDeclaration(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Declaration | undefined {
+  let symbol: ts.Symbol | undefined;
+  if (ts.isIdentifier(expression)) {
+    symbol = checker.getSymbolAtLocation(expression) ?? undefined;
+  } else if (ts.isPropertyAccessExpression(expression)) {
+    symbol = checker.getSymbolAtLocation(expression.name) ?? undefined;
+  } else if (ts.isElementAccessExpression(expression)) {
+    const key = expression.argumentExpression &&
+        (ts.isStringLiteralLike(expression.argumentExpression) ||
+          ts.isNumericLiteral(expression.argumentExpression))
+      ? expression.argumentExpression.text
+      : undefined;
+    if (key !== undefined) {
+      try {
+        symbol = checker.getTypeAtLocation(expression.expression).getProperty(
+          key,
+        );
+      } catch {
+        // Leave the element access unresolved when the receiver type is not
+        // available; structural factory validation still fails closed.
+      }
+    }
+  }
+  if (!symbol) return undefined;
+  if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    try {
+      symbol = checker.getAliasedSymbol(symbol);
+    } catch {
+      // Keep the local alias declaration when the checker cannot resolve it.
+    }
+  }
+  return symbol.valueDeclaration ?? symbol.declarations?.[0];
 }
 
 function generateMemberSchemas(

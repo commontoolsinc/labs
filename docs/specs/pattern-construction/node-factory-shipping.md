@@ -1319,6 +1319,40 @@ is an implementation detail and does not replace the durable call-site
 identity. Removing a nested protected path also removes any now-system-only
 required ancestor from the authored help and flag schema.
 
+This transitive obligation is compiler-owned provenance of the specific wrapper
+declaration, not a property of its structural TypeScript factory type. Two
+wrappers may intentionally expose identical public `PatternFactory<I, O>` types
+while forwarding different protected paths. The compiler therefore carries the
+augmented exact input schema and protected paths from the wrapper declaration to
+the corresponding `typeof wrapper` type use, through local or imported type
+aliases, and to the symbolic call site. This propagation is independent of
+source-file transformation order: compiling a consumer before the module that
+declares its wrapper must produce the same contract as the reverse order. The
+emitted `asFactory.argumentSchema` includes the synthesized required fields so stored
+first-class values have the exact materialization contract, but the trusted
+paths remain out-of-band compiler/artifact metadata and are emitted only on the
+dynamic invocation contract. They are never emitted as authored `asFactory`
+authority. A shared structural-type cache must not merge or select between
+different wrappers' obligations. A callable union has compiler-owned authority
+only when every alternate factory arm carries its own provenance and their
+exact schemas and protected paths agree. One provenanced arm must never lend
+its paths to an unprovenanced arm; partial provenance fails closed.
+
+Synthesizing a required protected path intersects that requirement with the
+existing input schema. It may narrow a compatible `object | null` type to
+`object`, but never weakens an impossible `false` schema or replaces a
+scalar-only schema at the root or an intermediate child. Incompatible existing
+constraints remain as an explicit intersection, even when that makes the
+result unsatisfiable. Ordinary compatible object schemas stay in the canonical
+top-level `properties` / `required` form.
+
+Forwarding analysis follows only a proven factory call or its supported
+direct-const-alias and `asScope` / `inSpace` modifier chains. Those derivations
+preserve the source factory's exact contract and protected paths. It does not
+recurse through arbitrary object containers or method receivers: an input
+object having a privileged factory in one property does not make an unrelated
+sibling call such as `input.text.toUpperCase()` a factory invocation.
+
 FUSE reserves the `fvj1:` string prefix for explicit Factory codec projections.
 JSON containing a malformed reserved tag is a write error; handler-file parsing
 falls back to convenient bare text only when JSON parsing itself fails, never

@@ -127,6 +127,56 @@ export function resolveLocalSchemaRef(
     : undefined;
 }
 
+/**
+ * Add required object-property paths to a schema without weakening any schema
+ * already present at those paths. Missing leaves are admitted by `true`;
+ * callers retain separate authority over what supplies their values.
+ */
+export function addRequiredSchemaPaths(
+  schema: JSONSchema,
+  paths: readonly (readonly string[])[],
+): JSONSchema {
+  let result = schema;
+  for (const path of paths) result = addRequiredSchemaPath(result, path);
+  return result;
+}
+
+function addRequiredSchemaPath(
+  schema: JSONSchema,
+  path: readonly string[],
+): JSONSchema {
+  const [head, ...tail] = path;
+  if (!head) return schema;
+  if (schema === false) return false;
+  const base: Record<string, unknown> = isPlainObject(schema)
+    ? { ...(schema as JSONSchemaObj) }
+    : { type: "object" };
+  const declaredType = base.type;
+  const admitsObject = declaredType === undefined ||
+    declaredType === "object" ||
+    (Array.isArray(declaredType) && declaredType.includes("object"));
+  if (!admitsObject) {
+    return {
+      allOf: [schema, addRequiredSchemaPath(true, path)],
+    } as JSONSchema;
+  }
+  const oldProperties: Record<string, unknown> = isPlainObject(base.properties)
+    ? base.properties as Record<string, unknown>
+    : {};
+  const child = oldProperties[head] as JSONSchema | undefined;
+  const nextChild = tail.length === 0
+    ? child ?? true
+    : addRequiredSchemaPath(child ?? true, tail);
+  const required = Array.isArray(base.required) ? [...base.required] : [];
+  if (!required.includes(head)) required.push(head);
+  return {
+    ...base,
+    type: "object",
+    properties: { ...oldProperties, [head]: nextChild },
+    required,
+  } as JSONSchema;
+}
+
 function normalizeSchemaData(
   value: unknown,
   context: SchemaNormalizationContext,
