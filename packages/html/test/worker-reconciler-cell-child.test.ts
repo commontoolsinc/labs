@@ -73,6 +73,57 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
   }
 
   await t.step(
+    "renders, updates, and cleans up Cells in a direct array root",
+    async () => {
+      const collector = createOpsCollector();
+      const reconciler = new WorkerReconciler({
+        onOps: collector.onOps,
+      });
+      const textCell = new MockCell("before");
+      const nestedTextCell = new MockCell("nested before");
+      const nestedArrayCell = new MockCell([nestedTextCell]);
+      const rootCell = new MockCell([textCell, nestedArrayCell]);
+
+      const cancel = reconciler.mount(
+        rootCell as unknown as Cell<unknown>,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const initialText = collector.getOpsOfType("create-text");
+      assertEquals(
+        initialText.some((op) => "text" in op && op.text === "before"),
+        true,
+      );
+      assertEquals(
+        initialText.some((op) => "text" in op && op.text === "nested before"),
+        true,
+      );
+
+      collector.clear();
+      textCell.set("after");
+      nestedTextCell.set("nested after");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const updatedText = collector.getOpsOfType("update-text");
+      assertEquals(
+        updatedText.some((op) => "text" in op && op.text === "after"),
+        true,
+      );
+      assertEquals(
+        updatedText.some((op) => "text" in op && op.text === "nested after"),
+        true,
+      );
+
+      cancel();
+      collector.clear();
+      textCell.set("ignored");
+      nestedTextCell.set("nested ignored");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assertEquals(collector.getOps(), []);
+    },
+  );
+
+  await t.step(
     "updates child Cell VNode in place when tag matches",
     async () => {
       const collector = createOpsCollector();
