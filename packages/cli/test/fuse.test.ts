@@ -14,6 +14,7 @@ import {
 import {
   buildBackgroundSupervisorDenoArgs,
   buildDenoArgs,
+  buildFuseBinaryArgs,
   buildFuseChildDenoArgs,
   ensureExecShim,
   findMountForPath,
@@ -27,8 +28,10 @@ import {
 import {
   buildFuseChildCommand,
   cleanupFuseChild,
+  parseSupervisorArgs,
   recordFuseChildPid,
   runFuseSupervisor,
+  supervisorHelp,
 } from "../lib/fuse-supervisor.ts";
 import { writeFailedSupervisorStartupStatus } from "../../fuse/mod.ts";
 import { withEnv } from "./utils.ts";
@@ -1495,5 +1498,178 @@ describe("FUSE supervisor command construction", () => {
     } finally {
       await Deno.remove(statePath).catch(() => undefined);
     }
+  });
+});
+
+describe("buildFuseBinaryArgs", () => {
+  const base = {
+    mountpoint: "/mnt",
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/id.key",
+    execCli: "/tmp/cf-exec",
+  };
+
+  it("builds a compiled-binary daemon invocation", () => {
+    const args = buildFuseBinaryArgs({
+      subcommand: "fuse-daemon",
+      ...base,
+      spaces: ["home", "work"],
+    });
+
+    expect(args.slice(0, 2)).toEqual(["fuse-daemon", "/mnt"]);
+    expect(args).not.toContain("run");
+    expect(args).not.toContain("--allow-ffi");
+    expect(args).not.toContain("fuse-supervisor");
+    const apiIndex = args.indexOf("--api-url");
+    expect(args[apiIndex + 1]).toBe("http://localhost:8000");
+    const identityIndex = args.indexOf("--identity");
+    expect(args[identityIndex + 1]).toBe("/tmp/id.key");
+    const execIndex = args.indexOf("--exec-cli");
+    expect(args[execIndex + 1]).toBe("/tmp/cf-exec");
+    expect(args.filter((arg) => arg === "--space").length).toBe(2);
+  });
+
+  it("builds a compiled-binary supervisor invocation with its lifecycle paths", () => {
+    const args = buildFuseBinaryArgs({
+      subcommand: "fuse-supervisor",
+      ...base,
+      logFile: "/tmp/cf-fuse.log",
+      statePath: "/tmp/state.json",
+      supervisorStatusPath: "/tmp/state.json.child-status",
+      supervisorToken: "token-1",
+    });
+
+    expect(args.slice(0, 2)).toEqual(["fuse-supervisor", "/mnt"]);
+    const logIndex = args.indexOf("--log-file");
+    expect(args[logIndex + 1]).toBe("/tmp/cf-fuse.log");
+    const stateIndex = args.indexOf("--state-path");
+    expect(args[stateIndex + 1]).toBe("/tmp/state.json");
+    const statusIndex = args.indexOf("--supervisor-status");
+    expect(args[statusIndex + 1]).toBe("/tmp/state.json.child-status");
+    const tokenIndex = args.indexOf("--supervisor-token");
+    expect(args[tokenIndex + 1]).toBe("token-1");
+  });
+
+  it("omits every optional flag that was not requested", () => {
+    const args = buildFuseBinaryArgs({
+      subcommand: "fuse-daemon",
+      mountpoint: "/mnt",
+      apiUrl: "",
+      identity: "",
+      execCli: "",
+    });
+
+    expect(args).toEqual(["fuse-daemon", "/mnt"]);
+  });
+
+  it("forwards the mount and CFC flags", () => {
+    const args = buildFuseBinaryArgs({
+      subcommand: "fuse-daemon",
+      ...base,
+      allowOther: true,
+      noattrcache: true,
+      cfcMode: "enforce-explicit",
+      cfcAnnotations: true,
+      cfcXattrNamespace: "both",
+      cfcWritebackXattrs: true,
+      cfcWritebackState: "/tmp/cfc.json",
+    });
+
+    expect(args).toContain("--allow-other");
+    expect(args).toContain("--noattrcache");
+    const modeIndex = args.indexOf("--cfc-mode");
+    expect(args[modeIndex + 1]).toBe("enforce-explicit");
+    expect(args).toContain("--cfc-annotations");
+    const nsIndex = args.indexOf("--cfc-xattr-namespace");
+    expect(args[nsIndex + 1]).toBe("both");
+    expect(args).toContain("--cfc-writeback-xattrs");
+    const stateIndex = args.indexOf("--cfc-writeback-state");
+    expect(args[stateIndex + 1]).toBe("/tmp/cfc.json");
+  });
+
+  it("forwards an attrcache-timeout of zero", () => {
+    const args = buildFuseBinaryArgs({
+      subcommand: "fuse-daemon",
+      ...base,
+      attrcacheTimeout: "0",
+    });
+
+    const flagIndex = args.indexOf("--attrcache-timeout");
+    expect(flagIndex).toBeGreaterThan(-1);
+    expect(args[flagIndex + 1]).toBe("0");
+    expect(args).not.toContain("--noattrcache");
+  });
+});
+
+describe("parseSupervisorArgs", () => {
+  it("parses the mountpoint and cache flags", () => {
+    const { options, help } = parseSupervisorArgs([
+      "/mnt",
+      "--api-url",
+      "http://localhost:8000",
+      "--noattrcache",
+      "--space",
+      "home",
+    ]);
+
+    expect(help).toBe(false);
+    expect(options.mountpoint).toBe("/mnt");
+    expect(options.apiUrl).toBe("http://localhost:8000");
+    expect(options.noattrcache).toBe(true);
+    expect(options.attrcacheTimeout).toBeUndefined();
+    expect(options.spaces).toEqual(["home"]);
+  });
+
+  it("parses an attrcache-timeout value, including zero", () => {
+    expect(
+      parseSupervisorArgs(["/mnt", "--attrcache-timeout", "2"]).options
+        .attrcacheTimeout,
+    ).toBe("2");
+    expect(
+      parseSupervisorArgs(["/mnt", "--attrcache-timeout", "0"]).options
+        .attrcacheTimeout,
+    ).toBe("0");
+  });
+
+  it("rejects an attrcache-timeout with no value", () => {
+    expect(() => parseSupervisorArgs(["/mnt", "--attrcache-timeout"]))
+      .toThrow("Missing value for --attrcache-timeout");
+  });
+
+  it("rejects unknown options", () => {
+    expect(() => parseSupervisorArgs(["/mnt", "--nosuchflag"]))
+      .toThrow("Unknown fuse supervisor option: --nosuchflag");
+  });
+
+  it("reports help without requiring a mountpoint", () => {
+    expect(parseSupervisorArgs(["--help"]).help).toBe(true);
+    expect(supervisorHelp()).toContain("--attrcache-timeout <seconds>");
+    expect(supervisorHelp()).toContain("--noattrcache");
+  });
+});
+
+describe("fuse mount option validation", () => {
+  // The mount action validates before it resolves an identity, creates the
+  // mountpoint, or spawns anything, so these never reach a real mount.
+  const neverMounted = "/tmp/cf-fuse-never-mounted";
+
+  it("rejects an attrcache-timeout below the supported range", async () => {
+    await expect(
+      fuse.parse(["mount", neverMounted, "--attrcache-timeout", "-1"]),
+    ).rejects.toThrow("Invalid --attrcache-timeout value: -1");
+    await expect(Deno.stat(neverMounted)).rejects.toThrow(Deno.errors.NotFound);
+  });
+
+  it("rejects an attrcache-timeout above the supported range", async () => {
+    await expect(
+      fuse.parse(["mount", neverMounted, "--attrcache-timeout", "86401"]),
+    ).rejects.toThrow("Invalid --attrcache-timeout value: 86401");
+  });
+
+  it("documents both cache flags in the mount help", () => {
+    const help = fuse.getCommand("mount")!.getHelp();
+    expect(help).toContain("--noattrcache");
+    expect(help).toContain("--attrcache-timeout");
+    expect(help).toContain("Conflicts");
   });
 });

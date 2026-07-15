@@ -77,7 +77,8 @@ import {
 import { decodeFuseComponent, encodeFusePathSegments } from "./path-codec.ts";
 import {
   buildMountFuseArgs,
-  parseAttrcacheTimeoutSeconds,
+  type MountCacheOptions,
+  resolveMountCacheOptions,
 } from "./mount-options.ts";
 import { buildNodeStat, getMountOwnership, nodeMode } from "./stat.ts";
 
@@ -367,21 +368,18 @@ export async function main(argv: string[] = Deno.args) {
     Deno.exit(1);
   }
 
-  const noattrcache = Boolean(args.noattrcache);
-  let attrcacheTimeoutSeconds: number | undefined;
+  let cacheOptions: MountCacheOptions;
   try {
-    attrcacheTimeoutSeconds = parseAttrcacheTimeoutSeconds(
-      String(args["attrcache-timeout"] ?? ""),
-    );
+    cacheOptions = resolveMountCacheOptions({
+      noattrcache: Boolean(args.noattrcache),
+      attrcacheTimeout: String(args["attrcache-timeout"] ?? ""),
+      attrcacheTimeoutGiven: argv.some((arg) =>
+        arg === "--attrcache-timeout" || arg.startsWith("--attrcache-timeout=")
+      ),
+    });
   } catch (e) {
     console.error(`[FUSE] ${e instanceof Error ? e.message : e}`);
-    Deno.exit(1);
-  }
-  if (noattrcache && attrcacheTimeoutSeconds !== undefined) {
-    console.error(
-      "[FUSE] --noattrcache and --attrcache-timeout are mutually exclusive",
-    );
-    Deno.exit(1);
+    return Deno.exit(1);
   }
 
   const mountpoint = args._[0] as string;
@@ -3220,8 +3218,7 @@ export async function main(argv: string[] = Deno.args) {
     provider: platform.provider(),
     allowOther: Boolean(args["allow-other"]),
     cfcWritebackXattrs,
-    noattrcache,
-    attrcacheTimeoutSeconds,
+    ...cacheOptions,
   });
   const { argsBuf, argv: _argv, encodedArgs: _ea } = platform.createFuseArgs(
     fuseArgs,

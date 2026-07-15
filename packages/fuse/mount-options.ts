@@ -45,6 +45,45 @@ export function parseAttrcacheTimeoutSeconds(
   return seconds;
 }
 
+/** The cache mount options a mount request resolves to. */
+export interface MountCacheOptions {
+  noattrcache: boolean;
+  attrcacheTimeoutSeconds?: number;
+}
+
+/**
+ * Resolve the cache options from their raw command-line spellings, rejecting
+ * an out-of-range timeout or the mutually exclusive combination. Throws an
+ * Error whose message names the offending flags.
+ *
+ * `attrcacheTimeoutGiven` reports whether the flag appeared in argv at all.
+ * The daemon's argument parser does not read a leading-dash token as an
+ * option value, so `--attrcache-timeout -1` parses as no value; the flag
+ * present with no value is rejected.
+ */
+export function resolveMountCacheOptions(
+  args: {
+    noattrcache: boolean;
+    attrcacheTimeout: string;
+    attrcacheTimeoutGiven?: boolean;
+  },
+): MountCacheOptions {
+  if (args.attrcacheTimeoutGiven && args.attrcacheTimeout === "") {
+    throw new Error(
+      `Missing value for --attrcache-timeout (expected a whole number of seconds between ${ATTRCACHE_TIMEOUT_MIN_SECONDS} and ${ATTRCACHE_TIMEOUT_MAX_SECONDS}; write a value that starts with "-" as --attrcache-timeout=<value>)`,
+    );
+  }
+  const attrcacheTimeoutSeconds = parseAttrcacheTimeoutSeconds(
+    args.attrcacheTimeout,
+  );
+  if (args.noattrcache && attrcacheTimeoutSeconds !== undefined) {
+    throw new Error(
+      "--noattrcache and --attrcache-timeout are mutually exclusive",
+    );
+  }
+  return { noattrcache: args.noattrcache, attrcacheTimeoutSeconds };
+}
+
 /**
  * Build the argv handed to fuse_mount.
  *

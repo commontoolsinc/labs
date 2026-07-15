@@ -225,12 +225,14 @@ export async function cleanupFuseChild(
   await child.status.catch(() => undefined);
 }
 
-interface ParsedSupervisorArgs {
+export interface ParsedSupervisorArgs {
   options: FuseSupervisorOptions;
   help: boolean;
 }
 
-function parseSupervisorArgs(rawArgs: string[]): ParsedSupervisorArgs {
+export function parseSupervisorArgs(
+  rawArgs: string[],
+): ParsedSupervisorArgs {
   const options: FuseSupervisorOptions = {
     mountpoint: "",
     apiUrl: "",
@@ -319,7 +321,7 @@ function requireValue(args: string[], index: number, flag: string): string {
   return value;
 }
 
-function supervisorHelp(): string {
+export function supervisorHelp(): string {
   return `Usage: fuse-supervisor <mountpoint> [options]
 
 Internal: supervise a background FUSE child process.

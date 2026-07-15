@@ -18,6 +18,7 @@ import {
   buildMountFuseArgs,
   DEFAULT_FUSE_T_ATTRCACHE_TIMEOUT_SECONDS,
   parseAttrcacheTimeoutSeconds,
+  resolveMountCacheOptions,
 } from "./mount-options.ts";
 import darwinPlatform, { libfusePaths } from "./platform-darwin.ts";
 import linuxPlatform from "./platform-linux.ts";
@@ -490,5 +491,91 @@ Deno.test("libfuse search includes the FUSE-T per-user install location", () => 
       "/usr/local/lib/libfuse-t.dylib",
       "/usr/local/lib/libfuse.2.dylib",
     ],
+  );
+});
+
+Deno.test("mount cache options resolve from their command-line spellings", () => {
+  assertEquals(
+    resolveMountCacheOptions({ noattrcache: false, attrcacheTimeout: "" }),
+    { noattrcache: false, attrcacheTimeoutSeconds: undefined },
+  );
+  assertEquals(
+    resolveMountCacheOptions({ noattrcache: false, attrcacheTimeout: "5" }),
+    { noattrcache: false, attrcacheTimeoutSeconds: 5 },
+  );
+  assertEquals(
+    resolveMountCacheOptions({ noattrcache: true, attrcacheTimeout: "" }),
+    { noattrcache: true, attrcacheTimeoutSeconds: undefined },
+  );
+  // An explicit 0 selects untuned caching and is not a "no value" sentinel.
+  assertEquals(
+    resolveMountCacheOptions({ noattrcache: false, attrcacheTimeout: "0" }),
+    { noattrcache: false, attrcacheTimeoutSeconds: 0 },
+  );
+});
+
+Deno.test("mount cache options reject the mutually exclusive combination", () => {
+  assertThrows(
+    () =>
+      resolveMountCacheOptions({ noattrcache: true, attrcacheTimeout: "1" }),
+    Error,
+    "mutually exclusive",
+  );
+  // Even the untuning 0 conflicts: it still asks for a cache regime.
+  assertThrows(
+    () =>
+      resolveMountCacheOptions({ noattrcache: true, attrcacheTimeout: "0" }),
+    Error,
+    "mutually exclusive",
+  );
+});
+
+Deno.test("mount cache options reject a flag whose value was dropped", () => {
+  // The daemon's parser yields no value for `--attrcache-timeout -1`; that
+  // must fail rather than resolve to the default cache regime.
+  assertThrows(
+    () =>
+      resolveMountCacheOptions({
+        noattrcache: false,
+        attrcacheTimeout: "",
+        attrcacheTimeoutGiven: true,
+      }),
+    Error,
+    "Missing value for --attrcache-timeout",
+  );
+  // Without the flag, an empty value still means "no cache tuning requested".
+  assertEquals(
+    resolveMountCacheOptions({
+      noattrcache: false,
+      attrcacheTimeout: "",
+      attrcacheTimeoutGiven: false,
+    }),
+    { noattrcache: false, attrcacheTimeoutSeconds: undefined },
+  );
+});
+
+Deno.test("mount cache options surface an out-of-range timeout", () => {
+  assertThrows(
+    () =>
+      resolveMountCacheOptions({ noattrcache: false, attrcacheTimeout: "-1" }),
+    Error,
+    "Invalid --attrcache-timeout value",
+  );
+});
+
+Deno.test("platform provider reports the implementation openFuse loaded", () => {
+  // Neither platform's library is opened by unit tests, so both report the
+  // pre-openFuse state. buildMountFuseArgs treats that as "not FUSE-T".
+  assertEquals(darwinPlatform.provider(), "unknown");
+  assertEquals(linuxPlatform.provider(), "unknown");
+  assertEquals(
+    buildMountFuseArgs({
+      os: "darwin",
+      provider: darwinPlatform.provider(),
+      allowOther: false,
+      cfcWritebackXattrs: false,
+      noattrcache: false,
+    }),
+    ["fuse_ct"],
   );
 });
