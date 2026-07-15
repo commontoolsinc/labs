@@ -38,6 +38,22 @@ const createAddresses = (
 ): IMemorySpaceAddress[] =>
   paths.map((path) => createAddress(path, space, id, type));
 
+type MutableFabricRecord = Record<string, FabricValue>;
+
+const createAction = (id: string): Action =>
+  Object.defineProperty(() => {}, "name", { value: id });
+
+function createNestedRecord(
+  path: readonly string[],
+  value: FabricValue,
+): FabricValue {
+  let result = value;
+  for (let i = path.length - 1; i >= 0; i--) {
+    result = { [path[i]]: result };
+  }
+  return result;
+}
+
 describe("arraysOverlap", () => {
   it("returns true when arrays are identical", () => {
     expect(arraysOverlap(["a", "b", "c"], ["a", "b", "c"])).toBe(true);
@@ -592,12 +608,6 @@ describe("addresssesToPathByEntity", () => {
 });
 
 describe("determineTriggeredActions", () => {
-  // Helper to create mock actions
-  const createAction = (id: string): Action => ({
-    schedule: () => {},
-    name: id,
-  } as unknown as Action);
-
   describe("basic functionality", () => {
     it("returns empty array when no dependencies", () => {
       const dependencies = new Map<Action, SortedAndCompactPaths>();
@@ -1576,14 +1586,14 @@ describe("determineTriggeredActions", () => {
         dependencies.set(action, [[`item${i}`]]);
       }
 
-      const before: FabricValue = {};
-      const after: FabricValue = {};
+      const before: MutableFabricRecord = {};
+      const after: MutableFabricRecord = {};
       for (let i = 0; i < 1000; i++) {
-        (before as any)[`item${i}`] = i;
-        (after as any)[`item${i}`] = i;
+        before[`item${i}`] = i;
+        after[`item${i}`] = i;
       }
       // Change one value
-      (after as any).item500 = "changed";
+      after["item500"] = "changed";
 
       const startTime = performance.now();
       const result = determineTriggeredActions(dependencies, before, after);
@@ -1600,19 +1610,8 @@ describe("determineTriggeredActions", () => {
         [action1, [deepPath]],
       ]);
 
-      // Create deeply nested objects
-      const before: any = {};
-      const after: any = {};
-      let currentBefore = before;
-      let currentAfter = after;
-      for (let i = 0; i < deepPath.length - 1; i++) {
-        currentBefore[deepPath[i]] = {};
-        currentAfter[deepPath[i]] = {};
-        currentBefore = currentBefore[deepPath[i]];
-        currentAfter = currentAfter[deepPath[i]];
-      }
-      currentBefore[deepPath[deepPath.length - 1]] = "before";
-      currentAfter[deepPath[deepPath.length - 1]] = "after";
+      const before = createNestedRecord(deepPath, "before");
+      const after = createNestedRecord(deepPath, "after");
 
       const result = determineTriggeredActions(dependencies, before, after);
       expect(result).toEqual([action1]);
@@ -1628,13 +1627,13 @@ describe("determineTriggeredActions", () => {
         [action1, paths],
       ]);
 
-      const before: any = {};
-      const after: any = {};
+      const before: MutableFabricRecord = {};
+      const after: MutableFabricRecord = {};
       for (let i = 0; i < 100; i++) {
         before[`field${i}`] = i;
         after[`field${i}`] = i;
       }
-      after.field50 = "changed";
+      after["field50"] = "changed";
 
       const result = determineTriggeredActions(dependencies, before, after);
       expect(result).toEqual([action1]);
@@ -2091,7 +2090,7 @@ Deno.bench("sortAndCompactPaths - multiple spaces/ids/types", () => {
 });
 
 Deno.bench("determineTriggeredActions - simple change", () => {
-  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const action = createAction("action");
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, [["user", "name"]]],
   ]);
@@ -2104,7 +2103,7 @@ Deno.bench("determineTriggeredActions - simple change", () => {
 });
 
 Deno.bench("determineTriggeredActions - no changes", () => {
-  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const action = createAction("action");
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, [["user", "name"]]],
   ]);
@@ -2119,10 +2118,7 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
   const after: Record<string, number> = {};
 
   for (let i = 0; i < 100; i++) {
-    const action = {
-      schedule: () => {},
-      name: `action${i}`,
-    } as unknown as Action;
+    const action = createAction(`action${i}`);
     dependencies.set(action, [[`field${i}`]]);
     before[`field${i}`] = i;
     after[`field${i}`] = i;
@@ -2138,30 +2134,21 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
 });
 
 Deno.bench("determineTriggeredActions - deep nesting", () => {
-  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const action = createAction("action");
   const deepPath = Array.from({ length: 10 }, (_, i) => `level${i}`);
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, [deepPath]],
   ]);
 
-  // Create deeply nested objects
-  const createNested = (value: string) => {
-    let result: any = value;
-    for (let i = deepPath.length - 1; i >= 0; i--) {
-      result = { [deepPath[i]]: result };
-    }
-    return result;
-  };
-
   determineTriggeredActions(
     dependencies,
-    createNested("before"),
-    createNested("after"),
+    createNestedRecord(deepPath, "before"),
+    createNestedRecord(deepPath, "after"),
   );
 });
 
 Deno.bench("determineTriggeredActions - multiple paths per action", () => {
-  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const action = createAction("action");
   const paths: SortedAndCompactPaths = Array.from(
     { length: 20 },
     (_, i) => [`field${i}`],
@@ -2170,13 +2157,13 @@ Deno.bench("determineTriggeredActions - multiple paths per action", () => {
     [action, paths],
   ]);
 
-  const before: any = {};
-  const after: any = {};
+  const before: MutableFabricRecord = {};
+  const after: MutableFabricRecord = {};
   for (let i = 0; i < 20; i++) {
     before[`field${i}`] = i;
     after[`field${i}`] = i;
   }
-  after.field10 = "changed";
+  after["field10"] = "changed";
 
   determineTriggeredActions(dependencies, before, after);
 });
@@ -2199,7 +2186,7 @@ Deno.bench("determineTriggeredActions - complex real-world", () => {
   ];
 
   for (const { paths, name } of actions) {
-    const action = { schedule: () => {}, name } as unknown as Action;
+    const action = createAction(name);
     dependencies.set(action, paths);
   }
 
