@@ -402,7 +402,6 @@ export async function finishServerExecutionMeasurement(
   assert(before.control !== null && after.control !== null);
   if (clientRouting !== undefined) {
     assertEquals(clientRouting.snapshotRequired, false);
-    assertEquals(clientRouting.truncatedActionRecords, 0);
   }
   const client = clientRouting === undefined ? undefined : {
     claims: clientRouting.claims.length,

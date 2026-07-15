@@ -141,6 +141,13 @@ Deno.test("measurement completion accepts a settled mix of served and unserved a
     true,
   );
   assertEquals(
+    isRoutingMeasurementResultReady({
+      ...diagnostics([served, unserved]),
+      truncatedActionRecords: 200,
+    }),
+    true,
+  );
+  assertEquals(
     isRoutingMeasurementResultReady(diagnostics([
       served,
       { ...unserved, pendingOverlayCount: 1 },
