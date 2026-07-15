@@ -1469,7 +1469,11 @@ implemented. Entry requires that design reviewed, covering:
 - one shared space lane plus per-user and per-session lanes without duplicating
   unscoped computation;
 - scope-monotonic read/write rules;
-- bounded user-delegated execution keys that survive connection loss;
+- bounded user-delegated execution keys that survive connection loss
+  (per the lattice design's Open question 1, C1 ships session-anchored
+  user-lane authority; standing delegated keys are the follow-on
+  hardening, not a C1 entry gate — this bullet's requirement transfers to
+  that follow-on);
 - context-qualified claims, indexes, wake, and cross-space permission changes;
 - vector input bases if cross-space actions are admitted.
 

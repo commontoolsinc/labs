@@ -270,25 +270,37 @@ starts, so it was replaced):
   from its own rows. Parked wake for session lanes is skipped: with no
   connected session there is no reader to serve and no acting context to
   bind — commits accumulate dirty markers and the lane catches up on
-  reconnect. This skip is staleness-only, and "scoped writes never wake
-  broader lanes" is sound, **only because of the scoped-cell computation
-  rule** (`docs/specs/scoped-cell-instances.md`): a derivation that reads
-  narrow state emits narrow-instance outputs plus links, so a broad
-  document's value never changes from a narrow read, and any actual narrow
-  read monotonically narrows the reader's own floor. That rule is a named
-  invariant of this design — and per-address scope checks alone cannot
-  enforce it, because the rule itself *requires* a session-lane transaction
-  to write one thing into broader instances: the stable scoped **link** in
-  the declared output slot. The generalized write rule is therefore:
-  a lane's writes to instances broader than the lane are admissible only
-  when the written value is a scoped link whose declared scope is at or
-  narrower than the lane, restricted to declared output/link slots.
-  Primary enforcement lives in the runner's output-scoping step (which
-  already decides instance placement and link emission); the execution
-  firewall remains the scope-*resolution* backstop and gains the
-  link-shape check for broader-instance writes. A builtin or hand-built
-  node copying a narrow *value* into a broad instance strands broad-lane
-  readers stale and is rejected at that boundary.
+  reconnect. This skip is staleness-only — but the argument must be stated
+  against what `docs/specs/scoped-cell-instances.md` actually permits, not
+  against an invariant it does not have. That spec's contract: a
+  computation's *output* takes the narrowest-of-read scope, with broader
+  output locations storing **links** to the scoped instance; and,
+  separately, narrow-to-wide **value** writes are explicitly sanctioned as
+  the data-widening path — handlers and lifts writing into passed-in cells
+  do not change the target's scope. Two consequences:
+
+  - **Lane-admissible writes are the output-link path only.** A lane's
+    writes to instances broader than the lane are admissible only as a
+    scoped link (declared scope at or narrower than the lane) in a
+    declared output/link slot. An action whose write surface includes
+    narrow-derived *value* writes to broader instances is **excluded from
+    scoped-lane claims and stays client-authoritative**: N session lanes
+    performing the same broad value write would be competing authoritative
+    writers — the race this design exists to end. This is a real,
+    spec-sanctioned carve-out (unlike pure derivations); shrinking it
+    means evolving scoped-cell semantics, which is Open question 7 for
+    that spec's owners. Primary enforcement lives in the runner's
+    output-scoping step (which already decides instance placement and
+    link emission); the execution firewall remains the scope-resolution
+    backstop and gains the link-shape check for broader-instance lane
+    writes.
+  - **Wake soundness, restated.** Parked-lane wake skip is sound because
+    *lane-authored* writes are so constrained: a lane's commits touch its
+    own scoped instances plus output links, never broad values. The
+    sanctioned narrow-to-wide value writes happen client-side (handlers,
+    excluded lifts), land as ordinary broad commits, and wake broader
+    lanes through the normal accepted-commit index — no scoped-lane wake
+    is involved, so skipping it loses nothing.
 - **User lanes follow principal liveness** (any connected session of the
   principal) in v1; with delegated keys they may also serve wake-on-commit
   while offline, which is precisely the async-durability win PerUser state
@@ -349,15 +361,38 @@ lookup, and the provider channel are all same-process primitives today).
   home-space confirmed value reflects B-state newer than what the client
   displays from B. Accepted, brief, self-healing, and counted, exactly as
   §B.4 counts its window.
-- **Writes later, under dual leases.** A cross-space *write* requires the
-  executor to hold both spaces' execution authority for the action's
-  transaction (never split; §B.2's whole-action rule is unchanged). That
-  means claim issuance gated on holding an `ExecutionLease` in every
-  written space, fencing in each, and a two-space settlement ordered
-  against both feeds. Until then, cross-space writers stay
-  client-authoritative — but by then they are the *only* residual class.
-- Permission changes mid-flight (losing read access to the foreign space)
-  revoke the claim exactly like a scope violation: whole-action fallback.
+- **Foreign permission changes are fenced by an authorization epoch, not
+  just named.** "Losing access revokes the claim" has a TOCTOU hole
+  without a mechanism: the foreign ACL can change after the point read and
+  before the home-space result commits. Each cross-space claim (and each
+  attempt) binds a **foreign authorization generation** — a per-(space,
+  principal) epoch the foreign engine bumps on any ACL mutation affecting
+  that principal. An ACL bump revokes claims holding the old generation,
+  and the home-space accept transaction revalidates the bound generation
+  before applying — a stale generation makes the whole attempt settle
+  canonically unserved, like any other firewall rejection. The C3 gate
+  covers both shapes: revocation while idle, and revocation between the
+  foreign read and the home apply.
+- **Writes later — and dual leases are necessary, not sufficient.** A
+  cross-space *write* requires the executor to hold both spaces' execution
+  authority for the action's transaction (never split; §B.2's whole-action
+  rule is unchanged): claim issuance gated on an `ExecutionLease` in every
+  written space, fencing in each. But leases solve *ownership* only. The
+  current storage contract applies multi-space commits **sequentially with
+  no cross-space atomicity**: commits stop at the first per-space failure,
+  earlier spaces stay durable, and the cross-space state is explicitly
+  indeterminate (`packages/runner/src/storage/interface.ts`, the
+  multi-space opt-in contract). Clients live with that today because their
+  writes are convergent; an *authoritative* executor cannot — a settlement
+  must never claim whole-action success when the second space failed, and
+  client overlay reconciliation and fail-open reruns are undefined against
+  an indeterminate partial apply. **C4's entry prerequisite is therefore a
+  coordinated commit protocol for co-resident engines** (prepare/outcome
+  record with recovery replay across both databases, or an explicit
+  per-space partial-outcome settlement vocabulary with defined client
+  behavior for each partial state) — its own design, reviewed before C4
+  starts. Until then, cross-space writers stay client-authoritative — but
+  by then they are the *only* residual class.
 
 ## 6. Rollout: one mechanism, staged enablement
 
@@ -381,13 +416,19 @@ Two hard rollout rules the dial alone does not give:
   flag-off. Scoped claim delivery therefore rides a new handshake
   subcapability (`context-lattice-claims-v1`), and — the load-bearing
   half — the host must not open a session lane for a session that did not
-  negotiate it. **User lanes need the stronger rule:** a user lane may open
-  only when *every* connected session of that principal has negotiated the
-  subcapability, and it drains when a non-negotiating session of the
-  principal connects. Otherwise a principal running one negotiated and one
-  Phase-2 client would have the Phase-2 session committing user-scoped
-  derived writes against the lane's commits — the exact write race this
-  gate exists to prevent, created by its own half-measure.
+  negotiate it. **User lanes need the stronger, principal-wide rule:** a
+  user lane may open only when *every* connected session of that principal
+  has negotiated the subcapability, and admitting a non-negotiating
+  session of the principal **fences the lane's generation and revokes its
+  claims before that session's demand/watch barrier completes** — no
+  window in which the Phase-2 client and the lane are both authoritative.
+  Otherwise a principal running one negotiated and one Phase-2 client
+  would have the Phase-2 session committing user-scoped derived writes
+  against the lane's commits — the exact write race this gate exists to
+  prevent, created by its own half-measure. The C1 gates include a
+  mixed-version reconnect fixture: a Phase-2 session of the same principal
+  connecting mid-run drains the user lane before it can observe or race
+  any lane commit.
 - **C2 on multi-session spaces is gated on the Phase 3 feed** (or at
   minimum session-scoped watch filtering). Session lanes add roughly one
   server commit per session-derived change per session — multiplying
@@ -414,7 +455,7 @@ Interactions:
 
 | Surface | Change |
 | --- | --- |
-| `packages/runner/src/scheduler/servability.ts` | context-rank classification instead of space-only rejection: `non-space-*-scope` reasons become lane-selection outcomes; cross-space stays inadmissible until C3 |
+| `packages/runner/src/scheduler/servability.ts` | context-rank classification instead of space-only rejection: `non-space-*-scope` reasons become lane-selection outcomes; narrow-derived value writes to broader instances stay client-authoritative (§4); cross-space reads stay inadmissible until C3, cross-space writes until C4 |
 | `packages/runner/src/executor/executor-worker.ts` | one Runtime per lane (session/user lanes constructed on demand inside the same Worker), lane-keyed candidate/claim maps; acting context threaded to the provider. **The Worker replica must be re-keyed by effective scope key** — the client replica keys documents by declared scope because a client is single-session; a multi-lane replica holding two sessions' instances of one id collides otherwise. This re-keying (doc map, pending versions, overlays, unresolvable-read rebase, provider sync frames, lane-tagged read resolution) is the intra-Worker confidentiality boundary and is load-bearing, not a refactor detail |
 | `packages/runner/src/storage/v2-host-provider.ts` | `actingContext` on commits; host validation against claim contextKey + the live lane grant (per-lane generation); scoped point queries under the acting principal |
 | `packages/memory/v2/server.ts` / `engine.ts` | claims/settlements/wake queries keyed by contextKey (schema already carries it); lane grants with per-lane generations and host-side drain on session death; context-scoped control-event delivery (§2); the `context-lattice-claims-v1` subcapability gate on lane opening (§6); session-lane demand derivation; foreign-readers index and vector basis (C3) |
@@ -435,11 +476,15 @@ Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
   session's client never matches the claim and its state is never readable
   from the lane; the lunch-poll placement guard passes; settlement latency
   with ≥3 concurrent session lanes stays within the agreed budget (§4).
-- **C3 — cross-space reads** (vector basis, foreign wake, ACL-checked
-  foreign point reads). Gate: a two-space read chain settles with a vector
-  basis and drops the overlay exactly once.
-- **C4 — cross-space writes** (dual leases) — explicitly last; may be
-  re-scoped after C3 experience.
+- **C3 — cross-space reads** (vector basis, foreign wake via the
+  foreign-readers index, ACL-checked foreign point reads, foreign
+  authorization generations). Gates: a two-space read chain settles with a
+  vector basis and drops the overlay exactly once; a foreign ACL
+  revocation while idle revokes the claim; a revocation between the
+  foreign read and the home apply settles the attempt unserved.
+- **C4 — cross-space writes** (dual leases + the coordinated-commit
+  protocol §5 requires as its reviewed entry prerequisite) — explicitly
+  last; may be re-scoped after C3 experience.
 
 ## 8. Open questions
 
@@ -484,6 +529,16 @@ Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
    weakens §B.5's confused-deputy protection (another principal's commit
    triggering egress under this session's identity) and requires CFC
    owners to decide it explicitly.
+7. **Narrow-to-wide value writes.** Scoped-cell semantics sanction
+   narrow-derived value writes into broader cells (handlers, lifts into
+   passed-in cells) as *the* data-widening path; §4 excludes such actions
+   from scoped-lane claims to avoid competing authoritative broad writers.
+   Shrinking that carve-out means evolving scoped-cell semantics (for
+   example, mandatory link-widening for lift side writes, keeping value
+   widening handler-only — handlers move server-side in Phase 5 anyway).
+   That is a decision for the scoped-cell spec's owners, with pattern
+   migration cost on the table; this design only requires that whatever
+   rule holds is enforceable at the runner output-scoping step.
 
 ## 9. Parent-document edits owed by this design
 

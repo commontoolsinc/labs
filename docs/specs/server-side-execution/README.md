@@ -253,10 +253,15 @@ The implementation:
 - derive an action `context_key` on the server using the shareability lattice
   `space < user < session`, where moving right is narrower;
 - permit a shared `space` or `user` row only when a trusted complete
-  transformer/runner scope summary covers the piece/result plus every possible
-  read, write, materializer envelope, and direct output; incomplete, unknown,
-  or dynamic surfaces start at `session:<principal>:<session-id>`, and observed
-  absence alone can never promote them;
+  transformer/runner scope summary covers the piece/result plus every declared
+  write, materializer envelope, and direct output. Observed reads may extend
+  beyond the summary's read envelopes when each is same-space and effectively
+  space-scoped (dynamic link-following reads — the implemented C0 step of
+  [context-lattice-execution.md](./context-lattice-execution.md)); incomplete
+  or unknown summaries, write surfaces exceeding their envelopes, and scoped
+  or cross-space observed surfaces still start at
+  `session:<principal>:<session-id>`, and observed absence alone can never
+  promote them;
 - include `context_key` in the action snapshot, action-state, read-index,
   and write-index action keys;
 - persist the resolved `read_scope_key` / `write_scope_key` on indexed
