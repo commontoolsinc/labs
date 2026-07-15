@@ -7,10 +7,13 @@ import {
   type ActionSettlement,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  getMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
   toAcceptedCommitSeq,
   toInputBasisSeq,
 } from "../v2.ts";
 import {
+  TEST_SESSION_OPEN_AUDIENCE,
   TEST_SESSION_OPEN_PRINCIPAL,
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,
@@ -35,6 +38,137 @@ const claimKey = (space: string): ActionClaimKey => ({
   actionKind: "computation",
   implementationFingerprint: "impl:v1",
   runtimeFingerprint: "runtime:v1",
+});
+
+class EffectBeforeMountContinuationTransport implements MemoryClient.Transport {
+  #receiver: (payload: string) => void = () => {};
+  readonly space = "did:key:z6Mk-execution-effect-before-mount";
+  readonly sessionId = "session:effect-before-mount";
+  readonly claim = {
+    ...claimKey(this.space),
+    leaseGeneration: 1,
+    claimGeneration: 1,
+    expiresAt: Date.now() + 60_000,
+  };
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(): void {}
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as {
+      type: string;
+      requestId?: string;
+    };
+    switch (message.type) {
+      case "hello":
+        this.#respond({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: {
+            ...getMemoryProtocolFlags(),
+            ...executionProtocolFlags,
+          },
+          sessionOpen: this.#sessionOpen(message.requestId ?? "hello"),
+        });
+        return Promise.resolve();
+      case "session.open":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: {
+            sessionId: this.sessionId,
+            sessionToken: "token:effect-before-mount",
+            serverSeq: 0,
+            sync: {
+              type: "sync",
+              fromSeq: 0,
+              toSeq: 0,
+              upserts: [],
+              removes: [],
+              execution: {
+                fromFeedSeq: 0,
+                toFeedSeq: 1,
+                snapshot: { claims: [] },
+                events: [],
+              },
+            },
+            sessionOpen: this.#sessionOpen(message.requestId!),
+          },
+        });
+        // A server can publish after sending the response but before the
+        // async mount continuation has installed its SpaceSession.
+        this.#respond({
+          type: "session/effect",
+          space: this.space,
+          sessionId: this.sessionId,
+          effect: {
+            type: "sync",
+            fromSeq: 0,
+            toSeq: 0,
+            upserts: [],
+            removes: [],
+            execution: {
+              fromFeedSeq: 1,
+              toFeedSeq: 2,
+              events: [{
+                type: "session.execution.claim.set",
+                claim: this.claim,
+              }],
+            },
+          },
+        });
+        return Promise.resolve();
+      case "session.ack":
+        this.#respond({
+          type: "response",
+          requestId: message.requestId!,
+          ok: { serverSeq: 0 },
+        });
+        return Promise.resolve();
+      default:
+        throw new Error(`unexpected memory request: ${message.type}`);
+    }
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  #sessionOpen(id: string) {
+    return {
+      audience: TEST_SESSION_OPEN_AUDIENCE,
+      challenge: {
+        value: `challenge:effect-before-mount:${id}`,
+        expiresAt: Date.now() + 60_000,
+      },
+    };
+  }
+
+  #respond(message: FabricValue): void {
+    this.#receiver(encodeMemoryBoundary(message));
+  }
+}
+
+Deno.test("client preserves execution effects delivered before mount installs the session", async () => {
+  const transport = new EffectBeforeMountContinuationTransport();
+  const client = await MemoryClient.connect({
+    transport,
+    protocolFlags: executionProtocolFlags,
+  });
+  try {
+    const session = await client.mount(
+      transport.space,
+      {},
+      testSessionOpenAuthFactory,
+    );
+    assertEquals(session.executionFeedSeq, 2);
+    assertEquals(session.executionClaims, [transport.claim]);
+  } finally {
+    await client.close();
+  }
 });
 
 Deno.test("buffered settlements are dropped when their claim is replaced before data arrives", async () => {

@@ -119,9 +119,13 @@ const compareEntitySnapshot = (
   left.id.localeCompare(right.id);
 
 type SessionRestoreResult = "restored" | "fresh-connection-required";
+interface PendingRequest {
+  deferred: PromiseWithResolvers<unknown>;
+  beforeResolve?: (response: ResponseMessage<unknown>) => void;
+}
 
 export class Client {
-  #pending = new Map<string, PromiseWithResolvers<unknown>>();
+  #pending = new Map<string, PendingRequest>();
   #spaces = new Set<SpaceSession>();
   #nextRequest = 1;
   #helloPending: PromiseWithResolvers<void> | null = null;
@@ -180,20 +184,25 @@ export class Client {
       options,
       this.sessionOpenAuthContext(),
     );
-    const result = await this.openSession(space, options, auth);
-    const session = new SpaceSession(
-      this,
-      space,
-      result.sessionId,
-      result.sessionToken,
-      result.serverSeq,
-      openAuthFactory,
-    );
-    if (result.sync !== undefined) {
-      session.initializeSync(result.sync);
+    let mountedSession: SpaceSession | undefined;
+    await this.requestOpenSession(space, options, auth, (result) => {
+      mountedSession = new SpaceSession(
+        this,
+        space,
+        result.sessionId,
+        result.sessionToken,
+        result.serverSeq,
+        openAuthFactory,
+      );
+      if (result.sync !== undefined) {
+        mountedSession.initializeSync(result.sync);
+      }
+      this.#spaces.add(mountedSession);
+    });
+    if (mountedSession === undefined) {
+      throw protocolError("session.open response did not install the session");
     }
-    this.#spaces.add(session);
-    return session;
+    return mountedSession;
   }
 
   forgetSession(session: SpaceSession): void {
@@ -226,12 +235,13 @@ export class Client {
 
   private async requestConnected<Result>(
     message: Record<string, unknown>,
+    beforeResolve?: (response: ResponseMessage<unknown>) => void,
   ): Promise<Result> {
     const requestId = message.requestId as string;
-    const pending = Promise.withResolvers<unknown>();
-    this.#pending.set(requestId, pending);
+    const deferred = Promise.withResolvers<unknown>();
+    this.#pending.set(requestId, { deferred, beforeResolve });
     await this.transport.send(encodeMemoryBoundary(message));
-    const result = await pending.promise as ResponseMessage<Result>;
+    const result = await deferred.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
       error.name = result.error.name;
@@ -257,15 +267,30 @@ export class Client {
     session: MountOptions,
     auth?: SessionOpenAuth,
   ): Promise<SessionOpenResult> {
-    const result = await this.request<SessionOpenResult>({
+    return await this.requestOpenSession(space, session, auth);
+  }
+
+  private async requestOpenSession(
+    space: string,
+    session: MountOptions,
+    auth?: SessionOpenAuth,
+    install?: (result: SessionOpenResult) => void,
+  ): Promise<SessionOpenResult> {
+    await this.ensureConnected();
+    return await this.requestConnected<SessionOpenResult>({
       type: "session.open",
       requestId: this.nextRequestId(),
       space,
       session,
       ...(auth ? auth : {}),
+    }, (response) => {
+      if (response.error !== undefined) {
+        return;
+      }
+      const result = response.ok as SessionOpenResult;
+      this.updateSessionOpenAuthContext(result.sessionOpen);
+      install?.(result);
     });
-    this.updateSessionOpenAuthContext(result.sessionOpen);
-    return result;
   }
 
   isConnected(): boolean {
@@ -388,39 +413,45 @@ export class Client {
       return;
     }
 
-    if (isSessionEffect(message)) {
-      for (const session of this.#spaces) {
-        if (
-          session.sessionId === message.sessionId &&
-          session.space === message.space
-        ) {
-          session.handleEffect(message.effect);
-        }
-      }
-      return;
-    }
-    if (isSessionRevoked(message)) {
-      for (const session of this.#spaces) {
-        if (
-          session.sessionId === message.sessionId &&
-          session.space === message.space
-        ) {
-          session.handleRevoked(message.reason);
-        }
-      }
+    if (isSessionEffect(message) || isSessionRevoked(message)) {
+      this.deliverSessionMessage(message);
       return;
     }
     if (isResponse(message)) {
       const pending = this.#pending.get(message.requestId);
       if (pending) {
-        pending.resolve(message);
-        this.#pending.delete(message.requestId);
+        try {
+          pending.beforeResolve?.(message);
+          pending.deferred.resolve(message);
+        } catch (error) {
+          pending.deferred.reject(error);
+        } finally {
+          this.#pending.delete(message.requestId);
+        }
       }
     }
   }
 
   private nextRequestId(): string {
     return `req:${this.#nextRequest++}`;
+  }
+
+  private deliverSessionMessage(
+    message: SessionEffectMessage | SessionRevokedMessage,
+  ): void {
+    for (const session of this.#spaces) {
+      if (
+        session.sessionId !== message.sessionId ||
+        session.space !== message.space
+      ) {
+        continue;
+      }
+      if (message.type === "session/effect") {
+        session.handleEffect(message.effect);
+      } else {
+        session.handleRevoked(message.reason);
+      }
+    }
   }
 
   private async ensureConnected(): Promise<void> {
@@ -519,7 +550,7 @@ export class Client {
 
   private rejectPending(error: Error): void {
     for (const pending of this.#pending.values()) {
-      pending.reject(error);
+      pending.deferred.reject(error);
     }
     this.#pending.clear();
     this.#helloPending?.reject(error);
