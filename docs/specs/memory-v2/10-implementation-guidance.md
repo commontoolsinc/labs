@@ -35,7 +35,7 @@ target. In particular:
 - the public one-shot read surface in this pass is `graph.query`; the older
   simple `query` / wildcard selector shape remains future protocol design
 - server syncs use negotiated frame-local `syncSchemaTableV2` schema tables;
-  query, watch, and transact requests use durable `requestSchemaCasV1` only when
+  query, watch, and transact requests use `requestSchemaCasV1` only when
   both peers advertise it and the server supplies store generation metadata
 - Toolshed owns one bounded service-wide request-schema SQLite store. Schemas in
   it are non-secret protocol metadata addressed by canonical tagged hash;
@@ -102,15 +102,16 @@ mismatched audience.
 
 The optional request-side schema CAS is negotiated independently of response
 schema tables. It is active only when the client and server both advertise
-`requestSchemaCasV1` and `hello.ok.requestSchemaCas` supplies the durable store
+`requestSchemaCasV1` and `hello.ok.requestSchemaCas` supplies the store
 generation (plus its service audience when present). Supported requests may
 then replace exact query-selector and link-payload schema positions with
 `schema-cas@1:<tagged-hash>` references. Clients optimistically omit
 definitions even on first use. On `MissingSchemas`, they retry once with the
-canonical definitions; a second miss is terminal. Once admitted, the durable
+canonical definitions; a second miss is terminal. Once admitted, the injected
 store serves refs-only requests sequentially across warm requests, same-client
-reconnect and session resume, fresh clients, and server restarts that reopen
-the store. This trades a cold miss for one extra round trip. `SchemaStoreError`
+reconnect and session resume, and fresh clients that reach that store. A
+durable store additionally serves restarts that reopen it. This trades a cold
+miss for one extra round trip. `SchemaStoreError`
 disables CAS for that connection and causes one exact inline retry. Concurrent
 cold missers may each send the body on their forced retry: exactly-once transfer
 across concurrent clients would require explicit coordination. Reserved wire

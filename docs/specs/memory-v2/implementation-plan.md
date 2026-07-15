@@ -32,10 +32,10 @@ Implemented on the current branch:
 - `session.watch.add` duplicate-id handling: identical definitions are no-ops,
   changed definitions are rejected
 - negotiated schema compaction in both directions: frame-local
-  `syncSchemaTableV2` tables for server syncs and durable `requestSchemaCasV1`
+  `syncSchemaTableV2` tables for server syncs and `requestSchemaCasV1`
   refs-first references for query, watch, and transact request schemas
 - one service-wide, bounded SQLite request-schema store in Toolshed, identified
-  by a durable generation and service audience; durable references expand before
+  by a durable generation and service audience; request references expand before
   request processing, while forced-retry definitions are authorized,
   hash-verified, and admitted atomically
 - compatibility and availability fallbacks: peers without bilateral request-CAS

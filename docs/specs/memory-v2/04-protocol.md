@@ -143,14 +143,14 @@ advertise the capability; otherwise it sends the historical fully expanded
 shape. The older `syncSchemaTable` flag names an incompatible, index-keyed draft
 and does not enable the v2 encoding.
 
-`requestSchemaCasV1` advertises the separately negotiated request-side durable
-schema CAS encoding. It is active only when both peers advertise it and the
+`requestSchemaCasV1` advertises the separately negotiated request-side schema
+CAS encoding. It is active only when both peers advertise it and the
 server supplies `requestSchemaCas` metadata. It does not broaden
 `syncSchemaTableV2`: supported query,
 watch, and transact envelopes may replace their exact schema-bearing positions
 with `schema-cas@1:<tagged-hash>` and supply canonical schemas in
 `schemaDefinitions`. A receiver verifies every supplied definition by its
-canonical tagged hash, resolves omitted definitions from its durable schema
+canonical tagged hash, resolves omitted definitions from its injected schema
 store, and expands references before handing the request to logical handlers.
 Every supplied definition must be referenced by that request. The receiver
 resolves the complete request before atomically inserting its verified
@@ -159,20 +159,23 @@ durable schema availability.
 The server materializes this encoding only after a request has passed its open
 session and authorization boundary, then persists verified definitions and
 normalizes logical handlers, replay, and watch state back to inline schemas.
-Servers advertise the capability only when they have a shared durable store;
+Servers advertise the capability whenever their host injects a `SchemaStore`;
 `hello.ok.requestSchemaCas.generation` identifies that store, and its optional
-audience identifies the service that owns it. Clients that have not implemented
-request compression continue to send inline schemas unchanged.
+audience identifies the service that owns it. Toolshed injects a shared,
+bounded, durable store. Other hosts choose the store lifetime and capacity, and
+must not claim restart reuse unless their store is durable. Clients that have
+not implemented request compression continue to send inline schemas unchanged.
 
 Negotiated clients use refs-first requests: every generated schema hash is
 optimistically sent as `schema-cas@1:` without a definition, including a
 client's cold first use. A `MissingSchemas` response causes exactly one retry
 with that request's canonical `schemaDefinitions`; a second `MissingSchemas` is
-terminal. After admission, the durable store makes sequential later uses refs
-only across warm requests, reconnect and resumed sessions, fresh clients, and
-server restarts that reopen the same schema store. The cold miss costs one extra
-round trip. A `SchemaStoreError` instead disables request CAS for that
-connection and retries the original request inline once.
+terminal. After admission, the store makes sequential later uses refs only
+across warm requests, reconnect and resumed sessions, and fresh clients that
+reach the same store. A durable store additionally supports server restarts that
+reopen it. The cold miss costs one extra round trip. A `SchemaStoreError`
+instead disables request CAS for that connection and retries the original
+request inline once.
 
 This is a sequential reuse guarantee, not a global exactly-once transfer
 guarantee. Concurrent cold clients can independently observe a missing hash and
@@ -183,11 +186,12 @@ Schema hashes are addresses, not authorization capabilities. A Toolshed-wide
 store intentionally allows any authorized Memory request at that service to
 resolve a known schema hash, so schemas admitted to this CAS MUST be treated as
 non-secret protocol metadata. The store has no public list or fetch endpoint.
-Implementations bound definition count, individual schema size, hash length,
-entry count, and total durable bytes. If the durable store rejects a request,
-the client disables request CAS for that connection and retries the original
-inline request once; schema-store exhaustion must degrade the optimization, not
-deny the underlying Memory operation.
+The protocol bounds definition count, individual schema size, and hash length.
+Toolshed also bounds store entry count and total bytes; other hosts are
+responsible for equivalent capacity policy. If the schema store rejects a
+request, the client disables request CAS for that connection and retries the
+original inline request once; schema-store exhaustion must degrade the
+optimization, not deny the underlying Memory operation.
 
 ### 4.1.2 Logical Sessions and Resume
 
