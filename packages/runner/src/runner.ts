@@ -1096,18 +1096,20 @@ export class Runner {
       const manifestMatch = existingManifest.findIndex((existingDescriptor) =>
         deepEqual(existingDescriptor.partialCause, descriptor.partialCause)
       );
+      // Re-emit the manifest link and backlink from the current descriptor on
+      // every setup. A compatible setsrc may narrow an internal schema while
+      // retaining the same partial cause; preserving the old manifest entry
+      // would leave stale producer authority attached to that cell.
+      const derivedSigilLink = derivedCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+      });
+      manifest.push({
+        partialCause: descriptor.partialCause,
+        link: derivedSigilLink,
+      });
+      setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
       if (manifestMatch === -1) {
-        // this cell isn't in our manifest yet. Create it, and add it to the manifest
-        const derivedSigilLink = derivedCell.getAsWriteRedirectLink({
-          base: resultCell,
-          includeSchema: true,
-        });
-        manifest.push({
-          partialCause: descriptor.partialCause,
-          link: derivedSigilLink,
-        });
-        setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
-
         // Seed the build-time default for the freshly created cell. The
         // manifest entry and this default are written together in one
         // transaction, so a manifest-referenced cell is already durable; on a
@@ -1127,8 +1129,6 @@ export class Runner {
             derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
           }
         }
-      } else {
-        manifest.push(existingManifest[manifestMatch]);
       }
     }
 

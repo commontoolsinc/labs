@@ -50,6 +50,33 @@ type ActiveDefaultMergePairs = WeakMap<
   WeakMap<object, WeakSet<object>>
 >;
 
+const mergeDefaultCandidateObjects = (
+  earlier: Record<string, FabricValue>,
+  later: Record<string, FabricValue>,
+): Record<string, FabricValue> => {
+  const result: Record<string, FabricValue> = {};
+  for (const key of new Set([...Object.keys(earlier), ...Object.keys(later)])) {
+    const hasEarlier = Object.hasOwn(earlier, key);
+    const hasLater = Object.hasOwn(later, key);
+    const earlierValue = earlier[key];
+    const laterValue = later[key];
+    const value = hasEarlier && hasLater &&
+        isFabricPlainObject(earlierValue) && !isCellLink(earlierValue) &&
+        isFabricPlainObject(laterValue) && !isCellLink(laterValue)
+      ? mergeDefaultCandidateObjects(earlierValue, laterValue)
+      : hasEarlier
+      ? earlierValue
+      : laterValue;
+    Object.defineProperty(result, key, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return result;
+};
+
 /** Whether an opaque Cell materialization matches this schema's wrapper. */
 export const schemaAcceptsOpaqueCellValue = (
   value: unknown,
@@ -273,6 +300,83 @@ function extractDefaultValuesInternal(
   activeSchemas.add(canonical);
 
   try {
+    const unionConstraints = [canonical.anyOf, canonical.oneOf].filter(
+      (branches): branches is JSONSchema[] => Array.isArray(branches),
+    );
+    if (unionConstraints.length > 0) {
+      if (Object.hasOwn(canonical, "default")) {
+        return validateSchemaValue(
+            canonical,
+            canonical.default,
+            resolvedRoot,
+          ) === undefined
+          ? canonical.default
+          : NO_SCHEMA_DEFAULT;
+      }
+
+      const {
+        anyOf: _anyOf,
+        oneOf: _oneOf,
+        default: _default,
+        ...baseSchema
+      } = canonical;
+      type DefaultCandidate = {
+        value: FabricValue | typeof NO_SCHEMA_DEFAULT;
+        selectedBranches: JSONSchema[];
+      };
+      let candidates: DefaultCandidate[] = [{
+        value: extractDefaultValuesInternal(
+          baseSchema,
+          resolvedRoot,
+          activeSchemasByRoot,
+        ),
+        selectedBranches: [],
+      }];
+      for (const branches of unionConstraints) {
+        const expanded: DefaultCandidate[] = [];
+        for (const candidate of candidates) {
+          for (const branch of branches) {
+            const branchDefault = extractDefaultValuesInternal(
+              branch,
+              resolvedRoot,
+              activeSchemasByRoot,
+            );
+            let value = candidate.value;
+            if (value === NO_SCHEMA_DEFAULT) {
+              value = branchDefault;
+            } else if (
+              branchDefault !== NO_SCHEMA_DEFAULT &&
+              isFabricPlainObject(value) && !isCellLink(value) &&
+              isFabricPlainObject(branchDefault) &&
+              !isCellLink(branchDefault)
+            ) {
+              value = mergeDefaultCandidateObjects(value, branchDefault);
+            }
+            expanded.push({
+              value,
+              selectedBranches: [...candidate.selectedBranches, branch],
+            });
+          }
+        }
+        candidates = expanded;
+      }
+      const validCandidates = candidates.filter((candidate) =>
+        candidate.value !== NO_SCHEMA_DEFAULT &&
+        candidate.selectedBranches.every((branch) =>
+          validateSchemaValue(branch, candidate.value, resolvedRoot) ===
+            undefined
+        ) &&
+        validateSchemaValue(canonical, candidate.value, resolvedRoot) ===
+          undefined
+      ).map((candidate) => candidate.value as FabricValue);
+      return validCandidates.length > 0 &&
+          validCandidates.every((candidate) =>
+            schemaDefaultValueEqual(candidate, validCandidates[0])
+          )
+        ? validCandidates[0]
+        : NO_SCHEMA_DEFAULT;
+    }
+
     if (
       (canonical.type === "object" ||
         Array.isArray(canonical.type) && canonical.type.includes("object")) &&
@@ -319,25 +423,6 @@ function extractDefaultValuesInternal(
       return Object.keys(obj).length > 0 || hasObjectDefault
         ? Object.freeze(obj)
         : NO_SCHEMA_DEFAULT;
-    }
-
-    const alternatives = canonical.anyOf ?? canonical.oneOf;
-    if (Array.isArray(alternatives)) {
-      if (Object.hasOwn(canonical, "default")) return canonical.default;
-      const defaults = alternatives.flatMap((branch) => {
-        const value = extractDefaultValuesInternal(
-          branch,
-          resolvedRoot,
-          activeSchemasByRoot,
-        );
-        return value === NO_SCHEMA_DEFAULT ? [] : [value];
-      });
-      if (
-        defaults.length > 0 &&
-        defaults.every((value) => schemaDefaultValueEqual(value, defaults[0]))
-      ) {
-        return defaults[0];
-      }
     }
 
     return Object.hasOwn(canonical, "default")
@@ -502,9 +587,20 @@ function mergeSchemaDefaultsInternal(
         value: unknown;
         selectedBranches: JSONSchema[];
       };
+      const unionDefaultValue = mergeSchemaDefaultsInternal(
+        value,
+        defaults,
+        baseSchema,
+        resolvedRoot,
+        true,
+        mergeMaterializedLinks,
+        acceptOpaqueValue,
+        undefined,
+        activePairs,
+      );
       let candidates: UnionCandidate[] = [{
         value: mergeSchemaDefaultsInternal(
-          value,
+          unionDefaultValue,
           baseDefaults,
           baseSchema,
           resolvedRoot,
@@ -576,8 +672,19 @@ function mergeSchemaDefaultsInternal(
         { ...objectSchema, type: "object" },
         resolvedRoot,
       );
-      return mergeSchemaDefaultsInternal(
+      const unionDefaultValue = mergeSchemaDefaultsInternal(
         value,
+        defaults,
+        { ...objectSchema, type: "object" },
+        resolvedRoot,
+        true,
+        mergeMaterializedLinks,
+        acceptOpaqueValue,
+        undefined,
+        activePairs,
+      );
+      return mergeSchemaDefaultsInternal(
+        unionDefaultValue,
         objectDefaults,
         { ...objectSchema, type: "object" },
         resolvedRoot,

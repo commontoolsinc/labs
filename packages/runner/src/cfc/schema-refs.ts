@@ -6,7 +6,7 @@ import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { rendererVDOMSchema, vnodeSchema } from "@commonfabric/runner/schemas";
-import { decodeJsonPointer } from "../link-types.ts";
+import { decodeJsonPointer, encodeJsonPointer } from "../link-types.ts";
 
 const logger = getLogger("cfc");
 
@@ -134,6 +134,9 @@ const localDefinitionName = (schemaRef: string): string | undefined => {
   return isRootDefsSchemaPointer(path) ? path[2] : undefined;
 };
 
+const encodedLocalDefinitionRef = (name: string): string =>
+  encodeJsonPointer(["#", "$defs", name]);
+
 const forEachSubschema = (
   schema: JSONSchemaObj,
   visit: (child: JSONSchema) => void,
@@ -196,6 +199,91 @@ const mapSubschemas = (
     if (mapped !== undefined) update(key, Object.fromEntries(mapped));
   }
   return (result ?? schema) as JSONSchemaObj;
+};
+
+const localDefinitionNamesInScope = (
+  schema: JSONSchemaObj,
+  definitions: SchemaDefinitions,
+): Set<string> => {
+  const names = new Set(Object.keys(definitions));
+  const collect = (fragment: JSONSchema): void => {
+    if (typeof fragment === "boolean") return;
+    if (typeof fragment.$ref === "string") {
+      const name = localDefinitionName(fragment.$ref);
+      if (name !== undefined) names.add(name);
+    }
+    forEachSubschema(fragment, (child) => {
+      if (
+        isRecord(child) && isRecord(child.$defs) &&
+        child.$defs !== definitions
+      ) return;
+      collect(child);
+    });
+  };
+  collect(schema);
+  for (const definition of Object.values(definitions)) {
+    if (
+      isRecord(definition) && isRecord(definition.$defs) &&
+      definition.$defs !== definitions
+    ) continue;
+    collect(definition);
+  }
+  return names;
+};
+
+/**
+ * Namespace one flattened schema scope so its local refs cannot bind to names
+ * owned by another scope. Children with their own `$defs` remain independent.
+ */
+const namespaceLocalDefinitionScope = (
+  schema: JSONSchemaObj,
+  definitions: SchemaDefinitions,
+  reservedNames: ReadonlySet<string>,
+): JSONSchemaObj => {
+  const names = localDefinitionNamesInScope(schema, definitions);
+
+  const usedNames = new Set([...reservedNames, ...names]);
+  const renamed = new Map<string, string>();
+  let suffix = 0;
+  for (const name of [...names].toSorted(utf8Compare)) {
+    let candidate: string;
+    do candidate = `__cfc_ref_site_${suffix++}_${name}`; while (
+      usedNames.has(candidate)
+    );
+    usedNames.add(candidate);
+    renamed.set(name, candidate);
+  }
+
+  const rewrite = (fragment: JSONSchema): JSONSchema => {
+    if (typeof fragment === "boolean") return fragment;
+    let result = fragment;
+    if (typeof fragment.$ref === "string") {
+      const name = localDefinitionName(fragment.$ref);
+      const nextName = name === undefined ? undefined : renamed.get(name);
+      if (nextName !== undefined) {
+        result = { ...result, $ref: encodedLocalDefinitionRef(nextName) };
+      }
+    }
+    return mapSubschemas(
+      result,
+      (child) =>
+        isRecord(child) && isRecord(child.$defs) && child.$defs !== definitions
+          ? child
+          : rewrite(child),
+    );
+  };
+
+  const rewritten = rewrite(schema) as JSONSchemaObj;
+  const rewrittenDefinitions = Object.fromEntries(
+    Object.entries(definitions).map(([name, definition]) => [
+      renamed.get(name)!,
+      isRecord(definition) && isRecord(definition.$defs) &&
+        definition.$defs !== definitions
+        ? definition
+        : rewrite(definition),
+    ]),
+  );
+  return { ...rewritten, $defs: rewrittenDefinitions };
 };
 
 const addRefs = (target: Set<string>, source: ReadonlySet<string>): void => {
@@ -545,7 +633,10 @@ const resolveCfcSchemaRefsUncached = (
   fullSchema: JSONSchema = schemaObj,
 ): JSONSchema | undefined => {
   const seenRefs = new Map<JSONSchema, Set<string>>();
-  const pendingSiblings: JSONSchemaObj[] = [];
+  const pendingSiblings: {
+    schema: JSONSchemaObj;
+    root: JSONSchema;
+  }[] = [];
   const mergePendingSiblings = (
     initial: JSONSchema,
     initialRoot: JSONSchema,
@@ -553,15 +644,36 @@ const resolveCfcSchemaRefsUncached = (
     let resolved = initial;
     let resolvedRoot = initialRoot;
     while (pendingSiblings.length > 0) {
-      const siblings = pendingSiblings.pop()!;
+      const { schema: siblings, root: siblingRoot } = pendingSiblings.pop()!;
       if (isRecord(resolved)) {
         const resolvedDefinitions = resolved.$defs ??
           (isRecord(resolvedRoot) ? resolvedRoot.$defs : undefined);
-        const siblingDefinitions = siblings.$defs;
+        let scopedSiblings = siblings;
+        let siblingDefinitions = isRecord(siblingRoot)
+          ? siblingRoot.$defs
+          : undefined;
+        if (siblingRoot !== resolvedRoot) {
+          // `$ref` targets and ref-site siblings own different local-definition
+          // scopes. Namespace even an empty ref-site definition map: its
+          // unresolved local refs must not begin resolving against target defs
+          // merely because the two scopes are flattened into one object.
+          const targetDefinitions = isRecord(resolvedDefinitions)
+            ? resolvedDefinitions
+            : {};
+          const refSiteDefinitions = isRecord(siblingDefinitions)
+            ? siblingDefinitions
+            : {};
+          scopedSiblings = namespaceLocalDefinitionScope(
+            siblings,
+            refSiteDefinitions,
+            localDefinitionNamesInScope(resolved, targetDefinitions),
+          );
+          siblingDefinitions = scopedSiblings.$defs;
+        }
         // A flattened resolved view has one `$defs` slot even though refs in
         // the target and in its ref-site siblings originate in different
-        // document scopes. Keep the target's existing names authoritative for
-        // compatibility, while adding definitions used only by the siblings.
+        // document scopes. Ref-site names are namespaced above, leaving the
+        // target's existing names authoritative.
         const definitions = isRecord(resolvedDefinitions) &&
             isRecord(siblingDefinitions) &&
             resolvedDefinitions !== siblingDefinitions
@@ -569,7 +681,7 @@ const resolveCfcSchemaRefsUncached = (
           : resolvedDefinitions ?? siblingDefinitions;
         resolved = {
           ...resolved,
-          ...siblings,
+          ...scopedSiblings,
           ...(definitions !== undefined && { $defs: definitions }),
         } as JSONSchemaObj;
       } else {
@@ -608,7 +720,11 @@ const resolveCfcSchemaRefsUncached = (
       // Delay ref-site siblings until the referenced target's own ref chain is
       // resolved in its local definition scope. Unwinding then establishes
       // the ref-site `$defs` scope without rebinding an intermediate target.
-      pendingSiblings.push(rest as JSONSchemaObj);
+      const siblings = rest as JSONSchemaObj;
+      pendingSiblings.push({
+        schema: siblings,
+        root: cfcSchemaChildRoot(siblings, fullSchema),
+      });
     }
     if (typeof resolved === "boolean") {
       return mergePendingSiblings(resolved, resolvedRoot);

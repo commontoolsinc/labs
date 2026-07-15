@@ -204,6 +204,49 @@ describe("runPattern", () => {
     expect(await result.pull()).toEqual({ output: 5 });
   });
 
+  it("refreshes derived internal manifest schemas during setup updates", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "refresh derived internal manifest schema",
+    );
+    const pattern = (valueSchema: JSONSchema): Pattern => ({
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: { value: valueSchema },
+        required: ["value"],
+      },
+      derivedInternalCells: [{
+        partialCause: "value",
+        schema: valueSchema,
+      }],
+      result: {
+        value: { $alias: { partialCause: "value", path: [] } },
+      },
+      nodes: [],
+    });
+    const wide = {
+      type: ["number", "string"],
+      default: 1,
+    } as const;
+    const narrow = { type: "number", default: 1 } as const;
+
+    await setupTrusted(runtime, undefined, pattern(wide), {}, resultCell);
+    const firstManifest = resultCell.getMetaRaw("internal");
+    const firstLink = Array.isArray(firstManifest)
+      ? parseLink(firstManifest[0].link, resultCell)
+      : undefined;
+    expect(firstLink?.schema).toEqual(wide);
+
+    await setupTrusted(runtime, undefined, pattern(narrow), {}, resultCell);
+    const nextManifest = resultCell.getMetaRaw("internal");
+    const nextLink = Array.isArray(nextManifest)
+      ? parseLink(nextManifest[0].link, resultCell)
+      : undefined;
+    expect(nextLink?.id).toBe(firstLink?.id);
+    expect(nextLink?.schema).toEqual(narrow);
+  });
+
   it("sets scoped write-redirect metadata links for argument and internal cells", async () => {
     const argumentSchema = {
       type: "object",
@@ -791,6 +834,41 @@ describe("runPattern", () => {
     );
     const defaultsValue = await resultWithDefaults.pull();
     expect(defaultsValue).toEqual({ result: 84 }); // 42 * 2
+  });
+
+  it("does not persist a union default rejected by the full argument schema", () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        anyOf: [
+          { type: "undefined" },
+          {
+            type: "object",
+            properties: { value: { type: "number", default: 1 } },
+            required: ["value"],
+          },
+        ],
+        oneOf: [
+          { type: "undefined" },
+          { type: "object" },
+          {
+            type: "object",
+            properties: { value: { type: "number" } },
+            required: ["value"],
+          },
+        ],
+      },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "invalid full-schema union default",
+    );
+
+    runTrusted(runtime, undefined, pattern, undefined, resultCell);
+
+    expect(resultCell.getArgumentCell()?.getRawUntyped()).toBeUndefined();
   });
 
   it("should handle complex nested schema types", async () => {
@@ -2158,6 +2236,83 @@ describe("runner utils", () => {
       })).toEqual({ x: 1 });
     });
 
+    it("returns no default unless the candidate satisfies the full schema", () => {
+      const duplicateOneOf: JSONSchema = {
+        oneOf: [
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 1 } },
+            required: ["x"],
+          },
+          {
+            type: "object",
+            properties: { x: { type: "number", default: 1 } },
+            required: ["x"],
+          },
+        ],
+      };
+      const baseConflict: JSONSchema = {
+        type: "undefined",
+        anyOf: [{
+          type: "object",
+          properties: { x: { type: "number", default: 1 } },
+          required: ["x"],
+        }],
+      };
+
+      expect(extractDefaultValues(duplicateOneOf)).toBeUndefined();
+      expect(extractDefaultValues(baseConflict)).toBeUndefined();
+    });
+
+    it("combines defaults across simultaneous union families", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        anyOf: [{
+          type: "object",
+          properties: { fromAny: { type: "number", default: 1 } },
+          required: ["fromAny"],
+        }],
+        oneOf: [{
+          type: "object",
+          properties: { fromOne: { type: "number", default: 2 } },
+          required: ["fromOne"],
+        }],
+      };
+
+      expect(extractDefaultValues(schema)).toEqual({
+        fromAny: 1,
+        fromOne: 2,
+      });
+    });
+
+    it("preserves explicit undefined while combining union defaults", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        anyOf: [{
+          type: "object",
+          properties: {
+            x: { type: "undefined", default: undefined },
+          },
+          required: ["x"],
+        }],
+        oneOf: [{
+          type: "object",
+          properties: { y: { type: "number", default: 2 } },
+          required: ["y"],
+        }],
+      };
+
+      const defaults = extractDefaultValues(schema) as
+        | Record<string, unknown>
+        | undefined;
+      expect(schemaHasDefaultValue(schema)).toBe(true);
+      expect(defaults).toBeDefined();
+      expect(Object.hasOwn(defaults!, "x")).toBe(true);
+      expect(defaults!.x).toBeUndefined();
+      expect(defaults!.y).toBe(2);
+      expect(validateSchemaValue(schema, defaults)).toBeUndefined();
+    });
+
     it("preserves explicit empty, non-object, and undefined defaults", () => {
       const noDefault: JSONSchema = {
         type: "object",
@@ -2379,6 +2534,51 @@ describe("runner utils", () => {
 
       expect(value).toEqual(existing);
       expect(validateSchemaValue(schema, value)).toBeUndefined();
+    });
+
+    it("hydrates explicit object defaults into present union values", () => {
+      const unionSchema: JSONSchema = {
+        type: "object",
+        default: { kind: "a", x: 1 },
+        anyOf: [
+          {
+            type: "object",
+            properties: {
+              kind: { const: "a" },
+              x: { type: "number" },
+            },
+            required: ["kind", "x"],
+          },
+          {
+            type: "object",
+            properties: { kind: { const: "b" } },
+            required: ["kind"],
+          },
+        ],
+      };
+      const typeArraySchema: JSONSchema = {
+        type: ["object", "undefined"],
+        properties: { x: { type: "number" } },
+        required: ["x"],
+        default: { x: 2 },
+      };
+
+      const unionValue = mergeSchemaDefaults(
+        {},
+        extractDefaultValues(unionSchema),
+        unionSchema,
+      );
+      const typeArrayValue = mergeSchemaDefaults(
+        {},
+        extractDefaultValues(typeArraySchema),
+        typeArraySchema,
+      );
+
+      expect(unionValue).toEqual({ kind: "a", x: 1 });
+      expect(validateSchemaValue(unionSchema, unionValue)).toBeUndefined();
+      expect(typeArrayValue).toEqual({ x: 2 });
+      expect(validateSchemaValue(typeArraySchema, typeArrayValue))
+        .toBeUndefined();
     });
 
     it("hydrates defaults from the anyOf branch matching existing state", () => {

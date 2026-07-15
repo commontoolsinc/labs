@@ -3,6 +3,7 @@ import {
   type CellPath,
   ContextualFlowControl,
   extractDefaultValues,
+  getMetaLink,
   getPatternIdentityRef,
   getValueAtPath,
   isCell,
@@ -20,6 +21,7 @@ import {
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
+import type { CellKind } from "@commonfabric/api";
 import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
@@ -90,10 +92,62 @@ interface PathSchemaContract {
   mayBeMissing?: boolean;
 }
 
+interface DurableSchemaPath {
+  root: JSONSchema;
+  path: (string | number)[];
+  /** Producer-document path corresponding to `path[schemaBaseDepth]`. */
+  rawBasePath: (string | number)[];
+  /** Projection ancestors in `path` that do not exist in the producer doc. */
+  schemaBaseDepth: number;
+  /** Materialized schema root used to validate the complete staged value. */
+  validationCell: Cell<unknown>;
+  /** Path within `validationCell` changed by the producer write. */
+  validationPath: (string | number)[];
+}
+
+interface DurableSourceContract {
+  schemas: DurableSchemaPath[];
+}
+
 interface StreamEventLocalization {
   contract: PathSchemaContract;
   consumedStream: boolean;
   issue?: string;
+}
+
+interface OuterCellShape {
+  kind: CellKind;
+  scope: ReturnType<typeof ContextualFlowControl.getAsCellScope>;
+}
+
+interface OuterCellLocalization {
+  contract: PathSchemaContract;
+  outer?: OuterCellShape;
+  issue?: string;
+}
+
+interface StoredCellTopology {
+  value: unknown;
+  opaqueHandle: boolean;
+}
+
+function storedCellTopology(
+  value: unknown,
+  cell: Cell<unknown>,
+): StoredCellTopology {
+  if (!isLink(value)) return { value, opaqueHandle: false };
+  try {
+    return {
+      value,
+      // A write redirect is an ordinary projection alias. A non-redirecting
+      // link is a first-class Cell handle whose wrapper capability applies.
+      opaqueHandle: parseLinkOrThrow(value, cell).overwrite !== "redirect",
+    };
+  } catch {
+    // Malformed links fail later during normal resolution/validation; do not
+    // grant them an ordinary-value branch for capability checks.
+    return { value, opaqueHandle: true };
+  }
 }
 
 const LINK_PATH_SAFE_ANCESTOR_KEYS = new Set([
@@ -122,6 +176,16 @@ const LINK_PATH_SAFE_ANCESTOR_KEYS = new Set([
   "title",
   "type",
   "writeOnly",
+]);
+
+const SCHEMA_ANNOTATION_KEYS = new Set([
+  "$comment",
+  "$defs",
+  "$id",
+  "$schema",
+  "description",
+  "examples",
+  "title",
 ]);
 
 function asCellShapesMatch(left: JSONSchema | undefined, right: JSONSchema) {
@@ -192,7 +256,10 @@ function linkPathAncestorIssue(
 export function linkPathContracts(
   initial: readonly PathSchemaContract[],
   path: readonly (string | number)[],
-  options: { trackSourcePresence?: boolean } = {},
+  options: {
+    trackSourcePresence?: boolean;
+    preserveMissingFlag?: boolean;
+  } = {},
 ): PathSchemaContract[] {
   let contracts = [...initial];
   for (const segment of path) {
@@ -258,11 +325,11 @@ export function linkPathContracts(
           throw new Error(`array link path contains non-index segment ${part}`);
         }
         const index = Number(part);
+        // Fabric arrays preserve sparse holes. `minItems` constrains length,
+        // not own-property presence, so every indexed source path can still
+        // yield Fabric `undefined` even for an unconditionally shaped array.
         const mayBeMissing = contract.mayBeMissing === true ||
-          options.trackSourcePresence === true &&
-            (!isUnconditionallyType(schema, "array") ||
-              typeof schema.minItems !== "number" ||
-              schema.minItems <= index);
+          options.trackSourcePresence === true;
         const child = Array.isArray(schema.prefixItems) &&
             index < schema.prefixItems.length
           ? schema.prefixItems[index]!
@@ -284,7 +351,8 @@ export function linkPathContracts(
     contracts = next;
   }
   return contracts.map(resolvePathSchemaContract).map((contract) =>
-    options.trackSourcePresence === true && contract.mayBeMissing === true
+    options.trackSourcePresence === true && contract.mayBeMissing === true &&
+      options.preserveMissingFlag !== true
       ? {
         schema: {
           anyOf: [contract.schema, { type: "undefined" }],
@@ -326,6 +394,248 @@ export function consumeOuterCellContract(
       ? payloadSchema
       : { ...payloadSchema, asCell: entries.slice(1) },
   };
+}
+
+function outerCellShapesMatch(
+  left: OuterCellShape,
+  right: OuterCellShape,
+): boolean {
+  return left.kind === right.kind && left.scope === right.scope;
+}
+
+/** Consume a uniform outer Cell wrapper through refs and compositions. */
+function localizeOuterCellContract(
+  unresolved: PathSchemaContract,
+  stored: StoredCellTopology | undefined = undefined,
+  active = new WeakSet<object>(),
+): OuterCellLocalization {
+  const contract = resolvePathSchemaContract(unresolved);
+  const { schema, root } = contract;
+  if (typeof schema !== "object" || schema === null) return { contract };
+  if (active.has(schema)) {
+    return { contract, issue: "recursive Cell schema cannot be localized" };
+  }
+  active.add(schema);
+  try {
+    const entries = ContextualFlowControl.getAsCellValues(schema);
+    if (entries.length > 0) {
+      const consumed = consumeOuterCellContract(schema);
+      return {
+        contract: { ...contract, schema: consumed.payloadSchema, root },
+        outer: {
+          kind: consumed.kind,
+          scope: ContextualFlowControl.getAsCellScope(entries[0]),
+        },
+      };
+    }
+
+    let changed = false;
+    let outer: OuterCellShape | undefined;
+    const result = { ...schema };
+    const mergeOuter = (
+      candidate: OuterCellShape,
+    ): string | undefined => {
+      if (outer !== undefined && !outerCellShapesMatch(outer, candidate)) {
+        return "Cell alternatives expose incompatible outer capabilities";
+      }
+      outer = candidate;
+      return undefined;
+    };
+
+    for (const key of ["anyOf", "oneOf"] as const) {
+      const alternatives = schema[key];
+      if (!Array.isArray(alternatives)) continue;
+      const localized = alternatives.map((alternative) =>
+        localizeOuterCellContract(
+          {
+            schema: alternative,
+            root: cfcSchemaChildRoot(alternative, root),
+          },
+          stored,
+          active,
+        )
+      );
+      const invalid = localized.find((entry) => entry.issue !== undefined);
+      if (invalid !== undefined) return invalid;
+      const wrapped = localized.filter((entry) => entry.outer !== undefined);
+      if (wrapped.length === 0) continue;
+      if (wrapped.length !== localized.length) {
+        if (stored !== undefined && !stored.opaqueHandle) {
+          const unwrapped = localized.filter((entry) =>
+            entry.outer === undefined
+          );
+          if (
+            unwrapped.length === 1 &&
+            Object.keys(schema).every((schemaKey) =>
+              schemaKey === key || SCHEMA_ANNOTATION_KEYS.has(schemaKey)
+            )
+          ) {
+            // Once raw topology selects the sole ordinary alternative, a
+            // singleton union with annotations is exactly that branch. Return
+            // it directly so descendant localization does not mistake the
+            // already-resolved union for a parent/child correlation.
+            return unwrapped[0];
+          }
+          result[key] = unwrapped.map((entry) => entry.contract.schema);
+          changed = true;
+          continue;
+        }
+        const opaqueProbe = Symbol("opaque Cell schema probe");
+        const ambiguous = localized.some((entry) =>
+          entry.outer === undefined &&
+          validateSchemaValue(
+              entry.contract.schema,
+              opaqueProbe,
+              entry.contract.root,
+              {
+                acceptOpaqueValue: (_value, candidateSchema) =>
+                  ContextualFlowControl.getAsCellValues(candidateSchema)
+                    .length > 0,
+              },
+            ) === undefined
+        );
+        if (ambiguous) {
+          const onlyStreams = wrapped.every((entry) =>
+            entry.outer?.kind === "stream"
+          );
+          return {
+            contract,
+            issue: onlyStreams
+              ? `stream event schema has mixed stream and non-stream ${key} alternatives`
+              : `Cell schema has ambiguous wrapped and unwrapped ${key} alternatives`,
+          };
+        }
+      }
+      for (const entry of wrapped) {
+        const issue = mergeOuter(entry.outer!);
+        if (issue !== undefined) return { contract, issue };
+      }
+      // The concrete value is an opaque Cell handle, so unwrapped alternatives
+      // that cannot accept that handle were not selected. Source-path absence
+      // is tracked separately on the contract and restored after localization.
+      result[key] = wrapped.map((entry) => entry.contract.schema);
+      changed = true;
+    }
+
+    if (Array.isArray(schema.allOf)) {
+      const localized = schema.allOf.map((alternative) =>
+        localizeOuterCellContract(
+          {
+            schema: alternative,
+            root: cfcSchemaChildRoot(alternative, root),
+          },
+          stored,
+          active,
+        )
+      );
+      const invalid = localized.find((entry) => entry.issue !== undefined);
+      if (invalid !== undefined) return invalid;
+      const wrapped = localized.filter((entry) => entry.outer !== undefined);
+      for (const entry of wrapped) {
+        const issue = mergeOuter(entry.outer!);
+        if (issue !== undefined) return { contract, issue };
+      }
+      if (wrapped.length > 0) {
+        result.allOf = localized.map((entry, index) =>
+          entry.outer === undefined
+            ? schema.allOf![index]
+            : entry.contract.schema
+        );
+        changed = true;
+      }
+    }
+    return {
+      contract: { ...contract, schema: changed ? result : schema, root },
+      outer,
+    };
+  } finally {
+    active.delete(schema);
+  }
+}
+
+/** @internal Exported for exhaustive authority-lattice tests. */
+export function cellCapabilityCanNarrow(
+  source: CellKind,
+  target: CellKind,
+): boolean {
+  if (source === target) return true;
+  if (source === "cell") {
+    return target === "readonly" || target === "writeonly" ||
+      target === "opaque" || target === "comparable";
+  }
+  if (source === "readonly") {
+    return target === "comparable" || target === "opaque";
+  }
+  return false;
+}
+
+const cellKindCanWrite = (kind: CellKind): boolean =>
+  kind === "cell" || kind === "writeonly" || kind === "stream";
+
+function assertWritablePiecePath(
+  schema: JSONSchema,
+  path: readonly (string | number)[],
+  bindingAtTerminal: boolean,
+  writesThroughTerminal: boolean,
+  baseCell: Cell<unknown>,
+): void {
+  let contracts: PathSchemaContract[] = [{ schema, root: schema }];
+  const rawRoot = baseCell.getRawUntyped({ lastNode: "top" });
+  for (let index = 0; index <= path.length; index++) {
+    const terminal = index === path.length;
+    // A terminal replacement/initialization does not exercise a Cell
+    // capability. If it resolves through an existing link, however, it is a
+    // write against that producer and the wrapper must authorize it.
+    if (terminal && (bindingAtTerminal || !writesThroughTerminal)) return;
+    const prefix = path.slice(0, index);
+    const storedValue = rawValueAtPath(rawRoot, prefix);
+    let prefixCell = baseCell;
+    for (const segment of prefix) {
+      prefixCell = prefixCell.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    const stored = storedCellTopology(storedValue.value, prefixCell);
+    const localized = contracts.map((contract) =>
+      localizeOuterCellContract(contract, stored)
+    );
+    const invalid = localized.find((entry) => entry.issue !== undefined);
+    if (invalid?.issue !== undefined) throw new Error(invalid.issue);
+    for (const entry of localized) {
+      if (
+        entry.outer !== undefined &&
+        (!cellKindCanWrite(entry.outer.kind) ||
+          !terminal && entry.outer.kind === "stream")
+      ) {
+        throw new Error(
+          `${entry.outer.kind} Cell path is not writable`,
+        );
+      }
+    }
+    // Once a durable link is encountered, the resolved producer contract is
+    // checked independently below. Continuing through the caller schema would
+    // inspect payload branches without the producer's raw topology and can
+    // mistake an ordinary union alternative for a restricted Cell handle.
+    if (isLink(stored.value) && writesThroughTerminal) return;
+    if (terminal) return;
+    const localizedContracts = localized.map((entry) => entry.contract);
+    try {
+      contracts = linkPathContracts(localizedContracts, [path[index]!]);
+    } catch {
+      // Capability checks need only the wrapper shape at the next slot. The
+      // ordinary write validator below still handles parent correlations, so
+      // use CFC's conservative path projection when exact link localization
+      // deliberately fails closed for a correlated schema.
+      const cfc = new ContextualFlowControl();
+      contracts = localizedContracts.map((contract) => {
+        const child = cfc.schemaAtPath(contract.schema, [
+          String(path[index]!),
+        ]);
+        return {
+          schema: child,
+          root: cfcSchemaChildRoot(child, contract.root),
+        };
+      });
+    }
+  }
 }
 
 /**
@@ -476,7 +786,7 @@ function canFollowSourceScope(
 function durableSourceContract(
   linkedCell: Cell<unknown>,
   manager: PieceManager,
-): { root: JSONSchema; path: (string | number)[] } | undefined {
+): DurableSourceContract | undefined {
   const sourceLink = linkedCell.getAsNormalizedFullLink();
   const sourceRoot = manager.runtime.getCellFromLink(
     { ...sourceLink, path: [], schema: undefined },
@@ -487,8 +797,173 @@ function durableSourceContract(
   const resultSchema = sourceRoot.getMetaRaw("schema") as
     | JSONSchema
     | undefined;
-  if (resultSchema === undefined) return undefined;
-  return { root: resultSchema, path: [...sourceLink.path] };
+  if (resultSchema !== undefined) {
+    return {
+      schemas: [{
+        root: resultSchema,
+        path: [...sourceLink.path],
+        rawBasePath: [],
+        schemaBaseDepth: 0,
+        validationCell: sourceRoot,
+        validationPath: [...sourceLink.path],
+      }],
+    };
+  }
+
+  // Argument and derived-internal documents carry a producer-owned backlink
+  // to their Piece result. Recover their schemas from that result's metadata;
+  // the schema on `sourceLink` itself is caller-carried and can be forged with
+  // asSchema().
+  const resultLink = getMetaLink(sourceRoot, "result");
+  if (resultLink === undefined) return undefined;
+  const ownerResult = manager.runtime.getCellFromLink(
+    { ...resultLink, schema: undefined },
+    undefined,
+    linkedCell.tx,
+  );
+  const relativePath = (
+    producerLink: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>,
+  ): (string | number)[] | undefined => {
+    if (
+      producerLink.space !== sourceLink.space ||
+      producerLink.id !== sourceLink.id ||
+      producerLink.scope !== sourceLink.scope ||
+      producerLink.path.length > sourceLink.path.length ||
+      producerLink.path.some((segment, index) =>
+        segment !== sourceLink.path[index]
+      )
+    ) return undefined;
+    return [...sourceLink.path.slice(producerLink.path.length)];
+  };
+
+  const schemas: DurableSchemaPath[] = [];
+  let ownedArgument = false;
+  const argumentLink = getMetaLink(ownerResult, "argument");
+  if (argumentLink?.schema !== undefined) {
+    const path = relativePath(argumentLink);
+    if (path !== undefined) {
+      ownedArgument = true;
+      schemas.push({
+        root: argumentLink.schema,
+        path,
+        rawBasePath: [...argumentLink.path],
+        schemaBaseDepth: 0,
+        validationCell: manager.runtime.getCellFromLink(
+          { ...argumentLink, schema: undefined },
+          undefined,
+          linkedCell.tx,
+        ),
+        validationPath: path,
+      });
+    }
+  }
+
+  const internal = ownerResult.getMetaRaw("internal");
+  let ownedInternal = false;
+  if (!ownedArgument && Array.isArray(internal)) {
+    for (const descriptor of internal) {
+      if (
+        descriptor === null || typeof descriptor !== "object" ||
+        !("link" in descriptor)
+      ) continue;
+      try {
+        const parsedInternalLink = parseLinkOrThrow(
+          (descriptor as { link: unknown }).link,
+          ownerResult,
+        );
+        const internalLink = manager.runtime.getCellFromLink(
+          parsedInternalLink,
+          parsedInternalLink.schema,
+          linkedCell.tx,
+        ).getAsNormalizedFullLink();
+        const path = relativePath(internalLink);
+        if (path === undefined) continue;
+        ownedInternal = true;
+        if (internalLink.schema !== undefined) {
+          schemas.push({
+            root: internalLink.schema,
+            path,
+            rawBasePath: [...internalLink.path],
+            schemaBaseDepth: 0,
+            validationCell: manager.runtime.getCellFromLink(
+              { ...internalLink, schema: undefined },
+              undefined,
+              linkedCell.tx,
+            ),
+            validationPath: path,
+          });
+        }
+        break;
+      } catch {
+        // A malformed manifest entry is not evidence for a writable contract.
+      }
+    }
+  }
+  if (!ownedArgument && !ownedInternal) return undefined;
+
+  // Argument and internal values may also be exposed through one or more
+  // public result projections. Every current projection is an additional
+  // producer-owned constraint: a write must preserve the argument/internal
+  // contract and all public result contracts simultaneously.
+  const ownerSchema = ownerResult.getMetaRaw("schema") as
+    | JSONSchema
+    | undefined;
+  const projected: DurableSchemaPath[] = [];
+  if (ownerSchema !== undefined) {
+    const rawResult = ownerResult.getRawUntyped({ lastNode: "top" });
+    const seen = new WeakSet<object>();
+    const visit = (
+      value: unknown,
+      projectionPath: (string | number)[],
+      projectionCell: Cell<unknown>,
+    ): void => {
+      if (isLink(value)) {
+        try {
+          const parsed = parseLinkOrThrow(value, projectionCell);
+          const target = manager.runtime.getCellFromLink(
+            parsed,
+            parsed.schema,
+            linkedCell.tx,
+          ).getAsNormalizedFullLink();
+          const suffix = relativePath(target);
+          if (suffix !== undefined) {
+            projected.push({
+              root: ownerSchema,
+              path: [...projectionPath, ...suffix],
+              rawBasePath: [...target.path],
+              schemaBaseDepth: projectionPath.length,
+              validationCell: ownerResult,
+              validationPath: [...projectionPath, ...suffix],
+            });
+          }
+        } catch {
+          // Malformed aliases are rejected by ordinary Piece validation.
+        }
+        return;
+      }
+      if (value === null || typeof value !== "object" || seen.has(value)) {
+        return;
+      }
+      seen.add(value);
+      for (const key of Object.keys(value)) {
+        const segment = Array.isArray(value) ? Number(key) : key;
+        visit(
+          (value as Record<PropertyKey, unknown>)[key],
+          [...projectionPath, segment],
+          projectionCell.key(segment as keyof unknown) as Cell<unknown>,
+        );
+      }
+      seen.delete(value);
+    };
+    visit(rawResult, [], ownerResult);
+  }
+  if (projected.length > 0) {
+    const unique = new Map(
+      projected.map((entry) => [JSON.stringify(entry.path), entry]),
+    );
+    schemas.push(...unique.values());
+  }
+  return schemas.length === 0 ? undefined : { schemas };
 }
 
 /**
@@ -523,6 +998,41 @@ function suppliedLinks(
   }
   seen.delete(value);
   return links;
+}
+
+function assertContractSubset(
+  sources: readonly PathSchemaContract[],
+  targets: readonly PathSchemaContract[],
+  label: string,
+): void {
+  for (const target of targets) {
+    let lastError: unknown;
+    const proved = sources.some((source) => {
+      try {
+        assertSchemaSubset(
+          withoutTopLevelScope(source.schema),
+          withoutTopLevelScope(target.schema),
+          label,
+          { sourceRoot: source.root, targetRoot: target.root },
+        );
+        return true;
+      } catch (error) {
+        lastError = error;
+        return false;
+      }
+    });
+    if (!proved) throw lastError;
+  }
+}
+
+function includePossibleMissingValue(
+  contract: PathSchemaContract,
+): PathSchemaContract {
+  if (contract.mayBeMissing !== true) return contract;
+  return {
+    schema: { anyOf: [contract.schema, { type: "undefined" }] },
+    root: contract.root,
+  };
 }
 
 function assertSuppliedLinkSchemasCompatible(
@@ -584,35 +1094,79 @@ function assertSuppliedLinkSchemasCompatible(
       );
     }
 
-    const wrappedTargets = targetContracts.filter((contract) =>
-      ContextualFlowControl.getAsCellValues(contract.schema).length > 0
+    const localizedTargets = targetContracts.map((contract) =>
+      localizeOuterCellContract(contract)
     );
-    const targetWrapper = wrappedTargets[0]?.schema;
-    for (const contract of wrappedTargets.slice(1)) {
-      if (!asCellShapesMatch(targetWrapper, contract.schema)) {
+    const invalidTarget = localizedTargets.find((entry) =>
+      entry.issue !== undefined
+    );
+    if (invalidTarget?.issue !== undefined) {
+      throw new Error(
+        `input link at ${displayPath} schema is not compatible: ${invalidTarget.issue}`,
+      );
+    }
+    const targetOuters = localizedTargets.flatMap((entry) =>
+      entry.outer === undefined ? [] : [entry.outer]
+    );
+    const targetOuter = targetOuters[0];
+    for (const outer of targetOuters.slice(1)) {
+      if (!outerCellShapesMatch(targetOuter!, outer)) {
         throw new Error(
           `input link at ${displayPath} schema is not compatible: destination Cell constraints disagree`,
         );
       }
     }
-    const preservesDirectHandle = targetWrapper !== undefined &&
+    const preservesDirectHandle = targetOuter !== undefined &&
       isCell(suppliedLink.value);
     if (preservesDirectHandle) preservedDirectHandles.add(suppliedLink);
 
-    const sourceRoot = preservesDirectHandle
-      ? durableSource.root
-      : sanitizeSchemaForLinks(
-        durableSource.root,
-        KeepAsCell.OnlyStream,
-      );
     let sourceContracts: PathSchemaContract[];
+    let rawSourceContracts: PathSchemaContract[];
     try {
-      sourceContracts = linkPathContracts(
-        [{ schema: sourceRoot, root: sourceRoot }],
-        durableSource.path,
-        { trackSourcePresence: true },
+      rawSourceContracts = durableSource.schemas.flatMap((source) =>
+        linkPathContracts(
+          [{ schema: source.root, root: source.root }],
+          source.path,
+          { trackSourcePresence: true, preserveMissingFlag: true },
+        )
       );
+      sourceContracts = durableSource.schemas.flatMap((source) => {
+        const root = preservesDirectHandle
+          ? source.root
+          : sanitizeSchemaForLinks(source.root, KeepAsCell.OnlyStream);
+        return linkPathContracts(
+          [{ schema: root, root }],
+          source.path,
+          { trackSourcePresence: true, preserveMissingFlag: true },
+        );
+      });
       if (!preservesDirectHandle) {
+        const rawLocalizedSources = rawSourceContracts.map((contract) =>
+          localizeOuterCellContract(contract)
+        );
+        const invalidRawSource = rawLocalizedSources.find((entry) =>
+          entry.issue !== undefined
+        );
+        if (invalidRawSource?.issue !== undefined) {
+          throw new Error(invalidRawSource.issue);
+        }
+        const rawSourceOuters = rawLocalizedSources.flatMap((entry) =>
+          entry.outer === undefined ? [] : [entry.outer]
+        );
+        const rawSourceOuter = rawSourceOuters[0];
+        for (const outer of rawSourceOuters.slice(1)) {
+          if (!outerCellShapesMatch(rawSourceOuter!, outer)) {
+            throw new Error("source Cell constraints disagree");
+          }
+        }
+        if (
+          rawSourceOuter !== undefined && rawSourceOuter.kind !== "cell" &&
+          rawSourceOuter.kind !== "stream"
+        ) {
+          throw new Error(
+            `${rawSourceOuter.kind} capability cannot be exposed as an ordinary alias`,
+          );
+        }
         const durableEntries = sourceContracts.map((contract) =>
           ContextualFlowControl.getAsCellValues(contract.schema)
         );
@@ -660,58 +1214,336 @@ function assertSuppliedLinkSchemasCompatible(
     }
 
     if (preservesDirectHandle) {
-      const target = consumeOuterCellContract(targetWrapper!);
-      const sourceIsStream = isStream(suppliedLink.value);
-      const targetIsStream = target.kind === "stream";
-      if (sourceIsStream !== targetIsStream) {
+      const localizedSources = sourceContracts.map((contract) =>
+        localizeOuterCellContract(contract)
+      );
+      const invalidSource = localizedSources.find((entry) =>
+        entry.issue !== undefined
+      );
+      if (invalidSource?.issue !== undefined) {
         throw new Error(
-          `input link at ${displayPath} schema is not compatible: ${
-            sourceIsStream ? "Stream" : "Cell"
-          } handle is not accepted as ${target.kind}`,
+          `input link at ${displayPath} schema is not compatible: ${invalidSource.issue}`,
         );
       }
-      sourceContracts = sourceContracts.map((contract) => {
-        const entries = ContextualFlowControl.getAsCellValues(contract.schema);
-        return entries.length === 0 ? contract : {
-          schema: consumeOuterCellContract(contract.schema).payloadSchema,
-          root: contract.root,
-        };
-      });
-      targetContracts = targetContracts.map((contract) => {
-        const entries = ContextualFlowControl.getAsCellValues(contract.schema);
-        return entries.length === 0 ? contract : {
-          schema: consumeOuterCellContract(contract.schema).payloadSchema,
-          root: contract.root,
-        };
-      });
+      const sourceOuters = localizedSources.flatMap((entry) =>
+        entry.outer === undefined ? [] : [entry.outer]
+      );
+      const sourceOuter = sourceOuters[0] ?? {
+        kind: isStream(suppliedLink.value) ? "stream" : "cell",
+        scope: undefined,
+      };
+      for (const outer of sourceOuters.slice(1)) {
+        if (!outerCellShapesMatch(sourceOuter, outer)) {
+          throw new Error(
+            `input link at ${displayPath} schema is not compatible: source Cell constraints disagree`,
+          );
+        }
+      }
+      if (!cellCapabilityCanNarrow(sourceOuter.kind, targetOuter.kind)) {
+        if (
+          sourceOuter.kind === "stream" || targetOuter.kind === "stream"
+        ) {
+          throw new Error(
+            `input link at ${displayPath} schema is not compatible: ${
+              sourceOuter.kind === "stream" ? "Stream" : "Cell"
+            } handle is not accepted as ${targetOuter.kind}`,
+          );
+        }
+        throw new Error(
+          `input link at ${displayPath} schema is not compatible: ${sourceOuter.kind} capability cannot be exposed as ${targetOuter.kind}`,
+        );
+      }
+      sourceContracts = localizedSources.map((entry) => entry.contract);
+      targetContracts = localizedTargets.map((entry) => entry.contract);
     }
+    sourceContracts = sourceContracts.map(includePossibleMissingValue);
 
     // The source and target contracts are conjunctions. Proving any source
     // conjunct implies each target conjunct is a conservative proof that the
     // complete source intersection is accepted by the target intersection.
-    for (const targetContract of targetContracts) {
-      let lastError: unknown;
-      const proved = sourceContracts.some((sourceContract) => {
-        try {
-          assertSchemaSubset(
-            withoutTopLevelScope(sourceContract.schema),
-            withoutTopLevelScope(targetContract.schema),
-            `input link at ${displayPath}`,
-            {
-              sourceRoot: sourceContract.root,
-              targetRoot: targetContract.root,
-            },
-          );
-          return true;
-        } catch (error) {
-          lastError = error;
-          return false;
-        }
-      });
-      if (!proved) throw lastError;
+    const label = `input link at ${displayPath}`;
+    if (
+      !preservesDirectHandle || targetOuter.kind !== "writeonly" &&
+        targetOuter.kind !== "stream"
+    ) {
+      assertContractSubset(sourceContracts, targetContracts, label);
+    }
+    if (preservesDirectHandle && cellKindCanWrite(targetOuter.kind)) {
+      // A writable handle can send values back to the producer, so the
+      // destination payload contract must also fit the source payload.
+      assertContractSubset(targetContracts, sourceContracts, label);
     }
   }
   return preservedDirectHandles;
+}
+
+function localizeWritableDestinationContracts(
+  destination: DurableSchemaPath,
+  rootCell: Cell<unknown>,
+): { contracts: PathSchemaContract[]; isStream: boolean } {
+  const { root, path, rawBasePath, schemaBaseDepth } = destination;
+  let contracts: PathSchemaContract[] = [{ schema: root, root }];
+  const rawRoot = rootCell.getRawUntyped({ lastNode: "top" });
+  for (let index = 0; index <= path.length; index++) {
+    const rawPrefix = index <= schemaBaseDepth
+      ? rawBasePath
+      : [...rawBasePath, ...path.slice(schemaBaseDepth, index)];
+    const storedValue = rawValueAtPath(rawRoot, rawPrefix);
+    let prefixCell = rootCell;
+    for (const segment of rawPrefix) {
+      prefixCell = prefixCell.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    const stored = storedCellTopology(storedValue.value, prefixCell);
+    const localized = contracts.map((contract) =>
+      localizeOuterCellContract(contract, stored)
+    );
+    const invalid = localized.find((entry) => entry.issue !== undefined);
+    if (invalid?.issue !== undefined) throw new Error(invalid.issue);
+    const outers = localized.flatMap((entry) =>
+      entry.outer === undefined ? [] : [entry.outer]
+    );
+    const outer = outers[0];
+    for (const candidate of outers.slice(1)) {
+      if (!outerCellShapesMatch(outer!, candidate)) {
+        throw new Error("write destination Cell constraints disagree");
+      }
+    }
+    const terminal = index === path.length;
+    if (outer !== undefined) {
+      if (!cellKindCanWrite(outer.kind)) {
+        throw new Error(
+          `${outer.kind} Cell write destination is not writable`,
+        );
+      }
+      if (outer.kind === "stream" && !terminal) {
+        throw new Error("stream Cell write destination path is not writable");
+      }
+    }
+    const payloadContracts = localized.map((entry) => entry.contract);
+    if (terminal) {
+      return {
+        contracts: payloadContracts,
+        isStream: outer?.kind === "stream",
+      };
+    }
+    contracts = linkPathContracts(payloadContracts, [path[index]!]);
+  }
+  throw new Error("write destination path could not be localized");
+}
+
+const MISSING_PROJECTION_ALIAS = Symbol("missing projection alias");
+
+function rawValueAtPath(
+  root: unknown,
+  path: readonly (string | number)[],
+): { present: boolean; value: unknown } {
+  let value = root;
+  for (const segment of path) {
+    if (
+      value === null || typeof value !== "object" ||
+      !Object.hasOwn(value, segment)
+    ) {
+      return { present: false, value: undefined };
+    }
+    value = (value as Record<PropertyKey, unknown>)[segment];
+  }
+  return { present: true, value };
+}
+
+function rawResolvedValueAtPath(
+  tx: NonNullable<Cell<unknown>["tx"]>,
+  resolved: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>,
+): { present: boolean; value: unknown } {
+  // Read the document envelope, not only its Cell value. A metadata-only
+  // argument/derived document has no own `value` field, while an explicitly
+  // stored Fabric undefined does. Cell.get() intentionally projects both as
+  // JavaScript undefined and therefore cannot distinguish these cases.
+  const document = tx.read({
+    space: resolved.space,
+    id: resolved.id,
+    scope: resolved.scope,
+    path: [],
+  });
+  if (document.error !== undefined) {
+    if (document.error.name === "NotFoundError") {
+      return { present: false, value: undefined };
+    }
+    throw new Error(
+      `projection alias document read failed: ${document.error.name}`,
+    );
+  }
+  const envelope = document.ok?.value;
+  if (
+    envelope === null || typeof envelope !== "object" ||
+    !Object.hasOwn(envelope, "value")
+  ) {
+    return { present: false, value: undefined };
+  }
+  return rawValueAtPath(
+    (envelope as Record<PropertyKey, unknown>).value,
+    resolved.path,
+  );
+}
+
+function omitMissingProjectionAliases(
+  materialized: unknown,
+  raw: unknown,
+  schemaView: unknown,
+  cell: Cell<unknown>,
+  manager: PieceManager,
+  schemaViewPresent = true,
+  resolving = new Set<string>(),
+): unknown | typeof MISSING_PROJECTION_ALIAS {
+  if (isLink(raw)) {
+    const tx = cell.tx;
+    if (tx === undefined) {
+      throw new Error("projection alias reconciliation requires a transaction");
+    }
+    const parsed = parseLinkOrThrow(raw, cell);
+    const fullLink = manager.runtime.getCellFromLink(
+      parsed,
+      undefined,
+      tx,
+    ).getAsNormalizedFullLink();
+    const resolved = resolveLink(
+      manager.runtime,
+      tx,
+      fullLink,
+      "value",
+    );
+    const key = JSON.stringify([
+      resolved.space,
+      resolved.id,
+      resolved.scope,
+      resolved.path,
+    ]);
+    if (resolving.has(key)) return materialized;
+    resolving.add(key);
+    try {
+      const state = rawResolvedValueAtPath(tx, resolved);
+      if (
+        !state.present && materialized === undefined && !schemaViewPresent
+      ) {
+        return MISSING_PROJECTION_ALIAS;
+      }
+      const resolvedCell = manager.runtime.getCellFromLink(
+        { ...resolved, schema: undefined },
+        undefined,
+        tx,
+      );
+      return omitMissingProjectionAliases(
+        materialized,
+        state.value,
+        schemaView,
+        resolvedCell,
+        manager,
+        schemaViewPresent,
+        resolving,
+      );
+    } finally {
+      resolving.delete(key);
+    }
+  }
+  if (
+    materialized === null || typeof materialized !== "object" ||
+    raw === null || typeof raw !== "object"
+  ) return materialized;
+
+  const result =
+    (Array.isArray(materialized)
+      ? materialized.slice()
+      : { ...materialized }) as Record<string, unknown>;
+  const materializedRecord = materialized as Record<PropertyKey, unknown>;
+  const rawRecord = raw as Record<PropertyKey, unknown>;
+  const viewRecord = schemaView !== null && typeof schemaView === "object"
+    ? schemaView as Record<PropertyKey, unknown>
+    : undefined;
+  for (const key of Object.keys(rawRecord)) {
+    if (!Object.hasOwn(materializedRecord, key)) continue;
+    const rawChild = rawRecord[key];
+    const childViewPresent = viewRecord !== undefined &&
+      Object.hasOwn(viewRecord, key);
+    const reconciled = omitMissingProjectionAliases(
+      materializedRecord[key],
+      rawChild,
+      childViewPresent ? viewRecord[key] : undefined,
+      cell.key(key as keyof unknown) as Cell<unknown>,
+      manager,
+      childViewPresent,
+      resolving,
+    );
+    if (reconciled === MISSING_PROJECTION_ALIAS) {
+      delete result[key];
+      continue;
+    }
+    result[key] = reconciled;
+  }
+  return result;
+}
+
+function validateDurableSourceRoots(
+  destination: DurableSourceContract,
+  nextValue: unknown,
+  manager: PieceManager,
+  acceptOpaqueValue: (value: unknown, schema: JSONSchema) => boolean,
+): string | undefined {
+  const groups: Array<{
+    root: JSONSchema;
+    cell: Cell<unknown>;
+    paths: (string | number)[][];
+  }> = [];
+  const sameCell = (left: Cell<unknown>, right: Cell<unknown>): boolean => {
+    const a = left.getAsNormalizedFullLink();
+    const b = right.getAsNormalizedFullLink();
+    return a.space === b.space && a.id === b.id && a.scope === b.scope &&
+      a.path.length === b.path.length &&
+      a.path.every((segment, index) => segment === b.path[index]);
+  };
+  for (const schema of destination.schemas) {
+    let group = groups.find((candidate) =>
+      candidate.root === schema.root &&
+      sameCell(candidate.cell, schema.validationCell)
+    );
+    if (group === undefined) {
+      group = {
+        root: schema.root,
+        cell: schema.validationCell,
+        paths: [],
+      };
+      groups.push(group);
+    }
+    if (
+      !group.paths.some((path) =>
+        path.length === schema.validationPath.length &&
+        path.every((segment, index) => segment === schema.validationPath[index])
+      )
+    ) {
+      group.paths.push(schema.validationPath);
+    }
+  }
+
+  for (const group of groups) {
+    const schemaView = group.cell.asSchema(group.root).get();
+    let candidate = omitMissingProjectionAliases(
+      group.cell.asSchema(undefined).get(),
+      group.cell.getRawUntyped(),
+      schemaView,
+      group.cell,
+      manager,
+    );
+    if (candidate === MISSING_PROJECTION_ALIAS) candidate = undefined;
+    for (const path of group.paths) {
+      candidate = replaceMaterializedValueAtPath(candidate, path, nextValue);
+    }
+    const issue = validateSchemaValue(
+      group.root,
+      candidate,
+      group.root,
+      { acceptOpaqueValue },
+    );
+    if (issue !== undefined) return issue;
+  }
+  return undefined;
 }
 
 class PiecePropIo implements PieceCellIo {
@@ -763,7 +1595,115 @@ class PiecePropIo implements PieceCellIo {
       }
 
       const writePath = path ?? [];
+      const writeTargetDiffers = (
+        left: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>,
+        right: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>,
+      ): boolean =>
+        left.space !== right.space || left.id !== right.id ||
+        left.scope !== right.scope || left.path.length !== right.path.length ||
+        left.path.some((segment, index) => segment !== right.path[index]);
+      const originalWriteTarget = txCell.getAsNormalizedFullLink();
+      const resolvedWriteTarget = resolveLink(
+        manager.runtime,
+        tx,
+        originalWriteTarget,
+        "writeRedirect",
+      );
+      const writesThroughTerminal = writeTargetDiffers(
+        originalWriteTarget,
+        resolvedWriteTarget,
+      );
+      const validateWriteDestination = (nextValue: unknown): void => {
+        if (!writesThroughTerminal) return;
+        const resolved = resolvedWriteTarget;
+        const resolvedCell = manager.runtime.getCellFromLink(
+          resolved,
+          resolved.schema,
+          tx,
+        );
+        const durableDestination = durableSourceContract(
+          resolvedCell,
+          manager,
+        );
+        if (durableDestination === undefined) {
+          throw new Error(
+            `updated ${this.#type} write destination has no durable schema contract`,
+          );
+        }
+        const destination = durableDestination;
+        let localizedDestination: ReturnType<
+          typeof localizeWritableDestinationContracts
+        >;
+        try {
+          const destinationRootCell = manager.runtime.getCellFromLink(
+            { ...resolved, path: [], schema: undefined },
+            undefined,
+            tx,
+          );
+          const localized = destination.schemas.map((schemaPath) =>
+            localizeWritableDestinationContracts(
+              schemaPath,
+              destinationRootCell,
+            )
+          );
+          const isStream = localized[0]?.isStream ?? false;
+          if (localized.some((entry) => entry.isStream !== isStream)) {
+            throw new Error(
+              "write destination contracts disagree on Stream capability",
+            );
+          }
+          localizedDestination = {
+            contracts: localized.flatMap((entry) => entry.contracts),
+            isStream,
+          };
+          const links = suppliedLinks(nextValue);
+          for (const contract of localizedDestination.contracts) {
+            assertSuppliedLinkSchemasCompatible(
+              links,
+              contract.schema,
+              resolvedCell,
+              manager,
+            );
+          }
+        } catch (error) {
+          throw new Error(
+            `updated ${this.#type} does not match its write destination: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+        const acceptsProvedLink = (
+          candidate: unknown,
+          candidateSchema: JSONSchema,
+        ): boolean =>
+          isLink(candidate) ||
+          schemaAcceptsOpaqueCellValue(candidate, candidateSchema);
+        let issue: string | undefined;
+        for (const contract of localizedDestination.contracts) {
+          issue = validateSchemaValue(
+            contract.schema,
+            nextValue,
+            contract.root,
+            { acceptOpaqueValue: acceptsProvedLink },
+          );
+          if (issue !== undefined) break;
+        }
+        if (issue === undefined) {
+          issue = validateDurableSourceRoots(
+            destination,
+            nextValue,
+            manager,
+            acceptsProvedLink,
+          );
+        }
+        if (issue !== undefined) {
+          throw new Error(
+            `updated ${this.#type} does not match its write destination: ${issue}`,
+          );
+        }
+      };
       const setTerminalValue = (nextValue: unknown) => {
+        validateWriteDestination(nextValue);
         if (
           nextValue === undefined && writePath.length > 0 &&
           !isStream(txCell)
@@ -795,6 +1735,13 @@ class PiecePropIo implements PieceCellIo {
             writePath.map((segment) => String(segment)),
           );
         const linksToRestore = suppliedLinks(value);
+        assertWritablePiecePath(
+          schema,
+          writePath,
+          linksToRestore.some((link) => link.path.length === 0),
+          writesThroughTerminal,
+          targetCell.withTx(tx),
+        );
         const preservedDirectHandles = assertSuppliedLinkSchemasCompatible(
           linksToRestore,
           schema,
@@ -893,6 +1840,13 @@ class PiecePropIo implements PieceCellIo {
       } else {
         const schema = targetCell.getAsNormalizedFullLink().schema ?? true;
         const linksToRestore = suppliedLinks(value);
+        assertWritablePiecePath(
+          schema,
+          writePath,
+          linksToRestore.some((link) => link.path.length === 0),
+          writesThroughTerminal,
+          targetCell.withTx(tx),
+        );
         const preservedDirectHandles = assertSuppliedLinkSchemasCompatible(
           linksToRestore,
           schema,
@@ -956,7 +1910,13 @@ class PiecePropIo implements PieceCellIo {
             // output -> present undefined). The durable schema-aware view
             // keeps missing optional projections absent while preserving
             // explicit undefined wherever the schema accepts it.
-            targetCell.withTx(tx).get(),
+            omitMissingProjectionAliases(
+              targetCell.asSchema(undefined).withTx(tx).get(),
+              targetCell.withTx(tx).getRawUntyped(),
+              targetCell.withTx(tx).get(),
+              targetCell.withTx(tx),
+              manager,
+            ),
             writePath,
             materializedValue,
           );

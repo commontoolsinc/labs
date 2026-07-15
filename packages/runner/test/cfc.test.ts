@@ -12,6 +12,7 @@ import {
   resolveCfcSchemaRefs,
   selectReferencedCfcSchemaDefs,
 } from "../src/cfc/schema-refs.ts";
+import { validateSchemaValue } from "../src/cfc/schema-sanitization.ts";
 
 describe("ContextualFlowControl.schemaAtPath", () => {
   it("rejects leading-zero array index like '01'", () => {
@@ -609,6 +610,72 @@ describe("CFC schema reference discovery", () => {
     expect(resolveCfcSchemaRefs(valueSchema, resolved)).toMatchObject({
       type: "string",
     });
+  });
+
+  it("keeps inherited ref-site definitions independent from target scope", () => {
+    const schema: JSONSchemaObj = {
+      type: "object",
+      properties: {
+        item: {
+          $ref: "#/$defs/Base",
+          type: "object",
+          properties: { sibling: { $ref: "#/$defs/Value" } },
+          required: ["sibling"],
+        },
+      },
+      required: ["item"],
+      $defs: {
+        Base: {
+          $defs: { Value: { type: "number" } },
+          allOf: [{
+            type: "object",
+            properties: { target: { $ref: "#/$defs/Value" } },
+            required: ["target"],
+          }],
+        },
+        Value: { type: "string" },
+      },
+    };
+
+    expect(
+      validateSchemaValue(schema, {
+        item: { target: 1, sibling: "ref-site" },
+      }),
+    ).toBeUndefined();
+    expect(
+      validateSchemaValue(schema, { item: { target: 1, sibling: 2 } }),
+    ).toBeDefined();
+    expect(
+      validateSchemaValue(schema, {
+        item: { target: "wrong", sibling: "ref-site" },
+      }),
+    ).toBeDefined();
+  });
+
+  it("does not bind unresolved target refs to generated sibling names", () => {
+    const schema: JSONSchemaObj = {
+      $ref: "#/$defs/Base",
+      $defs: {
+        Base: {
+          $defs: { Other: { type: "number" } },
+          allOf: [{ $ref: "#/$defs/__cfc_ref_site_1_Value" }],
+        },
+        Value: { type: "string" },
+      },
+    };
+
+    expect(validateSchemaValue(schema, "must remain unresolved")).toBeDefined();
+  });
+
+  it("keeps missing refs unresolved across a definition-less ref site", () => {
+    const refSiteRoot: JSONSchemaObj = {};
+    const schema: JSONSchemaObj = {
+      $ref: "https://commonfabric.org/schemas/vnode.json",
+      allOf: [{ $ref: "#/$defs/Props" }],
+    };
+    const vnode = { type: "vnode", name: "div", props: {} };
+
+    expect(validateSchemaValue(schema, vnode, refSiteRoot)).toBeDefined();
   });
 
   it("preserves nested definition scope boundaries while pruning", () => {

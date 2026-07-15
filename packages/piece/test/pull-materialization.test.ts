@@ -22,6 +22,7 @@ import {
 } from "@commonfabric/runner/cfc";
 import { PieceManager } from "../src/manager.ts";
 import {
+  cellCapabilityCanNarrow,
   consumeOuterCellContract,
   consumeStreamEventContract,
   linkPathContracts,
@@ -367,6 +368,39 @@ describe("piece link contract localization", () => {
     root,
   });
 
+  it("never grants authority across the Cell capability lattice", () => {
+    const kinds = [
+      "cell",
+      "readonly",
+      "writeonly",
+      "comparable",
+      "opaque",
+      "stream",
+    ] as const;
+    const allowed = new Set([
+      "cell:cell",
+      "cell:readonly",
+      "cell:writeonly",
+      "cell:comparable",
+      "cell:opaque",
+      "readonly:readonly",
+      "readonly:comparable",
+      "readonly:opaque",
+      "writeonly:writeonly",
+      "comparable:comparable",
+      "opaque:opaque",
+      "stream:stream",
+    ]);
+
+    for (const source of kinds) {
+      for (const target of kinds) {
+        expect(cellCapabilityCanNarrow(source, target)).toBe(
+          allowed.has(`${source}:${target}`),
+        );
+      }
+    }
+  });
+
   it("fails closed for path ancestors that cannot be localized", () => {
     const unresolvedRoot: JSONSchema = { $defs: {} };
     expect(() =>
@@ -418,6 +452,23 @@ describe("piece link contract localization", () => {
     });
     expect(linkPathContracts([contract(schema)], [1])[0]?.schema).toEqual({
       type: "number",
+    });
+  });
+
+  it("keeps sparse array indices optional despite minItems", () => {
+    const schema: JSONSchema = {
+      type: "array",
+      prefixItems: [{ type: "number" }],
+      items: { type: "number" },
+      minItems: 1,
+    };
+
+    expect(
+      linkPathContracts([contract(schema)], [0], {
+        trackSourcePresence: true,
+      })[0]?.schema,
+    ).toEqual({
+      anyOf: [{ type: "number" }, { type: "undefined" }],
     });
   });
 
@@ -623,6 +674,226 @@ describe("piece pull materialization", () => {
       /updated result does not match its schema/,
     );
     expect(await controller.result.get()).toEqual({ value: 2 });
+  });
+
+  it("does not hide invalid raw result siblings during path validation", async () => {
+    const resultSchema = {
+      type: "object",
+      properties: {
+        a: { type: "number" },
+        b: { type: "number" },
+      },
+      required: ["a"],
+    } as const;
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema,
+        result: { a: 1, b: 2 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await runtime.editWithRetry((tx) => {
+      piece.withTx(tx).key("b").setRawUntyped("bad");
+    });
+    const controller = new PieceController(manager, piece);
+
+    expect(piece.get()).toEqual({ a: 1 });
+    expect(piece.getRaw()).toEqual({ a: 1, b: "bad" });
+    await expect(controller.result.set(3, ["a"])).rejects.toThrow(
+      /updated result does not match its schema/,
+    );
+    expect(piece.getRaw()).toEqual({ a: 1, b: "bad" });
+  });
+
+  it("does not hide present explicit undefined behind an optional alias", async () => {
+    const model = {
+      type: "object",
+      properties: {
+        a: { type: "number" },
+        b: { type: "number" },
+      },
+      required: ["a"],
+    } as const;
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: model,
+        resultSchema: model,
+        result: {
+          a: { $alias: { cell: "argument", path: ["a"] } },
+          b: { $alias: { cell: "argument", path: ["b"] } },
+        },
+        nodes: [],
+      }),
+      { a: 1 },
+      undefined,
+      { start: true },
+    );
+    await runtime.editWithRetry((tx) => {
+      manager.getArgument(piece).withTx(tx).key("b").setRawUntyped(undefined);
+    });
+    const argument = manager.getArgument(piece);
+    const controller = new PieceController(manager, piece);
+
+    expect(Object.hasOwn(argument.getRaw() as object, "b")).toBe(true);
+    expect(Object.hasOwn(piece.get(), "b")).toBe(false);
+    await expect(controller.result.set(3, ["a"])).rejects.toThrow(
+      /updated result does not match its schema/,
+    );
+    expect(argument.getRaw()).toEqual({ a: 1, b: undefined });
+  });
+
+  it("reconciles missing projections through root and nested result aliases", async () => {
+    const model = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        arrayField: { type: "array", items: { type: "number" } },
+      },
+      required: ["value"],
+    } as const;
+    const source = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: model,
+        resultSchema: model,
+        result: {
+          value: { $alias: { cell: "argument", path: ["value"] } },
+          arrayField: {
+            $alias: { cell: "argument", path: ["arrayField"] },
+          },
+        },
+        nodes: [],
+      }),
+      { value: 1 },
+      undefined,
+      { start: true },
+    );
+    const rootTarget = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: model,
+        result: { value: 0 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const nestedSchema = {
+      type: "object",
+      properties: { nested: model },
+      required: ["nested"],
+    } as const;
+    const nestedTarget = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: nestedSchema,
+        result: { nested: { value: 0 } },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await runtime.editWithRetry((tx) => {
+      rootTarget.withTx(tx).set(source);
+      nestedTarget.withTx(tx).key("nested").set(source);
+    });
+
+    expect(rootTarget.get()).toEqual({ value: 1 });
+    expect(nestedTarget.get()).toEqual({ nested: { value: 1 } });
+    await expect(
+      new PieceController(manager, rootTarget).result.set(3, ["value"]),
+    ).resolves.toBeUndefined();
+    await expect(
+      new PieceController(manager, nestedTarget).result.set(4, [
+        "nested",
+        "value",
+      ]),
+    ).resolves.toBeUndefined();
+    expect(source.get()).toEqual({ value: 4 });
+  });
+
+  it("reconciles a missing optional projection at a cold derived Cell root", async () => {
+    const resultSchema = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        optional: { type: "array", items: { type: "number" } },
+      },
+      required: ["value"],
+    } as const;
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema,
+        derivedInternalCells: [{
+          partialCause: "optional",
+          schema: { type: "array", items: { type: "number" } },
+        }],
+        result: {
+          value: 1,
+          optional: {
+            $alias: { partialCause: "optional", path: [] },
+          },
+        },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    expect(piece.get()).toEqual({ value: 1 });
+    await expect(controller.result.set(2, ["value"]))
+      .resolves.toBeUndefined();
+    expect(piece.get()).toEqual({ value: 2 });
+  });
+
+  it("retains explicit undefined at an optional derived Cell root", async () => {
+    const resultSchema = {
+      type: "object",
+      properties: {
+        value: { type: "number" },
+        optional: { type: "array", items: { type: "number" } },
+      },
+      required: ["value"],
+    } as const;
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema,
+        derivedInternalCells: [{
+          partialCause: "optional",
+          schema: { type: "array", items: { type: "number" } },
+        }],
+        result: {
+          value: 1,
+          optional: {
+            $alias: { partialCause: "optional", path: [] },
+          },
+        },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await runtime.editWithRetry((tx) => {
+      piece.key("optional").withTx(tx).resolveAsCell()
+        .setRawUntyped(undefined);
+    });
+    const controller = new PieceController(manager, piece);
+
+    expect(piece.get()).toEqual({ value: 1 });
+    await expect(controller.result.set(2, ["value"])).rejects.toThrow(
+      /updated result does not match its schema/,
+    );
+    expect(piece.getRaw()).toMatchObject({ value: 1 });
   });
 
   it("validates result stream payloads independently of sibling projections", async () => {
@@ -1243,6 +1514,878 @@ describe("piece pull materialization", () => {
     expect(await controller.input.get(["handle"])).toBeUndefined();
   });
 
+  it("accepts opaque Cell handles through uniform union wrappers", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: ["number", "string"] } },
+          required: ["value"],
+        },
+        result: { value: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: {
+              anyOf: [
+                { type: "number", asCell: ["cell"] },
+                { type: "string", asCell: ["cell"] },
+              ],
+            },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+
+    await expect(
+      new PieceController(manager, targetPiece).input.set(
+        sourcePiece.key("value"),
+        ["handle"],
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it("selects ordinary and optional Cell alternatives by the supplied value", async () => {
+    const source = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+        result: { value: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            ordinaryOrHandle: {
+              anyOf: [
+                { type: "number" },
+                { type: "number", asCell: ["cell"] },
+              ],
+            },
+            optionalHandle: {
+              anyOf: [
+                { type: "number", asCell: ["cell"] },
+                { type: "undefined" },
+              ],
+            },
+          },
+          required: ["ordinaryOrHandle"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { ordinaryOrHandle: 0 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await expect(
+      controller.input.set(1, ["ordinaryOrHandle"]),
+    ).resolves.toBeUndefined();
+    await expect(
+      controller.input.set(source.key("value"), ["optionalHandle"]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("selects an ordinary union branch for descendant writes", async () => {
+    const payload = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    } as const;
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            slot: {
+              anyOf: [payload, { ...payload, asCell: ["readonly"] }],
+            },
+          },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: { n: 1 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await expect(controller.input.set(2, ["slot", "n"]))
+      .resolves.toBeUndefined();
+    expect(manager.getArgument(piece).getRaw()).toEqual({ slot: { n: 2 } });
+  });
+
+  it("selects an ordinary union branch through a result redirect", async () => {
+    const payload = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    } as const;
+    const schema = {
+      type: "object",
+      properties: {
+        slot: {
+          anyOf: [payload, { ...payload, asCell: ["readonly"] }],
+        },
+      },
+      required: ["slot"],
+    } as const;
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: schema,
+        resultSchema: schema,
+        result: {
+          slot: { $alias: { cell: "argument", path: ["slot"] } },
+        },
+        nodes: [],
+      }),
+      { slot: { n: 1 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await expect(controller.result.set(2, ["slot", "n"]))
+      .resolves.toBeUndefined();
+    expect(manager.getArgument(piece).getRaw()).toEqual({ slot: { n: 2 } });
+  });
+
+  it("narrows Cell capabilities without granting new authority", async () => {
+    const numberCell = (kind: "readonly" | "writeonly" | "comparable") => ({
+      type: "number" as const,
+      asCell: [kind],
+    });
+    const source = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            readonly: numberCell("readonly"),
+            writeonly: numberCell("writeonly"),
+            comparable: numberCell("comparable"),
+          },
+          required: ["readonly", "writeonly", "comparable"],
+        },
+        result: { readonly: 1, writeonly: 2, comparable: 3 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            comparable: numberCell("comparable"),
+            opaqueFromWriteonly: { type: "number", asCell: ["opaque"] },
+            opaqueFromComparable: { type: "number", asCell: ["opaque"] },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await expect(
+      controller.input.set(source.key("readonly"), ["comparable"]),
+    ).resolves.toBeUndefined();
+    await expect(
+      controller.input.set(source.key("writeonly"), ["opaqueFromWriteonly"]),
+    ).rejects.toThrow(/capability cannot be exposed/);
+    await expect(
+      controller.input.set(source.key("comparable"), [
+        "opaqueFromComparable",
+      ]),
+    ).rejects.toThrow(/capability cannot be exposed/);
+  });
+
+  it("does not strip restricted producer capabilities into ordinary aliases", async () => {
+    const payload = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    } as const;
+    const source = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            readonly: { ...payload, asCell: ["readonly"] },
+            writeonly: { type: "number", asCell: ["writeonly"] },
+          },
+        },
+        result: { readonly: { n: 1 }, writeonly: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            readableWritable: payload,
+            readableNumber: { type: "number" },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await expect(
+      controller.input.set(
+        source.key("readonly").asSchema(payload),
+        ["readableWritable"],
+      ),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+    await expect(
+      controller.input.set(
+        source.key("writeonly").asSchema({ type: "number" }),
+        ["readableNumber"],
+      ),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const preexisting = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: payload },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: source.key("readonly").asSchema(payload) },
+      undefined,
+      { start: true },
+    );
+    await expect(
+      new PieceController(manager, preexisting).input.set(2, ["slot", "n"]),
+    ).rejects.toThrow(/write destination.*not writable/);
+    expect(source.getRaw()).toEqual({
+      readonly: { n: 1 },
+      writeonly: 7,
+    });
+  });
+
+  it("rejects writable links that widen producer payload contracts", async () => {
+    const sourcePayload = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+      additionalProperties: false,
+    } as const;
+    const source = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: sourcePayload },
+          required: ["value"],
+        },
+        result: { value: { n: 1 } },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const widePayload = {
+      type: "object",
+      properties: { n: { type: ["number", "string"] } },
+      required: ["n"],
+      additionalProperties: false,
+    } as const;
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { ...widePayload, asCell: ["cell"] },
+            value: widePayload,
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await expect(
+      controller.input.set(source.key("value"), ["handle"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+    await controller.input.set(source.key("value"), ["value"]);
+    await expect(
+      controller.input.set("bad", ["value", "n"]),
+    ).rejects.toThrow(/updated input does not match its write destination/);
+    expect(source.getRaw()).toEqual({ value: { n: 1 } });
+  });
+
+  it("rejects stream links that widen producer event contracts", async () => {
+    const numberStream = { type: "number", asCell: ["stream"] } as const;
+    const source = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { event: numberStream },
+          required: ["event"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { event: numberStream },
+          required: ["event"],
+        },
+        result: { event: { $alias: { cell: "argument", path: ["event"] } } },
+        nodes: [],
+      }),
+      { event: { $stream: true } },
+      undefined,
+      { start: true },
+    );
+    const wideStream = {
+      type: ["number", "string"],
+      asCell: ["stream"],
+    } as const;
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { event: wideStream },
+          required: ["event"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { event: wideStream },
+          required: ["event"],
+        },
+        result: {
+          event: { $alias: { cell: "argument", path: ["event"] } },
+        },
+        nodes: [],
+      }),
+      { event: { $stream: true } },
+      undefined,
+      { start: true },
+    );
+
+    await expect(
+      new PieceController(manager, target).setInput({
+        event: source.key("event"),
+      }),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+  });
+
+  it("rejects descendant writes through Stream wrappers", async () => {
+    const event = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+      asCell: ["stream"],
+    } as const;
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { event },
+          required: ["event"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { event: { $stream: true } },
+      undefined,
+      { start: true },
+    );
+
+    await expect(
+      new PieceController(manager, piece).input.set(2, ["event", "n"]),
+    ).rejects.toThrow(/stream Cell path is not writable/);
+  });
+
+  it("does not amplify readonly handles or write through them", async () => {
+    const payload = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+      additionalProperties: false,
+    } as const;
+    const readonlyPayload = { ...payload, asCell: ["readonly"] } as const;
+    const source = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: readonlyPayload },
+          required: ["value"],
+        },
+        result: { value: { n: 1 } },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            readonlyHandle: readonlyPayload,
+            writableHandle: { ...payload, asCell: ["cell"] },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await controller.input.set(source.key("value"), ["readonlyHandle"]);
+    await expect(
+      controller.input.set(2, ["readonlyHandle", "n"]),
+    ).rejects.toThrow(/not writable/);
+    await expect(
+      controller.input.set(source.key("value"), ["writableHandle"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+    expect(source.getRaw()).toEqual({ value: { n: 1 } });
+  });
+
+  it("validates writes against a narrowed redirect destination", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          settings: {
+            type: "object",
+            properties: { n: { type: "number" } },
+            required: ["n"],
+          },
+        },
+        required: ["settings"],
+      },
+      resultSchema: {
+        type: "object",
+        properties: {
+          settings: {
+            type: "object",
+            properties: { n: { type: ["number", "string"] } },
+            required: ["n"],
+          },
+        },
+        required: ["settings"],
+      },
+      result: {
+        settings: { $alias: { cell: "argument", path: ["settings"] } },
+      },
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { settings: { n: 1 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await expect(
+      controller.result.set("bad", ["settings", "n"]),
+    ).rejects.toThrow(/updated result does not match its write destination/);
+    expect((await controller.input.getCell()).getRaw()).toEqual({
+      settings: { n: 1 },
+    });
+  });
+
+  it("re-proves supplied links against a narrowed redirect destination", async () => {
+    const source = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          required: ["value"],
+        },
+        result: { value: "linked" },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            settings: {
+              type: "object",
+              properties: { n: { type: "number" } },
+              required: ["n"],
+            },
+          },
+          required: ["settings"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: {
+            settings: {
+              type: "object",
+              properties: { n: { type: ["number", "string"] } },
+              required: ["n"],
+            },
+          },
+          required: ["settings"],
+        },
+        result: {
+          settings: { $alias: { cell: "argument", path: ["settings"] } },
+        },
+        nodes: [],
+      }),
+      { settings: { n: 1 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await expect(
+      controller.result.set(source.key("value"), ["settings", "n"]),
+    ).rejects.toThrow(/write destination/);
+    expect((await controller.input.getCell()).getRaw()).toEqual({
+      settings: { n: 1 },
+    });
+  });
+
+  it("ignores a widened carried schema on a write destination", async () => {
+    const narrow = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    } as const;
+    const wide = {
+      type: "object",
+      properties: { n: { type: ["number", "string"] } },
+      required: ["n"],
+    } as const;
+    const source = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: narrow },
+          required: ["value"],
+        },
+        result: { value: { n: 1 } },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: wide },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: { n: 0 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await controller.input.set(source.key("value").asSchema(wide), ["slot"]);
+    await expect(
+      controller.input.set("bad", ["slot", "n"]),
+    ).rejects.toThrow(/write destination/);
+    expect(source.getRaw()).toEqual({ value: { n: 1 } });
+  });
+
+  it("ignores a widened carried schema on another Piece argument", async () => {
+    const narrow = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    } as const;
+    const wide = {
+      type: "object",
+      properties: { n: { type: ["number", "string"] } },
+      required: ["n"],
+    } as const;
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { value: narrow },
+          required: ["value"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { value: narrow },
+          required: ["value"],
+        },
+        result: {
+          value: { $alias: { cell: "argument", path: ["value"] } },
+        },
+        nodes: [],
+      }),
+      { value: { n: 1 } },
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: wide },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {
+        slot: manager.getArgument(producer).key("value").asSchema(wide),
+      },
+      undefined,
+      { start: true },
+    );
+
+    await expect(
+      new PieceController(manager, target).input.set("bad", ["slot", "n"]),
+    ).rejects.toThrow(/write destination/);
+    expect(manager.getArgument(producer).getRaw()).toEqual({
+      value: { n: 1 },
+    });
+  });
+
+  it("validates linked descendant writes against producer containers", async () => {
+    const constrainedArray = {
+      type: "array",
+      items: { type: "number" },
+      maxItems: 1,
+    } as const;
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { arr: constrainedArray },
+          required: ["arr"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { arr: constrainedArray },
+          required: ["arr"],
+        },
+        result: {
+          arr: { $alias: { cell: "argument", path: ["arr"] } },
+        },
+        nodes: [],
+      }),
+      { arr: [1] },
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            slot: { type: "array", items: { type: "number" } },
+          },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: [] },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await controller.input.set(producer.key("arr"), ["slot"]);
+    await expect(controller.input.set(2, ["slot", 1])).rejects.toThrow(
+      /write destination/,
+    );
+    expect(manager.getArgument(producer).getRaw()).toEqual({ arr: [1] });
+  });
+
+  it("intersects argument and public result destination contracts", async () => {
+    const narrow = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    } as const;
+    const wide = {
+      type: "object",
+      properties: { n: { type: ["number", "string"] } },
+      required: ["n"],
+    } as const;
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { settings: wide },
+          required: ["settings"],
+        },
+        resultSchema: {
+          type: "object",
+          properties: { settings: narrow },
+          required: ["settings"],
+        },
+        result: {
+          settings: { $alias: { cell: "argument", path: ["settings"] } },
+        },
+        nodes: [],
+      }),
+      { settings: { n: 1 } },
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: wide },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: { n: 0 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await controller.input.set(producer.key("settings"), ["slot"]);
+    await expect(controller.input.set("bad", ["slot", "n"]))
+      .rejects.toThrow(/write destination/);
+    expect(manager.getArgument(producer).getRaw()).toEqual({
+      settings: { n: 1 },
+    });
+  });
+
+  it("intersects internal and public result destination contracts", async () => {
+    const narrow = {
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+      default: { n: 1 },
+    } as const;
+    const wide = {
+      type: "object",
+      properties: { n: { type: ["number", "string"] } },
+      required: ["n"],
+    } as const;
+    const producer = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: wide },
+          required: ["value"],
+        },
+        derivedInternalCells: [{
+          partialCause: "value",
+          schema: narrow,
+        }],
+        result: {
+          value: { $alias: { partialCause: "value", path: [] } },
+        },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const target = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: wide },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: { n: 0 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+
+    await controller.input.set(producer.key("value"), ["slot"]);
+    await expect(controller.input.set("bad", ["slot", "n"]))
+      .rejects.toThrow(/write destination/);
+    expect(producer.get()).toEqual({ value: { n: 1 } });
+  });
+
   it("accepts a Piece Stream supplied to a Stream Cell input", async () => {
     const sourcePiece = await manager.runPersistent(
       trustPattern(runtime, {
@@ -1673,8 +2816,22 @@ describe("piece pull materialization", () => {
       undefined,
       { start: true },
     );
-    await target.input.set(nonemptyArray.key(0), ["slot"]);
-    expect(await target.input.get(["slot"])).toBe(4);
+    await expect(
+      target.input.set(nonemptyArray.key(0), ["slot"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    await optionalTarget.input.set(nonemptyArray.key(0), ["slot"]);
+    const sparse = Array(1);
+    expect(validateSchemaValue(
+      {
+        type: "array",
+        items: { type: "number" },
+        minItems: 1,
+      },
+      sparse,
+    )).toBeUndefined();
+    await new PieceController(manager, nonemptyArray).result.set(sparse);
+    expect(await optionalTarget.input.get(["slot"])).toBeUndefined();
   });
 
   it("rejects path links through correlated parent schemas", async () => {
@@ -1978,7 +3135,8 @@ describe("piece pull materialization", () => {
         manager.getArgument(argumentSourcePiece).key("value"),
         ["slot"],
       ),
-    ).rejects.toThrow(/source has no durable schema contract/);
+    ).resolves.toBeUndefined();
+    expect(await controller.input.get(["slot"])).toBe(1);
   });
 
   it("hydrates path defaults while retaining raw explicit undefined", async () => {
