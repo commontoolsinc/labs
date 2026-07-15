@@ -459,6 +459,67 @@ describe("bound PatternFactory list operations", () => {
     }
   });
 
+  it("does not preempt rows when only the factory selection label changes", async () => {
+    const selected = createFactoryShell(sealFactoryState(boundMapOp()));
+    const selector = runtime.getCell<unknown>(
+      space,
+      "bound list label-only selector",
+      undefined,
+      tx,
+    );
+    const selectorLink = selector.getAsNormalizedFullLink();
+    const writeSelection = (label: string): void => {
+      tx.writeOrThrow({
+        space: selectorLink.space,
+        scope: selectorLink.scope,
+        id: selectorLink.id,
+        type: "application/json",
+        path: [],
+      }, {
+        value: selected,
+        cfc: {
+          version: 1,
+          schemaHash: "bound-list-label-only-selector",
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: [],
+              label: { confidentiality: [label] },
+            }],
+          },
+        },
+      });
+    };
+
+    writeSelection("factory-label-a");
+    await commitAndRenew();
+
+    let preemptions = 0;
+    const [cancelAll, addCancel] = useCancelGroup();
+    const supervisor = createListPatternFactorySupervisor(
+      runtime,
+      addCancel,
+      () => preemptions++,
+    );
+    try {
+      supervisor.materialize(
+        tx,
+        runtime.getCellFromLink(selectorLink, undefined, tx),
+        "map",
+      );
+      await commitAndRenew();
+
+      writeSelection("factory-label-b");
+      await commitAndRenew();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(preemptions).toBe(0);
+    } finally {
+      cancelAll();
+    }
+  });
+
   it("rebinds a mapped element when an intermediate redirect retargets", async () => {
     const first = runtime.getCell<number>(
       space,

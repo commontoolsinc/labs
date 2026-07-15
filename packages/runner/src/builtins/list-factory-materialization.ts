@@ -6,12 +6,10 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import type { Cell } from "../cell.ts";
 import { isPattern, type Pattern } from "../builder/types.ts";
 import type { AddCancel } from "../cancel.ts";
-import { cfcLabelViewForCell } from "../cfc/label-view.ts";
 import {
   FactoryArtifactUnavailableError,
   materializeFactory,
@@ -40,7 +38,6 @@ type ListBuiltinName = "map" | "filter" | "flatMap";
 
 type CanonicalSelection = {
   canonical: unknown;
-  cfcLabel: unknown;
 };
 
 type CurrentSelection = CanonicalSelection & {
@@ -64,11 +61,14 @@ function sameSelection(
   left: CanonicalSelection,
   right: CanonicalSelection,
 ): boolean {
+  // A label-only update is not a code-generation replacement. Every row node
+  // and handler rereads `factorySelectionLink` in its own transaction, so the
+  // current selector label still participates in CFC provenance without
+  // tearing down the stable row generation (and briefly removing its streams).
   return valueEqual(
     left.canonical as FabricValue,
     right.canonical as FabricValue,
-  ) &&
-    deepEqual(left.cfcLabel, right.cfcLabel);
+  );
 }
 
 function readSelection(
@@ -100,7 +100,6 @@ function readSelection(
   return {
     raw,
     canonical: canonicalSelection(raw),
-    cfcLabel: cfcLabelViewForCell(sourceCell),
     sourceLink: resolvedOp,
     dereferenceSources,
   };

@@ -1054,6 +1054,15 @@ Current array-callback lowering must use the same representation. For example,
 longer passes closure params as a separate sibling argument. All pattern
 closure values flow through the one internal `.curry(params)` operation.
 
+The bound-list supervisor treats only a different canonical `Factory@1` state
+as a row-generation replacement. A selector CFC-label update with byte-equal
+factory state must not tear down or recreate stable rows. Each row computation
+and handler registers the stable factory-selection link as its own dispatch
+dependency and rereads that link in the consuming transaction, so the current
+selector label still contributes to CFC provenance without briefly removing
+the row's stream registrations. Canonical code/params/modifier changes retain
+the switch-latest teardown and stale-generation fencing rules.
+
 Reactive array lowering does not support the optional JavaScript `thisArg`.
 Pattern callbacks have no ambient JavaScript receiver, and the canonical list
 node accepts only the bound factory, so a second array-method argument fails
