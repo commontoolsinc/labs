@@ -1738,6 +1738,31 @@ Deno.test("CellBridge decodes encoded space directory names for write paths", ()
   assertEquals(writePath?.jsonPath, ["title"]);
 });
 
+Deno.test("CellBridge resolves write paths through a detached prop subtree", () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "did:key:zSpace", []);
+  const piece = { id: "of:detached-piece", name: () => "Detached Piece" };
+  state.pieceControllers.set("notes", piece as never);
+
+  const pieceIno = tree.addDir(state.piecesIno, "notes");
+  const inputIno = tree.addDir(pieceIno, "input");
+  const lastMessageIno = tree.addFile(inputIno, "lastMessage", "hi", "string");
+
+  // A prop rebuild detaches the old `input` subtree, retains it so open handles
+  // keep working, and builds a replacement under the same name.
+  (bridge as unknown as { retainDetachedSubtree: (ino: bigint) => void })
+    .retainDetachedSubtree(inputIno);
+  const rebuiltInputIno = tree.addDir(pieceIno, "input");
+  tree.addFile(rebuiltInputIno, "lastMessage", "hi", "string");
+
+  const writePath = bridge.resolveWritePath(lastMessageIno);
+  assertEquals(writePath?.spaceName, "did:key:zSpace");
+  assertEquals(writePath?.pieceName, "notes");
+  assertEquals(writePath?.cell, "input");
+  assertEquals(writePath?.jsonPath, ["lastMessage"]);
+});
+
 Deno.test("CellBridge decodes encoded space directory names for source write paths", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
