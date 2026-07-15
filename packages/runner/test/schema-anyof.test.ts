@@ -14,6 +14,30 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+type TextNode = { type: "text"; value: string };
+type VDomNode = {
+  type: string;
+  name: string;
+  props: { style: { color: string } };
+  children: Array<TextNode | TextNode[] | string>;
+};
+
+function expectCell<T>(value: unknown): Cell<T> {
+  expect(isCell(value)).toBe(true);
+  if (!isCell(value)) {
+    throw new Error("Expected value to be a cell");
+  }
+  return value;
+}
+
+function expectArray(value: unknown): unknown[] {
+  expect(Array.isArray(value)).toBe(true);
+  if (!Array.isArray(value)) {
+    throw new Error("Expected value to be an array");
+  }
+  return value;
+}
+
 describe("Schema - AnyOf Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -161,7 +185,7 @@ describe("Schema - AnyOf Support", () => {
     });
 
     it("should handle anyOf in array items", () => {
-      const c = runtime.getCell<{ arr: any[] }>(
+      const c = runtime.getCell<{ arr: Array<string | number | boolean> }>(
         space,
         "should handle anyOf in array items 1",
         undefined,
@@ -459,12 +483,7 @@ describe("Schema - AnyOf Support", () => {
       });
 
       it("should work for the vdom schema with $ref", () => {
-        const plain = runtime.getCell<{
-          type: string;
-          name: string;
-          props: { style: { color: string } };
-          children: any[];
-        }>(
+        const plain = runtime.getCell<VDomNode>(
           space,
           "should work for the vdom schema with $ref 1",
           undefined,
@@ -492,7 +511,7 @@ describe("Schema - AnyOf Support", () => {
         );
         innerTextCell.setRaw({ type: "text", value: "world" });
 
-        const childrenArrayCell = runtime.getCell<any[]>(
+        const childrenArrayCell = runtime.getCell<FabricValue[]>(
           space,
           "should work for the vdom schema with $ref 5",
           undefined,
@@ -507,16 +526,16 @@ describe("Schema - AnyOf Support", () => {
           type: string;
           name: string;
           props: {
-            style: any;
+            style: FabricValue;
           };
-          children: any[];
+          children: FabricValue[];
         }>(
           space,
           "should work for the vdom schema with $ref 3",
           undefined,
           tx,
         );
-        withLinks.setRawUntyped({
+        const linkedVDom: FabricValue = {
           type: "vnode",
           name: "div",
           props: {
@@ -527,7 +546,8 @@ describe("Schema - AnyOf Support", () => {
             childrenArrayCell.getAsLink(),
             "or just text",
           ],
-        } as unknown as FabricValue);
+        };
+        withLinks.setRawUntyped(linkedVDom);
 
         const vdomSchema = {
           $ref: "#/$defs/VDom",
@@ -571,23 +591,21 @@ describe("Schema - AnyOf Support", () => {
           expect(result.name).toBe("div");
           expect(isCell(result.props)).toBe(false);
           expect(isCell(result.props?.style)).toBe(true);
-          expect(result.props!.style.get().color).toBe("red");
+          const style = expectCell<{ color: string }>(result.props!.style);
+          expect(style.get().color).toBe("red");
           expect(isCell(result.children)).toBe(true);
-          const children = result.children!.get();
+          const children = expectArray(result.children!.get());
           expect(children.length).toBe(3);
-          expect(isCell(children[0])).toBe(true);
-          expect((children[0] as Cell<any>).get().value).toBe("single");
+          const child0 = expectCell<TextNode>(children[0]);
+          expect(child0.get().value).toBe("single");
           expect(isCell(children[1])).toBe(false);
-          expect(Array.isArray(children[1])).toBe(true);
-          const child1 = children[1] as unknown as Cell<any>[];
-          expect(isCell(child1[0])).toBe(true);
-          expect(child1[0].get().value).toBe("hello");
-          expect(
-            isCell(child1[1]),
-          ).toBe(true);
-          expect(child1[1].get().value).toBe("world");
-          expect(isCell(children[2])).toBe(true);
-          expect((children[2] as Cell<any>).get()).toBe("or just text");
+          const child1 = expectArray(children[1]);
+          const child1First = expectCell<TextNode>(child1[0]);
+          expect(child1First.get().value).toBe("hello");
+          const child1Second = expectCell<TextNode>(child1[1]);
+          expect(child1Second.get().value).toBe("world");
+          const child2 = expectCell<string>(children[2]);
+          expect(child2.get()).toBe("or just text");
         }
       });
     });

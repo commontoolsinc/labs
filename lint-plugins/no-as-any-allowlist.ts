@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/schema-anyof.test.ts",
   "packages/runner/test/schema-basic.test.ts",
   "packages/runner/test/schema-format.test.ts",
   "packages/runner/test/schema-lineage.test.ts",
