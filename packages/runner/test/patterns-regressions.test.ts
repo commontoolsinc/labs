@@ -6,15 +6,86 @@ import { expect } from "@std/expect";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type FactoryInput, NAME } from "../src/builder/types.ts";
+import {
+  type Cell,
+  type JSONSchema,
+  type JSONValue,
+  NAME,
+  type Pattern,
+  type PatternFactory,
+  type Stream,
+} from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
-import type { Pattern } from "../src/builder/types.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+type VisibleItem = { name: string; visible: boolean };
+type ListOpInput<T> = {
+  element: T;
+  index: number;
+  array: T[];
+};
+type CollectionPatternHelpers<T> = {
+  mapWithPattern<S>(
+    op: PatternFactory<ListOpInput<T>, S>,
+    params: Record<string, unknown>,
+  ): S[];
+};
+type NotebookResult = {
+  title: string;
+  notes: Array<{ title: string }>;
+  noteCount: number;
+  [NAME]: string;
+  createNote: Stream<void>;
+};
+type PreparedRunnerProbe = {
+  cancels: unknown;
+  locallyPreparedResults: Set<string>;
+  setupInternal<T>(
+    tx: IExtendedStorageTransaction,
+    pattern: Pattern,
+    argument: T,
+    resultCell: Cell<T>,
+  ): unknown;
+  getDocKey<T>(cell: Cell<T>): string;
+};
+
+const collectionPattern = <T>(value: unknown): CollectionPatternHelpers<T> =>
+  value as CollectionPatternHelpers<T>;
+
+const stringSchema = {
+  type: "string",
+} as const satisfies JSONSchema;
+const booleanSchema = {
+  type: "boolean",
+} as const satisfies JSONSchema;
+const visibleItemSchema = {
+  type: "object",
+  properties: {
+    name: stringSchema,
+    visible: booleanSchema,
+  },
+  required: ["name", "visible"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+const visibleItemArgumentSchema = {
+  type: "object",
+  properties: {
+    element: visibleItemSchema,
+  },
+  required: ["element"],
+  additionalProperties: false,
+} as const satisfies JSONSchema;
+const nullableStringSchema = {
+  anyOf: [
+    stringSchema,
+    { type: "null" },
+  ],
+} as const satisfies JSONSchema;
 
 describe("Pattern Runner - Regressions", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -74,17 +145,25 @@ describe("Pattern Runner - Regressions", () => {
     >(
       ({ items }) => {
         // Map over items, returning item name if visible, null otherwise
-        const mapped = (items as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((item: any) =>
-              ifElse(
-                lift((i: { name: string; visible: boolean }) => i.visible)(
-                  item,
-                ),
-                lift((i: { name: string; visible: boolean }) => i.name)(item),
-                null,
-              )) as any)(element, index, array)
-          ),
+        const visibleNamePattern = pattern<
+          ListOpInput<VisibleItem>,
+          string | null
+        >(
+          ({ element }) =>
+            ifElse(
+              lift((item: VisibleItem | undefined) => item?.visible === true)(
+                element,
+              ),
+              lift((item: VisibleItem | undefined) => item?.name ?? "")(
+                element,
+              ),
+              null,
+            ),
+          visibleItemArgumentSchema,
+          nullableStringSchema,
+        );
+        const mapped = collectionPattern<VisibleItem>(items).mapWithPattern(
+          visibleNamePattern,
           {},
         );
         return { items, mapped };
@@ -188,7 +267,7 @@ describe("Pattern Runner - Regressions", () => {
       };
     });
 
-    const resultCell = runtime.getCell<any>(
+    const resultCell = runtime.getCell<NotebookResult>(
       space,
       "ct-notebook-name-regression",
       undefined,
@@ -244,25 +323,42 @@ describe("Pattern Runner - Regressions", () => {
       tx,
     );
 
-    const runner = runtime.runner as any;
+    const runnerValue: unknown = runtime.runner;
+    const runner = runnerValue as PreparedRunnerProbe;
     runner.setupInternal(tx, echoPattern, { title: "draft" }, resultCell);
     const key = runner.getDocKey(resultCell);
     expect(runner.locallyPreparedResults.has(key)).toBe(true);
 
     const originalCommit = tx.tx.commit.bind(tx.tx);
-    (tx.tx as any).commit = () =>
+    const syntheticConflict = Object.assign(new Error("synthetic conflict"), {
+      name: "ConflictError" as const,
+      transaction: {
+        iss: space,
+        cmd: "/memory/transact" as const,
+        sub: space,
+        args: { changes: {} },
+        prf: [],
+      },
+      conflict: {
+        space,
+        the: "application/json" as const,
+        of: "of:synthetic-conflict" as const,
+        expected: null,
+        actual: null,
+        existsInHistory: false,
+        history: [],
+      },
+    });
+    tx.tx.commit = () =>
       Promise.resolve({
-        error: {
-          name: "ConflictError",
-          message: "synthetic conflict",
-        },
+        error: syntheticConflict,
       });
 
     const result = await commitTx();
     expect(result.error?.name).toBe("ConflictError");
     expect(runner.locallyPreparedResults.has(key)).toBe(false);
 
-    (tx.tx as any).commit = originalCommit;
+    tx.tx.commit = originalCommit;
     tx = runtime.edit();
   });
 
@@ -291,6 +387,7 @@ describe("Pattern Runner - Regressions", () => {
         return { name: "result recipe" };
       },
     });
+    const resultRecipeValue: unknown = resultRecipe;
 
     const rawValuePattern = {
       argumentSchema: {},
@@ -303,10 +400,10 @@ describe("Pattern Runner - Regressions", () => {
         internalRecipe: {
           $alias: { partialCause: "recipe", path: [] },
         },
-        resultRecipe: resultRecipe as unknown,
+        resultRecipe: resultRecipeValue as JSONValue,
       },
       nodes: [],
-    } as unknown as Pattern;
+    } satisfies Pattern;
 
     const resultCell = runtime.getCell<{
       internalRecipe: { name: string };
