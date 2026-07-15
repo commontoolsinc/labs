@@ -24,7 +24,7 @@ function press(session: Session, ...names: string[]): void {
 }
 
 Deno.test("session: vertical scrolling and clamping", () => {
-  // Bare arrows are the text cursor now; j/k still scroll the pager.
+  // j/k scroll the pager (bare arrows scroll too; edit mode is entered with e).
   const s = makeSession();
   assertEquals(s.view().top, 0);
   press(s, "j", "j", "j");
@@ -51,7 +51,19 @@ Deno.test("session: horizontal scrolling", () => {
   assertEquals(s.view().left, 0, "left clamps at 0");
 });
 
-Deno.test("session: alt+arrows scroll and pan like the old cursor keys", () => {
+Deno.test("session: bare arrows scroll and pan the view", () => {
+  const s = makeSession();
+  press(s, "down", "down");
+  assertEquals(s.view().top, 2, "down arrows scroll the view");
+  press(s, "up");
+  assertEquals(s.view().top, 1);
+  press(s, "right");
+  assertEquals(s.view().left, 8, "right pans the view");
+  press(s, "left");
+  assertEquals(s.view().left, 0);
+});
+
+Deno.test("session: alt+arrows scroll and pan the view", () => {
   const s = makeSession();
   const alt = (name: string): Key => ({ name, alt: true });
   s.handleKey(alt("down"));
@@ -175,14 +187,21 @@ Deno.test("session: definition lookup overlay", () => {
   assert(ov!.title.includes("myPattern"));
 });
 
-Deno.test("session: line-number toggle and quit", () => {
+Deno.test("session: line-number toggle cycles off → input → file → off", () => {
   const s = makeSession();
-  assertEquals(s.view().showLineNumbers, false);
-  press(s, "#");
+  assertEquals(s.view().showLineNumbers, false, "off to start");
+  press(s, "#"); // → input position
   assertEquals(s.view().showLineNumbers, true);
-  assertEquals(s.quit, false);
-  press(s, "q");
-  assertEquals(s.quit, true);
+  assert(s.view().message.includes("input"), s.view().message);
+  // Input numbers are the document line (1-based) on each row.
+  assertEquals(s.view().lineNumbers?.[0], 1);
+  assertEquals(s.view().lineNumbers?.[2], 3);
+  press(s, "#"); // → file / message line
+  assert(s.view().message.includes("file"), s.view().message);
+  assertEquals(s.view().showLineNumbers, true);
+  press(s, "#"); // → off
+  assertEquals(s.view().showLineNumbers, false);
+  assertEquals(s.view().lineNumbers, null);
 });
 
 Deno.test("session: help overlay opens with ?", () => {
@@ -191,6 +210,44 @@ Deno.test("session: help overlay opens with ?", () => {
   const ov = s.view().overlay;
   assert(ov, "help overlay open");
   assert(ov!.title.toLowerCase().includes("keys"));
+});
+
+Deno.test("session: c cycles the non-printable display mode and reports it", () => {
+  const s = makeSession();
+  assertEquals(s.view().displayMode, "pictures", "starts on the first mode");
+  press(s, "c");
+  assertEquals(s.view().displayMode, "ansi");
+  assert(s.view().message.includes("ANSI colour"), "reports the new mode");
+  press(s, "c");
+  assertEquals(s.view().displayMode, "hidden");
+  press(s, "c");
+  assertEquals(
+    s.view().displayMode,
+    "pictures",
+    "wraps back to the first mode",
+  );
+});
+
+Deno.test("session: a search reveal in a compacting mode scrolls to the display column", () => {
+  // A wide line whose match sits far to the right of a control-code run, in a
+  // narrow viewport so revealing it must scroll horizontally. Hidden mode
+  // collapses the run, so the reveal counts display columns, not source columns.
+  const tail = "x".repeat(40) + "NEEDLE";
+  const doc = parseDocument(`a${"\x01".repeat(10)}${tail}\n`);
+  const s = new Session(
+    doc,
+    { color: true, showLineNumbers: false },
+    { width: 20, height: 6 },
+  );
+  press(s, "c", "c"); // pictures → ansi → hidden
+  assertEquals(s.view().displayMode, "hidden");
+  press(s, "/");
+  for (const ch of "NEEDLE") press(s, ch);
+  press(s, "enter");
+  // The 10-code run collapses to one ellipsis, so "NEEDLE" starts at display
+  // column ~42, not its source column ~51. The viewport frames the display one.
+  const left = s.view().left;
+  assert(left > 0 && left <= 42, `reveal used a display column, left=${left}`);
 });
 
 Deno.test("session: resize reclamps scroll", () => {
@@ -469,4 +526,35 @@ Deno.test("session: WASD preserves horizontal scroll", () => {
     leftBefore,
     "horizontal scroll preserved by WASD",
   );
+});
+
+Deno.test("session: the help overlay documents file folding and scrolling", () => {
+  const s = makeSession();
+  press(s, "?");
+  const ov = s.view().overlay!;
+  const text = ov.lines.map((l) => l.text).join("\n");
+  assert(text.includes("Diff files"), "has a Diff files section");
+  assert(/hide\s*\/\s*show/.test(text), "documents hide/show");
+  assert(text.includes("hide all files"), "documents hide all");
+  assert(text.includes("hide test"), "documents hiding test files");
+  assert(
+    ov.footer.includes("scroll"),
+    `footer advertises scrolling: ${ov.footer}`,
+  );
+});
+
+Deno.test("session: an info card is a dialog; its source view is a blue window", () => {
+  const doc = parseDocument(SAMPLE);
+  const s = new Session(
+    doc,
+    { color: true, showLineNumbers: false },
+    { width: 90, height: 24 },
+  );
+  press(s, "s", "s"); // select a section (has both a card and a source view)
+  press(s, "enter");
+  assert(!s.view().overlay?.sourceView, "the info card is a dialog");
+  press(s, "tab"); // toggle to source
+  assert(s.view().overlay?.sourceView, "its source view is a source window");
+  press(s, "tab"); // back to the card
+  assert(!s.view().overlay?.sourceView, "toggled back to the dialog");
 });

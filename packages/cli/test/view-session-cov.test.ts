@@ -6,7 +6,7 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
-import { parseDocument, SAMPLE } from "./view-helpers.ts";
+import { parseDocument, promptText, SAMPLE } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";
 import type { Key } from "../lib/view/keys.ts";
 import type { Semantics } from "../lib/view/semantics.ts";
@@ -15,6 +15,7 @@ import type { DirEntry, FileGateway } from "../lib/view/filegateway.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";
+import { overlayBox } from "../lib/view/render.ts";
 
 // --- key helpers -----------------------------------------------------------
 
@@ -52,7 +53,7 @@ function makeSession(width = 90, height = 24): Session {
   );
 }
 
-// --- noticeLines: more than six edited files (236-238) ----------------------
+// --- save dialog: more than six edited files -------------------------------
 
 Deno.test("session: the save prompt lists six files plus an '… and N more' line", () => {
   const path = "/work/main.ts";
@@ -74,15 +75,16 @@ Deno.test("session: the save prompt lists six files plus an '… and N more' lin
     undefined,
     source,
   );
-  press(s, "down"); // reveal the cursor
+  press(s, "e"); // reveal the cursor
   type(s, "X"); // dirty the buffer
   press(s, "ctrl-c"); // raise the save prompt
-  const notice = s.view().notice!;
-  assert(notice, "the notice lists the files");
-  assertEquals(notice[0], "9 files with changes:");
+  const body = s.view().dialog!.body;
+  assert(body, "the dialog lists the files");
+  assert(body[0].includes("9 files"), body[0]);
   // Six files are shown, then a summary line for the remaining three.
-  assertEquals(notice.length, 1 + 6 + 1);
-  assertEquals(notice[notice.length - 1], "  … and 3 more");
+  const fileLines = body.filter((l) => l.trimStart().startsWith("file"));
+  assertEquals(fileLines.length, 6, "six files listed");
+  assertEquals(body[body.length - 1], "  … and 3 more");
 });
 
 Deno.test("session: a single edited file shows no notice list", () => {
@@ -102,11 +104,11 @@ Deno.test("session: a single edited file shows no notice list", () => {
     undefined,
     source,
   );
-  press(s, "down");
+  press(s, "e");
   type(s, "Y");
   press(s, "ctrl-c");
-  assertEquals(s.view().notice, null, "one file needs no list");
-  assert(s.view().inputLine?.includes("solo.ts"), s.view().inputLine ?? "");
+  assertEquals(s.view().dialog!.body.length, 1, "one file needs no list");
+  assert(promptText(s.view()).includes("solo.ts"), promptText(s.view()));
 });
 
 // --- selectNode out-of-range guard (288) ------------------------------------
@@ -246,6 +248,100 @@ Deno.test("session: card selection wraps at the bottom and scrolls to stay visib
   assert(lastScroll >= 0);
 });
 
+Deno.test("session: Enter on a card's '… N more' line expands the list in place", () => {
+  let src = "// transformed: /app.ts\n";
+  for (let i = 0; i < 16; i++) src += `const v${i} = ${i};\n`;
+  const doc = parseDocument(src);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 100, height: 40 },
+  );
+  selectByLabel(s, "app.ts"); // the file section
+  press(s, "enter"); // open its card
+  const lines = () => s.view().overlay!.lines;
+  const moreLine = lines().findIndex((l) => l.text.includes("2 more"));
+  assert(moreLine >= 0, "the card is truncated with a more line");
+  // Move the selection down until it lands on the "… 2 more" line (the last
+  // selectable target), then press Enter to expand.
+  let guard = 0;
+  while (s.view().overlay!.selectedLine !== moreLine && guard++ < 100) {
+    press(s, "down");
+  }
+  assertEquals(s.view().overlay!.selectedLine, moreLine, "more line selected");
+  // 'z' (reveal) has no destination on a "… N more" line, so it does nothing.
+  press(s, "z");
+  assert(s.view().overlay !== null, "z left the card open");
+  assertEquals(
+    s.view().overlay!.selectedLine,
+    moreLine,
+    "still on the more line",
+  );
+  press(s, "enter");
+  assert(!lines().some((l) => l.text.includes("more")), "no more line now");
+  assert(lines().some((l) => l.text.includes("v15")), "every child listed");
+});
+
+Deno.test("session: following card references stacks them; Esc walks back, q closes all", () => {
+  let src = "// transformed: /app.ts\n";
+  for (let i = 0; i < 4; i++) src += `const v${i} = ${i};\n`;
+  const doc = parseDocument(src);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 100, height: 40 },
+  );
+  selectByLabel(s, "app.ts");
+  press(s, "enter"); // open the file section's card
+  const sectionTitle = s.view().overlay!.title;
+  assert(!s.view().overlay!.footer.includes("back"), "first card: Esc closes");
+  press(s, "down"); // select the first outline child (v0)
+  press(s, "enter"); // open v0's card, pushing the section card
+  assert(s.view().overlay!.title.includes("v0"), s.view().overlay!.title);
+  assert(
+    s.view().overlay!.footer.includes("esc back"),
+    "footer offers go-back",
+  );
+  press(s, "escape"); // pop back to the section card
+  assertEquals(
+    s.view().overlay!.title,
+    sectionTitle,
+    "back on the section card",
+  );
+  assertEquals(
+    s.view().overlay!.selectedLine !== undefined,
+    true,
+    "v0 reselected",
+  );
+  press(s, "escape"); // empty stack -> close to the main view
+  assertEquals(s.view().overlay, null, "the last Esc closes the card");
+  // q from within a stack closes everything at once.
+  press(s, "enter"); // reopen the section card
+  press(s, "down");
+  press(s, "enter"); // v0's card (stack: section)
+  press(s, "q");
+  assertEquals(s.view().overlay, null, "q closed the whole stack");
+});
+
+Deno.test("session: Enter on a 'defined elsewhere' entry, then Esc, returns to the card", () => {
+  const { s } = externalSession(1, 4);
+  const cardTitle = s.view().overlay!.title; // the flag card
+  press(s, "down"); // select the external reference
+  press(s, "enter"); // open the external file over the card
+  assert(
+    s.view().overlay!.title.includes("ext.ts"),
+    "opened the external file",
+  );
+  assert(
+    s.view().overlay!.footer.includes("esc back"),
+    "the file offers go-back",
+  );
+  press(s, "escape"); // pop back to the card we came from
+  assertEquals(s.view().overlay?.title, cardTitle, "back on the flag card");
+  press(s, "escape"); // empty stack -> close
+  assertEquals(s.view().overlay, null, "the last Esc closes");
+});
+
 Deno.test("session: 'z' on a card opens the external definition file in place", () => {
   const { s } = externalSession(1, 4);
   press(s, "down"); // select the external reference
@@ -346,6 +442,26 @@ Deno.test("session: overlay paging keys scroll the card", () => {
   // 'q' closes the overlay.
   press(s, "q");
   assertEquals(s.view().overlay, null, "q closed the overlay");
+});
+
+Deno.test("session: overlay scrolling stops once the last line reaches the bottom", () => {
+  const doc = parseDocument(SAMPLE);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 100, height: 20 },
+  );
+  press(s, "?");
+  const lines = s.view().overlay!.lines.length;
+  const innerH = overlayBox(100, 20).innerH;
+  const maxScroll = lines - innerH;
+  assert(maxScroll > 0, "the help is taller than the box");
+  // Hammer down well past the end: the scroll settles so the final line sits on
+  // the last content row, never scrolling it up past the frame.
+  for (let i = 0; i < lines + 5; i++) press(s, "pagedown");
+  assertEquals(s.view().overlay!.scroll, maxScroll, "clamped to the last line");
+  press(s, "down");
+  assertEquals(s.view().overlay!.scroll, maxScroll, "cannot scroll further");
 });
 
 Deno.test("session: Tab toggles a peek card to source and z reveals the subject from there", () => {
@@ -532,7 +648,7 @@ Deno.test("session: revealing the cursor on a non-editable view reports the reas
     { color: false, showLineNumbers: false },
     { width: 40, height: 10 },
   );
-  press(s, "down"); // try to reveal the cursor
+  press(s, "e"); // try to reveal the cursor
   assert(s.view().cursor === null, "no cursor without a source");
   assert(
     s.view().message.includes("no underlying file"),
@@ -540,7 +656,7 @@ Deno.test("session: revealing the cursor on a non-editable view reports the reas
   );
 });
 
-Deno.test("session: a read-only source reports its reason when arrowed", () => {
+Deno.test("session: a read-only source reports its reason on edit", () => {
   const doc = parseDocument("const a = 1;\n");
   const source: EditableSource = {
     label: null,
@@ -556,14 +672,14 @@ Deno.test("session: a read-only source reports its reason when arrowed", () => {
     undefined,
     source,
   );
-  press(s, "left");
+  press(s, "e");
   assertEquals(s.view().cursor, null);
   assert(s.view().message.includes("read-only"), s.view().message);
 });
 
 Deno.test("session: word, line and buffer movement in a file buffer", () => {
   const { s } = fileSession("alpha beta gamma\nsecond line here\nthird\n");
-  press(s, "down"); // reveal cursor at top
+  press(s, "e"); // reveal cursor at top
   assertEquals(s.view().cursor, { line: 0, col: 0 });
   s.handleKey(alt("f")); // word forward
   assert((s.view().cursor?.col ?? 0) > 0, "M-f moved forward a word");
@@ -605,7 +721,7 @@ Deno.test("session: cursor paging up and down moves the cursor by a page", () =>
     60,
     8,
   );
-  press(s, "down"); // reveal cursor at top
+  press(s, "e"); // reveal cursor at top
   press(s, "pagedown");
   assert((s.view().cursor?.line ?? 0) > 0, "pagedown moved the cursor");
   const afterDown = s.view().cursor!.line;
@@ -619,7 +735,7 @@ Deno.test("session: cursor paging up and down moves the cursor by a page", () =>
 
 Deno.test("session: typing, tab, space, kill-line, yank and word-case edits in a file", () => {
   const { s } = fileSession("hello world\n");
-  press(s, "down"); // reveal cursor
+  press(s, "e"); // reveal cursor
   press(s, "end"); // end of "hello world"
   type(s, "!"); // insert a char
   assert(s.doc.lines[0].text.endsWith("!"), s.doc.lines[0].text);
@@ -646,7 +762,7 @@ Deno.test("session: typing, tab, space, kill-line, yank and word-case edits in a
 
 Deno.test("session: delete-forward, backspace, kill-word forward/back, newline and mark/region", () => {
   const { s } = fileSession("abcdef ghij\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "delete"); // delete the 'a'
   assert(s.doc.lines[0].text.startsWith("bcdef"), s.doc.lines[0].text);
   press(s, "ctrl-d"); // delete the 'b'
@@ -673,7 +789,7 @@ Deno.test("session: delete-forward, backspace, kill-word forward/back, newline a
 
 Deno.test("session: yank-pop in a file rotates the kill ring", () => {
   const { s } = fileSession("one\ntwo\nthree\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "ctrl-k", "ctrl-k"); // kill "one" then the empty line / newline
   press(s, "down");
   press(s, "ctrl-k");
@@ -684,14 +800,14 @@ Deno.test("session: yank-pop in a file rotates the kill ring", () => {
 
 Deno.test("session: ctrl-` sets the mark like ctrl-space", () => {
   const { s } = fileSession("mark me\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   s.handleKey({ name: "ctrl-`" });
   assertEquals(s.view().message, "Mark set");
 });
 
 Deno.test("session: an unmodelled Alt combo while editing is a no-op", () => {
   const { s } = fileSession("text\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   const before = s.doc.text;
   s.handleKey(alt("q")); // not a modelled Alt binding
   assertEquals(s.doc.text, before, "unmodelled Alt combo changed nothing");
@@ -699,7 +815,7 @@ Deno.test("session: an unmodelled Alt combo while editing is a no-op", () => {
 
 Deno.test("session: escape leaves edit mode and triggers a reparse", () => {
   const { s } = fileSession("const a = 1;\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   type(s, "x"); // dirty + set needsReparse via live highlight
   press(s, "escape"); // leaves edit mode and reparses
   assertEquals(s.view().cursor, null, "cursor hidden after escape");
@@ -707,7 +823,7 @@ Deno.test("session: escape leaves edit mode and triggers a reparse", () => {
 
 Deno.test("session: ctrl-c while editing quits a clean buffer", () => {
   const { s } = fileSession("clean\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "ctrl-c");
   assert(s.quit, "ctrl-c quit the clean buffer");
 });
@@ -716,7 +832,7 @@ Deno.test("session: ctrl-c while editing quits a clean buffer", () => {
 
 Deno.test("session: F3 saves an editable file and ctrl-x ctrl-s also saves", () => {
   const { s, saved } = fileSession("save me\n");
-  press(s, "down"); // reveal cursor at the start
+  press(s, "e"); // reveal cursor at the start
   press(s, "end"); // move to the end of the line
   type(s, "!");
   press(s, "f3");
@@ -778,30 +894,32 @@ Deno.test("session: a save that throws is reported as a failure", () => {
     undefined,
     source,
   );
-  press(s, "down");
+  press(s, "e");
+  assert(s.view().cursor !== null, "e entered edit mode");
   type(s, "x");
+  assert(s.doc.lines[0].text.startsWith("x"), "the edit landed");
   press(s, "f3");
   assert(s.view().message.includes("Save failed"), s.view().message);
   assert(s.view().message.includes("disk full"), s.view().message);
 });
 
-Deno.test("session: the quit save-prompt answers y / d / c", () => {
-  // (y) save then quit. Escape leaves edit mode first; q in the pager quits.
+Deno.test("session: the quit save-prompt answers s / d / c", () => {
+  // (s) save then quit. Escape leaves edit mode first; q in the pager quits.
   {
     const { s, saved } = fileSession("one\n");
-    press(s, "down");
+    press(s, "e"); // enter edit mode
     type(s, "A");
     press(s, "escape"); // back to the pager (the buffer is still dirty)
     press(s, "q"); // dirty -> save prompt
-    assert(s.view().inputLine?.includes("Save changes"), s.view().inputLine!);
-    press(s, "y");
+    assert(promptText(s.view()).includes("Save changes"), promptText(s.view()));
+    press(s, "s");
     assert(saved.text?.includes("A"), saved.text ?? "");
-    assert(s.quit, "y saved and quit");
+    assert(s.quit, "s saved and quit");
   }
   // (d) discard then quit.
   {
     const { s, saved } = fileSession("two\n");
-    press(s, "down");
+    press(s, "e"); // enter edit mode
     type(s, "B");
     press(s, "escape");
     press(s, "q");
@@ -812,7 +930,7 @@ Deno.test("session: the quit save-prompt answers y / d / c", () => {
   // (c) cancel stays.
   {
     const { s } = fileSession("three\n");
-    press(s, "down");
+    press(s, "e"); // enter edit mode
     type(s, "C");
     press(s, "escape");
     press(s, "q");
@@ -823,7 +941,7 @@ Deno.test("session: the quit save-prompt answers y / d / c", () => {
   // escape also cancels.
   {
     const { s } = fileSession("four\n");
-    press(s, "down");
+    press(s, "e"); // enter edit mode
     type(s, "D");
     press(s, "escape");
     press(s, "q");
@@ -835,7 +953,7 @@ Deno.test("session: the quit save-prompt answers y / d / c", () => {
 
 Deno.test("session: requestQuitFromSignal raises the prompt with unsaved edits", () => {
   const { s } = fileSession("sig\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   type(s, "Z"); // dirty
   const willPrompt = s.requestQuitFromSignal();
   assert(willPrompt, "a dirty buffer prompts on signal");
@@ -845,7 +963,7 @@ Deno.test("session: requestQuitFromSignal raises the prompt with unsaved edits",
 
 Deno.test("session: requestQuitFromSignal on a clean buffer quits without a prompt", () => {
   const { s } = fileSession("clean\n");
-  press(s, "down"); // reveal cursor but make no edits
+  press(s, "e"); // reveal cursor but make no edits
   const willPrompt = s.requestQuitFromSignal();
   assertEquals(willPrompt, false, "clean buffer does not prompt");
   assert(s.quit, "and it quit");
@@ -867,29 +985,32 @@ Deno.test("session: C-x C-c quits", () => {
 
 Deno.test("session: ctrl-r on a clean buffer reports nothing to revert", () => {
   const { s } = fileSession("nothing\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "ctrl-r");
   assertEquals(s.view().message, "Nothing to revert.");
 });
 
 Deno.test("session: a plain-file revert prompt accepts y and reverts all", () => {
   const { s } = fileSession("original line\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   type(s, "EDIT");
   assert(s.doc.text.includes("EDIT"), "edited");
   press(s, "ctrl-r");
-  assert(s.view().inputLine?.includes("Revert all"), s.view().inputLine!);
+  assert(promptText(s.view()).includes("Revert all"), promptText(s.view()));
   press(s, "y");
   assertEquals(s.doc.text, "original line\n", "reverted to the original");
   assert(s.view().message.includes("Reverted"), s.view().message);
 });
 
-Deno.test("session: a plain-file revert prompt cancels on an unknown key", () => {
+Deno.test("session: a plain-file revert prompt ignores unlisted keys, cancels on c", () => {
   const { s } = fileSession("keep me\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   type(s, "X");
   press(s, "ctrl-r");
-  press(s, "q"); // not y/a -> cancelled
+  press(s, "q"); // not a button -> nothing happens, the prompt stays up
+  assertEquals(s.view().message, "", "an unlisted key does nothing");
+  assert(promptText(s.view()).includes("Revert"), "the prompt is still up");
+  press(s, "c"); // the Cancel button
   assertEquals(s.view().message, "Cancelled");
   assert(s.doc.text.includes("X"), "edit retained after cancel");
 });
@@ -912,7 +1033,7 @@ Deno.test("session: revert when the source offers none reports it", () => {
     undefined,
     source,
   );
-  press(s, "down");
+  press(s, "e");
   type(s, "x"); // dirty
   press(s, "ctrl-r");
   press(s, "y");
@@ -937,7 +1058,7 @@ Deno.test("session: revert that returns nothing-there is reported", () => {
     undefined,
     source,
   );
-  press(s, "down");
+  press(s, "e");
   type(s, "x"); // dirty
   press(s, "ctrl-r");
   press(s, "y");
@@ -948,7 +1069,7 @@ Deno.test("session: revert that returns nothing-there is reported", () => {
 
 Deno.test("session: ctrl-l when expanding context is unavailable reports it", () => {
   const { s } = fileSession("plain file\n");
-  press(s, "down");
+  press(s, "e"); // enter edit mode
   press(s, "ctrl-l"); // a plain file has no expandContext
   assertEquals(s.view().message, "Expanding context isn't available here.");
 });
@@ -995,7 +1116,7 @@ Deno.test("session: ctrl-l when expandContext yields nothing reports no more con
       undefined,
       source,
     );
-    press(s, "down"); // cursor mode
+    press(s, "e"); // cursor mode
     press(s, "ctrl-l");
     assertEquals(s.view().message, "No more context to show.");
   } finally {
@@ -1087,7 +1208,7 @@ function diffSession(ws: DiffWorkspace, height = 20): Session {
 
 /** Reveal the cursor and move it down to the given diff line. */
 function toLine(s: Session, line: number): void {
-  press(s, "down");
+  if (!s.view().cursor) press(s, "e"); // enter edit mode at the top
   let guard = 0;
   while ((s.view().cursor?.line ?? -1) < line && guard++ < 1000) {
     press(s, "down");
@@ -1271,8 +1392,8 @@ Deno.test("diffcov: revert prompt offers hunk / file / all for a diff", () => {
     type(s, "Z");
     assert(s.doc.text !== before, "edited");
     press(s, "ctrl-r");
-    assert(s.view().inputLine?.includes("hunk"), s.view().inputLine!);
-    press(s, "c"); // revert the chunk
+    assert(promptText(s.view()).includes("Hunk"), promptText(s.view()));
+    press(s, "h"); // revert the chunk
     assertEquals(s.doc.text, before, "the chunk reverted");
     assert(s.view().message.includes("Reverted"), s.view().message);
   } finally {
@@ -1296,7 +1417,7 @@ Deno.test("diffcov: revert 'file' scope through the session", () => {
   }
 });
 
-Deno.test("diffcov: an unknown key at the diff revert prompt cancels", () => {
+Deno.test("diffcov: an unlisted key at the diff revert prompt does nothing; Esc cancels", () => {
   const { ws, done } = diffWorkspace();
   try {
     const s = diffSession(ws);
@@ -1304,7 +1425,10 @@ Deno.test("diffcov: an unknown key at the diff revert prompt cancels", () => {
     press(s, "end");
     type(s, "M");
     press(s, "ctrl-r");
-    press(s, "z"); // not c/f/a
+    press(s, "z"); // not a button -> nothing happens
+    assertEquals(s.view().message, "", "an unlisted key does nothing");
+    assert(promptText(s.view()).includes("Revert"), "prompt still up");
+    press(s, "escape"); // Esc cancels (there is a Cancel button)
     assertEquals(s.view().message, "Cancelled");
   } finally {
     done();
@@ -1326,7 +1450,7 @@ Deno.test("diffcov: a diff that matches no file on disk is read-only", () => {
     undefined,
     diffSource(ws, edit),
   );
-  press(s, "down"); // try to reveal the cursor
+  press(s, "e"); // try to reveal the cursor
   assertEquals(s.view().cursor, null, "no cursor on a read-only diff");
   assert(s.view().message.length > 0, s.view().message);
 });
@@ -1567,7 +1691,7 @@ Deno.test("filepickercov: opening an existing file swaps the buffer", () => {
 
 Deno.test("filepickercov: the picker refuses to open with unsaved edits", () => {
   const s = pickerSession();
-  press(s, "down"); // reveal cursor
+  press(s, "e"); // reveal cursor
   type(s, "X"); // dirty
   press(s, "ctrl-x", "ctrl-f");
   type(s, "file00"); // filter to a single file entry
@@ -2015,7 +2139,7 @@ Deno.test("session: moving the edit cursor off-screen scrolls it back into view"
   const body = Array.from({ length: 40 }, (_, i) => `line${i} = ${i};`);
   const text = [longLine, ...body].join("\n") + "\n";
   const { s } = fileSession(text, 30, 8);
-  press(s, "down"); // reveal cursor at the top
+  press(s, "e"); // reveal cursor at the top
   // Move far down: b.row >= top + rows triggers the downward scroll branch.
   for (let i = 0; i < 30; i++) press(s, "down");
   assert(s.view().top > 0, "scrolled down to keep the cursor visible");

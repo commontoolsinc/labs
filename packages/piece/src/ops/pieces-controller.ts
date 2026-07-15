@@ -395,10 +395,13 @@ export class PiecesController<T = unknown> {
   async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
     this.disposeCheck();
 
-    // Fast path: check if pattern already exists (outside transaction)
-    const existingPattern = await this.#manager.getDefaultPattern();
+    // Fast path: resolve the existing root WITHOUT starting it. The updater
+    // must get a chance to replace an obsolete patternIdentity before
+    // bootstrap tries to load that identity; otherwise an unloadable old root
+    // prevents the very repair that would make it loadable.
+    const existingPattern = await this.#manager.getDefaultPattern(false);
     if (existingPattern) {
-      return new PieceController<NameSchema>(this.#manager, existingPattern);
+      return await this.startEnsuredDefaultPattern(existingPattern, true);
     }
 
     // Determine which pattern to use based on space type
@@ -455,9 +458,7 @@ export class PiecesController<T = unknown> {
     // - Reading defaultPattern inside the transaction creates an invariant
     // - If another process creates it first, the commit fails and retries
     // - On retry, we'll see the existing pattern and return early
-    let pieceCell: Cell<NameSchema>;
-
-    await timePiecesPhase(
+    const creationResult = await timePiecesPhase(
       "ensureDefaultPattern.editWithRetry",
       () =>
         this.#manager.runtime.editWithRetry((tx) => {
@@ -472,11 +473,11 @@ export class PiecesController<T = unknown> {
             // Pattern was created by another process - we're done
             // The editWithRetry will complete successfully, and we'll
             // fetch the existing pattern below
-            return;
+            return false;
           }
 
           // Create piece cell within this transaction
-          pieceCell = this.#manager.runtime.getCell<NameSchema>(
+          const pieceCell = this.#manager.runtime.getCell<NameSchema>(
             this.#manager.getSpace(),
             patternConfig.cause,
             nameSchema,
@@ -492,8 +493,10 @@ export class PiecesController<T = unknown> {
 
           // Link as default pattern within same transaction
           defaultPatternCell.set(pieceCell.withTx(tx));
+          return true;
         }),
     );
+    const createdByThisCall = creationResult.ok === true;
 
     // After transaction commits, fetch the final result
     // (either we created it, or another process did)
@@ -505,10 +508,35 @@ export class PiecesController<T = unknown> {
       throw new Error("Failed to create or find default pattern");
     }
 
-    // Start the piece after successful creation/discovery
+    // A root created by this successful attempt was compiled from the current
+    // source immediately above. If another writer won the race, treat the
+    // discovered root like every other persisted root and reconcile it before
+    // start.
+    return await this.startEnsuredDefaultPattern(
+      finalPattern,
+      !createdByThisCall,
+    );
+  }
+
+  private async startEnsuredDefaultPattern(
+    root: Cell<NameSchema>,
+    reconcileBeforeStart: boolean,
+  ): Promise<PieceController<NameSchema>> {
+    let rootToStart = root;
+    if (reconcileBeforeStart) {
+      await timePiecesPhase(
+        "ensureDefaultPattern.checkAndUpdateDefaultPattern",
+        () => this.checkAndUpdateDefaultPattern(root),
+      );
+      // The metadata swap committed through a transaction view. Resolve the
+      // root again so start() observes the committed patternIdentity rather
+      // than the pre-transaction snapshot held by the caller's cell.
+      rootToStart = await this.#manager.getDefaultPattern(false) ?? root;
+    }
+
     await timePiecesPhase(
       "ensureDefaultPattern.startPiece",
-      () => this.#manager.startPiece(finalPattern),
+      () => this.#manager.startPiece(rootToStart),
     );
     await timePiecesPhase(
       "ensureDefaultPattern.runtime.idle",
@@ -519,22 +547,22 @@ export class PiecesController<T = unknown> {
       () => this.#manager.synced(),
     );
 
-    return new PieceController<NameSchema>(this.#manager, finalPattern);
+    return new PieceController<NameSchema>(this.#manager, rootToStart);
   }
 
   /**
    * Roll the space's system root pattern forward in place if its toolshed
-   * serves a newer content identity than the running one. Best-effort: every
-   * failure logs and returns without throwing — a failed check must never break
-   * space open. The apply is a `patternIdentity` meta write; the existing
-   * pattern watcher (runner.ts) cancels the old nodes and re-instantiates the
-   * new pattern onto the SAME result cell (no new piece, state preserved by
-   * stable key). Never calls run()/stop()/recreateDefaultPattern.
+   * serves a newer content identity. Best-effort: every failure logs and
+   * returns without throwing. During {@link ensureDefaultPattern}, this runs
+   * before the persisted root is started, so an unloadable obsolete identity
+   * can be replaced before bootstrap. If the root is already running, its
+   * watcher applies the same metadata swap in place.
    *
-   * Call it AFTER {@link ensureDefaultPattern} has resolved (the root must be
-   * running for the watcher to be live).
+   * Never calls run()/stop()/recreateDefaultPattern.
    */
-  async checkAndUpdateDefaultPattern(): Promise<UpdateOutcome> {
+  async checkAndUpdateDefaultPattern(
+    resolvedRoot?: Cell<NameSchema>,
+  ): Promise<UpdateOutcome> {
     const runtime = this.#manager.runtime;
     const space = this.#manager.getSpace();
 
@@ -549,8 +577,10 @@ export class PiecesController<T = unknown> {
     }
 
     try {
-      // 2. The running root piece's result cell (no re-run).
-      const root = await this.#manager.getDefaultPattern(false);
+      // 2. The root piece's result cell, resolved without starting it. Ensure
+      // passes the cell it already found; explicit checks resolve it here.
+      const root = resolvedRoot ??
+        await this.#manager.getDefaultPattern(false);
       if (!root) return "current";
 
       // 3. Provenance + per-space host (NOT the global apiUrl — a foreign-homed

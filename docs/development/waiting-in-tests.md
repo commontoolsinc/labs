@@ -15,9 +15,9 @@ success: anything slower than the timeout can never be observed, even when it
 would have completed. The fixed delay puts a floor on latency and, in
 performance measurements, quantizes timings to the poll interval.
 
-Reach for a poll only for the cases catalogued under [Where a bounded poll is
-the right tool](#where-a-bounded-poll-is-the-right-tool). Everywhere else, wait
-on an event.
+Reach for a poll only for the cases catalogued under [Where the polling
+`waitFor` stays](#where-the-polling-waitfor-stays). Everywhere else, wait on an
+event.
 
 ## The primitives to use instead
 
@@ -95,11 +95,15 @@ fails the tests until its entry is removed. When a new in-scope usage is genuine
 one of the exception shapes below, add the file to the allowlist with a one-line
 reason and record it here.
 
-## Where a bounded poll is the right tool
+## Where the polling `waitFor` stays
 
-For these a bounded `waitFor` poll is the honest observation; replacing it would
-add coupling or complexity rather than remove flakiness. They are grouped by the
-reason a poll fits.
+These are grouped by the reason the poll stays, and the reasons are not equally
+good. For most of them a bounded `waitFor` is the honest observation, and
+replacing it would add coupling or complexity rather than remove flakiness. Two
+groups are here on weaker grounds: files that nothing automated runs, where a
+conversion would not pay for itself, and a few waits in files that CI does run
+which are simply not converted yet. Those two say so where they appear; do not
+read them as endorsements.
 
 ### No page, and no callback to hang a promise on
 
@@ -111,14 +115,28 @@ boundary the test can await without adding one to production code.
   no completion callback the test can hook, and a fresh `cell.sync()` round-trip
   has no registered subscription. There is no event boundary to resolve a
   deferred from without adding a render hook to the mock purely for the test.
-- `packages/generated-patterns/integration/pattern-harness.ts` pulls a runtime
-  `Cell` value and compares it, headless. No page; polling the pull until it
-  converges is the honest wait.
 - `packages/shell/integration/piece.test.ts` — the one poll that reads a freshly
   reloaded piece (`cc.get(pieceId, true)`) has no registered sink, so it stays a
   bounded poll on its own sync round trip. The other result-cell reads in this
   file, and every such read in `counter.test.ts` and `nested-counter.test.ts`,
   resolve a `defer()` from the existing `resultCell.sink(...)`.
+
+### A pull that drives its own loading
+
+`packages/generated-patterns/integration/pattern-harness.ts` compares a runtime
+`Cell` value, headless. There is no page to attach an in-page waiter to. A
+callback does exist — the harness registers `result.sink(() => {})` to keep the
+result reactive — but that callback is empty and records nothing, so today there
+is no latest value for a waiter to resolve against. It also sits on the root
+`result` cell, while each assertion walks a path of `key()` steps down to a
+nested cell and waits on `targetCell.pull()`.
+
+The pull is not purely an observation, which is what makes it hard to swap for a
+sink. It awaits the scheduler, and when the read reached a link whose target this
+replica had never loaded, it settles those loads and re-reads as each arrival
+reveals the next hop, for a bounded number of rounds. A sink reports committed
+changes; it does not drive that traversal. Polling the pull until it converges is
+the honest wait.
 
 ### Race, backpressure, and convergence tests
 
@@ -174,24 +192,70 @@ joined across two different browser pages (both must show both voters).
 binding, so it cannot express a two-page condition; the cross-browser
 propagation wait stays a poll.
 
-### Instrumentation and profiling one-shots
+### Instrumentation one-shots, and a few unconverted UI waits
 
-In `packages/patterns/integration/default-app.test.ts` and
-`packages/patterns/integration/reload/default-app-notebook.test.ts`, a number of
-`waitFor` calls wrap one-shot instrumentation (arm a trace, reset a logger,
-install a telemetry handler) that returns false only until a runtime API is
-present. These observe runtime API readiness, not a UI condition, and are
-env-gated profiling scaffolding rather than assertions. If converted, await a
-runtime-ready signal directly rather than installing a DOM waiter.
+`packages/patterns/integration/default-app.test.ts` keeps `waitFor` for one-shot
+instrumentation: arm a trace, reset a logger, install a telemetry handler. Each
+such call returns false only until a runtime API is present, so it observes
+runtime API readiness rather than a UI condition, and it is profiling scaffolding
+rather than an assertion. Most of them sit behind a `CF_CAPTURE_*` environment
+gate. If converted, await a runtime-ready signal directly rather than installing
+a DOM waiter.
+
+`packages/patterns/integration/reload/default-app-notebook.test.ts` keeps one
+wait of that shape — it arms the event-invocation telemetry handler, which is the
+one instrumentation wait that runs ungated in both files.
+
+The rest of the waits in these two files are ordinary UI conditions, and a poll
+is not the right tool for them. They are simply not converted yet: both files
+wait for the note modal's "Create Another" button to render, and
+`default-app.test.ts` also retries a piece-link click until the link is found. A
+`waitForCondition` predicate would express each of them. Converting them would
+not take either file off the allowlist, because the instrumentation waits keep
+both files importing `waitFor`.
 
 ### A shared state primitive
 
 `packages/integration/shell-utils.ts`'s `waitForState` compares the shell's
 serialized `AppState` (view plus identity DID), read through
-`globalThis.app.serialize()`. That is application state, not the DOM, and this is
-the shared primitive many suites build on. `waitForCondition`'s probe cannot see
-app state, so converting it would mean re-implementing view/identity comparison
-inside an in-page predicate for no reduction in flakiness.
+`globalThis.app.serialize()`. A handful of test files call it directly, but
+`ShellIntegration.goto()` also calls it internally after every navigation, so
+every suite that navigates through the shell depends on it.
+
+An in-page predicate could reach the state it reads: `globalThis.app` is a page
+global, and a `waitForCondition` predicate runs in the page, so it could call
+`serialize()` for itself. Two other things block the conversion.
+
+First, the predicate is serialized into the page and closes over nothing from the
+test module, so everything it needs has to be inlined. `waitForState` compares
+views through `isAppViewEqual` from `@commonfabric/shell/shared`, and it compares
+identities by DID — which the serialized state does not carry. `serialize()`
+writes the identity out as a raw key pair, and `deserialize()` recovers the DID by
+importing that private key through `Identity.fromRaw`. An in-page predicate can
+import neither module, so converting means re-implementing both view equality and
+private-key import inside the page, forking logic the shell relies on.
+
+Second, an `AppState` transition does not reliably mutate the DOM, so the
+MutationObserver hub would have nothing to pulse on and the wait would fall back
+to the coarse 500-millisecond in-page backstop. That polls more slowly than the
+50-millisecond loop it would replace.
+
+### A human-in-the-loop flow that no CI lane runs
+
+`packages/patterns/google/core/integration/google-calendar-importer.test.ts`
+drives the Google OAuth consent flow end to end, and a person has to complete
+that flow in a real browser. The test prints instructions to the console and then
+allows two minutes for the account selection and the scope approval. It cannot
+run unattended, and no CI lane runs it: the `patterns` package's `test` task
+ignores `google/core/integration`, and its `integration` tasks run only the
+`integration/` and `integration/reload/` directories. The check still sees the
+file, because the scan walks every `integration/` directory beneath `packages/`,
+so it needs an allowlist entry.
+
+Its waits are ordinary DOM and text conditions that `waitForCondition` would
+express. They stay a poll for the same reason as the disabled tests below:
+nothing automated exercises this file, so converting it churns code that no run
+covers.
 
 ### Disabled tests
 

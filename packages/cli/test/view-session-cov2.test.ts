@@ -175,8 +175,26 @@ function doctoredDiffSession(
   const built = buildDiffDocument(REAL_DIFF, model, ws);
   const text = bufferLines.join("\n") + "\n";
   // Reparse the doctored text through the diff source so the document's lines
-  // and the edit buffer agree, then move the cursor to the target row.
-  const source = diffSource(ws, built.edit);
+  // and the edit buffer agree, then move the cursor to the target row. The real
+  // policy would refuse a body line that sits in no verified hunk; these tests
+  // exercise adjustHunkCounts, not editability, so swap in a permissive policy
+  // that treats any context/added line as editable.
+  const real = diffSource(ws, built.edit);
+  const source: EditableSource = {
+    ...real,
+    policy: {
+      editStart: (lines, row) => {
+        const c = lines[row]?.[0];
+        return c === "+" || c === " " ? 1 : null;
+      },
+      regionKind: (lines, row) => {
+        const c = lines[row]?.[0];
+        return c === "+" || c === " " ? "hunk" : null;
+      },
+      insertPrefix: "+",
+      messageIndent: "    ",
+    },
+  };
   const doc = source.parse(text);
   const s = new Session(
     doc,
@@ -185,7 +203,7 @@ function doctoredDiffSession(
     undefined,
     source,
   );
-  press(s, "down"); // reveal the cursor at the top
+  press(s, "e"); // reveal the cursor at the top
   for (let i = 0; i < cursorRow; i++) press(s, "down");
   return { s, done };
 }
@@ -362,7 +380,7 @@ Deno.test("session: M-d kill-word forward on a plain file edits the buffer", () 
     undefined,
     source,
   );
-  press(s, "down");
+  press(s, "e");
   s.handleKey(alt("d")); // kill the first word
   assert(!s.doc.lines[0].text.startsWith("alpha"), s.doc.lines[0].text);
 });

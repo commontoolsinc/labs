@@ -17,18 +17,16 @@ Home root and published-pattern updates remain design (Phases 2–4).
 
 ## Last Updated
 
-2026-07-08
+2026-07-14
 
 ## Motivation
 
 - **System patterns must self-heal and roll forward.** `home.tsx` /
-  `default-app.tsx` are the most critical patterns to keep current, but today
-  they are **lazy-pinned at creation**: `ensureDefaultPattern`'s fast path
-  returns the existing root piece forever and never re-checks source
-  (`packages/piece/src/ops/pieces-controller.ts:342`). The only roll-forward is
-  a **manual** `recreateDefaultPattern` (shell Debugger button / CLI), which is
-  **not state-preserving** — it mints a new piece (`cause:
-  home-pattern-${Date.now()}`) and relinks (`pieces-controller.ts:222`).
+  `default-app.tsx` are the most critical patterns to keep current. Existing
+  roots are resolved without starting, reconciled against their tracked system
+  source, and only then bootstrapped. The manual `recreateDefaultPattern`
+  (shell Debugger button / CLI) remains a state-losing escape hatch: it mints a
+  new piece and relinks it.
 - **Two hazard cases to handle explicitly.** (1) We shipped a broken system
   pattern — once a fix ships, recovery must be automatic. (2) An
   schema-incompatible update slips through — the damage must be *bounded*
@@ -59,9 +57,9 @@ Home root and published-pattern updates remain design (Phases 2–4).
 | Mechanism | Where | Role here |
 |---|---|---|
 | Pattern pointer `patternIdentity = {identity, symbol}` on the piece result cell | write `runner.ts:1012`, read `getPatternIdentityRef` `runner.ts:4441` | The thing an update rewrites |
-| **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts:1246` (enabled unless `doNotUpdateOnPatternChange`, `runner.ts:1341`) | **The apply mechanism — already built.** An update is a meta write; the watcher does the rest |
+| **In-place re-run watcher** — `setupPatternWatcher` sinks the `patternIdentity` meta; on change it cancels the old pattern's nodes and re-instantiates the new pattern **onto the same result cell** | `runner.ts:1246` (enabled unless `doNotUpdateOnPatternChange`, `runner.ts:1341`) | Applies a metadata swap when the piece is already running; at space open, bootstrap reads the reconciled metadata directly |
 | Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/manager.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
-| `ensureDefaultPattern` (lazy, pinned-at-creation) / `recreateDefaultPattern` (manual, **not** state-preserving) | `pieces-controller.ts:342` / `:222` | The hook (ensure) and the escape hatch (recreate) |
+| `ensureDefaultPattern` (resolve → reconcile → start) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The automatic self-heal hook (ensure) and the state-losing escape hatch (recreate) |
 | System patterns = **raw TSX served by path**, bundled via `deno compile --include`; **no name→identity manifest** | `packages/toolshed/routes/patterns/patterns-server.ts`, `patterns.routes.ts` | Where the current system source + its identity come from |
 | Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `runtime.ts:1423` / `:1444`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
 | Build identity: `/api/meta` → `{ did, gitSha }` | `packages/toolshed/routes/meta/` | The version-skew signal |
@@ -85,9 +83,11 @@ Two decisions carry the whole design:
    source it tracks for updates. (`patternSource`, *not* `source`: the latter
    is the doc-level producer annotation the server-primary work uses.)
 2. **Update = resolve `patternSource` → current identity; if it differs from
-   the running `patternIdentity.identity`, write the new `{identity, symbol}`
-   to the piece's `patternIdentity` meta.** The existing watcher
-   (`runner.ts:1246`) re-instantiates in place. No new apply machinery.
+   the persisted `patternIdentity.identity`, write the new `{identity, symbol}`
+   to the piece's `patternIdentity` meta.** At space open this happens before
+   root bootstrap, so `start()` loads the reconciled identity. For an already
+   running root, the existing watcher (`runner.ts:1246`) re-instantiates in
+   place. No new apply machinery.
 
 System patterns run this loop automatically at space open (always-update);
 published patterns will run it behind an explicit user action (§ Phasing).
@@ -146,9 +146,11 @@ cf:[[//toolshed.url]/space/][slug]
 
 The apply is: ensure the new closure is loadable in the space
 (`compilePattern(program, { space })` writes source + compiled docs), then
-write `{ identity, symbol }` to the piece's `patternIdentity` meta. The watcher
-cancels the old pattern's reactive nodes and re-instantiates the new pattern
-onto the **same result cell**.
+write `{ identity, symbol }` to the piece's `patternIdentity` meta. During space
+open, `ensureDefaultPattern` performs this write before calling `startPiece`,
+so an obsolete pattern that cannot load never blocks its replacement. If the
+piece is already running, the watcher cancels its old reactive nodes and
+re-instantiates the new pattern onto the **same result cell**.
 
 - **Survives**: the result cell's entity and inbound links; any state cells the
   new pattern still reads (addressed by stable key/cause).
@@ -184,7 +186,9 @@ and `home.tsx`:
   pathname-prefixed names — **not** patterns-root-relative names — or the two
   identities never match and the check re-updates forever.
 
-**Runtime side (at space open, in the per-space worker).**
+**Runtime side (at space open, in the per-space worker).** Resolve the persisted
+root with `runIt=false`, run this loop, re-resolve the cell after any metadata
+transaction, and only then start it:
 
 1. `url` = home space → `home.tsx`; else the root piece's `patternSource`.
    `host` = `mappedHostFor(space) ?? apiUrl`. *(Change from today:
@@ -200,8 +204,10 @@ and `home.tsx`:
    or different toolshed"). Steady state is an in-memory compare, no request.
 4. `currentId === running patternIdentity.identity` → done.
 5. else → fetch `{host}{url}` source, `compilePattern(program, { space })`,
-   write `patternIdentity = { identity: currentId, symbol }`. The watcher
-   re-instantiates in place.
+   write `patternIdentity = { identity: currentId, symbol }`.
+6. Start the reconciled root. A newly created root skips the check because it
+   was compiled from the current source in the same ensure operation; a root
+   discovered after a creation race is treated as persisted and reconciled.
 
 ## Version-skew gate
 
@@ -241,7 +247,7 @@ so no build-dependence and no gate.
   shipping — the primary defense (feasible precisely because the list is short
   and we own the source).
 - **Self-heal from a borked ship**: fix source → new identity → next space open
-  swaps it in place → recovered, automatically.
+  swaps it before bootstrap → recovered even when the old identity cannot load.
 - **Rollback = redeploy**: ship the prior source → toolshed serves the prior
   identity → the same swap rolls back. No per-piece rollback state needed.
 - **Escape hatch**: manual `recreateDefaultPattern` remains (state-losing; last

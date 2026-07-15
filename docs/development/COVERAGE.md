@@ -18,6 +18,14 @@ profile into an LCOV file, and the job uploads it as a `coverage-profile-*`
 artifact. Most test jobs set `DENO_COVERAGE_DIR`, including both pattern
 integration jobs.
 
+Do not name a source file so that its path ends in `test.ts` (or `test.tsx`,
+`test.js`, `test.mjs`, `test.jsx`). `deno coverage` takes those for test files
+and leaves them out of the report, even though V8 records them and even if
+`--exclude` is overridden. The debt metric reads a missing report entry as a
+file no test ever loaded and charges every one of its lines, so a well-tested
+file scores as entirely uncovered. This is why the `cf test` command lives in
+`commands/test-command.ts`.
+
 ### Authored pattern code is measured by transformer instrumentation
 
 Patterns (the user programs under `packages/patterns`) are not loaded the way an
@@ -45,9 +53,10 @@ Two properties of this mechanism are worth keeping in mind.
   without asserting anything still marks those lines covered.
 
 `CF_PATTERN_COVERAGE_DIR` is read in exactly one place: the `cf test` command in
-`packages/cli/commands/test.ts`. A job that runs patterns through a plain
-`deno test` invocation, or by talking to a running Toolshed server, does not go
-through `cf test`. Setting the variable on such a job has no effect at all.
+`packages/cli/commands/test-command.ts`. A job that runs patterns through a
+plain `deno test` invocation, or by talking to a running Toolshed server, does
+not go through `cf test`. Setting the variable on such a job has no effect at
+all.
 
 ## How the two feed the coverage gate
 

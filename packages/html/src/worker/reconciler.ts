@@ -2822,26 +2822,11 @@ export class WorkerReconciler {
     };
     addCancel(() => this.cleanupNodeHandlers(state));
 
-    // Render each child and insert it
-    for (const childNode of nodes) {
-      const childState = this.renderNode(
-        ctx,
-        childNode,
-        new Set(visited),
-        policy,
-      );
-      if (childState) {
-        addCancel(childState.cancel);
-        this.queueOps([
-          {
-            op: "insert-child",
-            parentId: nodeId,
-            childId: childState.nodeId,
-            beforeId: null,
-          },
-        ]);
-      }
-    }
+    // Array items use the same Cell-aware child path as VNode children.
+    // rendererVDOMSchema projects array items as Cells, including at the root,
+    // so handing them directly to renderNode would violate its invariant that
+    // Cell children have already passed through renderCellChild.
+    addCancel(this.bindChildren(ctx, state, nodes, visited, policy));
 
     return state;
   }

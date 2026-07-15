@@ -219,12 +219,15 @@ propagate](#how-flags-propagate).
 - **Purpose.** At space open, rolls a space's **non-home** root system pattern
   (default-app) forward in place when its toolshed serves a newer content
   identity: version gate (client vs toolshed build sha) → cached `?identity`
-  compare → in-place `patternIdentity` swap, re-instantiated by the existing
-  pattern watcher onto the same result cell. Best-effort and non-blocking: no
-  failure of the check may break space open. When either build sha is unknown
-  (dev/source servers carry none) the check skips silently; the `versionSkew`
-  IPC signal — which raises the shell's reload banner — fires only on a proven
-  mismatch (both shas known and different). See
+  compare → in-place `patternIdentity` swap. Persisted roots are resolved
+  without starting; the check is awaited and the reconciled identity is
+  committed before root bootstrap, so an unloadable obsolete root cannot block
+  its own repair. The check remains best-effort and converts its own failures
+  to a no-op; if repair is unavailable, the subsequent root start retains its
+  normal loud failure behavior. When either build sha is unknown (dev/source
+  servers carry none) the check skips silently; the `versionSkew` IPC signal —
+  which raises the shell's reload banner — fires only on a proven mismatch
+  (both shas known and different). See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
@@ -233,8 +236,8 @@ propagate](#how-flags-propagate).
   background piece service) leave it off unless the env var is set. End state:
   graduate to always-on for system roots once golden-replay coverage has soaked
   and the home audit lands, then delete both auto-update flags.
-- **Status on 2026-07-09.** Implemented; on in the shell for non-home roots,
-  off elsewhere.
+- **Status on 2026-07-14.** Implemented; on in the shell for non-home roots,
+  off elsewhere. Root reconciliation runs before bootstrap.
 - **Path to removal.** Graduate the home root (below), make the check
   unconditional, and remove both flags together.
 

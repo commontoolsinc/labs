@@ -1,7 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { join } from "@std/path";
 import { exec } from "../commands/exec.ts";
-import { test as testCommand } from "../commands/test.ts";
+import { test as testCommand } from "../commands/test-command.ts";
 import { withEnv } from "./utils.ts";
 
 class ExitError extends Error {
@@ -124,5 +125,73 @@ describe("main command", () => {
     });
 
     expect(errors).toEqual(["Error: No test files found"]);
+  });
+
+  it("skips glob matches that are not pattern tests", async () => {
+    const dir = await Deno.makeTempDir();
+    try {
+      await Deno.writeTextFile(join(dir, "notes.txt"), "not a test");
+      const errors = await withCapturedErrors(async () => {
+        const code = await withMockExit(async () => {
+          await testCommand.parse([`${dir}/*`]);
+        });
+
+        expect(code).toBe(1);
+      });
+
+      expect(errors).toEqual(["Error: No test files found"]);
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  });
+
+  it("reports a directory holding no pattern tests", async () => {
+    const dir = await Deno.makeTempDir();
+    try {
+      const errors = await withCapturedErrors(async () => {
+        const code = await withMockExit(async () => {
+          await testCommand.parse([dir]);
+        });
+
+        expect(code).toBe(1);
+      });
+
+      expect(errors).toEqual(["Error: No test files found"]);
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  });
+
+  it("reports a pattern test path that cannot be read", async () => {
+    const file = await Deno.makeTempFile();
+    try {
+      // Descending into a regular file fails as NotADirectory, which is the
+      // path's other error branch.
+      const errors = await withCapturedErrors(async () => {
+        const code = await withMockExit(async () => {
+          await testCommand.parse([join(file, "child.test.tsx")]);
+        });
+
+        expect(code).toBe(1);
+      });
+
+      expect(errors[0]).toContain("Error accessing path");
+    } finally {
+      await Deno.remove(file);
+    }
+  });
+
+  it("reports a pattern test path that is neither a file nor a directory", {
+    ignore: Deno.build.os === "windows",
+  }, async () => {
+    const errors = await withCapturedErrors(async () => {
+      const code = await withMockExit(async () => {
+        await testCommand.parse(["/dev/null"]);
+      });
+
+      expect(code).toBe(1);
+    });
+
+    expect(errors[0]).toContain("is not a file or directory");
   });
 });

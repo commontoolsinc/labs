@@ -9,7 +9,9 @@ import { join } from "@std/path";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter, diffSource } from "../lib/view/diffedit.ts";
+import type { GitRunner } from "../lib/view/commitmsg.ts";
 import { Session } from "../lib/view/session.ts";
+import { promptText } from "./view-helpers.ts";
 
 function press(s: Session, ...names: string[]): void {
   for (const name of names) {
@@ -23,9 +25,9 @@ function type(s: Session, text: string): void {
   for (const ch of text) s.handleKey({ name: ch, char: ch });
 }
 
-/** Reveal the cursor and move it down to the given diff line. */
+/** Enter edit mode if needed and move the cursor down to the given diff line. */
 function toLine(s: Session, line: number): void {
-  press(s, "down"); // reveal at the top
+  if (!s.view().cursor) press(s, "e"); // enter edit mode at the top
   let guard = 0;
   while ((s.view().cursor?.line ?? -1) < line && guard++ < 1000) {
     press(s, "down");
@@ -75,15 +77,93 @@ function tempWorkspace(): {
 }
 
 function diffSession(ws: DiffWorkspace, height = 20): Session {
-  const model = parseDiff(DIFF)!;
-  const { doc, edit } = buildDiffDocument(DIFF, model, ws);
+  return diffSessionFrom(ws, DIFF, height);
+}
+
+function diffSessionFrom(
+  ws: DiffWorkspace,
+  diffText: string,
+  height = 20,
+  git?: GitRunner,
+): Session {
+  const model = parseDiff(diffText)!;
+  const { doc, edit } = buildDiffDocument(diffText, model, ws);
   return new Session(
     doc,
     { color: false, showLineNumbers: false },
     { width: 80, height },
     undefined,
-    diffSource(ws, edit),
+    diffSource(ws, edit, undefined, git),
   );
+}
+
+const SHOW_SHA = "0123456789abcdef0123456789abcdef01234567";
+
+// `git show` output: a commit header and message precede the diff. The message
+// lines are indented four spaces (git indents blank message lines to four
+// spaces too), so they read like context lines, but they belong to no hunk.
+const GIT_SHOW = [
+  `commit ${SHOW_SHA}`,
+  "Author: A B <a@b.example>",
+  "Date:   Wed Jul 1 12:00:00 2026 -0700",
+  "",
+  "    Subject line of the commit",
+  "    ",
+  "    A body paragraph of the message.",
+  "",
+  "diff --git a/m.ts b/m.ts",
+  "index 0000000..1111111 100644",
+  "--- a/m.ts",
+  "+++ b/m.ts",
+  "@@ -1,4 +1,5 @@ export function double",
+  " export function double(n: number): number {",
+  "     return n * 2;",
+  " }",
+  "-export const answer = 42;",
+  "+export const answer = double(21);",
+  "+const extra = answer + 1;",
+  "",
+].join("\n");
+// Line indices: 4 = subject, 5 = blank message line, 6 = body; 13 = a hunk
+// context line (editable); 16 = removed; 17,18 = additions.
+
+/** A fake git runner recording the message an amend would write. */
+function fakeGit(head: string | null): {
+  git: GitRunner;
+  amended: () => string | null;
+} {
+  let amended: string | null = null;
+  return {
+    git: {
+      headSha: () => head,
+      amendMessage: (m) => {
+        amended = m;
+        return "Amended the commit message";
+      },
+    },
+    amended: () => amended,
+  };
+}
+
+/** A fake git whose HEAD "moves": the first `headSha()` (the source caches it
+ * for editability) returns `first`; the fresh re-check at amend returns
+ * `later`. */
+function movingGit(first: string, later: string): {
+  git: GitRunner;
+  amended: () => string | null;
+} {
+  let calls = 0;
+  let amended: string | null = null;
+  return {
+    git: {
+      headSha: () => (++calls === 1 ? first : later),
+      amendMessage: (m) => {
+        amended = m;
+        return "Amended the commit message";
+      },
+    },
+    amended: () => amended,
+  };
 }
 
 Deno.test("diffedit: edits an added line in place and saves it to the file", () => {
@@ -371,12 +451,12 @@ Deno.test("diffedit: a forward delete that would join lines is refused", () => {
 Deno.test("diffedit: a diff matching no file on disk is read-only", () => {
   const noWs: DiffWorkspace = { resolve: () => null, read: () => null };
   const s = diffSession(noWs);
-  press(s, "down");
+  press(s, "e");
   assertEquals(s.view().cursor, null, "no cursor on an unmatched diff");
   assert(s.view().message.includes("match"), s.view().message);
 });
 
-Deno.test("diffedit: a dirty diff prompts on quit and y saves the file", () => {
+Deno.test("diffedit: a dirty diff prompts on quit and s saves the file", () => {
   const { root, ws, done } = tempWorkspace();
   try {
     const s = diffSession(ws);
@@ -384,8 +464,8 @@ Deno.test("diffedit: a dirty diff prompts on quit and y saves the file", () => {
     press(s, "end");
     type(s, "!");
     press(s, "escape", "q"); // hide cursor, quit from pager mode
-    assert(s.view().inputLine?.includes("Save changes"), "prompts");
-    press(s, "y");
+    assert(promptText(s.view()).includes("Save changes"), "prompts");
+    press(s, "s");
     assert(s.quit);
     const onDisk = Deno.readTextFileSync(join(root, "m.ts")).split("\n");
     assertEquals(onDisk[3], "export const answer = double(21);!");
@@ -470,11 +550,11 @@ Deno.test("diffedit: quitting a multi-file diff lists the edited files above the
     press(s, "end");
     type(s, "0");
     press(s, "escape", "q");
-    const prompt = s.view().inputLine ?? "";
+    const prompt = promptText(s.view());
     assert(prompt.includes("2 files"), `prompt: ${prompt}`);
-    const notice = (s.view().notice ?? []).join(" | ");
-    assert(notice.includes("x.ts"), notice);
-    assert(notice.includes("z.ts"), notice);
+    // The dialog body lists the files a save would write.
+    assert(prompt.includes("x.ts"), prompt);
+    assert(prompt.includes("z.ts"), prompt);
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
@@ -530,7 +610,7 @@ Deno.test("diffedit: Ctrl-R then 'a' reverts all edits through the session", () 
     type(s, "X");
     assert(s.doc.text !== before, "edited");
     s.handleKey({ name: "ctrl-r" });
-    assert(s.view().inputLine?.includes("Revert"), "the revert prompt shows");
+    assert(promptText(s.view()).includes("Revert"), "the revert prompt shows");
     press(s, "a");
     assertEquals(s.doc.text, before, "all edits reverted");
     assert(s.view().message.includes("Reverted"), s.view().message);
@@ -1118,7 +1198,7 @@ Deno.test("diffedit: after revert the cursor lands on an editable line, not a he
     press(s, "end");
     type(s, "Z");
     s.handleKey({ name: "ctrl-r" });
-    press(s, "c"); // revert the chunk
+    press(s, "h"); // revert the chunk
     const cl = s.view().cursor!.line;
     // The landed line is editable (not the @@ header it was spliced at).
     const text = s.doc.lines[cl].text;
@@ -1155,7 +1235,7 @@ Deno.test("diffedit: an edit-mode search leaves the full match set for normal-mo
   const { ws, done } = tempWorkspace();
   try {
     const s = diffSession(ws);
-    press(s, "down"); // reveal the edit cursor
+    press(s, "e"); // reveal the edit cursor
     s.handleKey({ name: "ctrl-s" });
     type(s, "answer"); // matches the removed line 8 and added line 9
     press(s, "enter");
@@ -1174,7 +1254,7 @@ Deno.test("diffedit: Ctrl-S search skips non-editable (removed) lines", () => {
   const { ws, done } = tempWorkspace();
   try {
     const s = diffSession(ws);
-    press(s, "down"); // reveal at line 0
+    press(s, "e"); // reveal at line 0
     s.handleKey({ name: "ctrl-s" });
     type(s, "answer"); // first occurs on the removed line 8, then the added line 9
     press(s, "enter");
@@ -1433,5 +1513,471 @@ Deno.test("diffedit: editing a hunk with a blank context line saves without trun
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
+  }
+});
+
+// --- refusing edits that cannot be saved (a commit-message preamble) ---------
+
+Deno.test("diffedit: refuses editing text before the diff (a commit-message subject)", () => {
+  const { ws, done } = tempWorkspace();
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW);
+    toLine(s, 4); // the indented subject line — reads like context, is not
+    assertEquals(s.view().cursor?.line, 4, "cursor on the subject line");
+    const before = s.doc.text;
+    type(s, "X");
+    assertEquals(s.doc.text, before, "the edit was refused");
+    assert(s.view().message.length > 0, "and it says why");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: refuses editing a message body line, allows a hunk line", () => {
+  const { ws, done } = tempWorkspace();
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW);
+    // A body line of the commit message is not part of any hunk: refused.
+    toLine(s, 6);
+    const before = s.doc.text;
+    type(s, "Z");
+    assertEquals(s.doc.text, before, "message body edit refused");
+    // An added line inside the verified hunk is still editable.
+    toLine(s, 17); // "+export const answer = double(21);"
+    press(s, "end");
+    type(s, " // note");
+    assert(s.doc.text !== before, "the hunk line accepted the edit");
+    assert(
+      s.doc.lines[17].text.includes("// note"),
+      s.doc.lines[17].text,
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: an edit-mode search skips the preamble to a savable line", () => {
+  const { ws, done } = tempWorkspace();
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW);
+    press(s, "e"); // reveal the cursor
+    // Search for text that appears on an added line inside the hunk. An edit-
+    // mode search lands the cursor only on editable matches, so it skips the
+    // commit-message preamble entirely.
+    s.handleKey({ name: "ctrl-s" });
+    for (const ch of "double(21)") s.handleKey({ name: ch, char: ch });
+    s.handleKey({ name: "enter" });
+    const line = s.view().cursor?.line ?? -1;
+    assert(line >= 12, `cursor landed in the hunk body, at ${line}`);
+    type(s, "!");
+    assert(s.doc.lines[line].text.includes("!"), "the landed line is editable");
+  } finally {
+    done();
+  }
+});
+
+// --- editing the HEAD commit's message (git show) ----------------------------
+
+Deno.test("diffedit: the HEAD commit's message is editable; save prompts then amends", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA); // the shown commit IS HEAD
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 4); // the subject line — an editable message line
+    press(s, "end");
+    type(s, " EDIT");
+    // A message line is edited as plain indented text (no removed/added pair).
+    assertEquals(
+      s.doc.lines[4].text,
+      "    Subject line of the commit EDIT",
+      s.doc.lines[4].text,
+    );
+    // Saving a changed message asks to confirm the amend first.
+    press(s, "f3");
+    assert(
+      promptText(s.view()).includes("Amend commit 012345678"),
+      promptText(s.view()) || "(no prompt)",
+    );
+    assertEquals(fg.amended(), null, "nothing amended before confirming");
+    // Confirm: the amend runs with the edited message (indent stripped).
+    press(s, "y");
+    assertEquals(
+      fg.amended(),
+      "Subject line of the commit EDIT\n\nA body paragraph of the message.",
+    );
+    assert(s.view().message.includes("Amended"), s.view().message);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: declining the amend prompt writes nothing", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 6); // the body line
+    press(s, "end");
+    type(s, " more");
+    press(s, "f3");
+    press(s, "n"); // decline
+    assertEquals(fg.amended(), null, "the commit was not amended");
+    assert(s.view().message.toLowerCase().includes("cancel"), s.view().message);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: Enter in a message adds another indented line", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 4);
+    press(s, "end");
+    press(s, "enter");
+    type(s, "second subject line");
+    // The new line carries git's four-space indent and stays a message line.
+    assertEquals(s.doc.lines[5].text, "    second subject line");
+    press(s, "f3");
+    press(s, "y");
+    assertEquals(
+      fg.amended(),
+      "Subject line of the commit\nsecond subject line\n\n" +
+        "A body paragraph of the message.",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: a non-HEAD commit's message is not editable", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit("ffffffffffffffffffffffffffffffffffffffff"); // not the shown sha
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 4);
+    const before = s.doc.text;
+    type(s, "X");
+    assertEquals(s.doc.text, before, "a non-HEAD message is read-only");
+    // Saving does not offer to amend a commit that is not HEAD.
+    press(s, "f3");
+    assertEquals(fg.amended(), null, "a non-HEAD commit is never amended");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: editing only a hunk (not the message) saves with no amend prompt", () => {
+  const { root, ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 17); // an added hunk line
+    press(s, "end");
+    type(s, " // x");
+    press(s, "f3");
+    // The message is unchanged, so no amend prompt and no amend.
+    assert(s.view().message.startsWith("Saved"), s.view().message);
+    assertEquals(fg.amended(), null, "an unchanged message is not amended");
+    assert(
+      Deno.readTextFileSync(join(root, "m.ts")).includes("// x"),
+      "the hunk edit was written",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: quitting with an edited message confirms the save then the amend, then quits", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 4);
+    press(s, "end");
+    type(s, " Q");
+    press(s, "escape"); // hide the cursor, back to pager mode
+    press(s, "q"); // quit → the dirty save prompt
+    assert(
+      promptText(s.view()).includes("Save changes"),
+      promptText(s.view()),
+    );
+    press(s, "s"); // → the amend prompt (the save-prompt handler stands aside)
+    assert(
+      promptText(s.view()).includes("Amend commit"),
+      promptText(s.view()),
+    );
+    assert(!s.quit, "not quit until the amend is confirmed");
+    press(s, "y"); // confirm the amend → save, amend, and quit
+    assert(s.quit, "quits after the amend");
+    assert(
+      fg.amended()?.startsWith("Subject line of the commit Q"),
+      fg.amended() ?? "(none)",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: with no git runner the message is not editable", () => {
+  const { ws, done } = tempWorkspace();
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW); // no git
+    toLine(s, 4);
+    const before = s.doc.text;
+    type(s, "X");
+    assertEquals(s.doc.text, before, "no git means no message editing");
+  } finally {
+    done();
+  }
+});
+
+// --- amend safety (review follow-ups) ----------------------------------------
+
+Deno.test("diffedit: refuses to save an all-blank commit message", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    // Blank both content lines of the message (leaving the four-space indents).
+    for (const row of [4, 6]) {
+      toLine(s, row);
+      press(s, "ctrl-a"); // line start
+      press(s, "ctrl-k"); // kill to end (nudged past the indent)
+    }
+    press(s, "f3");
+    assert(s.view().message.includes("would be empty"), s.view().message);
+    assertEquals(fg.amended(), null, "an empty message is never amended");
+    // No amend prompt was raised, so no file was written either.
+    assert(s.view().dialog == null, "no prompt is left open");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: refuses to save when every commit-message line is deleted", () => {
+  const { root, ws, done } = tempWorkspace();
+  const before = Deno.readTextFileSync(join(root, "m.ts"));
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    // Remove the three message lines: blank each one, then Backspace at its
+    // start takes the line away. Each removal leaves the cursor on the line
+    // above, so the next message line is again at row 4.
+    for (let i = 0; i < 3; i++) {
+      toLine(s, 4);
+      press(s, "ctrl-a");
+      press(s, "ctrl-k");
+      press(s, "backspace");
+    }
+    assertEquals(s.doc.lines[4].text, "", "no message lines are left");
+    press(s, "f3");
+    assert(s.view().message.includes("would be empty"), s.view().message);
+    assertEquals(fg.amended(), null, "the commit was not amended");
+    assertEquals(s.view().dialog, null, "no prompt is left open");
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      before,
+      "the refused save wrote no file",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: a SHA-256 repository's commit message is editable and amends", () => {
+  const { ws, done } = tempWorkspace();
+  const sha256 = "0".repeat(24) + SHOW_SHA; // a 64-character object id
+  const fg = fakeGit(sha256);
+  try {
+    const s = diffSessionFrom(
+      ws,
+      GIT_SHOW.replace(SHOW_SHA, sha256),
+      20,
+      fg.git,
+    );
+    toLine(s, 4);
+    press(s, "end");
+    type(s, " EDIT");
+    assertEquals(s.doc.lines[4].text, "    Subject line of the commit EDIT");
+    press(s, "f3");
+    assert(promptText(s.view()).includes("Amend commit"), promptText(s.view()));
+    press(s, "y");
+    assertEquals(
+      fg.amended(),
+      "Subject line of the commit EDIT\n\nA body paragraph of the message.",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: does not amend (or write files) when HEAD moved since the diff was shown", () => {
+  const { root, ws, done } = tempWorkspace();
+  const before = Deno.readTextFileSync(join(root, "m.ts"));
+  const fg = movingGit(SHOW_SHA, "ffffffffffffffffffffffffffffffffffffffff");
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 4);
+    press(s, "end");
+    type(s, " X");
+    press(s, "f3"); // editability used the cached (original) HEAD
+    press(s, "y"); // the amend re-reads HEAD, sees it moved, and refuses
+    assertEquals(fg.amended(), null, "no amend when HEAD moved");
+    assert(s.view().message.includes("HEAD has moved"), s.view().message);
+    // The amend runs before the file write, so a refusal leaves files untouched.
+    assertEquals(
+      Deno.readTextFileSync(join(root, "m.ts")),
+      before,
+      "no file written",
+    );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("diffedit: quitting after a message-only edit names the message, not files", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 20, fg.git);
+    toLine(s, 4);
+    press(s, "end");
+    type(s, " Z");
+    press(s, "escape"); // back to pager mode
+    press(s, "q"); // quit → the dirty save prompt
+    const prompt = promptText(s.view());
+    assert(prompt.includes("the commit message"), prompt);
+    assert(!/\bfiles?\b/.test(prompt), `should not name files: ${prompt}`);
+  } finally {
+    done();
+  }
+});
+
+// --- context-aware revert prompt ---------------------------------------------
+
+/** Move the text cursor to `line` (up or down), in edit mode. */
+function moveCursorTo(s: Session, line: number): void {
+  let guard = 0;
+  while ((s.view().cursor?.line ?? line) < line && guard++ < 2000) {
+    press(s, "down");
+  }
+  while ((s.view().cursor?.line ?? line) > line && guard++ < 2000) {
+    press(s, "up");
+  }
+}
+
+Deno.test("revert: in a hunk offers hunk and file, not message", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 30, fg.git);
+    toLine(s, 17); // an added hunk line
+    press(s, "end");
+    type(s, " X");
+    press(s, "ctrl-r");
+    const p = promptText(s.view());
+    assert(p.includes("Hunk"), p);
+    assert(p.includes("File"), p);
+    assert(!p.includes("Message"), p);
+    assert(p.includes("All"), p);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("revert: Enter does nothing on a diff revert (no default button)", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 30, fg.git);
+    toLine(s, 17);
+    press(s, "end");
+    type(s, " X");
+    const dirty = s.doc.text;
+    press(s, "ctrl-r");
+    press(s, "enter"); // no default -> a no-op, the dialog stays up
+    assert(promptText(s.view()).includes("Hunk"), "dialog still open");
+    assertEquals(s.view().message, "", "not cancelled");
+    assertEquals(s.doc.text, dirty, "nothing reverted");
+    // A scope key still works afterwards.
+    press(s, "a");
+    assert(!s.doc.text.includes(" X"), "all reverted after Enter no-op");
+  } finally {
+    done();
+  }
+});
+
+Deno.test("revert: on a file header offers file but not hunk", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 30, fg.git);
+    toLine(s, 17);
+    press(s, "end");
+    type(s, " X"); // make the buffer dirty
+    moveCursorTo(s, 8); // the "diff --git" header line — in the file, in no hunk
+    press(s, "ctrl-r");
+    const p = promptText(s.view());
+    assert(p.includes("File"), p);
+    assert(!p.includes("Hunk"), p);
+    assert(!p.includes("Message"), p);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("revert: in the commit preamble offers only all", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 30, fg.git);
+    toLine(s, 17);
+    press(s, "end");
+    type(s, " X");
+    moveCursorTo(s, 0); // the "commit …" line — no file, no hunk, no message
+    press(s, "ctrl-r");
+    const p = promptText(s.view());
+    assert(p.includes("All"), p);
+    assert(!p.includes("Hunk"), p);
+    assert(!p.includes("File"), p);
+    assert(!p.includes("Message"), p);
+  } finally {
+    done();
+  }
+});
+
+Deno.test("revert: in the commit message offers message, and m restores it", () => {
+  const { ws, done } = tempWorkspace();
+  const fg = fakeGit(SHOW_SHA);
+  try {
+    const s = diffSessionFrom(ws, GIT_SHOW, 30, fg.git);
+    // Edit both a hunk line and the message subject.
+    toLine(s, 17);
+    press(s, "end");
+    type(s, " HUNK");
+    moveCursorTo(s, 4);
+    press(s, "end");
+    type(s, " EDIT");
+    assertEquals(s.doc.lines[4].text, "    Subject line of the commit EDIT");
+    press(s, "ctrl-r");
+    const p = promptText(s.view());
+    assert(p.includes("Message"), p);
+    assert(!p.includes("Hunk"), p);
+    assert(!p.includes("File"), p);
+    press(s, "m"); // revert only the message
+    assertEquals(
+      s.doc.lines[4].text,
+      "    Subject line of the commit",
+      "the message is restored",
+    );
+    assert(
+      s.doc.lines[17].text.includes("HUNK"),
+      "the hunk edit is kept: " + s.doc.lines[17].text,
+    );
+    assert(s.view().message.includes("Reverted the message"), s.view().message);
+  } finally {
+    done();
   }
 });
