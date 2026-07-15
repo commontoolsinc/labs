@@ -2,6 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import {
+  getLoadedPieceView,
+  inspectLoadedPiece,
   recreateSpaceRootPattern,
   resolveLinkEndpointAddress,
   resolvePieceConfig,
@@ -9,6 +11,7 @@ import {
   withRuntimeCleanupOnFailure,
 } from "../lib/piece.ts";
 import { SlugResolutionError } from "@commonfabric/piece";
+import { UI } from "@commonfabric/runner";
 import {
   normalizeApiUrl,
   parseLink,
@@ -24,6 +27,43 @@ const FULL_URL = `${API_URL}/${SPACE}/${PIECE}`;
 const NO_PIECE_FULL_URL = `${API_URL}/${SPACE}`;
 
 describe("cli piece parsing", () => {
+  it("returns piece state when connection analysis fails", async () => {
+    const inspected = await inspectLoadedPiece({
+      id: "fid1:target",
+      name: () => "Lunch Poll",
+      input: { get: () => Promise.resolve({ question: "Lunch?" }) },
+      result: { get: () => Promise.resolve({ votes: 3 }) },
+      readingFrom: () => Promise.reject(new Error("space root failed")),
+      readBy: () =>
+        Promise.resolve([{
+          id: "fid1:reader",
+          name: () => "Dashboard",
+        }]),
+    });
+
+    expect(inspected.source).toEqual({ question: "Lunch?" });
+    expect(inspected.result).toEqual({ votes: 3 });
+    expect(inspected.readingFrom).toEqual([]);
+    expect(inspected.readBy).toEqual([{
+      id: "fid1:reader",
+      name: "Dashboard",
+    }]);
+    expect(inspected.connectionErrors).toEqual({
+      readingFrom: "space root failed",
+    });
+  });
+
+  it("reads a piece view without walking its connection graph", async () => {
+    const view = { name: "cf-screen", props: {}, children: [] };
+    const result = { [UI]: view };
+
+    expect(
+      await getLoadedPieceView({
+        result: { get: () => Promise.resolve(result) },
+      }),
+    ).toBe(view);
+  });
+
   it("normalizes API URLs for app route hints", () => {
     expect(normalizeApiUrl(
       "https://rapids.saga-castor.ts.net/",

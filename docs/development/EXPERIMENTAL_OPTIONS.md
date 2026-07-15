@@ -20,7 +20,7 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-09. Each flag's section carries the date its status
+**Last reviewed:** 2026-07-14. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -226,6 +226,12 @@ propagate](#how-flags-propagate).
   IPC signal — which raises the shell's reload banner — fires only on a proven
   mismatch (both shas known and different). See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
+  If an existing root fails its first start, the open path runs this same gated
+  check synchronously once and retries only after an in-place update. Legacy
+  roots without `patternSource` enroll only when their verified authored entry
+  path identifies the official system pattern appropriate to that space type;
+  custom roots stay pinned. Manual system-root recreation now stamps provenance
+  too.
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
   define is set to `"false"`, so the deployed product (and local shell dev
@@ -233,8 +239,9 @@ propagate](#how-flags-propagate).
   background piece service) leave it off unless the env var is set. End state:
   graduate to always-on for system roots once golden-replay coverage has soaked
   and the home audit lands, then delete both auto-update flags.
-- **Status on 2026-07-09.** Implemented; on in the shell for non-home roots,
-  off elsewhere.
+- **Status on 2026-07-14.** Implemented; on in the shell for non-home roots,
+  off elsewhere. Failed-start recovery, verified legacy provenance repair, and
+  provenance stamping on system-root recreation are covered by focused tests.
 - **Path to removal.** Graduate the home root (below), make the check
   unconditional, and remove both flags together.
 

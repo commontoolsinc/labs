@@ -256,12 +256,64 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternIdentityRef(piece.getCell())?.identity).toBe(before);
   });
 
-  it("skips a legacy non-home root with no patternSource (custom-app safety)", async () => {
+  it("repairs an existing system root after its first start fails", async () => {
     await setup({ systemPatternAutoUpdate: true });
-    // recreateDefaultPattern does NOT stamp patternSource — it stands in for a
-    // legacy root created before provenance existed (which might be a custom app
-    // seeded from home's defaultAppUrl, NOT the default app).
-    await controller.recreateDefaultPattern();
+    const piece = await controller.ensureDefaultPattern();
+    const firstRef = getPatternIdentityRef(piece.getCell());
+    await manager.stopPiece(piece.getCell());
+
+    stub.setSource(SOURCE_V2);
+    const originalGetDefaultPattern = manager.getDefaultPattern.bind(manager);
+    let failStartOnce = true;
+    manager.getDefaultPattern = ((runIt = true) => {
+      if (runIt && failStartOnce) {
+        failStartOnce = false;
+        return Promise.reject(new Error("stored root no longer compiles"));
+      }
+      return originalGetDefaultPattern(runIt);
+    }) as typeof manager.getDefaultPattern;
+
+    const recovered = await controller.ensureDefaultPattern();
+
+    const recoveredRef = getPatternIdentityRef(recovered.getCell());
+    expect(recovered.id).toBe(piece.id);
+    expect(recoveredRef).toBeDefined();
+    expect(recoveredRef!.identity).not.toBe(firstRef!.identity);
+    expect(recoveredRef!.identity).toBe(await identityForSource(SOURCE_V2));
+  });
+
+  it("back-fills a legacy default-app root from verified source", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    // Simulate a pre-provenance system root: the authored entry identifies the
+    // official pattern, but the root cell itself has no patternSource metadata.
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: {
+        main: DEFAULT_APP_PATTERN_URL,
+        files: [{ name: DEFAULT_APP_PATTERN_URL, contents: SOURCE_V1 }],
+      },
+    });
+    const root = piece.getCell();
+    expect(getPatternSource(root)).toBeUndefined();
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe(
+      "repaired-provenance",
+    );
+    await runtime.idle();
+    const repairedRoot = (await manager.getDefaultPattern(false))!;
+    expect(getPatternSource(repairedRoot)).toBe(DEFAULT_APP_PATTERN_URL);
+  });
+
+  it("skips a custom root with no patternSource", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    // A custom root has no resolvable patternSource. It also stands in for a
+    // legacy root created before provenance existed, which might have been
+    // seeded from home's custom defaultAppUrl rather than default-app.tsx.
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-root.tsx",
+        files: [{ name: "/custom-root.tsx", contents: SOURCE_V1 }],
+      },
+    });
     const root = (await manager.getDefaultPattern(false))!;
     expect(getPatternSource(root)).toBeUndefined();
     const before = getPatternIdentityRef(root)?.identity;
@@ -298,6 +350,40 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(await controller.checkAndUpdateDefaultPattern()).toBe(
       "skipped-disabled",
     );
+    expect(stub.identityFetches()).toBe(0);
+  });
+
+  it("does not infer provenance for a custom home root", async () => {
+    versionSkews = [];
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      clientVersion: BUILD_SHA,
+      experimental: {
+        systemPatternAutoUpdate: true,
+        systemPatternAutoUpdateHome: true,
+      },
+    });
+    const homeSession = await createSession({
+      identity: signer,
+      spaceDid: signer.did(),
+    });
+    manager = new PieceManager(homeSession, runtime);
+    await manager.synced();
+    controller = new PiecesController(manager);
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    const before = getPatternIdentityRef(root)?.identity;
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    expect(getPatternIdentityRef(root)?.identity).toBe(before);
+    expect(getPatternSource(root)).toBeUndefined();
     expect(stub.identityFetches()).toBe(0);
   });
 });

@@ -1000,6 +1000,28 @@ export interface PieceConnection {
   readBy: string[];
 }
 
+export interface PieceInspection {
+  id: string;
+  name?: string;
+  source?: Readonly<unknown>;
+  result: Readonly<unknown>;
+  readingFrom: Array<{ id: string; name?: string }>;
+  readBy: Array<{ id: string; name?: string }>;
+  connectionErrors?: {
+    readingFrom?: string;
+    readBy?: string;
+  };
+}
+
+export interface InspectablePiece {
+  readonly id: string;
+  name(): string | undefined;
+  input: { get(): Promise<unknown> };
+  result: { get(): Promise<unknown> };
+  readingFrom(): Promise<Array<{ id: string; name(): string | undefined }>>;
+  readBy(): Promise<Array<{ id: string; name(): string | undefined }>>;
+}
+
 export type PieceConnectionMap = Map<string, PieceConnection>;
 
 // Helper functions for piece mapping
@@ -1037,6 +1059,15 @@ async function buildConnectionMap(
     const pieceConfig: PieceConfig = { ...config, piece: piece.id };
     try {
       const details = await inspectPiece(pieceConfig);
+      if (details.connectionErrors) {
+        const errors = Object.entries(details.connectionErrors)
+          .map(([direction, message]) => `${direction}: ${message}`)
+          .join("; ");
+        console.error(
+          `Warning: Could not inspect connections for piece ${piece.id}: ` +
+            errors,
+        );
+      }
       connections.set(piece.id, createPieceConnection(piece, details));
     } catch (error) {
       // Skip pieces that can't be inspected, but include them with no connections
@@ -1149,14 +1180,9 @@ export async function generateSpaceMap(
   return formatSpaceMap(connections, format);
 }
 
-export async function inspectPiece(config: PieceConfig): Promise<{
-  id: string;
-  name?: string;
-  source?: Readonly<unknown>;
-  result: Readonly<unknown>;
-  readingFrom: Array<{ id: string; name?: string }>;
-  readBy: Array<{ id: string; name?: string }>;
-}> {
+export async function inspectPiece(
+  config: PieceConfig,
+): Promise<PieceInspection> {
   const manager = await loadManager(config);
   let resolvedConfig: PieceConfig;
   try {
@@ -1178,18 +1204,46 @@ export async function inspectPiece(config: PieceConfig): Promise<{
     resolvedConfig.pieceScope,
   );
 
+  return await inspectLoadedPiece(piece);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Inspect an already-resolved piece. Core state is authoritative; connection
+ * analysis is best-effort because it walks the space piece list and may need to
+ * start an unrelated (including the root) piece.
+ */
+export async function inspectLoadedPiece(
+  piece: InspectablePiece,
+): Promise<PieceInspection> {
   const id = piece.id;
   const name = piece.name();
   const source = (await piece.input.get()) as Readonly<unknown>;
   const result = (await piece.result.get()) as Readonly<unknown>;
-  const readingFrom = (await piece.readingFrom()).map((piece) => ({
-    id: piece.id,
-    name: piece.name(),
-  }));
-  const readBy = (await piece.readBy()).map((piece) => ({
-    id: piece.id,
-    name: piece.name(),
-  }));
+  let readingFrom: PieceInspection["readingFrom"] = [];
+  let readBy: PieceInspection["readBy"] = [];
+  const connectionErrors: NonNullable<PieceInspection["connectionErrors"]> = {};
+
+  try {
+    readingFrom = (await piece.readingFrom()).map((piece) => ({
+      id: piece.id,
+      name: piece.name(),
+    }));
+  } catch (error) {
+    connectionErrors.readingFrom = errorMessage(error);
+  }
+
+  try {
+    readBy = (await piece.readBy()).map((piece) => ({
+      id: piece.id,
+      name: piece.name(),
+    }));
+  } catch (error) {
+    connectionErrors.readBy = errorMessage(error);
+  }
 
   return {
     id,
@@ -1198,20 +1252,14 @@ export async function inspectPiece(config: PieceConfig): Promise<{
     result,
     readingFrom,
     readBy,
+    ...(Object.keys(connectionErrors).length > 0 ? { connectionErrors } : {}),
   };
 }
 
 async function inspectSlugTargetCell(
   manager: PieceManager,
   slug: string,
-): Promise<{
-  id: string;
-  name?: string;
-  source?: Readonly<unknown>;
-  result: Readonly<unknown>;
-  readingFrom: Array<{ id: string; name?: string }>;
-  readBy: Array<{ id: string; name?: string }>;
-}> {
+): Promise<PieceInspection> {
   const target = await resolveSlugTargetCell(manager, slug);
   await target.pull();
   const result = target.get() as Readonly<unknown>;
@@ -1229,8 +1277,37 @@ async function inspectSlugTargetCell(
 }
 
 export async function getPieceView(config: PieceConfig): Promise<unknown> {
-  const data = (await inspectPiece(config)) as any;
-  return data.result?.[UI] as VNode;
+  const manager = await loadManager(config);
+  let resolvedConfig: PieceConfig;
+  try {
+    resolvedConfig = await resolvePieceConfigWithManager(config, manager);
+  } catch (error) {
+    if (error instanceof SlugResolutionError && error.code === "not-piece") {
+      const target = await resolveSlugTargetCell(manager, config.piece);
+      await target.pull();
+      return viewFromResult(target.get());
+    }
+    throw error;
+  }
+  const pieces = new PiecesController(manager);
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  return await getLoadedPieceView(piece);
+}
+
+export async function getLoadedPieceView(
+  piece: Pick<InspectablePiece, "result">,
+): Promise<unknown> {
+  return viewFromResult(await piece.result.get());
+}
+
+function viewFromResult(result: unknown): VNode | undefined {
+  if (typeof result !== "object" || result === null) return undefined;
+  return (result as Record<PropertyKey, unknown>)[UI] as VNode | undefined;
 }
 
 export function formatViewTree(view: unknown): string {

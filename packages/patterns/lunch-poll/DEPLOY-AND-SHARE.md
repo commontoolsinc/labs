@@ -1,272 +1,265 @@
-# Deploying, updating & sharing lunch-poll state
+# Lunch poll deployment and recovery
 
-How to deploy the lunch poll, update it in place without losing data, share it,
-verify it actually worked, and recover it when it breaks. Written for someone
-(human or agent) operating the poll for the first time — read top to bottom
-once.
+This is the operator runbook for deploying the lunch poll without losing its
+shared state. The safe default is: update the existing piece through its stable
+slug, verify that its durable inputs did not change, and do mutation testing on
+a disposable canary.
 
-> **Status (2026-06-22): live-deployable.** The visit history + per-visit vote
-> snapshots live in a plain **`PerSpace<HistoryEntry[]>` array** (`visits`),
-> each entry embedding its own vote snapshot. (History was briefly on the SQLite
-> builtin, #4144/#4145; that's been reverted — see `LUNCH-COORDINATOR-TODO.md`
-> for the history. There is no longer any `sqliteDatabase`, `db.exec`, or
-> `sqliteRev`.)
+> **Status (2026-07-14): live-deployable.** Visit history and vote snapshots
+> are stored in the ordinary `PerSpace` input `visits`. There is no SQLite
+> database or separate process state to migrate.
 
-## Where the data lives (mental model)
+## Production address and state contract
 
-A poll's durable state belongs to **one deployed piece instance in one space**,
-addressed by `(space, causal-cell-id)` — not to "the pattern" in the abstract.
-So "share the state" = "everyone points at the same piece"; "copy the state" =
-"move that piece's values into a new piece." It all lives in **`PerSpace` input
-cells**, shared by everyone in the space: `question`, `city`, `options`,
-`votes`, `users`, `adminName`, `webSearchUrl`, and **`visits`** (the "Recently
-eaten" log + embedded vote snapshots that feed "Lunch stats"). Plus
-**`myName`**, which is **`PerUser`** (keyed by your DID).
+The public address is the stable slug, not the current causal piece id:
 
-All of these survive an in-place `setsrc` (Option A) and — because `visits` is
-now an ordinary `PerSpace` cell — can all be copied to another piece via the CLI
-(Option B).
-
-## The canonical piece
-
-One shared instance everyone iterates on. **This is a deployment pointer, not a
-stable identifier — current as of 2026-06-22.** A piece is tied to one
-space/server and can be reset, wedged, or lost; if it 404s, `inspect` fails, or
-it stops responding, re-establish it (see "Recovering" below) and update this
-block.
-
-The poll lives on **`rapids`** (`rapids.saga-castor.ts.net`), the intended
-successor to `toolshed`.
-
-```
-space:  team-lunch
-piece:  fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
-url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
+```text
+host:      https://rapids.saga-castor.ts.net
+space:     team-lunch
+slug:      lunch-poll
+public:    https://rapids.saga-castor.ts.net/team-lunch/lunch-poll
+piece id:  fid1:uC_TJ5p2vRMf9sDtci7pPKG7GThHYY7GFPbRJVSE71g
 ```
 
-### Historical: the `toolshed` piece
+The piece id is recorded only for recovery. Normal deploys and links should use
+`lunch-poll`; if a migration ever creates a replacement piece, repoint the slug
+only after the replacement has passed verification.
 
-Before `rapids`, the canonical poll ran on `toolshed`
-(`toolshed.saga-castor.ts.net`). Retained here for reference, and in case the
-`rapids` migration is rolled back:
+Durable shared inputs are:
 
-```
-space:  team-lunch
-piece:  fid1:zJT0lRy-Hd6p_ZsK_h6CZoK3rLcWOmsqwzqnHCAOlAg
-url:    https://toolshed.saga-castor.ts.net/team-lunch/fid1:zJT0lRy-Hd6p_ZsK_h6CZoK3rLcWOmsqwzqnHCAOlAg
+```text
+question options votes users adminName visits
 ```
 
-## Environment setup
+`myName` is `PerUser`. Do not copy it during a migration. Form drafts, the
+current-day override, and confirmation state are `PerSession` internals and are
+intentionally fresh in each browser/runtime session.
+
+## One-time operator setup
+
+Run commands from the repository root:
 
 ```bash
-export CF_API_URL=https://rapids.saga-castor.ts.net/   # current prod; toolshed.saga-castor.ts.net is the predecessor; http://localhost:8000 for local dev
-export CF_IDENTITY=./your-identity.key
-PIECE=fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0    # rapids; current as of 2026-06-22
+set -euo pipefail
+export CF_API_URL=https://rapids.saga-castor.ts.net
+export CF_IDENTITY="${CF_IDENTITY:-$HOME/.config/commonfabric/identity.key}"
 SPACE=team-lunch
+POLL=lunch-poll
+PATTERN=packages/patterns/lunch-poll/main.tsx
+
+test -r "$CF_IDENTITY"
+deno run -A packages/cli/mod.ts id did "$CF_IDENTITY"
 ```
 
-**Identity key:**
+The DID printed by the final command should be the intended deployer. Import
+the same key in the browser when the browser and CLI must act as the same user;
+see
+[`SHARED_IDENTITY.md`](../../../docs/development/SHARED_IDENTITY.md).
 
-- **Local dev** — the local toolshed trusts the identity derived from the
-  passphrase `"implicit trust"`. Mint a matching key (use `deno run`, **not**
-  `deno task`, when redirecting — the task wrapper prints ANSI preamble that
-  pollutes the file):
-  ```bash
-  deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
-  chmod 600 cf.key
-  ```
-- **Prod** — deploy with your own identity, or mint a fresh one
-  (`deno run -A packages/cli/mod.ts id new > prod.key`) and share that key with
-  whoever should be able to update the piece. Whoever deployed owns it; the
-  **host** is a separate, in-poll role (first joiner — see Identity below).
-
-## Option A — update the existing piece in place (recommended)
-
-To push code changes **and keep all accumulated state**, update the source of
-the existing piece. Do **not** run `cf piece new` — that mints a fresh, empty
-instance.
+For local development, derive the trusted local identity with `deno run` so
+shell redirection contains only the key:
 
 ```bash
-deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
-  packages/patterns/lunch-poll/main.tsx
-deno task cf piece step --piece "$PIECE" -s "$SPACE"
+deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
+chmod 600 cf.key
 ```
 
-**What survives `setsrc` (verified):** all the `PerSpace` cells
-(`users`/`votes`/`options`/`visits`/…). Cell ids derive from the causal
-generation chain (not contents, scope excluded), so `setsrc` keeps the same
-result cell and its populated inputs. **Adding a new `PerSpace` field is safe**
-— on an existing piece it hydrates to its `Default<>` while populated fields
-keep their data.
+### Bootstrap the stable slug
 
-**Caveat:** this holds only while each input's identity in the recipe stays
-stable. Adding fields is safe; heavily **reordering or renaming** pattern inputs
-can shift the causal chain and orphan old data. Don't refactor the input
-interface casually against a piece you care about.
-
-## Option B — copy the state into your own piece
-
-To get your **own** instance seeded with the current data (e.g. to experiment
-without touching the shared poll):
+A first deployment can create the slug atomically:
 
 ```bash
-# 1. Create your own empty piece (note the new ID it prints).
-MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
-  -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
+deno task cf piece new "$PATTERN" -s "$SPACE" --slug "$POLL"
+```
 
-# 2. Copy each PerSpace field from the canonical piece into yours.
-#    `--input` reads/writes the input cell where these live.
-for field in question city users options votes adminName webSearchUrl visits; do
-  deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
-    | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
+For the existing production piece, or after recovering an old deployment that
+predates slugs, bind it once:
+
+```bash
+RAW_PIECE=fid1:uC_TJ5p2vRMf9sDtci7pPKG7GThHYY7GFPbRJVSE71g
+deno task cf piece set-slug -s "$SPACE" "$POLL" "$RAW_PIECE"
+```
+
+## Normal deployment: update in place
+
+Start from the intended revision and run the focused tests before touching
+production:
+
+```bash
+git fetch origin main
+git merge-base --is-ancestor origin/main HEAD
+deno task cf test --timeout 180000 --root packages/patterns \
+  packages/patterns/lunch-poll/main.test.tsx
+deno task cf test --timeout 180000 --root packages/patterns \
+  packages/patterns/lunch-poll/multi-user.test.tsx
+```
+
+Snapshot every durable input, update the source in place, then prove those
+inputs are byte-for-byte unchanged:
+
+```bash
+SNAPSHOT_DIR=$(mktemp -d)
+STATE_FIELDS=(question options votes users adminName visits)
+
+for field in "${STATE_FIELDS[@]}"; do
+  deno task cf piece get -s "$SPACE" --piece "$POLL" \
+    "$field" --input > "$SNAPSHOT_DIR/$field.before.json"
 done
 
-# 3. Recompute so derived values (counts, ranking) refresh.
-deno task cf piece step --piece "$MINE" -s "$SPACE"
-deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
+deno task cf piece setsrc -s "$SPACE" --piece "$POLL" "$PATTERN"
+deno task cf piece step -s "$SPACE" --piece "$POLL"
+
+for field in "${STATE_FIELDS[@]}"; do
+  deno task cf piece get -s "$SPACE" --piece "$POLL" \
+    "$field" --input > "$SNAPSHOT_DIR/$field.after.json"
+  cmp "$SNAPSHOT_DIR/$field.before.json" "$SNAPSHOT_DIR/$field.after.json"
+done
+
+deno task cf piece inspect -s "$SPACE" --piece "$POLL" --summary --json
 ```
 
-This is a **one-time snapshot copy**, not a live link — the pieces diverge
-after. Because the copy loop includes `visits`, the "Recently eaten" log and
-"Lunch stats" come across too. (This is a change from the SQLite era, when the
-history lived in a per-piece, cell-derived db the CLI couldn't copy or repoint;
-the fabric-array model restores CLI portability — history copies like any other
-`PerSpace` cell.)
+`setsrc` retains the piece/result identity and its populated input cells. Adding
+a new defaulted input is safe. Renaming or heavily reordering inputs can change
+their causal identities, so treat that as a migration and test it against a
+copy first.
 
-## Verifying a deploy actually worked
+Open the stable URL after the CLI checks:
 
-History is now a plain `PerSpace` cell with computeds over it, so it reads back
-over the CLI like the rest of the poll's state — no subscription/`{ pending }`
-gotcha and no SQLite files to inspect.
+```text
+https://rapids.saga-castor.ts.net/team-lunch/lunch-poll
+```
 
-- **Read the `visits` input directly** to confirm a write landed (no browser
-  needed):
-  ```bash
-  deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
-  ```
-  The derived outputs (`recentVisits`, `placeStats`, `historyCount`,
-  `mostRecentTitle`, `voteHistoryCount`) recompute on `step` and read back the
-  same way.
+Verify that the poll renders, existing options/history are present, joining
+works, and `todayDate` reflects the browser's local date. Session-scoped values
+must be checked in that browser tab: every `cf` invocation creates a fresh
+runtime session, so `piece@session` in a later CLI command cannot observe a
+browser tab or a previous CLI invocation.
 
-**Smoke test after deploy** (host-gated handlers need a join first):
+## Mutation smoke test: use a disposable canary
+
+Do not add test restaurants, votes, users, or visits to production. Exercise
+handlers on a newly created canary and remove it afterward:
 
 ```bash
-deno task cf piece call --piece "$PIECE" -s "$SPACE" joinAs '{"name":"Host"}'
-deno task cf piece step --piece "$PIECE" -s "$SPACE"
-deno task cf piece call --piece "$PIECE" -s "$SPACE" addOption '{"title":"Test Cafe"}'
-deno task cf piece step --piece "$PIECE" -s "$SPACE"
-deno task cf piece call --piece "$PIECE" -s "$SPACE" logVisit '{"title":"Test Cafe"}'
-deno task cf piece step --piece "$PIECE" -s "$SPACE"
-# Confirm the entry landed (no browser needed):
-deno task cf piece get --piece "$PIECE" -s "$SPACE" visits --input -q
+CF=(deno run -A packages/cli/mod.ts)
+CANARY=$("${CF[@]}" piece new -s "$SPACE" "$PATTERN" --quiet)
+cleanup() { "${CF[@]}" piece rm -s "$SPACE" --piece "$CANARY" || true; }
+trap cleanup EXIT
+
+"${CF[@]}" piece call -s "$SPACE" --piece "$CANARY" joinAs \
+  '{"name":"Deploy Canary"}'
+"${CF[@]}" piece call -s "$SPACE" --piece "$CANARY" addOption \
+  '{"title":"Canary Cafe"}'
+"${CF[@]}" piece call -s "$SPACE" --piece "$CANARY" logVisit \
+  '{"title":"Canary Cafe"}'
+"${CF[@]}" piece step -s "$SPACE" --piece "$CANARY"
+
+"${CF[@]}" piece get -s "$SPACE" --piece "$CANARY" optionCount
+"${CF[@]}" piece get -s "$SPACE" --piece "$CANARY" historyCount
+"${CF[@]}" piece get -s "$SPACE" --piece "$CANARY" mostRecentTitle
 ```
 
-## Identity & joining
+The expected values are `1`, `1`, and `"Canary Cafe"`. The canary has a raw id
+and never owns the production slug.
 
-`myName` is `PerUser` (keyed by your authenticated DID); `adminName` (host) and
-the `users` directory are `PerSpace`. Consequences that bite:
+## Copy or replace a deployment
 
-1. **This build joins by free-text name.** Type a name in the join field and
-   click Join — no profile needed; the **first person to join becomes host**.
-   (On `main`, joining instead goes through the shared-profile `wish` flow,
-   which requires a profile in your home space. This `freetext-join` variant
-   removes that gate. The `joinAs` handler still honors an explicit `name`, so
-   CLI/headless joins work either way.)
-
-2. **CLI and browser are different identities unless you make them the same.**
-   If you join/seed from the `cf` CLI (one DID) then open the piece in a browser
-   (a different DID), the browser's `myName` is empty and it won't treat you as
-   host. To act as the same person in both, import your CLI key in the browser
-   via **Import CLI Key**; see
-   [`docs/development/SHARED_IDENTITY.md`](../../../docs/development/SHARED_IDENTITY.md).
-   Verify with `cf id did "$CF_IDENTITY"`.
-
-3. **Names are unique.** `joinAs` rejects a name already in `users`. If a
-   test/seed claimed your name, pick another or clear the stale entry.
-
-4. **Host role is claimable.** Any joined participant can take the host seat
-   with **Become host** (`claimHost`). A squatted/stale host seat doesn't need
-   an operator reset — just join and click Become host. (You can also reset
-   `adminName` to `""` directly when no one is joined.)
-
-## Resetting / re-seeding state (host or operator)
-
-**Coordinate before running this against the shared piece — it mutates state
-everyone sees, and direct `set` races anyone's live browser session.**
-
-- **Votes:** use the in-app `resetVotes` (host) — or call it via CLI.
-- **History:** use the **`clearHistory` handler** (host-gated) — it empties the
-  `visits` log (and its embedded vote snapshots):
-  ```bash
-  deno task cf piece call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
-  deno task cf piece step --piece "$PIECE" -s "$SPACE"
-  ```
-  Or, since `visits` is an ordinary `PerSpace` cell, write it directly (below).
-- **PerSpace cells:** write the input cells directly:
-  ```bash
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" users     --input -q
-  echo '""' | deno task cf piece set --piece "$PIECE" -s "$SPACE" adminName --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" options   --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" votes     --input -q
-  echo '[]' | deno task cf piece set --piece "$PIECE" -s "$SPACE" visits    --input -q
-  deno task cf piece step --piece "$PIECE" -s "$SPACE"
-  ```
-  After this, the first person to join in the browser becomes host as their own
-  browser identity.
-
-## Recovering the piece
-
-### Re-establishing (if it's lost / 404s)
+Use this only for a canary seeded with production data, a causal-input
+migration, or a genuinely unrecoverable piece. It copies a point-in-time
+snapshot; the two pieces diverge afterward.
 
 ```bash
-deno task cf piece new packages/patterns/lunch-poll/main.tsx -s "$SPACE"
-# → prints a new fid1:… — update the "canonical piece" block above.
+OLD=$POLL
+NEW=$(deno run -A packages/cli/mod.ts piece new -s "$SPACE" "$PATTERN" --quiet)
+STATE_FIELDS=(question options votes users adminName visits)
+MIGRATION_DIR=$(mktemp -d)
+
+for field in "${STATE_FIELDS[@]}"; do
+  deno task cf piece get -s "$SPACE" --piece "$OLD" \
+    "$field" --input > "$MIGRATION_DIR/$field.json"
+  deno task cf piece set -s "$SPACE" --piece "$NEW" \
+    "$field" --input < "$MIGRATION_DIR/$field.json"
+done
+
+deno task cf piece step -s "$SPACE" --piece "$NEW"
+
+for field in "${STATE_FIELDS[@]}"; do
+  deno task cf piece get -s "$SPACE" --piece "$NEW" \
+    "$field" --input > "$MIGRATION_DIR/$field.new.json"
+  cmp "$MIGRATION_DIR/$field.json" "$MIGRATION_DIR/$field.new.json"
+done
+
+# Browser-test /team-lunch/$NEW before changing the public pointer.
+deno task cf piece set-slug -s "$SPACE" "$POLL" "$NEW"
 ```
 
-You need `WRITE`/`OWNER` on the space (ACL-gated); a denied write changes
-nothing.
+Keep the old piece until the new public URL has been verified. Do not copy
+`myName`; each user rejoins or retains their own per-user state only when the
+same piece is updated in place.
 
-### Recovering a wedged piece
+## Reading and resetting state
 
-A piece can get into a bad **process** state — UI renders but **clicks do
-nothing**, no console errors (a settle loop flickers / logs warnings). Observed
-once when a "reset votes" click wedged the running instance. `setsrc` does
-**not** fix this (it reuses the same process cell); the cure is a fresh process:
+For reliable automation, read the specific input or scalar output you need:
 
 ```bash
-# 1. Confirm it's instance-specific: deploy the same code to a NEW piece. If the
-#    fresh piece works, the old one's process is wedged.
-NEW=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
-  -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
-
-# 2. Copy the PerSpace state across with the Option B loop (history carries too,
-#    since `visits` is now a PerSpace cell). Tip: leave users/adminName empty so
-#    the first joiner becomes host, or copy them and use Become host.
-
-# 3. Make the fresh piece canonical: update the "canonical piece" block above.
+deno task cf piece get -s "$SPACE" --piece "$POLL" visits --input
+deno task cf piece get -s "$SPACE" --piece "$POLL" historyCount
+deno task cf piece get -s "$SPACE" --piece "$POLL" todayVoteCount
 ```
 
-### Home space won't load (profile setup, `main`-style builds)
+`piece inspect` also reports source/result state. Connection analysis is
+best-effort because it walks other pieces in the space; a connection warning
+does not mean the target piece's state was unavailable.
 
-Unrelated to the poll itself, but bites colleagues setting up a profile: if a
-home space fails to load with
-`Handler used as lift, because $stream: true was
-overwritten`, the space's
-**stored** root pattern is a stale compiled artifact. Fix: open the header menu
-→ **Toggle debug mode** (🐛) → click the red **Recreate Root Pattern** button in
-the debugger drawer, then reload. (Console fallback:
-`localStorage.setItem("showDebuggerView","true")` then reload.) The
-free-text-join build of this poll sidesteps the profile requirement entirely.
+Reset commands mutate the shared poll and require coordination. Prefer the
+host-gated UI/handlers (`resetVotes`, `clearHistory`). An operator can directly
+replace the `votes` or `visits` input only when an intentional emergency reset
+has been agreed.
 
-## Performance notes
+## Identity and host behavior
 
-Cold loads of a poll with many options can take **minutes** — this is **not**
-graph/runtime cost (instantiation measures ~linear, ~12ms/option), it's the
-**per-option AI work done host-side on load**: each option triggers an image
-generation, a web search, and a `generateText` homepage-verification call,
-serialized behind a 30s mutex. Results are cached (`option.imageUrl` etc.), so
-warm loads are cheaper; the pain is the first host load of un-cached options.
-See willkelly's perf investigation in
-[labs#4141](https://github.com/commontoolsinc/labs/pull/4141) (keyed-collection
-/ runtime-aggregate direction) for the deeper aggregate + write-conflict
-findings.
+- Joining is profile-first when `#profileName` resolves, with manual entry as a
+  fallback. Programmatic callers may pass `{"name":"..."}` to `joinAs`.
+- `users` and `adminName` are shared; `myName` is per-user. The first joiner
+  becomes host.
+- Names are unique. A joined participant can use **Become host** (`claimHost`)
+  if the recorded host is stale.
+- The browser and CLI are different users unless they use the same imported
+  identity key.
+
+## Recovery and diagnosis
+
+### A root-pattern failure blocks unrelated CLI work
+
+Connection discovery and piece-list operations may traverse the space root. A
+stale root can therefore make an otherwise healthy poll look broken. Current
+runtimes attempt the system-pattern update before retrying a failed root start,
+and back-fill provenance for legacy roots whose verified authored entry is an
+official system pattern. Recreated system roots also retain provenance for the
+next update.
+
+Upgrade the shell/CLI to a build containing that recovery before taking a
+destructive action. Custom roots remain pinned and are never inferred as system
+roots.
+
+As a final, state-losing repair for the **space root** (not the poll piece):
+
+```bash
+deno task cf piece recreate-root -s "$SPACE"
+```
+
+Use this only after the automatic recovery fails. It recreates the space's
+navigation/root pattern; it is not a remedy for session-scoped browser state.
+
+### The source updated but a CLI session value did not
+
+This is usually scope, not a wedged deployment. `PerSession` state belongs to a
+single browser/runtime session, and each CLI command starts another one. Check
+durable `PerSpace` inputs with `piece get --input`, per-user state with the same
+identity, and UI/session state in the browser tab that owns it.
+
+### The piece is genuinely missing
+
+Create a replacement without changing the production slug, follow the copy and
+verification procedure above, and repoint `lunch-poll` only at the end. This
+keeps the shared URL stable and gives rollback a concrete old piece id.

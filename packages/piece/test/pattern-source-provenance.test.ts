@@ -104,4 +104,28 @@ describe("ensureDefaultPattern stamps patternSource", () => {
     const source = getPatternSource(piece.getCell());
     expect(source).toBe(DEFAULT_APP_PATTERN_URL);
   });
+
+  it("stamps provenance when recreating a system root", async () => {
+    await controller.ensureDefaultPattern();
+
+    const piece = await controller.recreateDefaultPattern();
+
+    expect(getPatternSource(piece.getCell())).toBe(DEFAULT_APP_PATTERN_URL);
+  });
+
+  it("leaves recreated custom roots untracked", async () => {
+    await controller.ensureDefaultPattern();
+
+    const piece = await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-root.tsx",
+        files: [{
+          name: "/custom-root.tsx",
+          contents: DEFAULT_APP_SOURCE,
+        }],
+      },
+    });
+
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+  });
 });
