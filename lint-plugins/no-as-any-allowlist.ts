@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/profile-home-bio.test.ts",
   "packages/runner/test/profile-home-pin-piece.test.ts",
   "packages/runner/test/profile-space-identity-collision-support.ts",
   "packages/runner/test/push-pull-patterns.bench.ts",

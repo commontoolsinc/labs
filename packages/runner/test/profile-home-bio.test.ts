@@ -54,10 +54,9 @@ describe("profile-home bio (owner-protected free-text field)", () => {
         undefined,
         tx,
       );
-      // deno-lint-ignore no-explicit-any
       const result = rt.run(
         tx,
-        pattern as any,
+        pattern,
         { initialName: "Ada" },
         resultCell,
       );
