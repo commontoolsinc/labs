@@ -7,6 +7,7 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 // CT-1755: a profile card can pin an EXISTING deployed piece. `mutateElements`'s
 // `addPiece` mode stores a real cross-space link to the target piece as the
@@ -44,8 +45,7 @@ const elementsSchema = {
       cell: { type: "unknown", asCell: ["cell"] },
     },
   },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} as const satisfies JSONSchema;
 
 type ElementCell = {
   getAsNormalizedFullLink(): NormalizedFullLink;
@@ -95,10 +95,9 @@ describe("profile-home addPiece (followable piece card)", () => {
         undefined,
         tx,
       );
-      // deno-lint-ignore no-explicit-any
       const result = rt.run(
         tx,
-        pattern as any,
+        pattern,
         { initialName: "Ada" },
         resultCell,
       );
@@ -125,8 +124,7 @@ describe("profile-home addPiece (followable piece card)", () => {
       const elementsCell = result.key("elements").asSchema(elementsSchema);
       await elementsCell.sync();
       await elementsCell.pull();
-      // deno-lint-ignore no-explicit-any
-      const elements = elementsCell.get() as any[];
+      const elements = elementsCell.get() as readonly ProfileElementRecord[];
       expect(elements.length).toBe(1);
       expect(elements[0].source).toBe("piece");
       expect(elements[0].title).toBe("Demo Counter");
@@ -157,10 +155,9 @@ describe("profile-home addPiece (followable piece card)", () => {
         undefined,
         tx,
       );
-      // deno-lint-ignore no-explicit-any
       const result = rt.run(
         tx,
-        pattern as any,
+        pattern,
         { initialName: "Ada" },
         resultCell,
       );
@@ -195,7 +192,7 @@ describe("profile-home addPiece (followable piece card)", () => {
       const elementsCell = result.key("elements").asSchema(elementsSchema);
       await elementsCell.sync();
       await elementsCell.pull();
-      const elements = elementsCell.get() as ProfileElementRecord[];
+      const elements = elementsCell.get() as readonly ProfileElementRecord[];
       expect(elements.map((element) => element.source)).toEqual([
         "catalog",
         "url",
