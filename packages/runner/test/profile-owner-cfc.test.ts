@@ -534,7 +534,7 @@ describe("profile owner CFC policy", () => {
         (rootSchema as { properties?: Record<string, JSONSchema> })
           .properties ?? {};
 
-      for (const field of ["name", "avatar", "elements"]) {
+      for (const field of ["name", "avatar", "externalLinks", "elements"]) {
         const fieldSchema = resolveLocalSchemaRef(
           rootSchema,
           properties[field],
