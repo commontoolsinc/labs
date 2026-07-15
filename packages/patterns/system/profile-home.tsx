@@ -1,6 +1,7 @@
 import {
   Cfc,
   computed,
+  Default,
   equals,
   handler,
   ifElse,
@@ -130,9 +131,16 @@ export type ProfileHomeOutput = {
   // Public web profiles the owner has chosen to associate with this profile.
   // The owner-protected list is distinct from `elements`, whose entries are
   // Common Fabric piece references.
-  externalLinks: OwnerProtectedProfileWrite<
-    ExternalProfileLink[],
-    typeof mutateExternalProfileLinks
+  // The default is outside the CFC wrapper: an old profile has no stored
+  // property, while new profiles get an empty owner-protected list. Putting
+  // the default inside the wrapper produces divergent CFC union branches when
+  // a home appends more than one profile.
+  externalLinks: Default<
+    OwnerProtectedProfileWrite<
+      ExternalProfileLink[],
+      typeof mutateExternalProfileLinks
+    >,
+    []
   >;
   elements: OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>;
   setName: Stream<SetProfileNameEvent>;
