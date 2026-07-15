@@ -43,6 +43,8 @@ export default pattern(() => {
   );
   const selectedProfile = Writable.of<LobbyProfile>({
     initialNameApplied: "Selected Profile",
+    externalLinks: [{ label: "GitHub", url: "https://github.com/octocat" }],
+    verifiedIdentities: [],
   });
   const selectedViewer = LobbyViewerState({
     viewerProfile: selectedProfile,
@@ -162,6 +164,10 @@ export default pattern(() => {
   );
   const assert_selected_profile_joined = computed(() =>
     participantNames(viewerRoster).join(",") === "Selected Profile" &&
+    lobbyParticipantsValue(viewerRoster)[0]?.profile.get()?.externalLinks?.[0]
+        ?.url === "https://github.com/octocat" &&
+    lobbyParticipantsValue(viewerRoster)[0]?.profile.get()
+        ?.verifiedIdentities?.length === 0 &&
     selectedViewer.hasJoined === true &&
     selectedViewer.joinLabel === "You’re here" &&
     selectedViewer.joinDisabled === true &&
