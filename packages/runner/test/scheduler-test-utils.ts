@@ -29,7 +29,7 @@ import type {
   IExtendedStorageTransaction,
   IStorageNotification,
 } from "../src/storage/interface.ts";
-import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
+import type { ActionStats, RuntimeTelemetryMarker } from "../src/telemetry.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -165,6 +165,24 @@ function getStaleSchedulerInternals(
   };
 }
 
+type SchedulerAutoDebounceInternals = {
+  actionStats: Map<string, ActionStats>;
+  getActionId: (action: Action) => string;
+  maybeAutoDebounce: (action: Action) => void;
+};
+
+function getSchedulerAutoDebounceInternals(
+  scheduler: Runtime["scheduler"],
+): SchedulerAutoDebounceInternals {
+  const internal = scheduler as unknown as SchedulerAutoDebounceInternals;
+
+  return {
+    actionStats: internal.actionStats,
+    getActionId: (action) => internal.getActionId(action),
+    maybeAutoDebounce: (action) => internal.maybeAutoDebounce(action),
+  };
+}
+
 type EventPreflightMarker = Extract<
   RuntimeTelemetryMarker,
   { type: "scheduler.event.preflight" }
@@ -180,6 +198,7 @@ export {
   disposeSchedulerTestRuntime,
   expect,
   expectSemanticCommitNotifiesSynchronously,
+  getSchedulerAutoDebounceInternals,
   getStaleSchedulerInternals,
   ignoreReadForScheduling,
   it,
@@ -202,6 +221,7 @@ export type {
   JSONSchema,
   ReactivityLog,
   RuntimeTelemetryMarker,
+  SchedulerAutoDebounceInternals,
   SchedulerTestRuntime,
   SchedulerTestStorageManager,
   StaleSchedulerInternals,
