@@ -264,8 +264,10 @@ Handlers remain writable through the mounted `.handler` file. Both mounted
 ### macOS: NFS client cache tuning
 
 FUSE-T serves the mount through the macOS NFS client, which caches attributes,
-negative name lookups, and directory listings on the client side. FUSE-T ignores
-the cache timeouts the filesystem implementation returns, so without tuning the
+negative name lookups, and directory listings on the client side. Neither lever
+a FUSE filesystem normally has reaches that cache: FUSE-T ignores the cache
+timeouts the filesystem implementation returns, and it returns success for the
+invalidation notifications without acting on them. So without tuning, the
 client's age-based 5-60 second defaults apply: a name that was once looked up
 and not found can keep reporting `NotFound` for up to a minute after the file
 appears daemon-side, and a directory listing can be served stale for tens of
@@ -355,8 +357,15 @@ independently from libfuse. FUSE callbacks are registered via
 subscriptions and FUSE requests run concurrently on Deno's event loop.
 
 Cell data is cached in an in-memory tree (`FsTree`). Subscriptions rebuild
-affected subtrees on cell changes and invalidate the kernel cache via
-`fuse_lowlevel_notify_inval_entry`.
+affected subtrees on cell changes and ask the kernel to drop what it cached for
+them, naming the stale directory entries with `fuse_lowlevel_notify_inval_entry`
+and each stale inode with `fuse_lowlevel_notify_inval_inode`.
+
+Those notifications reach the kernel on Linux. FUSE-T returns success for both
+calls but its NFS backend does not act on either, so a rebuilt subtree stays
+cached on macOS until the NFS client's attribute cache expires. That is what the
+mount's attribute-cache bound is for; see
+[macOS: NFS client cache tuning](#macos-nfs-client-cache-tuning).
 
 Writes are fire-and-forget: the FUSE reply is sent before the cell write
 completes, so subscription rebuilds don't block the callback chain (required to
