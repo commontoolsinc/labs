@@ -262,6 +262,46 @@ function compiledDefaultedOptionsProgram(version: 1 | 2): RuntimeProgram {
   };
 }
 
+function compiledArrayItemDefaultsProgram(version: 1 | 2): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        `import { ${
+          version === 1 ? "pattern" : "Default, pattern"
+        } } from 'commonfabric';`,
+        "interface Item {",
+        "  mode?: string;",
+        version === 2 ? "  attempts: number | Default<1>;" : "",
+        "}",
+        "interface Input { items: Item[]; }",
+        "export default pattern<Input>(() => ({ ready: true }));",
+      ].filter(Boolean).join("\n"),
+    }],
+  };
+}
+
+function compiledDynamicDefaultsProgram(version: 1 | 2): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        `import { ${
+          version === 1 ? "pattern" : "Default, pattern"
+        } } from 'commonfabric';`,
+        "interface Item {",
+        "  mode?: string;",
+        version === 2 ? "  attempts: number | Default<1>;" : "",
+        "}",
+        "type Input = Record<string, Item>;",
+        "export default pattern<Input>(() => ({ ready: true }));",
+      ].filter(Boolean).join("\n"),
+    }],
+  };
+}
+
 function linkedSettingsSourcePattern(): Pattern {
   return {
     argumentSchema: { type: "object" },
@@ -272,6 +312,7 @@ function linkedSettingsSourcePattern(): Pattern {
           type: "object",
           properties: { mode: { type: "string" } },
           required: ["mode"],
+          additionalProperties: false,
         },
       },
       required: ["settings"],
@@ -366,6 +407,30 @@ describe("piece pull materialization", () => {
     expect(manager.getResult(piece).get()).toEqual({ output: 14 });
   });
 
+  it("rejects setInput values outside the current argument schema", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await expect(
+      controller.setInput({ input: "wrong" } as unknown as { input: number }),
+    ).rejects.toThrow(/updated arguments do not match the candidate schema/);
+    expect((await controller.input.getCell()).getRaw()).toEqual({ input: 5 });
+    expect(await controller.result.get()).toEqual({ output: 10 });
+
+    await manager.stopPiece(piece);
+    await expect(
+      controller.setInput({ input: "still wrong" } as unknown as {
+        input: number;
+      }),
+    ).rejects.toThrow(/updated arguments do not match the candidate schema/);
+    expect((await controller.input.getCell()).getRaw()).toEqual({ input: 5 });
+  });
+
   it("validates path-based input writes against the current schema", async () => {
     const piece = await manager.runPersistent(
       trustPattern(runtime, doublePattern()),
@@ -391,6 +456,27 @@ describe("piece pull materialization", () => {
     expect(await controller.result.get()).toEqual({ output: 99 });
   });
 
+  it("validates stale result views against the durable result schema", async () => {
+    const initialPattern = await runtime.patternManager.compilePattern(
+      compiledResultNarrowingProgram("string | number"),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      initialPattern,
+      { input: 4 },
+      "stale-result-write-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const staleController = new PieceController(manager, piece);
+    const updater = new PieceController(manager, piece);
+
+    await updater.setPattern(compiledResultNarrowingProgram("number"));
+    await expect(
+      staleController.result.set("bad", ["value"]),
+    ).rejects.toThrow(/updated result does not match its schema/);
+    expect(await updater.result.get(["value"])).toBe(4);
+  });
+
   it("validates a union stream payload before sending exactly one event", async () => {
     const pattern: Pattern = {
       argumentSchema: {
@@ -402,10 +488,12 @@ describe("piece pull materialization", () => {
         $defs: {
           Event: {
             anyOf: [
-              { type: "number", asCell: ["stream"] },
-              { type: "undefined", asCell: ["stream"] },
+              { $ref: "#/$defs/NumberEvent" },
+              { $ref: "#/$defs/UndefinedEvent" },
             ],
           },
+          NumberEvent: { type: "number", asCell: ["stream"] },
+          UndefinedEvent: { type: "undefined", asCell: ["stream"] },
         },
       },
       resultSchema: { type: "object", properties: {} },
@@ -436,12 +524,22 @@ describe("piece pull materialization", () => {
       );
       expect(events).toEqual([5]);
 
-      const source = runtime.getCell<number>(
-        manager.getSpace(),
-        "stream-payload-link-" + crypto.randomUUID(),
-        { type: "number" },
+      const sourcePiece = await manager.runPersistent(
+        trustPattern(runtime, {
+          argumentSchema: { type: "object", properties: {} },
+          resultSchema: {
+            type: "object",
+            properties: { value: { type: "number" } },
+            required: ["value"],
+          },
+          result: { value: 9 },
+          nodes: [],
+        }),
+        {},
+        undefined,
+        { start: true },
       );
-      await runtime.editWithRetry((tx) => source.withTx(tx).set(9));
+      const source = sourcePiece.key("value");
       const rawLink = source.getAsLink({
         base: inputCell.key("slot"),
         includeSchema: true,
@@ -449,6 +547,31 @@ describe("piece pull materialization", () => {
       await controller.input.set(rawLink, ["slot"]);
       await runtime.idle();
       expect(events).toHaveLength(2);
+
+      const broadSource = await manager.runPersistent(
+        trustPattern(runtime, {
+          argumentSchema: { type: "object", properties: {} },
+          resultSchema: {
+            type: "object",
+            properties: { value: { type: ["number", "string"] } },
+            required: ["value"],
+          },
+          result: { value: 9 },
+          nodes: [],
+        }),
+        {},
+        undefined,
+        { start: true },
+      );
+      await expect(
+        controller.input.set(
+          broadSource.key("value").getAsLink({
+            base: inputCell.key("slot"),
+            includeSchema: true,
+          }),
+          ["slot"],
+        ),
+      ).rejects.toThrow(/input link.*schema is not compatible/);
 
       await controller.input.set(undefined, ["slot"]);
       await runtime.idle();
@@ -468,19 +591,28 @@ describe("piece pull materialization", () => {
   });
 
   it("accepts an opaque Cell supplied as a path value", async () => {
-    const source = runtime.getCell<number>(
-      manager.getSpace(),
-      "opaque-input-cell-" + crypto.randomUUID(),
-      { type: "number" },
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+        result: { value: 7 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
     );
-    await runtime.editWithRetry((tx) => source.withTx(tx).set(7));
+    const source = sourcePiece.key("value");
     const pattern: Pattern = {
       argumentSchema: {
         type: "object",
         properties: {
           handle: { type: "number", asCell: ["cell"] },
         },
-        required: ["handle"],
       },
       resultSchema: { type: "object", properties: {} },
       result: {},
@@ -488,7 +620,7 @@ describe("piece pull materialization", () => {
     };
     const piece = await manager.runPersistent(
       trustPattern(runtime, pattern),
-      { handle: source },
+      {},
       undefined,
       { start: true },
     );
@@ -497,6 +629,715 @@ describe("piece pull materialization", () => {
     await controller.input.set(source, ["handle"]);
 
     expect(await controller.input.get(["handle"])).toBe(7);
+
+    const incompatiblePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            value: { type: ["string", "undefined"] },
+          },
+        },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      controller.input.set(incompatiblePiece.key("value"), ["handle"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const nestedPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        ...pattern,
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "number", asCell: ["cell", "cell"] },
+          },
+        },
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      new PieceController(manager, nestedPiece).input.set(source, ["handle"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const readonlyPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        ...pattern,
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: { type: "number", asCell: ["readonly"] },
+          },
+        },
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      new PieceController(manager, readonlyPiece).input.set(source, ["handle"]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("accepts a Piece Stream supplied to a Stream Cell input", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            events: { $ref: "#/$defs/Event" },
+          },
+          required: ["events"],
+          $defs: {
+            Event: { type: "number", asCell: ["stream"] },
+          },
+        },
+        result: { events: { $stream: true } },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            events: { $ref: "#/$defs/Event" },
+          },
+          $defs: {
+            Event: { type: "number", asCell: ["stream"] },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+
+    const controller = new PieceController(manager, targetPiece);
+    await expect(
+      controller.setInput({ events: sourcePiece.key("events") }),
+    ).resolves.toBeUndefined();
+
+    const inputCell = await controller.input.getCell();
+    await expect(
+      controller.setInput({
+        events: sourcePiece.key("events").getAsLink({
+          base: inputCell.key("events"),
+          includeSchema: true,
+        }),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("projects nested Cell wrappers with the canonical link schema", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            value: {
+              type: "object",
+              properties: {
+                handle: {
+                  $ref: "#/$defs/NumberValue",
+                  asCell: ["cell"],
+                },
+              },
+              required: ["handle"],
+              additionalProperties: false,
+            },
+          },
+          required: ["value"],
+          $defs: { NumberValue: { type: "number" } },
+        },
+        result: { value: { handle: 7 } },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            slot: {
+              type: "object",
+              properties: { handle: { $ref: "#/$defs/NumberValue" } },
+              required: ["handle"],
+              additionalProperties: false,
+            },
+          },
+          required: ["slot"],
+          $defs: { NumberValue: { type: "number" } },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: { handle: 0 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, targetPiece);
+
+    await controller.input.set(sourcePiece.key("value"), ["slot"]);
+    expect(await controller.input.get(["slot"])).toEqual({ handle: 7 });
+  });
+
+  it("checks patternProperties on both sides of a durable path link", async () => {
+    const broadSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: ["number", "string"] } },
+          required: ["value"],
+        },
+        result: { value: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const patternedTarget = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          patternProperties: { "^x": { type: "number" } },
+          additionalProperties: true,
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { xSlot: 0 },
+      undefined,
+      { start: true },
+    );
+    await expect(
+      new PieceController(manager, patternedTarget).input.set(
+        broadSource.key("value"),
+        ["xSlot"],
+      ),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const patternedSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          patternProperties: {
+            "^x": { type: ["number", "string"] },
+          },
+          additionalProperties: false,
+        },
+        result: { xSlot: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const numericTarget = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: { type: "number" } },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: 0 },
+      undefined,
+      { start: true },
+    );
+    await expect(
+      new PieceController(manager, numericTarget).input.set(
+        patternedSource.key("xSlot"),
+        ["slot"],
+      ),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+  });
+
+  it("includes possible source-path omission in durable link contracts", async () => {
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: { type: "number" } },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: 0 },
+      undefined,
+      { start: true },
+    );
+    const target = new PieceController(manager, targetPiece);
+    const optionalSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          additionalProperties: false,
+        },
+        result: { value: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+
+    // The current value is a number, but a future schema-valid source write can
+    // omit the raw path and make the retained link yield Fabric `undefined`.
+    await expect(
+      target.input.set(optionalSource.key("value"), ["slot"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const defaultedOptionalSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number", default: 5 } },
+          additionalProperties: false,
+        },
+        result: { value: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    // Defaults are annotations on a source contract, not structural proof that
+    // a future raw producer value contains the linked path.
+    await expect(
+      target.input.set(defaultedOptionalSource.key("value"), ["slot"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const optionalTargetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            slot: { type: ["number", "undefined"] },
+          },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: 0 },
+      undefined,
+      { start: true },
+    );
+    const optionalTarget = new PieceController(manager, optionalTargetPiece);
+    await optionalTarget.input.set(optionalSource.key("value"), ["slot"]);
+    await new PieceController(manager, optionalSource).result.set({});
+    expect(await optionalTarget.input.get(["slot"])).toBeUndefined();
+
+    const requiredSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+        result: { value: 2 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await target.input.set(requiredSource.key("value"), ["slot"]);
+    expect(await target.input.get(["slot"])).toBe(2);
+    await expect(
+      new PieceController(manager, requiredSource).result.set({}),
+    ).rejects.toThrow(/does not match/);
+
+    const conditionallyObjectSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+        result: { value: 3 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      target.input.set(conditionallyObjectSource.key("value"), ["slot"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const maybeShortArray = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: { type: "array", items: { type: "number" } },
+        result: [3],
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      target.input.set(maybeShortArray.key(0), ["slot"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const nonemptyArray = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "array",
+          items: { type: "number" },
+          minItems: 1,
+        },
+        result: [4],
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await target.input.set(nonemptyArray.key(0), ["slot"]);
+    expect(await target.input.get(["slot"])).toBe(4);
+  });
+
+  it("rejects path links through correlated parent schemas", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: ["number", "string"] } },
+          required: ["value"],
+        },
+        result: { value: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                kind: { const: "n" },
+                value: { type: "number" },
+              },
+              required: ["kind", "value"],
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { const: "s" },
+                value: { type: "string" },
+              },
+              required: ["kind", "value"],
+            },
+          ],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { kind: "n", value: 0 },
+      undefined,
+      { start: true },
+    );
+
+    await expect(
+      new PieceController(manager, targetPiece).input.set(
+        sourcePiece.key("value"),
+        ["value"],
+      ),
+    ).rejects.toThrow(/anyOf correlates the linked field/);
+  });
+
+  it("uses destination scope as a follow cap for every durable link", async () => {
+    const sourcePattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+        },
+        required: ["value"],
+      },
+      result: { value: 1 },
+      nodes: [],
+    };
+    const spaceSource = await manager.runPersistent(
+      trustPattern(runtime, sourcePattern),
+      {},
+      undefined,
+      { start: true },
+    );
+    const sessionPattern = trustPattern(runtime, {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "number" },
+      result: 7,
+      nodes: [],
+    });
+    const sessionSource = runtime.getCell<number>(
+      manager.getSpace(),
+      "session-source-" + crypto.randomUUID(),
+      sessionPattern.resultSchema,
+      undefined,
+      "session",
+    );
+    await runtime.setup(undefined, sessionPattern, {}, sessionSource);
+    await sessionSource.sync();
+    expect(sessionSource.getAsNormalizedFullLink().scope).toBe("session");
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: { type: "number", scope: "user" } },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: 0 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, targetPiece);
+
+    await controller.input.set(spaceSource.key("value"), ["slot"]);
+    await expect(
+      controller.input.set(sessionSource, ["slot"]),
+    ).rejects.toThrow(/scope session exceeds the destination scope/);
+
+    const handleTarget = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: {
+            handle: {
+              type: "number",
+              asCell: [{ kind: "cell", scope: "user" }],
+            },
+          },
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    await expect(
+      new PieceController(manager, handleTarget).input.set(
+        sessionSource,
+        ["handle"],
+      ),
+    ).rejects.toThrow(/scope session exceeds the destination scope/);
+  });
+
+  it("checks a durable link schema even when its current value is undefined", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          slot: { type: ["number", "undefined"] },
+        },
+        required: ["slot"],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { slot: undefined },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const inputCell = await controller.input.getCell();
+    const compatibleSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            value: { type: ["number", "undefined"] },
+          },
+          required: ["value"],
+        },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const incompatibleSource = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: {
+            value: { type: ["string", "undefined"] },
+          },
+          required: ["value"],
+        },
+        result: {},
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const compatible = compatibleSource.key("value");
+    const incompatible = incompatibleSource.key("value");
+
+    await controller.input.set(
+      compatible.getAsLink({
+        base: inputCell.key("slot"),
+        includeSchema: true,
+      }),
+      ["slot"],
+    );
+    await expect(
+      controller.input.set(
+        incompatible.getAsLink({
+          base: inputCell.key("slot"),
+          includeSchema: true,
+        }),
+        ["slot"],
+      ),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const compatibleController = new PieceController(manager, compatibleSource);
+    await compatibleController.result.set(7, ["value"]);
+    expect(await controller.input.get(["slot"])).toBe(7);
+    await expect(
+      compatibleController.result.set("bad", ["value"]),
+    ).rejects.toThrow(/updated result does not match its schema/);
+    expect(await controller.input.get(["slot"])).toBe(7);
+  });
+
+  it("ignores a narrowed carried schema in favor of the producer contract", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: ["number", "string"] } },
+          required: ["value"],
+        },
+        result: { value: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const targetPiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { slot: { type: "number" } },
+          required: ["slot"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { slot: 0 },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, targetPiece);
+    const inputCell = await controller.input.getCell();
+    const narrowed = sourcePiece.key("value").asSchema({ type: "number" });
+
+    await expect(
+      controller.input.set(
+        narrowed.getAsLink({
+          base: inputCell.key("slot"),
+          includeSchema: true,
+        }),
+        ["slot"],
+      ),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+    await expect(
+      controller.input.set(narrowed, ["slot"]),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    const standalone = runtime.getCell<number>(
+      manager.getSpace(),
+      "standalone-link-without-contract-" + crypto.randomUUID(),
+      { type: "number" },
+    );
+    await runtime.editWithRetry((tx) => standalone.withTx(tx).set(1));
+    await expect(
+      controller.input.set(standalone, ["slot"]),
+    ).rejects.toThrow(/source has no durable schema contract/);
+
+    const argumentSourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: {
+          type: "object",
+          properties: { value: { type: "number" } },
+          required: ["value"],
+        },
+        resultSchema: { type: "object", properties: {} },
+        result: {},
+        nodes: [],
+      }),
+      { value: 1 },
+      undefined,
+      { start: true },
+    );
+    await expect(
+      controller.input.set(
+        manager.getArgument(argumentSourcePiece).key("value"),
+        ["slot"],
+      ),
+    ).rejects.toThrow(/source has no durable schema contract/);
   });
 
   it("hydrates path defaults while retaining raw explicit undefined", async () => {
@@ -764,6 +1605,47 @@ describe("piece pull materialization", () => {
     });
   });
 
+  it("hydrates array item defaults for root and whole-array writes", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                attempts: { type: "number", default: 1 },
+              },
+              required: ["attempts"],
+            },
+          },
+        },
+        required: ["items"],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { items: [{ attempts: 9 }] },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.input.set({ items: [{}] });
+    expect(await controller.input.get()).toEqual({
+      items: [{ attempts: 1 }],
+    });
+
+    await controller.input.set([{}], ["items"]);
+    expect(await controller.input.get()).toEqual({
+      items: [{ attempts: 1 }],
+    });
+  });
+
   it("uses a root discriminator to select array item defaults", async () => {
     const pattern: Pattern = {
       argumentSchema: {
@@ -954,9 +1836,47 @@ describe("piece pull materialization", () => {
     });
   });
 
+  it("migrates defaults through array items and dynamic fields", async () => {
+    const arrayPiece = await manager.runPersistent(
+      await runtime.patternManager.compilePattern(
+        compiledArrayItemDefaultsProgram(1),
+        { space: manager.getSpace() },
+      ),
+      { items: [{}] },
+      "array-default-migration-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const arrayController = new PieceController(manager, arrayPiece);
+    await arrayController.setPattern(compiledArrayItemDefaultsProgram(2));
+    expect((await arrayController.input.getCell()).getRaw()).toEqual({
+      items: [{ attempts: 1 }],
+    });
+
+    const dynamicPiece = await manager.runPersistent(
+      await runtime.patternManager.compilePattern(
+        compiledDynamicDefaultsProgram(1),
+        { space: manager.getSpace() },
+      ),
+      { extra: {} },
+      "dynamic-default-migration-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const dynamicController = new PieceController(manager, dynamicPiece);
+    await dynamicController.setPattern(compiledDynamicDefaultsProgram(2));
+    expect((await dynamicController.input.getCell()).getRaw()).toEqual({
+      extra: { attempts: 1 },
+    });
+  });
+
   it("updates a piece whose durable arguments contain links", async () => {
+    const sourcePattern = doublePattern();
+    sourcePattern.resultSchema = {
+      type: "object",
+      properties: { output: { type: "number" } },
+      required: ["output"],
+    };
     const source = await manager.runPersistent(
-      trustPattern(runtime, doublePattern()),
+      trustPattern(runtime, sourcePattern),
       { input: 5 },
       "linked-update-source-" + crypto.randomUUID(),
       { start: true },
@@ -1222,6 +2142,61 @@ describe("piece pull materialization", () => {
 
     expect(getPatternIdentityRef(piece)).toEqual(previousRef);
     expect(inputCell.getRaw()).toEqual({ value: 4, mode: "legacy-string" });
+  });
+
+  it("validates legacy-open setInput calls against the updated schema", async () => {
+    const piece = await manager.runPersistent(
+      await runtime.patternManager.compilePattern(
+        compiledOptionalNumberFieldProgram(1),
+        { space: manager.getSpace() },
+      ),
+      { value: 4 },
+      "optional-field-set-input-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    await controller.setPattern(compiledOptionalNumberFieldProgram(2));
+
+    await expect(
+      controller.setInput({ value: 4, mode: "legacy-string" }),
+    ).rejects.toThrow(/updated arguments do not match the candidate schema/);
+    expect((await controller.input.getCell()).getRaw()).toEqual({ value: 4 });
+  });
+
+  it("re-proves retained durable links against the candidate schema", async () => {
+    const sourcePiece = await manager.runPersistent(
+      trustPattern(runtime, {
+        argumentSchema: { type: "object", properties: {} },
+        resultSchema: {
+          type: "object",
+          properties: { value: { type: ["number", "string"] } },
+          required: ["value"],
+        },
+        result: { value: 1 },
+        nodes: [],
+      }),
+      {},
+      undefined,
+      { start: true },
+    );
+    const piece = await manager.runPersistent(
+      await runtime.patternManager.compilePattern(
+        compiledOptionalNumberFieldProgram(1),
+        { space: manager.getSpace() },
+      ),
+      { value: 4 },
+      "optional-field-linked-contract-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const previousRef = getPatternIdentityRef(piece);
+
+    await controller.input.set(sourcePiece.key("value"), ["mode"]);
+    await expect(
+      controller.setPattern(compiledOptionalNumberFieldProgram(2)),
+    ).rejects.toThrow(/input link.*schema is not compatible/);
+
+    expect(getPatternIdentityRef(piece)).toEqual(previousRef);
   });
 
   it("does not accept a linked stream as an optional scalar during migration", async () => {

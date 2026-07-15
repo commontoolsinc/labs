@@ -2,7 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { assertPatternSchemasBackwardCompatible } from "../src/schema-compatibility.ts";
+import {
+  assertPatternSchemasBackwardCompatible,
+  assertSchemaSubset,
+} from "../src/schema-compatibility.ts";
 
 function pattern(
   argumentSchema: JSONSchema,
@@ -37,6 +40,172 @@ const oldPattern = pattern(
 );
 
 describe("piece schema compatibility", () => {
+  it("uses target defaults as link proofs only under default-stable ancestors", () => {
+    const properties = {
+      x: { type: "number" as const },
+      y: { type: "number" as const },
+    };
+    const stableSource: JSONSchema = {
+      type: "object",
+      properties,
+      additionalProperties: false,
+    };
+    const stableTarget: JSONSchema = {
+      type: "object",
+      properties: {
+        ...properties,
+        x: { type: "number", default: 0 },
+      },
+      required: ["x"],
+      additionalProperties: false,
+    };
+    expect(() => assertSchemaSubset(stableSource, stableTarget)).not.toThrow();
+
+    expect(() =>
+      assertSchemaSubset(
+        { ...stableSource, maxProperties: 1 },
+        { ...stableTarget, maxProperties: 1 },
+      )
+    ).toThrow(/not stable under default insertion/);
+
+    expect(() =>
+      assertSchemaSubset(
+        {
+          ...stableSource,
+          dependentRequired: { x: ["y"] },
+        },
+        {
+          ...stableTarget,
+          dependentRequired: { x: ["y"] },
+        },
+      )
+    ).toThrow(/not stable under default insertion/);
+
+    expect(() =>
+      assertSchemaSubset(
+        { type: "array", items: stableSource, uniqueItems: true },
+        { type: "array", items: stableTarget, uniqueItems: true },
+      )
+    ).toThrow(/not stable under default insertion/);
+
+    const unstableChild: JSONSchema = {
+      type: "object",
+      properties: {
+        a: { type: "number", default: 0 },
+        b: { type: "number" },
+      },
+      maxProperties: 1,
+      additionalProperties: false,
+    };
+    const dynamicTarget: JSONSchema = {
+      type: "object",
+      patternProperties: {
+        "^x": unstableChild,
+      },
+      additionalProperties: false,
+    };
+    expect(() => assertSchemaSubset(dynamicTarget, dynamicTarget)).toThrow(
+      /not stable under default insertion/,
+    );
+
+    const arrayTarget: JSONSchema = {
+      type: "array",
+      items: stableTarget,
+      uniqueItems: true,
+    };
+    expect(() => assertSchemaSubset(arrayTarget, arrayTarget)).toThrow(
+      /not stable under default insertion/,
+    );
+
+    const nestedTarget: JSONSchema = {
+      type: "object",
+      properties: { item: unstableChild },
+      required: ["item"],
+      additionalProperties: false,
+    };
+    expect(() => assertSchemaSubset(nestedTarget, nestedTarget)).toThrow(
+      /not stable under default insertion/,
+    );
+
+    const plainArrayTarget: JSONSchema = {
+      type: "array",
+      items: unstableChild,
+    };
+    expect(() => assertSchemaSubset(plainArrayTarget, plainArrayTarget))
+      .toThrow(/not stable under default insertion/);
+  });
+
+  it("rejects changed migration defaults below default-unstable constraints", () => {
+    const resultSchema: JSONSchema = {
+      type: "object",
+      properties: {},
+    };
+    const boundedArgument: JSONSchema = {
+      type: "object",
+      properties: { y: { type: "number" } },
+      maxProperties: 1,
+    };
+    const withOptionalDefault: JSONSchema = {
+      ...boundedArgument,
+      properties: {
+        y: { type: "number" },
+        x: { type: "number", default: 0 },
+      },
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(boundedArgument, resultSchema),
+        pattern(withOptionalDefault, resultSchema),
+      )
+    ).toThrow(/not stable under default insertion/);
+
+    const existingOptional: JSONSchema = {
+      type: "object",
+      properties: {
+        x: { type: "number" },
+        y: { type: "number" },
+      },
+      maxProperties: 1,
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(existingOptional, resultSchema),
+        pattern({
+          ...existingOptional,
+          properties: {
+            x: { type: "number", default: 0 },
+            y: { type: "number" },
+          },
+        }, resultSchema),
+      )
+    ).toThrow(/not stable under default insertion/);
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(boundedArgument, resultSchema),
+        pattern({
+          ...withOptionalDefault,
+          required: ["x"],
+        }, resultSchema),
+      )
+    ).toThrow(/not stable under default insertion/);
+
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({
+          type: "array",
+          items: boundedArgument,
+          uniqueItems: true,
+        }, resultSchema),
+        pattern({
+          type: "array",
+          items: withOptionalDefault,
+          uniqueItems: true,
+        }, resultSchema),
+      )
+    ).toThrow(/not stable under default insertion/);
+  });
+
   it("accepts optional and defaulted fields plus wider argument unions", () => {
     const candidate = pattern(
       {
@@ -917,6 +1086,88 @@ describe("piece schema compatibility", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(resultAnyOf, resultNarrowed)
     ).not.toThrow();
+  });
+
+  it("does not use field-evolution allowances as conjunct proofs", () => {
+    const candidateProperty = {
+      type: "undefined",
+      default: undefined,
+    } as const;
+    const priorContracts: JSONSchema[] = [
+      { type: "object", required: ["x"] },
+      { type: "object", allOf: [{ required: ["x"] }] },
+      {
+        type: "object",
+        oneOf: [{ required: ["x"] }, { required: ["other"] }],
+      },
+      {
+        type: "object",
+        if: { required: ["flag"] },
+        then: { required: ["x"] },
+      },
+      {
+        type: "object",
+        dependentSchemas: { flag: { required: ["x"] } },
+      },
+      {
+        $ref: "#/$defs/Contract",
+        $defs: {
+          Contract: { type: "object", allOf: [{ required: ["x"] }] },
+        },
+      },
+    ];
+
+    for (const previousArgument of priorContracts) {
+      const candidateArgument = {
+        ...(previousArgument as Exclude<JSONSchema, boolean>),
+        properties: { x: candidateProperty },
+        required: ["x"],
+      } as JSONSchema;
+      expect(() =>
+        assertPatternSchemasBackwardCompatible(
+          pattern(previousArgument, oldPattern.resultSchema),
+          pattern(candidateArgument, oldPattern.resultSchema),
+        )
+      ).toThrow(/argument/);
+    }
+
+    const previousAnyOf: JSONSchema = {
+      type: "object",
+      anyOf: [
+        {
+          properties: {
+            kind: { const: "a" },
+            x: {
+              type: ["number", "undefined"],
+              asCell: ["cell"],
+              scope: "user",
+            },
+          },
+          required: ["kind", "x"],
+        },
+        {
+          properties: { kind: { const: "b" } },
+          required: ["kind"],
+        },
+      ],
+    };
+    const incompatibleAnyOf: JSONSchema = {
+      ...previousAnyOf,
+      properties: {
+        x: {
+          ...candidateProperty,
+          asCell: ["stream"],
+          scope: "session",
+        },
+      },
+      required: ["x"],
+    };
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(previousAnyOf, oldPattern.resultSchema),
+        pattern(incompatibleAnyOf, oldPattern.resultSchema),
+      )
+    ).toThrow(/argument/);
   });
 
   it("preserves required result guarantees and defaults new required results", () => {

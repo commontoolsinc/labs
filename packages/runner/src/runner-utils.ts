@@ -45,6 +45,11 @@ const schemaDefaultValueEqual = (left: unknown, right: unknown): boolean => {
   }
 };
 
+type ActiveDefaultMergePairs = WeakMap<
+  object,
+  WeakMap<object, WeakSet<object>>
+>;
+
 /** Whether an opaque Cell materialization matches this schema's wrapper. */
 export const schemaAcceptsOpaqueCellValue = (
   value: unknown,
@@ -418,6 +423,7 @@ export function mergeSchemaDefaults<T>(
     options.mergeMaterializedLinks === true,
     options.acceptOpaqueValue,
     options.acceptUnionCandidate,
+    new WeakMap(),
   ) as T;
 }
 
@@ -436,6 +442,7 @@ function mergeSchemaDefaultsInternal(
     ) => boolean)
     | undefined,
   acceptUnionCandidate: ((candidate: unknown) => boolean) | undefined,
+  activePairs: ActiveDefaultMergePairs,
 ): unknown {
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const resolved = typeof schema === "object" && schema !== null && schema.$ref
@@ -448,24 +455,53 @@ function mergeSchemaDefaultsInternal(
       : schemaRoot,
   );
 
+  const trackedValue = valuePresent && value !== null &&
+      typeof value === "object"
+    ? value as object
+    : undefined;
+  const trackedSchema = typeof resolved === "object" && resolved !== null
+    ? internSchema(resolved)
+    : undefined;
+  const trackedRoot = typeof resolvedRoot === "object" && resolvedRoot !== null
+    ? resolvedRoot
+    : trackedSchema;
+  let activeSchemas: WeakSet<object> | undefined;
   if (
-    valuePresent && isFabricPlainObject(value as FabricValue) &&
-    typeof resolved === "object" && resolved !== null &&
-    (Array.isArray(resolved.anyOf) || Array.isArray(resolved.oneOf))
+    trackedValue !== undefined && trackedSchema !== undefined &&
+    trackedRoot !== undefined
   ) {
-    const {
-      anyOf,
-      oneOf,
-      default: _unionDefault,
-      ...baseSchema
-    } = resolved;
-    const baseDefaults = extractDefaultValues(baseSchema, resolvedRoot);
-    const candidates: unknown[] = [];
-    for (const branch of [...(anyOf ?? []), ...(oneOf ?? [])]) {
-      let candidate = value;
-      if (baseDefaults !== undefined) {
-        candidate = mergeSchemaDefaultsInternal(
-          candidate,
+    let byRoot = activePairs.get(trackedValue);
+    if (!byRoot) {
+      byRoot = new WeakMap();
+      activePairs.set(trackedValue, byRoot);
+    }
+    activeSchemas = byRoot.get(trackedRoot);
+    if (!activeSchemas) {
+      activeSchemas = new WeakSet();
+      byRoot.set(trackedRoot, activeSchemas);
+    }
+    if (activeSchemas.has(trackedSchema)) return value;
+    activeSchemas.add(trackedSchema);
+  }
+
+  try {
+    if (
+      valuePresent &&
+      (isFabricPlainObject(value as FabricValue) || Array.isArray(value)) &&
+      typeof resolved === "object" && resolved !== null &&
+      (Array.isArray(resolved.anyOf) || Array.isArray(resolved.oneOf))
+    ) {
+      const {
+        anyOf,
+        oneOf,
+        default: _unionDefault,
+        ...baseSchema
+      } = resolved;
+      const baseDefaults = extractDefaultValues(baseSchema, resolvedRoot);
+      const candidates: unknown[] = [];
+      for (const branch of [...(anyOf ?? []), ...(oneOf ?? [])]) {
+        let candidate = mergeSchemaDefaultsInternal(
+          value,
           baseDefaults,
           baseSchema,
           resolvedRoot,
@@ -473,10 +509,9 @@ function mergeSchemaDefaultsInternal(
           mergeMaterializedLinks,
           acceptOpaqueValue,
           undefined,
+          activePairs,
         );
-      }
-      const branchDefaults = extractDefaultValues(branch, resolvedRoot);
-      if (branchDefaults !== undefined) {
+        const branchDefaults = extractDefaultValues(branch, resolvedRoot);
         candidate = mergeSchemaDefaultsInternal(
           candidate,
           branchDefaults,
@@ -486,114 +521,218 @@ function mergeSchemaDefaultsInternal(
           mergeMaterializedLinks,
           acceptOpaqueValue,
           undefined,
+          activePairs,
+        );
+        if (
+          validateSchemaValue(branch, candidate, resolvedRoot, {
+              acceptOpaqueValue,
+            }) === undefined &&
+          validateSchemaValue(resolved, candidate, resolvedRoot, {
+              acceptOpaqueValue,
+            }) === undefined
+        ) {
+          candidates.push(candidate);
+        }
+      }
+      const acceptedCandidates = acceptUnionCandidate === undefined
+        ? candidates
+        : candidates.filter(acceptUnionCandidate);
+      if (
+        acceptedCandidates.length > 0 &&
+        acceptedCandidates.every((candidate) =>
+          schemaDefaultValueEqual(candidate, acceptedCandidates[0])
+        )
+      ) {
+        return acceptedCandidates[0];
+      }
+      return value;
+    }
+
+    if (
+      valuePresent && isFabricPlainObject(value as FabricValue) &&
+      typeof resolved === "object" && resolved !== null &&
+      Array.isArray(resolved.type) && resolved.type.includes("object")
+    ) {
+      const { default: _unionDefault, ...objectSchema } = resolved;
+      const objectDefaults = extractDefaultValues(
+        { ...objectSchema, type: "object" },
+        resolvedRoot,
+      );
+      return mergeSchemaDefaultsInternal(
+        value,
+        objectDefaults,
+        { ...objectSchema, type: "object" },
+        resolvedRoot,
+        true,
+        mergeMaterializedLinks,
+        acceptOpaqueValue,
+        undefined,
+        activePairs,
+      );
+    }
+
+    if (
+      valuePresent && Array.isArray(value) &&
+      typeof resolved === "object" && resolved !== null &&
+      Array.isArray(resolved.type) && resolved.type.includes("array")
+    ) {
+      const { default: _unionDefault, ...arraySchema } = resolved;
+      return mergeSchemaDefaultsInternal(
+        value,
+        extractDefaultValues(
+          { ...arraySchema, type: "array" },
+          resolvedRoot,
+        ),
+        { ...arraySchema, type: "array" },
+        resolvedRoot,
+        true,
+        mergeMaterializedLinks,
+        acceptOpaqueValue,
+        undefined,
+        activePairs,
+      );
+    }
+
+    if (
+      valuePresent && Array.isArray(value) &&
+      typeof resolved === "object" && resolved !== null &&
+      (resolved.type === "array" || resolved.items !== undefined ||
+        resolved.prefixItems !== undefined)
+    ) {
+      const result = value.slice();
+      for (let index = 0; index < value.length; index++) {
+        if (!Object.hasOwn(value, index)) continue;
+        const itemSchema = Array.isArray(resolved.prefixItems) &&
+            index < resolved.prefixItems.length
+          ? resolved.prefixItems[index]!
+          : resolved.items ?? true;
+        result[index] = mergeSchemaDefaultsInternal(
+          value[index],
+          extractDefaultValues(itemSchema, resolvedRoot),
+          itemSchema,
+          resolvedRoot,
+          true,
+          mergeMaterializedLinks,
+          acceptOpaqueValue,
+          undefined,
+          activePairs,
         );
       }
+      return schemaDefaultValueEqual(result, value) ? value : result;
+    }
+
+    const objectSchema = typeof resolved === "object" && resolved !== null &&
+        (resolved.type === undefined || resolved.type === "object" ||
+          (Array.isArray(resolved.type) && resolved.type.includes("object")))
+      ? resolved
+      : undefined;
+    const traversesPresentObject = valuePresent &&
+      isFabricPlainObject(value as FabricValue) && objectSchema !== undefined;
+
+    if (defaults === undefined && !traversesPresentObject) return value;
+    if (
+      defaults !== undefined &&
+      (!isFabricPlainObject(defaults) || isCellLink(defaults))
+    ) {
+      return valuePresent ? value : defaults;
+    }
+    // Defaults only fill absent values or recursively merge plain records. A
+    // defined scalar, sparse array, Fabric special object, or sigil link is
+    // durable user state, not an empty object to replace with defaults.
+    if (
+      valuePresent &&
+      (!isFabricPlainObject(value as FabricValue) ||
+        (isCellLink(value) && !mergeMaterializedLinks))
+    ) {
+      return value;
+    }
+
+    const existing = valuePresent ? value as Record<string, unknown> : {};
+    const result: Record<string, unknown> = { ...existing };
+    // Object-shaped unions (including Common Fabric's non-standard
+    // `type: ["object", "undefined"]`) still need presence-aware merging. A
+    // generic merge cannot distinguish an absent property from an own property
+    // whose durable value is explicitly undefined.
+    const required = new Set(objectSchema?.required ?? []);
+    const defaultObject = (defaults ?? {}) as Record<string, unknown>;
+    const keys = new Set([
+      ...Object.keys(existing),
+      ...Object.keys(defaultObject),
+    ]);
+    for (const key of keys) {
+      const hasExistingValue = Object.hasOwn(existing, key);
+      const hasDefaultValue = Object.hasOwn(defaultObject, key);
+      const propertySchemas = schemasForObjectProperty(objectSchema, key);
+      let merged = existing[key];
+      let mergedValuePresent = hasExistingValue;
+      for (let index = 0; index < propertySchemas.length; index++) {
+        const propertySchema = propertySchemas[index]!;
+        const propertyDefaults = index === 0 && hasDefaultValue
+          ? defaultObject[key]
+          : extractDefaultValues(propertySchema, resolvedRoot);
+        merged = mergeSchemaDefaultsInternal(
+          merged,
+          propertyDefaults,
+          propertySchema,
+          resolvedRoot,
+          mergedValuePresent,
+          mergeMaterializedLinks,
+          acceptOpaqueValue,
+          undefined,
+          activePairs,
+        );
+        if (
+          !mergedValuePresent &&
+          schemaHasDefaultValue(propertySchema, resolvedRoot)
+        ) {
+          mergedValuePresent = true;
+        }
+      }
       if (
-        validateSchemaValue(branch, candidate, resolvedRoot, {
-            acceptOpaqueValue,
-          }) === undefined &&
-        validateSchemaValue(resolved, candidate, resolvedRoot, {
+        hasExistingValue || required.has(key) ||
+        propertySchemas.every((propertySchema) =>
+          validateSchemaValue(propertySchema, merged, resolvedRoot, {
             acceptOpaqueValue,
           }) === undefined
+        )
       ) {
-        candidates.push(candidate);
+        Object.defineProperty(result, key, {
+          value: merged,
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
       }
     }
-    const acceptedCandidates = acceptUnionCandidate === undefined
-      ? candidates
-      : candidates.filter(acceptUnionCandidate);
-    if (
-      acceptedCandidates.length > 0 &&
-      acceptedCandidates.every((candidate) =>
-        schemaDefaultValueEqual(candidate, acceptedCandidates[0])
-      )
-    ) {
-      return acceptedCandidates[0];
-    }
-    return value;
+    return valuePresent && schemaDefaultValueEqual(result, value)
+      ? value
+      : result;
+  } finally {
+    if (trackedSchema !== undefined) activeSchemas?.delete(trackedSchema);
   }
+}
 
+function schemasForObjectProperty(
+  schema: Exclude<JSONSchema, boolean> | undefined,
+  property: string,
+): JSONSchema[] {
+  if (schema === undefined) return [true];
+  const schemas: JSONSchema[] = [];
   if (
-    valuePresent && isFabricPlainObject(value as FabricValue) &&
-    typeof resolved === "object" && resolved !== null &&
-    Array.isArray(resolved.type) && resolved.type.includes("object")
+    schema.properties !== undefined &&
+    Object.hasOwn(schema.properties, property)
   ) {
-    const { default: _unionDefault, ...objectSchema } = resolved;
-    const objectDefaults = extractDefaultValues(
-      { ...objectSchema, type: "object" },
-      resolvedRoot,
-    );
-    return objectDefaults === undefined ? value : mergeSchemaDefaultsInternal(
-      value,
-      objectDefaults,
-      { ...objectSchema, type: "object" },
-      resolvedRoot,
-      true,
-      mergeMaterializedLinks,
-      acceptOpaqueValue,
-      undefined,
-    );
+    schemas.push(schema.properties[property]!);
   }
-
-  if (defaults === undefined) return value;
-  if (
-    !isFabricPlainObject(defaults) || isCellLink(defaults)
+  for (
+    const [source, patternSchema] of Object.entries(
+      schema.patternProperties ?? {},
+    )
   ) {
-    return valuePresent ? value : defaults;
+    if (new RegExp(source).test(property)) schemas.push(patternSchema);
   }
-  // Defaults only fill absent values or recursively merge plain records. A
-  // defined scalar, sparse array, Fabric special object, or sigil link is
-  // durable user state, not an empty object to replace with defaults.
-  if (
-    valuePresent &&
-    (!isFabricPlainObject(value as FabricValue) ||
-      (isCellLink(value) && !mergeMaterializedLinks))
-  ) {
-    return value;
+  if (schemas.length === 0) {
+    schemas.push(schema.additionalProperties ?? true);
   }
-
-  const existing = valuePresent ? value as Record<string, unknown> : {};
-  const result: Record<string, unknown> = { ...existing };
-  // Object-shaped unions (including Common Fabric's non-standard
-  // `type: ["object", "undefined"]`) still need presence-aware merging. A
-  // generic merge cannot distinguish an absent property from an own property
-  // whose durable value is explicitly undefined.
-  const objectSchema = typeof resolved === "object" && resolved !== null &&
-      (resolved.type === undefined || resolved.type === "object" ||
-        (Array.isArray(resolved.type) && resolved.type.includes("object")))
-    ? resolved
-    : undefined;
-  const required = new Set(objectSchema?.required ?? []);
-  for (const [key, defaultValue] of Object.entries(defaults)) {
-    const hasExistingValue = Object.hasOwn(existing, key);
-    const existingValue = existing[key];
-    const propertySchema = objectSchema?.properties !== undefined &&
-        Object.hasOwn(objectSchema.properties, key)
-      ? objectSchema.properties[key]
-      : objectSchema?.additionalProperties ?? true;
-    const merged = mergeSchemaDefaultsInternal(
-      existingValue,
-      defaultValue,
-      propertySchema,
-      resolvedRoot,
-      hasExistingValue,
-      mergeMaterializedLinks,
-      acceptOpaqueValue,
-      undefined,
-    );
-    if (
-      hasExistingValue || required.has(key) ||
-      validateSchemaValue(propertySchema, merged, resolvedRoot, {
-          acceptOpaqueValue,
-        }) === undefined
-    ) {
-      Object.defineProperty(result, key, {
-        value: merged,
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
-    }
-  }
-  return result;
+  return schemas;
 }

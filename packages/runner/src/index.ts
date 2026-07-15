@@ -105,6 +105,7 @@ export {
   parseLink,
   parseLinkOrThrow,
   parseLLMFriendlyLink,
+  sanitizeSchemaForLinks,
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 export {

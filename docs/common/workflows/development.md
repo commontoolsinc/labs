@@ -29,6 +29,19 @@ deno task cf piece link ... editor-id/items viewer-id/items
   result unions may be narrowed, including Common Fabric schema types such as
   `undefined`. For open argument objects, the piece's durable arguments are
   also validated against newly named fields before the update commits.
+  Defaults introduced by an accepted update are migrated recursively through
+  present objects, array items, and typed dynamic fields. Durable input links
+  are preserved only when the producer-owned Piece result contract fits the
+  destination contract; carried/narrowed view schemas and one currently
+  materialized value are not sufficient. Existing links are rechecked inside
+  the update transaction, and Piece result writes preserve those contracts.
+  A destination default can satisfy a link only beneath ancestors that remain
+  valid after default insertion; path links through correlated schemas (for
+  example, a discriminated union) are rejected when no durable proof is
+  possible. Because an absent Fabric path reads as `undefined`, a linked source
+  object field must be unconditionally object-shaped and required (and an array
+  index must be covered by `minItems`) unless the destination accepts
+  `undefined`; a source-side default alone does not prove raw path presence.
   This migrates the piece's current state; clients holding an older argument
   link must refresh it before writing again so they use the updated schema.
   Concurrent updates are applied atomically; a stale update fails instead of

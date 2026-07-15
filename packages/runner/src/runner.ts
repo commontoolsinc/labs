@@ -54,6 +54,7 @@ import {
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
+  KeepAsCell,
   type NormalizedFullLink,
   parseLink,
   toMemorySpaceAddress,
@@ -539,6 +540,14 @@ type SetupResult<R> = {
   needsStart: boolean;
 };
 
+type SetupValidationOptions = {
+  /** Optional layer-specific invariant checked inside the setup transaction. */
+  validateArgumentLinks?: (
+    argumentCell: Cell<unknown>,
+    argumentSchema: JSONSchema,
+  ) => void;
+};
+
 type RunResult<R> = {
   resultCell: Cell<R>;
   /** The exact local cancel registration installed by this invocation. */
@@ -902,6 +911,51 @@ export class Runner {
     );
   }
 
+  /** Stage an argument write, materialize aliases in the same transaction, and
+   * reject the transaction unless the resulting value satisfies its schema. */
+  private updateAndValidateArgument<T>(
+    tx: IExtendedStorageTransaction,
+    argumentLink: NormalizedFullLink,
+    argument: T,
+    argumentSchema: JSONSchema,
+    defaults: FabricValue,
+  ): void {
+    this.updateArgument(tx, argumentLink, argument, argumentSchema);
+    this.validateArgument(tx, argumentLink, argumentSchema, defaults);
+  }
+
+  private validateArgument(
+    tx: IExtendedStorageTransaction,
+    argumentLink: NormalizedFullLink,
+    argumentSchema: JSONSchema,
+    defaults: FabricValue,
+  ): void {
+    const argumentCell = this.runtime.getCellFromLink(
+      argumentLink,
+      undefined,
+      tx,
+    );
+    const materializedArgument = argumentCell.asSchema(undefined).withTx(tx)
+      .get();
+    const validationArgument = mergeSchemaDefaults(
+      materializedArgument,
+      defaults,
+      argumentSchema,
+      { mergeMaterializedLinks: true },
+    );
+    const validationFailure = validateSchemaValue(
+      argumentSchema,
+      validationArgument,
+      argumentSchema,
+      { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+    );
+    if (validationFailure !== undefined) {
+      throw new Error(
+        `updated arguments do not match the candidate schema: ${validationFailure}`,
+      );
+    }
+  }
+
   private updateResultSchemaMeta<R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
@@ -933,11 +987,18 @@ export class Runner {
 
     if (samePattern) {
       const argumentLink = getMetaLink(resultCell, "argument")!;
-      this.updateArgument(
+      const defaults = extractDefaultValues(pattern.argumentSchema);
+      const nextArgument = mergeSchemaDefaults(
+        argument,
+        defaults,
+        pattern.argumentSchema,
+      );
+      this.updateAndValidateArgument(
         tx,
         argumentLink,
-        argument,
+        nextArgument,
         pattern.argumentSchema,
+        defaults,
       );
       return { resultCell, needsStart: false };
     }
@@ -1083,6 +1144,7 @@ export class Runner {
   ): void {
     const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
     let argumentLink = getMetaLink(resultCell, "argument");
+    const updatesExistingArgument = argumentLink !== undefined;
     const previousInternal = resultCell.getMetaRaw("internal", {
       meta: ignoreReadForScheduling,
     });
@@ -1117,6 +1179,7 @@ export class Runner {
       const newArgumentSigilLink = newArgumentCell.getAsWriteRedirectLink({
         base: resultCell,
         includeSchema: true,
+        keepAsCell: KeepAsCell.All,
       });
       resultCell.withTx(tx).setMetaRaw("argument", newArgumentSigilLink);
 
@@ -1145,6 +1208,7 @@ export class Runner {
       const nextArgumentSigilLink = nextArgumentCell.getAsWriteRedirectLink({
         base: resultCell,
         includeSchema: true,
+        keepAsCell: KeepAsCell.All,
       });
       resultCell.withTx(tx).setMetaRaw("argument", nextArgumentSigilLink);
       argumentLink = nextArgumentCell.getAsNormalizedFullLink();
@@ -1155,41 +1219,40 @@ export class Runner {
       // schema. A thrown validation error aborts the transaction, so neither
       // this write nor the schema retarget can become durable on failure.
       if (nextArgument !== undefined) {
+        this.updateAndValidateArgument(
+          tx,
+          argumentLink,
+          nextArgument,
+          pattern.argumentSchema,
+          defaults,
+        );
+        argumentUpdated = true;
+      } else {
+        this.validateArgument(
+          tx,
+          argumentLink,
+          pattern.argumentSchema,
+          defaults,
+        );
+      }
+    }
+    if (nextArgument !== undefined && !argumentUpdated) {
+      if (updatesExistingArgument) {
+        this.updateAndValidateArgument(
+          tx,
+          argumentLink,
+          nextArgument,
+          pattern.argumentSchema,
+          defaults,
+        );
+      } else {
         this.updateArgument(
           tx,
           argumentLink,
           nextArgument,
           pattern.argumentSchema,
         );
-        argumentUpdated = true;
       }
-      const materializedArgument = nextArgumentCell.asSchema(undefined)
-        .withTx(tx).get();
-      const validationArgument = mergeSchemaDefaults(
-        materializedArgument,
-        defaults,
-        pattern.argumentSchema,
-        { mergeMaterializedLinks: true },
-      );
-      const validationFailure = validateSchemaValue(
-        pattern.argumentSchema,
-        validationArgument,
-        pattern.argumentSchema,
-        { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
-      );
-      if (validationFailure !== undefined) {
-        throw new Error(
-          `updated arguments do not match the candidate schema: ${validationFailure}`,
-        );
-      }
-    }
-    if (nextArgument !== undefined && !argumentUpdated) {
-      this.updateArgument(
-        tx,
-        argumentLink,
-        nextArgument,
-        pattern.argumentSchema,
-      );
     }
 
     // Record the content-addressed {identity, symbol} reference — the ONLY
@@ -1223,6 +1286,7 @@ export class Runner {
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    validationOptions: SetupValidationOptions = {},
   ): SetupResult<R> {
     const tx = providedTx ?? this.runtime.edit();
 
@@ -1295,6 +1359,17 @@ export class Runner {
       argument,
       resultCell,
     );
+
+    if (validationOptions.validateArgumentLinks !== undefined) {
+      const argumentLink = getMetaLink(resultCell.withTx(tx), "argument");
+      if (argumentLink === undefined) {
+        throw new Error("piece missing argument cell after setup");
+      }
+      validationOptions.validateArgumentLinks(
+        this.runtime.getCellFromLink(argumentLink, undefined, tx),
+        pattern.argumentSchema,
+      );
+    }
 
     const key = this.getDocKey(resultCell);
     const preparedPatternKey = patternIdentityKey(entryRef);
@@ -2107,6 +2182,7 @@ export class Runner {
     inputs?: any,
     options?: {
       expectedPatternIdentity?: { identity: string; symbol: string };
+      validateArgumentLinks?: SetupValidationOptions["validateArgumentLinks"];
     },
   ) {
     await resultCell.sync();
@@ -2151,6 +2227,7 @@ export class Runner {
         pattern,
         inputs,
         resultCell.withTx(givenTx),
+        { validateArgumentLinks: options?.validateArgumentLinks },
       );
     } else {
       const { error } = await this.runtime.editWithRetry((tx) => {
@@ -2160,6 +2237,7 @@ export class Runner {
           pattern,
           inputs,
           resultCell.withTx(tx),
+          { validateArgumentLinks: options?.validateArgumentLinks },
         );
       });
       if (error) {

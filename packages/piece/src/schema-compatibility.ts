@@ -26,6 +26,24 @@ interface CompatibilityContext {
   targetRoot: JSONSchema;
   role: SchemaRole;
   activePairs: ActivePairsByRoot;
+  /**
+   * Piece evolution deliberately permits a small set of non-subset changes
+   * (for example, naming a previously-uncontracted field on an open argument
+   * object). Those allowances are only sound at a whole contract boundary;
+   * they must never be used as proof that one conjunct implies another.
+   */
+  allowEvolutionPolicy: boolean;
+  /** Whether default-backed evolution remains safe through every ancestor. */
+  allowEvolutionDefaults: boolean;
+  /** Link materialization fills valid target defaults before validation. */
+  allowTargetDefaults: boolean;
+  /** Whether defaults describe a pattern migration or link materialization. */
+  defaultComparison: "evolution" | "target";
+}
+
+export interface SchemaSubsetOptions {
+  sourceRoot?: JSONSchema;
+  targetRoot?: JSONSchema;
 }
 
 type ActivePairsByRoot = WeakMap<
@@ -126,6 +144,10 @@ export function assertPatternSchemasBackwardCompatible(
       targetRoot: candidate.argumentSchema,
       role: "argument",
       activePairs: new WeakMap(),
+      allowEvolutionPolicy: true,
+      allowEvolutionDefaults: true,
+      allowTargetDefaults: false,
+      defaultComparison: "evolution",
     },
   );
   if (argumentIssue) issues.push(argumentIssue);
@@ -139,6 +161,10 @@ export function assertPatternSchemasBackwardCompatible(
       targetRoot: previous.resultSchema,
       role: "result",
       activePairs: new WeakMap(),
+      allowEvolutionPolicy: true,
+      allowEvolutionDefaults: true,
+      allowTargetDefaults: false,
+      defaultComparison: "evolution",
     },
   );
   if (resultIssue) issues.push(resultIssue);
@@ -149,6 +175,47 @@ export function assertPatternSchemasBackwardCompatible(
         issues.map((issue) => `- ${issue}`).join("\n")
       }`,
     );
+  }
+}
+
+/**
+ * Conservatively prove that every value described by `source` is accepted by
+ * `target`. This is used for durable links: validating only their current
+ * materialization is insufficient because the linked cell can change later.
+ */
+export function assertSchemaSubset(
+  source: JSONSchema,
+  target: JSONSchema,
+  label: string = "value",
+  options: SchemaSubsetOptions = {},
+): void {
+  for (
+    const [schemaLabel, schema, root] of [
+      ["source", source, options.sourceRoot ?? source],
+      ["target", target, options.targetRoot ?? target],
+    ] as const
+  ) {
+    const issue = validateSchemaDefinition(schema, root);
+    if (issue !== undefined) {
+      throw new Error(
+        `${label} schema is not compatible: ${schemaLabel} schema is invalid: ${issue}`,
+      );
+    }
+  }
+  const issue = schemaSubsetIssue(source, target, label, {
+    sourceRoot: options.sourceRoot ?? source,
+    targetRoot: options.targetRoot ?? target,
+    // Argument variance follows the needed source-subset-target direction for
+    // object fields. Link materialization may also fill valid target defaults.
+    role: "argument",
+    activePairs: new WeakMap(),
+    allowEvolutionPolicy: false,
+    allowEvolutionDefaults: true,
+    allowTargetDefaults: true,
+    defaultComparison: "target",
+  });
+  if (issue !== undefined) {
+    throw new Error(`${label} schema is not compatible: ${issue}`);
   }
 }
 
@@ -173,6 +240,34 @@ function schemaSubsetIssue(
     sourceRoot: sourceResolution.root,
     targetRoot: targetResolution.root,
   };
+  if (
+    context.defaultComparison === "target" &&
+    schemaHasUnsafeMaterializedDefault(target, context.targetRoot)
+  ) {
+    return `${path}: defaults changed below a constraint that is not stable under default insertion`;
+  }
+  // A target default changes the materialized value before validation. That is
+  // a sound link proof only while every ancestor is stable under recursive
+  // default insertion. Whole-value constraints such as maxProperties,
+  // dependentRequired, enum/const, conditionals, and uniqueItems can be broken
+  // even when both schemas carry the same constraint.
+  if (
+    !schemaIsStableUnderDescendantDefaults(source) ||
+    !schemaIsStableUnderDescendantDefaults(target)
+  ) {
+    context = {
+      ...context,
+      allowEvolutionDefaults: false,
+      allowTargetDefaults: false,
+    };
+  }
+  if (
+    !context.allowEvolutionDefaults &&
+    context.defaultComparison === "evolution" &&
+    !schemaDefaultsResolveEqually(source, target, context)
+  ) {
+    return `${path}: defaults changed below a constraint that is not stable under default insertion`;
+  }
   if (schemasResolveEqually(source, target, context)) return undefined;
 
   if (source === false || target === true) return undefined;
@@ -252,6 +347,35 @@ function schemaSubsetIssue(
   }
 }
 
+const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
+  ...ANNOTATION_KEYS,
+  "$ref",
+  "additionalProperties",
+  "exclusiveMaximum",
+  "exclusiveMinimum",
+  "format",
+  "items",
+  "maxItems",
+  "maxLength",
+  "maximum",
+  "minItems",
+  "minLength",
+  "minimum",
+  "multipleOf",
+  "pattern",
+  "properties",
+  "required",
+  "type",
+]);
+
+/** Whether inserting defaults below this schema leaves its own constraints true. */
+function schemaIsStableUnderDescendantDefaults(schema: JSONSchema): boolean {
+  if (typeof schema !== "object" || schema === null) return true;
+  return Object.keys(schema).every((key) =>
+    DEFAULT_STABLE_SCHEMA_KEYS.has(key)
+  );
+}
+
 function objectSubsetIssue(
   source: SchemaObject,
   target: SchemaObject,
@@ -278,14 +402,20 @@ function objectSubsetIssue(
 
   const sourceRequired = new Set(source.required ?? []);
   const targetRequired = new Set(target.required ?? []);
+  const allowEvolutionPolicy = context.allowEvolutionPolicy &&
+    !hasComplexSameInstanceConstraints(source) &&
+    !hasComplexSameInstanceConstraints(target);
+  const allowEvolutionDefaults = allowEvolutionPolicy &&
+    context.allowEvolutionDefaults;
   if (context.role === "argument") {
     for (const property of targetRequired) {
       if (
         !sourceRequired.has(property) &&
-        !schemaProvidesValidDefault(
-          targetProperties[property],
-          context.targetRoot,
-        )
+        (!(context.allowTargetDefaults || allowEvolutionDefaults) ||
+          !schemaProvidesValidDefault(
+            targetProperties[property],
+            context.targetRoot,
+          ))
       ) {
         return `${path}.${property}: newly required argument field has no default`;
       }
@@ -312,7 +442,8 @@ function objectSubsetIssue(
       if (
         Object.hasOwn(previousProperties, property) ||
         matchedPatterns.length > 0 ||
-        typeof previousAdditional === "boolean"
+        allowEvolutionPolicy && !sourceRequired.has(property) &&
+          typeof previousAdditional === "boolean"
       ) {
         continue;
       }
@@ -333,10 +464,10 @@ function objectSubsetIssue(
     for (const property of sourceRequired) {
       if (
         !Object.hasOwn(targetProperties, property) &&
-        !schemaProvidesValidDefault(
+        (!allowEvolutionDefaults || !schemaProvidesValidDefault(
           sourceProperties[property],
           context.sourceRoot,
-        )
+        ))
       ) {
         return `${path}.${property}: newly required result field has no default`;
       }
@@ -586,13 +717,16 @@ function schemaConjunctionSubsetIssue(
   path: string,
   context: CompatibilityContext,
 ): string | undefined {
+  const proofContext = source.length > 1 || target.length > 1
+    ? { ...context, allowEvolutionPolicy: false }
+    : context;
   for (const targetConstraint of target) {
     const implied = source.some((sourceConstraint) =>
       schemaSubsetIssue(
         sourceConstraint,
         targetConstraint,
         path,
-        context,
+        proofContext,
       ) === undefined
     );
     if (!implied) {
@@ -600,6 +734,10 @@ function schemaConjunctionSubsetIssue(
     }
   }
   return undefined;
+}
+
+function hasComplexSameInstanceConstraints(schema: SchemaObject): boolean {
+  return COMPLEX_CONSTRAINT_KEYS.some((key) => schema[key] !== undefined);
 }
 
 function schemaTypes(schema: SchemaObject): readonly string[] | undefined {
@@ -633,6 +771,90 @@ function schemasResolveEqually(
     }
   }
   return true;
+}
+
+function schemaDefaultsResolveEqually(
+  source: JSONSchema,
+  target: JSONSchema,
+  context: CompatibilityContext,
+): boolean {
+  const sourceHasDefault = schemaHasDefaultValue(source, context.sourceRoot);
+  const targetHasDefault = schemaHasDefaultValue(target, context.targetRoot);
+  return sourceHasDefault === targetHasDefault &&
+    (!sourceHasDefault ||
+      fabricAwareEqual(
+        extractDefaultValues(source, context.sourceRoot),
+        extractDefaultValues(target, context.targetRoot),
+      ));
+}
+
+type ActiveSchemasByStability = WeakMap<
+  object,
+  { stable: WeakSet<object>; unstable: WeakSet<object> }
+>;
+
+/** Whether target default merging can violate an ancestor constraint. */
+function schemaHasUnsafeMaterializedDefault(
+  input: JSONSchema,
+  root: JSONSchema,
+  unstableAncestor = false,
+  activeByRoot: ActiveSchemasByStability = new WeakMap(),
+): boolean {
+  const resolution = resolveSchema(input, root);
+  const schema = resolution.schema;
+  if (typeof schema !== "object" || schema === null) return false;
+
+  const rootKey = typeof resolution.root === "object" &&
+      resolution.root !== null
+    ? resolution.root
+    : schema;
+  let active = activeByRoot.get(rootKey);
+  if (active === undefined) {
+    active = { stable: new WeakSet(), unstable: new WeakSet() };
+    activeByRoot.set(rootKey, active);
+  }
+  const unstable = unstableAncestor ||
+    !schemaIsStableUnderDescendantDefaults(schema);
+  const activeForPath = unstable ? active.unstable : active.stable;
+  if (activeForPath.has(schema)) return false;
+  activeForPath.add(schema);
+  try {
+    if (unstable && Object.hasOwn(schema, "default")) return true;
+
+    const children: JSONSchema[] = [];
+    for (
+      const collection of [
+        schema.properties,
+        schema.patternProperties,
+      ]
+    ) {
+      if (collection !== undefined) {
+        children.push(...Object.values(collection));
+      }
+    }
+    for (const child of [schema.additionalProperties, schema.items]) {
+      if (child !== undefined) children.push(child);
+    }
+    for (
+      const collection of [
+        schema.prefixItems,
+        schema.anyOf,
+        schema.oneOf,
+      ]
+    ) {
+      if (collection !== undefined) children.push(...collection);
+    }
+    return children.some((child) =>
+      schemaHasUnsafeMaterializedDefault(
+        child,
+        resolution.root,
+        unstable,
+        activeByRoot,
+      )
+    );
+  } finally {
+    activeForPath.delete(schema);
+  }
 }
 
 function collectSchemaReferences(

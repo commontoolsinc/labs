@@ -2357,6 +2357,60 @@ describe("runner utils", () => {
       expect(validateSchemaValue(schema, value)).toBeUndefined();
     });
 
+    it("hydrates defaults through present arrays and dynamic object fields", () => {
+      const itemSchema: JSONSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: { attempts: { type: "number", default: 1 } },
+            required: ["attempts"],
+          },
+          { type: "undefined" },
+        ],
+      };
+      const sparse = [{}, , undefined];
+      const arrayValue = mergeSchemaDefaults(
+        sparse,
+        undefined,
+        { type: "array", items: itemSchema },
+      ) as unknown[];
+
+      expect(arrayValue[0]).toEqual({ attempts: 1 });
+      expect(Object.hasOwn(arrayValue, 1)).toBe(false);
+      expect(Object.hasOwn(arrayValue, 2)).toBe(true);
+      expect(arrayValue[2]).toBeUndefined();
+
+      const dynamicValue = mergeSchemaDefaults(
+        { extra: {}, xPattern: {} },
+        undefined,
+        {
+          type: ["object", "undefined"],
+          patternProperties: { "^x": itemSchema },
+          additionalProperties: itemSchema,
+        },
+      );
+      expect(dynamicValue).toEqual({
+        extra: { attempts: 1 },
+        xPattern: { attempts: 1 },
+      });
+    });
+
+    it("terminates on cyclic values under recursive schemas", () => {
+      const value: { self?: unknown } = {};
+      value.self = value;
+      const schema: JSONSchema = {
+        $ref: "#/$defs/Node",
+        $defs: {
+          Node: {
+            type: "object",
+            properties: { self: { $ref: "#/$defs/Node" } },
+          },
+        },
+      };
+
+      expect(mergeSchemaDefaults(value, undefined, schema)).toBe(value);
+    });
+
     it("merges shared base defaults before selecting a union branch", () => {
       const schema: JSONSchema = {
         type: "object",

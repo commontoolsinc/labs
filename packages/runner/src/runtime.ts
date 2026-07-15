@@ -1830,6 +1830,10 @@ export class Runtime {
     inputs?: any,
     options?: {
       expectedPatternIdentity?: { identity: string; symbol: string };
+      validateArgumentLinks?: (
+        argumentCell: Cell<unknown>,
+        argumentSchema: JSONSchema,
+      ) => void;
     },
   ) {
     return this.runner.runSynced(resultCell, pattern, inputs, options);

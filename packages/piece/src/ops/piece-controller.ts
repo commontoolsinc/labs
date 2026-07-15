@@ -1,11 +1,15 @@
 import {
   Cell,
   type CellPath,
+  ContextualFlowControl,
   extractDefaultValues,
   getPatternIdentityRef,
   getValueAtPath,
+  isCell,
   isLink,
   isStream,
+  type JSONSchema,
+  KeepAsCell,
   mergeSchemaDefaults,
   NAME,
   parseLinkOrThrow,
@@ -13,13 +17,22 @@ import {
   resolveCellPath,
   resolveLink,
   type RuntimeProgram,
+  sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
-import { validateSchemaValue } from "@commonfabric/runner/cfc";
+import {
+  cfcSchemaChildRoot,
+  resolveCfcSchemaRefRoot,
+  resolveCfcSchemaRefs,
+  validateSchemaValue,
+} from "@commonfabric/runner/cfc";
 import { pieceId, PieceManager } from "../manager.ts";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { compileProgram } from "./utils.ts";
-import { assertPatternSchemasBackwardCompatible } from "../schema-compatibility.ts";
+import {
+  assertPatternSchemasBackwardCompatible,
+  assertSchemaSubset,
+} from "../schema-compatibility.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -65,6 +78,310 @@ interface SuppliedLink {
   value: unknown;
 }
 
+interface OuterCellContract {
+  kind: ReturnType<typeof ContextualFlowControl.getAsCellKind>;
+  payloadSchema: JSONSchema;
+}
+
+interface PathSchemaContract {
+  schema: JSONSchema;
+  root: JSONSchema;
+  /** A valid producer value can omit an ancestor on the localized path. */
+  mayBeMissing?: boolean;
+}
+
+const LINK_PATH_SAFE_ANCESTOR_KEYS = new Set([
+  "$comment",
+  "$defs",
+  "$id",
+  "$ref",
+  "$schema",
+  "additionalProperties",
+  "asCell",
+  "default",
+  "definitions",
+  "description",
+  "examples",
+  "ifc",
+  "items",
+  "maxItems",
+  "minItems",
+  "patternProperties",
+  "properties",
+  "readOnly",
+  "required",
+  "scope",
+  "tags",
+  "title",
+  "type",
+  "writeOnly",
+]);
+
+function asCellShapesMatch(left: JSONSchema | undefined, right: JSONSchema) {
+  const leftEntries = ContextualFlowControl.getAsCellValues(left);
+  const rightEntries = ContextualFlowControl.getAsCellValues(right);
+  return leftEntries.length === rightEntries.length &&
+    leftEntries.every((entry, index) =>
+      ContextualFlowControl.getAsCellKind(entry) ===
+        ContextualFlowControl.getAsCellKind(rightEntries[index]) &&
+      ContextualFlowControl.getAsCellScope(entry) ===
+        ContextualFlowControl.getAsCellScope(rightEntries[index])
+    );
+}
+
+function resolvePathSchemaContract(
+  contract: PathSchemaContract,
+): PathSchemaContract {
+  const schema = contract.schema;
+  const schemaRoot = cfcSchemaChildRoot(schema, contract.root);
+  if (
+    typeof schema !== "object" || schema === null ||
+    typeof schema.$ref !== "string"
+  ) {
+    return { ...contract, schema, root: schemaRoot };
+  }
+  const resolved = resolveCfcSchemaRefs(schema, schemaRoot);
+  if (resolved === undefined) {
+    throw new Error("cannot resolve a local schema reference on a link path");
+  }
+  const owningRoot = resolveCfcSchemaRefRoot(schema, schemaRoot);
+  return {
+    ...contract,
+    schema: resolved,
+    root: cfcSchemaChildRoot(resolved, owningRoot),
+  };
+}
+
+function isUnconditionallyType(
+  schema: Exclude<JSONSchema, boolean>,
+  type: string,
+): boolean {
+  return schema.type === type ||
+    Array.isArray(schema.type) && schema.type.length > 0 &&
+      schema.type.every((entry) => entry === type);
+}
+
+function linkPathAncestorIssue(schema: JSONSchema): string | undefined {
+  if (typeof schema !== "object" || schema === null) return undefined;
+  const key = Object.keys(schema).find((candidate) =>
+    !LINK_PATH_SAFE_ANCESTOR_KEYS.has(candidate)
+  );
+  return key === undefined
+    ? undefined
+    : `${key} correlates the linked field with its parent value`;
+}
+
+/**
+ * Derive every schema conjunct that applies at a durable link target.
+ *
+ * `schemaAtPath()` intentionally returns a convenient approximation and loses
+ * pattern-property intersections and parent/field correlations. A future-value
+ * link proof needs the actual conjuncts, and must fail closed when an ancestor
+ * constraint cannot be localized to the linked slot.
+ */
+function linkPathContracts(
+  initial: readonly PathSchemaContract[],
+  path: readonly (string | number)[],
+  options: { trackSourcePresence?: boolean } = {},
+): PathSchemaContract[] {
+  let contracts = [...initial];
+  for (const segment of path) {
+    const part = String(segment);
+    const next: PathSchemaContract[] = [];
+    for (const unresolved of contracts) {
+      const contract = resolvePathSchemaContract(unresolved);
+      const { schema, root } = contract;
+      if (schema === false) {
+        next.push(contract);
+        continue;
+      }
+      if (schema === true) {
+        next.push(contract);
+        continue;
+      }
+      const ancestorIssue = linkPathAncestorIssue(schema);
+      if (ancestorIssue !== undefined) throw new Error(ancestorIssue);
+
+      const objectShaped = schema.type === "object" ||
+        schema.properties !== undefined ||
+        schema.patternProperties !== undefined ||
+        schema.additionalProperties !== undefined;
+      const arrayShaped = schema.type === "array" || schema.items !== undefined;
+      if (objectShaped && arrayShaped) {
+        throw new Error(
+          "an ambiguous object/array ancestor cannot prove a link path",
+        );
+      }
+      if (objectShaped) {
+        const mayBeMissing = contract.mayBeMissing === true ||
+          options.trackSourcePresence === true &&
+            (!isUnconditionallyType(schema, "object") ||
+              !schema.required?.includes(part));
+        const applicable: JSONSchema[] = [];
+        if (
+          schema.properties !== undefined &&
+          Object.hasOwn(schema.properties, part)
+        ) {
+          applicable.push(schema.properties[part]!);
+        }
+        for (
+          const [source, patternSchema] of Object.entries(
+            schema.patternProperties ?? {},
+          )
+        ) {
+          if (new RegExp(source).test(part)) applicable.push(patternSchema);
+        }
+        if (applicable.length === 0) {
+          applicable.push(schema.additionalProperties ?? true);
+        }
+        next.push(...applicable.map((child) => ({
+          schema: child,
+          root: cfcSchemaChildRoot(child, root),
+          mayBeMissing,
+        })));
+        continue;
+      }
+      if (arrayShaped) {
+        if (!/^(0|[1-9][0-9]*)$/.test(part)) {
+          throw new Error(`array link path contains non-index segment ${part}`);
+        }
+        const index = Number(part);
+        const mayBeMissing = contract.mayBeMissing === true ||
+          options.trackSourcePresence === true &&
+            (!isUnconditionallyType(schema, "array") ||
+              typeof schema.minItems !== "number" ||
+              schema.minItems <= index);
+        const child = schema.items ?? true;
+        next.push({
+          schema: child,
+          root: cfcSchemaChildRoot(child, root),
+          mayBeMissing,
+        });
+        continue;
+      }
+      // An unconstrained schema object is the object form of `true`.
+      if (Object.keys(schema).every((key) => key === "$defs")) {
+        next.push({ schema: true, root });
+        continue;
+      }
+      throw new Error(`schema does not describe a container at ${part}`);
+    }
+    contracts = next;
+  }
+  return contracts.map(resolvePathSchemaContract).map((contract) =>
+    options.trackSourcePresence === true && contract.mayBeMissing === true
+      ? {
+        schema: {
+          anyOf: [contract.schema, { type: "undefined" }],
+        },
+        root: contract.root,
+      }
+      : contract
+  );
+}
+
+function withoutTopLevelScope(schema: JSONSchema): JSONSchema {
+  if (
+    typeof schema !== "object" || schema === null || schema.scope === undefined
+  ) {
+    return schema;
+  }
+  const { scope: _scope, ...payload } = schema;
+  return payload;
+}
+
+/** Consume exactly one wrapper, retaining any nested Cell contract. */
+function consumeOuterCellContract(schema: JSONSchema): OuterCellContract {
+  const entries = ContextualFlowControl.getAsCellValues(schema);
+  if (entries.length === 0 || typeof schema !== "object" || schema === null) {
+    return { kind: "cell", payloadSchema: schema };
+  }
+  const { asCell: _asCell, ...payloadSchema } = schema;
+  return {
+    kind: ContextualFlowControl.getAsCellKind(entries[0]),
+    payloadSchema: entries.length === 1
+      ? payloadSchema
+      : { ...payloadSchema, asCell: entries.slice(1) },
+  };
+}
+
+/** Consume a stream channel marker from each top-level schema alternative. */
+function consumeStreamEventContract(
+  unresolved: PathSchemaContract,
+  active = new WeakSet<object>(),
+): PathSchemaContract {
+  const contract = resolvePathSchemaContract(unresolved);
+  const { schema, root } = contract;
+  if (typeof schema !== "object" || schema === null) return contract;
+  if (active.has(schema)) {
+    throw new Error("recursive stream event schema cannot be localized");
+  }
+  active.add(schema);
+  try {
+    const entries = ContextualFlowControl.getAsCellValues(schema);
+    if (entries.length > 0) {
+      const consumed = consumeOuterCellContract(schema);
+      if (consumed.kind !== "stream") {
+        throw new Error(`stream event schema uses ${consumed.kind} wrapper`);
+      }
+      return { schema: consumed.payloadSchema, root };
+    }
+
+    let changed = false;
+    const result = { ...schema };
+    for (const key of ["anyOf", "oneOf", "allOf"] as const) {
+      const alternatives = schema[key];
+      if (!Array.isArray(alternatives)) continue;
+      result[key] = alternatives.map((alternative) =>
+        consumeStreamEventContract(
+          {
+            schema: alternative,
+            root: cfcSchemaChildRoot(alternative, root),
+          },
+          active,
+        ).schema
+      );
+      changed = true;
+    }
+    return { schema: changed ? result : schema, root };
+  } finally {
+    active.delete(schema);
+  }
+}
+
+function canFollowSourceScope(
+  schema: JSONSchema,
+  sourceScope: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>["scope"],
+): boolean {
+  const cap = ContextualFlowControl.getSchemaScopeCap(schema);
+  if (cap === undefined || cap === "any") return true;
+  const rank = { space: 0, user: 1, session: 2 } as const;
+  return rank[sourceScope] <= rank[cap];
+}
+
+/**
+ * Recover a producer contract from durable Piece metadata, ignoring any schema
+ * carried by the supplied alias. A caller can narrow a Cell view before
+ * serializing it, so the envelope itself is not evidence about future writes.
+ */
+function durableSourceContract(
+  linkedCell: Cell<unknown>,
+  manager: PieceManager,
+): { root: JSONSchema; path: (string | number)[] } | undefined {
+  const sourceLink = linkedCell.getAsNormalizedFullLink();
+  const sourceRoot = manager.runtime.getCellFromLink(
+    { ...sourceLink, path: [], schema: undefined },
+    undefined,
+    linkedCell.tx,
+  );
+
+  const resultSchema = sourceRoot.getMetaRaw("schema") as
+    | JSONSchema
+    | undefined;
+  if (resultSchema === undefined) return undefined;
+  return { root: resultSchema, path: [...sourceLink.path] };
+}
+
 /**
  * Record raw links supplied anywhere in a Piece API value. Default merging
  * operates on their transaction-local materializations; the exact envelopes
@@ -99,6 +416,197 @@ function suppliedLinks(
   return links;
 }
 
+function assertSuppliedLinkSchemasCompatible(
+  links: readonly SuppliedLink[],
+  destinationSchema: JSONSchema,
+  baseCell: Cell<unknown>,
+  manager: PieceManager,
+  options: {
+    basePath?: readonly (string | number)[];
+    destinationIsStream?: boolean;
+  } = {},
+): void {
+  for (const suppliedLink of links) {
+    const basePath = options.basePath ?? [];
+    const fullPath = [...basePath, ...suppliedLink.path];
+    const displayPath = fullPath.join(".") || "<root>";
+    let linkBase = baseCell;
+    for (const segment of fullPath) {
+      linkBase = linkBase.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    let targetContracts: PathSchemaContract[];
+    try {
+      if (options.destinationIsStream) {
+        const streamContracts = linkPathContracts(
+          [{ schema: destinationSchema, root: destinationSchema }],
+          basePath,
+        ).map((contract) => consumeStreamEventContract(contract));
+        targetContracts = linkPathContracts(
+          streamContracts,
+          suppliedLink.path,
+        );
+      } else {
+        targetContracts = linkPathContracts(
+          [{ schema: destinationSchema, root: destinationSchema }],
+          fullPath,
+        );
+      }
+    } catch (error) {
+      throw new Error(
+        `input link at ${displayPath} schema is not compatible: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    const link = parseLinkOrThrow(suppliedLink.value, linkBase);
+    const linkedCell = manager.runtime.getCellFromLink(
+      { ...link, schema: undefined },
+      undefined,
+      linkBase.tx,
+    );
+    // A direct Cell view can be narrowed with asSchema() just as easily as a
+    // serialized alias can carry a narrowed schema. Neither is a future-value
+    // invariant, so every durable link needs producer-owned Piece metadata.
+    const durableSource = durableSourceContract(linkedCell, manager);
+    if (durableSource === undefined) {
+      throw new Error(
+        `input link at ${displayPath} schema is not compatible: source has no durable schema contract`,
+      );
+    }
+
+    const wrappedTargets = targetContracts.filter((contract) =>
+      ContextualFlowControl.getAsCellValues(contract.schema).length > 0
+    );
+    const targetWrapper = wrappedTargets[0]?.schema;
+    for (const contract of wrappedTargets.slice(1)) {
+      if (!asCellShapesMatch(targetWrapper, contract.schema)) {
+        throw new Error(
+          `input link at ${displayPath} schema is not compatible: destination Cell constraints disagree`,
+        );
+      }
+    }
+    const preservesDirectHandle = !options.destinationIsStream &&
+      targetWrapper !== undefined && isCell(suppliedLink.value);
+
+    const sourceRoot = preservesDirectHandle
+      ? durableSource.root
+      : sanitizeSchemaForLinks(
+        durableSource.root,
+        KeepAsCell.OnlyStream,
+      );
+    let sourceContracts: PathSchemaContract[];
+    try {
+      sourceContracts = linkPathContracts(
+        [{ schema: sourceRoot, root: sourceRoot }],
+        durableSource.path,
+        { trackSourcePresence: true },
+      );
+      if (!preservesDirectHandle) {
+        const durableEntries = sourceContracts.map((contract) =>
+          ContextualFlowControl.getAsCellValues(contract.schema)
+        );
+        const preservesStream = durableEntries.some((entries) =>
+          ContextualFlowControl.getAsCellKind(entries[0]) === "stream"
+        );
+        if (preservesStream) {
+          const streamContract = sourceContracts.find((contract) =>
+            ContextualFlowControl.getAsCellKind(
+              ContextualFlowControl.getAsCellValues(contract.schema)[0],
+            ) === "stream"
+          )!;
+          const carriedSchema = link.schema === undefined
+            ? undefined
+            : linkPathContracts(
+              [{ schema: link.schema, root: link.schema }],
+              [],
+            )[0]?.schema;
+          if (!asCellShapesMatch(carriedSchema, streamContract.schema)) {
+            throw new Error(
+              "link does not preserve its durable stream wrapper",
+            );
+          }
+        } else if (
+          ContextualFlowControl.getAsCellValues(link.schema).length > 0
+        ) {
+          throw new Error("link carries a non-durable Cell wrapper");
+        }
+      }
+    } catch (error) {
+      throw new Error(
+        `input link at ${displayPath} schema is not compatible: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    const sourceScope = linkedCell.getAsNormalizedFullLink().scope;
+    for (const targetContract of targetContracts) {
+      if (!canFollowSourceScope(targetContract.schema, sourceScope)) {
+        throw new Error(
+          `input link at ${displayPath} schema is not compatible: source Cell scope ${sourceScope} exceeds the destination scope`,
+        );
+      }
+    }
+
+    if (preservesDirectHandle) {
+      const target = consumeOuterCellContract(targetWrapper!);
+      if (target.kind === undefined) {
+        throw new Error(
+          `input link at ${displayPath} schema is not compatible: invalid outer Cell kind`,
+        );
+      }
+      const sourceIsStream = isStream(suppliedLink.value);
+      const targetIsStream = target.kind === "stream";
+      if (sourceIsStream !== targetIsStream) {
+        throw new Error(
+          `input link at ${displayPath} schema is not compatible: ${
+            sourceIsStream ? "Stream" : "Cell"
+          } handle is not accepted as ${target.kind}`,
+        );
+      }
+      sourceContracts = sourceContracts.map((contract) => {
+        const entries = ContextualFlowControl.getAsCellValues(contract.schema);
+        return entries.length === 0 ? contract : {
+          schema: consumeOuterCellContract(contract.schema).payloadSchema,
+          root: contract.root,
+        };
+      });
+      targetContracts = targetContracts.map((contract) => {
+        const entries = ContextualFlowControl.getAsCellValues(contract.schema);
+        return entries.length === 0 ? contract : {
+          schema: consumeOuterCellContract(contract.schema).payloadSchema,
+          root: contract.root,
+        };
+      });
+    }
+
+    // The source and target contracts are conjunctions. Proving any source
+    // conjunct implies each target conjunct is a conservative proof that the
+    // complete source intersection is accepted by the target intersection.
+    for (const targetContract of targetContracts) {
+      let lastError: unknown;
+      const proved = sourceContracts.some((sourceContract) => {
+        try {
+          assertSchemaSubset(
+            withoutTopLevelScope(sourceContract.schema),
+            withoutTopLevelScope(targetContract.schema),
+            `input link at ${displayPath}`,
+            {
+              sourceRoot: sourceContract.root,
+              targetRoot: targetContract.root,
+            },
+          );
+          return true;
+        } catch (error) {
+          lastError = error;
+          return false;
+        }
+      });
+      if (!proved) throw lastError;
+    }
+  }
+}
+
 class PiecePropIo implements PieceCellIo {
   #cc: PieceController;
   #type: PiecePropIoType;
@@ -127,9 +635,18 @@ class PiecePropIo implements PieceCellIo {
       // write starts; reusing a cell captured before the retry would then
       // write through the superseded contract.
       const piece = this.#cc.getCell().withTx(tx);
-      const targetCell = this.#type === "input"
-        ? manager.getArgument(piece)
-        : manager.getResult(piece);
+      let targetCell: Cell<unknown>;
+      if (this.#type === "input") {
+        targetCell = manager.getArgument(piece);
+      } else {
+        const resultCell = manager.getResult(piece);
+        const durableSchema = resultCell.getMetaRaw("schema") as
+          | JSONSchema
+          | undefined;
+        targetCell = durableSchema === undefined
+          ? resultCell
+          : resultCell.asSchema(durableSchema);
+      }
       committedTargetCell = targetCell;
 
       // Build the path with transaction context
@@ -171,6 +688,16 @@ class PiecePropIo implements PieceCellIo {
             writePath.map((segment) => String(segment)),
           );
         const linksToRestore = suppliedLinks(value);
+        assertSuppliedLinkSchemasCompatible(
+          linksToRestore,
+          schema,
+          targetCell,
+          manager,
+          {
+            basePath: writePath,
+            destinationIsStream: isStream(txCell),
+          },
+        );
         let materializedValue = value;
         for (const suppliedLink of linksToRestore) {
           let linkBase = txCell;
@@ -180,7 +707,7 @@ class PiecePropIo implements PieceCellIo {
           const link = parseLinkOrThrow(suppliedLink.value, linkBase);
           const linkValue = manager.runtime.getCellFromLink(
             link,
-            undefined,
+            sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
             tx,
           ).get();
           materializedValue = replaceMaterializedValueAtPath(
@@ -255,6 +782,50 @@ class PiecePropIo implements PieceCellIo {
         }
         setTerminalValue(nextValue);
       } else {
+        const schema = targetCell.getAsNormalizedFullLink().schema ?? true;
+        const linksToRestore = suppliedLinks(value);
+        assertSuppliedLinkSchemasCompatible(
+          linksToRestore,
+          schema,
+          targetCell,
+          manager,
+          {
+            basePath: writePath,
+            destinationIsStream: isStream(txCell),
+          },
+        );
+        let materializedValue = value;
+        for (const suppliedLink of linksToRestore) {
+          let linkBase = txCell;
+          for (const segment of suppliedLink.path) {
+            linkBase = linkBase.key(segment as keyof unknown) as Cell<unknown>;
+          }
+          const link = parseLinkOrThrow(suppliedLink.value, linkBase);
+          const linkValue = manager.runtime.getCellFromLink(
+            link,
+            sanitizeSchemaForLinks(link.schema, KeepAsCell.OnlyStream),
+            tx,
+          ).get();
+          materializedValue = replaceMaterializedValueAtPath(
+            materializedValue,
+            suppliedLink.path,
+            linkValue,
+          );
+        }
+        const validationRoot = replaceMaterializedValueAtPath(
+          targetCell.asSchema(undefined).withTx(tx).get(),
+          writePath,
+          materializedValue,
+        );
+        const issue = validateSchemaValue(
+          schema,
+          validationRoot,
+          schema,
+          { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+        );
+        if (issue !== undefined) {
+          throw new Error(`updated result does not match its schema: ${issue}`);
+        }
         setTerminalValue(value);
       }
     });
@@ -323,6 +894,12 @@ export class PieceController<T = unknown> {
       while (true) {
         const { pattern, ref } = await this.#loadCurrentPattern();
         try {
+          assertSuppliedLinkSchemasCompatible(
+            suppliedLinks(input),
+            pattern.argumentSchema,
+            this.#manager.getArgument(this.#cell),
+            this.#manager,
+          );
           // Use setup/start so we can update inputs without forcing reschedule.
           // The identity guard prevents a concurrent setsrc from being
           // overwritten by this already-loaded pattern.
@@ -334,15 +911,29 @@ export class PieceController<T = unknown> {
             { start: true, expectedPatternIdentity: ref },
           ) as Cell<T>;
         } catch (error) {
-          if (
-            !(error instanceof Error) ||
-            !error.message.includes(
-              "piece pattern changed while the source update was compiling",
-            )
-          ) {
-            throw error;
+          if (error instanceof Error) {
+            if (
+              error.message.includes(
+                "piece pattern changed while the source update was compiling",
+              )
+            ) {
+              continue;
+            }
+            // Link-schema checking happens before the runner transaction so it
+            // can inspect the caller's exact envelopes. If that check raced a
+            // source update, retry against the durable winner instead of
+            // reporting a stale contract failure.
+            await this.#cell.sync();
+            const currentRef = getPatternIdentityRef(this.#cell);
+            if (
+              currentRef !== undefined &&
+              (currentRef.identity !== ref.identity ||
+                currentRef.symbol !== ref.symbol)
+            ) {
+              continue;
+            }
           }
-          // Reload and reapply the input against the durable winner.
+          throw error;
         }
       }
     });
@@ -420,6 +1011,13 @@ export class PieceController<T = unknown> {
       return await execute(this.#manager, this.id, pattern, undefined, {
         start: true,
         expectedPatternIdentity: previousRef,
+        validateArgumentLinks: (argumentCell, argumentSchema) =>
+          assertSuppliedLinkSchemasCompatible(
+            suppliedLinks(argumentCell.getRaw()),
+            argumentSchema,
+            argumentCell,
+            this.#manager,
+          ),
       }) as Cell<T>;
     });
   }
@@ -511,6 +1109,10 @@ async function execute(
   options?: {
     start?: boolean;
     expectedPatternIdentity?: { identity: string; symbol: string };
+    validateArgumentLinks?: (
+      argumentCell: Cell<unknown>,
+      argumentSchema: JSONSchema,
+    ) => void;
   },
 ): Promise<Cell<unknown>> {
   return await manager.runWithPattern(pattern, pieceId, input, options);
