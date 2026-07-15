@@ -9,6 +9,7 @@ import {
 } from "./v2-auth-test-helpers.ts";
 
 const SPACE = "did:key:z6Mk-restore-flush-test";
+const OTHER_SPACE = "did:key:z6Mk-restore-flush-test-other";
 
 /**
  * Transport that wraps a real Server with lazy connection creation and
@@ -68,6 +69,12 @@ class ReconnectableTransport implements Transport {
     this.#connection?.close();
     this.#connection = null;
     queueMicrotask(() => this.#closeReceiver(new Error("disconnect")));
+  }
+
+  disconnectSynchronously(): void {
+    this.#connection?.close();
+    this.#connection = null;
+    this.#closeReceiver(new Error("disconnect"));
   }
 
   set delayTransacts(value: boolean) {
@@ -325,6 +332,111 @@ Deno.test(
         "unhandledrejection",
         suppressDisconnectRejection,
       );
+      unsubscribe();
+      await client.close();
+      await server.close();
+    }
+  },
+);
+
+Deno.test(
+  "ready publication restarts restore when a subscriber drops the connection",
+  async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://restore-ready-subscriber-race-test"),
+    });
+    const transport = new ReconnectableTransport(server);
+    const client = await connect({ transport });
+    const first = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
+    const second = await client.mount(
+      OTHER_SPACE,
+      {},
+      testSessionOpenAuthFactory,
+    );
+    const firstStates: Array<{ status: string; epoch: number }> = [];
+    const secondStates: Array<{ status: string; epoch: number }> = [];
+    let interrupted = false;
+    const unsubscribeFirst = first.subscribeConnectionState((state) => {
+      firstStates.push({ status: state.status, epoch: state.epoch });
+      if (state.status === "ready" && state.epoch === 2 && !interrupted) {
+        interrupted = true;
+        transport.disconnectSynchronously();
+      }
+    });
+    const unsubscribeSecond = second.subscribeConnectionState((state) => {
+      secondStates.push({ status: state.status, epoch: state.epoch });
+    });
+
+    try {
+      transport.disconnect();
+      await waitFor(() =>
+        client.isConnected() &&
+        first.connectionState.status === "ready" &&
+        first.connectionState.epoch === 3 &&
+        second.connectionState.status === "ready" &&
+        second.connectionState.epoch === 2
+      );
+
+      assertEquals(transport.connectionCount, 3);
+      assertEquals(firstStates, [
+        { status: "ready", epoch: 1 },
+        { status: "disconnected", epoch: 1 },
+        { status: "ready", epoch: 2 },
+        { status: "disconnected", epoch: 2 },
+        { status: "ready", epoch: 3 },
+      ]);
+      assertEquals(secondStates, [
+        { status: "ready", epoch: 1 },
+        { status: "disconnected", epoch: 1 },
+        { status: "ready", epoch: 2 },
+      ]);
+    } finally {
+      unsubscribeFirst();
+      unsubscribeSecond();
+      await client.close();
+      await server.close();
+    }
+  },
+);
+
+Deno.test(
+  "closed sessions ignore later lifecycle signals and isolate subscribers",
+  async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://closed-session-lifecycle-test"),
+    });
+    const client = await connect({
+      transport: new ReconnectableTransport(server),
+    });
+    const session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
+    const states: Array<{ status: string; epoch: number }> = [];
+    let throwingSubscriberCalls = 0;
+    const unsubscribeThrowing = session.subscribeConnectionState(() => {
+      throwingSubscriberCalls++;
+      throw new Error("expected subscriber failure");
+    });
+    const unsubscribe = session.subscribeConnectionState((state) => {
+      states.push({ status: state.status, epoch: state.epoch });
+    });
+
+    try {
+      await session.close();
+      const statesAfterClose = [...states];
+      await session.close();
+      session.handleDisconnect(new Error("late disconnect"));
+      session.handleRestored();
+      session.handleRevoked("taken-over");
+
+      assertEquals(statesAfterClose, [
+        { status: "ready", epoch: 1 },
+        { status: "closed", epoch: 1 },
+      ]);
+      assertEquals(states, statesAfterClose);
+      assertEquals(throwingSubscriberCalls, 2);
+    } finally {
+      unsubscribeThrowing();
       unsubscribe();
       await client.close();
       await server.close();
