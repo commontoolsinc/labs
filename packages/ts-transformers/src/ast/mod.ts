@@ -44,9 +44,12 @@ export * from "./dataflow.ts";
 export {
   classifyFactoryCallee,
   classifyFactoryCallExposure,
+  classifyFactoryCallTarget,
   type FactoryCalleeClassification,
   type FactoryCallExposure,
+  type FactoryCallTargetClassification,
   type FactoryValueOrigin,
+  isFactoryModifierAccess,
   isInsideFactoryMaterializationBoundary,
 } from "./factory-callee.ts";
 export {

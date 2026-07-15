@@ -570,6 +570,93 @@ export default pattern<{
 );
 
 Deno.test(
+  "same-kind provenanced unions compare each member's own result contract",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+const first = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { child: { a: number } }>((_input) => ({ child: { a: 1 } }));
+const second = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { child: { b: string } }>((_input) => ({ child: { b: "two" } }));
+
+export const firstWrapper = pattern<
+  { command: string },
+  { child: { a: number } }
+>(({ command }) => first({ command } as any));
+export const secondWrapper = pattern<
+  { command: string },
+  { child: { b: string } }
+>(({ command }) => second({ command } as any));
+
+type Operation = typeof firstWrapper | typeof secondWrapper;
+export default pattern<{ operation: Operation }>(({ operation }) =>
+  operation({ command: "run" })
+);
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(
+      diagnostics.filter((diagnostic) =>
+        diagnostic.type === "factory-call:schema-mismatch-union"
+      ).length,
+      1,
+    );
+    assertEquals(callsNamed(parseModule(output), "invokeFactory").length, 0);
+  },
+);
+
+Deno.test(
+  "same-kind provenanced unions with equal contracts remain callable",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+import { pattern, type FrameworkProvided } from "commonfabric";
+
+const privileged = pattern<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>((_input) => ({ ok: true }));
+
+export const firstWrapper = pattern<
+  { command: string },
+  { ok: boolean }
+>(({ command }) => privileged({ command } as any));
+export const secondWrapper = pattern<
+  { command: string },
+  { ok: boolean }
+>(({ command }) => privileged({ command } as any));
+
+type Operation = typeof firstWrapper | typeof secondWrapper;
+export default pattern<{ operation: Operation }>(({ operation }) =>
+  operation({ command: "run" })
+);
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(diagnostics, []);
+    assertEquals(callsNamed(parseModule(output), "invokeFactory").length, 1);
+  },
+);
+
+Deno.test(
   "repeated provenanced aliases do not look like a partial factory union",
   async () => {
     const diagnostics: TransformationDiagnostic[] = [];

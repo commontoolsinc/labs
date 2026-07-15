@@ -5,8 +5,10 @@ import { createSchemaTransformerV2 } from "@commonfabric/schema-generator";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import {
+  classifyFactoryCallTarget,
   detectCallKind,
   getPatternBuilderCallbackDescriptor,
+  isFactoryModifierAccess,
   isPatternBuilderCall,
   updatePatternBuilderCallbackArgument,
 } from "../ast/mod.ts";
@@ -257,10 +259,7 @@ function discoverFactoryContractsForExpression(
     return [contract];
   }
   const callee = unwrapExpression(target.expression);
-  if (
-    ts.isPropertyAccessExpression(callee) &&
-    (callee.name.text === "asScope" || callee.name.text === "inSpace")
-  ) {
+  if (isFactoryModifierAccess(callee)) {
     return discoverFactoryContractsForExpression(
       callee.expression,
       context,
@@ -575,6 +574,11 @@ function rewritePatternCallback(
       return ts.visitEachChild(node, rewrite, context.tsContext);
     }
     if (isInternalFrameworkHelper(node)) return node;
+    if (
+      classifyFactoryCallTarget(node, context.checker).kind === "derivation"
+    ) {
+      return ts.visitEachChild(node, rewrite, context.tsContext);
+    }
     const protectedPaths = frameworkPathsForFactoryExpression(
       node.expression,
       context,
@@ -682,29 +686,40 @@ function validateScheduledFactoryCalls(
     resolveFunction(argument, context.checker)
   ).find((candidate) => candidate !== undefined);
   if (!callback) return;
+  const visitedFunctions = new Set<ResolvedFunction>([callback]);
   let reported = false;
   const visit = (node: ts.Node): void => {
     if (reported || node !== callback.body && ts.isFunctionLike(node)) return;
     if (ts.isCallExpression(node)) {
-      const paths = frameworkPathsForFactoryExpression(
-        node.expression,
-        context,
-        new Set(),
-        new Set(),
-      );
-      if (paths.length > 0) {
-        const path = paths[0]!;
-        context.reportDiagnosticOnce({
-          severity: "error",
-          type: "scheduled-callback:framework-provided-factory-call",
-          message:
-            `A materialized factory call inside ${kind.builderName} requires FrameworkProvided path '${
-              path.join(".")
-            }', but handler event/context and lift input are authored data, not a trusted system-input channel.`,
-          node,
-        });
-        reported = true;
-        return;
+      const target = classifyFactoryCallTarget(node, context.checker);
+      if (target.kind === "invocation" || target.kind === "ambiguous") {
+        const paths = frameworkPathsForFactoryExpression(
+          node.expression,
+          context,
+          new Set(),
+          new Set(),
+        );
+        if (paths.length > 0) {
+          const path = paths[0]!;
+          context.reportDiagnosticOnce({
+            severity: "error",
+            type: "scheduled-callback:framework-provided-factory-call",
+            message:
+              `A materialized factory call inside ${kind.builderName} requires FrameworkProvided path '${
+                path.join(".")
+              }', but handler event/context and lift input are authored data, not a trusted system-input channel.`,
+            node,
+          });
+          reported = true;
+          return;
+        }
+      }
+
+      const helper = resolveFunction(node.expression, context.checker);
+      if (helper && !visitedFunctions.has(helper)) {
+        visitedFunctions.add(helper);
+        visit(helper.body);
+        if (reported) return;
       }
     }
     ts.forEachChild(node, visit);
@@ -926,10 +941,7 @@ function frameworkPathsForFactoryExpression(
         activeSymbols.delete(active);
       }
     }
-    if (
-      ts.isPropertyAccessExpression(target) &&
-      (target.name.text === "asScope" || target.name.text === "inSpace")
-    ) {
+    if (isFactoryModifierAccess(target)) {
       // The modifier callable itself is not a factory type, but derives one
       // from its receiver and must preserve that receiver's trusted paths.
       // Do not recurse through arbitrary methods: a containing input object
@@ -965,12 +977,16 @@ function frameworkPathsForPatternBuilder(
   const visit = (node: ts.Node): void => {
     if (node !== descriptor.callback.body && ts.isFunctionLike(node)) return;
     if (ts.isCallExpression(node)) {
-      paths.push(...frameworkPathsForFactoryExpression(
-        node.expression,
-        context,
-        activeNodes,
-        activeSymbols,
-      ));
+      if (
+        classifyFactoryCallTarget(node, context.checker).kind !== "derivation"
+      ) {
+        paths.push(...frameworkPathsForFactoryExpression(
+          node.expression,
+          context,
+          activeNodes,
+          activeSymbols,
+        ));
+      }
     }
     ts.forEachChild(node, visit);
   };

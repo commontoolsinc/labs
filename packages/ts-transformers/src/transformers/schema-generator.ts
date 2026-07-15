@@ -313,7 +313,13 @@ export function createSchemaAst(
     ) => {
       // Use createPropertyName which handles safe identifiers vs string literals
       // This includes checking for reserved words using TypeScript's scanner
-      const propertyName = createPropertyName(key, factory);
+      // `__proto__: value` is special object-literal syntax even when the key
+      // is quoted: it changes [[Prototype]] instead of creating an own data
+      // property. A computed key has ordinary property semantics and preserves
+      // the exact schema document.
+      const propertyName = key === "__proto__"
+        ? factory.createComputedPropertyName(factory.createStringLiteral(key))
+        : createPropertyName(key, factory);
 
       return factory.createPropertyAssignment(
         propertyName,

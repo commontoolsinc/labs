@@ -9,8 +9,8 @@ import {
 import { findFrameworkProvidedPaths } from "../policy/framework-provided.ts";
 
 import {
-  classifyFactoryCallee,
   classifyFactoryCallExposure,
+  classifyFactoryCallTarget,
   type FactoryCalleeClassification,
 } from "../ast/factory-callee.ts";
 import {
@@ -39,33 +39,41 @@ export class SymbolicFactoryCallTransformer extends HelpersOnlyTransformer {
         return ts.visitEachChild(node, visit, context.tsContext);
       }
 
-      const factoryValue = classifyFactoryCallee(node, context.checker);
+      const callTarget = classifyFactoryCallTarget(node, context.checker);
       if (
-        factoryValue?.origin === "live" &&
-        !factoryValue.hasNonFactoryMember &&
-        isFactoryModifierDerivation(node)
+        callTarget.kind === "derivation" &&
+        callTarget.factory.origin === "live" &&
+        !callTarget.factory.hasNonFactoryMember
       ) {
         context.markLiveFactoryDerivation(node);
       }
 
-      const classification = classifyFactoryCallee(
-        node.expression,
-        context.checker,
-      );
       const visited = ts.visitEachChild(
         node,
         visit,
         context.tsContext,
       ) as ts.CallExpression;
-      if (!classification) return visited;
+      if (
+        callTarget.kind === "not-factory" ||
+        callTarget.kind === "derivation"
+      ) return visited;
+      const classification = callTarget.factory;
 
       const exposure = classifyFactoryCallExposure(node, context.checker);
-      if (
-        classification.origin === "live" ||
-        exposure === "runtime-materialized"
-      ) {
+      if (classification.origin === "live") {
         return visited;
       }
+      if (exposure === "mixed" || exposure === "unknown") {
+        context.reportDiagnosticOnce({
+          type: "factory-call:mixed-helper-exposure",
+          message: exposure === "mixed"
+            ? "This helper is called from both eager symbolic and scheduled materialized contexts, so its factory call has no single safe lowering. Split the helper by execution context or inline the factory call."
+            : "This helper's factory exposure cannot be proven from its call sites. Call it only from one eager symbolic or scheduled materialized context, split the helper, or inline the factory call.",
+          node: node.expression,
+        });
+        return visited;
+      }
+      if (exposure === "runtime-materialized") return visited;
 
       const effectiveOrigin = exposure === "symbolic" &&
           classification.origin === "runtime-materialized"
@@ -131,12 +139,6 @@ export class SymbolicFactoryCallTransformer extends HelpersOnlyTransformer {
   }
 }
 
-function isFactoryModifierDerivation(node: ts.CallExpression): boolean {
-  const callee = node.expression;
-  return ts.isPropertyAccessExpression(callee) &&
-    (callee.name.text === "asScope" || callee.name.text === "inSpace");
-}
-
 function buildCompatibleContract(
   classification: FactoryCalleeClassification,
   expression: ts.Expression,
@@ -163,14 +165,23 @@ function buildCompatibleContract(
     return undefined;
   }
   if (provenance.contracts.length > 0) {
-    const generated = generateMemberSchemas(first, context, schemaGenerator);
     const contracts = provenance.contracts.map(
       (contract): EmittedFactoryContract => ({
         kind: contract.kind,
         inputSchema: contract.inputSchema as JSONSchema | undefined ??
-          generated.inputSchema,
+          generateProvenanceSchema(
+            contract.inputType,
+            contract.inputTypeNode,
+            context,
+            schemaGenerator,
+          ),
         outputSchema: contract.outputSchema as JSONSchema | undefined ??
-          generated.outputSchema,
+          generateProvenanceSchema(
+            contract.outputType,
+            contract.outputTypeNode,
+            context,
+            schemaGenerator,
+          ),
         frameworkProvidedPaths: contract.frameworkProvidedPaths ?? [],
       }),
     );
@@ -341,6 +352,38 @@ function generateMemberSchemas(
       context.sourceFile,
     ),
   };
+}
+
+/**
+ * Fill an exact compiler-owned contract from the semantic types attached to
+ * that same provenance record. In particular, never borrow the first member's
+ * schemas for a same-kind union: two wrappers may share an input shape and
+ * protected paths while intentionally returning different public results.
+ */
+function generateProvenanceSchema(
+  type: ts.Type | undefined,
+  typeNode: ts.TypeNode,
+  context: TransformationContext,
+  schemaGenerator: ReturnType<typeof createSchemaTransformerV2>,
+): JSONSchema {
+  if (type) {
+    return schemaGenerator.generateSchema(
+      type,
+      context.checker,
+      typeNode,
+      undefined,
+      context.options.state?.schemaHints,
+      context.sourceFile,
+      context.options.state?.typeRegistry,
+    );
+  }
+  return schemaGenerator.generateSchemaFromSyntheticTypeNode(
+    typeNode,
+    context.checker,
+    context.options.state?.typeRegistry,
+    context.options.state?.schemaHints,
+    context.sourceFile,
+  );
 }
 
 function createContractAst(

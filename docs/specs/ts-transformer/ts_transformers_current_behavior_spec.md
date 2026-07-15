@@ -293,6 +293,34 @@ doing so perturbs TypeScript's lazy union-member ordering and would make later
 schema emission order depend on this validation pass. Other contexts retain
 TypeScript's ordinary structural diagnostic.
 
+### 6.2.2 First-class factory call validation
+
+`SymbolicFactoryCallTransformer` distinguishes factory **invocations** from the
+contract-preserving `asScope()` / `inSpace()` **derivations** through the shared
+factory-callee classifier. Eager invocations of proven symbolic pattern inputs
+lower to `invokeFactory`; scheduled `lift` / `computed` / handler inputs are
+runner-materialized callables and remain direct calls.
+
+The transformer reports:
+
+- `factory-call:cross-kind-union` when one callable union spans factory kinds;
+- `factory-call:schema-mismatch-union` when same-kind alternatives do not have
+  exactly equal normalized public input and output schemas;
+- `factory-call:framework-provided-mismatch-union` when protected-path
+  provenance is partial or differs between alternatives;
+- `factory-call:spread-argument` for symbolic tuple/rest spread;
+- `factory-call:untransformable-symbolic-proxy` when a call cannot be proven
+  live or tied to an eager symbolic boundary; and
+- `factory-call:mixed-helper-exposure` when a stable helper is reached from both
+  eager-symbolic and scheduled-materialized sites, or its entry exposure cannot
+  be proven. V1 asks the author to split or inline that helper rather than
+  cloning/specializing it.
+
+Referenced helpers inherit a single provable exposure through their local call
+sites, including transitive helper calls. `FrameworkProvidedForwardingTransformer`
+also follows scheduled helper calls when validating privileged factory
+invocations; modifier derivations propagate provenance but are not invocations.
+
 ### 6.3 Opaque `.get()` validation
 
 On call `receiver.get()` (no args):

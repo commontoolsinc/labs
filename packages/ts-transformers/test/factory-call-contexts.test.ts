@@ -213,6 +213,139 @@ Deno.test(
 );
 
 Deno.test(
+  "a module-scope helper called only from a scheduled callback receives materialized factories",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+      import { lift, type PatternFactory } from "commonfabric";
+
+      interface Input { value: number }
+      interface Output { result: number }
+
+      function invoke(
+        operation: PatternFactory<Input, Output>,
+        value: number,
+      ) {
+        return operation({ value });
+      }
+
+      export const apply = lift((input: {
+        operation: PatternFactory<Input, Output>;
+        value: number;
+      }) => invoke(input.operation, input.value));
+    `,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(
+      diagnostics.filter((diagnostic) =>
+        diagnostic.type.startsWith("factory-call:")
+      ),
+      [],
+    );
+    assertEquals(
+      invokeFactoryContracts(output),
+      [],
+      "the helper's factory parameter is materialized by its only entry context",
+    );
+  },
+);
+
+Deno.test(
+  "a module-scope helper called only from an eager pattern lowers symbolically",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+      import { pattern, type PatternFactory } from "commonfabric";
+
+      interface Input { value: number }
+      interface Output { result: number }
+
+      function invoke(
+        operation: PatternFactory<Input, Output>,
+        value: number,
+      ) {
+        return operation({ value });
+      }
+
+      export default pattern<{
+        operation: PatternFactory<Input, Output>;
+        value: number;
+      }>((input) => ({ result: invoke(input.operation, input.value) }));
+    `,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(
+      diagnostics.filter((diagnostic) =>
+        diagnostic.type.startsWith("factory-call:")
+      ),
+      [],
+    );
+    assertEquals(invokeFactoryContracts(output).length, 1);
+  },
+);
+
+Deno.test(
+  "a helper shared by symbolic and materialized contexts fails with a focused diagnostic",
+  async () => {
+    const diagnostics: TransformationDiagnostic[] = [];
+    const output = await transformSource(
+      `
+      import { lift, pattern, type PatternFactory } from "commonfabric";
+
+      interface Input { value: number }
+      interface Output { result: number }
+      type Operation = PatternFactory<Input, Output>;
+
+      function invoke(operation: Operation, value: number) {
+        return operation({ value });
+      }
+
+      export const apply = lift((input: {
+        operation: Operation;
+        value: number;
+      }) => invoke(input.operation, input.value));
+
+      export default pattern<{
+        operation: Operation;
+        value: number;
+      }>((input) => ({ eager: invoke(input.operation, input.value) }));
+    `,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+        pipelineDiagnostics: diagnostics,
+      },
+    );
+
+    assertEquals(
+      diagnostics.filter((diagnostic) =>
+        diagnostic.type === "factory-call:mixed-helper-exposure"
+      ).length,
+      1,
+    );
+    assertEquals(
+      diagnostics.filter((diagnostic) =>
+        diagnostic.type === "factory-call:untransformable-symbolic-proxy"
+      ),
+      [],
+    );
+    assertEquals(invokeFactoryContracts(output), []);
+  },
+);
+
+Deno.test(
   "an eager factory capture becomes a direct scheduled input inside computed",
   async () => {
     const output = await transformSource(

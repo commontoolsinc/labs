@@ -245,6 +245,73 @@ export const apply = lift(callback);
   },
 );
 
+Deno.test(
+  "a privileged factory call reached through a scheduled helper fails closed",
+  async () => {
+    const { diagnostics } = await validateSource(
+      `
+import {
+  lift,
+  type FrameworkProvided,
+  type PatternFactory,
+} from "commonfabric";
+
+type Privileged = PatternFactory<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>;
+
+function invoke(operation: Privileged, command: string) {
+  return operation({ command } as any);
+}
+
+export const apply = lift((input: {
+  operation: Privileged;
+  command: string;
+}) => invoke(input.operation, input.command));
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+      },
+    );
+
+    const failures = diagnosticsOfType(diagnostics, SCHEDULED_FACTORY_CALL);
+    assertEquals(failures.length, 1);
+    assertStringIncludes(failures[0]!.message, "sandboxId");
+  },
+);
+
+Deno.test(
+  "scheduled factory modifier derivations do not count as privileged invocations",
+  async () => {
+    const { diagnostics } = await validateSource(
+      `
+import {
+  lift,
+  type FrameworkProvided,
+  type PatternFactory,
+} from "commonfabric";
+
+type Privileged = PatternFactory<{
+  command: string;
+  sandboxId: FrameworkProvided<string>;
+}, { ok: boolean }>;
+
+export const derive = lift((input: { operation: Privileged }) =>
+  input.operation.asScope("session").inSpace()
+);
+`,
+      {
+        types: COMMONFABRIC_TYPES,
+        typeCheck: true,
+      },
+    );
+
+    assertEquals(diagnosticsOfType(diagnostics, SCHEDULED_FACTORY_CALL), []);
+  },
+);
+
 for (
   const [boundary, source] of [
     [

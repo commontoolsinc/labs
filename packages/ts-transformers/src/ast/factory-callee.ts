@@ -14,22 +14,64 @@ export type FactoryValueOrigin =
   | "runtime-materialized"
   | "unknown";
 
-export type FactoryCallExposure = "symbolic" | "runtime-materialized";
+export type FactoryCallExposure =
+  | "symbolic"
+  | "runtime-materialized"
+  | "mixed"
+  | "unknown";
 
 type ScheduledCallback =
   | ts.ArrowFunction
   | ts.FunctionExpression
   | ts.FunctionDeclaration;
 
-const referencedScheduledCallbackCache = new WeakMap<
+const referencedFunctionExposureCache = new WeakMap<
   ts.TypeChecker,
-  WeakMap<ScheduledCallback, boolean>
+  WeakMap<ScheduledCallback, FactoryCallExposure | "unreferenced">
 >();
 
 export interface FactoryCalleeClassification {
   readonly members: readonly FactoryTypeInfo[];
   readonly hasNonFactoryMember: boolean;
   readonly origin: FactoryValueOrigin;
+}
+
+export type FactoryCallTargetClassification =
+  | {
+    readonly kind: "invocation" | "ambiguous" | "derivation";
+    readonly factory: FactoryCalleeClassification;
+  }
+  | { readonly kind: "not-factory" };
+
+/** The only public calls that derive a factory rather than invoke one. */
+export function isFactoryModifierAccess(
+  expression: ts.Expression,
+): expression is ts.PropertyAccessExpression {
+  return ts.isPropertyAccessExpression(expression) &&
+    (expression.name.text === "asScope" || expression.name.text === "inSpace");
+}
+
+/**
+ * Give every transformer one answer for whether a call invokes a factory,
+ * derives a factory, is an ambiguous callable union, or is unrelated.
+ */
+export function classifyFactoryCallTarget(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): FactoryCallTargetClassification {
+  const callee = unwrapExpression(call.expression);
+  if (isFactoryModifierAccess(callee)) {
+    const derived = classifyFactoryCallee(call, checker) ??
+      classifyFactoryCallee(callee.expression, checker);
+    if (derived) return { kind: "derivation", factory: derived };
+  }
+
+  const invoked = classifyFactoryCallee(callee, checker);
+  if (!invoked) return { kind: "not-factory" };
+  return {
+    kind: invoked.hasNonFactoryMember ? "ambiguous" : "invocation",
+    factory: invoked,
+  };
 }
 
 /**
@@ -95,21 +137,24 @@ export function classifyFactoryCallExposure(
   node: ts.Node,
   checker: ts.TypeChecker,
 ): FactoryCallExposure | undefined {
+  return classifyFactoryCallExposureInternal(node, checker, new Set());
+}
+
+function classifyFactoryCallExposureInternal(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  activeCallbacks: Set<ScheduledCallback>,
+): FactoryCallExposure | undefined {
   let current: ts.Node | undefined = node.parent;
   while (current) {
     if (
       ts.isArrowFunction(current) || ts.isFunctionExpression(current) ||
       ts.isFunctionDeclaration(current)
     ) {
-      if (isReferencedScheduledCallback(current, checker)) {
-        return "runtime-materialized";
-      }
-      if (ts.isFunctionDeclaration(current)) {
-        current = current.parent;
-        continue;
-      }
-      const semantics = getCallbackBoundarySemantics(current, checker);
-      if (semantics.decision.kind === "supported") {
+      const semantics = ts.isFunctionDeclaration(current)
+        ? undefined
+        : getCallbackBoundarySemantics(current, checker);
+      if (semantics?.decision.kind === "supported") {
         switch (semantics.decision.boundaryKind) {
           case "lift-builder":
           case "lift-applied":
@@ -130,6 +175,20 @@ export function classifyFactoryCallExposure(
           default:
             break;
         }
+      }
+      const referenced = classifyReferencedFunctionExposure(
+        current,
+        checker,
+        activeCallbacks,
+      );
+      if (referenced) return referenced;
+      if (
+        ts.isFunctionDeclaration(current) ||
+        isStableFunctionInitializer(current)
+      ) {
+        // A stable helper with no locally provable entry site may be exported
+        // or called from another source file. Do not guess one exposure mode.
+        return "unknown";
       }
     }
     current = current.parent;
@@ -299,9 +358,14 @@ function classifyParameterOrigin(
   ) {
     return "unknown";
   }
-  if (isReferencedScheduledCallback(owner, checker)) {
-    return "runtime-materialized";
-  }
+  const referenced = classifyReferencedFunctionExposure(
+    owner,
+    checker,
+    new Set(),
+  );
+  if (referenced === "runtime-materialized") return referenced;
+  if (referenced === "symbolic") return referenced;
+  if (referenced === "mixed" || referenced === "unknown") return "unknown";
   if (ts.isFunctionDeclaration(owner)) return "unknown";
   const semantics = getCallbackBoundarySemantics(owner, checker);
   if (semantics.decision.kind !== "supported") return "unknown";
@@ -323,28 +387,33 @@ function classifyParameterOrigin(
 }
 
 /**
- * Referenced callbacks are not syntactically nested in their owning builder
- * call, so the ordinary ancestor-based callback-boundary policy cannot see
- * them. Resolve stable local callback references at their scheduled builder
- * use site and give their parameters the same runner-materialized exposure as
- * an equivalent inline callback.
+ * Referenced callbacks and helpers are not syntactically nested in their call
+ * sites, so ordinary ancestor-based policy cannot see their execution mode.
+ * Resolve stable local references and combine every external entry site. A
+ * helper used from both eager and scheduled code is deliberately "mixed": its
+ * body cannot choose one lowering without specialization.
  */
-function isReferencedScheduledCallback(
+function classifyReferencedFunctionExposure(
   callback: ScheduledCallback,
   checker: ts.TypeChecker,
-): boolean {
-  let checkerCache = referencedScheduledCallbackCache.get(checker);
+  activeCallbacks: Set<ScheduledCallback>,
+): FactoryCallExposure | undefined {
+  let checkerCache = referencedFunctionExposureCache.get(checker);
   if (!checkerCache) {
     checkerCache = new WeakMap();
-    referencedScheduledCallbackCache.set(checker, checkerCache);
+    referencedFunctionExposureCache.set(checker, checkerCache);
   }
   const cached = checkerCache.get(callback);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    return cached === "unreferenced" ? undefined : cached;
+  }
+  if (activeCallbacks.has(callback)) return "unknown";
+  activeCallbacks.add(callback);
 
   let scheduled = false;
   let symbolic = false;
+  let unknown = false;
   const visit = (node: ts.Node): void => {
-    if (scheduled && symbolic) return;
     if (ts.isCallExpression(node)) {
       const callKind = detectCallKind(node, checker);
       if (
@@ -370,13 +439,72 @@ function isReferencedScheduledCallback(
           }
         }
       }
+
+      const called = resolveCallbackReference(
+        node.expression,
+        checker,
+        new Set(),
+      );
+      if (
+        called && sameCallback(called, callback) &&
+        !isDescendantOf(node, callback)
+      ) {
+        const exposure = classifyFactoryCallExposureInternal(
+          node,
+          checker,
+          activeCallbacks,
+        );
+        switch (exposure) {
+          case "runtime-materialized":
+            scheduled = true;
+            break;
+          case "symbolic":
+            symbolic = true;
+            break;
+          case "mixed":
+            scheduled = true;
+            symbolic = true;
+            break;
+          case "unknown":
+          case undefined:
+            unknown = true;
+            break;
+        }
+      }
     }
     ts.forEachChild(node, visit);
   };
-  visit(callback.getSourceFile());
-  const materializedOnly = scheduled && !symbolic;
-  checkerCache.set(callback, materializedOnly);
-  return materializedOnly;
+  try {
+    visit(callback.getSourceFile());
+  } finally {
+    activeCallbacks.delete(callback);
+  }
+
+  const exposure: FactoryCallExposure | "unreferenced" = scheduled && symbolic
+    ? "mixed"
+    : unknown
+    ? "unknown"
+    : scheduled
+    ? "runtime-materialized"
+    : symbolic
+    ? "symbolic"
+    : "unreferenced";
+  checkerCache.set(callback, exposure);
+  return exposure === "unreferenced" ? undefined : exposure;
+}
+
+function isStableFunctionInitializer(callback: ScheduledCallback): boolean {
+  return !ts.isFunctionDeclaration(callback) &&
+    ts.isVariableDeclaration(callback.parent) &&
+    callback.parent.initializer === callback;
+}
+
+function sameCallback(
+  left: ScheduledCallback,
+  right: ScheduledCallback,
+): boolean {
+  return left === right ||
+    ts.getOriginalNode(left) === ts.getOriginalNode(right);
 }
 
 function resolveCallbackReference(

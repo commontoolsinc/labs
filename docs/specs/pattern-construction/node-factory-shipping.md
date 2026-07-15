@@ -1135,6 +1135,13 @@ module-scoped function declarations receive the same schema injection,
 FrameworkProvided validation, and scheduled materialized-factory exposure.
 Moving a callback into a stable declaration must neither turn a scheduled
 factory argument into a symbolic proxy nor drop a pattern's public schemas.
+The same rule applies to a stable helper whose factory invocation is reached
+only from one exposure mode: all-eager callers make its invocation symbolic,
+while all-scheduled callers make it materialized. Version 1 does not clone or
+specialize a helper reached from both modes. Mixed or otherwise unprovable entry
+exposure is a compile-time diagnostic directing the author to split or inline
+the helper, so one emitted body never guesses between incompatible call
+semantics.
 
 Version 1 requires the stored factory's canonical public schemas to equal the
 call site's generated schemas after reference resolution and normalization.
