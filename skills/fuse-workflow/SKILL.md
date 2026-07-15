@@ -156,9 +156,24 @@ cat /tmp/cf/my-space/pieces/assistant/result.json | jq '.messages'
 echo '{"message":"Hello from agent"}' > \
   /tmp/cf/my-space/pieces/assistant/result/sendMessage.handler
 
-# Agent monitors for changes (polling — fswatch may not work with FUSE-T)
-while true; do cat /tmp/cf/my-space/pieces/task/result/status; sleep 2; done
+# Agent waits for a piece to reach a state. Address it by entity ID, not name:
+# a piece's name gains a count suffix on every state change, so a
+# pieces/<name>/... path goes stale on the very change being waited for.
+until [ "$(cat /tmp/cf/my-space/entities/$ENTITY_ID/result/status)" = "done" ]; do
+  sleep 1
+done
 ```
+
+Wait on the condition and let the loop end when it holds, rather than printing
+on a `while true` loop. This polls because no change-notification surface
+through the mount is known to work — `fswatch` and `watchman` are untested
+against FUSE-T. The loop cannot detect a dead transport, which stalls it
+indefinitely; `.status` at the mount root reports `connection.disconnected`.
+
+For a subscription rather than a poll, go through the runtime instead of the
+filesystem: `cf piece render --piece <id> --watch` subscribes to the cell and
+re-renders on each change. That surface renders UI, so it fits watching a piece
+render rather than reading a single scalar.
 
 ### Pattern Development Loop
 
