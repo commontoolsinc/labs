@@ -31,6 +31,8 @@ import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("mergeable-append-multispace");
@@ -101,11 +103,29 @@ const PROGRAM: RuntimeProgram = {
 
 const RESULT_CAUSE = "mergeable-append-multispace host";
 
+type CommitNative = NonNullable<
+  IStorageProviderWithReplica["replica"]["commitNative"]
+>;
+type CommitNativeArgs = Parameters<CommitNative>;
+type CommitNativeResult = ReturnType<CommitNative>;
+type InjectedCommitNativeResult = Promise<
+  Awaited<CommitNativeResult> | {
+    error: { name: string; message: string };
+  }
+>;
+type MutableInjectedCommitNativeReplica =
+  & Omit<
+    IStorageProviderWithReplica["replica"],
+    "commitNative"
+  >
+  & {
+    commitNative: (...args: CommitNativeArgs) => InjectedCommitNativeResult;
+  };
+
 const itemLinkListSchema = {
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
-  // deno-lint-ignore no-explicit-any
-} as any;
+} satisfies JSONSchema;
 
 type EventCommitMarker = {
   type: "scheduler.event.commit";
@@ -158,8 +178,7 @@ async function readDurableItemCount(
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const handle = rt.run(tx, parent as any, {}, resultCell);
+    const handle = rt.run(tx, parent, {}, resultCell);
     rt.prepareTxForCommit(tx);
     await tx.commit();
     for (let i = 0; i < 8; i++) {
@@ -167,9 +186,8 @@ async function readDurableItemCount(
       await rt.idle();
       await storage.synced();
     }
-    const items = handle.key("items").asSchema(itemLinkListSchema)
-      // deno-lint-ignore no-explicit-any
-      .get() as any[];
+    const items = handle.key("items").asSchema<unknown[]>(itemLinkListSchema)
+      .get();
     return Array.isArray(items) ? items.length : 0;
   } finally {
     await rt.dispose();
@@ -208,8 +226,7 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const handle = rt.run(tx, parent as any, {}, resultCell);
+    const handle = rt.run(tx, parent, {}, resultCell);
     rt.prepareTxForCommit(tx);
     expect((await tx.commit()).error).toBeUndefined();
     await handle.pull();
@@ -225,12 +242,11 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
     // in its own replica and is unaffected: it commits durably on the first
     // attempt (the multi-space split has no rollback), so pre-fix the child
     // exists but the home append is dropped.
-    const replica = manager.open(space).replica as unknown as {
-      commitNative: (...args: unknown[]) => Promise<unknown>;
-    };
+    const replica = manager.open(space)
+      .replica as MutableInjectedCommitNativeReplica;
     const realCommitNative = replica.commitNative.bind(replica);
     let injectedRemaining = 8;
-    replica.commitNative = (...args: unknown[]) => {
+    replica.commitNative = (...args: CommitNativeArgs) => {
       if (injectedRemaining > 0) {
         injectedRemaining--;
         return Promise.resolve({
@@ -284,8 +300,7 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
       undefined,
       tx,
     );
-    // deno-lint-ignore no-explicit-any
-    const handle = rt.run(tx, parent as any, {}, resultCell);
+    const handle = rt.run(tx, parent, {}, resultCell);
     rt.prepareTxForCommit(tx);
     expect((await tx.commit()).error).toBeUndefined();
     await handle.pull();
@@ -297,12 +312,11 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
     // into the retry window; it fails fast. Eight injections make accidental
     // windowing obvious: the wrong behavior would ride out the storm and land
     // the append, while the correct behavior consumes only the first rejection.
-    const replica = manager.open(space).replica as unknown as {
-      commitNative: (...args: unknown[]) => Promise<unknown>;
-    };
+    const replica = manager.open(space)
+      .replica as MutableInjectedCommitNativeReplica;
     const realCommitNative = replica.commitNative.bind(replica);
     let injectedRemaining = 8;
-    replica.commitNative = (...args: unknown[]) => {
+    replica.commitNative = (...args: CommitNativeArgs) => {
       if (injectedRemaining > 0) {
         injectedRemaining--;
         return Promise.resolve({
