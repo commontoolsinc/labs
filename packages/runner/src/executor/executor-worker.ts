@@ -516,13 +516,23 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     onAcceptedCommitIntegrated(notice) {
       const stalePieceIds = new Set<string>();
       for (const reader of notice.staleDemandedReaders) {
-        stalePieceIds.add(reader.pieceId);
         const identity = schedulerIdentityKeyForStaleReader(reader);
         const action = identity === undefined
           ? undefined
           : actionsBySchedulerIdentity.get(identity);
         if (action !== undefined) {
+          // A live registered action reruns from its direct invalidation; the
+          // changed documents already arrived with this notice's replica
+          // sync, so re-pulling its piece's whole closure would only re-run
+          // the host graph query per wave (measured: the dominant host
+          // main-isolate cost, stalling every client round trip). A rerun
+          // that reaches a newly linked, not-yet-synced document still fails
+          // open to the pending-demand retry path.
           runtime?.scheduler.invalidateActionForHostWake(action);
+        } else {
+          // No live registration matches (parked piece, replaced identity, or
+          // a not-yet-instantiated root): the closure pull is the only wake.
+          stalePieceIds.add(reader.pieceId);
         }
       }
       selectiveWake?.push([...stalePieceIds]);

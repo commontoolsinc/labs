@@ -3543,6 +3543,11 @@ class SpaceReplica implements ISpaceReplica {
         }
       }
       const { session } = await this.sessionHandle();
+      if (this.#actionTransactionRouter !== undefined) {
+        // A rejection learned during the awaits above may have doomed a
+        // localSeq this commit's pending reads still name.
+        this.rebaseShadowPendingReads(commit);
+      }
       const applied = await session.transact(commit);
       this.confirmPending(localSeq, operations, applied);
       this.noteSourceCommitConfirmed(localSeq, applied.seq);
@@ -4669,6 +4674,12 @@ class SpaceReplica implements ISpaceReplica {
 
   private noteSourceCommitRejected(localSeq: number): void {
     this.#confirmedSeqByLocalSeq.delete(localSeq);
+    if (this.#actionTransactionRouter !== undefined) {
+      // A rejected commit's localSeq can never resolve on the host. A routed
+      // commit built while this one was still pending may reference it; the
+      // pre-send rebase resolves such reads onto the confirmed base.
+      this.#shadowLocalSeqs.add(localSeq);
+    }
     this.dropClaimedOverlays(
       (overlay) => overlay.unresolvedBasisLocalSeqs.has(localSeq),
       { dirtyProducer: true, diagnosticCode: "source-basis-rejected" },
