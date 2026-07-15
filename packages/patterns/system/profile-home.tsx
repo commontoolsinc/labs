@@ -705,6 +705,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   isOwner,
                   <cf-hstack>
                     <cf-button
+                      id="profile-edit-toggle"
                       variant="ghost"
                       size="sm"
                       onClick={toggleProfileEditing({ editing })}

@@ -181,7 +181,7 @@ describe("home-space profile creation", () => {
       '[data-ui-region="profile-presentation"]',
       "Edit profile",
     );
-    await clickButtonByText(page, "Edit profile");
+    await clickProfileEditToggle(page);
     await waitForRuntimeIdle(page);
     await page.waitForSelector('[data-ui-region="profile-edit"]', {
       strategy: "pierce",
@@ -254,39 +254,29 @@ async function clickProfileLink(page: any, name: string) {
   await target.click();
 }
 
-// ProfileHome's edit action is intentionally not a public picker action, so
-// locate its visible cf-button by label and click the component's native target
-// with a browser gesture.
+// ProfileHome rerenders its owner-gated control immediately after the test
+// runner marks a cf-button's inner click target, so the generic CDP helper can
+// lose that transient marker before it clicks. This toggle writes only local
+// view state (not CFC-protected profile data), so invoke its stable native
+// target within the browser DOM and assert the resulting edit form below.
 // deno-lint-ignore no-explicit-any
-async function clickButtonByText(page: any, label: string) {
-  const token = `profile-button-${crypto.randomUUID()}`;
-  const marked = await page.evaluate(
-    (targetLabel: string, targetToken: string) => {
-      const collect = (root: Document | ShadowRoot, result: Element[]) => {
-        for (const element of root.querySelectorAll("*")) {
-          result.push(element);
-          if (element.shadowRoot) collect(element.shadowRoot, result);
-        }
-      };
-      const elements: Element[] = [];
-      collect(document, elements);
-      for (const element of elements) {
-        if (element.tagName.toLowerCase() !== "cf-button") continue;
-        if ((element.textContent ?? "").trim() !== targetLabel) continue;
-        const clickTarget =
-          element.shadowRoot?.querySelector("[data-cf-button]") ??
-            element;
-        clickTarget.setAttribute("data-profile-button-click", targetToken);
+async function clickProfileEditToggle(page: any) {
+  const clicked = await page.evaluate(() => {
+    const stack: (Document | ShadowRoot)[] = [document];
+    while (stack.length > 0) {
+      const root = stack.pop()!;
+      const button = root.querySelector("#profile-edit-toggle");
+      if (button) {
+        const target = button.shadowRoot?.querySelector("[data-cf-button]") ??
+          button;
+        (target as HTMLElement).click();
         return true;
       }
-      return false;
-    },
-    { args: [label, token] },
-  );
-  if (!marked) throw new Error(`No cf-button labeled "${label}" found`);
-  const target = await page.waitForSelector(
-    `[data-profile-button-click="${token}"]`,
-    { strategy: "pierce", timeout: 30_000 },
-  );
-  await target.click();
+      for (const element of root.querySelectorAll("*")) {
+        if (element.shadowRoot) stack.push(element.shadowRoot);
+      }
+    }
+    return false;
+  });
+  if (!clicked) throw new Error("Profile edit toggle was not rendered");
 }
