@@ -43,6 +43,8 @@ type PoolCounters = Readonly<{
 
 type ControlCounters = Readonly<{
   claimsIssued: number;
+  claimsRevoked: number;
+  claimedActionConflicts: number;
   acceptedActionAttempts: number;
   settlementsCommitted: number;
   settlementsNoOp: number;
@@ -97,6 +99,8 @@ type HealthStats = {
   } | null;
   serverExecutionControl?: {
     claimsIssued?: number;
+    claimsRevoked?: number;
+    claimedActionConflicts?: number;
     acceptedActionAttempts?: number;
     settlementsCommitted?: number;
     settlementsNoOp?: number;
@@ -217,6 +221,11 @@ async function readMeasurement(
     ? undefined
     : {
       claimsIssued: counter(rawControl.claimsIssued, "claims issued"),
+      claimsRevoked: counter(rawControl.claimsRevoked, "claims revoked"),
+      claimedActionConflicts: counter(
+        rawControl.claimedActionConflicts,
+        "claimed action conflicts",
+      ),
       acceptedActionAttempts: counter(
         rawControl.acceptedActionAttempts,
         "accepted action attempts",
@@ -471,6 +480,16 @@ export async function finishServerExecutionMeasurement(
       after.control.claimsIssued,
       before.control.claimsIssued,
       "claims issued",
+    ),
+    claimsRevoked: delta(
+      after.control.claimsRevoked,
+      before.control.claimsRevoked,
+      "claims revoked",
+    ),
+    claimedActionConflicts: delta(
+      after.control.claimedActionConflicts,
+      before.control.claimedActionConflicts,
+      "claimed action conflicts",
     ),
     placement: {
       schedulerRuns: delta(

@@ -191,7 +191,13 @@ type NoteCreateTimingEntry = {
   noteCountBefore: number;
   noteCountAfter: number;
   createToViewMs: number;
+  /** click → the app state names the new note view (UI readiness). */
+  viewConditionMs: number;
+  /** view readiness → runtime idle (scheduler/settlement quiescence). */
+  viewIdleWaitMs: number;
   returnToHomeMs: number;
+  /** space-link click → home state + runtime idle, before the list check. */
+  homeIdleWaitMs: number;
   totalMs: number;
 };
 
@@ -423,6 +429,7 @@ describe("default-app flow test", () => {
           typeof state.view.pieceId === "string" &&
           state.view.pieceId.length > 0;
       });
+      const noteViewVisibleAt = performance.now();
 
       await waitForRuntimeIdle(page);
       const noteViewReadyAt = performance.now();
@@ -514,6 +521,7 @@ describe("default-app flow test", () => {
         );
       }
       await waitForRuntimeIdle(page);
+      const homeIdleAt = performance.now();
 
       console.log(`Wait for note count to increase (note ${noteIndex})...`);
       await waitForCondition(page, noteTitlesExceed, {
@@ -538,8 +546,17 @@ describe("default-app flow test", () => {
         createToViewMs: Number(
           (noteViewReadyAt - noteCreateStartedAt).toFixed(3),
         ),
+        viewConditionMs: Number(
+          (noteViewVisibleAt - noteCreateStartedAt).toFixed(3),
+        ),
+        viewIdleWaitMs: Number(
+          (noteViewReadyAt - noteViewVisibleAt).toFixed(3),
+        ),
         returnToHomeMs: Number(
           (noteCreateFinishedAt - noteViewReadyAt).toFixed(3),
+        ),
+        homeIdleWaitMs: Number(
+          (homeIdleAt - noteViewReadyAt).toFixed(3),
         ),
         totalMs: Number(
           (noteCreateFinishedAt - noteCreateStartedAt).toFixed(3),
