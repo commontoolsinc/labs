@@ -223,6 +223,50 @@ describe("scheduler event identity", () => {
     expect(executionWakes).toBe(1);
   });
 
+  it("settles a handler-load-pending event during runtime disposal", async () => {
+    const loadingLink: NormalizedFullLink = {
+      ...eventLink,
+      id: "of:dispose-pending-stream",
+      space,
+    };
+    const env = createSchedulerTestRuntime(import.meta.url);
+    const commitStatus = Promise.withResolvers<string>();
+    let disposed = false;
+    try {
+      const schedulerInternals = env.runtime.scheduler as unknown as {
+        eventQueueState: {
+          loadPieceForEvent?: () => Promise<boolean>;
+        };
+        backgroundTasks: Set<Promise<unknown>>;
+      };
+      schedulerInternals.eventQueueState.loadPieceForEvent = () =>
+        Promise.resolve(true);
+
+      env.runtime.scheduler.queueEvent(
+        loadingLink,
+        "payload",
+        undefined,
+        (tx) => commitStatus.resolve(tx.status().status),
+      );
+      await Promise.all([...schedulerInternals.backgroundTasks]);
+
+      const outcome = await Promise.race([
+        disposeSchedulerTestRuntime(env).then(() => "disposed"),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve("dispose-deadlock"), 250)
+        ),
+      ]);
+      expect(outcome).toBe("disposed");
+      expect(await commitStatus.promise).toBe("error");
+      disposed = outcome === "disposed";
+    } finally {
+      if (!disposed) {
+        env.runtime.scheduler.addEventHandler(() => {}, loadingLink);
+        await disposeSchedulerTestRuntime(env);
+      }
+    }
+  });
+
   it("settles a piece-start failure exactly once", async () => {
     const eventQueue: QueuedEvent[] = [];
     const backgroundTasks = new Set<Promise<unknown>>();

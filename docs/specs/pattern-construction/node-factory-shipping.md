@@ -1481,7 +1481,10 @@ a nested list/dynamic handler has registered yet: the event remains parked for
 that exact registration. A failed piece start settles it as an error. This rule
 applies only to an intent that had no registration when queued. It does not
 retarget an event already captured by an older handler generation into a
-replacement registration.
+replacement registration. Runtime teardown is a terminal owner cancellation:
+it settles any still-load-pending intent before waiting for scheduler
+quiescence, rather than hanging disposal on a handler that can no longer
+register.
 Readiness waiting is distinct from an authored handler attempt and does not
 consume the event's commit-retry budget, call its final callback, or mint a
 receipt. One parked attempt performs one event-driven artifact preparation; it

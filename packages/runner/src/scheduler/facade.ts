@@ -1876,6 +1876,21 @@ export class Scheduler {
     this.diagnosisEnabled = false;
   }
 
+  /**
+   * Settle events whose exact handler registration is still pending before
+   * runtime teardown waits for scheduler quiescence. Live runtimes keep these
+   * intents parked indefinitely; teardown is the terminal owner cancellation.
+   */
+  cancelHandlerLoadPendingEvents(reason: string): void {
+    let dropped = false;
+    for (const event of [...this.eventQueue]) {
+      if (event.handlerLoadPending !== true) continue;
+      this.dropEvent(event, reason);
+      dropped = true;
+    }
+    if (dropped) this.queueExecution();
+  }
+
   // ============================================================
   // Execution orchestration
   // ============================================================

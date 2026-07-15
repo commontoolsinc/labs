@@ -1400,6 +1400,9 @@ export class Runtime {
     this.queues.clear();
     // Stop all running docs
     this.runner.stopAll();
+    this.scheduler.cancelHandlerLoadPendingEvents(
+      "Event dropped: runtime disposed before its handler registered",
+    );
 
     // Background source checks are deliberately outside the scheduler. Abort
     // and settle them before the storage sessions they may write through close.
