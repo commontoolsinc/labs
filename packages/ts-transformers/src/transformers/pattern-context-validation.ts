@@ -145,7 +145,10 @@ export class PatternContextValidationTransformer
 
       if (ts.isCallExpression(node)) {
         const reactiveContext = context.getReactiveContext(node);
+        const isNestedCallee = ts.isCallExpression(node.parent) &&
+          node.parent.expression === node;
         if (
+          !isNestedCallee &&
           reactiveContext.kind === "compute" &&
           reactiveContext.owner !== "standalone" &&
           isWishFactoryExpression(node, checker)

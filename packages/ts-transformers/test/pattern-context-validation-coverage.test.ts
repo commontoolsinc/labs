@@ -138,7 +138,16 @@ Deno.test(
   "methods on an existing Wish state do not create another Wish factory",
   async () => {
     const source = `
-      import { computed, pattern, wish } from "commonfabric";
+      import {
+        computed,
+        pattern,
+        type WishState,
+        wish,
+      } from "commonfabric";
+
+      function getFind(request: WishState<string>) {
+        return request.candidates.find;
+      }
 
       export default pattern(() => {
         const request = wish<string>({ query: "#note" });
@@ -148,7 +157,93 @@ Deno.test(
         const labels = computed(() =>
           request.candidates.map((candidate) => candidate.toUpperCase())
         );
-        return { match, labels };
+        const helperMatch = computed(() =>
+          getFind(request)((candidate) => candidate === "selected")
+        );
+        return { match, labels, helperMatch };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      0,
+    );
+  },
+);
+
+Deno.test(
+  "wish factories returned through callable helpers are rejected",
+  async () => {
+    const source = `
+      import { computed, pattern, wish } from "commonfabric";
+
+      type Callable = (options: { query: string }) => unknown;
+
+      function makeWish(): Callable {
+        return wish as Callable;
+      }
+
+      const factories = { create: wish as Callable };
+      const elementAlias = factories["create"];
+
+      function makePropertyWish(): Callable {
+        return factories.create;
+      }
+
+      function makeElementWish(): Callable {
+        return elementAlias;
+      }
+
+      export default pattern(() => {
+        const invalid = computed(() =>
+          makeWish()({ query: "#hidden" })
+        );
+        const invalidProperty = computed(() =>
+          makePropertyWish()({ query: "#hidden-property" })
+        );
+        const invalidElement = computed(() =>
+          makeElementWish()({ query: "#hidden-element" })
+        );
+        return { invalid, invalidProperty, invalidElement };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      3,
+    );
+  },
+);
+
+Deno.test(
+  "non-Wish callable shapes and recursive helpers remain allowed",
+  async () => {
+    const source = `
+      import { computed, pattern } from "commonfabric";
+
+      function first(): number {
+        return second();
+      }
+
+      function second(): number {
+        return first();
+      }
+
+      export default pattern(() => {
+        const inline = computed(() => (() => 42)());
+        const unresolved = computed(() => missingCallable());
+        const recursive = computed(() => first());
+        return { inline, unresolved, recursive };
       });
     `;
     const { diagnostics } = await validateSource(source, {

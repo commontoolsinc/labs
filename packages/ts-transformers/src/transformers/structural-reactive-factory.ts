@@ -1,7 +1,10 @@
 import ts from "typescript";
 
 import { detectCallKind } from "../ast/mod.ts";
-import { isCommonFabricSymbol } from "../core/common-fabric-symbols.ts";
+import {
+  isCommonFabricSymbol,
+  resolvesToCommonFabricSymbol,
+} from "../core/common-fabric-symbols.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { isBrandedCellType } from "./cell-type.ts";
 
@@ -155,15 +158,13 @@ function isWishStateType(
  * behavior for external helpers whose implementation is unavailable.
  */
 export function isWishFactoryExpression(
-  expression: ts.Expression,
+  expression: ts.CallExpression,
   checker: ts.TypeChecker,
   seenSymbols = new Set<ts.Symbol>(),
 ): boolean {
-  const target = unwrapExpression(expression);
-  if (!ts.isCallExpression(target)) return false;
-  if (detectCallKind(target, checker)?.kind === "wish") return true;
-  if (isWishStateType(checker.getTypeAtLocation(target))) return true;
-  return wishFactoryHelperCallee(target.expression, checker, seenSymbols);
+  if (detectCallKind(expression, checker)?.kind === "wish") return true;
+  if (isWishStateType(checker.getTypeAtLocation(expression))) return true;
+  return wishFactoryHelperCallee(expression.expression, checker, seenSymbols);
 }
 
 function wishFactoryHelperCallee(
@@ -183,8 +184,15 @@ function wishFactoryHelperCallee(
     return false;
   }
 
-  const symbol = checker.getSymbolAtLocation(target);
+  const symbol = checker.getSymbolAtLocation(target) ??
+    (ts.isElementAccessExpression(target) &&
+        ts.isStringLiteralLike(target.argumentExpression)
+      ? checker.getTypeAtLocation(target.expression).getProperty(
+        target.argumentExpression.text,
+      )
+      : undefined);
   if (!symbol) return false;
+  if (resolvesToCommonFabricSymbol(symbol, checker, "wish")) return true;
   const resolvedSymbol = getAliasedSymbol(symbol, checker);
   if (seenSymbols.has(resolvedSymbol)) return false;
   seenSymbols.add(resolvedSymbol);
@@ -198,15 +206,7 @@ function wishFactoryHelperCallee(
         seenSymbols,
       );
     }
-    if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) {
-      return false;
-    }
-    const initializer = unwrapExpression(declaration.initializer);
-    return (
-      ts.isIdentifier(initializer) ||
-      ts.isPropertyAccessExpression(initializer) ||
-      ts.isElementAccessExpression(initializer)
-    ) && wishFactoryHelperCallee(initializer, checker, seenSymbols);
+    return false;
   });
 }
 
@@ -218,6 +218,14 @@ function returnedExpressionCreatesWish(
   const target = unwrapExpression(expression);
   if (ts.isCallExpression(target)) {
     return isWishFactoryExpression(target, checker, seenSymbols);
+  }
+  if (
+    (ts.isIdentifier(target) ||
+      ts.isPropertyAccessExpression(target) ||
+      ts.isElementAccessExpression(target)) &&
+    wishFactoryHelperCallee(target, checker, seenSymbols)
+  ) {
+    return true;
   }
   if (
     ts.isPropertyAccessExpression(target) ||
@@ -294,6 +302,9 @@ function getAliasedSymbol(
 function getReturnedExpression(
   declaration: ts.Declaration,
 ): ts.Expression | undefined {
+  if (ts.isPropertyAssignment(declaration)) {
+    return declaration.initializer;
+  }
   if (
     ts.isFunctionDeclaration(declaration) ||
     ts.isMethodDeclaration(declaration) ||
@@ -328,7 +339,8 @@ function getReturnedExpression(
   if (
     ts.isIdentifier(initializer) ||
     ts.isCallExpression(initializer) ||
-    ts.isPropertyAccessExpression(initializer)
+    ts.isPropertyAccessExpression(initializer) ||
+    ts.isElementAccessExpression(initializer)
   ) {
     return initializer;
   }
