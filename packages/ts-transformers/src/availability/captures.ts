@@ -44,7 +44,7 @@ export function availabilityPathKey(path: readonly string[]): string {
   return JSON.stringify(path);
 }
 
-function parseAvailabilityCaptureExpression(
+export function parseAvailabilityCaptureExpression(
   expression: ts.Expression,
 ): ReturnType<typeof parseCaptureExpression> {
   const parsed = parseCaptureExpression(expression);
@@ -108,9 +108,21 @@ function parseExplicitAvailabilityCaptureExpression(
   boundary: ts.Expression | ts.Block,
   context: TransformationContext,
   seen: Set<ts.Symbol> = new Set(),
+  diagnosticNode: ts.Expression = expression,
 ): ReturnType<typeof parseCaptureExpression> {
+  const reportUnsupported = (): void => {
+    context.reportDiagnosticOnce({
+      type: "availability:unsupported-guard-operand",
+      message:
+        "Availability guards inside computed()/lift() can follow only stable const aliases. Use a const alias with a static property, element, or key() path.",
+      node: diagnosticNode,
+    });
+  };
   const parsed = parseAvailabilityCaptureExpression(expression);
-  if (!parsed) return undefined;
+  if (!parsed) {
+    reportUnsupported();
+    return undefined;
+  }
   const root = captureRootIdentifier(expression);
   if (!root) return parsed;
   const symbol = context.checker.getSymbolAtLocation(root);
@@ -124,12 +136,7 @@ function parseExplicitAvailabilityCaptureExpression(
     context.factory,
   );
   if (!initializer) {
-    context.reportDiagnosticOnce({
-      type: "availability:unsupported-guard-operand",
-      message:
-        "Availability guards inside computed()/lift() can follow only stable const aliases. Use a const alias with a static property, element, or key() path.",
-      node: expression,
-    });
+    reportUnsupported();
     return undefined;
   }
   seen.add(symbol);
@@ -138,6 +145,7 @@ function parseExplicitAvailabilityCaptureExpression(
     boundary,
     context,
     seen,
+    diagnosticNode,
   );
   return source
     ? {
@@ -145,7 +153,7 @@ function parseExplicitAvailabilityCaptureExpression(
       path: [...source.path, ...parsed.path],
       expression,
     }
-    : parsed;
+    : undefined;
 }
 
 function predicateTypeForCall(

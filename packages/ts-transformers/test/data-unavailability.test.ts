@@ -227,10 +227,36 @@ Deno.test("a mutable computed-local guard alias is rejected", async () => {
   `);
 
   assertEquals(
-    diagnosticTypes(diagnostics).includes(
-      "availability:unsupported-guard-operand",
-    ),
-    true,
+    diagnosticTypes(diagnostics).filter((type) =>
+      type === "availability:unsupported-guard-operand"
+    ).length,
+    1,
+  );
+});
+
+Deno.test("a dynamically selected computed-local guard alias is rejected", async () => {
+  const { diagnostics } = await validateSource(`
+    import { AsyncResult, computed, hasError, pattern } from "commonfabric";
+
+    type Repo = { name: string };
+
+    export default pattern((input: {
+      requests: AsyncResult<Repo>[];
+      index: number;
+    }) => {
+      const failed = computed(() => {
+        const selected = input.requests[input.index];
+        return hasError(selected);
+      });
+      return { failed };
+    });
+  `);
+
+  assertEquals(
+    diagnosticTypes(diagnostics).filter((type) =>
+      type === "availability:unsupported-guard-operand"
+    ).length,
+    1,
   );
 });
 
@@ -553,6 +579,45 @@ Deno.test("an availability guard does not hide a reactive value created inside a
     {
       types: { "commonfabric.d.ts": commonfabricTypes },
     },
+  );
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "compute-context:local-reactive-use",
+    ),
+    true,
+  );
+});
+
+Deno.test("an invalid observer used as a computed key does not hide another local reactive value", async () => {
+  const { diagnostics } = await validateSource(
+    `
+    import {
+      computed,
+      generateText,
+      observeAvailability,
+      pattern,
+    } from "commonfabric";
+
+    export default pattern((input: { key: string }) => {
+      const value = computed(() => {
+        const local = generateText({ prompt: "created too late" });
+        const observed = observeAvailability(input.key, "error");
+        if (local[observed as unknown as "error"]) return "used";
+        return "unused";
+      });
+      return { value };
+    });
+  `,
+    {
+      types: { "commonfabric.d.ts": commonfabricTypes },
+    },
+  );
+
+  assertEquals(
+    diagnosticTypes(diagnostics).includes(
+      "availability:observation-inside-compute",
+    ),
+    true,
   );
   assertEquals(
     diagnosticTypes(diagnostics).includes(

@@ -13,6 +13,7 @@ import {
   unwrapAvailabilityExpression,
 } from "./analysis.ts";
 import { getStableConstAliasInitializer } from "../ast/stable-const-alias.ts";
+import { parseAvailabilityCaptureExpression } from "./captures.ts";
 
 function captureRootIdentifier(
   expression: ts.Expression,
@@ -281,16 +282,21 @@ export class AvailabilityAnalysisTransformer extends HelpersOnlyTransformer {
           const rootDeclaration = rootSymbol?.valueDeclaration ??
             rootSymbol?.declarations?.[0];
           const functionBody = nearestFunctionBody(node);
+          const aliasInitializer = getStableConstAliasInitializer(
+            rootSymbol,
+            context.factory,
+          );
           if (
             rootDeclaration && functionBody &&
             nodeIsWithin(rootDeclaration, functionBody) &&
-            !getStableConstAliasInitializer(rootSymbol, context.factory)
+            (!aliasInitializer ||
+              !parseAvailabilityCaptureExpression(aliasInitializer))
           ) {
             context.reportDiagnosticOnce({
               type: "availability:unsupported-guard-operand",
               message:
                 "Availability guards inside computed()/lift() can follow only stable const aliases. Use a const alias with a static property, element, or key() path.",
-              node,
+              node: operand ?? node,
             });
           }
           const observation = operand

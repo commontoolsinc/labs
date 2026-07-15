@@ -403,23 +403,45 @@ export class PatternContextValidationTransformer
     };
     collectInvalidObservers(func.body);
 
-    const referencesInvalidObserver = (node: ts.Node): boolean => {
-      let found = false;
-      const visit = (child: ts.Node): void => {
-        if (found) return;
-        if (
-          ts.isIdentifier(child) &&
-          invalidObserverSymbols.has(
-            context.checker.getSymbolAtLocation(child) as ts.Symbol,
-          )
-        ) {
-          found = true;
-          return;
+    const isRootedInInvalidObserver = (expression: ts.Expression): boolean => {
+      let current = expression;
+      while (true) {
+        if (ts.isIdentifier(current)) {
+          return invalidObserverSymbols.has(
+            context.checker.getSymbolAtLocation(current) as ts.Symbol,
+          );
         }
-        ts.forEachChild(child, visit);
-      };
-      visit(node);
-      return found;
+        if (
+          ts.isParenthesizedExpression(current) ||
+          ts.isAsExpression(current) ||
+          ts.isTypeAssertionExpression(current) ||
+          ts.isSatisfiesExpression(current) ||
+          ts.isNonNullExpression(current)
+        ) {
+          current = current.expression;
+          continue;
+        }
+        if (
+          ts.isPropertyAccessExpression(current) ||
+          ts.isElementAccessExpression(current)
+        ) {
+          current = current.expression;
+          continue;
+        }
+        if (ts.isCallExpression(current)) {
+          const callKind = detectCallKind(current, context.checker)?.kind;
+          if (
+            (callKind === "availability-result" ||
+              callKind === "partial-result") && current.arguments[0]
+          ) {
+            current = current.arguments[0];
+          } else {
+            current = current.expression;
+          }
+          continue;
+        }
+        return false;
+      }
     };
 
     const findProblematicUse = (
@@ -442,7 +464,7 @@ export class PatternContextValidationTransformer
             context,
           )
         ) {
-          if (referencesInvalidObserver(node)) {
+          if (isRootedInInvalidObserver(node)) {
             ts.forEachChild(node, visit);
             return;
           }
@@ -461,7 +483,7 @@ export class PatternContextValidationTransformer
             context,
           )
         ) {
-          if (referencesInvalidObserver(node)) {
+          if (isRootedInInvalidObserver(node)) {
             ts.forEachChild(node, visit);
             return;
           }
