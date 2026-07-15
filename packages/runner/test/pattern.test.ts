@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  type FactoryInput,
   type Frame,
   isModule,
   isPattern,
   type JSONSchema,
   type Module,
   type Pattern,
+  type PatternFactory,
 } from "../src/builder/types.ts";
 import { lift } from "../src/builder/module.ts";
 import { pattern, popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -15,6 +15,40 @@ import { reactive } from "../src/builder/reactive.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Identity } from "@commonfabric/identity";
+
+type CauseAssignable<T> = T & {
+  for(cause: unknown, allowIfSet?: boolean): T;
+};
+type AliasValue = {
+  $alias: {
+    partialCause?: unknown;
+    path?: unknown;
+    schema?: unknown;
+  };
+};
+type PatternResultAliases = Record<string, AliasValue>;
+type ListOpInput<T> = {
+  element: T;
+  index: number;
+  array: T[];
+};
+type CollectionPatternHelpers<T> = {
+  mapWithPattern<S>(
+    op: PatternFactory<ListOpInput<T>, S>,
+    params: Record<string, unknown>,
+  ): S[];
+};
+type PatternNodeInputs = { op: Pattern };
+
+const causeAssignable = <T>(value: T): CauseAssignable<T> =>
+  value as CauseAssignable<T>;
+const patternResultAliases = (value: unknown): PatternResultAliases =>
+  value as PatternResultAliases;
+const aliasValue = (value: unknown): AliasValue => value as AliasValue;
+const collectionPattern = <T>(value: unknown): CollectionPatternHelpers<T> =>
+  value as CollectionPatternHelpers<T>;
+const patternNodeInputs = (value: unknown): PatternNodeInputs =>
+  value as PatternNodeInputs;
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -66,7 +100,7 @@ describe("pattern", () => {
     const double = lift(({ x }) => x * 2);
     const doublePattern = pattern<{ x: number }>(() => {
       const x = reactive<number>(1);
-      (x as any).for("x");
+      causeAssignable(x).for("x");
       return { double: double({ x }) };
     });
     expect(isPattern(doublePattern)).toBe(true);
@@ -120,17 +154,16 @@ describe("pattern", () => {
     );
 
     const testPattern = pattern(() => {
-      const first = (isPositive(1) as any).for("isSelected", true);
-      const second = (isPositive(2) as any).for("isSelected", true);
+      const first = causeAssignable(isPositive(1)).for("isSelected", true);
+      const second = causeAssignable(isPositive(2)).for("isSelected", true);
       return { first, second };
     });
 
-    const firstPath = (testPattern.result as any).first.$alias.path;
-    const secondPath = (testPattern.result as any).second.$alias.path;
-    expect((testPattern.result as any).first.$alias.partialCause).toBe(
-      "isSelected",
-    );
-    expect((testPattern.result as any).second.$alias.partialCause).toEqual({
+    const result = patternResultAliases(testPattern.result);
+    const firstPath = result.first.$alias.path;
+    const secondPath = result.second.$alias.path;
+    expect(result.first.$alias.partialCause).toBe("isSelected");
+    expect(result.second.$alias.partialCause).toEqual({
       name: "isSelected",
       $generated: 0,
     });
@@ -158,14 +191,14 @@ describe("pattern", () => {
     // namespace — the build throws at the `.for()` call.
     expect(() =>
       pattern(() => {
-        const sneaky = (isPositive(1) as any).for({ $generated: 0 });
+        const sneaky = causeAssignable(isPositive(1)).for({ $generated: 0 });
         return { sneaky };
       })
     ).toThrow('top-level key "$generated" is reserved');
 
     expect(() =>
       pattern(() => {
-        const sneaky = (isPositive(1) as any).for({
+        const sneaky = causeAssignable(isPositive(1)).for({
           $kind: "stream",
           $generated: 0,
         });
@@ -180,16 +213,21 @@ describe("pattern", () => {
     const testPattern = pattern(() => {
       // Nested `$generated` can't collide with the flat generated causes, and
       // only `$generated` is reserved — other `$`-keys stay legal.
-      const nested = (isPositive(1) as any).for({ outer: { $generated: 0 } });
-      const sigilish = (isPositive(2) as any).for({ $kind: "stream" });
+      const nested = causeAssignable(isPositive(1)).for({
+        outer: { $generated: 0 },
+      });
+      const sigilish = causeAssignable(isPositive(2)).for({
+        $kind: "stream",
+      });
       return { nested, sigilish };
     });
 
     // Both records flow through as partial causes unchanged.
-    expect((testPattern.result as any).nested.$alias.partialCause).toEqual({
+    const result = patternResultAliases(testPattern.result);
+    expect(result.nested.$alias.partialCause).toEqual({
       outer: { $generated: 0 },
     });
-    expect((testPattern.result as any).sigilish.$alias.partialCause).toEqual({
+    expect(result.sigilish.$alias.partialCause).toEqual({
       $kind: "stream",
     });
   });
@@ -352,15 +390,14 @@ describe("pattern", () => {
   it("pattern with map node serializes correctly", () => {
     const doubleArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
-        const doubled = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            ((({ x }: any) => {
+        const doubled = collectionPattern<{ x: number }>(values)
+          .mapWithPattern(
+            pattern<ListOpInput<{ x: number }>>(({ element }) => {
               const double = lift<number>((x) => x * 2);
-              return { doubled: double(x) };
-            }) as any)(element, index, array)
-          ),
-          {},
-        );
+              return { doubled: double(element.x) };
+            }),
+            {},
+          );
         return { doubled };
       },
     );
@@ -375,7 +412,7 @@ describe("pattern", () => {
       list: { $alias: { cell: "argument", path: ["values"] } },
     });
 
-    const inputs = doubleArray.nodes[0].inputs as unknown as { op: Pattern };
+    const inputs = patternNodeInputs(doubleArray.nodes[0].inputs);
     expect(isPattern(inputs.op)).toBe(true);
 
     const innerModule = inputs.op.nodes[0].module as Module;
@@ -489,15 +526,15 @@ describe("pattern", () => {
 
   it("pattern with mixed ifc properties has correct confidentiality in the schema of the ssn result", () => {
     const ArgumentSchema = {
-      description: "Capitalize a word",
+      description: "Capitalize an ssn",
       type: "object",
       properties: {
-        word: {
+        ssn: {
           type: "string",
-          default: "hello",
+          default: "123-45-6789",
         },
       },
-      required: ["word"],
+      required: ["ssn"],
     } as const satisfies JSONSchema;
     const ResultSchema = {
       description: "Capitalized word",
@@ -511,11 +548,9 @@ describe("pattern", () => {
       required: ["capitalized"],
     } as const satisfies JSONSchema;
 
-    // Input typed loosely (the original used the schema-first overload whose
-    // input was JSONSchema); this lift is applied below with `{ ssn }`.
     const capitalize = lift(
-      ({ word }: any) => ({
-        capitalized: word.charAt(0).toUpperCase() + word.slice(1),
+      ({ ssn }: { ssn: string }) => ({
+        capitalized: ssn.charAt(0).toUpperCase() + ssn.slice(1),
       }),
       ArgumentSchema,
       ResultSchema,
@@ -535,7 +570,7 @@ describe("pattern", () => {
           ifc: { confidentiality: ["confidential"] },
         },
       },
-      required: ["word"],
+      required: ["ssn"],
     } as const satisfies JSONSchema;
 
     const capitalizeSsnPattern = pattern<
@@ -556,7 +591,7 @@ describe("pattern", () => {
     expect(argumentSchema).toMatchObject(UserSchema);
     expect(nodes).toHaveLength(1);
     expect(nodes[0].outputs).toHaveProperty("$alias");
-    const nodeOutputAlias = (nodes[0].outputs as any)["$alias"];
+    const nodeOutputAlias = aliasValue(nodes[0].outputs).$alias;
     expect(nodeOutputAlias).toMatchObject({
       partialCause: { $generated: 0 },
       path: [],
@@ -582,7 +617,7 @@ describe("pattern", () => {
   });
 
   it("creates a pattern with function-only syntax (no schema)", () => {
-    const doublePattern = pattern((input: { x: any }) => {
+    const doublePattern = pattern((input: { x: number }) => {
       const double = lift<number>((x) => x * 2);
       return { double: double(input.x) };
     });
@@ -590,7 +625,7 @@ describe("pattern", () => {
   });
 
   it("creates nodes correctly with function-only syntax", () => {
-    const doublePattern = pattern((input: { x: any }) => {
+    const doublePattern = pattern((input: { x: number }) => {
       const double = lift<number>((x) => x * 2);
       return { double: double(double(input.x)) };
     });

@@ -1,5 +1,4 @@
 export const NO_AS_ANY_ALLOWLIST: readonly string[] = [
-  "packages/runner/test/pattern.test.ts",
   "packages/runner/test/patterns-core.test.ts",
   "packages/runner/test/patterns-dynamic.test.ts",
   "packages/runner/test/patterns-findindex.test.ts",
