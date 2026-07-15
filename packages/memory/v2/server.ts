@@ -288,6 +288,7 @@ const commitTouchesAclDoc = (
 ): boolean => {
   const id = aclDocId(space);
   return operations.some((operation) =>
+    typeof operation === "object" && operation !== null &&
     "id" in operation && operation.id === id
   );
 };
@@ -409,19 +410,16 @@ class Connection {
       this.#requestTypesById.delete(message.requestId);
     }
 
+    const actualMessage = this.server.prepareServerMessageSchemas(
+      message,
+      { compress: this.#syncSchemaTable },
+    );
     const observer = this.server.activeWireAccountingObserver();
     if (observer === undefined) {
-      this.sendRaw(
-        this.#syncSchemaTable
-          ? this.server.compressServerMessageSchemas(message)
-          : message,
-      );
+      this.sendRaw(actualMessage);
       return;
     }
 
-    const actualMessage = this.#syncSchemaTable
-      ? this.server.compressServerMessageSchemas(message)
-      : message;
     const baselinePayload = encodeMemoryBoundary(message);
     const actualPayload = encodeMemoryBoundary(actualMessage);
     const baselineAccounting = this.accountPayload(observer, baselinePayload);
@@ -1069,7 +1067,10 @@ export class Server {
     readonly options: {
       sessions?: SessionRegistry;
       store?: URL;
-      /** Shared durable request-schema CAS store owned by the host process. */
+      /**
+       * Host-owned request-schema CAS store. Toolshed injects a shared,
+       * bounded, durable store; other hosts define its lifetime and capacity.
+       */
       schemaStore?: SchemaStore;
       subscriptionRefreshDelayMs?: number;
       authorizeSessionOpen: (
@@ -1143,8 +1144,19 @@ export class Server {
   }
 
   compressServerMessageSchemas(message: ServerMessage): ServerMessage {
+    return this.prepareServerMessageSchemas(message, { compress: true });
+  }
+
+  /** Seeds outbound schemas and optionally applies sync-table compression. */
+  prepareServerMessageSchemas(
+    message: ServerMessage,
+    options: { compress: boolean },
+  ): ServerMessage {
+    const { compress } = options;
     const store = this.#schemaStore;
-    if (store === undefined) return compressServerMessageSchemas(message);
+    if (store === undefined) {
+      return compress ? compressServerMessageSchemas(message) : message;
+    }
     const schemas: JSONSchema[] = [];
     const compressed = compressServerMessageSchemas(
       message,
@@ -1152,7 +1164,7 @@ export class Server {
     );
     try {
       store.putAll(schemas);
-      return compressed;
+      return compress ? compressed : message;
     } catch (error) {
       console.warn(
         "Memory request schema CAS could not seed outbound schemas",

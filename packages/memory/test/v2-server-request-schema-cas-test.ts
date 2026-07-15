@@ -9,6 +9,8 @@ import {
   MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
+  type WatchAddResult,
+  type WireMemoryProtocolFlags,
 } from "../v2.ts";
 import { compressRequestSchemas } from "../v2/request-schema-cas.ts";
 import { openSchemaStore, type SchemaStore } from "../v2/schema-store.ts";
@@ -50,13 +52,16 @@ const createServer = (
     sessionOpenAuth: { audience },
   });
 
-const open = async (server: Server) => {
+const open = async (
+  server: Server,
+  flags: WireMemoryProtocolFlags = getMemoryProtocolFlags(),
+) => {
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   await connection.receive(encodeMemoryBoundary({
     type: "hello",
     protocol: MEMORY_PROTOCOL,
-    flags: getMemoryProtocolFlags(),
+    flags,
   }));
   const hello = shift(messages) as HelloOkMessage;
   assertEquals(hello.type, "hello.ok");
@@ -165,6 +170,61 @@ Deno.test("outbound sync compression records schema evidence in the shared store
   }
 });
 
+Deno.test("connections seed outbound schemas without sync compression", async () => {
+  const run = async (maxEntries?: number) => {
+    const store = await openSchemaStore({
+      url: new URL("memory:"),
+      ...(maxEntries === undefined ? {} : { maxEntries }),
+    });
+    const server = createServer(store);
+    try {
+      await server.writeDocument(space, "of:root", {
+        "/": { "link@1": { id: "of:child", path: [], schema } },
+      });
+      const flags = {
+        ...getMemoryProtocolFlags(),
+        syncSchemaTableV2: false,
+      };
+      const { connection, messages, sessionId } = await open(server, flags);
+
+      await connection.receive(encodeMemoryBoundary({
+        type: "session.watch.add",
+        requestId: "watch",
+        space,
+        sessionId,
+        watches: [{
+          id: "root",
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:root",
+              selector: { path: [], schema: false },
+            }],
+          },
+        }],
+      }));
+      const watched = response<WatchAddResult>(shift(messages));
+      assertExists(watched.ok);
+      assertEquals(Object.hasOwn(watched.ok.sync, "schemaTable"), false);
+      assertEquals(store.has(hash), maxEntries === undefined);
+
+      if (maxEntries === undefined) {
+        const warm = compressRequestSchemas(query(sessionId), {
+          isKnownSchemaHash: (candidate) => candidate === hash,
+        });
+        await connection.receive(encodeMemoryBoundary(warm));
+        assertEquals(response(shift(messages)).error, undefined);
+      }
+    } finally {
+      await server.close();
+      store.close();
+    }
+  };
+
+  await run();
+  await run(0);
+});
+
 Deno.test("outbound sync compression still succeeds when schema seeding is full", async () => {
   const store = await openSchemaStore({
     url: new URL("memory:"),
@@ -233,6 +293,22 @@ Deno.test("server returns protocol errors for malformed request CAS envelopes", 
         space,
         sessionId,
         commit: {},
+        schemaDefinitions: { [hash]: schema },
+      },
+      {
+        type: "transact",
+        requestId: "null-operation",
+        space,
+        sessionId,
+        commit: { operations: [null] },
+        schemaDefinitions: { [hash]: schema },
+      },
+      {
+        type: "transact",
+        requestId: "primitive-operation",
+        space,
+        sessionId,
+        commit: { operations: ["invalid"] },
         schemaDefinitions: { [hash]: schema },
       },
     ];
