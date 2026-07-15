@@ -2425,6 +2425,13 @@ describe("runner utils", () => {
       expect(Object.hasOwn(arrayValue, 2)).toBe(true);
       expect(arrayValue[2]).toBeUndefined();
 
+      const unionArrayValue = mergeSchemaDefaults(
+        [{}],
+        undefined,
+        { type: ["array", "undefined"], items: itemSchema },
+      );
+      expect(unionArrayValue).toEqual([{ attempts: 1 }]);
+
       const dynamicValue = mergeSchemaDefaults(
         { extra: {}, xPattern: {} },
         undefined,
