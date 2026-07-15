@@ -1270,6 +1270,26 @@ describe("piece schema compatibility", () => {
         argumentWith({ enum: [,] } as unknown as JSONSchema),
         argumentWith({ type: "number" }),
       ],
+      [
+        argumentWith({
+          type: "number",
+          asCell: ["bogus"],
+        } as unknown as JSONSchema),
+        argumentWith({ type: "number" }),
+      ],
+      [
+        argumentWith({
+          type: "number",
+          asCell: [{ kind: "cell", scope: "bogus" }],
+        } as unknown as JSONSchema),
+        argumentWith({ type: "number" }),
+      ],
+      [
+        resultWith(
+          { type: "undefined", scope: "bogus" } as unknown as JSONSchema,
+        ),
+        resultWith({ type: "undefined" }),
+      ],
     ];
     for (const [previous, candidate] of malformedCases) {
       expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))

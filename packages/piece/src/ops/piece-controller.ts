@@ -3,10 +3,15 @@ import {
   type CellPath,
   extractDefaultValues,
   getPatternIdentityRef,
+  getValueAtPath,
+  isLink,
+  isStream,
   mergeSchemaDefaults,
   NAME,
+  parseLinkOrThrow,
   type Pattern,
   resolveCellPath,
+  resolveLink,
   type RuntimeProgram,
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
@@ -23,6 +28,76 @@ interface PieceCellIo {
 }
 
 type PiecePropIoType = "result" | "input";
+
+/** Copy only a materialized value's path spine and replace its leaf. */
+function replaceMaterializedValueAtPath(
+  current: unknown,
+  path: readonly (string | number)[],
+  value: unknown,
+): unknown {
+  if (path.length === 0) return value;
+
+  const [segment, ...remaining] = path;
+  const prototype = current !== null && typeof current === "object"
+    ? Object.getPrototypeOf(current)
+    : undefined;
+  const clone: Record<PropertyKey, unknown> | unknown[] = Array.isArray(current)
+    ? current.slice()
+    : prototype === Object.prototype || prototype === null
+    ? Object.assign(Object.create(prototype), current)
+    : typeof segment === "number"
+    ? []
+    : {};
+  const child = current !== null && typeof current === "object"
+    ? (current as Record<PropertyKey, unknown>)[segment]
+    : undefined;
+  Object.defineProperty(clone, segment, {
+    value: replaceMaterializedValueAtPath(child, remaining, value),
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+  return clone;
+}
+
+interface SuppliedLink {
+  path: (string | number)[];
+  value: unknown;
+}
+
+/**
+ * Record raw links supplied anywhere in a Piece API value. Default merging
+ * operates on their transaction-local materializations; the exact envelopes
+ * are restored before the final durable write.
+ */
+function suppliedLinks(
+  value: unknown,
+  path: (string | number)[] = [],
+  seen = new WeakSet<object>(),
+): SuppliedLink[] {
+  if (isLink(value)) return [{ path, value }];
+  if (value === null || typeof value !== "object" || seen.has(value)) return [];
+
+  const prototype = Object.getPrototypeOf(value);
+  if (
+    !Array.isArray(value) && prototype !== Object.prototype &&
+    prototype !== null
+  ) {
+    return [];
+  }
+  seen.add(value);
+
+  const links: SuppliedLink[] = [];
+  for (const key of Object.keys(value)) {
+    links.push(...suppliedLinks(
+      (value as Record<string, unknown>)[key],
+      [...path, key],
+      seen,
+    ));
+  }
+  seen.delete(value);
+  return links;
+}
 
 class PiecePropIo implements PieceCellIo {
   #cc: PieceController;
@@ -63,27 +138,124 @@ class PiecePropIo implements PieceCellIo {
         txCell = txCell.key(segment as keyof unknown) as Cell<unknown>;
       }
 
-      const schema = targetCell.getAsNormalizedFullLink().schema ?? true;
-      const nextValue = (path?.length ?? 0) === 0 && this.#type === "input"
-        ? mergeSchemaDefaults<Record<string, unknown>>(
-          value as Record<string, unknown> | undefined,
-          extractDefaultValues(schema),
-          schema,
-        )
-        : value;
-      txCell.set(nextValue);
+      const writePath = path ?? [];
+      const setTerminalValue = (nextValue: unknown) => {
+        if (
+          nextValue === undefined && writePath.length > 0 &&
+          !isStream(txCell)
+        ) {
+          // Cell.set() treats undefined as a missing child at a path. Piece IO
+          // preserves Fabric's first-class explicit undefined by writing the
+          // raw slot instead. Streams are the exception: undefined is an event
+          // payload and must go through Cell.set(). Inspect the actual Cell so
+          // compound and referenced stream schemas behave identically.
+          const rawTarget = resolveLink(
+            manager.runtime,
+            tx,
+            txCell.getAsNormalizedFullLink(),
+            "writeRedirect",
+          );
+          manager.runtime.getCellFromLink(rawTarget, undefined, tx)
+            .setRawUntyped(undefined);
+        } else {
+          txCell.set(nextValue);
+        }
+      };
 
       if (this.#type === "input") {
-        const materialized = targetCell.asSchema(undefined).withTx(tx).get();
+        const schema = targetCell.getAsNormalizedFullLink().schema ?? true;
+        const writeSchema = writePath.length === 0
+          ? schema
+          : manager.runtime.cfc.schemaAtPath(
+            schema,
+            writePath.map((segment) => String(segment)),
+          );
+        const linksToRestore = suppliedLinks(value);
+        let materializedValue = value;
+        for (const suppliedLink of linksToRestore) {
+          let linkBase = txCell;
+          for (const segment of suppliedLink.path) {
+            linkBase = linkBase.key(segment as keyof unknown) as Cell<unknown>;
+          }
+          const link = parseLinkOrThrow(suppliedLink.value, linkBase);
+          const linkValue = manager.runtime.getCellFromLink(
+            link,
+            undefined,
+            tx,
+          ).get();
+          materializedValue = replaceMaterializedValueAtPath(
+            materializedValue,
+            suppliedLink.path,
+            linkValue,
+          );
+        }
+        const stagedRoot = replaceMaterializedValueAtPath(
+          targetCell.asSchema(undefined).withTx(tx).get(),
+          writePath,
+          materializedValue,
+        );
+        const mergedRoot = mergeSchemaDefaults(
+          stagedRoot,
+          extractDefaultValues(schema),
+          schema,
+          {
+            // A Piece API write is present even when its value is the Fabric
+            // extension `undefined`; do not replace it with a default.
+            valuePresent: true,
+            mergeMaterializedLinks: true,
+            acceptOpaqueValue: schemaAcceptsOpaqueCellValue,
+          },
+        );
+        let nextValue = getValueAtPath(mergedRoot, writePath);
+        if (writePath.length > 0) {
+          nextValue = mergeSchemaDefaults(
+            nextValue,
+            extractDefaultValues(writeSchema),
+            writeSchema,
+            {
+              valuePresent: true,
+              mergeMaterializedLinks: true,
+              acceptOpaqueValue: schemaAcceptsOpaqueCellValue,
+              acceptUnionCandidate: (candidate) =>
+                validateSchemaValue(
+                  schema,
+                  replaceMaterializedValueAtPath(
+                    stagedRoot,
+                    writePath,
+                    candidate,
+                  ),
+                  schema,
+                  { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+                ) === undefined,
+            },
+          );
+        }
+        const validationRoot = writePath.length === 0
+          ? nextValue
+          : replaceMaterializedValueAtPath(
+            stagedRoot,
+            writePath,
+            nextValue,
+          );
         const issue = validateSchemaValue(
           schema,
-          materialized,
+          validationRoot,
           schema,
           { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
         );
         if (issue !== undefined) {
           throw new Error(`updated input does not match its schema: ${issue}`);
         }
+        for (const suppliedLink of linksToRestore) {
+          nextValue = replaceMaterializedValueAtPath(
+            nextValue,
+            suppliedLink.path,
+            suppliedLink.value,
+          );
+        }
+        setTerminalValue(nextValue);
+      } else {
+        setTerminalValue(value);
       }
     });
     if (error) {

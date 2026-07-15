@@ -1530,6 +1530,58 @@ describe("setup/start", () => {
     }
   });
 
+  it("runSynced rethrows retry exhaustion when identity is required", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced rethrows precondition retry exhaustion",
+    );
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const failure = new Error("precondition retry exhausted");
+    runtime.editWithRetry = (() => Promise.resolve({ error: failure })) as any;
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell,
+        trustExecutable(runtime, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+        },
+      )).rejects.toThrow("precondition retry exhausted");
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("runSynced returns the untyped cell when the pattern has no result schema", async () => {
+    const pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    } as unknown as Pattern;
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced pattern without result schema",
+    );
+
+    const result = await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, pattern),
+      {},
+    );
+
+    expect(result).toBe(resultCell);
+  });
+
   it("setup rethrows callback failures from editWithRetry", async () => {
     const pattern: Pattern = {
       argumentSchema: {
@@ -1879,7 +1931,74 @@ describe("runner utils", () => {
     expect(schemaAcceptsOpaqueCellValue(stream, { asCell: ["cell"] })).toBe(
       false,
     );
+    expect(schemaAcceptsOpaqueCellValue(cell, {
+      asCell: [{ kind: "cell", scope: undefined }],
+      scope: undefined,
+    })).toBe(true);
     expect(schemaAcceptsOpaqueCellValue({}, { asCell: ["cell"] })).toBe(false);
+    const nonEnumerableKind = {};
+    Object.defineProperty(nonEnumerableKind, "kind", { value: "cell" });
+    const nonEnumerableScope = { kind: "cell" };
+    Object.defineProperty(nonEnumerableScope, "scope", { value: "session" });
+    const inheritedAsCell = Object.assign(
+      Object.create({ asCell: ["cell"] }),
+      { type: "number" },
+    );
+    const nonEnumerableAsCell = { type: "number" };
+    Object.defineProperty(nonEnumerableAsCell, "asCell", {
+      value: ["cell"],
+    });
+    const inheritedSchemaScope = Object.assign(
+      Object.create({ scope: "session" }),
+      { type: "number", asCell: ["cell"] },
+    );
+    const nonEnumerableSchemaScope = { type: "number", asCell: ["cell"] };
+    Object.defineProperty(nonEnumerableSchemaScope, "scope", {
+      value: "session",
+    });
+    const observedAccessorKinds: string[] = [];
+    const accessorAsCell = ["stream"];
+    Object.defineProperty(accessorAsCell, 0, {
+      enumerable: true,
+      get: () => {
+        const kind = observedAccessorKinds.length === 0 ? "stream" : "cell";
+        observedAccessorKinds.push(kind);
+        return kind;
+      },
+    });
+    const malformedWrappers = [
+      { type: "number", asCell: [] },
+      { type: "number", asCell: "cell" },
+      { type: "number", asCell: ["bogus"] },
+      { type: "number", asCell: ["cell", "bogus"] },
+      {
+        type: "number",
+        asCell: [{ kind: "cell" }, { kind: "bogus" }],
+      },
+      { type: "number", asCell: [{ kind: "cell", scope: "bogus" }] },
+      { type: "number", asCell: [Object.create({ kind: "cell" })] },
+      {
+        type: "number",
+        asCell: [
+          Object.assign(Object.create({ scope: "session" }), { kind: "cell" }),
+        ],
+      },
+      { type: "number", asCell: [nonEnumerableKind] },
+      { type: "number", asCell: [nonEnumerableScope] },
+      inheritedAsCell,
+      nonEnumerableAsCell,
+      inheritedSchemaScope,
+      nonEnumerableSchemaScope,
+      { type: "number", asCell: accessorAsCell },
+      { type: "number", asCell: ["cell"], scope: "bogus" },
+    ] as unknown as JSONSchema[];
+    for (const schema of malformedWrappers) {
+      expect(schemaAcceptsOpaqueCellValue(cell, schema)).toBe(false);
+      expect(validateSchemaValue(schema, cell, schema, {
+        acceptOpaqueValue: schemaAcceptsOpaqueCellValue,
+      })).toBeDefined();
+    }
+    expect(observedAccessorKinds).toEqual([]);
   });
 
   describe("extractDefaultValues", () => {
@@ -2236,6 +2355,71 @@ describe("runner utils", () => {
 
       expect(value).toEqual({ x: 1 });
       expect(validateSchemaValue(schema, value)).toBeUndefined();
+    });
+
+    it("merges shared base defaults before selecting a union branch", () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          shared: { type: "number", default: 1 },
+        },
+        anyOf: [
+          {
+            type: "object",
+            properties: { kind: { const: "a" } },
+            required: ["kind"],
+          },
+          {
+            type: "object",
+            properties: { kind: { const: "b" } },
+            required: ["kind"],
+          },
+        ],
+      };
+      const defaults = extractDefaultValues(schema);
+
+      expect(mergeSchemaDefaults({ kind: "a" }, defaults, schema)).toEqual({
+        kind: "a",
+        shared: 1,
+      });
+
+      const invalid = { kind: "other" };
+      expect(mergeSchemaDefaults(invalid, defaults, schema)).toBe(invalid);
+    });
+
+    it("uses full-context acceptance to disambiguate union defaults", () => {
+      const schema: JSONSchema = {
+        anyOf: [
+          {
+            type: "object",
+            properties: { attempts: { type: "number", default: 1 } },
+            required: ["attempts"],
+          },
+          {
+            type: "object",
+            properties: { retries: { type: "number", default: 2 } },
+            required: ["retries"],
+          },
+        ],
+      };
+
+      expect(mergeSchemaDefaults({}, undefined, schema, {
+        acceptUnionCandidate: (candidate) =>
+          Object.hasOwn(candidate as object, "attempts"),
+      })).toEqual({ attempts: 1 });
+    });
+
+    it("compares identical unsupported union candidates defensively", () => {
+      const marker = () => "opaque";
+      const value = { marker };
+      const schema: JSONSchema = {
+        anyOf: [
+          { type: "object" },
+          { type: "object" },
+        ],
+      };
+
+      expect(mergeSchemaDefaults(value, undefined, schema)).toBe(value);
     });
 
     it("keeps a non-object type-union default while hydrating present objects", () => {

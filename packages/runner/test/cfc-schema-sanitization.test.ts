@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { CELL_KINDS } from "../src/scope.ts";
 import {
   cfcObjectSchemaIsClosed,
   INJECTION_SAFE_ATOM,
@@ -499,9 +500,21 @@ describe("cfc schema sanitization", () => {
     const sparseEnum = [,];
     const sparseAnyOf = [, { type: "number" }];
     const sparsePrefixItems = [, { type: "number" }];
+    const accessorType = ["number"];
+    Object.defineProperty(accessorType, 0, {
+      enumerable: true,
+      get: () => "number",
+    });
+    const nonEnumerableRequired = ["value"];
+    Object.defineProperty(nonEnumerableRequired, 0, {
+      value: "value",
+      enumerable: false,
+    });
     const malformed = [
       { type: sparseType },
+      { type: accessorType },
       { required: sparseRequired },
+      { required: nonEnumerableRequired },
       { dependentRequired: { value: sparseDependency } },
       { enum: sparseEnum },
       { anyOf: sparseAnyOf },
@@ -518,6 +531,151 @@ describe("cfc schema sanitization", () => {
       type: "array",
       items: { type: "number" },
     }, sparseValue)).toBeUndefined();
+  });
+
+  it("validates Common Fabric cell-wrapper extensions", () => {
+    const valid: JSONSchema = {
+      type: "undefined",
+      default: undefined,
+      scope: "session",
+      anyOf: [
+        ...CELL_KINDS.map((kind) => ({ asCell: [kind] })),
+        { asCell: [{ kind: "cell", scope: "any" }] },
+        { asCell: [{ kind: "cell", scope: undefined }] },
+      ],
+    };
+    expect(validateSchemaDefinition(valid)).toBeUndefined();
+
+    const sparseAsCell = [, "cell"];
+    const accessorAsCell = ["cell"];
+    Object.defineProperty(accessorAsCell, 0, {
+      enumerable: true,
+      get: () => "cell",
+    });
+    const inheritedKind = Object.create({ kind: "cell" });
+    const inheritedScope = Object.assign(Object.create({ scope: "session" }), {
+      kind: "cell",
+    });
+    const inheritedAsCell = Object.create({ asCell: ["cell"] });
+    const inheritedSchemaScope = Object.create({ scope: "session" });
+    const nonEnumerableKind = {};
+    Object.defineProperty(nonEnumerableKind, "kind", { value: "cell" });
+    const nonEnumerableScope = { kind: "cell" };
+    Object.defineProperty(nonEnumerableScope, "scope", { value: "session" });
+    const nonEnumerableAsCell = {};
+    Object.defineProperty(nonEnumerableAsCell, "asCell", {
+      value: ["cell"],
+    });
+    const nonEnumerableSchemaScope = {};
+    Object.defineProperty(nonEnumerableSchemaScope, "scope", {
+      value: "session",
+    });
+    const malformed = [
+      { asCell: [] },
+      { asCell: sparseAsCell },
+      { asCell: accessorAsCell },
+      { asCell: ["bogus"] },
+      { asCell: [42] },
+      { asCell: [{ kind: "bogus" }] },
+      { asCell: [{ kind: "cell", scope: "bogus" }] },
+      { asCell: [inheritedKind] },
+      { asCell: [inheritedScope] },
+      { asCell: [nonEnumerableKind] },
+      { asCell: [nonEnumerableScope] },
+      inheritedAsCell,
+      nonEnumerableAsCell,
+      { scope: "bogus" },
+      inheritedSchemaScope,
+      nonEnumerableSchemaScope,
+    ] as unknown as JSONSchema[];
+    for (const schema of malformed) {
+      expect(validateSchemaDefinition(schema)).toBeDefined();
+    }
+  });
+
+  it("reports malformed strict keyword shapes at their exact child", () => {
+    const malformed: [JSONSchema, string][] = [
+      [{ type: ["number", 1] } as unknown as JSONSchema, "non-string"],
+      [{ type: ["number", "number"] }, "duplicate"],
+      [{ minLength: -1 }, "non-negative integer"],
+      [{ pattern: 1 } as unknown as JSONSchema, "pattern must be a string"],
+      [{ properties: [] } as unknown as JSONSchema, "object of schemas"],
+      [
+        { dependentRequired: [] } as unknown as JSONSchema,
+        "dependentRequired: must be an object",
+      ],
+      [
+        { uniqueItems: "yes" } as unknown as JSONSchema,
+        "uniqueItems: must be a boolean",
+      ],
+      [{ enum: [1, 1] }, "enum: values must be unique"],
+      [
+        { anyOf: [{ type: ["number", "number"] }] },
+        "anyOf[0]",
+      ],
+      [
+        { prefixItems: [{ type: ["number", "number"] }] },
+        "prefixItems[0]",
+      ],
+      [
+        { items: { type: ["number", "number"] } },
+        "items",
+      ],
+    ];
+    for (const [schema, message] of malformed) {
+      expect(validateSchemaDefinition(schema)).toContain(message);
+    }
+  });
+
+  it("fails closed for cyclic values and indeterminate schema branches", () => {
+    const recursive: JSONSchema = {
+      $ref: "#/$defs/Node",
+      $defs: {
+        Node: {
+          type: "object",
+          properties: { next: { $ref: "#/$defs/Node" } },
+        },
+      },
+    };
+    const cyclic: { next?: unknown } = {};
+    cyclic.next = cyclic;
+    expect(validateSchemaValue(recursive, cyclic)).toContain(
+      "recursive schema",
+    );
+
+    expect(validateSchemaValue([] as unknown as JSONSchema, 1)).toContain(
+      "object or boolean",
+    );
+    expect(validateSchemaValue({ $ref: "#/$defs/Missing" }, 1)).toContain(
+      "cannot resolve schema reference",
+    );
+    expect(validateSchemaValue({
+      anyOf: [
+        { type: "number" },
+        { $ref: "#/$defs/Missing" },
+      ],
+    }, "not-a-number")).toContain("cannot resolve schema reference");
+  });
+
+  it("skips sparse value holes in every collection validation mode", () => {
+    const sparse = [1, , 3];
+    expect(validateAgainstSchema({ items: { type: "number" } }, sparse))
+      .toBeUndefined();
+    expect(validateSchemaValue({ uniqueItems: true }, [1, , 1])).toContain(
+      "not unique",
+    );
+    expect(validateSchemaValue({ contains: { type: "number" } }, [1, ,]))
+      .toBeUndefined();
+
+    const sameFunction = () => 1;
+    expect(validateSchemaValue({ uniqueItems: true }, [
+      sameFunction,
+      sameFunction,
+    ])).toContain("not unique");
+    expect(validateSchemaValue({ uniqueItems: true }, [
+      () => 1,
+      () => 1,
+    ])).toBeUndefined();
   });
 
   it("reports every strict migration constraint it cannot satisfy", () => {

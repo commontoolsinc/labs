@@ -10,6 +10,11 @@ import {
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model/schema-hash";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
+import {
+  hasOwnEnumerableDataProperty,
+  isCellKind,
+  isSchemaScope,
+} from "../scope.ts";
 import { uniqueCfcAtoms } from "./observation.ts";
 import {
   cfcSchemaChildRoot,
@@ -529,7 +534,7 @@ const SUPPORTED_SCHEMA_FORMATS = new Set([
 
 const isDenseArray = (value: readonly unknown[]): boolean => {
   for (let index = 0; index < value.length; index++) {
-    if (!Object.hasOwn(value, index)) return false;
+    if (!hasOwnEnumerableDataProperty(value, index)) return false;
   }
   return true;
 };
@@ -716,6 +721,54 @@ const validateSchemaDefinitionInternal = (
     const typeIssue = schemaTypeDefinitionIssue(schema.type);
     if (typeIssue !== undefined) return `${path}: ${typeIssue}`;
 
+    if (
+      "scope" in schema &&
+      !hasOwnEnumerableDataProperty(schema, "scope")
+    ) {
+      return `${path}.scope: must be an own enumerable data property`;
+    }
+    if (schema.scope !== undefined && !isSchemaScope(schema.scope)) {
+      return `${path}.scope: must be space, user, session, or any`;
+    }
+    if (
+      "asCell" in schema &&
+      !hasOwnEnumerableDataProperty(schema, "asCell")
+    ) {
+      return `${path}.asCell: must be an own enumerable data property`;
+    }
+    if (schema.asCell !== undefined) {
+      if (
+        !Array.isArray(schema.asCell) || schema.asCell.length === 0 ||
+        !isDenseArray(schema.asCell)
+      ) {
+        return `${path}.asCell: must be a non-empty dense array`;
+      }
+      for (let index = 0; index < schema.asCell.length; index++) {
+        const entry = schema.asCell[index] as unknown;
+        if (isCellKind(entry)) continue;
+        if (!isRecord(entry) || Array.isArray(entry)) {
+          return `${path}.asCell[${index}]: must be a cell kind or descriptor`;
+        }
+        if (!hasOwnEnumerableDataProperty(entry, "kind")) {
+          return `${path}.asCell[${index}].kind: must be an own enumerable data property`;
+        }
+        if (!isCellKind(entry.kind)) {
+          return `${path}.asCell[${index}].kind: unsupported cell kind ${
+            String(entry.kind)
+          }`;
+        }
+        if (
+          "scope" in entry &&
+          !hasOwnEnumerableDataProperty(entry, "scope")
+        ) {
+          return `${path}.asCell[${index}].scope: must be an own enumerable data property`;
+        }
+        if (entry.scope !== undefined && !isSchemaScope(entry.scope)) {
+          return `${path}.asCell[${index}].scope: must be space, user, session, or any`;
+        }
+      }
+    }
+
     for (
       const key of [
         "properties",
@@ -746,7 +799,10 @@ const validateSchemaDefinitionInternal = (
       }
     }
     if (schema.dependentRequired !== undefined) {
-      if (!isRecord(schema.dependentRequired)) {
+      if (
+        !isRecord(schema.dependentRequired) ||
+        Array.isArray(schema.dependentRequired)
+      ) {
         return `${path}.dependentRequired: must be an object`;
       }
       for (

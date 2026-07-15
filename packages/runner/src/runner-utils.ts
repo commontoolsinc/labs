@@ -25,6 +25,12 @@ import {
   resolveCfcSchemaRefs,
 } from "./cfc/schema-refs.ts";
 import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
+import {
+  hasOwnEnumerableDataProperty,
+  isAsCellEntryArray,
+  isCellKind,
+  isSchemaScope,
+} from "./scope.ts";
 
 const schemaDefaultValueEqual = (left: unknown, right: unknown): boolean => {
   try {
@@ -45,10 +51,23 @@ export const schemaAcceptsOpaqueCellValue = (
   schema: JSONSchema,
 ): boolean => {
   if (!isCell(value)) return false;
+  if (
+    typeof schema !== "object" || schema === null ||
+    !hasOwnEnumerableDataProperty(schema, "asCell") ||
+    !isAsCellEntryArray(schema.asCell)
+  ) {
+    return false;
+  }
+  if ("scope" in schema) {
+    if (!hasOwnEnumerableDataProperty(schema, "scope")) return false;
+    if (schema.scope !== undefined && !isSchemaScope(schema.scope)) {
+      return false;
+    }
+  }
   const expectedKind = ContextualFlowControl.getAsCellKind(
-    ContextualFlowControl.getAsCellValues(schema).at(0),
+    schema.asCell.at(0),
   );
-  return expectedKind !== undefined &&
+  return isCellKind(expectedKind) &&
     (expectedKind === "stream") === isStream(value);
 };
 
@@ -378,15 +397,27 @@ export function mergeSchemaDefaults<T>(
   value: T | undefined,
   defaults: unknown,
   schema: JSONSchema,
-  options: { mergeMaterializedLinks?: boolean } = {},
+  options: {
+    mergeMaterializedLinks?: boolean;
+    valuePresent?: boolean;
+    acceptOpaqueValue?: (
+      value: unknown,
+      schema: JSONSchema,
+      fullSchema: JSONSchema,
+    ) => boolean;
+    /** Disambiguate otherwise-valid top-level union default candidates. */
+    acceptUnionCandidate?: (candidate: unknown) => boolean;
+  } = {},
 ): T {
   return mergeSchemaDefaultsInternal(
     value,
     defaults,
     schema,
     schema,
-    value !== undefined,
+    options.valuePresent ?? value !== undefined,
     options.mergeMaterializedLinks === true,
+    options.acceptOpaqueValue,
+    options.acceptUnionCandidate,
   ) as T;
 }
 
@@ -397,6 +428,14 @@ function mergeSchemaDefaultsInternal(
   fullSchema: JSONSchema,
   valuePresent: boolean,
   mergeMaterializedLinks: boolean,
+  acceptOpaqueValue:
+    | ((
+      value: unknown,
+      schema: JSONSchema,
+      fullSchema: JSONSchema,
+    ) => boolean)
+    | undefined,
+  acceptUnionCandidate: ((candidate: unknown) => boolean) | undefined,
 ): unknown {
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const resolved = typeof schema === "object" && schema !== null && schema.$ref
@@ -432,6 +471,8 @@ function mergeSchemaDefaultsInternal(
           resolvedRoot,
           true,
           mergeMaterializedLinks,
+          acceptOpaqueValue,
+          undefined,
         );
       }
       const branchDefaults = extractDefaultValues(branch, resolvedRoot);
@@ -443,22 +484,31 @@ function mergeSchemaDefaultsInternal(
           resolvedRoot,
           true,
           mergeMaterializedLinks,
+          acceptOpaqueValue,
+          undefined,
         );
       }
       if (
-        validateSchemaValue(branch, candidate, resolvedRoot) === undefined &&
-        validateSchemaValue(resolved, candidate, resolvedRoot) === undefined
+        validateSchemaValue(branch, candidate, resolvedRoot, {
+            acceptOpaqueValue,
+          }) === undefined &&
+        validateSchemaValue(resolved, candidate, resolvedRoot, {
+            acceptOpaqueValue,
+          }) === undefined
       ) {
         candidates.push(candidate);
       }
     }
+    const acceptedCandidates = acceptUnionCandidate === undefined
+      ? candidates
+      : candidates.filter(acceptUnionCandidate);
     if (
-      candidates.length > 0 &&
-      candidates.every((candidate) =>
-        schemaDefaultValueEqual(candidate, candidates[0])
+      acceptedCandidates.length > 0 &&
+      acceptedCandidates.every((candidate) =>
+        schemaDefaultValueEqual(candidate, acceptedCandidates[0])
       )
     ) {
-      return candidates[0];
+      return acceptedCandidates[0];
     }
     return value;
   }
@@ -480,6 +530,8 @@ function mergeSchemaDefaultsInternal(
       resolvedRoot,
       true,
       mergeMaterializedLinks,
+      acceptOpaqueValue,
+      undefined,
     );
   }
 
@@ -526,10 +578,14 @@ function mergeSchemaDefaultsInternal(
       resolvedRoot,
       hasExistingValue,
       mergeMaterializedLinks,
+      acceptOpaqueValue,
+      undefined,
     );
     if (
       hasExistingValue || required.has(key) ||
-      validateSchemaValue(propertySchema, merged, resolvedRoot) === undefined
+      validateSchemaValue(propertySchema, merged, resolvedRoot, {
+          acceptOpaqueValue,
+        }) === undefined
     ) {
       Object.defineProperty(result, key, {
         value: merged,

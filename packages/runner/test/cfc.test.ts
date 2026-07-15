@@ -152,6 +152,18 @@ describe("ContextualFlowControl.schemaAtPath", () => {
       .toThrow(/Failed to resolve \$ref/);
   });
 
+  it("falls back when a type-array classifier contains an unresolved union", () => {
+    const cfc = new ContextualFlowControl();
+    const schema = deepFreeze({
+      type: ["object", "undefined"],
+      anyOf: [{ $ref: "#/$defs/Missing" }],
+      $defs: { Present: { type: "string" } },
+    } as JSONSchemaObj);
+
+    expect(() => cfc.schemaAtPath(schema, ["value"]))
+      .toThrow(/Failed to resolve \$ref/);
+  });
+
   it("considers a schema with only $defs true'", () => {
     const schema: JSONSchema = {
       $defs: { Test: { type: "array", items: { type: "string" } } },
@@ -606,6 +618,18 @@ describe("CFC schema reference discovery", () => {
 });
 
 describe("schemaHasIfc", () => {
+  it("honors a caller-provided visited set", () => {
+    const secret: JSONSchema = {
+      type: "string",
+      ifc: { confidentiality: [cfcAtom.resource("AlreadySeen")] },
+    };
+    const schema: JSONSchema = { allOf: [secret] };
+
+    expect(schemaHasIfc(schema, new Set<JSONSchema>([secret]), schema)).toBe(
+      false,
+    );
+  });
+
   it("resolves nested $defs while scanning child schemas", () => {
     const schema: JSONSchema = {
       type: "object",

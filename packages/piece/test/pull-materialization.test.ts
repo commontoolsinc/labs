@@ -382,7 +382,446 @@ describe("piece pull materialization", () => {
     await expect(controller.input.set("invalid", ["input"])).rejects.toThrow(
       /updated input does not match its schema/,
     );
+    await expect(controller.input.set(new Date(), ["input"])).rejects.toThrow(
+      /updated input does not match its schema/,
+    );
     expect(await controller.input.get()).toEqual({ input: 7 });
+
+    await controller.result.set(99, ["output"]);
+    expect(await controller.result.get()).toEqual({ output: 99 });
+  });
+
+  it("validates a union stream payload before sending exactly one event", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          slot: { $ref: "#/$defs/Event" },
+        },
+        required: ["slot"],
+        $defs: {
+          Event: {
+            anyOf: [
+              { type: "number", asCell: ["stream"] },
+              { type: "undefined", asCell: ["stream"] },
+            ],
+          },
+        },
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { slot: { $stream: true } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const inputCell = await controller.input.getCell();
+    const stream = inputCell.key("slot");
+    const events: unknown[] = [];
+    const removeHandler = runtime.scheduler.addEventHandler((_tx, event) => {
+      events.push(event);
+    }, stream.getAsNormalizedFullLink());
+
+    try {
+      await controller.input.set(5, ["slot"]);
+      await runtime.idle();
+      expect(events).toEqual([5]);
+
+      await expect(controller.input.set("bad", ["slot"])).rejects.toThrow(
+        /does not match/,
+      );
+      expect(events).toEqual([5]);
+
+      const source = runtime.getCell<number>(
+        manager.getSpace(),
+        "stream-payload-link-" + crypto.randomUUID(),
+        { type: "number" },
+      );
+      await runtime.editWithRetry((tx) => source.withTx(tx).set(9));
+      const rawLink = source.getAsLink({
+        base: inputCell.key("slot"),
+        includeSchema: true,
+      });
+      await controller.input.set(rawLink, ["slot"]);
+      await runtime.idle();
+      expect(events).toHaveLength(2);
+
+      await controller.input.set(undefined, ["slot"]);
+      await runtime.idle();
+      expect(events).toHaveLength(3);
+      expect(Object.hasOwn(events, 2)).toBe(true);
+      expect(events[2]).toBeUndefined();
+      const rawAfterUndefined = inputCell.asSchema(undefined).get() as {
+        slot?: unknown;
+      };
+      expect(
+        Object.hasOwn(rawAfterUndefined, "slot") &&
+          rawAfterUndefined.slot === undefined,
+      ).toBe(false);
+    } finally {
+      removeHandler();
+    }
+  });
+
+  it("accepts an opaque Cell supplied as a path value", async () => {
+    const source = runtime.getCell<number>(
+      manager.getSpace(),
+      "opaque-input-cell-" + crypto.randomUUID(),
+      { type: "number" },
+    );
+    await runtime.editWithRetry((tx) => source.withTx(tx).set(7));
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          handle: { type: "number", asCell: ["cell"] },
+        },
+        required: ["handle"],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { handle: source },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.input.set(source, ["handle"]);
+
+    expect(await controller.input.get(["handle"])).toBe(7);
+  });
+
+  it("hydrates path defaults while retaining raw explicit undefined", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          settings: {
+            type: "object",
+            properties: {
+              mode: { type: "string" },
+              attempts: { type: "number", default: 1 },
+              label: {
+                type: ["string", "undefined"],
+                default: "fallback",
+              },
+            },
+            required: ["mode", "attempts", "label"],
+          },
+        },
+        required: ["settings"],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { settings: { mode: "old", attempts: 1, label: "old" } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.input.set(
+      { mode: "new", label: undefined },
+      ["settings"],
+    );
+    const settings = await controller.input.get(["settings"]) as Record<
+      string,
+      unknown
+    >;
+    expect(settings.mode).toBe("new");
+    expect(settings.attempts).toBe(1);
+    expect(Object.hasOwn(settings, "label")).toBe(true);
+    // Typed reads intentionally project a schema default over undefined.
+    expect(settings.label).toBe("fallback");
+    const rawInput = (await controller.input.getCell()).asSchema(undefined)
+      .get() as { settings: Record<string, unknown> };
+    expect(Object.hasOwn(rawInput.settings, "label")).toBe(true);
+    expect(rawInput.settings.label).toBeUndefined();
+
+    await controller.input.set("again", ["settings", "label"]);
+    await controller.input.set(undefined, ["settings", "label"]);
+    const explicit = await controller.input.get(["settings"]) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.hasOwn(explicit, "label")).toBe(true);
+    expect(explicit.label).toBe("fallback");
+    const rawExplicit = (await controller.input.getCell()).asSchema(undefined)
+      .get() as { settings: Record<string, unknown> };
+    expect(Object.hasOwn(rawExplicit.settings, "label")).toBe(true);
+    expect(rawExplicit.settings.label).toBeUndefined();
+  });
+
+  it("stores explicit undefined at absent object and array paths", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          slot: { type: ["number", "undefined"] },
+          label: {
+            type: ["string", "undefined"],
+            default: "fallback",
+          },
+          items: {
+            type: "array",
+            items: { type: ["number", "undefined"] },
+          },
+        },
+        required: ["slot", "items"],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const items = new Array(1);
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { items },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.input.set(undefined, ["slot"]);
+    await controller.input.set(undefined, ["label"]);
+    await controller.input.set(undefined, ["items", 0]);
+
+    const rawInput = (await controller.input.getCell()).asSchema(undefined)
+      .get() as { slot?: unknown; label?: unknown; items: unknown[] };
+    expect(Object.hasOwn(rawInput, "slot")).toBe(true);
+    expect(rawInput.slot).toBeUndefined();
+    expect(Object.hasOwn(rawInput, "label")).toBe(true);
+    expect(rawInput.label).toBeUndefined();
+    expect(Object.hasOwn(rawInput.items, 0)).toBe(true);
+    expect(rawInput.items[0]).toBeUndefined();
+    expect(await controller.input.get(["label"])).toBe("fallback");
+  });
+
+  it("stores explicit undefined at result object and array paths", async () => {
+    const resultSchema = {
+      type: "object",
+      properties: {
+        slot: { type: ["number", "undefined"] },
+        label: {
+          type: ["string", "undefined"],
+          default: "fallback",
+        },
+        items: {
+          type: "array",
+          items: { type: ["number", "undefined"] },
+        },
+      },
+      required: ["items"],
+    } as const;
+    const resultItems = new Array(1);
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema,
+      result: { items: resultItems },
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      {},
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.result.set(undefined, ["slot"]);
+    await controller.result.set(undefined, ["label"]);
+    await controller.result.set(undefined, ["items", 0]);
+
+    const rawResult = (await controller.result.getCell()).asSchema(undefined)
+      .get() as { slot?: unknown; label?: unknown; items: unknown[] };
+    expect(Object.hasOwn(rawResult, "slot")).toBe(true);
+    expect(rawResult.slot).toBeUndefined();
+    expect(Object.hasOwn(rawResult, "label")).toBe(true);
+    expect(rawResult.label).toBeUndefined();
+    expect(Object.hasOwn(rawResult.items, 0)).toBe(true);
+    expect(rawResult.items[0]).toBeUndefined();
+    expect(await controller.result.get(["label"])).toBe("fallback");
+  });
+
+  it("selects root union defaults for a path write", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        anyOf: [
+          {
+            type: "object",
+            properties: {
+              kind: { const: "a" },
+              settings: {
+                type: "object",
+                properties: {
+                  attempts: { type: "number", default: 1 },
+                },
+                required: ["attempts"],
+              },
+            },
+            required: ["kind", "settings"],
+          },
+          {
+            type: "object",
+            properties: {
+              kind: { const: "b" },
+              settings: {
+                type: "object",
+                properties: {
+                  retries: { type: "number", default: 2 },
+                },
+                required: ["retries"],
+              },
+            },
+            required: ["kind", "settings"],
+          },
+        ],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { kind: "a", settings: { attempts: 7 } },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.input.set({}, ["settings"]);
+
+    const rawInput = (await controller.input.getCell()).asSchema(undefined)
+      .get();
+    expect(rawInput).toEqual({
+      kind: "a",
+      settings: { attempts: 1 },
+    });
+    expect(validateSchemaValue(pattern.argumentSchema, rawInput))
+      .toBeUndefined();
+    expect(await controller.input.get(["kind"])).toBe("a");
+
+    await expect(controller.input.set("b", ["kind"])).rejects.toThrow(
+      /updated input does not match its schema/,
+    );
+    const afterRejectedSwitch = (await controller.input.getCell()).asSchema(
+      undefined,
+    ).get();
+    expect(afterRejectedSwitch).toEqual(rawInput);
+    expect(validateSchemaValue(pattern.argumentSchema, afterRejectedSwitch))
+      .toBeUndefined();
+  });
+
+  it("hydrates item-schema defaults for an array element write", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                mode: { type: "string" },
+                attempts: { type: "number", default: 1 },
+              },
+              required: ["mode", "attempts"],
+            },
+          },
+        },
+        required: ["items"],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { items: [{ mode: "old", attempts: 2 }] },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.input.set({ mode: "new" }, ["items", 0]);
+
+    const rawInput = (await controller.input.getCell()).asSchema(undefined)
+      .get();
+    expect(rawInput).toEqual({
+      items: [{ mode: "new", attempts: 1 }],
+    });
+  });
+
+  it("uses a root discriminator to select array item defaults", async () => {
+    const pattern: Pattern = {
+      argumentSchema: {
+        type: "object",
+        anyOf: [
+          {
+            type: "object",
+            properties: {
+              kind: { const: "a" },
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    attempts: { type: "number", default: 1 },
+                  },
+                  required: ["attempts"],
+                },
+              },
+            },
+            required: ["kind", "items"],
+          },
+          {
+            type: "object",
+            properties: {
+              kind: { const: "b" },
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    retries: { type: "number", default: 2 },
+                  },
+                  required: ["retries"],
+                },
+              },
+            },
+            required: ["kind", "items"],
+          },
+        ],
+      },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const piece = await manager.runPersistent(
+      trustPattern(runtime, pattern),
+      { kind: "a", items: [{ attempts: 7 }] },
+      undefined,
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+
+    await controller.input.set({}, ["items", 0]);
+
+    const rawInput = (await controller.input.getCell()).asSchema(undefined)
+      .get();
+    expect(rawInput).toEqual({ kind: "a", items: [{ attempts: 1 }] });
   });
 
   it("materializes piece results before runWithPattern returns", async () => {
@@ -596,6 +1035,63 @@ describe("piece pull materialization", () => {
       settings: { mode: "linked", attempts: 1 },
     });
     expect(await controller.result.get()).toEqual({ mode: "linked" });
+  });
+
+  it("preserves caller-supplied raw links at and below a write path", async () => {
+    const sourcePattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: {
+          settings: {
+            type: "object",
+            properties: {
+              mode: { type: "string" },
+              attempts: { type: "number" },
+            },
+            required: ["mode", "attempts"],
+          },
+        },
+        required: ["settings"],
+      },
+      result: { settings: { mode: "linked", attempts: 3 } },
+      nodes: [],
+    };
+    const source = await manager.runPersistent(
+      trustPattern(runtime, sourcePattern),
+      {},
+      "raw-link-path-source-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const targetPattern = await runtime.patternManager.compilePattern(
+      compiledLinkedSettingsProgram(2),
+      { space: manager.getSpace() },
+    );
+    const target = await manager.runPersistent(
+      targetPattern,
+      { settings: { mode: "local", attempts: 1 } },
+      "raw-link-path-target-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, target);
+    await manager.link(
+      entityRefToString(source.entityId),
+      ["settings"],
+      entityRefToString(target.entityId),
+      ["settings"],
+    );
+    const rawBefore = (await controller.input.getCell()).getRaw() as {
+      settings: unknown;
+    };
+
+    await controller.input.set(rawBefore.settings, ["settings"]);
+
+    expect((await controller.input.getCell()).getRaw()).toEqual(rawBefore);
+    await controller.input.set({ settings: rawBefore.settings });
+    expect((await controller.input.getCell()).getRaw()).toEqual(rawBefore);
+    expect(await controller.input.get()).toEqual({
+      settings: { mode: "linked", attempts: 3 },
+    });
   });
 
   it("rejects an incompatible schema update before changing the piece", async () => {
@@ -886,6 +1382,61 @@ describe("piece pull materialization", () => {
         doubled: 9,
         summary: "updated",
       });
+    } finally {
+      releaseCommit.resolve();
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("re-resolves root schema defaults for a path write after retry", async () => {
+    const firstPattern = await runtime.patternManager.compilePattern(
+      compiledLinkedSettingsProgram(1),
+      { space: manager.getSpace() },
+    );
+    const piece = await manager.runPersistent(
+      firstPattern,
+      { settings: { mode: "old" } },
+      "piece-prop-path-schema-race-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const controller = new PieceController(manager, piece);
+    const commitEntered = defer<void>();
+    const releaseCommit = defer<void>();
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    let interceptNextCommit = true;
+    runtime.editWithRetry =
+      ((action, maxRetries) =>
+        originalEditWithRetry((transaction) => {
+          const result = action(transaction);
+          if (interceptNextCommit) {
+            interceptNextCommit = false;
+            const originalCommit = transaction.commit.bind(transaction);
+            transaction.commit = async () => {
+              commitEntered.resolve();
+              await releaseCommit.promise;
+              return await originalCommit();
+            };
+          }
+          return result;
+        }, maxRetries)) as typeof runtime.editWithRetry;
+
+    try {
+      const inputUpdate = controller.input.set(
+        { mode: "new" },
+        ["settings"],
+      );
+      await commitEntered.promise;
+      await controller.setPattern(compiledLinkedSettingsProgram(2));
+      releaseCommit.resolve();
+      await inputUpdate;
+
+      const currentPattern = await controller.getPattern();
+      const rawInput = (await controller.input.getCell()).getRaw();
+      expect(rawInput).toEqual({
+        settings: { mode: "new", attempts: 1 },
+      });
+      expect(validateSchemaValue(currentPattern.argumentSchema, rawInput))
+        .toBeUndefined();
     } finally {
       releaseCommit.resolve();
       runtime.editWithRetry = originalEditWithRetry;
