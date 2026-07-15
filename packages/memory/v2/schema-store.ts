@@ -27,12 +27,12 @@ PRAGMA busy_timeout = 5000;
 const GENERATION_KEY = "generation";
 
 export interface SchemaStore {
-  /** Stable UUID identifying this durable store instance. */
+  /** Stable UUID identifying this store instance for its configured lifetime. */
   readonly generation: string;
 
-  /** Canonicalizes and durably records a schema under its tagged content hash. */
+  /** Canonicalizes and records a schema under its tagged content hash. */
   put(schema: JSONSchema): StoredSchema;
-  /** Atomically canonicalizes and durably records a collection of schemas. */
+  /** Atomically canonicalizes and records a collection of schemas. */
   putAll(schemas: readonly JSONSchema[]): StoredSchema[];
   /** Returns a verified, immutable canonical schema, or undefined when absent. */
   get(hash: string): StoredSchema | undefined;

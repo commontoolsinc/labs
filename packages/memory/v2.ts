@@ -254,7 +254,7 @@ export interface MemoryProtocolFlags {
   syncSchemaTable: boolean;
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
-  /** Hash-keyed durable request schema CAS for request-side schema elision. */
+  /** Hash-keyed request schema CAS for request-side schema elision. */
   requestSchemaCasV1?: boolean;
   /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
@@ -292,12 +292,12 @@ export interface HelloOkMessage {
   type: "hello.ok";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
-  /** Present only when the negotiated request schema CAS store is durable. */
+  /** Present when the server has an injected request schema CAS store. */
   requestSchemaCas?: RequestSchemaCasMetadata;
   sessionOpen?: SessionOpenAuthMetadata;
 }
 
-/** Identifies the durable store backing negotiated request-schema CAS. */
+/** Identifies the store backing negotiated request-schema CAS. */
 export interface RequestSchemaCasMetadata {
   generation: string;
   /** The service identity that owns this store, when the host has one. */
@@ -753,7 +753,7 @@ export function resetSyncSchemaTableConfig(): void {
 
 /**
  * Build capability for request-side schema CAS. A server additionally requires
- * an injected durable SchemaStore before advertising the capability.
+ * an injected SchemaStore before advertising the capability.
  */
 export function setRequestSchemaCasConfig(enabled?: boolean): void {
   requestSchemaCasEnabled = enabled ?? true;
