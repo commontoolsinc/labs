@@ -7,6 +7,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { JSONSchema, MemorySpace, URI } from "@commonfabric/runner";
 import { parseLink } from "../src/link-utils.ts";
 import { env } from "@commonfabric/integration";
+import { deploymentRuntimeOptions } from "./runtime-options.ts";
 import { IStorageManager } from "../src/storage/interface.ts";
 const { API_URL } = env;
 
@@ -43,13 +44,14 @@ function read(
 
 async function test() {
   // First runtime - save data
-  const runtime1 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      memoryHost: new URL(API_URL),
-    }),
+  const apiUrl = new URL(API_URL);
+  const storageManager1 = StorageManager.open({
+    as: identity,
+    memoryHost: apiUrl,
   });
+  const runtime1 = new Runtime(
+    deploymentRuntimeOptions(apiUrl, storageManager1),
+  );
   const addressSchema = {
     type: "object",
     properties: {
@@ -115,13 +117,13 @@ async function test() {
   const addressesArrayCellLink1 = addressesArrayCell1.getAsNormalizedFullLink();
 
   // Attempt to load on runtime2
-  const runtime2 = new Runtime({
-    apiUrl: new URL(API_URL),
-    storageManager: StorageManager.open({
-      as: identity,
-      memoryHost: new URL(API_URL),
-    }),
+  const storageManager2 = StorageManager.open({
+    as: identity,
+    memoryHost: apiUrl,
   });
+  const runtime2 = new Runtime(
+    deploymentRuntimeOptions(apiUrl, storageManager2),
+  );
   const runtime2Tx = runtime2.edit();
 
   const addressesArrayCell2 = runtime2.getCellFromLink(

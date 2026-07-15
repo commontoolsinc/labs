@@ -23,6 +23,7 @@ import type { Cell, JSONSchema, MemorySpace } from "@commonfabric/runner";
 /** A content-addressed pattern pointer. */
 type PatternRef = { identity: string; symbol: string };
 import { env } from "@commonfabric/integration";
+import { deploymentRuntimeOptions } from "./runtime-options.ts";
 
 const API_URL = new URL(env.API_URL);
 
@@ -100,10 +101,9 @@ function createTestContext(identity: Identity): TestContext {
     as: identity,
     memoryHost: new URL(API_URL),
   });
-  const runtime = new Runtime({
-    apiUrl: API_URL,
-    storageManager,
-  });
+  const runtime = new Runtime(
+    deploymentRuntimeOptions(API_URL, storageManager),
+  );
   return { runtime, storageManager };
 }
 

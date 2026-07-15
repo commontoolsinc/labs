@@ -18,6 +18,7 @@ import {
   type VNode,
 } from "@commonfabric/runtime-client";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
+import { experimentalOptionsFromEnv } from "@commonfabric/runner";
 import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { Program } from "@commonfabric/js-compiler";
@@ -1414,6 +1415,10 @@ async function createRuntimeClient(
   }
 
   const transport = await WebWorkerRuntimeTransport.connect();
+  const experimental = {
+    ...experimentalOptionsFromEnv(Deno.env.get),
+    ...extraOptions.experimental,
+  };
   const worker = await RuntimeClient.initialize(transport, {
     apiUrl: new URL(API_URL),
     identity: session.as,
@@ -1421,6 +1426,7 @@ async function createRuntimeClient(
     spaceDid: session.space,
     spaceName: session.spaceName,
     ...extraOptions,
+    experimental,
   });
 
   await worker.synced(session.space);
