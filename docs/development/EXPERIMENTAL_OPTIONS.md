@@ -44,6 +44,7 @@ was last checked against the code.
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
+| [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
 Removed or never-shipped flags that documentation elsewhere still references are
 recorded in [Appendix A](#appendix-a-removed-and-never-shipped-flags). Toggles
@@ -584,6 +585,54 @@ the per-epic implementation notes).
 - **Path to removal.** Land exchange resolution so the ceiling stops
   over-blocking, turn it on by default, and then remove the localStorage toggle
   and make the ceiling unconditional.
+
+## Category 5: Fuse mount cache tuning
+
+### `fuseNfsCacheTuning`
+
+- **Toggle via.** `cf fuse mount --attrcache-timeout <seconds>` or
+  `cf fuse mount --noattrcache` (mutually exclusive). Both plumb through the
+  background supervisor and the compiled binary's hidden
+  `fuse-daemon`/`fuse-supervisor` subcommands to `-o attrcache-timeout=<n>` /
+  `-o noattrcache` in the args handed to FUSE-T's `fuse_mount`
+  ([`packages/fuse/mount-options.ts`](../../packages/fuse/mount-options.ts),
+  `buildMountFuseArgs`). The options are applied only when the loaded
+  provider is FUSE-T; Linux and macFUSE mounts accept and ignore the flags,
+  matching `--allow-other`'s Linux-only handling in reverse.
+- **Added by.** Ian Hickson (noattrcache evaluation following #4642/#4654).
+- **Purpose.** FUSE-T serves mounts through the macOS NFS client and ignores
+  the entry/attribute timeouts the filesystem returns, so the client's
+  age-based 5-60 second caching defaults apply: a daemon-side `ENOENT` seeds
+  a negative name cache entry served without daemon round-trips, and cached
+  directory listings are served stale. Measured against a live space on
+  FUSE-T 1.2.7 / macOS 26 (2026-07-14, recorded in
+  [the evaluation](../history/packages/fuse/noattrcache-mount-option-evaluation.md)):
+  untuned mounts showed stale-`NotFound` windows of 3.2-56.3 s and listing
+  staleness of 0.8-53.4 s, while `attrcache-timeout=1` bounded both below
+  half a second at no measurable stat cost (about 2 microseconds per stat,
+  cache-served) and with zero read errors through sustained rebuild storms.
+  `noattrcache` on FUSE-T 1.2.x maps to the NFS `nonegnamecache` flag only;
+  it left 7.5-29 s windows and is kept as a diagnostic dial.
+- **Current default and planned end state.** The flag value is a whole
+  number of seconds. When neither flag is given, cf itself adds
+  `-o attrcache-timeout=1` (one second) to every FUSE-T mount — the default
+  lives in cf's `buildMountFuseArgs`, not in FUSE-T, whose own default is
+  the untuned NFS client caching. `--attrcache-timeout 0` turns cf's
+  addition off and leaves that untuned caching in place. Separately, the
+  `cf exec` listing-recheck delay in
+  [`packages/cli/lib/exec.ts`](../../packages/cli/lib/exec.ts)
+  (`DIR_LISTING_RECHECK_DELAY_MS`, 3.5 seconds) remains as the backstop for
+  untuned, macFUSE, and pre-1.0.29 FUSE-T mounts. That delay is sized for
+  the untuned client's multi-second listing staleness; once field use
+  confirms most mounts run with the one-second cache bound, the delay can
+  be reduced to just over one second to match.
+- **Status on 2026-07-14.** Implemented, on by default for FUSE-T mounts.
+  Validated by a 5-minute live-space soak (1296 daemon-side writes, ~2790
+  reads per probe target, p99 read latency 4 ms, worst transient 110 ms,
+  zero stale-negative false positives, daemon CPU ≤3%, no livelock).
+- **Path to removal.** Fold the default into permanent documented behavior
+  and shrink the exec.ts recheck delay, or retire the NFS dial entirely if
+  FUSE-T's FSKit backend (macOS 26+) replaces the NFS backend.
 
 ---
 

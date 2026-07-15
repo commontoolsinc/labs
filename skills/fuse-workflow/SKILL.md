@@ -231,6 +231,15 @@ Changes from the browser appear in the filesystem within ~1 second (FUSE-T NFS
 cache). Not instant. If you need to force a re-read, `cat` the `.json` file (not
 the exploded directory).
 
+FUSE-T mounts default to `attrcache-timeout=1`, which bounds all client-side
+staleness (attributes, negative name lookups, directory listings) at about one
+second — measured p99 read latency during daemon-side write storms is a few
+milliseconds, with sub-second transients while a subtree rebuilds. If a mount
+was created with `--attrcache-timeout 0` (untuned), a path stat'd while absent
+can keep reporting `NotFound` for up to a minute and `ls` can be tens of seconds
+stale; remount with the default before debugging "missing" files. See
+`packages/fuse/README.md` "macOS: NFS client cache tuning".
+
 ### Large Pieces
 
 Pieces with large `$UI` trees or complex schemas produce huge `result.json`

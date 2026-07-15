@@ -261,6 +261,47 @@ also have `user_allow_other` enabled in `/etc/fuse.conf`.
 Handlers remain writable through the mounted `.handler` file. Both mounted
 `.handler` and `.tool` files can be executed directly or via `cf exec`.
 
+### macOS: NFS client cache tuning
+
+FUSE-T serves the mount through the macOS NFS client, which caches attributes,
+negative name lookups, and directory listings on the client side. FUSE-T ignores
+the cache timeouts the filesystem implementation returns, so without tuning the
+client's age-based 5-60 second defaults apply: a name that was once looked up
+and not found can keep reporting `NotFound` for up to a minute after the file
+appears daemon-side, and a directory listing can be served stale for tens of
+seconds.
+
+FUSE-T mounts therefore default to `attrcache-timeout=1`, which fixes every NFS
+attribute-cache window at one second. Measured against a live space (FUSE-T
+1.2.7, macOS 26): the stale-`NotFound` window drops from 3-56 seconds to under
+half a second, listing staleness drops the same way, stats stay cache-served
+(about 2 microseconds each), and sustained daemon-side write storms produce zero
+read errors through the mount.
+
+Two flags adjust this; both take effect on macOS/FUSE-T mounts only and are
+ignored on Linux and macFUSE, and they are mutually exclusive:
+
+```bash
+# Bound cache validity to N whole seconds (default 1). 0 disables the
+# tuning and keeps the NFS client's age-based 5-60 second caching.
+cf fuse mount /tmp/cf --attrcache-timeout 5
+cf fuse mount /tmp/cf --attrcache-timeout 0
+
+# Mount with FUSE-T's noattrcache option instead. On current FUSE-T this
+# maps to the NFS nonegnamecache flag: negative name lookups are never
+# cached, while positive attribute caching keeps the client defaults.
+cf fuse mount /tmp/cf --noattrcache
+```
+
+`--attrcache-timeout` relies on a FUSE-T mount option that is present in the
+FUSE-T source and release notes but absent from its wiki's option list. The
+option was added in FUSE-T 1.0.29 (October 2023); on older FUSE-T installs mount
+with `--attrcache-timeout 0` if the default is not accepted. `--noattrcache`
+bounds only the negative-lookup staleness; measured on the same stack it left
+multi-second stale-`NotFound` windows (the directory attribute cache still
+serves the old listing), so prefer the timeout for freshness-sensitive
+workloads.
+
 ### CFC Annotations
 
 `cf fuse mount --cfc-mode=<mode>` selects the FUSE-side CFC guardrail mode:
@@ -370,6 +411,10 @@ command ls /tmp/cf/home/pieces/
 # Or use a stat-based tool
 find /tmp/cf/home/pieces/ -maxdepth 1
 ```
+
+If stale listings or stale `NotFound` results are a recurring problem for a
+workload, mount with `--noattrcache` or `--attrcache-timeout` (see
+[macOS: NFS client cache tuning](#macos-nfs-client-cache-tuning)).
 
 ### Permission denied / Operation not permitted
 
