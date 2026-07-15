@@ -288,7 +288,7 @@ class ClaimRecordingServer {
   renewExecutionClaim(
     _lease: ExecutionLeaseHandle,
     claim: ExecutionClaim,
-  ): Promise<ExecutionClaim> {
+  ): Promise<ExecutionClaim | null> {
     this.renewRequests.push(claim);
     return Promise.resolve({ ...claim, expiresAt: claim.expiresAt + 80_000 });
   }
@@ -657,6 +657,65 @@ Deno.test("claim renewal is not blocked by a still-running activation", async ()
     worker.acknowledgeLatestClaimedRun();
     await flushClaimControl();
     await executor.stop({ abrupt: true });
+  }
+});
+
+Deno.test("claim renewal tolerates an exact release while storage is open", async () => {
+  let nextTimer = 0;
+  const timers = new Map<
+    number,
+    { callback: () => void; delayMs: number }
+  >();
+  const { worker, server, crashes, executor } = await startExecutor({
+    routing: true,
+    claimTimers: {
+      now: () => 0,
+      setTimer(callback, delayMs) {
+        const timer = ++nextTimer;
+        timers.set(timer, { callback, delayMs });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        timers.delete(timer);
+      },
+    },
+  });
+  const renewalStarted = Promise.withResolvers<void>();
+  const finishRenewal = Promise.withResolvers<ExecutionClaim | null>();
+  server.renewExecutionClaim = (
+    _lease: ExecutionLeaseHandle,
+    claim: ExecutionClaim,
+  ) => {
+    server.renewRequests.push(claim);
+    renewalStarted.resolve();
+    return finishRenewal.promise;
+  };
+  try {
+    worker.candidate(CLAIM_KEY);
+    await flushClaimControl();
+
+    const renewal = [...timers.values()].find((timer) =>
+      timer.delayMs === 40_000
+    );
+    if (renewal === undefined) throw new Error("renewal timer missing");
+    renewal.callback();
+    await renewalStarted.promise;
+
+    // Opening a first-use engine can yield. If the Worker rejects the exact
+    // action in that interval, the server correctly returns null rather than
+    // resurrecting the released incarnation.
+    worker.unserved(CLAIM, "dynamic-non-space-read-scope");
+    await flushClaimControl();
+    finishRenewal.resolve(null);
+    await flushClaimControl();
+
+    assertEquals(server.renewRequests, [CLAIM]);
+    assertEquals(server.revoked, [CLAIM]);
+    assertEquals(crashes, []);
+    assertEquals(worker.terminated, false);
+  } finally {
+    finishRenewal.resolve(null);
+    await executor.stop();
   }
 });
 

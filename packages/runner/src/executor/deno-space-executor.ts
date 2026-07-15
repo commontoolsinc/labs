@@ -743,6 +743,13 @@ class DenoSpaceExecutor implements SpaceExecutor {
       live,
     );
     if (renewed === null) {
+      // The Worker can classify the action as unserved or invalidate it while
+      // renewal awaits engine setup. In that case the server must return null
+      // to avoid resurrecting the released incarnation, and the matching
+      // local release has already ended our authority obligation.
+      if (
+        !this.#claimIsCurrent(expected) || this.#stopped || this.#failed
+      ) return;
       throw new Error("executor claim renewal lost authority");
     }
     const current = this.#claims.get(key);
