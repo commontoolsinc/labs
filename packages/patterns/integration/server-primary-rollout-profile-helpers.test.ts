@@ -67,6 +67,14 @@ const diagnostics = (
   snapshotRequired: false,
   claims: [claim],
   actions: [action()],
+  branchTotals: {
+    upstreamRoutes: 0,
+    claimedOverlayRoutes: 4,
+    settlements: { committed: 3, noOp: 1, failed: 0, unserved: 0 },
+    basisCoveredOverlayDrops: 4,
+    nonAuthoritativeOverlayDrops: 0,
+    settlementDiagnostics: {},
+  },
   truncatedActionRecords: 0,
   ...overrides,
 });

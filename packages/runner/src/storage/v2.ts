@@ -80,6 +80,7 @@ import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
   ExecutionRoutingActionDiagnostics,
+  ExecutionRoutingBranchTotals,
   ExecutionRoutingDiagnostics,
   ExecutionRoutingDiagnosticsQuery,
   IMemoryAddress,
@@ -1930,6 +1931,30 @@ type ExecutionRoutingDiagnosticRecord = {
   lastSettlement?: ActionSettlement;
 };
 
+type MutableExecutionRoutingBranchTotals = {
+  upstreamRoutes: number;
+  claimedOverlayRoutes: number;
+  readonly settlements: {
+    committed: number;
+    noOp: number;
+    failed: number;
+    unserved: number;
+  };
+  basisCoveredOverlayDrops: number;
+  nonAuthoritativeOverlayDrops: number;
+  readonly settlementDiagnostics: Record<string, number>;
+};
+
+const emptyExecutionRoutingBranchTotals =
+  (): MutableExecutionRoutingBranchTotals => ({
+    upstreamRoutes: 0,
+    claimedOverlayRoutes: 0,
+    settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+    basisCoveredOverlayDrops: 0,
+    nonAuthoritativeOverlayDrops: 0,
+    settlementDiagnostics: {},
+  });
+
 const EXECUTION_ROUTING_DIAGNOSTIC_ACTION_LIMIT = 128;
 
 type SchedulerObservationBatchEntry = {
@@ -1960,6 +1985,10 @@ class SpaceReplica implements ISpaceReplica {
   readonly #executionRoutingDiagnostics = new Map<
     string,
     ExecutionRoutingDiagnosticRecord
+  >();
+  readonly #executionRoutingBranchTotals = new Map<
+    BranchName,
+    MutableExecutionRoutingBranchTotals
   >();
   #truncatedExecutionRoutingDiagnosticRecords = 0;
   readonly #confirmedSeqByLocalSeq = new Map<number, number>();
@@ -2253,6 +2282,7 @@ class SpaceReplica implements ISpaceReplica {
     }
     if (query.resetCounters === true) {
       this.#executionRoutingDiagnostics.clear();
+      this.#executionRoutingBranchTotals.clear();
       this.#truncatedExecutionRoutingDiagnosticRecords = 0;
     }
 
@@ -2330,6 +2360,7 @@ class SpaceReplica implements ISpaceReplica {
       snapshotRequired: this.#executionSnapshotRequired,
       claims,
       actions,
+      branchTotals: this.cloneExecutionRoutingBranchTotals(query.branch),
       truncatedActionRecords: this.#truncatedExecutionRoutingDiagnosticRecords,
     };
   }
@@ -3279,10 +3310,13 @@ class SpaceReplica implements ISpaceReplica {
     const key = actionClaimKeyFromObservation(observation);
     if (key === undefined || key.space !== this.#space) return;
     const record = this.executionRoutingDiagnosticRecord(key);
+    const totals = this.executionRoutingBranchTotals(key.branch);
     if (route.disposition === "upstream") {
       record.upstreamRoutes++;
+      totals.upstreamRoutes++;
     } else {
       record.claimedOverlayRoutes++;
+      totals.claimedOverlayRoutes++;
     }
   }
 
@@ -4293,12 +4327,45 @@ class SpaceReplica implements ISpaceReplica {
     return record;
   }
 
+  private executionRoutingBranchTotals(
+    branch: BranchName,
+  ): MutableExecutionRoutingBranchTotals {
+    let totals = this.#executionRoutingBranchTotals.get(branch);
+    if (totals === undefined) {
+      totals = emptyExecutionRoutingBranchTotals();
+      this.#executionRoutingBranchTotals.set(branch, totals);
+    }
+    return totals;
+  }
+
+  private cloneExecutionRoutingBranchTotals(
+    branch: BranchName,
+  ): ExecutionRoutingBranchTotals {
+    const totals = this.#executionRoutingBranchTotals.get(branch) ??
+      emptyExecutionRoutingBranchTotals();
+    return {
+      upstreamRoutes: totals.upstreamRoutes,
+      claimedOverlayRoutes: totals.claimedOverlayRoutes,
+      settlements: { ...totals.settlements },
+      basisCoveredOverlayDrops: totals.basisCoveredOverlayDrops,
+      nonAuthoritativeOverlayDrops: totals.nonAuthoritativeOverlayDrops,
+      settlementDiagnostics: { ...totals.settlementDiagnostics },
+    };
+  }
+
   private noteExecutionSettlement(settlement: ActionSettlement): void {
     const record = this.executionRoutingDiagnosticRecord(settlement.claim);
+    const totals = this.executionRoutingBranchTotals(settlement.branch);
     if (settlement.outcome === "no-op") {
       record.settlements.noOp++;
+      totals.settlements.noOp++;
     } else {
       record.settlements[settlement.outcome]++;
+      totals.settlements[settlement.outcome]++;
+    }
+    if (settlement.diagnosticCode !== undefined) {
+      totals.settlementDiagnostics[settlement.diagnosticCode] =
+        (totals.settlementDiagnostics[settlement.diagnosticCode] ?? 0) + 1;
     }
     record.lastSettlement = cloneActionSettlement(settlement);
   }
@@ -4796,10 +4863,13 @@ class SpaceReplica implements ISpaceReplica {
       options.diagnosticCode === "claim-no-op";
     for (const overlay of dropped) {
       const record = this.executionRoutingDiagnosticRecord(overlay.claim);
+      const totals = this.executionRoutingBranchTotals(overlay.claim.branch);
       if (basisCovered) {
         record.basisCoveredOverlayDrops++;
+        totals.basisCoveredOverlayDrops++;
       } else if (options.dirtyProducer) {
         record.nonAuthoritativeOverlayDrops++;
+        totals.nonAuthoritativeOverlayDrops++;
       }
     }
     const localSeqs = new Set(dropped.map((overlay) => overlay.localSeq));

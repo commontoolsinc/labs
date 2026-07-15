@@ -129,6 +129,14 @@ describe("RuntimeClient execution routing diagnostics", () => {
       snapshotRequired: false,
       claims: [],
       actions: [],
+      branchTotals: {
+        upstreamRoutes: 0,
+        claimedOverlayRoutes: 0,
+        settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+        basisCoveredOverlayDrops: 0,
+        nonAuthoritativeOverlayDrops: 0,
+        settlementDiagnostics: {},
+      },
       truncatedActionRecords: 0,
     };
     const requests: unknown[] = [];

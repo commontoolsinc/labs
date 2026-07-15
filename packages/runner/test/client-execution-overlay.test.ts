@@ -2186,6 +2186,9 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
             claim,
             inputBasisSeq: toInputBasisSeq(7),
             outcome,
+            ...(outcome === "unserved"
+              ? { diagnosticCode: "dynamic-read-outside-static-surface" }
+              : {}),
           } as ActionSettlement,
         })),
       },
@@ -2201,6 +2204,16 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
       unserved: 1,
     });
     assertEquals(outcomes.actions[0]?.lastSettlement?.outcome, "unserved");
+    assertEquals(outcomes.branchTotals, {
+      upstreamRoutes: 0,
+      claimedOverlayRoutes: 0,
+      settlements: { committed: 0, noOp: 1, failed: 1, unserved: 1 },
+      basisCoveredOverlayDrops: 1,
+      nonAuthoritativeOverlayDrops: 0,
+      settlementDiagnostics: {
+        "dynamic-read-outside-static-surface": 1,
+      },
+    });
   } finally {
     sourceApplied.resolve({ seq: 6, branch: "", revisions: [] });
     await storage.close();
@@ -2377,6 +2390,14 @@ Deno.test("execution routing diagnostics bound historical action records", async
     const diagnostics = storage.getExecutionRoutingDiagnostics(query);
     assertEquals(diagnostics.actions.length, 128);
     assertEquals(diagnostics.truncatedActionRecords, 1);
+    assertEquals(diagnostics.branchTotals, {
+      upstreamRoutes: 129,
+      claimedOverlayRoutes: 0,
+      settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+      basisCoveredOverlayDrops: 0,
+      nonAuthoritativeOverlayDrops: 0,
+      settlementDiagnostics: {},
+    });
     assertEquals(
       storage.getExecutionRoutingDiagnostics({
         ...query,
@@ -2398,6 +2419,14 @@ Deno.test("execution routing diagnostics bound historical action records", async
     });
     assertEquals(reset.actions, []);
     assertEquals(reset.truncatedActionRecords, 0);
+    assertEquals(reset.branchTotals, {
+      upstreamRoutes: 0,
+      claimedOverlayRoutes: 0,
+      settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+      basisCoveredOverlayDrops: 0,
+      nonAuthoritativeOverlayDrops: 0,
+      settlementDiagnostics: {},
+    });
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();

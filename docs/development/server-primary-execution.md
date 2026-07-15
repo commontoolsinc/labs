@@ -121,9 +121,11 @@ claim and every boot-era overlay/settlement has drained before it resets the
 bounded space/branch routing counters. After the interaction it waits for all
 measured routes to reach a terminal outcome and requires both claimed overlays
 and successful basis-covered settlements. Its output reports upstream versus
-claimed-overlay routes and includes a bounded `problemActions` list with action
-and piece ids plus the last fallback reason. Canonical `unserved` fallback is
-reported rather than treated as a stuck measurement; failed settlements,
+claimed-overlay routes. Branch-wide counters remain exact when the bounded
+per-action history evicts old records; a diagnostic histogram and bounded
+`problemActions` sample retain fallback reasons and action/piece ids. Canonical
+`unserved` fallback is reported rather than treated as a stuck measurement;
+failed settlements,
 fence/firewall rejects, worker failures, pending routes, or a workload with no
 authoritative success still reject the sample. The dedicated exact-routing
 fixture below remains the stricter proof that one selected action was served

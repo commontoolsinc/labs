@@ -157,6 +157,17 @@ export interface ExecutionRoutingSettlementCounts {
   readonly unserved: number;
 }
 
+/** Branch-wide historical routing totals since the last counter reset. Unlike
+ * the bounded per-action records below, these totals survive record eviction. */
+export interface ExecutionRoutingBranchTotals {
+  readonly upstreamRoutes: number;
+  readonly claimedOverlayRoutes: number;
+  readonly settlements: ExecutionRoutingSettlementCounts;
+  readonly basisCoveredOverlayDrops: number;
+  readonly nonAuthoritativeOverlayDrops: number;
+  readonly settlementDiagnostics: Readonly<Record<string, number>>;
+}
+
 /** Exact-action execution-routing state and bounded historical counters. */
 export interface ExecutionRoutingActionDiagnostics {
   readonly key: ActionClaimKey;
@@ -186,6 +197,7 @@ export interface ExecutionRoutingDiagnostics {
   readonly snapshotRequired: boolean;
   readonly claims: readonly ExecutionClaim[];
   readonly actions: readonly ExecutionRoutingActionDiagnostics[];
+  readonly branchTotals: ExecutionRoutingBranchTotals;
   /** Number of historical action records evicted since the last reset. */
   readonly truncatedActionRecords: number;
 }

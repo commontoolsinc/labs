@@ -407,31 +407,15 @@ export async function finishServerExecutionMeasurement(
   const client = clientRouting === undefined ? undefined : {
     claims: clientRouting.claims.length,
     actions: clientRouting.actions.length,
-    upstreamRoutes: clientRouting.actions.reduce(
-      (total, action) => total + action.upstreamRoutes,
-      0,
-    ),
-    claimedOverlayRoutes: clientRouting.actions.reduce(
-      (total, action) => total + action.claimedOverlayRoutes,
-      0,
-    ),
-    settlements: clientRouting.actions.reduce(
-      (totals, action) => ({
-        committed: totals.committed + action.settlements.committed,
-        noOp: totals.noOp + action.settlements.noOp,
-        failed: totals.failed + action.settlements.failed,
-        unserved: totals.unserved + action.settlements.unserved,
-      }),
-      { committed: 0, noOp: 0, failed: 0, unserved: 0 },
-    ),
-    basisCoveredOverlayDrops: clientRouting.actions.reduce(
-      (total, action) => total + action.basisCoveredOverlayDrops,
-      0,
-    ),
-    nonAuthoritativeOverlayDrops: clientRouting.actions.reduce(
-      (total, action) => total + action.nonAuthoritativeOverlayDrops,
-      0,
-    ),
+    truncatedActionRecords: clientRouting.truncatedActionRecords,
+    upstreamRoutes: clientRouting.branchTotals.upstreamRoutes,
+    claimedOverlayRoutes: clientRouting.branchTotals.claimedOverlayRoutes,
+    settlements: clientRouting.branchTotals.settlements,
+    basisCoveredOverlayDrops:
+      clientRouting.branchTotals.basisCoveredOverlayDrops,
+    nonAuthoritativeOverlayDrops:
+      clientRouting.branchTotals.nonAuthoritativeOverlayDrops,
+    settlementDiagnostics: clientRouting.branchTotals.settlementDiagnostics,
     pendingOverlays: clientRouting.actions.reduce(
       (total, action) => total + action.pendingOverlayCount,
       0,

@@ -12,9 +12,7 @@ const routingActionIsPending = (
 
 const routingSnapshotIsComplete = (
   diagnostics: ExecutionRoutingDiagnostics,
-): boolean =>
-  !diagnostics.snapshotRequired &&
-  diagnostics.truncatedActionRecords === 0;
+): boolean => !diagnostics.snapshotRequired;
 
 /** The benchmark counter reset is valid only after boot-era overlays and
  * settlements have drained. Resetting counters does not discard those live
@@ -37,11 +35,9 @@ export function isRoutingMeasurementResultReady(
 ): boolean {
   if (!routingSnapshotIsComplete(diagnostics)) return false;
   if (diagnostics.actions.some(routingActionIsPending)) return false;
-  return diagnostics.actions.some((action) =>
-    action.claimedOverlayRoutes > 0
-  ) && diagnostics.actions.some((action) =>
-    action.settlements.committed + action.settlements.noOp > 0
-  );
+  return diagnostics.branchTotals.claimedOverlayRoutes > 0 &&
+    diagnostics.branchTotals.settlements.committed +
+          diagnostics.branchTotals.settlements.noOp > 0;
 }
 
 export type RoutingMeasurementProblemAction = Readonly<{

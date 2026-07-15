@@ -60,6 +60,34 @@ const diagnostics = (
   snapshotRequired: false,
   claims: [claim],
   actions,
+  branchTotals: {
+    upstreamRoutes: actions.reduce(
+      (sum, action) => sum + action.upstreamRoutes,
+      0,
+    ),
+    claimedOverlayRoutes: actions.reduce(
+      (sum, action) => sum + action.claimedOverlayRoutes,
+      0,
+    ),
+    settlements: actions.reduce(
+      (totals, action) => ({
+        committed: totals.committed + action.settlements.committed,
+        noOp: totals.noOp + action.settlements.noOp,
+        failed: totals.failed + action.settlements.failed,
+        unserved: totals.unserved + action.settlements.unserved,
+      }),
+      { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+    ),
+    basisCoveredOverlayDrops: actions.reduce(
+      (sum, action) => sum + action.basisCoveredOverlayDrops,
+      0,
+    ),
+    nonAuthoritativeOverlayDrops: actions.reduce(
+      (sum, action) => sum + action.nonAuthoritativeOverlayDrops,
+      0,
+    ),
+    settlementDiagnostics: {},
+  },
   truncatedActionRecords: 0,
 });
 
