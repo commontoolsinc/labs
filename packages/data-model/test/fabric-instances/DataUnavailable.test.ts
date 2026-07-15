@@ -22,6 +22,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { FabricInstance } from "@/interface.ts";
+import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { valueEqual } from "@/valueEqual.ts";
 import { hashStringOf } from "@/value-hash.ts";
@@ -178,6 +179,20 @@ describe("DataUnavailable", () => {
     expect(isDataUnavailable(foreignPending)).toBe(true);
     expect(isPending(foreignPending)).toBe(true);
     expect(hasError(foreignPending)).toBe(false);
+  });
+
+  it("recognizes a marker whose FabricInstance base came from another bundle", () => {
+    const foreignPending = new DataUnavailable({ reason: "pending" });
+    class ForeignDataUnavailable {}
+    Object.setPrototypeOf(
+      foreignPending,
+      ForeignDataUnavailable.prototype,
+    );
+    Object.freeze(foreignPending);
+
+    expect(foreignPending instanceof FabricInstance).toBe(false);
+    expect(isDataUnavailable(foreignPending)).toBe(true);
+    expect(shallowFabricFromNativeValue(foreignPending)).toBe(foreignPending);
   });
 
   it("does not expose mutable same-realm brand registration", () => {

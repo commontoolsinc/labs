@@ -3,6 +3,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { isCanonicalDataUnavailable } from "@/fabric-instances/data-unavailable-brand.ts";
 import { FabricInstance } from "./interface.ts";
 
 // SES replaces the host Error constructor with a tamed one that does not
@@ -163,8 +164,15 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
 
   // Fallbacks for values whose constructor wasn't recognized (tag === null).
   if (tag === null) {
-    // Fabric protocol values are already valid and must be recognized before
-    // consulting realm-specific native helpers.
+    // Split bundles can duplicate the FabricInstance base while sharing the
+    // canonical DataUnavailable private brand. Recognize that control value
+    // before the realm-specific base-class identity check below.
+    if (isCanonicalDataUnavailable(value)) {
+      return NATIVE_TAGS.FabricInstance;
+    }
+
+    // Other Fabric protocol values are already valid and must be recognized
+    // before consulting realm-specific native helpers.
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
 
     // Foreign/SES `Error` instances and exotic subclasses. Use the native

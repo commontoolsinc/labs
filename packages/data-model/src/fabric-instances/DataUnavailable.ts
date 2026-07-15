@@ -13,6 +13,10 @@ import { DEEP_FREEZE, type FabricValue, IS_DEEP_FROZEN } from "@/interface.ts";
 import { fabricFromNativeValue } from "@/native-conversion.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import { BaseFabricInstance } from "./BaseFabricInstance.ts";
+import {
+  getCanonicalDataUnavailableClass,
+  installCanonicalDataUnavailableClass,
+} from "./data-unavailable-brand.ts";
 import { FabricError } from "./FabricError.ts";
 import { ProblematicValue } from "./ProblematicValue.ts";
 
@@ -82,44 +86,6 @@ function isErrorFromAnotherRealm(value: unknown): value is Error {
     (candidate.stack === undefined || typeof candidate.stack === "string");
 }
 
-// Split production bundles can evaluate this module more than once in the
-// same worker. Share the canonical constructor across those evaluations so
-// every copy mints the same private-field brand without exposing registration.
-const DATA_UNAVAILABLE_CLASS_KEY = Symbol.for(
-  "common.fabric.DataUnavailable.constructor",
-);
-const DATA_UNAVAILABLE_CLASS_HOST = globalThis as unknown as Record<
-  PropertyKey,
-  unknown
->;
-
-function getCanonicalDataUnavailableClass():
-  | typeof DataUnavailable
-  | undefined {
-  if (!Object.hasOwn(DATA_UNAVAILABLE_CLASS_HOST, DATA_UNAVAILABLE_CLASS_KEY)) {
-    return undefined;
-  }
-  const existing = DATA_UNAVAILABLE_CLASS_HOST[DATA_UNAVAILABLE_CLASS_KEY];
-  if (typeof existing !== "function") {
-    throw new TypeError("Invalid global DataUnavailable constructor");
-  }
-  return existing as typeof DataUnavailable;
-}
-
-function installCanonicalDataUnavailableClass(): void {
-  if (getCanonicalDataUnavailableClass()) return;
-  Object.defineProperty(
-    DATA_UNAVAILABLE_CLASS_HOST,
-    DATA_UNAVAILABLE_CLASS_KEY,
-    {
-      value: DataUnavailable,
-      configurable: false,
-      enumerable: false,
-      writable: false,
-    },
-  );
-}
-
 /**
  * Fabric control value representing data which a computation cannot yet use.
  *
@@ -142,7 +108,9 @@ export class DataUnavailable extends BaseFabricInstance
 
   constructor(state: DataUnavailableState) {
     super();
-    const canonical = getCanonicalDataUnavailableClass();
+    const canonical = getCanonicalDataUnavailableClass<
+      typeof DataUnavailable
+    >();
     if (canonical && canonical !== DataUnavailable) {
       return new canonical(state);
     }
@@ -150,7 +118,9 @@ export class DataUnavailable extends BaseFabricInstance
   }
 
   static override [Symbol.hasInstance](value: unknown): boolean {
-    const canonical = getCanonicalDataUnavailableClass();
+    const canonical = getCanonicalDataUnavailableClass<
+      typeof DataUnavailable
+    >();
     if (canonical && canonical !== DataUnavailable) {
       return value instanceof canonical;
     }
@@ -307,7 +277,9 @@ export class DataUnavailable extends BaseFabricInstance
 
   /** The codec for instances of this class. */
   static get [CODEC](): FabricCodec {
-    const canonical = getCanonicalDataUnavailableClass();
+    const canonical = getCanonicalDataUnavailableClass<
+      typeof DataUnavailable
+    >();
     if (canonical && canonical !== DataUnavailable) {
       return canonical[CODEC];
     }
@@ -315,7 +287,7 @@ export class DataUnavailable extends BaseFabricInstance
   }
 }
 
-installCanonicalDataUnavailableClass();
+installCanonicalDataUnavailableClass(DataUnavailable);
 
 function invalidState(state: FabricValue, message: string): ProblematicValue {
   return new ProblematicValue(
