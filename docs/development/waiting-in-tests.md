@@ -41,10 +41,13 @@ Waits split into two groups with different primitives.
   signal.
 - The higher-level wrappers in
   `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
-  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`,
+  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`, `clickNthCfButton`,
   `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`, `waitForRuntimeSynced` —
   bundle "settle the view, act once, wait for the effect" on top of the two
-  primitives above.
+  primitives above. `clickCfButton` takes the first match and reaches through a
+  host's shadow root for its inner `[data-cf-button]`; `clickNthCfButton` takes
+  the `index`-th match of a selector that already resolves to the buttons
+  themselves.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
