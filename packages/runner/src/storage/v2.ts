@@ -40,6 +40,7 @@ import {
   type LegacyBackgroundExclusion,
   type LegacyBackgroundExclusionStatus,
   type PatchOp,
+  type PendingRead,
   type SchedulerActionSnapshotQuery,
   type SchedulerObservationCommit,
   type SchedulerSnapshotListResult,
@@ -1990,6 +1991,10 @@ class SpaceReplica implements ISpaceReplica {
     key: ActionClaimKey,
   ) => readonly object[];
   readonly #shadowLocalSeqsByAction = new WeakMap<object, Set<number>>();
+  // Every executor-shadow local commit, across all actions. A shadow version
+  // never reaches the host, so an upstream commit's pending read must never
+  // name one (see rebaseShadowPendingReads).
+  readonly #shadowLocalSeqs = new Set<number>();
   readonly #executionClaims = new Map<string, ExecutionClaim>();
   readonly #claimedOverlays = new Map<number, ClaimedOverlayGeneration>();
   // A fast server settlement can beat the client's bounded speculative run.
@@ -3100,6 +3105,9 @@ class SpaceReplica implements ISpaceReplica {
         ]);
       }
     }
+    if (route.disposition !== "local") {
+      this.rebaseShadowPendingReads(commit);
+    }
     if (route.disposition === "unserved") {
       return await this.publishUnservedAttempt(commit, route);
     }
@@ -3155,6 +3163,9 @@ class SpaceReplica implements ISpaceReplica {
     // In both cases the whole action remains local and no scheduler,
     // precondition, SQLite, or semantic operation reaches the host.
     if (route.disposition === "local") {
+      if (route.kind === "executor-shadow" && operations.length > 0) {
+        this.#shadowLocalSeqs.add(localSeq);
+      }
       if (
         route.kind === "executor-shadow" && operations.length > 0 &&
         source?.sourceAction !== undefined
@@ -4490,6 +4501,48 @@ class SpaceReplica implements ISpaceReplica {
     this.#earlyExecutionSettlements.delete(
       executionClaimIncarnationKey(claim),
     );
+  }
+
+  /**
+   * Rebase pending reads that name executor-shadow versions onto the
+   * confirmed base beneath them before an upstream/unserved transaction
+   * leaves this replica.
+   *
+   * A shadow commit is local-only, so its localSeq never receives a server
+   * resolution; a pending read naming it fails apply with "pending dependency
+   * not resolved" on every retry until the action's inputs move — measured as
+   * the dominant executor conflict storm (a claimed action reading the shadow
+   * output of an unclaimed or unservable producer). Reading the confirmed
+   * base instead is the same optimistic bet an ordinary stale read carries:
+   * normal conflict detection still rejects the commit when the underlying
+   * document moved.
+   */
+  private rebaseShadowPendingReads(commit: ClientCommit): void {
+    if (this.#shadowLocalSeqs.size === 0) return;
+    const retained: PendingRead[] = [];
+    let rebased = 0;
+    for (const read of commit.reads.pending) {
+      if (!this.#shadowLocalSeqs.has(read.localSeq)) {
+        retained.push(read);
+        continue;
+      }
+      const record = this.#docs.get(docKey(read.id as URI, read.scope));
+      commit.reads.confirmed.push({
+        id: read.id,
+        scope: read.scope,
+        path: read.path,
+        seq: record?.confirmed.seq ?? 0,
+        ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
+      });
+      rebased++;
+    }
+    if (rebased > 0) {
+      commit.reads.pending = retained;
+      logger.debug("execution-shadow-read-rebased", () => [
+        "Rebased shadow pending reads onto their confirmed base",
+        { localSeq: commit.localSeq, rebased },
+      ]);
+    }
   }
 
   private recordClaimedOverlay(
