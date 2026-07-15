@@ -5,7 +5,7 @@ cannot run that directly: reactive expressions have to be lowered into explicit
 calls, closures have to be made explicit, and every reactive boundary has to
 carry a JSON Schema derived from the author's TypeScript types. This pipeline
 does that transformation. It is "System"-layer code, and it is large
-(`ts-transformers` alone is 41k lines).
+(`ts-transformers` alone is one of the largest packages in the repo).
 
 You can see its output for any file with:
 
@@ -76,7 +76,7 @@ flowchart TB
     src[".tsx source + a Program (entry + in-memory sources)"]
     compiler["TypeScriptCompiler<br/>(virtual filesystem host, type-check)"]
     bridge["harness/engine.ts supplies beforeTransformers =<br/>CommonFabricTransformerPipeline.toFactories()"]
-    emit["tsProgram.emit() runs the 22 transformer stages"]
+    emit["tsProgram.emit() runs the transformer stages (a couple dozen)"]
     out["per-module CommonJS + source map"]
     records["module records → runner evaluates in the SES sandbox"]
 
@@ -86,7 +86,7 @@ flowchart TB
 
 ---
 
-## The transformer pipeline: 22 stages in three phases
+## The transformer pipeline: a couple dozen stages in three phases
 
 The pipeline is an ordered list (`cf-pipeline.ts`, `CFC_TRANSFORMER_STAGE_SPECS`).
 The ordering matters: most validation runs first so illegal code is rejected
@@ -233,8 +233,8 @@ identity-based depth-first pre-pass detecting cycles.
   explicit sync note at the top of the file) the Fabric value types against
   `data-model`. Changing a signature means editing it in two places.
 - **The biggest files are the densest part of the system.**
-  `schema-injection.ts` (4134 lines) and `type-shrinking.ts` (3285) are the
-  least approachable region; budget accordingly.
+  `schema-injection.ts` and `type-shrinking.ts` (each several thousand lines) are
+  the least approachable region; budget accordingly.
 - **The `lift-applied` distinction is subtle.** `__cfHelpers.lift(cb)(input)` —
   a single application — is classified as `lift-applied` and is what `computed`
   lowers to. An unapplied `lift(cb)` or a multi-application chain is deliberately

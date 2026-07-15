@@ -10,7 +10,7 @@ the skills system.
 
 ## `utils` is the universal leaf
 
-Everything depends on `utils`. It is imported by 303 files across the repo. Its
+Everything depends on `utils`. It is imported by nearly every file in the repo. Its
 own `src/index.ts` deliberately **throws**, to force callers to import the
 specific subpath they need rather than the whole barrel.
 
@@ -18,8 +18,8 @@ specific subpath they need rather than the whole barrel.
 flowchart TB
     classDef leaf fill:#27ae60,stroke:#1e8449,color:#fff
     utils["utils (subpath-only)<br/>logger, defer, cache, deep-equal,<br/>base64url, bigint, arrays, types,<br/>sandbox-contract, async-local-store"]:::leaf
-    runner["runner (149 files)"]
-    datamodel["data-model (27 files)"]
+    runner["runner (most files)"]
+    datamodel["data-model"]
     others["…every other package…"]
 
     runner --> utils
@@ -27,7 +27,7 @@ flowchart TB
     others --> utils
 ```
 
-The single largest module inside it is `logger.ts` (1502 lines), a from-scratch
+The single largest module inside it is `logger.ts`, a from-scratch
 logging library that works in both Deno and the browser. (Until recently
 `deno.jsonc` declared a `"./integration"` export pointing at a file that no
 longer existed; that dangling export has since been removed.)
@@ -36,7 +36,7 @@ longer existed; that dangling export has since been removed.)
 
 ## `patterns`: example programs of unequal authority
 
-`patterns` is by far the largest directory (~321k non-test lines), but it is example code,
+`patterns` is by far the largest directory in the repo, but it is example code,
 not engine code. The most important thing a newcomer must learn here is that
 **the patterns do not carry equal authority.** Copying the wrong one teaches you
 a deprecated idiom. The authority ladder is tracked in
@@ -48,7 +48,7 @@ flowchart TB
     exemplar["exemplar — current best practice; copy these<br/>(catalog/, counter/, do-list/, todo-list/, notes/, reading-list/, ...)"]
     demo["demo — real capability use, dated style;<br/>copy the capability call, not the style"]
     fixture["fixture — regression scaffolding; never imitate"]
-    legacy["legacy — superseded; do not copy<br/>(the whole record/ system, ~25 attribute clones, factory-outputs/)"]
+    legacy["legacy — superseded; do not copy<br/>(the whole record/ system, a couple dozen attribute clones, factory-outputs/)"]
 
     primitive --> exemplar --> demo --> fixture --> legacy
 ```
@@ -144,22 +144,22 @@ and a few more.
 
 | Package | Role |
 |---|---|
-| `static` | Lazy-loaded static assets, shared across Deno (read from disk) and browser (served by `toolshed`). Holds the bundled type declarations shipped to the in-browser TypeScript compiler — `es2023.d.ts` (459 KB, generated), `dom.d.ts`, and symlinks to the live `api` and `html` sources. Most of the package's size is that one generated file. |
+| `static` | Lazy-loaded static assets, shared across Deno (read from disk) and browser (served by `toolshed`). Holds the bundled type declarations shipped to the in-browser TypeScript compiler — a large generated `es2023.d.ts`, `dom.d.ts`, and symlinks to the live `api` and `html` sources. Most of the package's size is that one generated file. |
 | `test-support` | Golden-fixture suite runner (`defineFixtureSuite`, unified-diff helpers) and isolated-Deno-subprocess helpers that run `deno check` in a temporary config so tests do not dirty the repo lockfile. |
 | `deno-web-test` | Runs `Deno.test`-style tests inside a real browser, for code that must work in both Deno and the browser. Driven by `vendor-astral`. |
 | `vendor-astral` | A vendored copy of Astral, a Deno-native browser-automation library over the Chrome DevTools Protocol. Excluded from lint, format, and the test runner. Do not edit it as if it were first-party. |
 | `integration` | The browser-driving test harness: a `Browser`/`Page` wrapper over the Chrome DevTools Protocol, an `env` module of test knobs (target URL, headless toggle, per-run space name), and shell login helpers. Its own `test` task is a stub; the tests that use it live in other packages. |
 | `home-schemas` | Schemas for the "home" space. Exists specifically so that `runner` and `piece` can share schemas without importing each other — a deliberate shared leaf to break a cycle. |
-| `generated-patterns` | 145 machine-generated test patterns (each with a paired test) plus the harness that generates them (`ralph/`). |
+| `generated-patterns` | Well over a hundred machine-generated test patterns (each with a paired test) plus the harness that generates them (`ralph/`). |
 
 ---
 
 ## The repository task and CI surface
 
-- `tasks/check.sh` (`deno task check`) is the type-check gate. It pins Deno to
-  `>=2.8.0 <2.9.0` and type-checks an explicit set of directories with an 8 GB
-  V8 heap. `mise.toml` pins Deno to `2.8.1`; a wrong local Deno fails the gate
-  immediately.
+- `tasks/check.sh` (`deno task check`) is the type-check gate. It pins Deno to a
+  narrow version range and type-checks an explicit set of directories with an
+  enlarged V8 heap. `mise.toml` pins the exact Deno version; a wrong local Deno
+  fails the gate immediately.
 - `tasks/test.ts`, `tasks/integration.ts`, and `tasks/cfcheck.ts` are the test,
   integration, and pattern-check runners, all of which shard in CI.
 - `.github/workflows/deno.yml` is the main CI: format check, lint,

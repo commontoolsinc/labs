@@ -129,10 +129,10 @@ the "foundation."
 
 ## How big each package is
 
-Sizes are non-test TypeScript lines, measured from source. They tell you where
-the weight (and the reading time) actually is. Note that two large numbers are
-not hand-written engineering: `patterns` is example programs, and most of
-`static` is a single generated TypeScript standard-library declaration file.
+Rough sizes (non-test TypeScript lines, order-of-magnitude — they tell you where
+the weight and the reading time are, not an exact measurement). `runner` dwarfs
+everything; `ui` and `ts-transformers` are the next tier; the foundation
+libraries are comparatively small.
 
 ```mermaid
 %%{init: {'theme':'neutral'}}%%
@@ -140,25 +140,26 @@ graph LR
     classDef big fill:#c0392b,stroke:#7b241c,color:#fff
     classDef mid fill:#e67e22,stroke:#a04000,color:#fff
     classDef small fill:#27ae60,stroke:#1e8449,color:#fff
-    R["runner — 106k loc"]:::big
-    U["ui — 53k loc"]:::big
-    T["ts-transformers — 41k loc"]:::mid
-    C["cli — 25k loc"]:::mid
-    M["memory — 18k loc"]:::mid
-    SH["shell — 15k loc"]:::mid
-    TS["toolshed — 14k loc"]:::mid
-    H["html — 13k loc"]:::mid
-    F["fuse — 12k loc"]:::mid
-    DM["data-model — 8k loc"]:::small
-    SG["schema-generator — 8k loc"]:::small
-    SI["state-inspector — 6k loc"]:::small
-    API["api — 6k loc"]:::small
-    UT["utils — 3.5k loc"]:::small
+    R["runner — ~100k"]:::big
+    U["ui — ~50k"]:::big
+    T["ts-transformers — ~40k"]:::mid
+    C["cli — ~25k"]:::mid
+    M["memory — ~18k"]:::mid
+    SH["shell — ~15k"]:::mid
+    TS["toolshed — ~14k"]:::mid
+    H["html — ~13k"]:::mid
+    F["fuse — ~12k"]:::mid
+    DM["data-model — ~8k"]:::small
+    SG["schema-generator — ~8k"]:::small
+    SI["state-inspector — ~6k"]:::small
+    API["api — ~6k"]:::small
+    UT["utils — ~3.5k"]:::small
 ```
 
-(Excluded from this chart because they are examples, generated, or vendored:
-`patterns` 321k, `generated-patterns` 39k, `vendor-astral` 29k, `cf-harness`
-23k, `static` 13k. See the [tooling page](tooling-and-patterns.md).)
+(Excluded from this chart because they are examples, generated, or vendored, and
+much larger: `patterns` (example programs), `generated-patterns`, `vendor-astral`
+(vendored), `cf-harness`, and `static` (mostly a generated declaration file). See
+the [tooling page](tooling-and-patterns.md).)
 
 ---
 

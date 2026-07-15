@@ -30,7 +30,7 @@ flowchart BT
     runner -.->|"the one upward edge:<br/>v2/query.ts"| memory
 ```
 
-`leb128` (170 lines, one file) and `content-hash` (a SHA-256 backend selector)
+`leb128` (a single small file) and `content-hash` (a SHA-256 backend selector)
 exist only to serve `data-model`'s deterministic hashing. You will rarely touch
 them directly.
 
@@ -216,9 +216,9 @@ across a round trip. Three finer points worth knowing:
   Three kinds: `origin-committed` (a prior commit from this session must be
   durable), `entity-absent` (an id must have no value), and `entity-value-hash`
   (an id pinned to an exact `valueHash`, where `null` pins "absent/deleted").
-- **A snapshot is materialized every `DEFAULT_SNAPSHOT_INTERVAL` (10) patches**
-  for an entity, so a read replays at most ~10 patch rows; setting the interval to
-  `0` disables snapshotting.
+- **A snapshot is materialized every so many patches** for an entity
+  (`DEFAULT_SNAPSHOT_INTERVAL`), so a read replays only a handful of patch rows on
+  top of the nearest snapshot; setting the interval to `0` disables snapshotting.
 - **Branches are first-class.** A `branch` table holds `parent_branch`,
   `fork_seq`, `head_seq`, and `status`; the default root branch is the empty
   string `''`, and every table's key begins with `branch`. A `ClientCommit` can
@@ -238,7 +238,7 @@ holds the per-row CFC label rules; `commit-eval.ts` re-derives row labels
 server-side at commit time and rolls back on a violation; `write-targets.ts` maps
 each positional `?` to its target column for the write-ceiling check (fail-closed
 for shapes it can't attribute). `read-pool.ts` is an LRU of read-only connections
-(default 32) so reads never attach to the engine connection, and `disk-source.ts`
+so reads never attach to the engine connection, and `disk-source.ts`
 lets an external on-disk SQLite file be attached read-only by handle.
 
 Note that space-level ACL (`Record<DID|"*", "READ"|"WRITE"|"OWNER">`, `acl.ts`)
@@ -252,9 +252,8 @@ a complete audit trail. The `state-inspector` package (`@commonfabric/state-insp
 is the lens over it: it opens a space's SQLite file read-only, reconstructs the
 value of any entity at any `(branch, seq)`, and answers who/what/when questions
 — time-travel, conflict inspection, and cross-space queries — with no live
-runtime and no capture step. It depends only on `memory` (7 imports),
-`data-model`, `identity`, and `api`, so it is a clean leaf consumer of the
-storage layer. It is wired into the `cf` CLI as `cf inspect` (the package also
+runtime and no capture step. It depends only on `memory`, `data-model`,
+`identity`, and `api`, so it is a clean leaf consumer of the storage layer. It is wired into the `cf` CLI as `cf inspect` (the package also
 exposes a local `deno task inspect`), and has a matching `state-inspector` agent
 skill. This is the tool to reach for when debugging what
 a space actually recorded.

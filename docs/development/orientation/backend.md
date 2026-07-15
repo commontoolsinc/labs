@@ -170,7 +170,7 @@ Concrete mechanics: `findModel` is a plain `MODELS[name]` lookup (aliases are
 extra keys pointing at the same `ModelConfig`), and the `default` alias resolves
 through `DEFAULT_MODEL_CANDIDATES` (`gateway:claude-sonnet-4-6` →
 `anthropic:claude-sonnet-4-6` → `anthropic:claude-sonnet-4-5`). `loadGatewayModels`
-fetches `${gateway}/v1/models` with a 3-second timeout, forces an HTTP/1.1 client
+fetches `${gateway}/v1/models` with a short timeout, forces an HTTP/1.1 client
 (to dodge a Deno HTTP/2 SSE bug), and falls back cleanly off-Tailscale. The disk
 cache keys on the SHA-256 of the request JSON (after stripping the `cache`/
 `metadata` fields), and the two endpoints have *opposite* defaults: `generateText`
@@ -215,12 +215,12 @@ The registered-pieces list is typed as `BGPieceEntry` (`schema.ts`, fields
 fetched via `getBGPieces` and watched with `piecesCell.sink(...)`. That registry
 cell is synced with a privileged confidentiality label (`ifc: { confidentiality:
 ["secret"] }`) at the fixed cause `BG_CELL_CAUSE` in `BG_SYSTEM_SPACE_ID`.
-Concrete scheduler constants: each `SpaceManager` runs at most one piece at a
-time from a timestamp-sorted queue polled every 100 ms (`pollingIntervalMs`),
-reruns a piece every 60 s (`rerunIntervalMs`), applies linear backoff
-(`rerunIntervalMs · (failureCount + 1)`), and disables a piece on its third
-consecutive failure. The `WorkerController` uses `msgId`-keyed IPC with a per-task
-timeout that production sets to 10 minutes. To fire a piece the worker resolves
+The scheduling model: each `SpaceManager` runs at most one piece at a time from a
+timestamp-sorted queue (`pollingIntervalMs`), reruns each piece roughly once a
+minute (`rerunIntervalMs`), applies linear backoff on failure, and disables a
+piece after a few consecutive failures. The `WorkerController` uses `msgId`-keyed
+IPC with a per-task timeout (several minutes in production). To fire a piece the
+worker resolves
 the cell by id, loads it with schema `{ bgUpdater: { asCell: ["stream"] } }`, and
 does `updater.withTx(tx).send({}); tx.commit()` then awaits `runtime.idle()`.
 Isolation is strict: one worker per space, and a terminal worker error disables
@@ -252,9 +252,10 @@ polled.
   without understanding why.
 - **The new ingest and telemetry routes are gated and fail-safe.**
   `/api/ingest/:id` requires a `Bearer` token (uniform 401 for any failure),
-  caps the body at 1 MB, and parses only after the token verifies;
+  caps the body size, and parses only after the token verifies;
   `/api/telemetry/*` proxies browser OTLP to the collector and is fail-open (204
-  when disabled, 413 over 1 MB, otherwise a fire-and-forget 202 — never 5xx).
+  when disabled, 413 over the size cap, otherwise a fire-and-forget 202 — never a
+  5xx).
 - **`background-piece-service` carries the most TODOs in this group**, several
   about the scheduler being approximate: space managers should watch their own
   pieces, a terminal error cannot always be attributed to a specific piece (so a
@@ -269,7 +270,7 @@ polled.
   `BG_CELL_CAUSE = "bgUpdater-2025-03-18"`, and the derived system-space DID
   (`BG_SYSTEM_SPACE_ID`), all in `schema.ts`/`worker.ts`. None of them contain
   the word "charm"; they are simply legacy-shaped.
-- **A tool-loop cap is hardcoded** (`stepCountIs(8)`) in `generateText.ts` as a
+- **A tool-loop cap is hardcoded** (`stepCountIs(...)`) in `generateText.ts` as a
   runaway guard.
 
 ---
@@ -280,10 +281,10 @@ polled.
   `tasks/build-binaries.ts` compiles two binaries — `dist/toolshed` and
   `dist/bg-piece-service` — and writes the `COMPILED` sentinel as JSON
   (`{commitSha, builtAt}`), `--include`d into the toolshed binary and read at
-  `/api/meta`. `Dockerfile.toolshed` pins Deno 2.8.1 and does a 15-second "warm
-  run" so the `@db/sqlite` FFI library is baked into the image (no GitHub egress
-  on first DB open). The `COMPILED` file's presence also switches the shell route
-  from dev-proxy to static serving.
+  `/api/meta`. `Dockerfile.toolshed` pins a specific Deno version and does a brief
+  "warm run" so the `@db/sqlite` FFI library is baked into the image (no GitHub
+  egress on first DB open). The `COMPILED` file's presence also switches the shell
+  route from dev-proxy to static serving.
 - `background-piece-service` (`@commonfabric/background-piece`) — entry
   `src/main.ts` (`deno task start`). It now ships its own tests, so unlike
   `vendor-astral` it is no longer in the test runner's disabled list.

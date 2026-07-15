@@ -163,7 +163,7 @@ aliases) are the mitigation. Other concrete details: JSON keys become path
 components via a reversible percent-encoding (`path-codec.ts` escapes `/`, `:`, a
 leading `.`, etc.; empty string → `%_empty`); a callable file is a self-invoking
 shebang script (`#!<cli> exec`, `# schema:` comment lines you can `cat`, then a
-body that re-invokes `cf exec`); virtual files are capped at 64 MB. On a cell
+body that re-invokes `cf exec`); virtual files have a fixed size cap. On a cell
 change the daemon calls `fuse_lowlevel_notify_inval_entry`/`_inode`, but FUSE-T
 returns ENOSYS for `notify_inval_entry`, so it falls back to per-inode
 invalidation with short cache timeouts. The FFI struct layouts are hand-maintained
@@ -184,15 +184,16 @@ and differ between macOS (FUSE v2; FUSE-T preferred over macFUSE) and Linux
   retry loop and single-transaction commit.
 - **`cf-harness`** is the biggest naming trap in the repo. It is **not** a test
   harness for the runtime. It is an experimental, Common-Fabric-native agent
-  runtime: a bounded model-to-tool-call-to-sandbox-execute loop with exactly ten
-  built-in tools (`bash`, `bash-no-sandbox`, `read_file`, `view_image`,
+  runtime: a bounded model-to-tool-call-to-sandbox-execute loop with a small set
+  of built-in tools (`bash`, `bash-no-sandbox`, `read_file`, `view_image`,
   `web_fetch`, `read_skill_resource`, `run_skill_script`, `edit_file`,
   `write_file`, `delegate_task`), a Docker/gVisor sandbox (`docker-runsc-cfc`,
   default runtime `runsc-cfc`, mounts `/workspace` and `/fabric`), SQLite session
   persistence (WAL mode), an OpenAI-compatible gateway client, and CFC-aware
   deny/recovery shaping. Its design direction is that `runner` owns the
   authoritative CFC meaning and `cf-harness` transports and respects it. Loom is
-  its first target. The `prompt-loop.ts` file (2889 lines) is monolithic.
+  its first target. The `prompt-loop.ts` file is monolithic (several thousand
+  lines).
 
 ---
 
@@ -205,21 +206,21 @@ and differ between macOS (FUSE v2; FUSE-T preferred over macFUSE) and Linux
   survivors repo-wide are the wire-level `bgUpdater` stream name, a dated cause
   string in that service, plain-English "charm" occurrences in test-data
   fixtures (a Scrabble word list, a Frankenstein excerpt), and git history.
-- **`cli` is a hub, and a growing one** (about 25k non-test lines now). It
-  imports `runner` (26), `identity` (9), `utils` (9), `js-compiler` (8),
-  `piece`/`api` (5 each), and now `state-inspector` (2) — it wires the offline
-  space-inspector (see the [storage page](storage-substrate.md)) into the `cf`
-  command. A change in any of those can break the command line.
+- **`cli` is a hub, and a growing one.** It imports `runner` most, plus
+  `identity`, `utils`, `js-compiler`, `piece`, `api`, and now `state-inspector`
+  — it wires the offline space-inspector (see the
+  [storage page](storage-substrate.md)) into the `cf` command. A change in any of
+  those can break the command line.
 - **`PieceManager` has a flagged hot spot.** `piece/src/manager.ts:856` carries
   `// FIXME(JA): this really really really needs to be revisited`, and there is
   an elevated-permissions TODO at line 294.
 - **`runtime-client` teardown is intentionally quiet.** After a `Dispose`, the
   worker silently acknowledges late requests and drops notifications. This is by
   design but surprising while debugging.
-- **The biggest files to budget for:** `fuse/mod.ts` (3389) and
-  `fuse/cell-bridge.ts` (3287); `cli/lib/test-runner.ts` (1951) and
-  `cli/lib/piece.ts` (1417); `runtime-client/backends/runtime-processor.ts`
-  (1794) and `protocol/types.ts` (1177).
+- **The biggest files to budget for:** `fuse/mod.ts` and `fuse/cell-bridge.ts`
+  (the two largest, a few thousand lines each); `cli/lib/test-runner.ts` and
+  `cli/lib/piece.ts`; `runtime-client/backends/runtime-processor.ts` and
+  `protocol/types.ts`.
 
 ---
 

@@ -1,12 +1,13 @@
 # The dependency graph (measured, not intended)
 
-This page is the empirical import graph between workspace packages. It was built
-by scanning every package's `.ts` and `.tsx` source for `@commonfabric/*`
-imports and counting them. Two passes were taken: one over all files, and one
-over production files only (excluding anything matching a test, fixture,
-integration, or benchmark path). The production graph is the one that matters
-for runtime layering, so it is the one drawn here. The difference between the
-two passes is itself informative and is noted where it changes the story.
+This page is the empirical import graph between workspace packages — which
+package imports which, read from the source rather than from intentions. It is
+built by scanning every package's `.ts` and `.tsx` source for `@commonfabric/*`
+imports, over production files only (test, fixture, integration, and benchmark
+paths excluded, since those don't reflect runtime layering). The shapes that
+matter for orientation are structural: which package is the hub, which are the
+floor, where the cycles are — not the exact reference counts, which drift with
+every commit.
 
 Some apparent edges were discarded after inspection because they were comments
 or strings rather than real imports: `api → runner`, `api → memory`,
@@ -18,15 +19,14 @@ the absence is deliberate.)
 
 ---
 
-## The spine: `runner` is the hub, four leaves are the floor
+## The spine: `runner` is the hub, a few small libraries are the floor
 
 The graph is not a balanced tree. It is one very large hub (`runner`) sitting on
 a small floor of foundation libraries (`utils`, `data-model`, `api`, `identity`,
 `memory`), with everything else arranged around the hub. Of those, `utils`,
 `api`, and `identity` are true leaves (no outgoing package edges); `data-model`
-and `memory` are not — they sit on the leaves below them. Edge labels are the
-number of importing references in production code, so they show where the heavy
-coupling is.
+and `memory` are not — they sit on the leaves below them. The bold edges below
+are `runner`'s heaviest dependencies.
 
 ```mermaid
 flowchart TD
@@ -42,31 +42,31 @@ flowchart TD
     contenthash["content-hash"]
     leb128["leb128"]
 
-    runner -->|152| datamodel
-    runner -->|148| utils
-    runner -->|72| memory
-    runner -->|68| api
-    runner -->|22| jsc["js-compiler"]
-    datamodel -->|35| utils
-    datamodel -->|12| api
-    datamodel -->|1| contenthash
-    datamodel -->|1| leb128
-    memory -->|18| datamodel
-    memory -->|7| api
-    identity -->|2| utils
-    contenthash -->|2| utils
-    jsc -->|1| schemagen["schema-generator"]
-    schemagen -->|18| api
+    runner ==> datamodel
+    runner ==> utils
+    runner ==> memory
+    runner --> api
+    runner --> jsc["js-compiler"]
+    datamodel --> utils
+    datamodel --> api
+    datamodel --> contenthash
+    datamodel --> leb128
+    memory --> datamodel
+    memory --> api
+    identity --> utils
+    contenthash --> utils
+    jsc --> schemagen["schema-generator"]
+    schemagen --> api
 ```
 
 Three things to take from this:
 
-- **`utils` is the universal floor.** It is imported by 303 files across the
+- **`utils` is the universal floor.** It is imported by nearly every file in the
   repo. Its own `index.ts` deliberately throws, to force callers to import the
   specific subpath they need (for example `@commonfabric/utils/defer`).
-- **`runner` is the gravity well.** It pulls in `data-model` 152 times,
-  `utils` 148 times, and `memory` 72 times in production code alone. Any change
-  to `data-model` or `memory` ripples straight into the runtime.
+- **`runner` is the gravity well.** It leans hardest on `data-model`, `utils`,
+  and `memory` — by a wide margin — so any change to `data-model` or `memory`
+  ripples straight into the runtime.
 - **`api` is mostly types, and a pure leaf.** It sits at the very floor because
   it is the authoring surface — almost entirely TypeScript declarations that
   author code is compiled against — and it has no outgoing package imports at all
@@ -84,31 +84,32 @@ flowchart TD
     classDef hub fill:#c0392b,stroke:#7b241c,color:#fff
     runner["runner"]:::hub
 
-    toolshed["toolshed"] -->|21| runner
-    toolshed -->|7| memory["memory"]
-    toolshed -->|6| llm["llm"]
-    toolshed -->|2| bcs["background-piece-service"]
-    cli["cli"] -->|26| runner
-    cli -->|8| jsc["js-compiler"]
-    cli -->|5| piece["piece"]
-    cli -->|2| sinsp["state-inspector"]
-    sinsp -->|7| memory
-    rtc["runtime-client"] -->|22| runner
-    rtc -->|16| memory
-    ui["ui"] -->|50| rtc
-    ui -->|13| runner
-    shell["shell"] -->|16| rtc
-    shell -->|13| identity["identity"]
-    shell -->|3| ui
-    html["html"] -->|10| rtc
-    html -->|8| runner
-    piece -->|11| runner
-    bcs -->|15| runner
-    memory -->|1| runner
-    llm -->|1| runner
+    toolshed["toolshed"] --> runner
+    toolshed --> memory["memory"]
+    toolshed --> llm["llm"]
+    toolshed --> bcs["background-piece-service"]
+    cli["cli"] --> runner
+    cli --> jsc["js-compiler"]
+    cli --> piece["piece"]
+    cli --> sinsp["state-inspector"]
+    sinsp --> memory
+    rtc["runtime-client"] --> runner
+    rtc --> memory
+    ui["ui"] ==> rtc
+    ui --> runner
+    shell["shell"] --> rtc
+    shell --> identity["identity"]
+    shell --> ui
+    html["html"] --> rtc
+    html --> runner
+    piece --> runner
+    bcs --> runner
+    memory --> runner
+    llm --> runner
 ```
 
-`ui` leaning on `runtime-client` 50 times is the strongest single coupling in
+`ui` leans on `runtime-client` far more than on anything else (the bold edge) —
+the strongest single coupling in
 the consumer half. `ui` does not talk to `runner` directly very much; it talks
 to the worker-side runtime through `runtime-client`'s cell handles.
 
@@ -133,7 +134,7 @@ flowchart LR
     subgraph c2["Cycle 2"]
         runner2["runner"]:::cyc
         memory2["memory"]:::cyc
-        runner2 -->|"70 refs: stores + queries cells"| memory2
+        runner2 -->|"heavily: stores + queries cells"| memory2
         memory2 -->|"v2/query.ts imports<br/>runner/traverse"| runner2
     end
     subgraph c3["Cycle 3"]
@@ -182,34 +183,33 @@ reaching into it for a non-generic schema.
 
 ---
 
-## God-files: where the line count concentrates
+## God-files: where the complexity concentrates
 
 Cycles are one kind of debt; oversized single files are another. These are the
-files a newcomer will be sent to and should expect to lose an afternoon in. All
-counts are lines.
+files a newcomer will be sent to and should expect to lose an afternoon in —
+each several thousand lines, listed roughly biggest first:
 
-| File | Lines | What it is |
-|---|---|---|
-| `runner/src/cfc/prepare.ts` | 6407 | The Contextual-Flow-Control write-policy gate |
-| `memory/v2/engine.ts` | 6254 | The transactional SQLite core |
-| `runner/src/runner.ts` | 5218 | Instantiates a pattern's nodes into scheduler actions |
-| `runner/src/traverse.ts` | 4896 | Schema-driven traversal of the value/link graph |
-| `ts-transformers/src/transformers/schema-injection.ts` | 4134 | Attaches schemas to reactive boundaries |
-| `html/src/worker/reconciler.ts` | 3862 | The worker-thread VDOM reconciler |
-| `runner/src/builtins/llm-dialog.ts` | 3804 | The LLM dialog builtin |
-| `runner/src/storage/v2.ts` | 3480 | The storage manager, provider, and space replica |
-| `runner/src/cell.ts` | 3452 | The Cell and Stream abstractions |
-| `ts-transformers/src/policy/capability-analysis.ts` | 3446 | CFC capability analysis for the transformer |
-| `runner/src/scheduler/facade.ts` | 2787 | The scheduler's public facade (after the scheduler-v2 refactor split `scheduler.ts` into `scheduler/`) |
+| File | What it is |
+|---|---|
+| `runner/src/cfc/prepare.ts` | The Contextual-Flow-Control write-policy gate |
+| `memory/v2/engine.ts` | The transactional SQLite core |
+| `runner/src/runner.ts` | Instantiates a pattern's nodes into scheduler actions |
+| `runner/src/traverse.ts` | Schema-driven traversal of the value/link graph |
+| `ts-transformers/src/transformers/schema-injection.ts` | Attaches schemas to reactive boundaries |
+| `html/src/worker/reconciler.ts` | The worker-thread VDOM reconciler |
+| `runner/src/builtins/llm-dialog.ts` | The LLM dialog builtin |
+| `runner/src/storage/v2.ts` | The storage manager, provider, and space replica |
+| `runner/src/cell.ts` | The Cell and Stream abstractions |
+| `ts-transformers/src/policy/capability-analysis.ts` | CFC capability analysis for the transformer |
+| `runner/src/scheduler/facade.ts` | The scheduler's public facade (after scheduler-v2 split `scheduler.ts` into `scheduler/`) |
 
-`runner` alone holds seven of the eleven, and its single largest file is the
-CFC write-policy gate — Contextual Flow Control has grown into the biggest piece
-of the runtime. The complexity is real and concentrated. (A large generated JSX
-type-declaration file, `html/src/jsx.d.ts` at ~5.5k lines, is omitted here
-because it is generated declarations, not code to read. Bigger files still —
-`patterns/scrabble/scrabble-words.ts` at ~179k lines and the vendored and
-generated blobs under `vendor-astral/` and `static/assets/` — are data, not
-code.)
+Most of these are in `runner`, and its single largest file is the CFC
+write-policy gate — Contextual Flow Control has grown into the biggest piece of
+the runtime. The complexity is real and concentrated. (A large *generated* JSX
+type-declaration file, `html/src/jsx.d.ts`, is omitted here because it is
+declarations, not code to read; so are the far larger data blobs —
+`patterns/scrabble/scrabble-words.ts` and the vendored/generated files under
+`vendor-astral/` and `static/assets/`.)
 
 ---
 
@@ -237,48 +237,45 @@ directory that never existed. The genuinely still-live ones:
 
 ---
 
-## Full production edge list
+## Full production dependency list
 
-For completeness, every production import edge with its reference count. "Prod"
-means test, fixture, integration, and benchmark files were excluded.
+For completeness, which packages each package imports in production code (test,
+fixture, integration, and benchmark files excluded). This is the adjacency — the
+structure — without the reference counts, which are noise for orientation and go
+stale immediately.
 
 ```
-api               → memory(comment only), runner(comment only), utils(comment only)
-background-piece  → identity(9), piece(2), runner(15), utils(3)
-cf-harness        → api(18), llm(4), runner(28), utils(2)
-cli               → api(5), data-model(3), fuse(1), html(2), identity(9),
-                    js-compiler(8), llm(2), memory(3), piece(5), runner(26),
-                    runtime-client(1), state-inspector(2), static(1),
-                    test-support(1), ts-transformers(1), utils(9)
-content-hash      → utils(2)
-data-model        → api(12), content-hash(1), leb128(1), utils(35)
-fuse              → api(3), content-hash(2), data-model(1), piece(3), runner(9)
-home-schemas      → api(12), piece(1), runner(comment only)
-html              → api(5), runner(8), runtime-client(10), ui(comment only), utils(6)
-identity          → utils(2)
-iframe-sandbox    → runner(1), utils(4)
-integration       → identity(1), runner(1), shell(1), utils(3)
-js-compiler       → static(1), ts-transformers(1), utils(4)
-lib-shell         → api(1), data-model(1), identity(1), runner(2), runtime-client(2), utils(1)
-llm               → api(1), runner(1), utils(1)
-memory            → api(7), data-model(18), identity(2), runner(1), utils(6)
-piece             → api(3), data-model(2), home-schemas(1), identity(2),
-                    js-compiler(1), runner(11), utils(4)
-runner            → api(68), content-hash(1), data-model(152), home-schemas(1),
-                    html(3), identity(2), js-compiler(22), llm(2), memory(72),
-                    piece(comment only), static(3), ts-transformers(7), utils(148)
-runtime-client    → api(1), data-model(6), home-schemas(2), html(1), identity(6),
-                    js-compiler(4), llm(1), piece(2), runner(22), utils(13)
-schema-generator  → api(18), data-model(1), utils(9)
-shell             → api(1), felt(1), home-schemas(1), html(1), identity(13),
-                    lib-shell(3), memory(1), piece(1), runner(8),
-                    runtime-client(16), ui(3), utils(4)
-state-inspector   → api(2), data-model(5), identity(1), memory(7),
-                    runner(comment only)
-static            → utils(3)
-toolshed          → api(4), background-piece(2), content-hash(2), data-model(8),
-                    identity(2), llm(6), memory(7), runner(21), static(3), utils(11)
-ts-transformers   → api(9), schema-generator(12), utils(5)
-ui                → api(8), content-hash(1), html(2), identity(8),
-                    iframe-sandbox(2), runner(13), runtime-client(50), shell(4)
+api               → utils (all references are comment-only; api is a pure leaf)
+background-piece  → identity, piece, runner, utils
+cf-harness        → api, llm, runner, utils
+cli               → api, data-model, fuse, html, identity, js-compiler, llm,
+                    memory, piece, runner, runtime-client, state-inspector,
+                    static, test-support, ts-transformers, utils
+content-hash      → utils
+data-model        → api, content-hash, leb128, utils
+fuse              → api, content-hash, data-model, piece, runner
+home-schemas      → api, piece
+html              → api, runner, runtime-client, utils
+identity          → utils
+iframe-sandbox    → runner, utils
+integration       → identity, runner, shell, utils
+js-compiler       → static, ts-transformers, utils
+lib-shell         → api, data-model, identity, runner, runtime-client, utils
+llm               → api, runner, utils
+memory            → api, data-model, identity, runner, utils
+piece             → api, data-model, home-schemas, identity, js-compiler, runner, utils
+runner            → api, content-hash, data-model, home-schemas, html, identity,
+                    js-compiler, llm, memory, static, ts-transformers, utils
+runtime-client    → api, data-model, home-schemas, html, identity, js-compiler,
+                    llm, piece, runner, utils
+schema-generator  → api, data-model, utils
+shell             → api, felt, home-schemas, html, identity, lib-shell, memory,
+                    piece, runner, runtime-client, ui, utils
+state-inspector   → api, data-model, identity, memory
+static            → utils
+toolshed          → api, background-piece, content-hash, data-model, identity,
+                    llm, memory, runner, static, utils
+ts-transformers   → api, schema-generator, utils
+ui                → api, content-hash, html, identity, iframe-sandbox, runner,
+                    runtime-client, shell
 ```

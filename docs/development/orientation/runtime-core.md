@@ -1,7 +1,8 @@
 # The runtime core: `runner`
 
 `runner` is the reactive engine. It is the package everything else is arranged
-around, it is the largest hand-written package (106k non-test lines), and it
+around, it is by far the largest hand-written package (roughly 100k non-test
+lines — several times the next-biggest), and it
 holds four of the eleven biggest files in the repo. If you understand `runner`,
 the rest of the system is mostly plumbing around it.
 
@@ -22,7 +23,7 @@ large hub files at the top level.
 | `traverse.ts` | Schema-driven traversal of the value-and-link graph; resolves a (schema, path) query into concrete reads, following links. One of the largest files in the package. |
 | `schema.ts` | Schema resolution, validate-and-transform, default-value handling. |
 | `link-utils.ts`, `link-types.ts`, `sigil-types.ts` | The link system: the serialized `SigilLink`, the in-memory `NormalizedLink`, and the deprecated `LegacyAlias`. |
-| `scheduler/` (31 files) | The reactive engine (post `scheduler-v2` refactor; `scheduler.ts` is a one-line re-export of `scheduler/facade.ts`). `facade.ts` = the `Scheduler` class; `invalidation.ts` marks readers invalid on a commit; `trigger-index.ts` maps entities to the actions that read them; `dependency-graph.ts` holds the `dependents`/`reverseDependencies` edges and demand-reachability (`isLive`); `settle.ts` is the pull settle loop; `run.ts` runs one action (tx → run → commit → resubscribe); `topology.ts` orders the work set; `work-oracle.ts` answers "is there runnable pull work". |
+| `scheduler/` (a few dozen files) | The reactive engine (post `scheduler-v2` refactor; `scheduler.ts` is a one-line re-export of `scheduler/facade.ts`). `facade.ts` = the `Scheduler` class; `invalidation.ts` marks readers invalid on a commit; `trigger-index.ts` maps entities to the actions that read them; `dependency-graph.ts` holds the `dependents`/`reverseDependencies` edges and demand-reachability (`isLive`); `settle.ts` is the pull settle loop; `run.ts` runs one action (tx → run → commit → resubscribe); `topology.ts` orders the work set; `work-oracle.ts` answers "is there runnable pull work". |
 | `storage/` | Layered persistence and remote sync: the storage manager, per-space replica, journaled transactions, and the WebSocket session to the memory host. |
 | `builder/` | The authoring surface that turns pattern code into a serializable node graph (`pattern`, `lift`, `reactive`/`cell`, `createNodeFactory`). |
 | `builtins/` | Built-in modules patterns can call: `map`/`filter`/`ifElse`/`when`, `llm`/`generateText`/`generateObject`, the fetch builtins (`fetchJson`/`fetchText`/`fetchProgram`/`streamData`), `navigateTo`, `wish`, and SQLite builtins. |
@@ -110,9 +111,9 @@ An **execute/settle phase** then drains the invalid-plus-demanded set to
 quiescence.
 
 Since the `scheduler-v2` refactor the engine lives in `runner/src/scheduler/`
-(31 files; `scheduler.ts` is now just a re-export of `scheduler/facade.ts`, which
-holds the `Scheduler` class). The steps below give the current file and function
-for each hop.
+(a few dozen files; `scheduler.ts` is now just a re-export of
+`scheduler/facade.ts`, which holds the `Scheduler` class). The steps below give
+the current file and function for each hop.
 
 ```mermaid
 sequenceDiagram
@@ -137,7 +138,7 @@ sequenceDiagram
     Loop->>Loop: topologicalSort (order by read→write edges)
     Loop->>Run: runSchedulerAction (new tx → run → commit → resubscribe)
     Note over Run: the commit's changed writes re-enter as a new notification
-    Note over Loop: repeat up to MAX_ITERS (10); non-settling subgraphs<br/>get exponential backoff, not a hard cycle-break
+    Note over Loop: repeat up to a small fixed cap; non-settling subgraphs<br/>get exponential backoff, not a hard cycle-break
     Loop-->>Code: idle / settled
 ```
 
@@ -150,11 +151,11 @@ Three facts that trip people up:
   an unchanged write yields no triggered readers and no invalidation. There is no
   longer a separate "write-propagation" module.
 - **The loop is bounded but has no cycle-breaker.** The settle loop runs at most
-  `MAX_ITERS` (10, in `scheduler/constants.ts`), with a matching per-node
-  `PASS_RUN_BUDGET`. A subgraph that will not settle is not force-broken; it is
-  deferred with exponential backoff (`planBudgetBackoff`, 250 ms → 2 s), and
-  `idle()` is released after `CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES` (3) so a
-  reactive feedback loop degrades rather than hangs.
+  a small fixed number of iterations (`MAX_ITERS` in `scheduler/constants.ts`),
+  with a matching per-node run budget. A subgraph that will not settle is not
+  force-broken; it is deferred with exponential backoff (`planBudgetBackoff`), and
+  `idle()` is released after a few backoff passes so a reactive feedback loop
+  degrades rather than hangs.
 - **"Idle" and "settled" are observable.** `runtime.idle()` waits for reactive
   quiescence; `runtime.settled()` additionally drains pending commits and
   storage sync. Tests and the background service rely on both.

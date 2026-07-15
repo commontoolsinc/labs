@@ -78,7 +78,7 @@ Two facts that catch people out:
   `data-cfc-blocked-reason`). If UI content "disappears," suspect the flow-control
   policy before suspecting a render bug.
 
-The `VDomOp` vocabulary (`vdom-ops.ts`) is a 12-member discriminated union:
+The `VDomOp` vocabulary (`vdom-ops.ts`) is a small discriminated union:
 `create-element` (optionally carrying a `space` for cross-space transclusion),
 `create-text`, `update-text`, `set-prop`, `remove-prop`, `set-attrs` (a bulk
 initial-render optimization), `set-event` (carries an integer `handlerId`, not a
@@ -95,11 +95,11 @@ main-thread `CellHandle.subscribe()` and calls `requestUpdate()` on change;
 writing back calls `cellHandle.set(v)`, which sends a `CellSet` request over IPC
 to the worker, and the worker applies it in a transaction
 (`runtime.edit()` → `withTx(tx).set(v)` → `tx.commit()`). Debounce and blur
-timing for inputs live on the controller (default `debounce` 300 ms). The runtime
+timing for inputs live on the controller (a short debounce by default). The runtime
 and the current space arrive through Lit context (`runtimeContext`,
 `spaceContext`).
 
-`ui` holds ~110 `cf-*` component directories under `v2/components/`; `v2/core/`
+`ui` holds over a hundred `cf-*` component directories under `v2/components/`; `v2/core/`
 holds the controllers (`base-element.ts`, `cell-controller.ts` with typed
 subclasses, `input-timing-controller.ts`, `mention-controller.ts`,
 `form-field-controller.ts`, drag/debug/menu helpers), and `v2/styles/variables.ts`
@@ -177,7 +177,7 @@ flowchart TB
 `views/index.ts` registers eight views — `RootView` (`x-root-view`), `AppView`,
 `BodyView`, `HeaderView`, `LoginView`, `QuickJumpView`, `ACLView`, `DebuggerView`
 — and `DebuggerView` pulls in `SchedulerGraphView` and `SchedulerSourceView`.
-Those last two are large (each over 3000 lines) because the shell ships its own
+Those last two are large (several thousand lines each) because the shell ships its own
 scheduler-visualization and debugging tools. State changes go through a
 three-variant `Command` union (`set-view` / `set-identity` / `set-config`) applied
 by `applyCommand`, which clones the state and mutates the copy (immutable update);
@@ -214,9 +214,9 @@ bound "current space" (default worker URL `/scripts/worker-runtime.js`).
 - **Several shell views are disabled pending a worker refactor.** `ACLView` and
   parts of `QuickJumpView` carry `TODO(runtime-worker-refactor)` and are
   currently inert.
-- **The biggest files to budget for:** `html/src/jsx.d.ts` (5458 lines, but it
-  is generated type declarations), `html/src/worker/reconciler.ts` (3862), and
-  the shell debug views (~3000 each).
+- **The biggest files to budget for:** `html/src/jsx.d.ts` (the largest, but
+  generated type declarations), `html/src/worker/reconciler.ts`, and the shell
+  debug views — each several thousand lines.
 
 ---
 
