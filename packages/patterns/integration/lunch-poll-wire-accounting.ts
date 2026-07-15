@@ -1,6 +1,9 @@
 import type {
   MemoryWireAccountingRecord,
   MemoryWireAccountingReport,
+  MemoryWireCandidate,
+  MemoryWireCandidateScope,
+  MemoryWireSemanticCategory,
 } from "@commonfabric/memory/v2/wire-accounting";
 
 export type LunchPollWireAccountingTotals = {
@@ -19,9 +22,36 @@ export type LunchPollWireAccountingRow = LunchPollWireAccountingTotals & {
 
 export type LunchPollWireAccountingAnalysis = {
   records: MemoryWireAccountingRecord[];
+  truncated?: { reason: string };
   totals: LunchPollWireAccountingTotals;
   rows: LunchPollWireAccountingRow[];
+  protocolSemanticRows: LunchPollProtocolSemanticRow[];
+  candidateRows: LunchPollWireCandidateRow[];
 };
+
+export type LunchPollProtocolSemanticRow = {
+  direction: string;
+  classification: string;
+  category: MemoryWireSemanticCategory;
+  actualBytes: number;
+  percentOfProtocolClass: number;
+  percentOfAllTraffic: number;
+};
+
+export type LunchPollWireCandidateRow = {
+  category: MemoryWireSemanticCategory;
+  scope: MemoryWireCandidateScope;
+  candidateBytes: number;
+  candidateOccurrences: number;
+  repeatOccurrencesConnectionLocal: number;
+  repeatBytesConnectionLocal: number;
+  referenceCostConnectionLocal: number;
+  netSavingsConnectionLocal: number;
+};
+
+// This is deliberately a simulation cost, not a protocol claim: a compact
+// future reference still needs a marker plus a cache key on the wire.
+const CACHE_REFERENCE_BYTES = 12;
 
 const SYNC_CLASSIFICATION_SUFFIX = ".sync";
 // First measured real Lunch Poll browser run saved 22.9% on sync-bearing
@@ -75,6 +105,17 @@ export function analyzeLunchPollWireAccounting(
       connections: Set<string>;
     }
   >();
+  const candidates = new Map<string, {
+    category: MemoryWireSemanticCategory;
+    scope: MemoryWireCandidateScope;
+    candidates: Array<{ candidate: MemoryWireCandidate; connectionId: string }>;
+  }>();
+  const protocolSemantic = new Map<string, {
+    direction: string;
+    classification: string;
+    category: MemoryWireSemanticCategory;
+    actualBytes: number;
+  }>();
 
   for (const record of records) {
     baselineBytes += record.baselineBytes;
@@ -98,6 +139,31 @@ export function analyzeLunchPollWireAccounting(
     group.actualBytes += record.actualBytes;
     group.frames += 1;
     group.connections.add(record.connectionId);
+
+    for (
+      const [category, bytes] of Object.entries(
+        record.actualSemanticBytes ?? {},
+      ) as [MemoryWireSemanticCategory, number][]
+    ) {
+      if (bytes === 0) continue;
+      const protocolKey =
+        `${record.direction}\u0000${record.classification}\u0000${category}`;
+      let protocolGroup = protocolSemantic.get(protocolKey);
+      if (protocolGroup === undefined) {
+        protocolGroup = {
+          direction: record.direction,
+          classification: record.classification,
+          category,
+          actualBytes: 0,
+        };
+        protocolSemantic.set(protocolKey, protocolGroup);
+      }
+      protocolGroup.actualBytes += bytes;
+    }
+
+    for (const candidate of record.actualCandidates ?? []) {
+      addCandidateRow(candidates, candidate, record.connectionId);
+    }
   }
 
   const rows = [...groups.values()].map((group) => ({
@@ -113,12 +179,109 @@ export function analyzeLunchPollWireAccounting(
     left.classification.localeCompare(right.classification) ||
     left.direction.localeCompare(right.direction)
   );
+  const protocolClassActualBytes = new Map(
+    rows.map((row) => [
+      `${row.direction}\u0000${row.classification}`,
+      row.actualBytes,
+    ]),
+  );
+  const protocolSemanticRows = [...protocolSemantic.values()].map((row) => {
+    const protocolActualBytes = protocolClassActualBytes.get(
+      `${row.direction}\u0000${row.classification}`,
+    ) ?? 0;
+    return {
+      ...row,
+      percentOfProtocolClass: protocolActualBytes === 0
+        ? 0
+        : (row.actualBytes / protocolActualBytes) * 100,
+      percentOfAllTraffic: actualBytes === 0
+        ? 0
+        : (row.actualBytes / actualBytes) * 100,
+    };
+  }).sort((left, right) =>
+    left.classification.localeCompare(right.classification) ||
+    left.direction.localeCompare(right.direction) ||
+    left.category.localeCompare(right.category)
+  );
+  const candidateRows = [...candidates.values()].map((group) => {
+    const uniqueConnection = new Set<string>();
+    let repeatBytesConnectionLocal = 0;
+    let repeatOccurrencesConnectionLocal = 0;
+    for (const { candidate, connectionId } of group.candidates) {
+      const connectionKey = `${connectionId}\u0000${candidate.fingerprint}`;
+      if (uniqueConnection.has(connectionKey)) {
+        repeatBytesConnectionLocal += candidate.encodedBytes;
+        repeatOccurrencesConnectionLocal += 1;
+      }
+      uniqueConnection.add(connectionKey);
+    }
+    const candidateOccurrences = group.candidates.length;
+    const referenceCostConnectionLocal = repeatOccurrencesConnectionLocal *
+      CACHE_REFERENCE_BYTES;
+    return {
+      category: group.category,
+      scope: group.scope,
+      candidateBytes: group.candidates.reduce(
+        (sum, item) => sum + item.candidate.encodedBytes,
+        0,
+      ),
+      candidateOccurrences,
+      repeatOccurrencesConnectionLocal,
+      repeatBytesConnectionLocal,
+      referenceCostConnectionLocal,
+      netSavingsConnectionLocal: Math.max(
+        0,
+        repeatBytesConnectionLocal - referenceCostConnectionLocal,
+      ),
+    };
+  }).sort((left, right) =>
+    left.category.localeCompare(right.category) ||
+    left.scope.localeCompare(right.scope)
+  );
 
   return {
     records,
+    truncated: report.truncated === undefined
+      ? undefined
+      : { ...report.truncated },
     totals: toTotals(baselineBytes, actualBytes, records.length, connections),
     rows,
+    protocolSemanticRows,
+    candidateRows,
   };
+}
+
+function addCandidateRow(
+  groups: Map<string, {
+    category: MemoryWireSemanticCategory;
+    scope: MemoryWireCandidateScope;
+    candidates: Array<{ candidate: MemoryWireCandidate; connectionId: string }>;
+  }>,
+  candidate: MemoryWireCandidate,
+  connectionId: string,
+): void {
+  candidateGroup(groups, candidate.category, candidate.scope).candidates.push({
+    candidate,
+    connectionId,
+  });
+}
+
+function candidateGroup(
+  groups: Map<string, {
+    category: MemoryWireSemanticCategory;
+    scope: MemoryWireCandidateScope;
+    candidates: Array<{ candidate: MemoryWireCandidate; connectionId: string }>;
+  }>,
+  category: MemoryWireSemanticCategory,
+  scope: MemoryWireCandidateScope,
+) {
+  const key = `${category}\u0000${scope}`;
+  let group = groups.get(key);
+  if (group === undefined) {
+    group = { category, scope, candidates: [] };
+    groups.set(key, group);
+  }
+  return group;
 }
 
 function isOutboundSync(record: MemoryWireAccountingRecord): boolean {
@@ -126,10 +289,31 @@ function isOutboundSync(record: MemoryWireAccountingRecord): boolean {
     record.classification.endsWith(SYNC_CLASSIFICATION_SUFFIX);
 }
 
+const REQUEST_SCHEMA_CAS_CLASSIFICATIONS = new Set([
+  "client.graph.query",
+  "client.session.watch.set",
+  "client.session.watch.add",
+  "client.transact",
+]);
+
+function isInboundRequestSchemaCas(
+  record: MemoryWireAccountingRecord,
+): boolean {
+  return record.direction === "inbound" &&
+    REQUEST_SCHEMA_CAS_CLASSIFICATIONS.has(record.classification);
+}
+
 export function validateLunchPollWireAccounting(
   analysis: LunchPollWireAccountingAnalysis,
+  options: { requestSchemaCasEnabled?: boolean } = {},
 ): string[] {
+  const requestSchemaCasEnabled = options.requestSchemaCasEnabled ?? true;
   const errors: string[] = [];
+  if (analysis.truncated !== undefined) {
+    errors.push(
+      `wire accounting report truncated: ${analysis.truncated.reason}`,
+    );
+  }
   const connectionIds = new Set(
     analysis.records.map((record) => record.connectionId),
   );
@@ -162,8 +346,29 @@ export function validateLunchPollWireAccounting(
   }
 
   for (const record of analysis.records) {
+    if (record.actualSemanticBytes !== undefined) {
+      const semanticBytes = Object.values(record.actualSemanticBytes).reduce(
+        (sum, bytes) => sum + bytes,
+        0,
+      );
+      if (semanticBytes !== record.actualBytes) {
+        errors.push(
+          `actual semantic bytes differ for ${record.classification}: semantic=${semanticBytes} actual=${record.actualBytes}`,
+        );
+      }
+      const candidateBytes = (record.actualCandidates ?? []).reduce(
+        (sum, candidate) => sum + candidate.encodedBytes,
+        0,
+      );
+      if (candidateBytes > record.actualBytes) {
+        errors.push(
+          `candidate bytes exceed actual bytes for ${record.classification}: candidates=${candidateBytes} actual=${record.actualBytes}`,
+        );
+      }
+    }
     if (
       record.direction === "inbound" &&
+      (!requestSchemaCasEnabled || !isInboundRequestSchemaCas(record)) &&
       record.baselineBytes !== record.actualBytes
     ) {
       errors.push(
@@ -179,6 +384,35 @@ export function validateLunchPollWireAccounting(
         `outbound non-sync ${record.classification} frame on ${record.connectionId} changed bytes: baseline=${record.baselineBytes} actual=${record.actualBytes}`,
       );
     }
+  }
+
+  const inboundRequestSchemaCasRecords = analysis.records.filter(
+    isInboundRequestSchemaCas,
+  );
+  const inboundRequestSchemaCasBaseline = inboundRequestSchemaCasRecords.reduce(
+    (sum, record) => sum + record.baselineBytes,
+    0,
+  );
+  const inboundRequestSchemaCasActual = inboundRequestSchemaCasRecords.reduce(
+    (sum, record) => sum + record.actualBytes,
+    0,
+  );
+  if (inboundRequestSchemaCasRecords.length === 0) {
+    errors.push("expected at least one request-schema-CAS browser frame");
+  } else if (
+    requestSchemaCasEnabled &&
+    !(inboundRequestSchemaCasActual < inboundRequestSchemaCasBaseline)
+  ) {
+    errors.push(
+      `expected request-schema-CAS inbound browser aggregate actual bytes to be less than baseline: baseline=${inboundRequestSchemaCasBaseline} actual=${inboundRequestSchemaCasActual}`,
+    );
+  } else if (
+    !requestSchemaCasEnabled &&
+    inboundRequestSchemaCasActual !== inboundRequestSchemaCasBaseline
+  ) {
+    errors.push(
+      `expected request-schema-CAS-capable inbound browser aggregate bytes to remain inline when disabled: baseline=${inboundRequestSchemaCasBaseline} actual=${inboundRequestSchemaCasActual}`,
+    );
   }
 
   const outboundSyncRecords = analysis.records.filter(isOutboundSync);
@@ -245,6 +479,26 @@ export function formatLunchPollWireAccounting(
       `${row.direction} | ${row.classification} | ${row.frames} | ${row.baselineBytes} | ${row.actualBytes} | ${row.savedBytes} | ${
         formatPercent(row.savedPercent)
       }`,
+    );
+  }
+
+  lines.push(
+    "direction | classification | category | actual bytes | % of protocol class | % of all traffic",
+  );
+  for (const row of analysis.protocolSemanticRows) {
+    lines.push(
+      `${row.direction} | ${row.classification} | ${row.category} | ${row.actualBytes} | ${
+        formatPercent(row.percentOfProtocolClass)
+      } | ${formatPercent(row.percentOfAllTraffic)}`,
+    );
+  }
+
+  lines.push(
+    "category | scope | candidate bytes | candidates | repeats (connection) | repeat bytes (connection) | reference cost (connection) | net savings (connection)",
+  );
+  for (const row of analysis.candidateRows) {
+    lines.push(
+      `${row.category} | ${row.scope} | ${row.candidateBytes} | ${row.candidateOccurrences} | ${row.repeatOccurrencesConnectionLocal} | ${row.repeatBytesConnectionLocal} | ${row.referenceCostConnectionLocal} | ${row.netSavingsConnectionLocal}`,
     );
   }
 

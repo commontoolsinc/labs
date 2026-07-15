@@ -50,6 +50,8 @@ import {
 const { API_URL, FRONTEND_URL, MEMORY_WIRE_ACCOUNTING_TOKEN, SPACE_NAME } = env;
 const PROPAGATION_TIMEOUT = 60_000;
 const WIRE_ACCOUNTING_PATH = "api/storage/memory/wire-accounting";
+const REQUEST_SCHEMA_CAS_ENABLED =
+  Deno.env.get("CF_MEMORY_REQUEST_SCHEMA_CAS_ENABLED") !== "false";
 
 const HOST = "Alice";
 const GUEST = "Bob";
@@ -395,7 +397,9 @@ describe("lunch poll: two users vote on a shared option", () => {
         accountingStopped = true;
         const analysis = analyzeLunchPollWireAccounting(report);
         console.log(formatLunchPollWireAccounting(analysis));
-        const errors = validateLunchPollWireAccounting(analysis);
+        const errors = validateLunchPollWireAccounting(analysis, {
+          requestSchemaCasEnabled: REQUEST_SCHEMA_CAS_ENABLED,
+        });
         assert(
           errors.length === 0,
           `Memory wire-accounting invariants failed:\n${errors.join("\n")}`,
