@@ -957,6 +957,59 @@ Deno.test("shared execution pool renews authority while a Worker is still starti
   }
 });
 
+Deno.test("shared execution pool fences a start whose authority renewal is rejected", async () => {
+  const control = new FakeExecutionControl();
+  control.renewalSucceeds = false;
+  const renewalStarted = Promise.withResolvers<void>();
+  const originalRenew = control.renewExecutionLease.bind(control);
+  control.renewExecutionLease = (current) => {
+    const renewal = originalRenew(current);
+    renewalStarted.resolve();
+    return renewal;
+  };
+  const timers = new ManualTimers();
+  const startEntered = Promise.withResolvers<void>();
+  const releaseStart = Promise.withResolvers<void>();
+  const executor = new FakeExecutor();
+  let startupSignal: AbortSignal | undefined;
+  const factory: SpaceExecutorFactory = {
+    async start(options): Promise<SpaceExecutor> {
+      startupSignal = options.signal;
+      startEntered.resolve();
+      // Deliberately return even after abort: the pool must still fence and
+      // tear down a factory that crosses the cancellation boundary late.
+      await releaseStart.promise;
+      return executor;
+    },
+  };
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+  });
+  pool.start();
+
+  try {
+    const addingDemand = control.emit(1, [demand(1, ["piece:a"])]);
+    await startEntered.promise;
+    timers.fire((delayMs) => delayMs > 2_000);
+    await renewalStarted.promise;
+    assertEquals(startupSignal?.aborted, true);
+
+    releaseStart.resolve();
+    await addingDemand;
+    await pool.idle();
+    assertEquals(executor.stopOptions, [{ abrupt: true }]);
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "backoff");
+    assertEquals(pool.metrics().workersStarted, 0);
+    assertEquals(pool.metrics().leaseLosses, 1);
+  } finally {
+    releaseStart.resolve();
+    await pool.close();
+  }
+});
+
 Deno.test("shared execution pool settles before fencing a graceful drain", async () => {
   const events: string[] = [];
   const control = new FakeExecutionControl(events);

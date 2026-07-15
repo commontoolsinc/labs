@@ -831,14 +831,27 @@ export class SharedExecutionPool {
     };
 
     scheduleRenewal();
+    let executor: SpaceExecutor;
     try {
-      return await start();
+      executor = await start();
     } finally {
-      running = false;
       if (renewalTimer !== null) this.#clearTimer(renewalTimer);
       const inFlightRenewal = renewalTask;
       if (inFlightRenewal !== null) await inFlightRenewal;
+      running = false;
+      if (renewalTimer !== null) this.#clearTimer(renewalTimer);
     }
+    if (renewalFailed) {
+      try {
+        await executor.stop({ abrupt: true });
+      } catch (error) {
+        console.warn("executor Worker startup-fence teardown failed", error);
+      }
+      throw startupAbort.signal.reason instanceof Error
+        ? startupAbort.signal.reason
+        : new Error("execution lease renewal lost during Worker startup");
+    }
+    return executor;
   }
 
   #scheduleRenewal(slot: Slot, token: object): void {
