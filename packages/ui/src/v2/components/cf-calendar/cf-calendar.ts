@@ -20,6 +20,8 @@ import { type CellHandle } from "@commonfabric/runtime-client";
  * @attr {boolean} disabled - Whether the calendar is disabled
  * @attr {string} min - YYYY-MM-DD minimum selectable date
  * @attr {string} max - YYYY-MM-DD maximum selectable date
+ * @attr {string} week-start - First day of the week: "sunday" (default) or
+ *   "monday"
  *
  * @prop {CellHandle<string> | string} value - Selected date in YYYY-MM-DD format
  * @prop {CellHandle<string[]> | string[]} markedDates - Dates with dot indicators
@@ -206,6 +208,7 @@ export class CFCalendar extends BaseElement {
     min: { type: String },
     max: { type: String },
     disabled: { type: Boolean, reflect: true },
+    weekStart: { type: String, attribute: "week-start" },
   };
 
   declare value: CellHandle<string> | string;
@@ -213,13 +216,26 @@ export class CFCalendar extends BaseElement {
   declare min: string;
   declare max: string;
   declare disabled: boolean;
+  declare weekStart: "sunday" | "monday";
 
   _viewYear: number;
   _viewMonth: number;
 
+  /**
+   * Last value content the view month was synced against. Lets cell-change
+   * notifications distinguish "the bound value actually changed" (resync the
+   * view month) from a mere redelivery/re-render (leave the view alone, so a
+   * user who navigated to another month isn't yanked back).
+   */
+  private _lastSyncedValue: string | undefined;
+
   private _valueCellController = createCellController<string>(this, {
     timing: { strategy: "immediate" },
     onChange: (_newValue) => {
+      // Follow the bound value's month when its CONTENT changes — e.g. the
+      // host app writes a date in another month to the same cell. Without
+      // this, only reassigning the `value` property resynced the view.
+      this._resyncViewIfValueChanged();
       this.requestUpdate();
     },
   });
@@ -239,6 +255,7 @@ export class CFCalendar extends BaseElement {
     this.disabled = false;
     this.min = "";
     this.max = "";
+    this.weekStart = "sunday";
   }
 
   override connectedCallback() {
@@ -274,11 +291,23 @@ export class CFCalendar extends BaseElement {
 
   private _syncViewToValue(): void {
     const val = this._getValue();
+    this._lastSyncedValue = val;
     if (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
       const [y, m] = val.split("-").map(Number);
       this._viewYear = y;
       this._viewMonth = m - 1;
     }
+  }
+
+  /**
+   * Resync the view month only if the bound value's content changed since we
+   * last synced. Redeliveries of an unchanged value (or unrelated re-renders)
+   * must not move the view: the user may have navigated elsewhere with the
+   * prev/next buttons.
+   */
+  private _resyncViewIfValueChanged(): void {
+    if (this._getValue() === this._lastSyncedValue) return;
+    this._syncViewToValue();
   }
 
   private _getValue(): string {
@@ -300,7 +329,9 @@ export class CFCalendar extends BaseElement {
     }> = [];
 
     const firstDay = new Date(year, month, 1);
-    const startDow = firstDay.getDay(); // 0=Sun
+    // Rotate the raw day-of-week (0=Sun) so column 0 is the configured week
+    // start: number of leading previous-month cells before the 1st.
+    const startDow = (firstDay.getDay() - this._weekStartOffset() + 7) % 7;
 
     const daysInMonth = new Date(year, month + 1, 0).getDate();
 
@@ -341,6 +372,20 @@ export class CFCalendar extends BaseElement {
     }
 
     return cells;
+  }
+
+  /** Offset from Sunday of the configured first day of the week. */
+  private _weekStartOffset(): number {
+    return this.weekStart === "monday" ? 1 : 0;
+  }
+
+  /** Weekday header labels, rotated to start at the configured week start. */
+  _weekdayLabels(): string[] {
+    const labels = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+    const offset = this._weekStartOffset();
+    return offset === 0
+      ? labels
+      : [...labels.slice(offset), ...labels.slice(0, offset)];
   }
 
   private _toDateStr(date: Date): string {
@@ -476,7 +521,7 @@ export class CFCalendar extends BaseElement {
     const selectedValue = this._getValue();
     const markedDatesSet = new Set(this._getMarkedDates());
     const grid = this._buildGrid(this._viewYear, this._viewMonth);
-    const weekdays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+    const weekdays = this._weekdayLabels();
 
     return html`
       <div class="calendar" data-cf-calendar>
