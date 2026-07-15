@@ -26,6 +26,7 @@ import {
   PointerCycleTracker,
   SchemaObjectTraverser,
   schemaTrackerCoversSelector,
+  type TraversalContext,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
@@ -39,11 +40,12 @@ import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
+  context: TraversalContext = createDefaultTraversalContext(),
 ): SchemaObjectTraverser<FabricValue> {
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector);
+  return new SchemaObjectTraverser(tx, selector, context);
 }
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
@@ -2749,6 +2751,150 @@ describe("link schema path narrowing", () => {
 
     expect(ok).toBeUndefined();
     expect(error).toBeDefined();
+  });
+
+  it("stops query traversal at an opaque nested cell boundary", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:opaque-friends-root" as URI;
+    const directFriendsUri = "of:opaque-direct-friends" as URI;
+    const directFriendUri = "of:opaque-direct-friend" as URI;
+    const nestedFriendsUri = "of:opaque-nested-friends" as URI;
+    const secondDegreeFriendUri = "of:opaque-second-degree-friend" as URI;
+
+    const fullUserSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const fullFriendsSchema = {
+      type: "array",
+      items: fullUserSchema,
+    } as const satisfies JSONSchema;
+
+    const rootValue = {
+      id: "root",
+      friends: makeLink(directFriendsUri, [], fullFriendsSchema),
+    };
+    const directFriendsValue = [
+      makeLink(directFriendUri, [], fullUserSchema),
+    ];
+    const directFriendValue = {
+      id: "direct",
+      friends: makeLink(nestedFriendsUri, [], fullFriendsSchema),
+    };
+    const nestedFriendsValue = [
+      makeLink(secondDegreeFriendUri, [], fullUserSchema),
+    ];
+
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, directFriendsUri, directFriendsValue);
+    putDoc(store, directFriendUri, directFriendValue);
+    putDoc(store, nestedFriendsUri, nestedFriendsValue);
+    putDoc(store, secondDegreeFriendUri, { id: "second-degree", friends: [] });
+
+    const directFriendSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: fullUserSchema,
+          asCell: ["opaque"],
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const querySchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: directFriendSchema,
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const context = createDefaultTraversalContext();
+    const traverser = getTraverser(
+      store,
+      { path: ["value"], schema: querySchema },
+      context,
+    );
+
+    const { ok: result, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toEqual({
+      id: "root",
+      friends: [{ id: "direct", friends: directFriendValue.friends }],
+    });
+
+    const trackerKey = (id: URI) => `${SPACE}/space/${id}`;
+    expect(context.schemaTracker.has(trackerKey(rootUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendsUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(nestedFriendsUri))).toBe(false);
+    expect(context.schemaTracker.has(trackerKey(secondDegreeFriendUri))).toBe(
+      false,
+    );
+
+    const nonOpaqueDirectFriendSchema = {
+      ...directFriendSchema,
+      properties: {
+        ...directFriendSchema.properties,
+        friends: fullFriendsSchema,
+      },
+    } as const satisfies JSONSchema;
+    const nonOpaqueQuerySchema = {
+      ...querySchema,
+      properties: {
+        ...querySchema.properties,
+        friends: {
+          type: "array",
+          items: nonOpaqueDirectFriendSchema,
+        },
+      },
+    } as const satisfies JSONSchema;
+    const nonOpaqueContext = createDefaultTraversalContext();
+    const nonOpaqueTraverser = getTraverser(
+      store,
+      { path: ["value"], schema: nonOpaqueQuerySchema },
+      nonOpaqueContext,
+    );
+    nonOpaqueTraverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(nonOpaqueContext.schemaTracker.has(trackerKey(nestedFriendsUri)))
+      .toBe(true);
+    expect(
+      nonOpaqueContext.schemaTracker.has(trackerKey(secondDegreeFriendUri)),
+    ).toBe(true);
   });
 });
 
