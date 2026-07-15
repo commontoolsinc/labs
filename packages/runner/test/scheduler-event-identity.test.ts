@@ -175,6 +175,14 @@ describe("scheduler event identity", () => {
         ),
       ]);
       expect(outcome).toBe("payload");
+
+      const idleOutcome = await Promise.race([
+        env.runtime.idle().then(() => "idle"),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve("piece-load-still-blocks-idle"), 250)
+        ),
+      ]);
+      expect(idleOutcome).toBe("idle");
     } finally {
       pieceLoad.resolve(true);
       await disposeSchedulerTestRuntime(env);
@@ -231,16 +239,28 @@ describe("scheduler event identity", () => {
     };
     const env = createSchedulerTestRuntime(import.meta.url);
     const commitStatus = Promise.withResolvers<string>();
+    const pieceLoad = Promise.withResolvers<boolean>();
+    let loadSignal: AbortSignal | undefined;
     let disposed = false;
     try {
       const schedulerInternals = env.runtime.scheduler as unknown as {
         eventQueueState: {
-          loadPieceForEvent?: () => Promise<boolean>;
+          loadPieceForEvent?: (
+            runtime: Runtime,
+            link: NormalizedFullLink,
+            signal: AbortSignal,
+          ) => Promise<boolean>;
         };
         backgroundTasks: Set<Promise<unknown>>;
       };
-      schedulerInternals.eventQueueState.loadPieceForEvent = () =>
-        Promise.resolve(true);
+      schedulerInternals.eventQueueState.loadPieceForEvent = (
+        _runtime,
+        _link,
+        signal,
+      ) => {
+        loadSignal = signal;
+        return pieceLoad.promise;
+      };
 
       env.runtime.scheduler.queueEvent(
         loadingLink,
@@ -248,7 +268,8 @@ describe("scheduler event identity", () => {
         undefined,
         (tx) => commitStatus.resolve(tx.status().status),
       );
-      await Promise.all([...schedulerInternals.backgroundTasks]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(schedulerInternals.backgroundTasks.size).toBe(1);
 
       const outcome = await Promise.race([
         disposeSchedulerTestRuntime(env).then(() => "disposed"),
@@ -258,8 +279,10 @@ describe("scheduler event identity", () => {
       ]);
       expect(outcome).toBe("disposed");
       expect(await commitStatus.promise).toBe("error");
+      expect(loadSignal?.aborted).toBe(true);
       disposed = outcome === "disposed";
     } finally {
+      pieceLoad.resolve(true);
       if (!disposed) {
         env.runtime.scheduler.addEventHandler(() => {}, loadingLink);
         await disposeSchedulerTestRuntime(env);

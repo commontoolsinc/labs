@@ -88,12 +88,15 @@ function followResultCellChain(
  *
  * @param runtime - The runtime instance
  * @param cellLink - The location that received an event or should be current
+ * @param signal - Cancels a load continuation before it can start the piece
  * @returns Promise<boolean> - true if a piece was started, false otherwise
  */
 export async function ensurePieceRunning(
   runtime: Runtime,
   cellLink: NormalizedFullLink,
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  if (signal?.aborted) return false;
   try {
     const tx = runtime.edit();
     tx.tx.immediate = true;
@@ -126,6 +129,7 @@ export async function ensurePieceRunning(
       // Commit the read transaction before starting the piece
       runtime.prepareTxForCommit(tx);
       await tx.commit();
+      if (signal?.aborted) return false;
 
       // Load the pattern by its content identity.
       const pattern = await runtime.patternManager.loadPatternByIdentity(
@@ -133,6 +137,7 @@ export async function ensurePieceRunning(
         identityRef.symbol,
         cellLink.space,
       );
+      if (signal?.aborted) return false;
 
       if (!pattern) {
         logger.debug("ensure-piece", () => [
@@ -147,6 +152,7 @@ export async function ensurePieceRunning(
 
       // Start the existing piece - this registers event handlers without
       // re-running setup and potentially allocating different metadata cells.
+      if (signal?.aborted) return false;
       await runtime.start(resultCell);
 
       logger.debug("ensure-piece", () => [

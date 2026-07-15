@@ -1483,8 +1483,12 @@ applies only to an intent that had no registration when queued. It does not
 retarget an event already captured by an older handler generation into a
 replacement registration. Runtime teardown is a terminal owner cancellation:
 it settles any still-load-pending intent before waiting for scheduler
-quiescence, rather than hanging disposal on a handler that can no longer
-register.
+quiescence, aborts the event-owned load continuation before it can start a
+piece after teardown, and releases the scheduler's wait even when the
+underlying storage request cannot be canceled. Exact handler registration also
+releases that scheduler wait immediately, while allowing a broader piece start
+that is already in progress to finish independently. Neither path may hang
+`idle()` or resurrect the settled event.
 Readiness waiting is distinct from an authored handler attempt and does not
 consume the event's commit-retry budget, call its final callback, or mint a
 receipt. One parked attempt performs one event-driven artifact preparation; it

@@ -217,6 +217,15 @@ export type QueuedEvent = {
    * handlers cannot overtake it.
    */
   handlerLoadPending?: boolean;
+  /**
+   * Control for the asynchronous piece-start attempt that owns this pending
+   * slot. Registering the exact handler releases only the scheduler's wait;
+   * terminal event cancellation also aborts the underlying load continuation.
+   */
+  handlerLoadControl?: {
+    releaseSchedulerWait(): void;
+    abortLoad(reason: string): void;
+  };
   /** Internal exactly-once guard for terminal pre-dispatch drops. */
   finalOutcomeNotified?: boolean;
   /**

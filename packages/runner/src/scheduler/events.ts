@@ -109,6 +109,7 @@ export interface SchedulerEventQueueState {
   readonly loadPieceForEvent?: (
     runtime: Runtime,
     eventLink: NormalizedFullLink,
+    signal: AbortSignal,
   ) => Promise<boolean>;
   readonly queueExecution: () => void;
   readonly recordLineageEvent: (
@@ -166,6 +167,9 @@ export function dropQueuedEvent(
   event: QueuedEvent,
   reason: string,
 ): void {
+  const loadControl = event.handlerLoadControl;
+  delete event.handlerLoadControl;
+  loadControl?.abortLoad(reason);
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
   if (event.originTx !== undefined) {
@@ -260,6 +264,9 @@ function hydrateLoadPendingEvent(
   queuedEvent: QueuedEvent,
   registration: EventHandlerRegistration,
 ): void {
+  const loadControl = queuedEvent.handlerLoadControl;
+  delete queuedEvent.handlerLoadControl;
+  loadControl?.releaseSchedulerWait();
   queuedEvent.handlerRegistration = registration;
   queuedEvent.handlerGeneration = registration.generation;
   queuedEvent.handler = registration.handler;
@@ -373,6 +380,16 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
       registration: unavailableRegistration,
     });
     queuedEvent.handlerLoadPending = true;
+    const loadWaitReleased = Promise.withResolvers<void>();
+    const loadAbort = new AbortController();
+    const loadControl = {
+      releaseSchedulerWait: () => loadWaitReleased.resolve(),
+      abortLoad: (reason: string) => {
+        loadAbort.abort(new Error(reason));
+        loadWaitReleased.resolve();
+      },
+    };
+    queuedEvent.handlerLoadControl = loadControl;
     state.eventQueue.push(queuedEvent);
     if (args.originTx !== undefined) {
       state.recordLineageEvent(args.originTx, queuedEvent);
@@ -381,10 +398,16 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
 
     const startTask = (async () => {
       try {
-        const started = await (state.loadPieceForEvent ?? ensurePieceRunning)(
-          state.runtime,
-          args.eventLink,
-        );
+        const loadOutcome = await Promise.race([
+          (state.loadPieceForEvent ?? ensurePieceRunning)(
+            state.runtime,
+            args.eventLink,
+            loadAbort.signal,
+          ).then((started) => ({ kind: "loaded" as const, started })),
+          loadWaitReleased.promise.then(() => ({ kind: "released" as const })),
+        ]);
+        if (loadOutcome.kind === "released") return;
+        const { started } = loadOutcome;
         // The origin may have failed while the piece was loading.
         if (
           queuedEvent.finalOutcomeNotified ||
@@ -413,6 +436,9 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           }`,
         );
       } finally {
+        if (queuedEvent.handlerLoadControl === loadControl) {
+          delete queuedEvent.handlerLoadControl;
+        }
         state.queueExecution();
       }
     })();
