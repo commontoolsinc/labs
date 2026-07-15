@@ -53,9 +53,7 @@ note under legacy).
 
 Capability and app demos (root files): `annotation.tsx`,
 `annotation-manager.tsx`, `aside.tsx`, `bookmarks.tsx`, `chatbot.tsx`,
-`cheeseboard.tsx`, `compiler.tsx` (known issue: the December 2025 survey in
-`docs/history/packages/patterns/PREEXISTING_BUGS.md` found its "Navigate To
-Piece" button broken; unverified since), `deep-research.tsx`, `dice.tsx` (+
+`cheeseboard.tsx`, `compiler.tsx`, `deep-research.tsx`, `dice.tsx` (+
 `dice-handlers.ts`), `group-chat-lobby.tsx`, `group-chat-room.tsx`, `image.tsx`,
 `image-analysis.tsx`, `link-preview.tsx`, `map-demo.tsx`, `mobile-app-demo.tsx`,
 `pattern-index.tsx`, `profile-roster-live-demo.tsx` (demo: live multi-user
