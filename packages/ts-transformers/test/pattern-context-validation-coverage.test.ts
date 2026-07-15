@@ -79,9 +79,16 @@ Deno.test(
       } from "commonfabric";
 
       declare function externalWish<T>(query: string): WishState<T>;
+      declare function externalWishUnion<T>(
+        query: string,
+      ): WishState<T> | null;
 
       function buildRequest(query: string) {
         return wish<string>({ query }).result;
+      }
+
+      function buildElementRequest(query: string) {
+        return wish<string>({ query })["result"];
       }
 
       const invalidHandler = handler<void, {}>(() => {
@@ -95,13 +102,21 @@ Deno.test(
         const invalidComputed = computed(() =>
           resultOf(buildRequest("#computed"))
         );
+        const invalidElement = computed(() =>
+          resultOf(buildElementRequest("#element"))
+        );
         const invalidExternal = computed(() =>
           resultOf(externalWish<string>("#external").result)
+        );
+        const invalidExternalUnion = computed(() =>
+          externalWishUnion<string>("#external-union")
         );
         return {
           invalidAction,
           invalidComputed,
+          invalidElement,
           invalidExternal,
+          invalidExternalUnion,
           invalidHandler,
         };
       });
@@ -114,7 +129,7 @@ Deno.test(
         diagnostics,
         "compute-context:local-reactive-use",
       ).length,
-      4,
+      6,
     );
   },
 );
