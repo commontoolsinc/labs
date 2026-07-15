@@ -96,6 +96,15 @@ describe(
       expect(passed).toBe(1);
     });
 
+    it("accepts unavailable VDOM roots", async () => {
+      const { failed, passed } = await runTests(
+        fixture("unavailable-render.test.tsx"),
+        { root: FIXTURES },
+      );
+      expect(failed).toBe(0);
+      expect(passed).toBe(1);
+    });
+
     it("preserves the headless default when no render step is present", async () => {
       const result = await withCoverage("no-render.test.tsx");
       expect(result.lateHitCount).toBe(0);

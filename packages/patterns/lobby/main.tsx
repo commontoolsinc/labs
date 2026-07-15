@@ -9,6 +9,7 @@ import {
   pattern,
   type PerSpace,
   RequiresIntegrity,
+  resultOf,
   Stream,
   type TrustedActionWrite,
   UI,
@@ -656,7 +657,7 @@ const LobbyParticipantRow = pattern<
 const Lobby = pattern<LobbyInput, LobbyOutput>(({ roster, adminRegistry }) => {
   const adminRegistryCell: LobbyAdminRegistryCell = adminRegistry!;
   const profileWish = wish<LobbyProfile>({ query: "#profile" });
-  const myProfile = profileWish.result;
+  const myProfile = resultOf(profileWish.result);
   const viewerState = LobbyViewerState({
     viewerProfile: myProfile,
     roster,
