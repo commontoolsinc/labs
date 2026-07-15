@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { isPlainObject } from "@commonfabric/utils/types";
 import type {
@@ -10,6 +11,7 @@ import type {
   WatchSpec,
 } from "../v2.ts";
 import {
+  type LinkSchemaTraversal,
   mapLinkSchemas,
   REQUEST_SCHEMA_CAS_REF_PREFIX,
 } from "./schema-table-links.ts";
@@ -19,6 +21,7 @@ const MAX_REQUEST_SCHEMA_BYTES = 256 * 1024;
 const MAX_REQUEST_SCHEMA_HASH_LENGTH = 256;
 const MAX_REQUEST_SCHEMA_TRAVERSAL_DEPTH = 64;
 const MAX_REQUEST_SCHEMA_TRAVERSAL_NODES = 100_000;
+const MAX_REQUEST_SCHEMA_POSITIONS = 100_000;
 const textEncoder = new TextEncoder();
 
 export type RequestSchemaDefinitions = Record<string, JSONSchema>;
@@ -69,6 +72,35 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
 const isSchema = (value: unknown): value is JSONSchema =>
   value === true || value === false || isPlainRecord(value);
 
+interface RequestSchemaTraversal extends LinkSchemaTraversal {
+  nodes: number;
+  positions: number;
+}
+
+const createRequestSchemaTraversal = (): RequestSchemaTraversal => ({
+  nodes: 0,
+  positions: 0,
+  visitNode(depth) {
+    this.nodes += 1;
+    if (
+      depth > MAX_REQUEST_SCHEMA_TRAVERSAL_DEPTH ||
+      this.nodes > MAX_REQUEST_SCHEMA_TRAVERSAL_NODES
+    ) {
+      throw new InvalidRequestSchemaDefinitionsError(
+        "Request schema traversal limit exceeded",
+      );
+    }
+  },
+  visitSchemaPosition() {
+    this.positions += 1;
+    if (this.positions > MAX_REQUEST_SCHEMA_POSITIONS) {
+      throw new InvalidRequestSchemaDefinitionsError(
+        "Request schema traversal limit exceeded",
+      );
+    }
+  },
+});
+
 const isSupportedRequest = (
   value: unknown,
 ): value is RequestSchemaCasRequest =>
@@ -96,11 +128,16 @@ const definitionsFitLimits = (
 ): boolean => {
   if (definitions.size > MAX_REQUEST_SCHEMA_DEFINITIONS) return false;
   try {
-    return [...definitions].every(([hash, schema]) =>
-      hash.length <= MAX_REQUEST_SCHEMA_HASH_LENGTH &&
-      textEncoder.encode(JSON.stringify(schema)).byteLength <=
-        MAX_REQUEST_SCHEMA_BYTES
-    );
+    let totalBytes = 0;
+    for (const [hash, schema] of definitions) {
+      if (hash.length > MAX_REQUEST_SCHEMA_HASH_LENGTH) return false;
+      const canonical = internSchema(schema, true).schema;
+      const bytes = textEncoder.encode(jsonFromValue(canonical)).byteLength;
+      if (bytes > MAX_REQUEST_SCHEMA_BYTES) return false;
+      totalBytes += bytes;
+      if (totalBytes > MAX_REQUEST_SCHEMA_BYTES) return false;
+    }
+    return true;
   } catch {
     return false;
   }
@@ -109,7 +146,9 @@ const definitionsFitLimits = (
 const mapQuerySchemas = (
   query: GraphQuery,
   mapSchema: (schema: unknown) => unknown,
+  traversal: RequestSchemaTraversal,
 ): GraphQuery => {
+  traversal.visitNode(0);
   if (!isPlainRecord(query) || !Array.isArray(query.roots)) {
     throw new InvalidRequestSchemaDefinitionsError(
       "Invalid request schema query",
@@ -117,6 +156,7 @@ const mapQuerySchemas = (
   }
   let changed = false;
   const roots = query.roots.map((root) => {
+    traversal.visitNode(1);
     if (!isPlainRecord(root) || !isPlainRecord(root.selector)) {
       throw new InvalidRequestSchemaDefinitionsError(
         "Invalid request schema query root",
@@ -125,6 +165,7 @@ const mapQuerySchemas = (
     if (
       !Object.hasOwn(root.selector, "schema")
     ) return root;
+    traversal.visitSchemaPosition();
     const schema = mapSchema(root.selector.schema);
     if (schema === root.selector.schema) return root;
     changed = true;
@@ -139,6 +180,7 @@ const mapQuerySchemas = (
 const mapWatchSchemas = (
   watches: WatchSpec[],
   mapSchema: (schema: unknown) => unknown,
+  traversal: RequestSchemaTraversal,
 ): WatchSpec[] => {
   if (!Array.isArray(watches)) {
     throw new InvalidRequestSchemaDefinitionsError(
@@ -147,12 +189,13 @@ const mapWatchSchemas = (
   }
   let changed = false;
   const mapped = watches.map((watch) => {
+    traversal.visitNode(0);
     if (!isPlainRecord(watch)) {
       throw new InvalidRequestSchemaDefinitionsError(
         "Invalid request schema watch",
       );
     }
-    const query = mapQuerySchemas(watch.query, mapSchema);
+    const query = mapQuerySchemas(watch.query, mapSchema, traversal);
     if (query === watch.query) return watch;
     changed = true;
     return { ...watch, query };
@@ -163,6 +206,7 @@ const mapWatchSchemas = (
 const mapTransactSchemas = (
   request: TransactRequest,
   mapSchema: (schema: unknown) => unknown,
+  traversal: RequestSchemaTraversal,
 ): TransactRequest => {
   if (
     !isPlainRecord(request.commit) || !Array.isArray(request.commit.operations)
@@ -173,19 +217,20 @@ const mapTransactSchemas = (
   }
   let changed = false;
   const operations = request.commit.operations.map((operation) => {
+    traversal.visitNode(0);
     if (!isPlainRecord(operation)) {
       throw new InvalidRequestSchemaDefinitionsError(
         "Invalid request schema operation",
       );
     }
     if (operation.op === "set") {
-      const value = mapLinkSchemas(operation.value, mapSchema);
+      const value = mapLinkSchemas(operation.value, mapSchema, traversal);
       if (value === operation.value) return operation;
       changed = true;
       return { ...operation, value: value as typeof operation.value };
     }
     if (operation.op === "patch") {
-      const patches = mapLinkSchemas(operation.patches, mapSchema);
+      const patches = mapLinkSchemas(operation.patches, mapSchema, traversal);
       if (patches === operation.patches) return operation;
       changed = true;
       return { ...operation, patches: patches as typeof operation.patches };
@@ -200,20 +245,50 @@ const mapTransactSchemas = (
 const mapRequestSchemas = (
   request: RequestSchemaCasRequest,
   mapSchema: (schema: unknown) => unknown,
+  traversal = createRequestSchemaTraversal(),
 ): RequestSchemaCasRequest => {
   switch (request.type) {
     case "graph.query": {
-      const query = mapQuerySchemas(request.query, mapSchema);
+      const query = mapQuerySchemas(request.query, mapSchema, traversal);
       return query === request.query ? request : { ...request, query };
     }
     case "session.watch.set":
     case "session.watch.add": {
-      const watches = mapWatchSchemas(request.watches, mapSchema);
+      const watches = mapWatchSchemas(request.watches, mapSchema, traversal);
       return watches === request.watches ? request : { ...request, watches };
     }
     case "transact":
-      return mapTransactSchemas(request, mapSchema);
+      return mapTransactSchemas(request, mapSchema, traversal);
   }
+};
+
+/**
+ * Collect CAS hashes only from schema-bearing positions supported by a request
+ * envelope. This shares compression and expansion's schema traversal rather
+ * than interpreting arbitrary user strings.
+ */
+export const collectRequestSchemaCasHashes = (
+  request: unknown,
+): ReadonlySet<string> => {
+  if (!isSupportedRequest(request)) {
+    throw new InvalidRequestSchemaDefinitionsError(
+      "Unsupported request schema table message",
+    );
+  }
+  const hashes = new Set<string>();
+  mapRequestSchemas(request, (value) => {
+    if (
+      typeof value === "string" &&
+      value.startsWith(REQUEST_SCHEMA_CAS_REF_PREFIX)
+    ) {
+      const hash = value.slice(REQUEST_SCHEMA_CAS_REF_PREFIX.length);
+      if (hash.length > 0 && hash.length <= MAX_REQUEST_SCHEMA_HASH_LENGTH) {
+        hashes.add(hash);
+      }
+    }
+    return value;
+  });
+  return hashes;
 };
 
 export const compressRequestSchemas = <
@@ -223,11 +298,17 @@ export const compressRequestSchemas = <
   options: CompressRequestSchemasOptions,
 ): Request => {
   const definitions = new Map<string, JSONSchema>();
-  const rewritten = mapRequestSchemas(
-    request,
-    (value) =>
-      isSchema(value) ? schemaReference(value, definitions, options) : value,
-  );
+  let rewritten: RequestSchemaCasRequest;
+  try {
+    rewritten = mapRequestSchemas(
+      request,
+      (value) =>
+        isSchema(value) ? schemaReference(value, definitions, options) : value,
+    );
+  } catch (error) {
+    if (error instanceof InvalidRequestSchemaDefinitionsError) return request;
+    throw error;
+  }
   if (rewritten === request && request.schemaDefinitions === undefined) {
     return request;
   }
@@ -279,19 +360,40 @@ const canonicalDefinitions = (
     );
   }
   const definitions: RequestSchemaDefinitions = {};
+  let totalBytes = 0;
   for (const [hash, schema] of entries) {
+    if (hash.length > MAX_REQUEST_SCHEMA_HASH_LENGTH) {
+      throw new InvalidRequestSchemaDefinitionsError(
+        `Request schema definition hash is too long: ${hash}`,
+      );
+    }
     if (!isSchema(schema)) {
       throw new InvalidRequestSchemaDefinitionsError(
         `Invalid request schema definition: ${hash}`,
       );
     }
-    const encoded = JSON.stringify(schema);
-    if (textEncoder.encode(encoded).byteLength > MAX_REQUEST_SCHEMA_BYTES) {
+    let canonical: ReturnType<typeof internSchema>;
+    let encoded: string;
+    try {
+      canonical = internSchema(schema, true);
+      encoded = jsonFromValue(canonical.schema);
+    } catch {
+      throw new InvalidRequestSchemaDefinitionsError(
+        `Invalid request schema definition: ${hash}`,
+      );
+    }
+    const bytes = textEncoder.encode(encoded).byteLength;
+    if (bytes > MAX_REQUEST_SCHEMA_BYTES) {
       throw new InvalidRequestSchemaDefinitionsError(
         `Request schema definition is too large: ${hash}`,
       );
     }
-    const canonical = internSchema(schema, true);
+    totalBytes += bytes;
+    if (totalBytes > MAX_REQUEST_SCHEMA_BYTES) {
+      throw new InvalidRequestSchemaDefinitionsError(
+        "Request schema definitions are too large",
+      );
+    }
     if (canonical.taggedHashString !== hash) {
       throw new InvalidRequestSchemaDefinitionsError(
         `Request schema definition hash mismatch: ${hash}`,
@@ -307,6 +409,7 @@ const expandSchema = (
   definitions: RequestSchemaDefinitions | undefined,
   lookup: SchemaHashLookup,
   referencedDefinitions: Set<string>,
+  resolvedSchemas: Map<string, JSONSchema>,
 ): unknown => {
   if (
     typeof value !== "string" ||
@@ -324,15 +427,21 @@ const expandSchema = (
       Object.hasOwn(definitions, hash)
     ? definitions[hash]
     : undefined;
+  if (definedSchema !== undefined) referencedDefinitions.add(hash);
+  const resolved = resolvedSchemas.get(hash);
+  if (resolved !== undefined) return resolved;
   const schema = definedSchema ?? lookup(hash);
   if (schema === undefined) throw new MissingRequestSchemaDefinitionError(hash);
-  if (definedSchema !== undefined) referencedDefinitions.add(hash);
-  const canonical = internSchema(schema, true);
+  const canonical = definedSchema === undefined ? internSchema(schema, true) : {
+    schema,
+    taggedHashString: hash,
+  };
   if (canonical.taggedHashString !== hash) {
     throw new InvalidRequestSchemaDefinitionsError(
       `Request schema definition hash mismatch: ${hash}`,
     );
   }
+  resolvedSchemas.set(hash, canonical.schema);
   return canonical.schema;
 };
 
@@ -350,9 +459,17 @@ export const expandRequestSchemas = (
     ? undefined
     : canonicalDefinitions(request.schemaDefinitions);
   const referencedDefinitions = new Set<string>();
+  const resolvedSchemas = new Map<string, JSONSchema>();
   const expanded = mapRequestSchemas(
     request,
-    (value) => expandSchema(value, definitions, lookup, referencedDefinitions),
+    (value) =>
+      expandSchema(
+        value,
+        definitions,
+        lookup,
+        referencedDefinitions,
+        resolvedSchemas,
+      ),
   );
   if (definitions !== undefined) {
     const unused = Object.keys(definitions).filter((hash) =>
@@ -373,22 +490,32 @@ export const expandRequestSchemas = (
 export const hasRequestSchemaCasPayload = (request: unknown): boolean => {
   if (!isSupportedRequest(request)) return false;
   const hasDefinitions = request.schemaDefinitions !== undefined;
-
   const hasReference = (value: unknown): boolean =>
     typeof value === "string" &&
     value.startsWith(REQUEST_SCHEMA_CAS_REF_PREFIX);
+  const traversal = createRequestSchemaTraversal();
   const queryHasReference = (query: unknown): boolean => {
+    traversal.visitNode(0);
     if (!isPlainRecord(query) || !Array.isArray(query.roots)) return false;
-    return query.roots.some((root) =>
-      isPlainRecord(root) && isPlainRecord(root.selector) &&
-      hasReference(root.selector.schema)
-    );
+    let found = false;
+    for (const root of query.roots) {
+      traversal.visitNode(1);
+      if (!isPlainRecord(root) || !isPlainRecord(root.selector)) continue;
+      if (!Object.hasOwn(root.selector, "schema")) continue;
+      traversal.visitSchemaPosition();
+      found ||= hasReference(root.selector.schema);
+    }
+    return found;
   };
-  const watchesHaveReference = (watches: unknown): boolean =>
-    Array.isArray(watches) &&
-    watches.some((watch) =>
-      isPlainRecord(watch) && queryHasReference(watch.query)
-    );
+  const watchesHaveReference = (watches: unknown): boolean => {
+    if (!Array.isArray(watches)) return false;
+    let found = false;
+    for (const watch of watches) {
+      traversal.visitNode(0);
+      if (isPlainRecord(watch)) found ||= queryHasReference(watch.query);
+    }
+    return found;
+  };
   const scanValue = (
     value: unknown,
   ): { hasReference: boolean; exceeded: boolean } => {
@@ -396,15 +523,13 @@ export const hasRequestSchemaCasPayload = (request: unknown): boolean => {
       value,
       depth: 0,
     }];
-    let nodes = 0;
     let found = false;
     let exceeded = false;
     while (pending.length > 0) {
       const current = pending.pop()!;
-      nodes += 1;
-      if (nodes > MAX_REQUEST_SCHEMA_TRAVERSAL_NODES) {
-        exceeded = true;
-        break;
+      traversal.nodes += 1;
+      if (traversal.nodes > MAX_REQUEST_SCHEMA_TRAVERSAL_NODES) {
+        return { hasReference: found, exceeded: true };
       }
       if (current.depth > MAX_REQUEST_SCHEMA_TRAVERSAL_DEPTH) {
         exceeded = true;
@@ -425,16 +550,15 @@ export const hasRequestSchemaCasPayload = (request: unknown): boolean => {
       const linkPayload = isPlainRecord(linkEnvelope)
         ? linkEnvelope["link@1"]
         : undefined;
-      if (
-        isPlainRecord(linkPayload) &&
-        Object.hasOwn(linkPayload, "schema") &&
-        hasReference(linkPayload.schema)
-      ) found = true;
+      if (isPlainRecord(linkPayload) && Object.hasOwn(linkPayload, "schema")) {
+        traversal.visitSchemaPosition();
+        found ||= hasReference(linkPayload.schema);
+      }
       const alias = current.value.$alias;
-      if (
-        isPlainRecord(alias) && Object.hasOwn(alias, "schema") &&
-        hasReference(alias.schema)
-      ) found = true;
+      if (isPlainRecord(alias) && Object.hasOwn(alias, "schema")) {
+        traversal.visitSchemaPosition();
+        found ||= hasReference(alias.schema);
+      }
 
       const children = Object.values(current.value);
       for (let index = children.length - 1; index >= 0; index -= 1) {
@@ -443,36 +567,49 @@ export const hasRequestSchemaCasPayload = (request: unknown): boolean => {
     }
     return { hasReference: found, exceeded };
   };
-
-  switch (request.type) {
-    case "graph.query":
-      return hasDefinitions || queryHasReference(request.query);
-    case "session.watch.set":
-    case "session.watch.add":
-      return hasDefinitions || watchesHaveReference(request.watches);
-    case "transact": {
-      if (
-        !isPlainRecord(request.commit) ||
-        !Array.isArray(request.commit.operations)
-      ) return hasDefinitions;
-      let hasReference = false;
-      let exceeded = false;
-      for (const operation of request.commit.operations) {
-        if (!isPlainRecord(operation)) continue;
-        let scan: ReturnType<typeof scanValue> | undefined;
-        if (operation.op === "set") scan = scanValue(operation.value);
-        if (operation.op === "patch") scan = scanValue(operation.patches);
-        if (scan !== undefined) {
-          hasReference ||= scan.hasReference;
-          exceeded ||= scan.exceeded;
+  let foundReference = false;
+  let exceeded = false;
+  try {
+    switch (request.type) {
+      case "graph.query":
+        foundReference = queryHasReference(request.query);
+        break;
+      case "session.watch.set":
+      case "session.watch.add":
+        foundReference = watchesHaveReference(request.watches);
+        break;
+      case "transact": {
+        if (
+          !isPlainRecord(request.commit) ||
+          !Array.isArray(request.commit.operations)
+        ) break;
+        for (const operation of request.commit.operations) {
+          traversal.visitNode(0);
+          if (!isPlainRecord(operation)) continue;
+          if (operation.op === "set") {
+            const scan = scanValue(operation.value);
+            foundReference ||= scan.hasReference;
+            exceeded ||= scan.exceeded;
+          }
+          if (operation.op === "patch") {
+            const scan = scanValue(operation.patches);
+            foundReference ||= scan.hasReference;
+            exceeded ||= scan.exceeded;
+          }
         }
+        break;
       }
-      if (exceeded && (hasDefinitions || hasReference)) {
-        throw new InvalidRequestSchemaDefinitionsError(
-          "Request schema traversal limit exceeded",
-        );
-      }
-      return hasDefinitions || hasReference;
     }
+  } catch (error) {
+    if (error instanceof InvalidRequestSchemaDefinitionsError) {
+      throw error;
+    }
+    throw error;
   }
+  if (exceeded) {
+    throw new InvalidRequestSchemaDefinitionsError(
+      "Request schema traversal limit exceeded",
+    );
+  }
+  return hasDefinitions || foundReference;
 };

@@ -737,6 +737,37 @@ class Connection {
     }
 
     let logical = parsed;
+    const casRequest = parsed.type === "graph.query" ||
+        parsed.type === "session.watch.set" ||
+        parsed.type === "session.watch.add" || parsed.type === "transact"
+      ? parsed as RequestSchemaCasRequest
+      : undefined;
+    if (casRequest !== undefined) {
+      const sessionWasAttached = this.server.isSessionAttached(
+        casRequest.space,
+        casRequest.sessionId,
+        this.id,
+      );
+      const authorization = await this.server.authorizeRequestSchemaIngestion(
+        casRequest,
+        this,
+      );
+      if (authorization !== null) {
+        this.recordParsedInbound(payload, parsed);
+        const response = respondTypedError(casRequest.requestId, authorization);
+        if (sessionWasAttached) {
+          this.sendSessionResponse(
+            casRequest.space,
+            casRequest.sessionId,
+            casRequest.requestId,
+            response,
+          );
+        } else {
+          this.send(response);
+        }
+        return;
+      }
+    }
     let hasCasPayload: boolean;
     try {
       hasCasPayload = hasRequestSchemaCasPayload(parsed);
@@ -749,20 +780,10 @@ class Connection {
       return;
     }
     if (hasCasPayload) {
-      const casRequest = parsed as RequestSchemaCasRequest;
-      const authorization = await this.server.authorizeRequestSchemaIngestion(
-        casRequest,
-        this,
-      );
-      if (authorization !== null) {
-        this.recordParsedInbound(payload, parsed);
-        this.send(respondTypedError(casRequest.requestId, authorization));
-        return;
-      }
       if (!this.#requestSchemaCasV1) {
         this.recordParsedInbound(payload, parsed);
         this.send(respondTypedError(
-          casRequest.requestId,
+          casRequest!.requestId,
           toError(
             "ProtocolError",
             "request schema CAS was not negotiated",
@@ -772,12 +793,12 @@ class Connection {
       }
       try {
         logical = this.server.expandRequestSchemas(
-          casRequest,
+          casRequest!,
         );
       } catch (error) {
         this.recordParsedInbound(payload, parsed);
         this.send(respondTypedError(
-          casRequest.requestId,
+          casRequest!.requestId,
           this.server.requestSchemaCasError(error),
         ));
         return;

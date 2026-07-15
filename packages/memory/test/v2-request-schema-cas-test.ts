@@ -1,5 +1,12 @@
-import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertStrictEquals,
+  assertThrows,
+} from "@std/assert";
 import { LINK_V1_TAG } from "@commonfabric/data-model/cell-rep";
+import { jsonFromValue } from "@commonfabric/data-model/codec-json";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "@commonfabric/api";
 import type {
@@ -482,6 +489,52 @@ Deno.test("request schema CAS bounds definition count, size, and reference lengt
   );
 });
 
+Deno.test("request schema CAS measures Fabric defaults by canonical encoded size", () => {
+  const oversizedSchema: JSONSchema = { type: "string" };
+  Object.defineProperty(oversizedSchema, "default", {
+    value: new FabricBytes(new Uint8Array(300_000)),
+    enumerable: true,
+  });
+  const canonical = internSchema(oversizedSchema, true);
+  const encodedSize = new TextEncoder().encode(
+    jsonFromValue(canonical.schema),
+  ).byteLength;
+  assert(encodedSize > 256 * 1024);
+
+  const inline: GraphQueryRequest = {
+    ...graphRequest(),
+    query: {
+      roots: [{
+        id: "of:oversized",
+        selector: { path: [], schema: oversizedSchema },
+      }],
+    },
+  };
+  assertStrictEquals(
+    compressRequestSchemas(inline, { isKnownSchemaHash: noKnownSchemas }),
+    inline,
+  );
+
+  assertThrows(
+    () =>
+      expandRequestSchemas({
+        ...inline,
+        query: {
+          roots: [{
+            id: "of:oversized",
+            selector: {
+              path: [],
+              schema: `schema-cas@1:${canonical.taggedHashString}`,
+            },
+          }],
+        },
+        schemaDefinitions: { [canonical.taggedHashString]: canonical.schema },
+      }, () => undefined),
+    InvalidRequestSchemaDefinitionsError,
+    "too large",
+  );
+});
+
 Deno.test("request schema CAS bounds preflight traversal", () => {
   const casLink = {
     "/": {
@@ -503,7 +556,11 @@ Deno.test("request schema CAS bounds preflight traversal", () => {
       operations: [{ op: "set", id: "of:root", value: nested }],
     },
   };
-  assertEquals(hasRequestSchemaCasPayload(request), false);
+  assertThrows(
+    () => hasRequestSchemaCasPayload(request),
+    InvalidRequestSchemaDefinitionsError,
+    "traversal limit",
+  );
   assertThrows(
     () =>
       hasRequestSchemaCasPayload({
@@ -538,12 +595,32 @@ Deno.test("request schema CAS bounds preflight traversal", () => {
       operations: [{ op: "set", id: "of:root", value: wide }],
     },
   };
-  assertEquals(hasRequestSchemaCasPayload(wideRequest), false);
+  assertThrows(
+    () => hasRequestSchemaCasPayload(wideRequest),
+    InvalidRequestSchemaDefinitionsError,
+    "traversal limit",
+  );
   assertThrows(
     () =>
       hasRequestSchemaCasPayload({
         ...wideRequest,
         schemaDefinitions: {},
+      }),
+    InvalidRequestSchemaDefinitionsError,
+    "traversal limit",
+  );
+  assertThrows(
+    () =>
+      hasRequestSchemaCasPayload({
+        ...request,
+        commit: {
+          ...request.commit,
+          operations: [{
+            op: "set",
+            id: "of:root",
+            value: [...wide, casLink],
+          }],
+        },
       }),
     InvalidRequestSchemaDefinitionsError,
     "traversal limit",
@@ -585,5 +662,178 @@ Deno.test("request schema CAS bounds preflight traversal", () => {
       isKnownSchemaHash: () => false,
     }),
     deepLinkRequest,
+  );
+});
+
+Deno.test("request schema CAS shares traversal limits across transaction operations", () => {
+  const wide = Array.from({ length: 50_000 }, () => null);
+  const inline: TransactRequest = {
+    ...transactRequest(),
+    commit: {
+      ...transactRequest().commit,
+      operations: [
+        { op: "set", id: "of:first", value: { values: wide } },
+        { op: "set", id: "of:second", value: { values: wide } },
+      ],
+    },
+  };
+  assertThrows(
+    () => hasRequestSchemaCasPayload(inline),
+    InvalidRequestSchemaDefinitionsError,
+    "traversal limit",
+  );
+  assertThrows(
+    () => hasRequestSchemaCasPayload({ ...inline, schemaDefinitions: {} }),
+    InvalidRequestSchemaDefinitionsError,
+    "traversal limit",
+  );
+
+  const casLink = {
+    "/": {
+      [LINK_V1_TAG]: {
+        id: "of:child",
+        path: [],
+        schema: `schema-cas@1:${hash}`,
+      },
+    },
+  };
+  const withCas: TransactRequest = {
+    ...inline,
+    commit: {
+      ...inline.commit,
+      operations: [
+        {
+          op: "set" as const,
+          id: "of:first",
+          value: { values: [casLink, ...wide] },
+        },
+        { op: "set" as const, id: "of:second", value: { values: wide } },
+      ],
+    },
+  };
+  assertThrows(
+    () => hasRequestSchemaCasPayload(withCas),
+    InvalidRequestSchemaDefinitionsError,
+    "traversal limit",
+  );
+
+  const inlineLink = {
+    "/": { [LINK_V1_TAG]: { id: "of:child", path: [], schema } },
+  };
+  const compressible: TransactRequest = {
+    ...inline,
+    commit: {
+      ...inline.commit,
+      operations: [
+        {
+          op: "set" as const,
+          id: "of:first",
+          value: { values: [inlineLink, ...wide] },
+        },
+        { op: "set" as const, id: "of:second", value: { values: wide } },
+      ],
+    },
+  };
+  assertStrictEquals(
+    compressRequestSchemas(compressible, { isKnownSchemaHash: noKnownSchemas }),
+    compressible,
+  );
+  assertThrows(
+    () =>
+      expandRequestSchemas(
+        { ...withCas, schemaDefinitions: { [hash]: schema } },
+        () => undefined,
+      ),
+    InvalidRequestSchemaDefinitionsError,
+    "traversal limit",
+  );
+});
+
+Deno.test("request schema CAS memoizes repeated references per expansion", () => {
+  const request = compressRequestSchemas(transactRequest(), {
+    isKnownSchemaHash: () => true,
+  });
+  let lookups = 0;
+  assertEquals(
+    expandRequestSchemas(request, (candidate) => {
+      lookups += 1;
+      return candidate === hash ? schema : undefined;
+    }),
+    transactRequest(),
+  );
+  assertEquals(lookups, 1);
+
+  const defined = {
+    ...request,
+    schemaDefinitions: { [hash]: internSchema(schema, true).schema },
+  };
+  assertEquals(
+    expandRequestSchemas(defined, () => undefined),
+    transactRequest(),
+  );
+});
+
+Deno.test("request schema CAS bounds definition keys and cumulative bytes", () => {
+  let lookups = 0;
+  assertThrows(
+    () =>
+      expandRequestSchemas({
+        ...graphRequest(),
+        schemaDefinitions: { ["x".repeat(257)]: schema },
+      }, () => {
+        lookups += 1;
+        return undefined;
+      }),
+    InvalidRequestSchemaDefinitionsError,
+    "hash is too long",
+  );
+  assertEquals(lookups, 0);
+
+  const first: JSONSchema = { description: "first ".repeat(25_000) };
+  const second: JSONSchema = { description: "second ".repeat(25_000) };
+  const firstCanonical = internSchema(first, true);
+  const secondCanonical = internSchema(second, true);
+  const inline: GraphQueryRequest = {
+    ...graphRequest(),
+    query: {
+      roots: [
+        { id: "of:first", selector: { path: [], schema: first } },
+        { id: "of:second", selector: { path: [], schema: second } },
+      ],
+    },
+  };
+  assertStrictEquals(
+    compressRequestSchemas(inline, { isKnownSchemaHash: noKnownSchemas }),
+    inline,
+  );
+  assertThrows(
+    () =>
+      expandRequestSchemas({
+        ...inline,
+        query: {
+          roots: [
+            {
+              id: "of:first",
+              selector: {
+                path: [],
+                schema: `schema-cas@1:${firstCanonical.taggedHashString}`,
+              },
+            },
+            {
+              id: "of:second",
+              selector: {
+                path: [],
+                schema: `schema-cas@1:${secondCanonical.taggedHashString}`,
+              },
+            },
+          ],
+        },
+        schemaDefinitions: {
+          [firstCanonical.taggedHashString]: firstCanonical.schema,
+          [secondCanonical.taggedHashString]: secondCanonical.schema,
+        },
+      }, () => undefined),
+    InvalidRequestSchemaDefinitionsError,
+    "definitions are too large",
   );
 });

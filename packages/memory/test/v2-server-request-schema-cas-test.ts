@@ -364,7 +364,62 @@ Deno.test("server returns protocol errors for malformed request CAS envelopes", 
     }));
     assertEquals(response(shift(messages)).error?.name, "ProtocolError");
     await connection.receive(encodeMemoryBoundary(inlineRequest));
-    assertEquals(response(shift(messages)).error, undefined);
+    assertEquals(response(shift(messages)).error?.name, "ProtocolError");
+  } finally {
+    await server.close();
+    store.close();
+  }
+});
+
+Deno.test("server authorizes CAS sessions before traversing transaction payloads", async () => {
+  const store = await openSchemaStore({ url: new URL("memory:") });
+  const server = createServer(store);
+  try {
+    const owner = await open(server);
+    const other = await open(server);
+    let nested: unknown = {
+      "/": {
+        "link@1": {
+          id: "of:child",
+          path: [],
+          schema: `schema-cas@1:${hash}`,
+        },
+      },
+    };
+    for (let depth = 0; depth < 65; depth += 1) nested = { nested };
+
+    await other.connection.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "foreign-deep-cas",
+      space,
+      sessionId: owner.sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "of:root", value: nested }],
+      },
+    }));
+    const rejected = response(shift(other.messages));
+    assertEquals(rejected.error?.name, "SessionError");
+    assertEquals(
+      rejected.error?.message,
+      "Session is not open on this connection",
+    );
+    assertEquals(store.has(hash), false);
+
+    await owner.connection.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "owned-deep-cas",
+      space,
+      sessionId: owner.sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "of:root", value: nested }],
+      },
+    }));
+    assertEquals(response(shift(owner.messages)).error?.name, "ProtocolError");
+    assertEquals(store.has(hash), false);
   } finally {
     await server.close();
     store.close();
