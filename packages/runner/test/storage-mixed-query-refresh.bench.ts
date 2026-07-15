@@ -1,10 +1,13 @@
 import { Identity } from "@commonfabric/identity";
+import type { Result, Unit, URI } from "@commonfabric/memory/interface";
+import type { EntityDocument } from "@commonfabric/memory/v2";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   entityRefFrom,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 
 // Select the cell-rep regime from the env flag, mirroring how the product reads
 // EXPERIMENTAL_MODERN_CELL_REP: unset means "accept the default" (a no-op, since
@@ -28,12 +31,15 @@ const UPDATE_COUNT = 5;
 const BASE_HASHES = [0, 1].map((index) =>
   hashOf({ causal: { bench: "mixed-query", source: index } })
 );
-const BASE_SOURCES = BASE_HASHES.map((hash) => `of:${hash.taggedHashString}`);
+const BASE_SOURCES = BASE_HASHES.map(
+  (hash): URI => `of:${hash.taggedHashString}`,
+);
 
-type TestProvider = ReturnType<typeof StorageManager.emulate> extends {
-  open(space: string): infer T;
-} ? T
-  : never;
+type TestProvider = IStorageProviderWithReplica & {
+  send(
+    batch: { uri: URI; value: EntityDocument | undefined }[],
+  ): Promise<Result<Unit, Error>>;
+};
 
 const docUri = (index: number) => `of:mixed-query-refresh-${index}` as const;
 
@@ -144,9 +150,9 @@ const setup = async (retargetSources: boolean) => {
   const storageManager = StorageManager.emulate({
     as: signer,
   });
-  const provider = storageManager.open(space) as unknown as TestProvider;
+  const provider = storageManager.open(space) as TestProvider;
 
-  await (provider as any).send(
+  await provider.send(
     BASE_SOURCES.map((uri, index) => ({
       uri,
       value: {
@@ -155,7 +161,7 @@ const setup = async (retargetSources: boolean) => {
     })),
   );
 
-  await (provider as any).send(
+  await provider.send(
     Array.from({ length: DOC_COUNT }, (_, index) => ({
       uri: docUri(index),
       value: buildDoc(index, 0, 0),
@@ -164,21 +170,21 @@ const setup = async (retargetSources: boolean) => {
 
   for (let index = 0; index < DOC_COUNT; index++) {
     const uri = docUri(index);
-    await (provider as any).sync(uri, { path: [], schema: false });
-    await (provider as any).sync(uri, { path: [], schema: rootSchema });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, { path: [], schema: false });
+    await provider.sync(uri, { path: [], schema: rootSchema });
+    await provider.sync(uri, {
       path: ["argument", "element"],
       schema: elementSchema,
     });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, {
       path: ["argument", "pieces"],
       schema: piecesSchema,
     });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, {
       path: ["internal", "__#0"],
       schema: internalZeroSchema,
     });
-    await (provider as any).sync(uri, {
+    await provider.sync(uri, {
       path: ["internal", "__#3stream"],
       schema: internalStreamSchema,
     });
@@ -200,7 +206,7 @@ const runUpdateLoop = async (
   retargetSources: boolean,
 ) => {
   for (let version = 1; version <= UPDATE_COUNT; version++) {
-    await (provider as any).send(
+    await provider.send(
       Array.from({ length: DOC_COUNT }, (_, index) => ({
         uri: docUri(index),
         value: buildDoc(
