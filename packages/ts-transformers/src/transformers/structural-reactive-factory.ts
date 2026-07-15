@@ -148,42 +148,88 @@ function isWishStateType(
 }
 
 /**
- * Follow local helper returns and stable aliases to determine whether evaluating
- * an expression creates a Wish factory node. The return-type check preserves
- * the same fail-closed behavior for helpers whose implementation is external.
+ * Follow local helper returns and callable aliases to determine whether calling
+ * an expression creates a Wish factory node. Stored Wish values are not
+ * followed: invoking a method on an existing Wish must not be mistaken for
+ * creating another factory. The return-type check preserves fail-closed
+ * behavior for external helpers whose implementation is unavailable.
  */
 export function isWishFactoryExpression(
   expression: ts.Expression,
   checker: ts.TypeChecker,
   seenSymbols = new Set<ts.Symbol>(),
 ): boolean {
-  return someResolvedHelperExpressionMatches(
-    expression,
-    checker,
-    (target, nextSeenSymbols) => {
-      if (ts.isCallExpression(target)) {
-        if (detectCallKind(target, checker)?.kind === "wish") return true;
-        if (isWishStateType(checker.getTypeAtLocation(target))) return true;
-        return isWishFactoryExpression(
-          target.expression,
-          checker,
-          nextSeenSymbols,
-        );
-      }
-      if (
-        ts.isPropertyAccessExpression(target) ||
-        ts.isElementAccessExpression(target)
-      ) {
-        return isWishFactoryExpression(
-          target.expression,
-          checker,
-          nextSeenSymbols,
-        );
-      }
+  const target = unwrapExpression(expression);
+  if (!ts.isCallExpression(target)) return false;
+  if (detectCallKind(target, checker)?.kind === "wish") return true;
+  if (isWishStateType(checker.getTypeAtLocation(target))) return true;
+  return wishFactoryHelperCallee(target.expression, checker, seenSymbols);
+}
+
+function wishFactoryHelperCallee(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seenSymbols: Set<ts.Symbol>,
+): boolean {
+  const target = unwrapExpression(expression);
+  if (ts.isCallExpression(target)) {
+    return isWishFactoryExpression(target, checker, seenSymbols);
+  }
+  if (
+    !ts.isIdentifier(target) &&
+    !ts.isPropertyAccessExpression(target) &&
+    !ts.isElementAccessExpression(target)
+  ) {
+    return false;
+  }
+
+  const symbol = checker.getSymbolAtLocation(target);
+  if (!symbol) return false;
+  const resolvedSymbol = getAliasedSymbol(symbol, checker);
+  if (seenSymbols.has(resolvedSymbol)) return false;
+  seenSymbols.add(resolvedSymbol);
+
+  return (resolvedSymbol.getDeclarations() ?? []).some((declaration) => {
+    const returnedExpression = getReturnedExpression(declaration);
+    if (returnedExpression) {
+      return returnedExpressionCreatesWish(
+        returnedExpression,
+        checker,
+        seenSymbols,
+      );
+    }
+    if (!ts.isVariableDeclaration(declaration) || !declaration.initializer) {
       return false;
-    },
-    seenSymbols,
-  );
+    }
+    const initializer = unwrapExpression(declaration.initializer);
+    return (
+      ts.isIdentifier(initializer) ||
+      ts.isPropertyAccessExpression(initializer) ||
+      ts.isElementAccessExpression(initializer)
+    ) && wishFactoryHelperCallee(initializer, checker, seenSymbols);
+  });
+}
+
+function returnedExpressionCreatesWish(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  seenSymbols: Set<ts.Symbol>,
+): boolean {
+  const target = unwrapExpression(expression);
+  if (ts.isCallExpression(target)) {
+    return isWishFactoryExpression(target, checker, seenSymbols);
+  }
+  if (
+    ts.isPropertyAccessExpression(target) ||
+    ts.isElementAccessExpression(target)
+  ) {
+    return returnedExpressionCreatesWish(
+      target.expression,
+      checker,
+      seenSymbols,
+    );
+  }
+  return false;
 }
 
 function someResolvedHelperExpressionMatches(

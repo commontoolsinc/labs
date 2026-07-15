@@ -134,6 +134,36 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "methods on an existing Wish state do not create another Wish factory",
+  async () => {
+    const source = `
+      import { computed, pattern, wish } from "commonfabric";
+
+      export default pattern(() => {
+        const request = wish<string>({ query: "#note" });
+        const match = computed(() =>
+          request.candidates.find((candidate) => candidate === "selected")
+        );
+        const labels = computed(() =>
+          request.candidates.map((candidate) => candidate.toUpperCase())
+        );
+        return { match, labels };
+      });
+    `;
+    const { diagnostics } = await validateSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    assertEquals(
+      errorsOfType(
+        diagnostics,
+        "compute-context:local-reactive-use",
+      ).length,
+      0,
+    );
+  },
+);
+
 // validateComputationExpression -> findProblematicAccess: a reactive property
 // access used in a bare statement-position arithmetic computation is at a
 // restricted (non-lowerable) site, so it is rejected with
