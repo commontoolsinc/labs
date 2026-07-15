@@ -174,10 +174,12 @@ Deno.test("availability provenance and observations cover retained and invalid f
         generateObjectStream,
         generateText,
         generateTextStream,
+        llmDialog,
         observeAvailability,
         partialResultOf,
         resultOf,
         sqliteQuery,
+        wish,
       } from "commonfabric";
       import * as cf from "commonfabric";
 
@@ -219,6 +221,12 @@ Deno.test("availability provenance and observations cover retained and invalid f
       const textStream = generateTextStream({ prompt: "repo" });
       const textStreamAlias = textStream;
       const textStreamState = textStreamAlias.result;
+      const wishState = wish({ query: "#repo" });
+      const wishStateAlias = wishState;
+      const aliasedWishState = wishStateAlias.result;
+      const dialogState = llmDialog<Repo>({ messages: [] });
+      const dialogStateAlias = dialogState;
+      const aliasedDialogState = dialogStateAlias.result;
       const objectStreamResult = partialResultOf(objectStreamAlias);
       const textStreamResult = partialResultOf(
         generateTextStream({ prompt: "repo" }),
@@ -228,6 +236,10 @@ Deno.test("availability provenance and observations cover retained and invalid f
       const emptyProjection = resultOf();
       const ordinaryCall = ordinary(fetched);
       const ordinaryResultProperty = ordinary(fetched).result;
+      const plainResultProperty = ({ result: fetched }).result;
+      const cyclicStateA = cyclicStateB;
+      const cyclicStateB = cyclicStateA;
+      const cyclicStateResult = cyclicStateA.result;
       const allObserved = observeAvailability(fetched);
       const selective = observeAvailability(fetched, "error", "error", "pending");
       const invalid = observeAvailability(fetched, "not-a-reason");
@@ -237,7 +249,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
       declare const plainUnknown: unknown;
       declare const unavailable: HasError;
       declare const asyncString: AsyncResult<string>;
-      function constrained<T extends HasError>(value: T) { return value; }
+      function constrained<T extends Repo | HasError>(value: T) { return value; }
     `,
     ({ context, sourceFile }) => {
       assertEquals(
@@ -305,6 +317,8 @@ Deno.test("availability provenance and observations cover retained and invalid f
           "objectStreamState",
           "aliasedObjectStreamState",
           "textStreamState",
+          "aliasedWishState",
+          "aliasedDialogState",
         ]
       ) {
         assertEquals(
@@ -346,6 +360,20 @@ Deno.test("availability provenance and observations cover retained and invalid f
       assertEquals(
         resolveAvailabilityValueProvenance(
           initializer(sourceFile, "ordinaryResultProperty"),
+          context,
+        ),
+        undefined,
+      );
+      assertEquals(
+        resolveAvailabilityValueProvenance(
+          initializer(sourceFile, "plainResultProperty"),
+          context,
+        ),
+        undefined,
+      );
+      assertEquals(
+        resolveAvailabilityValueProvenance(
+          initializer(sourceFile, "cyclicStateResult"),
           context,
         ),
         undefined,
@@ -442,9 +470,14 @@ Deno.test("availability provenance and observations cover retained and invalid f
         variable(sourceFile, "plainUnknown").name,
       );
       const constrained = functionDeclaration(sourceFile, "constrained");
-      const constrainedType = checker.getTypeAtLocation(
-        constrained.typeParameters![0]!,
+      const constrainedSymbol = checker.getSymbolAtLocation(
+        constrained.typeParameters![0]!.name,
       );
+      assert(constrainedSymbol);
+      const constrainedType = checker.getDeclaredTypeOfSymbol(
+        constrainedSymbol,
+      );
+      assert(constrainedType.flags & ts.TypeFlags.TypeParameter);
       assert(typeContainsAvailabilityVariant(asyncType, variant, checker));
       assert(
         typeContainsAvailabilityVariant(constrainedType, variant, checker),
