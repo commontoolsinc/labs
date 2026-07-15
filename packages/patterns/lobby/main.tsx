@@ -25,7 +25,7 @@ import {
 import type {
   ExternalProfileLink,
   VerifiedExternalIdentityCell,
-} from "../system/profile-home.tsx";
+} from "../system/profile-types.ts";
 
 /**
  * A small shared lobby: people join with their Fabric profile, everyone can
