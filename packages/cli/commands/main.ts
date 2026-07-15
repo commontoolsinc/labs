@@ -9,7 +9,7 @@ import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
 import { piece } from "./piece.ts";
 import { identity } from "./identity.ts";
-import { test } from "./test.ts";
+import { test } from "./test-command.ts";
 import { view } from "./view.ts";
 import { wish } from "./wish.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
