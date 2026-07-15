@@ -122,11 +122,22 @@ open and a waiter that never fires would hang instead.
 A check prevents new integration tests from importing the polling `waitFor`.
 `tasks/check-no-waitfor.ts` scans the `.ts` files under any `integration/`
 directory beneath `packages/` (excluding the `@commonfabric/integration` package,
-which defines `waitFor`) and fails when one names `waitFor` in an import from
-`@commonfabric/integration` and is not on the check's allowlist. Run it with
-`deno task check-no-waitfor`; the CI "Check" job runs it on every pull request.
-The error names the offending file and points at `waitForCondition`,
-`awaitViewSettled`, the in-process `defer()` replacement, and this report.
+which defines `waitFor`) and fails when one names `waitFor` in an import of that
+package and is not on the check's allowlist. Two spellings reach it and both
+count: the bare `@commonfabric/integration` specifier, and a relative path ending
+at the package's `utils.ts` or `index.ts`. Commenting the import out clears the
+check, so it stays out of the way while a test is being migrated — text inside a
+comment or a string is not an import. Run it with `deno task check-no-waitfor`;
+the CI "Check" job runs it on every pull request. The error names the offending
+file and points at `waitForCondition`, `awaitViewSettled`, the in-process
+`defer()` replacement, and this report.
+
+The check is a speed bump against reaching for `waitFor` out of habit, not a seal
+against a determined evasion. It reads the import statement and nothing else, so
+a namespace import — `import * as I from "@commonfabric/integration"` followed by
+`I.waitFor(...)` — passes it. Every import of the package in the repository uses
+the named form. Treat a green check as "no new polling `waitFor` was imported the
+usual way", not as proof that a suite polls nowhere.
 
 The allowlist inside `tasks/check-no-waitfor.ts` covers only the exceptions the
 check can see: the integration-test files that import the shared `waitFor` from
