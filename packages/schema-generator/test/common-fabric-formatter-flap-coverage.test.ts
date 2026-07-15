@@ -198,7 +198,11 @@ describe("Common Fabric formatter flap coverage", () => {
           enabled: true,
         } as const;
 
-        interface Default<T, V> {}
+        // Mirror the public Default<T, V> brand payload. The payload is the
+        // only place V survives after the checker expands the authored alias.
+        declare const DEFAULT_MARKER: unique symbol;
+        type DefaultMarker<V> = { readonly [DEFAULT_MARKER]: V };
+        type Default<T, V extends T = T> = (T & DefaultMarker<V>) | T;
         interface Settings {
           retries: number;
           enabled: boolean;
