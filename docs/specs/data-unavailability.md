@@ -757,7 +757,14 @@ Resume reconciliation must preserve a persisted unavailable marker while an
 input list is still transiently absent; `map`, `filter`, and `flatMap` must not
 replace it with a fabricated empty list. Likewise, exhaustion of bounded
 linked-document loading becomes a terminal `error` for subsequent demand
-rather than leaving an unwakeable `syncing` value.
+rather than leaving an unwakeable `syncing` value while the target space's
+storage connection remains ready. A declared storage disconnect parks pending
+linked-document loads at `syncing` without consuming their retry budget or
+using retry timers to guess when connectivity has returned. When that space
+publishes a new ready epoch after session restoration, the runtime invalidates
+both parked loads and prior terminal linked-load errors, then wakes their live
+consumers for a fresh bounded attempt. Initial connection establishment is not
+a reconnect and does not invalidate an in-flight load.
 
 ### Streaming generation
 

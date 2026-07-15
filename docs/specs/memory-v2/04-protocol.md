@@ -744,6 +744,16 @@ On disconnect:
 3. the client reconnects, replays retained commits, restores the watch set, and
    resumes integrating sync from `seenSeq`
 
+The client session lifecycle API publishes `ready(epoch)`,
+`disconnected(epoch, cause)`, and `closed(epoch, cause)` states. Subscription
+immediately yields the current state. A newly mounted session starts at ready
+epoch 1; disconnect retains that epoch, and the next ready state increments it.
+For clients carrying multiple mounted spaces on one transport, the new ready
+epoch is published only after the new `hello` handshake and restoration of all
+still-mounted sessions complete, including watch restoration and retained
+commit replay. Session revocation publishes `closed` instead of a later ready
+epoch.
+
 ## 4.9 Blob Transfer
 
 Blob bytes are transferred through dedicated HTTP endpoints. Blob references in

@@ -42,6 +42,7 @@ import type {
   IStorageManager,
   IStorageProvider,
   MemorySpace,
+  StorageConnectionState,
   URI,
 } from "./storage/interface.ts";
 import {
@@ -174,7 +175,14 @@ const MISSING_DOC_RETRY_MAX_MS = 1_000;
 const MISSING_DOC_MAX_ATTEMPTS = 3;
 
 type MissingDocLoadEntry = {
-  status: "pending" | "retry-ready" | "settled" | "error";
+  status:
+    | "pending"
+    | "retry-ready"
+    | "waiting-for-connection"
+    | "settled"
+    | "error";
+  space: MemorySpace;
+  connectionEpoch: number;
   attempts: number;
   waiters: Map<Action, ExternalDependencyActionToken>;
   reservedDocPull?: {
@@ -1157,6 +1165,12 @@ export class Runtime {
    * should await all pending commits before calling dispose().
    */
   async dispose(): Promise<void> {
+    for (const cancel of this.storageConnectionStateCancels.values()) {
+      cancel();
+    }
+    this.storageConnectionStateCancels.clear();
+    this.storageConnectionStates.clear();
+
     // Cancel readiness backoff timers before storage teardown. In-flight syncs
     // observe the cleared map when they settle and exit without scheduling
     // actions against a disposing runtime.
@@ -1311,6 +1325,11 @@ export class Runtime {
     string,
     MissingDocLoadEntry
   >();
+  private storageConnectionStates = new Map<
+    MemorySpace,
+    StorageConnectionState
+  >();
+  private storageConnectionStateCancels = new Map<MemorySpace, () => void>();
 
   /**
    * Establish selector coverage for a link followed only for its reference
@@ -1356,6 +1375,7 @@ export class Runtime {
     observeSettlement: boolean,
     sourceSpace?: MemorySpace,
   ): LinkedDocLoadStatus {
+    const connectionState = this.observeStorageConnection(link.space);
     const key = missingDocLoadKey(link);
     const token = observeSettlement
       ? this.scheduler.getExecutingActionToken()
@@ -1363,8 +1383,7 @@ export class Runtime {
     const existing = this.missingDocLoads.get(key);
     if (existing !== undefined) {
       if (
-        existing.status !== "settled" && existing.status !== "error" &&
-        token !== undefined
+        existing.status !== "settled" && token !== undefined
       ) {
         existing.waiters.set(token.action, token);
       }
@@ -1389,17 +1408,104 @@ export class Runtime {
       this.storageManager.shouldPullDoc?.(space, id, scope) === true;
     if (sameSpace && !reserved) return "settled";
 
+    const status: MissingDocLoadEntry["status"] =
+      connectionState?.status === "disconnected"
+        ? "waiting-for-connection"
+        : connectionState?.status === "closed"
+        ? "error"
+        : "retry-ready";
     const entry: MissingDocLoadEntry = {
-      status: "retry-ready",
+      status,
+      space,
+      connectionEpoch: connectionState?.epoch ?? 0,
       attempts: 0,
       waiters: new Map(
         token === undefined ? [] : [[token.action, token]],
       ),
       ...(reserved ? { reservedDocPull: { space, id, scope } } : {}),
+      ...(connectionState?.status === "closed"
+        ? { error: connectionState.cause }
+        : {}),
     };
     this.missingDocLoads.set(key, entry);
-    this.startMissingDocLoadAttempt(key, link, entry);
-    return "pending";
+    if (entry.status === "retry-ready") {
+      this.startMissingDocLoadAttempt(key, link, entry);
+    }
+    return entry.status === "error" ? "error" : "pending";
+  }
+
+  private observeStorageConnection(
+    space: MemorySpace,
+  ): StorageConnectionState | undefined {
+    if (!this.storageConnectionStateCancels.has(space)) {
+      const subscribe = this.storageManager.subscribeConnectionState;
+      if (subscribe !== undefined) {
+        const cancel = subscribe.call(
+          this.storageManager,
+          space,
+          (state) => this.handleStorageConnectionState(space, state),
+        );
+        this.storageConnectionStateCancels.set(space, cancel);
+      }
+    }
+    return this.storageConnectionStates.get(space);
+  }
+
+  private handleStorageConnectionState(
+    space: MemorySpace,
+    state: StorageConnectionState,
+  ): void {
+    const previous = this.storageConnectionStates.get(space);
+    this.storageConnectionStates.set(space, state);
+
+    if (state.status === "disconnected") {
+      for (const entry of this.missingDocLoads.values()) {
+        if (
+          entry.space !== space || entry.status === "settled" ||
+          entry.status === "error"
+        ) {
+          continue;
+        }
+        entry.cancelRetryDelay?.();
+        entry.cancelRetryDelay = undefined;
+        entry.status = "waiting-for-connection";
+      }
+      return;
+    }
+
+    if (
+      state.status === "ready" && previous?.status === "disconnected" &&
+      state.epoch > previous.epoch
+    ) {
+      for (const [key, entry] of this.missingDocLoads) {
+        if (
+          entry.space !== space || entry.status === "settled" ||
+          entry.connectionEpoch >= state.epoch
+        ) {
+          continue;
+        }
+        entry.cancelRetryDelay?.();
+        entry.cancelRetryDelay = undefined;
+        this.missingDocLoads.delete(key);
+        this.releaseMissingDocPullReservation(entry);
+        this.wakeMissingDocLoadWaiters(entry);
+        entry.waiters.clear();
+      }
+      return;
+    }
+
+    if (state.status === "closed") {
+      for (const entry of this.missingDocLoads.values()) {
+        if (entry.space !== space || entry.status === "settled") continue;
+        entry.cancelRetryDelay?.();
+        entry.cancelRetryDelay = undefined;
+        entry.status = "error";
+        entry.error = state.cause;
+        this.releaseMissingDocPullReservation(entry);
+        this.wakeMissingDocLoadWaiters(entry);
+        entry.waiters.clear();
+      }
+    }
   }
 
   private startMissingDocLoadAttempt(
@@ -1425,6 +1531,13 @@ export class Runtime {
       },
       (cause) => {
         if (this.missingDocLoads.get(key) !== entry) return;
+        const connectionState = this.storageConnectionStates.get(entry.space);
+        if (connectionState?.status === "disconnected") {
+          entry.status = "waiting-for-connection";
+          entry.attempts = Math.max(0, entry.attempts - 1);
+          this.releaseMissingDocPullReservation(entry);
+          return;
+        }
         if (entry.attempts >= MISSING_DOC_MAX_ATTEMPTS) {
           // Exhaustion is terminal for this runtime. Wake every consumer so
           // the visible value becomes an error instead of remaining an
@@ -1466,6 +1579,7 @@ export class Runtime {
     const retryWork = retryDelay.then(() => {
       entry.cancelRetryDelay = undefined;
       if (this.missingDocLoads.get(key) !== entry) return;
+      if (entry.status === "waiting-for-connection") return;
       entry.status = "retry-ready";
       const liveWaiters = this.wakeMissingDocLoadWaiters(entry);
       if (liveWaiters === 0) {

@@ -151,6 +151,71 @@ const waitFor = async (
 };
 
 Deno.test(
+  "space sessions publish disconnect and restored connection epochs",
+  async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://session-connection-state-test"),
+    });
+    const transport = new ReconnectableTransport(server);
+    const client = await connect({ transport });
+    const session = await client.mount(
+      SPACE,
+      {},
+      testSessionOpenAuthFactory,
+    );
+    const states: Array<{ status: string; epoch: number }> = [];
+    const unsubscribe = session.subscribeConnectionState((state) => {
+      states.push({ status: state.status, epoch: state.epoch });
+    });
+
+    try {
+      assertEquals(states, [{ status: "ready", epoch: 1 }]);
+
+      transport.delayTransacts = true;
+      const pendingCommit = session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "doc:connection-state",
+          value: { value: { ready: true } },
+        }],
+      });
+      await transport.firstPendingTransact;
+      transport.disconnect();
+      await waitFor(() =>
+        transport.delayedTransactLocalSeqs.filter((localSeq) => localSeq === 1)
+          .length >= 2
+      );
+
+      // A successful handshake alone is not ready: the retained commit is
+      // still replaying, so consumers must continue seeing disconnected.
+      assertEquals(states, [
+        { status: "ready", epoch: 1 },
+        { status: "disconnected", epoch: 1 },
+      ]);
+
+      await transport.releaseTransacts();
+      await pendingCommit;
+      await waitFor(() =>
+        states.some((state) => state.status === "ready" && state.epoch === 2)
+      );
+
+      assertEquals(states.slice(0, 3), [
+        { status: "ready", epoch: 1 },
+        { status: "disconnected", epoch: 1 },
+        { status: "ready", epoch: 2 },
+      ]);
+    } finally {
+      unsubscribe();
+      await client.close();
+      await server.close();
+    }
+  },
+);
+
+Deno.test(
   "commits enqueued during restore are eventually flushed",
   async () => {
     const server = new Server({

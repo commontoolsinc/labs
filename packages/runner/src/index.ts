@@ -50,6 +50,7 @@ export type {
   ChangeGroup,
   IExtendedStorageTransaction,
   MemorySpace,
+  StorageConnectionState,
 } from "./storage/interface.ts";
 export {
   debugTransactionWrites,

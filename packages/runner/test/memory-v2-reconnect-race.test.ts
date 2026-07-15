@@ -234,6 +234,52 @@ const visibleIds = (
   ids: readonly URI[],
 ) => ids.filter((id) => provider.get(id)?.value !== undefined).sort();
 
+Deno.test("storage manager publishes connection state per space", async () => {
+  const server = new MemoryV2Server.Server({
+    ...TEST_MEMORY_SERVER_AUTH,
+    store: new URL(
+      `memory://runner-v2-connection-state-${crypto.randomUUID()}`,
+    ),
+  });
+  const transport = new SabotagedReconnectTransport(server);
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-connection-state"),
+  }, sessionFactory);
+  const states: Array<{ status: string; epoch: number }> = [];
+  const unsubscribe = storageManager.subscribeConnectionState(
+    space,
+    (state) => states.push({ status: state.status, epoch: state.epoch }),
+  );
+  const provider = storageManager.open(space) as TestProvider;
+
+  try {
+    assertEquals(states, [{ status: "idle", epoch: 0 }]);
+
+    await provider.sync(`of:connection-state-${crypto.randomUUID()}` as URI);
+    await waitFor(() =>
+      states.some((state) => state.status === "ready" && state.epoch === 1)
+    );
+
+    transport.disconnect();
+    await waitFor(() =>
+      states.some((state) => state.status === "ready" && state.epoch === 2)
+    );
+
+    assertEquals(states.slice(0, 4), [
+      { status: "idle", epoch: 0 },
+      { status: "ready", epoch: 1 },
+      { status: "disconnected", epoch: 1 },
+      { status: "ready", epoch: 2 },
+    ]);
+  } finally {
+    unsubscribe();
+    await storageManager.close();
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 runner does not integrate its own replayed commit after reconnect", async () => {
   const server = new MemoryV2Server.Server({
     ...TEST_MEMORY_SERVER_AUTH,
