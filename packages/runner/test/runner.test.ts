@@ -3,7 +3,13 @@ import { expect } from "@std/expect";
 import "@commonfabric/utils/equal-ignoring-symbols";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type Module, NAME, type Pattern } from "../src/builder/types.ts";
+import {
+  type Cell,
+  type Module,
+  NAME,
+  type Pattern,
+  type Stream,
+} from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import {
@@ -24,6 +30,42 @@ import {
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+type DefaultOptions = {
+  enabled: boolean;
+  value: number;
+  name: string;
+};
+type MergeDefaultsResult = {
+  options: DefaultOptions;
+  result: number;
+};
+type CounterResult = {
+  [NAME]?: string;
+  counter?: number;
+};
+type MutableNestedValue = {
+  value: string;
+};
+type RunnerStorageSubscriptionProbe = {
+  resultPatternCache: Map<string, string>;
+  createStorageSubscription(): IStorageSubscription;
+};
+type RunnerLazyStartProbe = {
+  locallyPreparedResults: Set<string>;
+  syncCellsForRunningPattern(
+    resultCell: Cell<unknown>,
+    pattern: Module | Pattern,
+    inputs?: unknown,
+  ): Promise<boolean>;
+};
+type HandlerValueContext = {
+  value: Cell<number>;
+};
+type ConcurrentStartResult = {
+  value: number;
+  increment: Stream<void>;
+};
 
 function runTrusted(
   runtime: Runtime,
@@ -871,7 +913,9 @@ describe("runPattern", () => {
         {
           module: {
             type: "javascript",
-            implementation: (args: { input: number; options: any }) => {
+            implementation: (
+              args: { input: number; options: DefaultOptions },
+            ) => {
               return args.options.enabled ? args.input * args.options.value : 0;
             },
           },
@@ -891,7 +935,7 @@ describe("runPattern", () => {
       input: 5,
     }, resultCell);
 
-    const resultValue = await result.pull() as any;
+    const resultValue = await result.pull() as MergeDefaultsResult;
     expect(resultValue.options).toEqual({
       enabled: true,
       value: 10,
@@ -916,7 +960,7 @@ describe("runPattern", () => {
         {
           module: {
             type: "javascript",
-            implementation: (input: any) => {
+            implementation: (input: { value: number }) => {
               return input.value;
             },
           },
@@ -926,7 +970,7 @@ describe("runPattern", () => {
       ],
     };
 
-    const resultCell = runtime.getCell<any>(
+    const resultCell = runtime.getCell<CounterResult>(
       space,
       "state preservation test",
     );
@@ -965,7 +1009,7 @@ describe("runPattern", () => {
         {
           module: {
             type: "javascript",
-            implementation: (input: any) => input.value,
+            implementation: (input: { value: number }) => input.value,
           },
           inputs: { $alias: { cell: "argument", path: [] } },
           outputs: { $alias: { partialCause: "counter", path: [] } },
@@ -981,7 +1025,7 @@ describe("runPattern", () => {
       },
     };
 
-    const resultCell = runtime.getCell<any>(
+    const resultCell = runtime.getCell<CounterResult>(
       space,
       "state preservation across pattern changes test",
     );
@@ -1081,8 +1125,12 @@ describe("runPattern", () => {
     const internalCell2 = getDerivedInternalCell(result2, {
       partialCause: "nested",
     });
-    const nested1 = internalCell1.getRawUntyped({ frozen: false }) as any;
-    const nested2 = internalCell2.getRawUntyped({ frozen: false }) as any;
+    const nested1 = internalCell1.getRawUntyped({
+      frozen: false,
+    }) as MutableNestedValue;
+    const nested2 = internalCell2.getRawUntyped({
+      frozen: false,
+    }) as MutableNestedValue;
 
     // Verify they are different objects
     expect(nested1).not.toBe(nested2);
@@ -1162,10 +1210,8 @@ describe("storage subscription", () => {
   });
 
   it("clears cached patterns when storage notifies of changes", () => {
-    const internals = runtime.runner as unknown as {
-      resultPatternCache: Map<string, string>;
-      createStorageSubscription(): IStorageSubscription;
-    };
+    const runnerValue: unknown = runtime.runner;
+    const internals = runnerValue as RunnerStorageSubscriptionProbe;
 
     const uri = "pattern-cache-test" as URI;
     const key = `${space}/space/${uri}`;
@@ -1663,8 +1709,8 @@ describe("setup/start", () => {
     setupTrusted(
       runtime,
       undefined,
-      mod as any,
-      { input: 2 } as any,
+      mod,
+      { input: 2 },
       resultCell,
     );
 
@@ -1707,8 +1753,8 @@ describe("setup/start", () => {
     setupTrusted(
       runtime,
       undefined,
-      undefined as any,
-      { input: 10 } as any,
+      undefined,
+      { input: 10 },
       resultCell,
     );
     // Not started yet; result still aliases internal and shows previous value
@@ -1863,7 +1909,7 @@ describe("runner utils", () => {
     });
 
     it("should treat cell aliases and references as values", () => {
-      const testCell = runtime.getCell<{ a: any }>(
+      const testCell = runtime.getCell<{ a: unknown }>(
         space,
         "should treat cell aliases and references as values 1",
         undefined,
@@ -2012,7 +2058,10 @@ describe("runner utils", () => {
                 },
                 required: ["$ctx"],
               },
-              implementation: (_event: unknown, { value }: any) => {
+              implementation: (
+                _event: unknown,
+                { value }: HandlerValueContext,
+              ) => {
                 value.set(value.get() + 1);
               },
             },
@@ -2025,7 +2074,7 @@ describe("runner utils", () => {
         ],
       };
 
-      const resultCell = runtime.getCell<any>(
+      const resultCell = runtime.getCell<ConcurrentStartResult>(
         space,
         "concurrent start dedupe",
       );
@@ -2034,12 +2083,15 @@ describe("runner utils", () => {
       // Simulate a persisted piece being resumed. In that path start() syncs
       // dependencies before registering handlers, which is where this race
       // used to allow duplicate starts for the same result cell.
-      (runtime.runner as any).locallyPreparedResults.clear();
-      (resultCell as any).synced = true;
+      const runnerValue: unknown = runtime.runner;
+      const runner = runnerValue as RunnerLazyStartProbe;
+      runner.locallyPreparedResults.clear();
+      Object.assign(resultCell, { synced: true });
 
-      const runner = runtime.runner as any;
       const originalSync = runner.syncCellsForRunningPattern.bind(runner);
-      runner.syncCellsForRunningPattern = async (...args: any[]) => {
+      runner.syncCellsForRunningPattern = async (
+        ...args: Parameters<RunnerLazyStartProbe["syncCellsForRunningPattern"]>
+      ) => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         return originalSync(...args);
       };
