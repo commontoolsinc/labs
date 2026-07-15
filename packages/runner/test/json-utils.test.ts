@@ -12,8 +12,11 @@ import {
 } from "../src/builder/json-utils.ts";
 import {
   type FabricValue,
+  isModule,
+  isPattern,
   type JSONSchema,
   type JSONSchemaObj,
+  type Module,
 } from "../src/builder/types.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
@@ -24,6 +27,63 @@ import { Engine } from "../src/harness/engine.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
+
+type Style = {
+  background: string;
+  borderRadius: string;
+  padding: string;
+};
+
+type SerializedTree = {
+  children: {
+    props: {
+      style: Style;
+    };
+  }[];
+};
+
+type CircularInput = {
+  name: string;
+  child: {
+    parent?: CircularInput;
+  };
+};
+
+type CircularOutput = {
+  name: string;
+  child: {
+    parent: Record<string, never>;
+  };
+};
+
+type NestedMetadata = {
+  author: string;
+  version: number;
+};
+
+type NestedTree = {
+  items: [
+    { meta: NestedMetadata },
+    { meta: NestedMetadata },
+    {
+      nested: {
+        deep: {
+          meta: NestedMetadata;
+        };
+      };
+    },
+  ];
+};
+
+type FunctionBackedModule = Module & {
+  implementation: (...args: never[]) => unknown;
+};
+
+function isFunctionBackedModule(
+  value: unknown,
+): value is FunctionBackedModule {
+  return isModule(value) && typeof value.implementation === "function";
+}
 
 describe("json-utils", () => {
   let runtime: Runtime;
@@ -697,7 +757,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithLegacyAliases(tree as any) as any;
+      const result = toJSONWithLegacyAliases(tree) as SerializedTree;
 
       // All 5 children should have the full style object
       for (let i = 0; i < 5; i++) {
@@ -710,10 +770,10 @@ describe("json-utils", () => {
     });
 
     it("should still guard against circular references", () => {
-      const circular: any = { name: "root", child: {} };
+      const circular: CircularInput = { name: "root", child: {} };
       circular.child.parent = circular; // true circular reference
 
-      const result = toJSONWithLegacyAliases(circular as any) as any;
+      const result = toJSONWithLegacyAliases(circular) as CircularOutput;
 
       // The root should serialize, but the circular back-reference should be {}
       expect(result.name).toEqual("root");
@@ -730,7 +790,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithLegacyAliases(tree as any) as any;
+      const result = toJSONWithLegacyAliases(tree) as NestedTree;
 
       expect(result.items[0].meta).toEqual({ author: "test", version: 1 });
       expect(result.items[1].meta).toEqual({ author: "test", version: 1 });
@@ -748,7 +808,7 @@ describe("json-utils", () => {
       });
 
       const result = toJSONWithLegacyAliases(
-        cellWithFalseSchema as any,
+        cellWithFalseSchema,
         (cell) => {
           const { schema, scope } = cell.export();
           return {
@@ -801,10 +861,12 @@ describe("moduleToJSON", () => {
         src: "main.tsx:1:1",
       },
     );
-    const serialized = moduleToJSON({
-      type: "javascript",
-      implementation,
-    } as any);
+    const serialized = moduleToJSON(
+      {
+        type: "javascript",
+        implementation,
+      } satisfies Module,
+    );
 
     expect(serialized).toMatchObject({
       type: "javascript",
@@ -822,10 +884,12 @@ describe("moduleToJSON", () => {
         src: "main.tsx:2:1",
       },
     );
-    const serialized = moduleToJSON({
-      type: "raw",
-      implementation,
-    } as any);
+    const serialized = moduleToJSON(
+      {
+        type: "raw",
+        implementation,
+      } satisfies Module,
+    );
 
     expect(serialized).toMatchObject({
       type: "raw",
@@ -852,10 +916,14 @@ describe("moduleToJSON", () => {
       ),
     );
     const { main } = await compileEngine.compileAndEvaluateModules(program);
-    const pattern = main?.default as any;
+    const pattern = main?.default;
+    expect(isPattern(pattern)).toBe(true);
+    if (!isPattern(pattern)) {
+      throw new Error("Expected default export to be a pattern");
+    }
 
     const seen = new Set<unknown>();
-    let targetModule: any;
+    let targetModule: FunctionBackedModule | undefined;
     const visit = (value: unknown) => {
       if (
         !value ||
@@ -867,14 +935,10 @@ describe("moduleToJSON", () => {
       seen.add(value);
       if (
         !targetModule &&
-        typeof (value as { type?: unknown }).type === "string" &&
-        (value as { type?: string }).type === "javascript" &&
-        typeof (value as { implementation?: unknown }).implementation ===
-          "function"
+        isFunctionBackedModule(value) &&
+        value.type === "javascript"
       ) {
-        const implementation =
-          (value as { implementation: (...args: unknown[]) => unknown })
-            .implementation;
+        const implementation = value.implementation;
         const implementationSource =
           (implementation as { preview?: string }).preview ??
             implementation.toString();
@@ -900,6 +964,9 @@ describe("moduleToJSON", () => {
     visit(pattern);
 
     expect(targetModule).toBeDefined();
+    if (!targetModule) {
+      throw new Error("Expected fixture to contain a javascript module");
+    }
 
     // The implementation became verified during the STANDALONE Engine's
     // evaluation, so it carries process-global content-addressed provenance
