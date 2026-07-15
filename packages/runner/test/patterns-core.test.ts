@@ -7,11 +7,33 @@ import "@commonfabric/utils/equal-ignoring-symbols";
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { type FactoryInput, type JSONSchema } from "../src/builder/types.ts";
+import { type JSONSchema, type PatternFactory } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+type ListOpInput<T> = {
+  element: T;
+  index: number;
+  array: T[];
+};
+type CollectionPatternHelpers<T> = {
+  mapWithPattern<S>(
+    op: PatternFactory<ListOpInput<T>, S>,
+    params: Record<string, unknown>,
+  ): S[];
+};
+type DoubledArrayResult = { doubled: unknown[] };
+
+const collectionPattern = <T>(value: unknown): CollectionPatternHelpers<T> =>
+  value as CollectionPatternHelpers<T>;
+const optionalCollectionPattern = <T>(
+  value: unknown,
+): CollectionPatternHelpers<T> | undefined =>
+  value as CollectionPatternHelpers<T> | undefined;
+const doubledArrayResult = (value: unknown): DoubledArrayResult =>
+  value as DoubledArrayResult;
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -165,14 +187,15 @@ describe("Pattern Runner - Core", () => {
 
     const multipliedArray = pattern<{ values: { x: number }[] }>(
       ({ values }) => {
-        const multiplied = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            ((({ x }: any, index: any, array: any) => {
-              return { multiplied: multiply({ x, index, array }) };
-            }) as any)(element, index, array)
-          ),
-          {},
-        );
+        const multiplied = collectionPattern<{ x: number }>(values)
+          .mapWithPattern(
+            pattern<ListOpInput<{ x: number }>>(
+              ({ element, index, array }) => ({
+                multiplied: multiply({ x: element.x, index, array }),
+              }),
+            ),
+            {},
+          );
         return { multiplied };
       },
     );
@@ -210,12 +233,13 @@ describe("Pattern Runner - Core", () => {
 
     const doubleArray = pattern<{ values?: number[] }>(
       ({ values }) => {
-        const doubled = (values as any)?.mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((x: any) => double(x)) as any)(element, index, array)
-          ),
-          {},
-        ) ?? [];
+        const doubled = optionalCollectionPattern<number>(values)
+          ?.mapWithPattern(
+            pattern<ListOpInput<number>, number>(({ element }) =>
+              double(element)
+            ),
+            {},
+          ) ?? [];
         return { doubled };
       },
     );
@@ -243,9 +267,9 @@ describe("Pattern Runner - Core", () => {
 
     const doubleArray = pattern<{ values: number[] }>(
       ({ values }) => {
-        const doubled = (values as any).mapWithPattern(
-          pattern(({ element, index, array }: FactoryInput<any>) =>
-            (((x: any) => double(x)) as any)(element, index, array)
+        const doubled = collectionPattern<number>(values).mapWithPattern(
+          pattern<ListOpInput<number>, number>(({ element }) =>
+            double(element)
           ),
           {},
         );
@@ -274,7 +298,7 @@ describe("Pattern Runner - Core", () => {
     await commitTx();
 
     const value = await result.pull();
-    const doubled = (value as any).doubled;
+    const doubled = doubledArrayResult(value).doubled;
     expect(Array.isArray(doubled)).toBe(true);
     expect(doubled.length).toBe(3);
     expect(doubled[0]).toBe(20);
