@@ -51,17 +51,19 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
-  errorHandlers.add((err: Error) => {
+  runtime.scheduler.onError((err) => {
     capturedError = err;
   });
 
-  const resultCell = runtime.getCell(space, "lift-stack-trace-cts");
+  const resultCell = runtime.getCell<{ result: number }>(
+    space,
+    "lift-stack-trace-cts",
+  );
 
   await runtime.setup(undefined, patternFn, { input: 5 }, resultCell);
   runtime.start(resultCell);
 
-  const initial = (await resultCell.pull()) as any;
+  const initial = await resultCell.pull();
   assertEquals(initial.result, 10);
 
   // Trigger the error by setting input > 10
@@ -129,8 +131,7 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
-  errorHandlers.add((err: Error) => {
+  runtime.scheduler.onError((err) => {
     capturedError = err;
   });
 
@@ -209,8 +210,7 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
-  errorHandlers.add((err: Error) => {
+  runtime.scheduler.onError((err) => {
     capturedError = err;
   });
 
