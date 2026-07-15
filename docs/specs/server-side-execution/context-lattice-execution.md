@@ -487,13 +487,45 @@ Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
   protocol §5 requires as its reviewed entry prerequisite) — explicitly
   last; may be re-scoped after C3 experience.
 
-## 8. Open questions
+## 8. Residual client-authoritative register
 
-1. **User-lane authority at zero sessions:** session-anchored (v1-simple,
-   no new key material, lane sleeps when the user is fully offline) vs
-   standing delegated execution keys (offline continuation, revocation
-   surface, consent UX). Recommendation: ship C1 session-anchored; design
-   the delegated key alongside C2 with CFC owners.
+§1's thesis is that carve-outs bite twice: once as missing coverage and
+once as what-is-carved-out classification complexity. This register keeps
+every residual exclusion honest. The structural claim to hold each entry
+to: after C0 and this design, **every membership test below is a cheap,
+local check — an actionKind, a string prefix, a summary-presence bit, a
+registry lookup, or a per-address space/scope compare. None requires
+following links or proving a negative, and the client never performs any
+of them** (clients route purely by claims). An entry that stops satisfying
+that claim is a design bug.
+
+| # | Excluded from server authority | Membership test | Resolves via |
+| --- | --- | --- | --- |
+| R1 | Event handlers (all user intent) | `actionKind === "event-handler"` | Phase 5 signed events; until then §B.3's prediction window persists (counted) |
+| R2 | Render/UI effects | effect kind + render surface | D-projector mode, deliberately unscheduled |
+| R3 | Unverified implementations (host, dynamic, test builders — no verified provenance, so no `impl:` fingerprint) | fingerprint prefix | engineering: extend verified provenance to those constructors; **data step: enumerate the class on dogfood spaces** (44/run in default-app); a product call only if some authoring path can never be stamped |
+| R4 | Actions without a complete scope summary (transformer gaps, hand-built nodes) | summary-presence bit | engineering: transformer emission coverage; same dogfood enumeration (14/run) |
+| R5 | Builtins outside the server-executable registry | static registry lookup | per-builtin broker support as needed |
+| R6 | Cross-space reads (until C3), cross-space writes (until C4 + coordinated-commit design); multi-host cross-space (gap, no design) | per-address space compare | C3/C4 scheduled; multi-host needs a roadmap answer before it needs a design |
+| R7 | user/session contexts before their rank enables (C1/C2 staging) | lattice rank | C1/C2 shipping; temporary by construction |
+| R8 | User-lane work while the principal has zero sessions | host lane state | resolved for v1: session-anchored (simplest); the later delegation design restores offline continuation correctly and owns its consent question |
+| R9 | Spaces owned by the legacy background service | host exclusion lock | Phase 3 registry unification |
+| R10 | Client compute for claimed actions (N× speculation) and graph-query subscription serving | — (not a classification; standing machinery cost) | Phase 3 feed + G17 suppression, gated on closure coverage data |
+| R11 | Accepted reconciliation windows: §B.3 prediction, §B.4 scalar basis, §5 vector basis | — (counted divergence, not exclusions) | B.3 closes with Phase 5; basis windows accepted and counted |
+
+Engineering debt riding alongside (no decisions): the owed deterministic
+fixtures (shrink race, shared child, rebase replica test) and the
+stale-confirmed-read conflict retry cost (re-measure after the feed).
+
+## 9. Open questions
+
+1. **Resolved (owner decision, 2026-07-15) — user-lane authority at zero
+   sessions:** ship the simplest form now — session-anchored, no new key
+   material, the lane sleeps when the user is fully offline. Proper
+   delegation later fixes this correctly (offline continuation, revocation
+   surface, consent UX — including offline egress consent, folded here
+   from the former Open question 6); that later design is where CFC owners
+   weigh in.
 2. **Promotion cadence:** narrowing is evidence-driven and immediate
    (unchanged); a new fingerprint's trusted summary is trusted immediately.
    That trust is safe for *authority* solely because the execution firewall
@@ -510,13 +542,11 @@ Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
    budget (G18 territory). Cheap v1: LRU-park session lanes beyond a cap;
    parked session lanes are correct by construction (client remains
    authoritative for anything unclaimed/unserved).
-4. **Does C1 precede or follow the Phase 3 feed?** The feed only needs
-   space-lane coverage to start paying; C1 widens it. Recommendation:
-   start the feed after C0 measurement confirms coverage on dogfood
-   spaces; run C1 in parallel — different subsystems, different owners.
-   **C2 is different:** it multiplies per-session commit volume and is
-   gated on the feed (§6), so the feed is on C2's critical path, not
-   parallel to it.
+4. **Resolved (owner decision, 2026-07-15) — sequencing.** The feed starts
+   after C0 measurement confirms coverage on dogfood spaces; C1 runs in
+   parallel (different subsystems). C2 waits for the feed, which is on its
+   critical path (§6). Work continues on the Phase 0–2 implementation
+   branch rather than merging first.
 5. **Lane placement: N lanes in one Worker vs Worker-per-lane-group.**
    One Worker serializes all lanes on one thread (§4) but keeps §6.1's
    one-lease-per-branch/space topology. Worker groups would parallelize
@@ -539,7 +569,7 @@ Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
    origin and never lane-recomputed. No scoped-cell semantics change is
    required.
 
-## 9. Parent-document edits owed by this design
+## 10. Parent-document edits owed by this design
 
 Landing with **C1**: README §5.B.1's reconnect contract changes from "a
 complete claim snapshot" to "a complete snapshot of the claims this session
