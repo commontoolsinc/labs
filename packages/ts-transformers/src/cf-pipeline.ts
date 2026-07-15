@@ -1,6 +1,7 @@
 import {
   BuilderCallHoistingTransformer,
   CastValidationTransformer,
+  CellOfStaticInitialValidationTransformer,
   CfcPolicyAuthoringTransformer,
   CfcPolicyOfValidationTransformer,
   EmptyArrayOfValidationTransformer,
@@ -44,6 +45,10 @@ const CFC_TRANSFORMER_STAGE_SPECS: readonly TransformerStageSpec[] = [
   {
     name: "EmptyArrayOfValidationTransformer",
     create: (options) => new EmptyArrayOfValidationTransformer(options),
+  },
+  {
+    name: "CellOfStaticInitialValidationTransformer",
+    create: (options) => new CellOfStaticInitialValidationTransformer(options),
   },
   {
     name: "OpaqueGetValidationTransformer",

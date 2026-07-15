@@ -1,5 +1,6 @@
 export { BuilderCallHoistingTransformer } from "./builder-call-hoisting.ts";
 export { CastValidationTransformer } from "./cast-validation.ts";
+export { CellOfStaticInitialValidationTransformer } from "./cell-of-static-initial-validation.ts";
 export { CfcPolicyAuthoringTransformer } from "./cfc-policy-authoring.ts";
 export { CfcPolicyOfValidationTransformer } from "./cfc-policy-of-validation.ts";
 export { PatternCallbackLoweringTransformer } from "./pattern-callback-lowering.ts";
