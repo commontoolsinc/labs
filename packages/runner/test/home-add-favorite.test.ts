@@ -13,10 +13,24 @@ const signer = await Identity.fromPassphrase("home add-favorite tests");
 const space = signer.did();
 
 type FavoriteEntry = {
+  cell?: unknown;
   tags?: string[];
   tag?: string;
   userTags?: string[];
   id?: string;
+};
+
+type FavoriteCommand = {
+  piece: unknown;
+  tags?: string[];
+  spaceName?: string;
+  id: string;
+};
+
+type HomeState = {
+  favorites?: FavoriteEntry[];
+  addFavorite?: FavoriteCommand;
+  removeFavorite?: FavoriteCommand;
 };
 
 // Compiles and runs the real home pattern, then drives its addFavorite /
@@ -27,8 +41,7 @@ describe("home favorites handlers", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
-  // deno-lint-ignore no-explicit-any
-  let home: any;
+  let home: Cell<HomeState>;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
