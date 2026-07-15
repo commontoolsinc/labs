@@ -1719,27 +1719,27 @@ export type JSONSchemaObj = {
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
   readonly enum?: readonly ImmutableJSONValue[]; // not validated
   readonly const?: ImmutableJSONValue; // not validated
-  // Validation for numeric - none applied
+  // Validation for numeric
   readonly multipleOf?: number;
   readonly maximum?: number;
   readonly exclusiveMaximum?: number;
   readonly minimum?: number;
   readonly exclusiveMinimum?: number;
-  // Validation for string - none applied
+  // Validation for string
   readonly maxLength?: number;
   readonly minLength?: number;
   readonly pattern?: string;
-  // Validation for array  - none applied
+  // Validation for array
   readonly maxItems?: number;
   readonly minItems?: number;
   readonly uniqueItems?: boolean;
   readonly maxContains?: number;
   readonly minContains?: number;
   // Validation for object
-  readonly maxProperties?: number; // not validated
-  readonly minProperties?: number; // not validated
+  readonly maxProperties?: number;
+  readonly minProperties?: number;
   readonly required?: readonly string[];
-  readonly dependentRequired?: Readonly<Record<string, readonly string[]>>; // not validated
+  readonly dependentRequired?: Readonly<Record<string, readonly string[]>>;
 
   // Format annotations
   readonly format?: string; // not validated

@@ -235,7 +235,7 @@ describe("llmDialog", () => {
               type: "tool-call",
               toolCallId: "present-invalid-result",
               toolName: "presentResult",
-              input: { answer: "not a number" },
+              input: { answer: "no" },
             }],
             id: "present-invalid-result-response",
           },
@@ -254,7 +254,7 @@ describe("llmDialog", () => {
 
     const presentedSchema = {
       type: "object",
-      properties: { answer: { type: "number" } },
+      properties: { answer: { type: "string", minLength: 4 } },
       required: ["answer"],
     } as const satisfies JSONSchema;
     const testPattern = pattern(
@@ -306,7 +306,7 @@ describe("llmDialog", () => {
               type: "tool-call",
               toolCallId: "present-valid-result",
               toolName: "presentResult",
-              input: { answer: 42 },
+              input: { answer: "valid" },
             }],
             id: "present-valid-result-response",
           },
@@ -326,7 +326,7 @@ describe("llmDialog", () => {
     addMessage.send({ role: "user", content: "Valid turn" });
     await settled;
 
-    expect(result.key("result").get()).toEqual({ answer: 42 });
+    expect(result.key("result").get()).toEqual({ answer: "valid" });
     expect(result.key("error").get()).toBeUndefined();
   });
 

@@ -248,6 +248,98 @@ describe("cfc schema sanitization", () => {
       type: "array",
       items: { type: "string" },
     }, ["ok", 2])).toBe("1: value does not match type string");
+    expect(validateAgainstSchema({
+      type: "string",
+      minLength: 3,
+    }, "ab")).toBe("string is shorter than minLength 3");
+    expect(validateAgainstSchema({
+      type: "string",
+      pattern: "^[A-Z]",
+    }, "lowercase")).toBe("string does not match pattern ^[A-Z]");
+    expect(validateAgainstSchema({
+      type: "number",
+      minimum: 1,
+    }, 0)).toBe("number is less than minimum 1");
+    expect(validateAgainstSchema({
+      type: "array",
+      minItems: 2,
+    }, [1])).toBe("array has fewer than minItems 2");
+    expect(validateAgainstSchema({
+      type: "number",
+      multipleOf: 0.25,
+    }, 1.1)).toBe("number is not a multiple of 0.25");
+    expect(validateAgainstSchema({
+      type: "number",
+      maximum: 4,
+    }, 5)).toBe("number is greater than maximum 4");
+    expect(validateAgainstSchema({
+      type: "number",
+      exclusiveMaximum: 4,
+    }, 4)).toBe("number is not less than exclusiveMaximum 4");
+    expect(validateAgainstSchema({
+      type: "number",
+      exclusiveMinimum: 1,
+    }, 1)).toBe("number is not greater than exclusiveMinimum 1");
+    expect(validateAgainstSchema({
+      type: "string",
+      maxLength: 2,
+    }, "abc")).toBe("string is longer than maxLength 2");
+    expect(validateAgainstSchema({
+      type: "string",
+      pattern: "[",
+    }, "anything")).toBe("schema has invalid pattern [");
+    expect(validateAgainstSchema({
+      type: "array",
+      maxItems: 1,
+    }, [1, 2])).toBe("array has more than maxItems 1");
+    expect(validateAgainstSchema({
+      type: "array",
+      uniqueItems: true,
+    }, [{ id: 1 }, { id: 1 }])).toBe("array item 1 is not unique");
+    expect(validateAgainstSchema({
+      type: "object",
+      maxProperties: 1,
+    }, { a: 1, b: 2 })).toBe("object has more than maxProperties 1");
+    expect(validateAgainstSchema({
+      type: "object",
+      minProperties: 2,
+    }, { a: 1 })).toBe("object has fewer than minProperties 2");
+    expect(validateAgainstSchema({
+      type: "object",
+      dependentRequired: { cardNumber: ["billingAddress"] },
+    }, { cardNumber: "1234" })).toBe(
+      "property cardNumber requires property billingAddress",
+    );
+    expect(validateAgainstSchema({
+      type: "object",
+      properties: {
+        score: {
+          type: "number",
+          multipleOf: 0.25,
+          minimum: 0,
+          exclusiveMaximum: 1.25,
+        },
+        label: {
+          type: "string",
+          minLength: 2,
+          maxLength: 3,
+          pattern: "^[A-Z]+$",
+        },
+        tags: {
+          type: "array",
+          minItems: 1,
+          maxItems: 2,
+          uniqueItems: true,
+        },
+      },
+      required: ["score", "label", "tags"],
+      minProperties: 3,
+      maxProperties: 3,
+    }, {
+      score: 1,
+      label: "OK",
+      tags: ["one", "two"],
+    })).toBeUndefined();
   });
 });
 

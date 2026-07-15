@@ -570,14 +570,108 @@ export const validateAgainstSchema = (
     return `value does not match type ${types.join("|")}`;
   }
 
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (typeof schema.multipleOf === "number" && schema.multipleOf > 0) {
+      const quotient = value / schema.multipleOf;
+      const tolerance = Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;
+      if (Math.abs(quotient - Math.round(quotient)) > tolerance) {
+        return `number is not a multiple of ${schema.multipleOf}`;
+      }
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      return `number is greater than maximum ${schema.maximum}`;
+    }
+    if (
+      typeof schema.exclusiveMaximum === "number" &&
+      value >= schema.exclusiveMaximum
+    ) {
+      return `number is not less than exclusiveMaximum ${schema.exclusiveMaximum}`;
+    }
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      return `number is less than minimum ${schema.minimum}`;
+    }
+    if (
+      typeof schema.exclusiveMinimum === "number" &&
+      value <= schema.exclusiveMinimum
+    ) {
+      return `number is not greater than exclusiveMinimum ${schema.exclusiveMinimum}`;
+    }
+  }
+
+  if (typeof value === "string") {
+    const length = [...value].length;
+    if (typeof schema.maxLength === "number" && length > schema.maxLength) {
+      return `string is longer than maxLength ${schema.maxLength}`;
+    }
+    if (typeof schema.minLength === "number" && length < schema.minLength) {
+      return `string is shorter than minLength ${schema.minLength}`;
+    }
+    if (typeof schema.pattern === "string") {
+      let pattern: RegExp;
+      try {
+        pattern = new RegExp(schema.pattern, "u");
+      } catch {
+        return `schema has invalid pattern ${schema.pattern}`;
+      }
+      if (!pattern.test(value)) {
+        return `string does not match pattern ${schema.pattern}`;
+      }
+    }
+  }
+
+  if (Array.isArray(value)) {
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+      return `array has more than maxItems ${schema.maxItems}`;
+    }
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
+      return `array has fewer than minItems ${schema.minItems}`;
+    }
+    if (schema.uniqueItems === true) {
+      for (let index = 0; index < value.length; index++) {
+        if (
+          value.slice(0, index).some((entry) => deepEqual(entry, value[index]))
+        ) {
+          return `array item ${index} is not unique`;
+        }
+      }
+    }
+  }
+
   // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this path
   // today, but will in the not-too-distant future; at that point this guard-less
   // `isRecord`-walk fails (a `FabricPrimitive` is decomposed, a `FabricInstance`
   // is walked by internal slots rather than codec contents). Mark ahead of that.
   if (isRecord(value) && !Array.isArray(value)) {
+    const propertyCount = Object.keys(value).length;
+    if (
+      typeof schema.maxProperties === "number" &&
+      propertyCount > schema.maxProperties
+    ) {
+      return `object has more than maxProperties ${schema.maxProperties}`;
+    }
+    if (
+      typeof schema.minProperties === "number" &&
+      propertyCount < schema.minProperties
+    ) {
+      return `object has fewer than minProperties ${schema.minProperties}`;
+    }
     for (const key of schema.required ?? []) {
       if (!(key in value)) {
         return `missing required property ${key}`;
+      }
+    }
+    for (
+      const [key, dependencies] of Object.entries(
+        schema.dependentRequired ?? {},
+      )
+    ) {
+      if (key in value) {
+        const missing = dependencies.find((dependency) =>
+          !(dependency in value)
+        );
+        if (missing !== undefined) {
+          return `property ${key} requires property ${missing}`;
+        }
       }
     }
     for (const [key, child] of Object.entries(schema.properties ?? {})) {
