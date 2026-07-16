@@ -143,6 +143,12 @@ reconnect snapshots are all branch-qualified.
       W2.5 + W2.6 + W2.7 + W2.8 ────▶ W2.9 interactive latency gates
       W2.9 + W2.10 ─────────────────▶ deployed flag drill (W2.4 remainder)
 
+    Phase 2.6 (servable-surface completeness; R3/R4 → zero):
+      W2.11 builtin identity ─────────▶ W2.15 builtin computation descriptors
+      W2.12 read-only cert relaxation ▶ W2.13 direct-builder cert path
+      W2.11 + W2.13 ──────────────────▶ W2.14 runtime write-empty summaries
+      W2.14 + W2.15 + W2.16 ──────────▶ zero-verdict acceptance run
+
     Later:
       Phase 3 background demand and feed narrowing
       Phase 4 scoped execution with delegated keys
@@ -1437,6 +1443,181 @@ be named and justified in the recorded report, not waved through.
 - [ ] Fresh-pair latency deltas are at parity (~0 budget; any test-setup
       exclusion named and justified) and recorded.
 - [ ] The runbook names the latency gates beside the CPU gate.
+
+---
+
+## 4.6 Phase 2.6 — servable-surface completeness (R3/R4 → zero)
+
+The owner ruling (2026-07-15) reclassified register entries R3
+(`untrusted-implementation`) and R4 (`incomplete-static-surface`) as defect
+classes with target zero. The diagnosis pass (2026-07-15; one instrumented
+flag-on default-app run plus two static pipeline maps, recorded in
+[the dated report](../../history/development/performance/server-execution-r3-r4-diagnosis-2026-07-15.md))
+enumerated the full population: 37 verdicts from 18 distinct offenders
+across 7 pieces, produced by exactly two mechanisms.
+
+- **R3 is raw builtins, nothing else.** Every offender is a `map`, `wish`,
+  or `ifElse` node. Authored pattern code is fully covered: hoisting +
+  `__cfReg` + SES evaluation record provenance, and zero `cf:module/`
+  implementations were rejected. Host builtins are registered by canonical
+  registry ref and never SES-evaluated, so `getVerifiedProvenance` misses
+  them; only `SERVER_EXECUTABLE_BUILTIN_IDS` get the static
+  `impl:cf:builtin/<id>:server-v1` stamp
+  (`packages/runner/src/runner.ts:5096-5104`). `ifElse` is structural: JSX
+  ternaries and `&&`/`||` lower to `ifElse`/`when`/`unless`, so conditional
+  rendering guarantees R3 today.
+- **R4 is missing transformer certificates on trusted implementations.**
+  The certificate (`completeSchedulerScopeSummary`) is emitted at exactly
+  two sites, both on the `computed()` path; the gate rejects any param
+  that is recursive/wildcard/passthrough/opaque — and `toCapability`
+  defaults to opaque for whole-value use. Three offenders are read-only
+  computeds tripping opaque/passthrough reads; two are direct module-scope
+  `lift()` builders, a form that has **no certificate path at all**; of
+  those, `computeIndex` additionally has a genuinely data-dependent write
+  surface.
+
+Post-C0, the firewall bounds only **writes** to the static envelope; reads
+are admitted dynamically per-address. That reframes the certificate: its
+load-bearing content is the write envelope. The work orders below follow
+that line. The client never classifies unclaimed actions, so acceptance
+runs must observe the executor-side classifier.
+
+### W2.11 — Static identity for every canonical builtin (R3 → 0)
+
+**Depends on:** —. **Status:** planned.
+
+Generalize the raw-path stamp (`runner.ts:5096-5104`): a raw module
+resolved through the canonical builtin registry ref but outside
+`SERVER_EXECUTABLE_BUILTIN_IDS` gets
+`implementationHash = cf:builtin/<id>:v1` — a shape deliberately distinct
+from `:server-v1` so identity is never conflated with "the server has a
+native implementation of this external effect"
+(`run.ts:793` keys its effect-descriptor path on the exact `:server-v1`
+fingerprint). Identity remains derived only from the canonical registry
+ref, never caller-controlled metadata (same trust argument as the existing
+subset). The nodes then classify `incomplete-static-surface` until W2.15
+supplies descriptors — which is the honest gap (surface, not trust).
+
+**Success criteria:**
+
+- [ ] Flag-on default-app run emits zero `untrusted-implementation`
+      verdicts (executor-side classifier observed).
+- [ ] Servability unit tests: `cf:builtin/<id>:v1` candidates pass the
+      fingerprint gate and still require a summary; `:server-v1` effect
+      semantics untouched.
+
+### W2.12 — Certify read-only computeds despite opaque/passthrough reads (RC-1)
+
+**Depends on:** C0 (landed). **Status:** planned.
+
+`hasCompleteSchedulerScopeSummary`
+(`packages/ts-transformers/src/closures/strategies/lift-applied-strategy.ts:156-172`)
+rejects opaque/passthrough/wildcard **reads**, but post-C0 only writes are
+envelope-bound (`servability.ts:315-329`); reads are admitted dynamically
+(`:302-314`) and still feed the runtime context floor. Relax the gate:
+certify when every param's `writePaths` is empty (read-only callback),
+regardless of read capability. Keep every rejection for callbacks with
+writes, and keep the `recursive` rejection (a bailed analysis cannot
+trustworthily claim "read-only" — those cases belong to W2.14).
+
+Semantics: `complete: true` then certifies **write-completeness** (plus
+the structural CFC sibling reads); document this where the summary is
+defined. Soundness rides C0: a session-scoped dynamic read through an
+opaque param must still promote the runtime floor — add a runtime test.
+
+**Success criteria:**
+
+- [ ] note.tsx `__cfLift_5/12/13` (and the latent `__cfLift_19`) carry
+      certificates in `--show-transformed` output; fixtures cover
+      truthiness-on-opaque and `??`-passthrough shapes.
+- [ ] Runtime floor test: opaque-param session-scoped read still yields a
+      session-context rank flag-on.
+- [ ] Writing callbacks keep today's gate behavior (regression fixtures).
+
+### W2.13 — Certificate path for direct lift()/derive() builders (RC-2)
+
+**Depends on:** W2.12. **Status:** planned.
+
+The direct builder form (`visitInjectedDualSchemaBuilderCall`,
+`schema-injection.ts:3466-3569`) injects only the two schemas and never
+emits a certificate, regardless of body — every module-scope
+`lift()`/`derive()` is R4-incomplete by construction. Run the same
+capability analysis on the builder callback and emit through the same
+(W2.12-relaxed) gate as `computed()`.
+
+**Success criteria:**
+
+- [ ] Direct-lift fixtures certify when their bodies qualify under the
+      W2.12 gate.
+- [ ] `computeIndex` explicitly does **not** certify (fixture asserts the
+      absence — its wildcard write surface must keep failing closed).
+
+### W2.14 — Runtime write-empty summaries, fail-closed (RC-3b)
+
+**Depends on:** W2.11, W2.13. **Status:** planned.
+
+For computations with `impl:` fingerprints, no transformer certificate,
+and an empty registered write surface, assemble the observation's
+`completeActionScopeSummary` at runtime with `writes: []` (reads from the
+observed log; C0 admits them). This is fail-closed, not assumed: the
+engine firewall rejects any run that ever writes
+(`dynamic-write-outside-static-surface`), so a wrong "write-empty" belief
+de-claims the action rather than corrupting anything. Covers
+`computeMentionable` (recursive, so statically unprovable, but provably
+write-free at runtime). Acceptance must show a deliberately-writing action
+de-claims cleanly without a conflict storm (reuse the W2.7 dedupe).
+
+**Success criteria:**
+
+- [ ] `computeMentionable` is claim-ready flag-on.
+- [ ] A test action that writes despite an empty-write summary is rejected
+      fail-closed once and falls back to client-primary without repeated
+      verdict spam.
+
+### W2.15 — Per-builtin computation descriptors (the R3→R4 cohort)
+
+**Depends on:** W2.11. **Status:** planned.
+
+Mirror the existing effect path — `ServerBuiltinActionDescriptor`
+(`packages/runner/src/builtins/server-execution.ts:40-49`) assembled into
+a summary at observation time (`run.ts:792-841`, today gated
+`actionKind === "effect"` at `:793`) — with a per-builtin **computation**
+descriptor registry accepted as an alternative certificate source in the
+`run.ts:744-777` computation block. Order of attack:
+
+1. `ifElse`/`when`/`unless` — pure single-output selectors; trivial static
+   surface; the cheapest claim-coverage win (structural in every UI).
+2. `map`/`filter`/`flatMap` — fixed output-collection envelope via
+   `materializerWriteEnvelopes`; per-element children are already
+   provenance-covered hoisted patterns.
+3. `wish` — resolver semantics; may stay identity-only until its
+   servability story is designed (record explicitly if so).
+
+**Success criteria:**
+
+- [ ] Flag-on default-app: `ifElse`/`map` nodes are claim-ready; measured
+      claim coverage over the former 18-offender population recorded.
+- [ ] Remaining unservable verdicts name only `computeIndex` (until
+      W2.16) and any explicitly recorded `wish` deferral.
+
+### W2.16 — backlinks-index computeIndex redesign (RC-3a)
+
+**Depends on:** — (pattern-level). **Status:** planned; disposition is an
+owner-visible recommendation.
+
+`computeIndex` writes `allPieces[*].backlinks` and
+`allPieces[*].mentioned[*].backlinks` via wildcard iteration and dynamic
+`.key(i)` — not statically enumerable, and a runtime summary can only be
+made safe as a fail-closed accumulating envelope (a strictly weaker
+guarantee than completeness). Options: **(a) redesign as per-piece
+derivations with statically bounded writes (recommended — it is a
+repo-owned system pattern and this alone reaches target zero); (b)
+accumulating fail-closed write envelope (documented as weaker); (c) keep
+client-primary (contradicts target zero; last resort).**
+
+**Success criteria:**
+
+- [ ] Flag-on default-app run emits **zero** R3/R4 verdicts end-to-end.
 
 ---
 
