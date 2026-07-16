@@ -1,4 +1,4 @@
-// Pins the KNOWN QUIRK in mapping spec §2/§16.7: the two analysis paths
+// Pins the KNOWN QUIRK in mapping spec §2/§17.7: the two analysis paths
 // encode literals differently for the SAME authored type.
 //   type path  (generateSchema):                 { type, enum: [v] }
 //   node path  (generateSchemaFromSyntheticTypeNode, schema-generator.ts

@@ -16,6 +16,10 @@ The transformers analyze TypeScript at compile time and:
    parameters with schemas
 3. **Annotate data flow boundaries** - Every `lift` / `computed`, `handler`, and
    `mapWithPattern` gets input/output schemas
+4. **Serialize and invoke trusted factory values** - `PatternFactory`,
+   `ModuleFactory`, and `HandlerFactory` values carry exact public contracts;
+   eager symbolic calls lower through `invokeFactory`, while live and scheduled
+   materialized calls remain direct
 
 Example transformation (illustrative; trimmed for readability — use
 `--show-transformed` below for the full output):
@@ -154,14 +158,16 @@ onward), and pinned to the constant by `test/spec-sync.test.ts`.
 
 ### Representative Rewrites
 
-| Input Pattern         | Output                                   | Purpose                    |
-| --------------------- | ---------------------------------------- | -------------------------- |
-| `array.map(fn)`       | `array.mapWithPattern(boundFactory)`     | Explicit closure captures  |
-| `expr1 * expr2`       | `lift(schema, schema, fn)(inputs)`       | Data flow boundary         |
-| `onClick={() => ...}` | `handler(eventSchema, stateSchema, fn)`  | Handler with dual schemas  |
-| `assert(() => expr)`  | a `computed` whose body records operands | Test assertion diagnostics |
-| `Cell<T>`             | `{ type: "...", asCell: ["cell"] }`      | Writable reactive ref      |
-| `Reactive<T>`         | structural schema without `asOpaque`     | Read-only reactive ref     |
+| Input Pattern          | Output                                    | Purpose                                          |
+| ---------------------- | ----------------------------------------- | ------------------------------------------------ |
+| `array.map(fn)`        | `array.mapWithPattern(boundFactory)`      | Explicit closure captures                        |
+| `expr1 * expr2`        | `lift(schema, schema, fn)(inputs)`        | Data flow boundary                               |
+| `onClick={() => ...}`  | `handler(eventSchema, stateSchema, fn)`   | Handler with dual schemas                        |
+| `assert(() => expr)`   | a `computed` whose body records operands  | Test assertion diagnostics                       |
+| `Cell<T>`              | `{ type: "...", asCell: ["cell"] }`       | Writable reactive ref                            |
+| `Reactive<T>`          | structural schema without `asOpaque`      | Read-only reactive ref                           |
+| eager `factory(input)` | `invokeFactory(factory, input, contract)` | Symbolic factory node with exact public contract |
+| factory value schema   | `{ asFactory: { kind, ...schemas } }`     | Serializable executable contract                 |
 
 ### Assertion diagnostics
 
@@ -218,6 +224,14 @@ Three things about the stage are load-bearing:
 The stage rewrites `assert(...)` calls and nothing else, so output for code that
 does not use `assert` is unchanged. See
 `docs/common/workflows/pattern-testing.md` for the authoring side.
+
+Factory calls are classified by value origin plus the nearest decisive callback
+boundary. Public pattern inputs and private pattern captures are symbolic during
+eager graph construction; factory inputs to scheduled `lift` / `computed` /
+`handler` callbacks are runner-materialized direct callables. `asScope()` and
+`inSpace()` preserve contract/provenance as derivations. Ambiguous origin, mixed
+helper exposure, mismatched callable unions, or incomplete provenance diagnoses
+rather than emitting a guessed executable contract.
 
 ## Additional Documentation
 

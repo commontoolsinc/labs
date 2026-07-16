@@ -37,6 +37,8 @@ This v1 draft focuses on the **reactive expression language inside patterns**:
 - collection operators over reactive receivers
 - direct reactive property/element access
 - pattern-body expression forms that interact with ownership-first lowering
+- serializable `PatternFactory`, `ModuleFactory`, and `HandlerFactory` values,
+  their modifier derivations, and calls across eager/scheduled boundaries
 
 It does **not** attempt to restate every validation rule in the package. The
 existing current-behavior spec remains the descriptive inventory for those
@@ -78,6 +80,14 @@ Each construct family is classified as one of:
 | Optional-call on reactive receivers | Unsupported | Optional-call forms are outside the intended language because they are difficult to lower without semantic ambiguity |
 | Direct non-JSX receiver-method calls on reactive values in top-level pattern-body expression sites | Supported | Value-like receiver-method roots at top-level object-property, call-argument, variable-initializer, array-element, or return-expression sites lower to derived local value expressions |
 | Direct receiver-method roots inside supported collection callbacks | Supported | Callback-local value-like receiver-method roots lower to callback-local lift-applied computations instead of remaining raw or requiring manual wrapper calls |
+| Trusted `PatternFactory`, `ModuleFactory`, and `HandlerFactory` values | Supported | Factories are first-class serializable values with exact public input/output contracts; trust comes from Common Fabric provenance or compiler-owned contract metadata, not a matching type name |
+| Factory calls at eager pattern public/private boundaries | Supported | Public factory inputs and private captured factories are symbolic during eager graph construction and lower to an explicit runtime invocation node with their exact contract |
+| Factory calls inside scheduled callbacks | Supported | Factory inputs to `lift`, `computed`, `handler`, action, and event callbacks are materialized direct callables; calls retain ordinary receiver/evaluation semantics |
+| Factory modifier derivations (`asScope`, `inSpace`) | Supported | These derive a new factory while preserving the receiver's exact contract and trusted provenance; they are not invocations |
+| Same-kind factory unions with exactly equal contracts | Supported | A callable union is valid only when every arm has the same kind, normalized public input/output schemas, and FrameworkProvided paths |
+| Cross-kind, contract-mismatched, or partially provenanced callable unions | Unsupported | The compiler must not guess one executable contract or let one union arm authorize another |
+| Symbolic factory call with one explicit non-spread argument | Supported | The compiler lowers one public input without synchronously reading reactive proxy state |
+| Spread factory arguments or one helper shared by eager-symbolic and scheduled-materialized sites | Unsupported | Spread cannot be synchronously materialized during graph construction; mixed/unknown helper exposure has no single safe lowering and should diagnose with split/inline guidance |
 | Direct top-level `.get()` reads in pattern-owned reactive context | Unsupported | Even on true cell-like values, eager `.get()` reads should move into JSX or an explicit computation callback such as `computed`, `action`, `lift`, or `handler` rather than living directly in the top-level declarative pattern body |
 | `.get()` on ordinary opaque/reactive values | Unsupported | Pattern inputs, `computed` results, `lift` results, and other ordinary reactive values should be read directly rather than through `.get()` |
 | Statement-boundary imperative constructs in top-level pattern-owned code (`let`, loops, function creation, early return) | Unsupported | Top-level pattern context is intentionally declarative; imperative statement structure belongs in explicit callback bodies such as `computed`, `action`, `lift`, or `handler` |
@@ -248,6 +258,36 @@ Why:
   and nested JSX-local expressions are valid here
 - inner plain arrays stay plain JS and are not implicitly promoted into
   pattern-owned collection operators
+
+### Factory Values Across Execution Boundaries
+
+Factory values are supported at both eager and scheduled boundaries, but the
+call form follows where the value is materialized:
+
+```ts
+import { lift, pattern, type PatternFactory } from "commonfabric";
+
+interface ChildInput {
+  title: string;
+}
+
+interface ChildOutput {
+  title: string;
+}
+
+pattern<{ child: PatternFactory<ChildInput, ChildOutput> }>(
+  ({ child }) => ({ nested: child({ title: "eager" }) }),
+);
+
+lift(({ child }: {
+  child: PatternFactory<ChildInput, ChildOutput>;
+}) => child({ title: "scheduled" }));
+```
+
+The first call is symbolic at eager graph construction and is compiler-lowered;
+the second receives a materialized callable from the runner and calls directly.
+A helper called from both forms must be split or inlined unless the compiler can
+prove one exposure for every entry site.
 
 ## 4.2 Common Relocation Patterns
 
@@ -549,6 +589,34 @@ still reject. That carve-out is an unratified delta recorded in
 `ts_transformers_design_deltas.md` (2026-07-10): either this matrix gains the
 carve-out or the implementation reverts; per §1, do not treat the accident of
 acceptance as language policy in the meantime.
+
+## 5.8 First-Class Factory Values And Calls
+
+Factories form one serializable construct family, not three unrelated callable
+special cases:
+
+1. `PatternFactory<I, O>` and `ModuleFactory<I, O>` carry public argument and
+   result schemas; `HandlerFactory<C, E>` carries context and event schemas.
+2. Public pattern input and private closure captures remain separate contracts.
+   Capturing a factory never widens the factory's public input or binds public
+   fields through private `.curry(...)` state.
+3. Call lowering follows value origin plus the nearest decisive execution
+   boundary. Live and scheduled-materialized values call directly; eager
+   symbolic values lower to an explicit runtime node.
+4. `asScope()` and `inSpace()` preserve kind, public contract, and provenance.
+5. Callable unions are invocable only when every arm is same-kind and has
+   exactly equal normalized public schemas and protected input paths.
+6. A source-level invocation takes one explicit non-spread argument. Unknown
+   origin, mixed helper exposure, ambiguous callable/non-callable unions, or
+   incomplete trusted provenance is outside the language and must diagnose.
+7. `FrameworkProvided` inputs are system channels. Eager patterns may forward
+   statically proven object paths from wrapper argument 0; authored values and
+   scheduled callback data may not supply them.
+
+This family is the deliberate exception to the ordinary rule that callable
+properties are not serializable schema values. Recognition must be provenance-
+checked: a user type merely named like a public factory is still an ordinary
+callable and receives no serialization authority.
 
 ## 6. Non-Normative Hardening Follow-Ups
 

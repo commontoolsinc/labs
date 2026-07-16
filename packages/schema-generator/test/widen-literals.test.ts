@@ -1,5 +1,5 @@
 // Pins the CURRENT behavior of the `widenLiterals` generation option
-// (mapping spec §8/§14; quirk §16.3). The flag is consulted by
+// (mapping spec §8/§15; quirk §17.3). The flag is consulted by
 // PrimitiveFormatter (single literals) and by the anyOf merge pass
 // (mergeIdenticalSchemas), but NOT by the all-literal-union branch
 // (union-formatter.ts ~:176-214), which runs first. The resulting boundary
@@ -33,7 +33,7 @@ describe("widenLiterals option", () => {
     expect(schema).toEqual({ type: "string" });
   });
 
-  it("does NOT widen an all-literal union (known quirk, spec §16.3)", async () => {
+  it("does NOT widen an all-literal union (known quirk, spec §17.3)", async () => {
     // The all-literal branch runs before the flag is consulted, so the
     // enum survives even with widenLiterals: true.
     const schema = await generate(`type T = "a" | "b";`, "T", WIDEN);

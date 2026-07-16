@@ -897,14 +897,21 @@ export class SchemaGenerator implements ISchemaGenerator {
     // resolved directly by the switch below, so they never cause widening.
     if (ts.isUnionTypeNode(typeNode)) {
       const memberSchemas = typeNode.types.map((member) => {
-        const memberType = typeRegistry?.get(member) ??
-          checker.getTypeFromTypeNode(member);
-        // Route each arm through the ordinary child formatter so node-scoped
-        // compiler hints (notably exact asFactory contracts) and wrapper
-        // semantics are honored. `any`/unbound synthetic arms still fall back
-        // to node analysis inside formatChildType, preserving keyword and
-        // ordinary non-factory union behavior.
-        return this.formatChildType(memberType, context, member);
+        const factoryContracts = context.schemaHints?.get(member)
+          ?.factoryContracts ??
+          context.schemaHints?.get(ts.getOriginalNode(member))
+            ?.factoryContracts;
+        if (factoryContracts?.length) {
+          const memberType = typeRegistry?.get(member) ??
+            checker.getTypeFromTypeNode(member);
+          // Exact compiler-owned factory arms must pass through the ordinary
+          // formatter so FactoryFormatter can emit their carried contracts.
+          return this.formatChildType(memberType, context, member);
+        }
+        // Preserve the node path for ordinary synthetic union arms. In
+        // particular, literal nodes intentionally emit `const` here rather
+        // than the type path's single-value `enum` spelling.
+        return this.analyzeTypeNodeStructure(member, checker, context);
       });
       if (memberSchemas.some((schema) => schema === true)) {
         return true;

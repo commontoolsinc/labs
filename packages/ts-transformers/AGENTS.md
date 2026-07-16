@@ -2,10 +2,10 @@
 
 TypeScript AST transformer pipeline that compiles the CTS dialect (natural
 TS/JSX pattern source) into explicit, schema-annotated reactive form for the
-Common Fabric runtime. 23 ordered stages (`CFC_TRANSFORMER_STAGE_SPECS`,
-`src/cf-pipeline.ts`): validation → JSX routing → lift/closure lowering → schema
-injection → builder hoisting + `__cfReg` registration → schema generation →
-module-scope hardening.
+Common Fabric runtime. 27 ordered stages (`CFC_TRANSFORMER_STAGE_SPECS`,
+`src/cf-pipeline.ts`): validation → JSX/factory routing → lift/closure lowering
+→ schema and FrameworkProvided metadata injection → builder hoisting + `__cfReg`
+registration → schema generation → module-scope hardening.
 
 ## Where answers live
 
@@ -48,10 +48,16 @@ the spec). `docs/common/` is author-facing teaching material, lowest authority.
 - Stage order is behavior (invariant C-002). Notably BuilderCallHoisting runs
   AFTER SchemaInjection so hoists are schema-transparent; hoisted consts flush
   before their owning statement for TDZ reasons (spec §11).
+- Factory stage order is also behavior: FrameworkProvided forwarding runs before
+  symbolic factory invocation, both run before closure conversion, and final
+  FrameworkProvided metadata is attached after schema/callback lowering.
 - Cross-stage communication goes through `CrossStageState` only
   (`src/core/cross-stage-state.ts`); `typeRegistry` + `schemaHints` are bare
   WeakMaps because schema-generator (separate package) reads them; the
   `schemaInjected` marker deliberately has NO `getOriginalNode` fallback.
+  Factory contracts/provenance use `factoryContractsBySymbol`, schema hints, and
+  the live-derivation marker; do not reconstruct their authority from names or
+  neighboring union arms.
 - Call detection is provenance-first via `COMMONFABRIC_RUNTIME_EXPORT_REGISTRY`
   (`src/core/commonfabric-runtime-registry.ts`); a guard test asserts it covers
   every callable the runner's builder factory injects. New runtime export ⇒ add
@@ -72,6 +78,9 @@ the spec). `docs/common/` is author-facing teaching material, lowest authority.
   "Common Fabric TypeScript"). CFC = Contextual Flow Control, the
   information-flow security model (`specs` repo `cfc/`). The pipeline constant
   prefix `CFC_TRANSFORMER_*` predates this split — it names the CTS pipeline.
+- Serializable factory invocation fails closed: if origin, execution exposure,
+  exact public contract, or FrameworkProvided provenance cannot be proved, emit
+  the dedicated diagnostic instead of guessing or degrading the schema.
 
 ## When you change behavior
 

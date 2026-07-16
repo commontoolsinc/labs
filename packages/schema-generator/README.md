@@ -1,62 +1,129 @@
 # @commonfabric/schema-generator
 
-Short notes on the JSON Schema generator and ref/definitions behavior. The
-canonical behavior reference is the mapping spec:
-`docs/specs/schema-generator/ts_to_json_schema_mapping.md`; see also `AGENTS.md`
-for the working guide.
+Converts TypeScript types and transformer-created TypeNodes into Common Fabric's
+JSON Schema 2020-12 dialect. The complete current-behavior reference is
+`docs/specs/schema-generator/ts_to_json_schema_mapping.md`; the extension
+vocabulary is summarized in `docs/specs/json_schema.md` and defined by
+`packages/api/index.ts`.
 
-## All‑Named Hoisting (default)
+## Public API
 
-- Hoists every named type into `$defs` and emits `#/$defs/...` refs for non‑root
-  occurrences.
-- Excludes wrapper spellings and native leaf types from hoisting (the real rule
-  is broader than a short name list — see `getNamedTypeKey`
-  (`src/type-utils.ts`) and `src/typescript/wrapper-names.ts`; it covers all
-  cell-wrapper spellings including `Writable`/`OpaqueCell`/`SqliteDb`, the
-  native-type table, and generic instantiations).
-- Root types remain inline unless recursion forces promotion to a `$ref`;
-  `$defs` is included only if at least one ref is emitted.
-- Unaliased type-literal shapes and generic alias instantiations are inlined; a
-  non-generic named alias of a literal shape IS hoisted under the alias name
-  (aliasSymbol fallback).
-- `$ref` may appear with Common Fabric extensions as siblings (e.g.
-  `{ "$ref": "#/$defs/Foo", asCell: ["stream"] }`).
+The root export provides:
 
-Rationale: Improves human readability and re‑use of complex shared shapes while
-keeping wrapper semantics explicit and simple.
+- `SchemaGenerator` and `createSchemaTransformerV2`
+- `containsFactoryType` / `detectTrustedFactoryType` and their public factory
+  types
+- Common Fabric declaration/provenance helpers
+- `ISchemaGenerator` and `JSONSchemaObjMutable`
 
-Implementation: see `src/schema-generator.ts` (`formatType`) and
-`src/type-utils.ts` (`getNamedTypeKey` filtering).
+Seven focused subpaths expose the interface and TypeScript helper modules; the
+factory work adds `./common-fabric-symbols` alongside the existing wrapper and
+property helpers.
 
-## Native Type Schemas
+Both the class and plugin expose:
 
-- Maps ECMAScript built-ins directly when they appear as properties:
-  - `Date` → `{ type: "string", format: "date-time" }`
-  - `URL` → `{ type: "string", format: "uri" }`
-  - Typed array family (`Uint8Array`, `Uint8ClampedArray`, `Int8Array`,
-    `Uint16Array`, `Int16Array`, `Uint32Array`, `Int32Array`, `Float32Array`,
-    `Float64Array`, `BigInt64Array`, `BigUint64Array`) plus `ArrayBuffer`,
-    `ArrayBufferLike`, `SharedArrayBuffer`, and `ArrayBufferView` → `true`
-    (permissive JSON Schema leaf)
-- These shortcuts keep schemas inline without emitting `$ref` definitions, while
-  avoiding conflicts with array detection or hoisting, even when the compiler
-  widens them via intersections or aliases.
+```ts
+generateSchema(
+  type,
+  checker,
+  typeNode?,
+  { widenLiterals? }?,
+  schemaHints?,
+  sourceFile?,
+  typeRegistry?,
+)
 
-## Function Properties
+generateSchemaFromSyntheticTypeNode(
+  typeNode,
+  checker,
+  typeRegistry?,
+  schemaHints?,
+  sourceFile?,
+)
+```
 
-- Properties whose resolved type is callable or constructable are skipped
-  entirely so we do not emit function shapes in JSON Schema output.
-- Method signatures, declared methods, and properties whose type exposes call
-  signatures are all filtered before we decide on `required` membership or emit
-  attribute metadata (docs, default wrappers, etc.).
-- This keeps schemas focused on serialisable data: JSON Schema cannot describe
-  runtime function values, and downstream tooling expects objects, arrays, and
-  primitives only.
+`typeRegistry` preserves semantic types for synthetic nodes. `schemaHints`
+carries array-item overrides, exact factory contracts/provenance, and CFC UI
+metadata from `@commonfabric/ts-transformers`.
 
-Implementation: see `src/formatters/object-formatter.ts` and
-`src/type-utils.ts:isFunctionLike`.
+## Formatter Order
+
+First match wins:
+
+1. Factory
+2. Common Fabric wrappers/defaults/scopes/CFC aliases
+3. Native types
+4. Union
+5. Intersection
+6. Array
+7. Primitive
+8. Object
+
+This order is behavior. In particular, trusted factory values must route before
+ordinary callable properties are filtered.
+
+## First-Class Factory Values
+
+Trusted `PatternFactory`, `ModuleFactory`, and `HandlerFactory` values emit:
+
+```json
+{
+  "asFactory": {
+    "kind": "pattern",
+    "argumentSchema": { "type": "object" },
+    "resultSchema": { "type": "object" }
+  }
+}
+```
+
+Module factories use the same fields with `kind: "module"`. Handlers use
+`contextSchema` and `eventSchema` with `kind: "handler"`.
+
+Each nested input/output schema is an independent schema document and owns the
+`$defs` required by its own `$ref`s. Exact compiler hints take precedence over
+checker reconstruction and preserve union arms. Recursive factory-inside-
+factory contracts that cannot form a finite series of self-contained documents
+throw instead of degrading.
+
+Recognition requires Common Fabric alias/private-brand provenance or an exact
+compiler hint. A user type with a matching name is not enough. FrameworkProvided
+paths remain compiler/runtime authority metadata and are not emitted inside
+`asFactory`.
+
+## Named-Type Hoisting
+
+- Named non-wrapper types are hoisted into `$defs`; non-root occurrences use
+  `#/$defs/...`.
+- Root types remain inline unless recursion forces a `$ref`; `$defs` is omitted
+  when unused.
+- Native leaves and wrapper spellings are excluded. Generic alias instantiations
+  and unaliased type literals inline; non-generic named aliases hoist.
+- `$ref` may have Common Fabric extension siblings such as
+  `{ "$ref": "#/$defs/Foo", "asCell": ["stream"] }`.
+
+The precise exclusion policy lives in `getNamedTypeKey` and
+`src/typescript/wrapper-names.ts`.
+
+## Callable Properties
+
+Ordinary callable/constructable properties are skipped before `required`
+membership and metadata emission because JSON Schema cannot describe functions.
+Trusted first-class factories are the explicit exception and use
+`FactoryFormatter`. A legacy narrow exception retains callable properties whose
+return signature is `Stream`, `Cell`, or `SqliteDb` as an `asCell` schema.
+
+## Native Leaves
+
+`Date` emits a date-time string, `URL` emits a URI string, and typed-array /
+ArrayBuffer-family values emit permissive `true` schemas. These stay inline and
+do not collide with array detection or named-type hoisting.
 
 ## Running
 
 - Check typings: `deno task check`
 - Run tests: `deno task test`
+- Format/lint: `deno task fmt` / `deno task lint`
+
+Factory behavior is pinned in `test/schema/factory-types.test.ts`; changes also
+affect the ts-transformers schema fixtures, so run both packages for cross-
+package contract changes.
