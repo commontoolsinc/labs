@@ -139,7 +139,7 @@ describe("FabricError", () => {
           string,
           FabricValue
         >;
-        expect("__proto__" in state).toBe(false);
+        expect(Object.hasOwn(state, "__proto__")).toBe(false);
       });
 
       it("does not let custom props override built-in fields", () => {
