@@ -114,6 +114,7 @@ import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
 import {
+  builtinImplementationHash,
   isServerExecutableBuiltinId,
   serverBuiltinImplementationHash,
 } from "./builtins/server-execution.ts";
@@ -5099,6 +5100,18 @@ export class Runner {
     if (serverBuiltinId !== undefined) {
       (action as { implementationHash?: string }).implementationHash =
         serverBuiltinImplementationHash(serverBuiltinId);
+    } else if (moduleRefName !== undefined) {
+      // Canonical builtin resolved through the registry ref but outside the
+      // server-executable subset: stamp a static per-builtin identity so its
+      // fingerprint clears the servability gate instead of the `action:…`
+      // shape that classifies as `untrusted-implementation`. It then rejects as
+      // `incomplete-static-surface` until a descriptor supplies the surface
+      // (spec §4.6, W2.15) — the honest gap is surface, not trust. Keyed ONLY
+      // on `moduleRefName` (the canonical ref, set exclusively by the ref
+      // resolution path), never `rawTargetName`/`impl`, which fold in
+      // caller-controlled debug metadata (`debugName`/`.src`/`.name`).
+      (action as { implementationHash?: string }).implementationHash =
+        builtinImplementationHash(moduleRefName);
     } else {
       this.applyImplementationHash(action, impl);
     }

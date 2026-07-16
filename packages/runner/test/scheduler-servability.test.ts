@@ -125,6 +125,72 @@ describe("static action servability", () => {
     });
   });
 
+  it("treats a canonical builtin (cf:builtin/<id>:v1) fingerprint as trusted", () => {
+    // W2.11: a raw builtin now carries `impl:cf:builtin/<id>:v1`. It must clear
+    // the fingerprint gate exactly like any other `impl:` identity — the honest
+    // gap is the missing surface (W2.15 descriptors), NOT trust. A computation
+    // with no summary is `incomplete-static-surface`, never
+    // `untrusted-implementation` (the `action:…` shape it replaced).
+    expect(classifyStaticActionServability(
+      candidate({
+        implementationFingerprint: "impl:cf:builtin/map:v1",
+        completeActionScopeSummary: undefined,
+      }),
+      servedSpace,
+    )).toEqual({
+      status: "unservable",
+      reason: "incomplete-static-surface",
+    });
+
+    // With a complete summary the builtin fingerprint is fully servable —
+    // proving the gate never special-cases the builtin shape.
+    expect(classifyStaticActionServability(
+      candidate({
+        implementationFingerprint: "impl:cf:builtin/map:v1",
+        completeActionScopeSummary: {
+          ...candidate().completeActionScopeSummary as Record<string, unknown>,
+          implementationFingerprint: "impl:cf:builtin/map:v1",
+        },
+      }),
+      servedSpace,
+    )).toEqual({
+      status: "claim-ready",
+      actionKind: "computation",
+    });
+  });
+
+  it("leaves the :server-v1 effect fingerprint semantics unchanged", () => {
+    // The server-executable subset keeps `:server-v1`; W2.11 must not perturb
+    // it. An effect with no summary is still `unknown-effect-surface`, and a
+    // complete one is still `broker-required` — identical to any other `impl:`
+    // effect.
+    expect(classifyStaticActionServability(
+      candidate({
+        actionKind: "effect",
+        implementationFingerprint: "impl:cf:builtin/fetchText:server-v1",
+        completeActionScopeSummary: undefined,
+      }),
+      servedSpace,
+    )).toEqual({
+      status: "unservable",
+      reason: "unknown-effect-surface",
+    });
+    expect(classifyStaticActionServability(
+      candidate({
+        actionKind: "effect",
+        implementationFingerprint: "impl:cf:builtin/fetchText:server-v1",
+        completeActionScopeSummary: {
+          ...candidate().completeActionScopeSummary as Record<string, unknown>,
+          implementationFingerprint: "impl:cf:builtin/fetchText:server-v1",
+        },
+      }),
+      servedSpace,
+    )).toEqual({
+      status: "broker-required",
+      actionKind: "effect",
+    });
+  });
+
   it("rejects malformed direct output surfaces", () => {
     expect(classifyStaticActionServability(
       withSummary({ directOutputs: [] }),
