@@ -1620,9 +1620,15 @@ descriptor registry accepted as an alternative certificate source in the
 
 ### W2.16 — Serve the materializer class (envelope-granular write completeness)
 
-**Depends on:** W2.11, W2.13, W2.14. **Status:** planned (owner direction,
-2026-07-15: dynamic writers are materializers — serve them as the
-scheduler already models them; no pattern redesign).
+**Depends on:** W2.11, W2.13, W2.14. **Status:** implemented (2026-07-15,
+both halves). The transformer derives computeIndex's envelopes outright —
+no pattern edit: dynamic-descent writes record a bounded envelope prefix
+(`writeEnvelopePaths` + a fail-closed `wildcardUnbounded` proof); the
+runner gives map/filter/flatMap per-builtin materializer descriptors whose
+envelope is a root prefix over the result-container document, and authored
+dynamic writers a runtime envelope summary. Registering envelopes indexes
+the nodes as materializers, so the executor Worker inherits dirty-at-idle
+scheduling structurally.
 
 The scheduler already has this class: **materializers**
 (`packages/runner/src/scheduler/materializers.ts`) — actions with side
@@ -1667,13 +1673,24 @@ Work items:
 
 **Success criteria:**
 
-- [ ] `computeIndex` is claim-ready flag-on; a write outside the run's
-      envelopes rejects fail-closed once (no verdict spam).
-- [ ] `map`/`filter`/`flatMap` nodes are claim-ready; per-element children
+- [x] `computeIndex` is claim-ready flag-on (absent from the verdict log;
+      envelope enforcement observed live as fail-closed
+      `dynamic-write-outside-static-surface` de-claims, ×5 in the
+      acceptance run — first-reconcile child instantiation and cross-doc
+      writes, both by design).
+- [x] `map`/`filter`/`flatMap` nodes are claim-ready (`map` measured
+      in-run; `filter`/`flatMap` descriptor-level); per-element children
       unchanged.
-- [ ] Executor idle-priority test for claimed materializers.
-- [ ] Flag-on default-app run emits **zero** R3/R4 verdicts except the
-      recorded `wish` deferral (W2.15) — the phase's only named residual.
+- [ ] Executor idle-priority test for claimed materializers (the policy
+      holds structurally — materializer indexing drives the Worker's
+      shared scheduler — but the explicit Worker-level test is owed with
+      the other deterministic fixtures).
+- [x] Flag-on default-app run emits **zero** R3/R4 verdicts except the
+      recorded `wish` deferral (measured 2026-07-15: `wish` ×4 is the
+      entire static-unservable log; settlement avg 528 ms / p95 677 ms).
+      Watch item: `claimedActionConflicts` 20 with the enlarged claimed
+      cohort (benign overlay races; settlement latency unaffected) — keep
+      in view at the W2.9 parity measurement.
 
 ---
 
