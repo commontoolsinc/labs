@@ -290,6 +290,102 @@ describe("static action servability", () => {
     }
   });
 
+  it("promotes user-scoped computation surfaces to user rank in a user lane", () => {
+    // C1.5a: lane-parameterized classification. A user-scoped read, write, or
+    // piece surface on a computation classifies claim-ready at user rank
+    // instead of unserving.
+    const cases = [
+      withSummary({ reads: [address("of:input", { scope: "user" })] }),
+      withSummary({
+        writes: [address("of:output"), address("of:side", { scope: "user" })],
+      }),
+      withSummary({ piece: address("of:piece", { scope: "user" }) }),
+    ];
+    for (const testCase of cases) {
+      expect(classifyStaticActionServability(
+        testCase,
+        servedSpace,
+        { userContext: true },
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "user",
+      });
+    }
+  });
+
+  it("keeps all-space computations byte-identical under a user lane", () => {
+    // Space regression: with the lane enabled, an all-space surface must
+    // produce exactly the space-only result shape (no contextRank field).
+    expect(classifyStaticActionServability(
+      candidate(),
+      servedSpace,
+      { userContext: true },
+    )).toEqual({
+      status: "claim-ready",
+      actionKind: "computation",
+    });
+  });
+
+  it("keeps session-scoped surfaces unservable under a user lane", () => {
+    expect(classifyStaticActionServability(
+      withSummary({ reads: [address("of:input", { scope: "session" })] }),
+      servedSpace,
+      { userContext: true },
+    )).toEqual({
+      status: "unservable",
+      reason: "non-space-read-scope",
+    });
+    expect(classifyStaticActionServability(
+      withSummary({ writes: [address("of:output", { scope: "session" })] }),
+      servedSpace,
+      { userContext: true },
+    )).toEqual({
+      status: "unservable",
+      reason: "non-space-write-scope",
+    });
+  });
+
+  it("keeps user-scoped effects unservable under a user lane (amendment 8)", () => {
+    // Effects stay space-lane in C1: the lane never promotes a
+    // non-computation action, so a user-scoped effect surface unserves
+    // exactly as it does without the lane.
+    expect(classifyStaticActionServability(
+      {
+        ...candidate({ actionKind: "effect" }),
+        completeActionScopeSummary: {
+          ...candidate().completeActionScopeSummary as Record<string, unknown>,
+          reads: [address("of:input", { scope: "user" })],
+        },
+      },
+      servedSpace,
+      { userContext: true },
+    )).toEqual({
+      status: "unservable",
+      reason: "non-space-read-scope",
+    });
+  });
+
+  it("keeps user-scoped surfaces unservable without the lane", () => {
+    // Option off (no lane argument): byte-identical to the space-only
+    // classifier — user scope still unserves.
+    expect(classifyStaticActionServability(
+      withSummary({ reads: [address("of:input", { scope: "user" })] }),
+      servedSpace,
+    )).toEqual({
+      status: "unservable",
+      reason: "non-space-read-scope",
+    });
+    expect(classifyStaticActionServability(
+      withSummary({ reads: [address("of:input", { scope: "user" })] }),
+      servedSpace,
+      { userContext: false },
+    )).toEqual({
+      status: "unservable",
+      reason: "non-space-read-scope",
+    });
+  });
+
   it("keeps handlers, UI writes, sources, and unknown actions client-primary", () => {
     const cases = [
       ["event-handler", "event-handler"],

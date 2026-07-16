@@ -443,6 +443,12 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     servedSpace: space,
     branch,
     builtinBrokerAvailable: true,
+    // C1.5a: user-rank candidate production stays inert unless the host
+    // passes the experimental option; the Worker's acting principal (the
+    // lease sponsor until C1.5b's per-lane contexts) keys the lane.
+    userRankCandidates: request.experimental
+      ?.serverPrimaryExecutionUserRankCandidates === true,
+    lanePrincipal: request.principal,
     claimForAction: (action) => claimsByAction.get(action),
     permanentUnservedReasonForAction,
     onCandidate: (candidate, sourceAction) => {

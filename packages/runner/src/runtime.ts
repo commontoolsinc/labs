@@ -236,6 +236,17 @@ export interface ExperimentalOptions {
   /** Enable the trusted-client server-primary execution protocol (default off). */
   serverPrimaryExecution?: boolean | undefined;
   /**
+   * Let the executor Worker produce USER-RANK candidate claims for
+   * computation actions whose surfaces are user-scoped (context-lattice
+   * C1.5a). Default off: every observation classifies exactly as the
+   * space-only executor does (space or unservable), and no user-rank claim
+   * is ever requested. Effects and session-scoped surfaces are unaffected
+   * either way (amendment 8: user-rank is computation-only in C1).
+   * Programmatic-only — the C1.9 measurement fixture flips it together with
+   * the memory-side `serverPrimaryExecutionClaimRank` dial.
+   */
+  serverPrimaryExecutionUserRankCandidates?: boolean | undefined;
+  /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
    * default: the resolution (a stack capture + source-map walk per primitive)

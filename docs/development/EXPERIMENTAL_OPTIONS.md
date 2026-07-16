@@ -30,6 +30,7 @@ was last checked against the code.
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (#3646) | graduate to always-on | implemented, on by default, rollback override retained |
 | [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
+| [`serverPrimaryExecutionUserRankCandidates`](#serverprimaryexecutionuserrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C1.5a) | fold into `serverPrimaryExecution` once user lanes graduate | implemented, off by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
@@ -73,8 +74,9 @@ the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
 Six flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
 `serverPrimaryExecution`, `eagerSourceAnnotation`, `systemPatternAutoUpdate`,
-`systemPatternAutoUpdateHome`); `commitPreconditions` is deliberately mapped to
-`null` there, which records "not env-reachable" as a decision rather than an
+`systemPatternAutoUpdateHome`); `commitPreconditions` and
+`serverPrimaryExecutionUserRankCandidates` are deliberately mapped to `null`
+there, which records "not env-reachable" as a decision rather than an
 omission.
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
 with a warning rather than coerced. See [How flags
@@ -191,6 +193,40 @@ propagate](#how-flags-propagate).
   and builtin-passivity rollout; confirm every supported deployment and client
   speaks the protocol; make it unconditional; then delete the runtime flag,
   environment/build wiring, and optional-capability negotiation.
+
+### `serverPrimaryExecutionUserRankCandidates`
+
+- **Toggle via.** `RuntimeOptions.experimental.serverPrimaryExecutionUserRankCandidates`
+  only. It is mapped to `null` in the canonical `EXPERIMENTAL_ENV_VARS`
+  registry — deliberately programmatic-only, like the memory-side
+  `serverPrimaryExecutionClaimRank` dial it partners with; the C1.9
+  measurement fixture flips both together. There is no ambient control point:
+  the host passes the flag to the executor Worker at initialization and the
+  Worker's action-transaction router reads it directly.
+- **Added by.** Bernhard Seefeld, in server-side execution C1.5a (executor
+  candidate context rank, 2026-07-16).
+- **Purpose.** Gates USER-RANK candidate production in the executor Worker
+  (context-lattice design §2/§6). When on, a computation whose observed
+  surfaces include user-scoped addresses classifies at user rank: its
+  CandidateClaim carries the canonical `user:<did>` context key of the
+  Worker's acting principal, and the per-attempt transaction firewall admits
+  that lane's user-scoped reads and writes. Effects and session-scoped
+  surfaces are unaffected either way — user rank is computation-only in C1
+  (adversarial-review amendment 8), and session rank stays unservable until
+  C2. Candidate PRODUCTION is what this flag gates; claim ISSUANCE is
+  additionally gated by `serverPrimaryExecutionClaimRank` on the host, so
+  either dial alone keeps user lanes fully inert.
+- **Current default and planned end state.** Off by default: every
+  observation classifies exactly as the space-only executor does (space or
+  unservable), zero user-rank candidates are produced, and space-lane
+  classification is byte-identical. Enabled only inside the C1.9 two-principal
+  measurement gate until user lanes graduate.
+- **Status on 2026-07-16.** Implemented (C1.5a). With the flag on, user-rank
+  candidates still perform no isolated per-lane execution until C1.5b lands
+  the per-lane acting contexts and the re-keyed Worker replica.
+- **Path to removal.** Graduate user-rank candidacy with the rest of the C1
+  gates, fold it into `serverPrimaryExecution` alongside the claim-rank dial,
+  then delete the option and its Worker plumbing.
 
 ### `commitPreconditions`
 

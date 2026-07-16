@@ -1008,6 +1008,59 @@ Deno.test("the claim-rank dial gates user-rank issuance and revokes on disable",
   }
 });
 
+Deno.test("user-rank claim issuance is computation-only in C1 (amendment 8)", async () => {
+  const server = createControlServer("memory-v2-execution-claim-rank-kind");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const flags = MemoryV2 as unknown as {
+    setServerPrimaryExecutionClaimRankConfig(rank?: "space" | "user"): void;
+    resetServerPrimaryExecutionClaimRankConfig(): void;
+  };
+  flags.setServerPrimaryExecutionClaimRankConfig("user");
+  try {
+    const lease = await demandAndAcquireLease(server, session);
+    await server.openUserLaneGrant(
+      CONTROL_SPACE,
+      "",
+      TEST_SESSION_OPEN_PRINCIPAL,
+    );
+    const userContextKey = Engine.userExecutionContextKey(
+      TEST_SESSION_OPEN_PRINCIPAL,
+    ) as `user:${string}`;
+
+    // Effects stay space-lane in C1: a user-rank effect claim is refused at
+    // issuance even with the rank dial on and a live lane grant.
+    await assertRejects(
+      () =>
+        server.setExecutionClaim(lease, {
+          ...claimKey(CONTROL_SPACE, "", "action:user-rank-effect"),
+          actionKind: "effect",
+          contextKey: userContextKey,
+        }),
+      Error,
+      "claim rank",
+    );
+
+    // The computation twin of the same tuple admits under the same grant.
+    const computationClaim = await server.setExecutionClaim(lease, {
+      ...claimKey(CONTROL_SPACE, "", "action:user-rank-effect"),
+      contextKey: userContextKey,
+    });
+    assertEquals(server.hasLiveExecutionClaim(computationClaim), true);
+
+    // Space-rank effect claims keep today's behavior, untouched by the dial.
+    const spaceEffectClaim = await server.setExecutionClaim(lease, {
+      ...claimKey(CONTROL_SPACE, "", "action:space-effect"),
+      actionKind: "effect",
+    });
+    assertEquals(server.hasLiveExecutionClaim(spaceEffectClaim), true);
+  } finally {
+    flags.resetServerPrimaryExecutionClaimRankConfig();
+    await client.close();
+    await server.close();
+  }
+});
+
 Deno.test("executor claim admission declines a transient demand gap without weakening the strict API", async () => {
   const server = createControlServer(
     "memory-v2-execution-claim-demand-gap",

@@ -1503,7 +1503,7 @@ export class Server {
     ) {
       throw new Error("server-primary builtin passivity is disabled");
     }
-    if (!this.#executionClaimRankEnabled(claim.contextKey)) {
+    if (!this.#executionClaimRankEnabled(claim)) {
       throw new Error(
         "server-primary execution claim rank is not enabled for this context",
       );
@@ -1512,14 +1512,17 @@ export class Server {
 
   /** Issuance-side rank dial (context-lattice §6): the host issues claims
    * only up to the enabled context rank. Space is always issuable; user rank
-   * requires the dial; session rank stays un-issuable until C2 wires it into
-   * the ladder. Rank enablement gates ISSUANCE and RENEWAL only — the
-   * engine's commit-time claim guards are rank-independent. */
+   * requires the dial AND actionKind `computation` (amendment 8 — effects
+   * stay space-lane in C1; lane-grant egress is a named follow-on); session
+   * rank stays un-issuable until C2 wires it into the ladder. Rank
+   * enablement gates ISSUANCE and RENEWAL only — the engine's commit-time
+   * claim guards are rank-independent. */
   #executionClaimRankEnabled(
-    contextKey: ExecutionClaimInput["contextKey"],
+    claim: Pick<ExecutionClaimInput, "actionKind" | "contextKey">,
   ): boolean {
-    if (contextKey === "space") return true;
-    return Engine.principalOfUserContextKey(contextKey) !== undefined &&
+    if (claim.contextKey === "space") return true;
+    return claim.actionKind === "computation" &&
+      Engine.principalOfUserContextKey(claim.contextKey) !== undefined &&
       getServerPrimaryExecutionClaimRankConfig() === "user";
   }
 
@@ -3940,7 +3943,7 @@ export class Server {
     }
     // Disabling a claim rank revokes its live claims at renewal, mirroring
     // the flag-off revoke above; lower-rank claims are untouched.
-    if (!this.#executionClaimRankEnabled(live.contextKey)) {
+    if (!this.#executionClaimRankEnabled(live)) {
       this.revokeExecutionClaim(live);
       return null;
     }

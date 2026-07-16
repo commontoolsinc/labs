@@ -346,6 +346,49 @@ Deno.test("session-rank claims stay rejected as claim-observation-mismatch", asy
   }
 });
 
+Deno.test("user-rank effect claims fence claim-observation-mismatch (amendment 8)", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim: ExecutionClaim = {
+      ...claimFor(lease, USER_CONTEXT_KEY),
+      actionKind: "effect",
+    };
+    // Matching effect observation: the guard must reject on the user-rank ×
+    // effect combination itself, not on a claim/observation kind mismatch.
+    const observation: SchedulerActionObservation = {
+      ...claimedRunObservation(claim, []),
+      actionKind: "effect",
+    };
+    const error = assertThrows(
+      () =>
+        Engine.applyCommit(engine, {
+          sessionId: "executor-session",
+          space: SPACE,
+          principal: PRINCIPAL,
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [],
+            schedulerObservation: observation,
+          },
+          executionClaims: new Map([[1, claim]]),
+          executionLeaseFence: {
+            lease,
+            nowMs: nowMs + 1,
+            authorize: () => true,
+          },
+        }),
+      Engine.ExecutionLeaseFenceError,
+    );
+    assertEquals(error.fenceCause, "claim-observation-mismatch");
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("malformed user-rank claim keys fence claim-observation-mismatch", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;

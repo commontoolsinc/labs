@@ -1,11 +1,14 @@
-import { assertEquals, assertStrictEquals } from "@std/assert";
+import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
 import type {
   ActionClaimKey,
   ClientCommit,
   ExecutionClaim,
 } from "@commonfabric/memory/v2";
-import { toDocumentPath } from "@commonfabric/memory/v2";
+import {
+  toDocumentPath,
+  userExecutionContextKey,
+} from "@commonfabric/memory/v2";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
   createExecutorActionTransactionRouter,
@@ -889,5 +892,249 @@ Deno.test("executor action router reports a repeated unservable verdict once", a
     "untrusted-implementation",
     "dynamic-non-space-read-scope",
     "dynamic-non-space-write-scope",
+  ]);
+});
+
+// --- C1.5a: executor candidate context rank -------------------------------
+
+const LANE_PRINCIPAL =
+  "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+const OTHER_LANE_PRINCIPAL =
+  "did:key:z6MkrZ1r5XBFZjBU34qyD8fueMbMRkKw17BZaq2ivKFjnz2z";
+
+const userOutput = {
+  space: SPACE,
+  scope: "user" as const,
+  id: "of:action-router-user-output",
+  path: ["value"],
+};
+
+/** PerUser derivation: user-scoped read, user-scoped output. */
+const perUserObservation = () => {
+  const base = observation();
+  const userRead = {
+    space: SPACE,
+    scope: "user" as const,
+    id: "of:action-router-user-input",
+    path: ["value"],
+  };
+  return {
+    ...base,
+    reads: [userRead],
+    actualChangedWrites: [userOutput],
+    currentKnownWrites: [userOutput],
+    completeActionScopeSummary: {
+      ...base.completeActionScopeSummary,
+      reads: [userRead],
+      writes: [userOutput],
+      directOutputs: [userOutput],
+    },
+  };
+};
+
+const perUserCommit = (): ClientCommit => ({
+  localSeq: 1,
+  reads: {
+    confirmed: [{
+      id: "of:action-router-user-input",
+      scope: "user",
+      path: toDocumentPath(["value"]),
+      seq: 2,
+    }],
+    pending: [],
+  },
+  operations: [{
+    op: "set",
+    id: "of:action-router-user-output",
+    scope: "user",
+    value: { value: 42 },
+  }],
+  schedulerObservation: perUserObservation(),
+});
+
+const userLaneRouter = (
+  lanePrincipal: string,
+  candidates: { claimKey: ActionClaimKey; sourceAction: object }[],
+  diagnostics: ExecutorCandidateDiagnostic[],
+  options: { userRankCandidates?: boolean } = {},
+) =>
+  createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    userRankCandidates: options.userRankCandidates ?? true,
+    lanePrincipal,
+    claimForAction: () => undefined,
+    onCandidate: (candidate, sourceAction) =>
+      candidates.push({ claimKey: candidate.claimKey, sourceAction }),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+Deno.test("executor router keys a PerUser computation candidate at user rank", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
+
+  const route = await router({
+    space: SPACE,
+    commit: perUserCommit(),
+    sourceAction: action,
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  assertEquals(route.kind, "executor-shadow");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(diagnostics, []);
+  assertEquals(candidates.length, 1);
+  // The canonical helper percent-encodes the colon-bearing DID; naive
+  // `user:${did}` concatenation must never appear as a candidate key.
+  assertEquals(
+    candidates[0]!.claimKey.contextKey,
+    userExecutionContextKey(LANE_PRINCIPAL),
+  );
+  assertEquals(candidates[0]!.claimKey, {
+    ...key,
+    contextKey: userExecutionContextKey(LANE_PRINCIPAL),
+  });
+});
+
+Deno.test("executor router keys two principals' lanes as distinct candidate identities", async () => {
+  const aliceCandidates: { claimKey: ActionClaimKey; sourceAction: object }[] =
+    [];
+  const bobCandidates: { claimKey: ActionClaimKey; sourceAction: object }[] =
+    [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const alice = userLaneRouter(LANE_PRINCIPAL, aliceCandidates, diagnostics);
+  const bob = userLaneRouter(OTHER_LANE_PRINCIPAL, bobCandidates, diagnostics);
+
+  const aliceAction = {};
+  const bobAction = {};
+  const aliceRoute = await alice({
+    space: SPACE,
+    commit: perUserCommit(),
+    sourceAction: aliceAction,
+  });
+  const bobRoute = await bob({
+    space: SPACE,
+    commit: perUserCommit(),
+    sourceAction: bobAction,
+  });
+  if (
+    aliceRoute.disposition !== "local" ||
+    aliceRoute.kind !== "executor-shadow" ||
+    bobRoute.disposition !== "local" || bobRoute.kind !== "executor-shadow"
+  ) {
+    throw new Error("expected shadow routes");
+  }
+  aliceRoute.afterLocalApply?.();
+  bobRoute.afterLocalApply?.();
+  assertEquals(diagnostics, []);
+  assertEquals(
+    aliceCandidates[0]!.claimKey.contextKey,
+    userExecutionContextKey(LANE_PRINCIPAL),
+  );
+  assertEquals(
+    bobCandidates[0]!.claimKey.contextKey,
+    userExecutionContextKey(OTHER_LANE_PRINCIPAL),
+  );
+  assert(
+    aliceCandidates[0]!.claimKey.contextKey !==
+      bobCandidates[0]!.claimKey.contextKey,
+  );
+});
+
+Deno.test("executor router keeps a user-floor effect space-classified (amendment 8)", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
+
+  const effect = perUserCommit();
+  const effectObservation = effect
+    .schedulerObservation as unknown as Record<string, unknown>;
+  effectObservation.actionKind = "effect";
+  const route = await router({
+    space: SPACE,
+    commit: effect,
+    sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  // Never a user-rank candidate: the effect keeps today's space-only
+  // classification and unserves on its user-scoped surface.
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "non-space-read-scope",
+  ]);
+});
+
+Deno.test("executor router keeps session-scoped surfaces unservable in a user lane", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
+
+  const scoped = perUserCommit();
+  const scopedObservation = scoped.schedulerObservation as ReturnType<
+    typeof perUserObservation
+  >;
+  (scopedObservation.completeActionScopeSummary.reads as Array<
+    Record<string, unknown>
+  >)[0] = {
+    ...scopedObservation.completeActionScopeSummary.reads[0],
+    scope: "session",
+  };
+  const route = await router({
+    space: SPACE,
+    commit: scoped,
+    sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "non-space-read-scope",
+  ]);
+});
+
+Deno.test("executor router keeps space actions byte-identical with the user lane on", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
+
+  const spaceAction = {};
+  const route = await router({
+    space: SPACE,
+    commit: commit(),
+    sourceAction: spaceAction,
+  });
+  if (route.disposition !== "local" || route.kind !== "executor-shadow") {
+    throw new Error("expected shadow route");
+  }
+  route.afterLocalApply?.();
+  assertEquals(diagnostics, []);
+  // Exactly today's space candidate: contextKey "space", nothing else added.
+  assertEquals(candidates, [{ claimKey: key, sourceAction: spaceAction }]);
+});
+
+Deno.test("executor router produces zero user-rank candidates with the option off", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics, {
+    userRankCandidates: false,
+  });
+
+  const route = await router({
+    space: SPACE,
+    commit: perUserCommit(),
+    sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  // Option off: the PerUser surface classifies exactly as today — an
+  // unservable static verdict, never a candidate of any rank.
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "non-space-read-scope",
   ]);
 });

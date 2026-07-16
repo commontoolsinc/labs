@@ -1,4 +1,8 @@
-import type { ActionClaimKey, ExecutionClaim } from "@commonfabric/memory/v2";
+import {
+  type ActionClaimKey,
+  type ExecutionClaim,
+  userExecutionContextKey,
+} from "@commonfabric/memory/v2";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { CandidateClaim } from "./deno-space-executor.ts";
 import {
@@ -51,6 +55,17 @@ export interface ExecutorActionTransactionRouterOptions {
   readonly branch: string;
   /** The Worker has a narrow host broker for supported builtin effects. */
   readonly builtinBrokerAvailable?: boolean;
+  /**
+   * C1.5a candidate context rank, default OFF: when true, a computation
+   * whose surfaces include user-scoped addresses classifies at user rank and
+   * its candidate claim key carries `user:<lanePrincipal>` instead of
+   * unserving. Effects and session-scoped surfaces keep today's space-only
+   * classification either way (amendment 8). Requires `lanePrincipal`.
+   */
+  readonly userRankCandidates?: boolean;
+  /** Principal of this Worker's acting context — the canonical `user:<did>`
+   * candidate keys are constructed from it (amendment 18 helpers only). */
+  readonly lanePrincipal?: string;
   readonly claimForAction: (sourceAction: object) => ExecutionClaim | undefined;
   /** Exact-incarnation permanent broker failure captured synchronously by the
    * Worker. Returning a reason converts the continuation into one canonical
@@ -197,11 +212,28 @@ export function createExecutorActionTransactionRouter(
     );
     const routedObservation = input.commit
       .schedulerObservation as SchedulerActionObservation;
+    const userLaneEnabled = options.userRankCandidates === true &&
+      typeof options.lanePrincipal === "string" &&
+      options.lanePrincipal.length > 0;
     const staticDecision = classifyStaticActionServability(
       routedObservation,
       options.servedSpace,
+      userLaneEnabled ? { userContext: true } : undefined,
     );
-    const claimKey = actionClaimKeyFromObservation(routedObservation);
+    // The candidate context rank follows the static classification: a
+    // user-rank computation keys its candidate (and every later claim
+    // request) by the canonical user context key of the lane principal.
+    const contextRank: "space" | "user" =
+      staticDecision.status === "claim-ready" &&
+        staticDecision.contextRank === "user"
+        ? "user"
+        : "space";
+    const claimKey = actionClaimKeyFromObservation(
+      routedObservation,
+      contextRank === "user"
+        ? userExecutionContextKey(options.lanePrincipal!)
+        : "space",
+    );
     if (claimKey === undefined) {
       const diagnosticCode = staticDecision.status === "unservable"
         ? staticDecision.reason
@@ -275,7 +307,11 @@ export function createExecutorActionTransactionRouter(
     const dynamicReason = dynamicActionTransactionUnservableReason(
       input,
       routedObservation,
-      options,
+      {
+        servedSpace: options.servedSpace,
+        branch: options.branch,
+        contextRank,
+      },
     );
     if (dynamicReason !== undefined) {
       if (liveClaim !== undefined) {

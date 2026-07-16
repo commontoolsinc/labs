@@ -35,17 +35,28 @@ import {
   type LegacyBackgroundExclusionStatus,
   type Operation,
   type PatchOp,
+  principalOfUserContextKey,
   type Reference,
   type SchedulerActionSnapshotCursor,
   type SchedulerExecutionContextKey,
+  sessionExecutionContextKey,
   type SessionId,
   type SqliteOperation,
   tableDeclaresRowLabel,
   toAcceptedCommitSeq,
   toInputBasisSeq,
+  userExecutionContextKey,
 } from "../v2.ts";
 
 export type { SchedulerExecutionContextKey } from "../v2.ts";
+// Canonical context-key helpers live in the dependency-light `../v2.ts`
+// (browser-safe for runner clients); this module remains an amendment-18
+// import site for engine/server/executor code.
+export {
+  principalOfUserContextKey,
+  sessionExecutionContextKey,
+  userExecutionContextKey,
+} from "../v2.ts";
 
 const DEFAULT_SCOPE: CellScope = "space";
 const DEFAULT_SCOPE_KEY = "space" as const;
@@ -70,20 +81,14 @@ const normalizeScope = (scope: CellScope | undefined): CellScope =>
 
 const encodeScopeKeyPart = (value: string): string => encodeURIComponent(value);
 
-const resolvePrincipalSessionKey = (
-  principal: string,
-  sessionId: SessionId,
-): string =>
-  `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
-
 export const resolveCommitSessionKey = (
   sessionId: SessionId,
   principal?: string,
 ): string =>
-  principal ? resolvePrincipalSessionKey(principal, sessionId) : sessionId;
+  principal ? sessionExecutionContextKey(principal, sessionId) : sessionId;
 
 // Principal segment of a stored commit/observation session key
-// (`session:<principal>:<sessionId>` per resolvePrincipalSessionKey).
+// (`session:<principal>:<sessionId>` per sessionExecutionContextKey).
 // Principal-less sessions store the bare session id — no principal. The
 // segments are encodeURIComponent-encoded, so splitting on ":" is exact.
 export const principalOfSessionKey = (key: string): string | undefined => {
@@ -92,35 +97,6 @@ export const principalOfSessionKey = (key: string): string | undefined => {
   if (parts.length !== 3) return undefined;
   try {
     return decodeURIComponent(parts[1]);
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * Canonical `user:<principal>` scope/execution-context key. The principal
- * segment is encodeURIComponent-encoded, so a colon-bearing did:key principal
- * never appears raw — naive `user:${did}` concatenation never matches a
- * canonical key. The single construction site for user-rank keys; parse with
- * `principalOfUserContextKey`.
- */
-export const userExecutionContextKey = (principal: string): `user:${string}` =>
-  `user:${encodeScopeKeyPart(principal)}`;
-
-/**
- * Principal segment of a canonical user context key per
- * `userExecutionContextKey`. Returns `undefined` for anything that is not a
- * well-formed user-rank key (wrong prefix, empty or raw-colon-bearing
- * segment, undecodable escape).
- */
-export const principalOfUserContextKey = (key: string): string | undefined => {
-  if (!key.startsWith("user:")) return undefined;
-  const encodedPrincipal = key.slice("user:".length);
-  if (encodedPrincipal.length === 0 || encodedPrincipal.includes(":")) {
-    return undefined;
-  }
-  try {
-    return decodeURIComponent(encodedPrincipal);
   } catch {
     return undefined;
   }
@@ -152,7 +128,7 @@ export const resolveScopeKey = (
           "session scoped memory operations require a session id",
         );
       }
-      return resolvePrincipalSessionKey(options.principal, options.sessionId);
+      return sessionExecutionContextKey(options.principal, options.sessionId);
   }
 };
 
@@ -8256,12 +8232,16 @@ const resolvedPendingReadsForBasis = (
 // colon-bearing DID never appears raw). Session rank arrives with C2 and
 // stays rejected here, as do malformed keys. Effective-context EQUALITY is
 // owned by the claim-context-mismatch fence once the observation's context
-// resolves.
+// resolves. User-rank claims are computation-only in C1 (amendment 8):
+// effects stay space-lane until lane-grant egress lands, so the guard and
+// the issuance path both reject a user-rank effect claim.
 const isAdmissibleExecutionClaimContextKey = (
   contextKey: SchedulerExecutionContextKey,
+  actionKind: ExecutionClaim["actionKind"],
 ): boolean =>
   contextKey === "space" ||
-  principalOfUserContextKey(contextKey) !== undefined;
+  (actionKind === "computation" &&
+    principalOfUserContextKey(contextKey) !== undefined);
 
 const claimKeyFromExecutionClaim = (
   claim: ExecutionClaim,
@@ -8324,7 +8304,7 @@ const acceptedSchedulerObservation = (
     assertedClaim.claimGeneration !== claim.claimGeneration ||
     options.principal === undefined || options.space === undefined ||
     claim.branch !== options.branch || claim.space !== options.space ||
-    !isAdmissibleExecutionClaimContextKey(claim.contextKey) ||
+    !isAdmissibleExecutionClaimContextKey(claim.contextKey, claim.actionKind) ||
     claim.pieceId !== observation.pieceId ||
     claim.actionId !== observation.actionId ||
     claim.actionKind !== observation.actionKind ||

@@ -903,6 +903,55 @@ export type SchedulerExecutionContextKey =
   | `user:${string}`
   | `session:${string}:${string}`;
 
+/** Scope-key segment encoding shared by every canonical context-key helper.
+ * Percent-encoding is what keeps colon-bearing DID segments unambiguous. */
+const encodeScopeKeyPart = (value: string): string => encodeURIComponent(value);
+
+/**
+ * Canonical `user:<principal>` scope/execution-context key. The principal
+ * segment is encodeURIComponent-encoded, so a colon-bearing did:key principal
+ * never appears raw — naive `user:${did}` concatenation never matches a
+ * canonical key. The single construction site for user-rank keys; parse with
+ * `principalOfUserContextKey`. Lives in this dependency-light module (and is
+ * re-exported by `v2/engine.ts`) so browser-side runner code can construct
+ * canonical keys without the engine's SQLite dependency.
+ */
+export const userExecutionContextKey = (principal: string): `user:${string}` =>
+  `user:${encodeScopeKeyPart(principal)}`;
+
+/**
+ * Principal segment of a canonical user context key per
+ * `userExecutionContextKey`. Returns `undefined` for anything that is not a
+ * well-formed user-rank key (wrong prefix, empty or raw-colon-bearing
+ * segment, undecodable escape).
+ */
+export const principalOfUserContextKey = (key: string): string | undefined => {
+  if (!key.startsWith("user:")) return undefined;
+  const encodedPrincipal = key.slice("user:".length);
+  if (encodedPrincipal.length === 0 || encodedPrincipal.includes(":")) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(encodedPrincipal);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Canonical `session:<principal>:<sessionId>` scope/execution-context key —
+ * the same shape the engine derives for principal-bound sessions
+ * (`resolveCommitSessionKey`) and `resolveScopeKey("session", …)`. The single
+ * construction site clients use for their own-chain acceptance check
+ * (context-lattice §2); both segments are percent-encoded, so colon-bearing
+ * DIDs and session ids stay unambiguous.
+ */
+export const sessionExecutionContextKey = (
+  principal: string,
+  sessionId: string,
+): `session:${string}:${string}` =>
+  `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
+
 /** Map a client demand root onto the durable scheduler's piece identity. The
  * first server-primary phase accepts raw entity ids and already-qualified ids,
  * but executes only the shared space partition. */

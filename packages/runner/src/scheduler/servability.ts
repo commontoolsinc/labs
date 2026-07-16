@@ -58,6 +58,10 @@ export type StaticActionServability =
   | {
     status: "claim-ready";
     actionKind: "computation";
+    /** Present only when a lane-parameterized classification promoted the
+     * candidate to user rank (context-lattice C1.5a); absent means space
+     * rank, keeping the space-only result shape byte-identical. */
+    contextRank?: "user";
   }
   | {
     status: "broker-required";
@@ -68,9 +72,25 @@ export type StaticActionServability =
     reason: StaticActionUnservableReason;
   };
 
+/**
+ * Lane parameterization for both servability classifiers (context-lattice
+ * C1.5a/C1.6). `userContext` admits user-scoped addresses on computation
+ * surfaces — the static classifier then reports `contextRank: "user"` and
+ * the dynamic firewall accepts the lane principal's user-scoped reads and
+ * writes. Absent (or false), both classifiers are byte-identical to the
+ * space-only behavior: session-scoped surfaces stay unservable either way,
+ * and effects keep space-only checks (amendment 8: user-rank is
+ * computation-only in C1).
+ */
+export interface StaticActionServabilityLane {
+  readonly userContext?: boolean;
+}
+
 export interface ActionTransactionServabilityContext {
   readonly servedSpace: MemorySpace;
   readonly branch: string;
+  /** Lane rank for the per-attempt firewall; absent means space rank. */
+  readonly contextRank?: "space" | "user";
 }
 
 /**
@@ -79,6 +99,7 @@ export interface ActionTransactionServabilityContext {
  */
 export function actionClaimKeyFromObservation(
   observation: SchedulerActionObservation,
+  contextKey: ActionClaimKey["contextKey"] = "space",
 ): ActionClaimKey | undefined {
   if (
     typeof observation.ownerSpace !== "string" ||
@@ -99,7 +120,7 @@ export function actionClaimKeyFromObservation(
   return {
     branch: observation.branch,
     space: observation.ownerSpace,
-    contextKey: "space",
+    contextKey,
     pieceId: observation.pieceId,
     actionId: observation.actionId,
     actionKind: observation.actionKind,
@@ -136,12 +157,17 @@ export function executionClaimMatchesActionKey(
 export function classifyStaticActionServability(
   value: unknown,
   servedSpace: MemorySpace,
+  lane?: StaticActionServabilityLane,
 ): StaticActionServability {
   if (!isRecord(value)) {
     return unservable("malformed-candidate");
   }
   const candidate = value as StaticActionServabilityCandidate;
   const actionKind = candidate.actionKind;
+  // Amendment 8: user-rank promotion applies to computations only; effects
+  // keep space-only checks whatever the lane says.
+  const userLane = lane?.userContext === true && actionKind === "computation";
+  let userScoped = false;
 
   if (actionKind === "event-handler") {
     return unservable("event-handler");
@@ -202,7 +228,10 @@ export function classifyStaticActionServability(
     return unservable("foreign-piece-space");
   }
   if (scopeOf(summary.piece) !== "space") {
-    return unservable("non-space-piece-scope");
+    if (!userLane || scopeOf(summary.piece) !== "user") {
+      return unservable("non-space-piece-scope");
+    }
+    userScoped = true;
   }
   if (!isRootValueAddress(summary.piece)) {
     return unservable("malformed-static-surface");
@@ -216,7 +245,10 @@ export function classifyStaticActionServability(
       return unservable("foreign-read-space");
     }
     if (scopeOf(read) !== "space") {
-      return unservable("non-space-read-scope");
+      if (!userLane || scopeOf(read) !== "user") {
+        return unservable("non-space-read-scope");
+      }
+      userScoped = true;
     }
   }
 
@@ -230,7 +262,10 @@ export function classifyStaticActionServability(
       return unservable("foreign-write-space");
     }
     if (scopeOf(write) !== "space") {
-      return unservable("non-space-write-scope");
+      if (!userLane || scopeOf(write) !== "user") {
+        return unservable("non-space-write-scope");
+      }
+      userScoped = true;
     }
   }
 
@@ -239,9 +274,11 @@ export function classifyStaticActionServability(
     return unservable("malformed-output-surface");
   }
 
-  return actionKind === "effect"
-    ? { status: "broker-required", actionKind }
-    : { status: "claim-ready", actionKind };
+  return actionKind === "effect" ? { status: "broker-required", actionKind } : {
+    status: "claim-ready",
+    actionKind,
+    ...(userScoped ? { contextRank: "user" as const } : {}),
+  };
 }
 
 /**
@@ -266,8 +303,9 @@ export function dynamicActionTransactionUnservableReason(
     return "dynamic-observation-batch";
   }
   if (commit.merge !== undefined) return "dynamic-branch-merge";
+  const laneRank = context.contextRank ?? "space";
   for (const read of [...commit.reads.confirmed, ...commit.reads.pending]) {
-    if ((read.scope ?? "space") !== "space") {
+    if (!laneAdmitsScope(read.scope, laneRank)) {
       return "dynamic-non-space-read-scope";
     }
     if (
@@ -279,14 +317,14 @@ export function dynamicActionTransactionUnservableReason(
   }
   for (const operation of commit.operations) {
     if (operation.op === "sqlite") return "dynamic-sqlite-operation";
-    if ((operation.scope ?? "space") !== "space") {
+    if (!laneAdmitsScope(operation.scope, laneRank)) {
       return "dynamic-non-space-write-scope";
     }
   }
   for (const precondition of commit.preconditions ?? []) {
     if (
       precondition.kind === "entity-absent" &&
-      (precondition.scope ?? "space") !== "space"
+      !laneAdmitsScope(precondition.scope, laneRank)
     ) {
       return "dynamic-non-space-write-scope";
     }
@@ -309,7 +347,12 @@ export function dynamicActionTransactionUnservableReason(
   // constraint is what claims actually promise. Writes remain strictly
   // bounded by their declared envelopes.
   for (const address of [...observation.reads, ...observation.shallowReads]) {
-    const reason = dynamicAddressReason(address, context.servedSpace, "read");
+    const reason = dynamicAddressReason(
+      address,
+      context.servedSpace,
+      "read",
+      laneRank,
+    );
     if (reason !== undefined) return reason;
   }
   for (
@@ -321,7 +364,12 @@ export function dynamicActionTransactionUnservableReason(
       ...(observation.ignoredSchedulingWrites ?? []),
     ]
   ) {
-    const reason = dynamicAddressReason(address, context.servedSpace, "write");
+    const reason = dynamicAddressReason(
+      address,
+      context.servedSpace,
+      "write",
+      laneRank,
+    );
     if (reason !== undefined) return reason;
     if (!writeEnvelopes.some((envelope) => covers(envelope, address))) {
       return "dynamic-write-outside-static-surface";
@@ -345,12 +393,23 @@ function dynamicAddressReason(
   address: IMemorySpaceAddress,
   servedSpace: MemorySpace,
   kind: "read" | "write",
+  laneRank: "space" | "user",
 ): string | undefined {
   if (address.space !== servedSpace) return `dynamic-foreign-${kind}-space`;
-  if (scopeOf(address) !== "space") {
+  if (!laneAdmitsScope(address.scope, laneRank)) {
     return `dynamic-non-space-${kind}-scope`;
   }
   return undefined;
+}
+
+/** A user-rank lane admits the lane principal's user-scoped addresses on top
+ * of shared space state; session scope stays inadmissible until C2. */
+function laneAdmitsScope(
+  scope: CellScope | undefined,
+  laneRank: "space" | "user",
+): boolean {
+  const declared = scope ?? "space";
+  return declared === "space" || (laneRank === "user" && declared === "user");
 }
 
 function covers(

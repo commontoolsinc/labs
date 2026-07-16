@@ -2,6 +2,7 @@ import {
   ActionClaimKey,
   actionClaimMapKey,
   ExecutionClaim,
+  principalOfUserContextKey,
   type WireMemoryProtocolFlags,
   wireMemoryProtocolFlags,
 } from "@commonfabric/memory/v2";
@@ -72,10 +73,15 @@ export interface DenoSpaceExecutorFactoryOptions {
 }
 
 export interface CandidateClaim {
+  /** Carries the candidate's context rank: `space`, or a canonical
+   * `user:<did>` lane identity since C1.5a (amendment 22 — lane identity
+   * crosses the executor channels; raw sponsor credentials and session
+   * tokens still do not). */
   readonly claimKey: ActionClaimKey;
   readonly builtinId?: ServerExecutableBuiltinId;
-  /** Worker-derived from a host-only accepted-commit boolean. No principal or
-   * actor identity crosses either executor IPC channel. */
+  /** Worker-derived from a host-only accepted-commit boolean. Beyond the
+   * claim key's lane identity, no principal or actor identity crosses either
+   * executor IPC channel. */
   readonly causalActorMatchesSponsor?: boolean;
   /** Worker-side demand epoch; stale closure candidates are ignored after a
    * demanded-root shrink rebuilds the runtime graph. */
@@ -235,7 +241,15 @@ const isCandidateClaim = (value: unknown): value is CandidateClaim => {
   if (typeof claim !== "object" || claim === null) return false;
   const key = claim as Record<string, unknown>;
   return typeof key.branch === "string" && typeof key.space === "string" &&
-    key.contextKey === "space" && typeof key.pieceId === "string" &&
+    // C1.5a widens the intra-Worker lane identity to space plus canonical
+    // user-rank keys; session rank stays rejected until C2. User-rank claims
+    // are computation-only in C1 (amendment 8) — the executor never requests
+    // one for an effect.
+    typeof key.contextKey === "string" &&
+    (key.contextKey === "space" ||
+      (key.actionKind === "computation" &&
+        principalOfUserContextKey(key.contextKey) !== undefined)) &&
+    typeof key.pieceId === "string" &&
     typeof key.actionId === "string" &&
     (key.actionKind === "computation" || key.actionKind === "effect") &&
     typeof key.implementationFingerprint === "string" &&

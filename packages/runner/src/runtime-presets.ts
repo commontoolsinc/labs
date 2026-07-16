@@ -186,6 +186,9 @@ export const EXPERIMENTAL_ENV_VARS = {
   modernCellRep: "EXPERIMENTAL_MODERN_CELL_REP",
   persistentSchedulerState: "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
   serverPrimaryExecution: "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION",
+  // C1 rollout dial: flipped programmatically by the C1.9 measurement
+  // fixture alongside the memory-side claim-rank dial; no env exposure.
+  serverPrimaryExecutionUserRankCandidates: null,
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.
