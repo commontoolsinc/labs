@@ -49,7 +49,7 @@ primitive), and are run via `cf test`.
 │           │                    │                            │
 │           ▼                    ▼                            │
 │  ┌─────────────────────────────────────────┐                │
-│  │      Assertions (Cell<boolean>)         │                │
+│  │    Assertions (Cell<AssertRecord>)      │                │
 │  │  (computed from pattern state)          │                │
 │  └─────────────────────────────────────────┘                │
 └─────────────────────────────────────────────────────────────┘
@@ -157,7 +157,7 @@ export default pattern(() => {
   return {
     tests: [
       { action: action_add_expense },       // Runner calls .send()
-      { assertion: assert_has_one_expense }, // Runner checks === true
+      { assertion: assert_has_one_expense }, // Runner checks its `ok`
       { action: action_add_another },
       { assertion: assert_total_is_45 },
       { assertion: assert_categories_correct },
@@ -193,7 +193,7 @@ The `cf test` runner processes the `tests` array **in order**:
 ┌──────────────────────────────────────────────────────────────┐
 │  1. "action" in step? → step.action.send()                   │
 │  2. await runtime.idle()                                     │
-│  3. "assertion" in step? → step.assertion.get() === true?    │
+│  3. "assertion" in step? → step.assertion.get() ok?          │
 │     ✓ PASS / ✗ FAIL                                          │
 │  ... repeat for each step                                    │
 └──────────────────────────────────────────────────────────────┘
@@ -255,6 +255,13 @@ expense-tracker.test.tsx
 ## Runner Implementation
 
 ### Algorithm
+
+The runner itself is `packages/cli/lib/test-runner.ts`. The sketch below is a
+reading aid for the shape of the loop, not a second copy of it: it leaves out
+settling, the retry an assertion gets to let the graph settle, timeouts around
+each step, and the multi-user paths. Behavior that matters belongs in the code
+and in the prose above — change one of those and this sketch needs the same
+edit, so keep it short enough to be worth having.
 
 ```typescript
 // Shown for illustration only.
@@ -331,17 +338,24 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
       ]);
 
     } else if (isAssertion) {
-      // It's an assertion - check the boolean value via .key() access
+      // It's an assertion - read the value via .key() access. An assert(...)
+      // carries a record of the operands it recorded; anything else carries a
+      // bare boolean.
       assertionCount++;
       const assertCell = testsCell.key(i).key("assertion") as Cell<unknown>;
       const value = assertCell.get();
-      const passed = value === true;
+      const record = asAssertRecord(value);
+      const passed = record ? record.ok : value === true;
 
       results.push({
         name: `assertion_${assertionCount}`,
         passed,
         afterAction: lastActionIndex !== null ? `action_${actionCount}` : null,
-        error: passed ? undefined : `Expected true, got ${JSON.stringify(value)}`,
+        error: passed
+          ? undefined
+          : record
+          ? formatAssertRecord(record)
+          : `Expected true, got ${toCompactDebugString(value)}`,
       });
     } else if (isRender) {
       await materializeTestVDOM(testsCell.key(i).key("render"), settleRuntime);
