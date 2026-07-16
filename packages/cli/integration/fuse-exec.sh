@@ -279,14 +279,13 @@ case "$MOUNT_PID" in
     ;;
 esac
 
-for _ in $(seq 1 30); do
-  if ! kill -0 "$MOUNT_PID" >/dev/null 2>&1; then
-    error "Fuse daemon exited before mount became ready."
-  fi
-  sleep 0.1
-done
-
-sleep 1
+# 'cf fuse mount --background' returns only after the daemon has reported the
+# 'mounted' supervisor state and been confirmed alive. The daemon reports that
+# just before it enters its FUSE session loop, and mounted paths hydrate lazily,
+# so the wait_for_path calls below cover the rest.
+if ! kill -0 "$MOUNT_PID" >/dev/null 2>&1; then
+  error "Fuse daemon exited immediately after reporting mount readiness."
+fi
 
 wait_for_path "$MOUNTPOINT/$SPACE/pieces"
 
@@ -480,12 +479,13 @@ exec 9<> "$INPUT_LAST_MESSAGE"
 printf 'open-stale' >&9
 : > "$INPUT_LAST_MESSAGE"
 exec 9>&-
+# The truncate empties the buffer of every descriptor open on this inode, which
+# disarms the one opened above. A descriptor that stayed armed is left dirty, and
+# a dirty handle flushes in the same tick as the callback the kernel sends on
+# close(), so its write is issued before the close returns. That write reaches the
+# cell after the truncate's own write, so lastMessage settles on 'open-stale' and
+# this wait reports it rather than reaching "".
 wait_for_piece_value "lastMessage" '""'
-sleep 0.5
-LAST_MESSAGE_AFTER_TRUNCATE=$(cf piece get $SPACE_ARGS --piece "$PIECE_ID" "lastMessage" 2>/dev/null || true)
-if [ "$LAST_MESSAGE_AFTER_TRUNCATE" != '""' ]; then
-  error "Path truncate should not be undone by a stale open file handle. Got: $LAST_MESSAGE_AFTER_TRUNCATE"
-fi
 success "Path truncate clears stale open write handles"
 
 echo "FUSE exec integration passed."
