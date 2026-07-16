@@ -324,6 +324,100 @@ express. They stay a poll for the same reason as the disabled tests below:
 nothing automated exercises this file, so converting it churns code that no run
 covers.
 
+### A shell script observing another process through a kernel mount
+
+`packages/cli/integration/fuse-exec.sh` drives the FUSE daemon as a separate
+process through a real mount, and observes it from bash. Its three poll loops —
+`wait_for_path`, `resolve_entity_dir`, and `wait_for_piece_value` — stay polls.
+
+There is no event channel to convert them to. The state each loop waits on lives
+in another process: the daemon's tree for the two path loops, and the server's
+cell for the value loop. Bash has no callback to resolve a `defer()` from.
+
+Watching the filesystem does not substitute for one. A mounted path appears
+because the daemon added a node to its own tree, and that is not a filesystem
+operation passing through the mount, which is what the kernel raises inotify
+events for. The daemon's two notification calls, `notify_inval_entry` and
+`notify_inval_inode`, tell the kernel to drop cache entries; they do not announce
+new state to a watcher.
+
+The two path loops also drive the work they wait for, which is the same shape as
+the pattern harness's `pull()` above. The lookup behind a `test -e` is what makes
+the daemon fetch: for the space root it runs `connectSpace`, and for the piece
+paths beneath it `CellBridge.prepareLookup`, which hydrates the piece property.
+Polling the probe until it converges is the honest wait.
+
+Two waits in this script are not polls, and should not become polls.
+
+Mount readiness needs no timing loop. `cf fuse mount --background` calls
+`awaitBackgroundMountStartup`, which waits for the daemon to report the
+`mounted` supervisor state and confirms both the supervisor and the child are
+alive before the command prints the PID. Every other exit from that function
+throws, and a throw kills the child and fails the command, so a script that has
+parsed a PID has a daemon that reported mounted.
+
+The daemon reports that state just before it enters its FUSE session loop, so it
+means the kernel mount exists rather than that any request has been served, and
+mounted paths hydrate lazily besides. Both gaps belong to `wait_for_path`, whose
+probe carries its own kill-timeout and retries for twenty seconds. What is left
+for the script is one check that the daemon survived the handshake.
+
+The stale-descriptor assertion — that truncating a path does not let an already
+open descriptor write its old buffer back — waits on `wait_for_piece_value`
+alone. This looks like it needs a delay, because it asserts that something does
+not happen. It does not, because a descriptor that could write late is a
+descriptor that has already written.
+
+Both truncate paths — `open` with `O_TRUNC` on Linux, and the handle-less
+`setattr` that FUSE-T issues on macOS — reach `handles.truncateByIno`, which
+empties the buffer of every handle on the inode and clears both `dirty` and
+`truncatePending` on the one that is not the truncating handle. `flushHandle`,
+`flushCb` and `releaseCb` all gate on that pair, so the disarmed descriptor is
+inert. A descriptor that stayed armed instead flushes from the callback the
+kernel sends on `close()`, which the flush callback issues in the same tick when
+the handle is dirty. Its write targets the same cell as the truncate's own write
+and is issued after it, so it lands last and the value settles on the stale
+content rather than `""`.
+
+The deferred flush that every write arms, `scheduleFlush(handle, 500)`, is the
+one path that could fire after the wait, and it cannot resurrect anything.
+`truncateByIno` does not cancel it, so it does fire around half a second later —
+into `flushHandle`'s guard, which the disarm has already closed. In the armed
+case it never gets that far, because the flush callback calls
+`clearScheduledFlush` before flushing.
+
+#### The daemon's `.status` file is not a wait signal
+
+The FUSE daemon keeps write statistics (`writeStats` in `packages/fuse/mod.ts`)
+and publishes them through the `.status` file at the mount root. That file looks
+like a way to wait for the daemon to report a write-path event. It is not. The
+counters it carries lag the events they describe, and reading it around a write
+shows them frozen across the open, the write, the truncate and the release, then
+jumping several counts at once.
+
+The content is a snapshot rather than a live view. `CellBridge.initStatus` bakes
+JSON into a tree node and the read callback serves that node's stored bytes, so
+the numbers a reader sees are the ones the last `updateStatus` call baked.
+
+Refreshes do reach `.status` from the write path, but never carrying the counter
+a waiter wants. A successful flush calls `markExistingFinalized`, which reaches
+`updateStatus` through `CfcWritebackStore.deletePrepared`, `persist` and the
+store's `onChange` hook. That chain runs before `writeStats.flushed++` on every
+flush branch, so the snapshot a flush triggers always reports the count from
+before that flush. Opening and writing move their own counters with no refresh
+attached at all.
+
+Attribute caching sits on top. `.status` is a static inode, so `replyEntry` gives
+it a one-second entry and attribute timeout on Linux, and a macOS mount bounds
+staleness through an NFS attribute-cache option instead, because FUSE-T ignores
+the timeouts a reply carries. `updateStatus` assigns `node.content` and changes
+no size or mtime, so nothing invalidates a cached reader either way.
+
+Waiting on `.status` therefore means waiting for a refresh that reports the state
+before the event, through a cache with no invalidation, at a granularity coarser
+than the wait itself. Making it a real signal means ordering the refresh after
+the counters, regenerating on read, and giving a reader something to notice.
+
 ### Disabled tests
 
 `cf-code-editor.test.disabled.ts`, `cf-render.test.disabled.ts`, and
