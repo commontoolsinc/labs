@@ -172,7 +172,7 @@ same last-colon `FabricHash.fromString` parse), and no hash-layer parser
 needs to learn anything.
 
 Kind parsing is by scheme (`entityKindOfIdString`,
-`packages/data-model/src/fabric-primitives/entity-kind.ts`): the segment
+`packages/data-model/src/entity-kind.ts`): the segment
 before the FIRST colon. `computed:fid1:H` parses as kind `"computed"`;
 `of:` URIs, bare tagged hashes (`fid1:H`), non-entity URIs (`data:`),
 colon-free strings, and UNKNOWN schemes (e.g. `future:fid1:H`) all parse as

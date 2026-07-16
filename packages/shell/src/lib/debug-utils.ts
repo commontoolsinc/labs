@@ -19,7 +19,7 @@ import type {
   WriteStackTraceMatcher,
 } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
-import { hasEntityUriScheme } from "@commonfabric/data-model/fabric-primitives";
+import { hasEntityUriScheme } from "@commonfabric/data-model/entity-kind";
 import { isRecord } from "@commonfabric/utils/types";
 import type { MetaField } from "@commonfabric/api";
 import { createVDomDebugHelpers, viewSettled } from "@commonfabric/html/debug";

@@ -5,7 +5,7 @@
  * into concise summaries suitable for LLMs to help humans debug software behavior.
  */
 
-import { entityUriSchemePrefix } from "@commonfabric/data-model/fabric-primitives";
+import { entityUriSchemePrefix } from "@commonfabric/data-model/entity-kind";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type {
   IExtendedStorageTransaction,

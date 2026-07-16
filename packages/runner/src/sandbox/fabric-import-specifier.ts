@@ -2,7 +2,7 @@ import { validateSlug } from "../slugs.ts";
 import {
   ENTITY_URI_SCHEMES,
   type EntityUriScheme,
-} from "@commonfabric/data-model/fabric-primitives";
+} from "@commonfabric/data-model/entity-kind";
 
 export const HASH_RE = /^[A-Za-z0-9_-]{43}$/;
 
