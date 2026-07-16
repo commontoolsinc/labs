@@ -2,9 +2,8 @@ import {
   action,
   computed,
   Default,
-  handler,
+  entityRefToString,
   NAME,
-  navigateTo,
   pattern,
   type PerSession,
   type PerUser,
@@ -17,7 +16,12 @@ import {
 
 import Topic, {
   asArray,
+  crossrefChipRow,
+  crossrefJoin,
+  fidPayload,
+  openTopic,
   snippet,
+  topicCorpus,
   type TopicPiece,
   TOPICS_THEME,
   whenLabel,
@@ -40,6 +44,20 @@ export interface TopicsInput {
   myName?: PerUser<Writable<string | Default<"">>>;
 }
 
+/** One topic's place in the prose reference graph. Derived at read time from
+ * fids pasted in bodies, comments, and link URLs — never persisted, so a
+ * partial-view replica can never destroy real edges (the failure class of
+ * index patterns that write backlinks into their targets). */
+export interface TopicCrossref {
+  /** The topic's own fid in tagged form (`fid1:…`); "" until known. */
+  fid: string;
+  topic: TopicPiece;
+  /** Sibling topics whose fids this topic's prose mentions. */
+  refsOut: TopicPiece[];
+  /** Sibling topics whose prose mentions this topic's fid. */
+  referencedBy: TopicPiece[];
+}
+
 /**
  * Topics — a tracker over #topic pieces: durable units of shared attention
  * (CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics
@@ -52,6 +70,10 @@ export interface TopicsOutput {
   topics: TopicPiece[];
   mentionable: TopicPiece[];
   topicCount: number;
+  /** The prose reference graph over the board's own topics, one row per
+   * (non-null) entry of `topics`. Rows carry their topic, so consumers never
+   * need to correlate by index — indices are not a stable address. */
+  crossrefs: TopicCrossref[];
   /** The viewer's display name (normalized to "" until set). */
   myName: string;
   /** Session-local draft for the footer composer (exposed for embedding and
@@ -63,13 +85,10 @@ export interface TopicsOutput {
   submitTopic: Stream<void>;
 }
 
-/** Row navigation, bound per topic card. Module-scope handler (not an inline
- * closure) so embedders and tests can bind and drive it directly. */
-export const openTopic = handler<void, { topic: TopicPiece }>(
-  (_, { topic }) => {
-    navigateTo(topic);
-  },
-);
+// Navigation + chip-row live with the other shared pieces in topic.tsx (the
+// detail page renders the same chips); re-exported here so embedders and
+// tests keep importing them from the tracker.
+export { crossrefChipRow, openTopic } from "./topic.tsx";
 
 export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   const newTitle = new Writable.perSession("");
@@ -82,6 +101,10 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       createdAt: safeDateNow(),
       createdByName: (myName.get() ?? "").trim() || "someone",
       myName,
+      // The board's own list, so the detail page can derive its connections
+      // and the editor has a mention universe (backfilled as a one-time
+      // link-bind on pieces created before this input existed).
+      mentionable: topics,
     });
     // Mergeable append: concurrent creates from different users all land.
     topics.push(piece);
@@ -102,13 +125,59 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
 
   const topicCount = computed(() => asArray(topics.get()).length);
 
-  const sortedTopics = computed(() =>
-    asArray(topics.get())
-      .filter((t) => t)
-      .toSorted((a, b) => (b?.lastActivityAt ?? 0) - (a?.lastActivityAt ?? 0))
-  );
+  // The prose reference graph as index edges over `topics` (raw order),
+  // recomputed from the whole corpus on any board change (O(topics × text) —
+  // trivial at board scale; the growth path is per-topic memoization).
+  // Identity is each entry's resolved result-doc fid, so the existing corpus
+  // lights up with zero authoring changes and nothing derived is persisted.
+  // Indices, not pieces: the UI must bind its navigation handlers to direct
+  // `topics` elements — a handler bound to a piece nested inside a derived
+  // wrapper object silently keeps the consuming UI computed from ever
+  // running.
+  const crossrefEdges = computed(() => {
+    const list = asArray(topics.get());
+    // Each entry's own fid payload ("" while unresolved, e.g. mid-sync —
+    // such entries simply hold no edges this render).
+    const payloads = list.map((t, i) => {
+      if (!t) return "";
+      // resolveAsCell/entityId are cell-runtime surface, not on the pattern
+      // Writable type (same cast as notes' appendLink).
+      const ref = (topics.key(i) as any).resolveAsCell?.()?.entityId;
+      return ref ? fidPayload(entityRefToString(ref)) : "";
+    });
+    const { refsOut, referencedBy } = crossrefJoin(
+      list.map((t) => topicCorpus(t)),
+      payloads,
+    );
+    return list.map((_t, i) => ({
+      fid: payloads[i] ? `fid1:${payloads[i]}` : "",
+      refsOut: refsOut[i],
+      referencedBy: referencedBy[i],
+    }));
+  });
 
-  const hasNoTopics = computed(() => sortedTopics.length === 0);
+  // Piece-valued view of the graph for consumers (tests, embedders, headless
+  // reads) — reading pieces through the wrapper rows is fine, only handler
+  // binds are not.
+  const crossrefs = computed(() => {
+    const list = asArray(topics.get());
+    const rows: TopicCrossref[] = [];
+    crossrefEdges.forEach((e, i) => {
+      const t = list[i];
+      if (!t) return;
+      rows.push({
+        fid: e.fid,
+        topic: t,
+        refsOut: e.refsOut.map((j) => list[j]),
+        referencedBy: e.referencedBy.map((j) => list[j]),
+      });
+    });
+    return rows;
+  });
+
+  const hasNoTopics = computed(() =>
+    asArray(topics.get()).filter((t) => t).length === 0
+  );
 
   return {
     [NAME]: computed(() => `Topics (${asArray(topics.get()).length})`),
@@ -130,37 +199,58 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
           </cf-vstack>
 
           <cf-vstack gap="2" padding="4">
-            {computed(() =>
-              sortedTopics.map((topic) => (
+            {computed(() => {
+              const list = asArray(topics.get());
+              const edges = crossrefEdges;
+              const order = list
+                .map((_, i) => i)
+                .filter((i) => list[i])
+                .toSorted((a, b) =>
+                  (list[b]?.lastActivityAt ?? 0) -
+                  (list[a]?.lastActivityAt ?? 0)
+                );
+              return order.map((i) => (
                 <cf-card>
                   <cf-hstack gap="3" align="center">
                     <cf-vstack gap="0" style="flex: 1; min-width: 0;">
                       <cf-text block style="font-weight: 600;">
-                        {topic.title || "(untitled topic)"}
+                        {list[i].title || "(untitled topic)"}
                       </cf-text>
-                      {topic.body
+                      {list[i].body
                         ? (
                           <cf-text tone="muted" block truncate>
-                            {snippet(topic.body, 120)}
+                            {snippet(list[i].body, 120)}
                           </cf-text>
                         )
                         : null}
                       <cf-text variant="caption" tone="muted">
-                        {topic.commentCount} comments · by{" "}
-                        {topic.createdByName || "someone"} ·{" "}
-                        {whenLabel(topic.lastActivityAt)}
+                        {list[i].commentCount} comments · by{" "}
+                        {list[i].createdByName || "someone"} ·{" "}
+                        {whenLabel(list[i].lastActivityAt)}
                       </cf-text>
+                      {crossrefChipRow(
+                        "references →",
+                        false,
+                        list,
+                        edges[i]?.refsOut ?? [],
+                      )}
+                      {crossrefChipRow(
+                        "← referenced by",
+                        true,
+                        list,
+                        edges[i]?.referencedBy ?? [],
+                      )}
                     </cf-vstack>
                     <cf-button
                       variant="secondary"
-                      onClick={openTopic({ topic })}
+                      onClick={openTopic({ topic: list[i] })}
                     >
                       Open
                     </cf-button>
                   </cf-hstack>
                 </cf-card>
-              ))
-            )}
+              ));
+            })}
 
             {hasNoTopics
               ? (
@@ -188,6 +278,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     topics,
     mentionable: topics,
     topicCount,
+    crossrefs,
     myName: myNameView,
     newTitle,
     addTopic,

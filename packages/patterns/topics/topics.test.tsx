@@ -5,12 +5,26 @@
  * merge behavior): this file drives every exposed stream and derived value in
  * one runtime — action guards, authorship fallback ("someone" before a name
  * is set), the unsafe-scheme link rejection, label defaulting, body Edit→Save
- * via setBody, activity-based sorting, and the exported pure helpers.
+ * via setBody, activity-based sorting, the derived crossref graph (edges from
+ * fids pasted in bodies, comments, and link URLs; never persisted), and the
+ * exported pure helpers.
  */
 import { action, computed, NAME, UI } from "commonfabric";
 import { pattern } from "commonfabric";
-import Topics, { openTopic, type TopicPiece } from "./main.tsx";
-import Topic, { isSafeLinkUrl, snippet, whenLabel } from "./topic.tsx";
+import Topics, {
+  crossrefChipRow,
+  openTopic,
+  type TopicPiece,
+} from "./main.tsx";
+import Topic, {
+  crossrefJoin,
+  extractFidPayloads,
+  fidPayload,
+  isSafeLinkUrl,
+  snippet,
+  topicCorpus,
+  whenLabel,
+} from "./topic.tsx";
 
 export default pattern(() => {
   const board = Topics({});
@@ -21,6 +35,10 @@ export default pattern(() => {
     title: "Direct topic",
     body: "line one\nline two",
   });
+
+  // Branch pin for the detail derive: a piece with no `mentionable` wired
+  // (the pre-rev corpus, until backfilled) derives empty connection sets.
+  const lone = Topic({ title: "Lone", createdAt: 1, createdByName: "t" });
 
   // --- actions ---
 
@@ -231,7 +249,176 @@ export default pattern(() => {
     isSafeLinkUrl("   ") === false
   );
 
+  // --- crossrefs: the derived prose reference graph ---
+
+  // Fid-free corpus: rows exist (one per topic, self-describing via `topic`),
+  // every fid is a real tagged hash, and no edges are claimed. Pins the
+  // fid1-tag assumption the prose scan relies on — if entity ids ever stop
+  // being fid1-tagged, this fails loudly instead of edges silently vanishing.
+  // Runs at the two-topic point: the edge that follows must exist while the
+  // harness still evaluates the board's card-list computed, so the chip
+  // branches render (and count as covered), not just the data layer.
+  const assert_crossrefs_baseline = computed(() =>
+    (board.crossrefs ?? []).length === 2 &&
+    board.crossrefs?.[0]?.fid?.startsWith("fid1:") === true &&
+    (board.crossrefs?.[0]?.fid ?? "").length > 25 &&
+    board.crossrefs?.[0]?.topic?.title === "First topic" &&
+    board.crossrefs?.[1]?.topic?.title === "Second topic" &&
+    (board.crossrefs?.[0]?.refsOut ?? []).length === 0 &&
+    (board.crossrefs?.[0]?.referencedBy ?? []).length === 0 &&
+    (board.crossrefs?.[1]?.refsOut ?? []).length === 0 &&
+    (board.crossrefs?.[1]?.referencedBy ?? []).length === 0
+  );
+
+  // A pasted page URL in a body creates the edge on both ends.
+  const action_body_ref_first = action(() => {
+    const fid = board.crossrefs?.[0]?.fid ?? "";
+    board.topics?.[1]?.setBody.send({
+      body: `relates to https://estuary.example/topics-dev/${fid} directly`,
+    });
+  });
+  const assert_body_edge = computed(() =>
+    (board.crossrefs?.[1]?.refsOut ?? []).length === 1 &&
+    board.crossrefs?.[1]?.refsOut?.[0]?.title === "First topic" &&
+    (board.crossrefs?.[0]?.referencedBy ?? []).length === 1 &&
+    board.crossrefs?.[0]?.referencedBy?.[0]?.title === "Second topic" &&
+    (board.crossrefs?.[0]?.refsOut ?? []).length === 0
+  );
+
+  // Detail-page view of the same edge: each board-created topic derives its
+  // own row from the mentionable siblings wired at creation (indices into
+  // `mentionable` = the board's own list), while a piece with no mentionable
+  // derives empty sets.
+  const assert_detail_edges = computed(() => {
+    return (board.topics?.[1]?.crossrefs?.refsOut ?? []).join(",") === "0" &&
+      (board.topics?.[1]?.crossrefs?.referencedBy ?? []).length === 0 &&
+      (board.topics?.[0]?.crossrefs?.referencedBy ?? []).join(",") === "1" &&
+      (board.topics?.[0]?.crossrefs?.refsOut ?? []).length === 0;
+  });
+
+  const assert_lone_edgeless = computed(() => {
+    return (lone.crossrefs?.refsOut ?? []).length === 0 &&
+      (lone.crossrefs?.referencedBy ?? []).length === 0;
+  });
+
+  // Drives the exact chip markup the card map emits, independent of UI
+  // demand timing: a populated row yields the hstack vnode — navigation
+  // binds included — and an edgeless row collapses to null so the card
+  // renders nothing for it. The real in-card path renders too: this suite
+  // exports [UI], so the harness demands the vdom continuously (#4715).
+  const assert_chip_row_markup = computed(() => {
+    const list = (board.topics ?? []) as TopicPiece[];
+    if (list.length < 2) return false;
+    const row = crossrefChipRow("references →", false, list, [0, 1]);
+    return row !== null &&
+      crossrefChipRow("← referenced by", true, list, []) === null;
+  });
+
+  // A share link in a comment counts too — its colon is percent-encoded.
+  const action_comment_ref_encoded = action(() => {
+    const enc = (board.crossrefs?.[0]?.fid ?? "").replace(":", "%3A");
+    board.topics?.[2]?.addComment.send({
+      body: `shared as ?shared-pattern=estuary%2Ftopics-dev%2F${enc}`,
+    });
+  });
+  const assert_comment_edge = computed(() =>
+    (board.crossrefs?.[2]?.refsOut ?? []).length === 1 &&
+    board.crossrefs?.[2]?.refsOut?.[0]?.title === "First topic" &&
+    (board.crossrefs?.[0]?.referencedBy ?? []).length === 2
+  );
+
+  // A structured link's URL is part of the corpus (scan ∪ TopicLink).
+  const action_link_ref_second = action(() => {
+    board.topics?.[2]?.addLink.send({
+      kind: "topic",
+      url: `https://estuary.example/topics-dev/${
+        board.crossrefs?.[1]?.fid ?? ""
+      }`,
+      label: "the second topic",
+    });
+  });
+  const assert_link_edge = computed(() =>
+    (board.crossrefs?.[2]?.refsOut ?? []).length === 2 &&
+    board.crossrefs?.[2]?.refsOut?.[1]?.title === "Second topic" &&
+    (board.crossrefs?.[1]?.referencedBy ?? []).length === 1 &&
+    board.crossrefs?.[1]?.referencedBy?.[0]?.title === "Composed topic"
+  );
+
+  // Mentioning yourself or a fid nothing on the board owns adds no edges.
+  const action_self_and_unknown_ref = action(() => {
+    const own = board.crossrefs?.[0]?.fid ?? "";
+    board.topics?.[0]?.setBody.send({
+      body: `self ${own} and unknown fid1:${"Z".repeat(43)} stay edgeless`,
+    });
+  });
+  const assert_self_unknown_ignored = computed(() =>
+    (board.crossrefs?.[0]?.refsOut ?? []).length === 0 &&
+    (board.crossrefs?.[0]?.referencedBy ?? []).length === 2
+  );
+
+  // Nothing is persisted: retract the prose and the edge is simply gone.
+  const action_remove_body_ref = action(() => {
+    board.topics?.[1]?.setBody.send({ body: "no references anymore" });
+  });
+  const assert_edge_removed = computed(() =>
+    (board.crossrefs?.[1]?.refsOut ?? []).length === 0 &&
+    (board.crossrefs?.[0]?.referencedBy ?? []).length === 1 &&
+    board.crossrefs?.[0]?.referencedBy?.[0]?.title === "Composed topic"
+  );
+
+  // The fid-scanning helpers, over every pasted shape (bare, of:-prefixed,
+  // percent-encoded) plus the non-matches (short payloads, non-fid hashes).
+  const P1 = "A".repeat(43);
+  const P2 = "B".repeat(43);
+  const assert_crossref_helpers = computed(() =>
+    extractFidPayloads(
+        `a fid1:${P1} b of:fid1:${P2} c fid1%3A${P1}`,
+      ).join(",") === `${P1},${P2},${P1}` &&
+    extractFidPayloads("no fids here, not even fid1:tooshort").length === 0 &&
+    extractFidPayloads("").length === 0 &&
+    fidPayload(`fid1:${P1}`) === P1 &&
+    fidPayload(` fid1:${P1} `) === P1 &&
+    fidPayload("of:fid1:" + P1) === "" &&
+    fidPayload("bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy") === "" &&
+    fidPayload("") === ""
+  );
+
+  // The shared join (the piece notes imports when backlinks-index's write
+  // path retires): one payload→entry map, one scan per corpus. First-mention
+  // order out, ascending referrers in; repeats, self-mentions, and payloads
+  // no entry owns all drop.
+  const assert_crossref_join = computed(() => {
+    const P3 = "C".repeat(43);
+    const joined = crossrefJoin(
+      [
+        `self fid1:${P1} then fid1:${P2}`,
+        "",
+        `fid1:${P2} twice fid1:${P2} then fid1:${P1} unknown fid1:${
+          "Z".repeat(43)
+        }`,
+      ],
+      [P1, P2, P3],
+    );
+    return joined.refsOut[0].join(",") === "1" &&
+      joined.refsOut[1].join(",") === "" &&
+      joined.refsOut[2].join(",") === "1,0" &&
+      joined.referencedBy[0].join(",") === "2" &&
+      joined.referencedBy[1].join(",") === "0,2" &&
+      joined.referencedBy[2].join(",") === "" &&
+      topicCorpus({
+          body: "b",
+          comments: [{ body: "c" }],
+          links: [{ url: "u" }],
+        }) === "b\nc\nu" &&
+      topicCorpus(undefined) === "";
+  });
+
   return {
+    // Continuous UI demand (#4715) over the board: its card list — including
+    // the in-card crossref chip rows — renders through the real reconciler
+    // while the suite runs. A board list element is the shared-safe
+    // TopicPiece projection and exposes no [UI]; the topic detail page is
+    // driven directly through the `render` steps below.
     [UI]: board[UI],
     tests: [
       { assertion: assert_initial },
@@ -255,6 +442,12 @@ export default pattern(() => {
       { assertion: assert_link_added },
       { action: action_add_second_topic },
       { assertion: assert_second_topic },
+      { assertion: assert_crossrefs_baseline },
+      { action: action_body_ref_first },
+      { assertion: assert_body_edge },
+      { assertion: assert_detail_edges },
+      { assertion: assert_lone_edgeless },
+      { assertion: assert_chip_row_markup },
       { action: action_comment_first_again },
       { action: action_submit_topic_via_composer },
       { assertion: assert_composed_topic },
@@ -277,6 +470,16 @@ export default pattern(() => {
       { assertion: assert_link_draft_flow },
       { action: action_open_topic },
       { assertion: assert_pure_helpers },
+      { action: action_comment_ref_encoded },
+      { assertion: assert_comment_edge },
+      { action: action_link_ref_second },
+      { assertion: assert_link_edge },
+      { action: action_self_and_unknown_ref },
+      { assertion: assert_self_unknown_ignored },
+      { action: action_remove_body_ref },
+      { assertion: assert_edge_removed },
+      { assertion: assert_crossref_helpers },
+      { assertion: assert_crossref_join },
     ],
   };
 });
