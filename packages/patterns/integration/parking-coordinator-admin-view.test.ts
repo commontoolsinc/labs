@@ -10,6 +10,9 @@ import {
 } from "./pieces-controller.ts";
 import {
   clickCfButtonAndWaitForText,
+  fillCfInput,
+  logStepTimings,
+  StepTimer,
   waitForDisabled,
   waitForRuntimeIdle,
   waitForText,
@@ -19,7 +22,13 @@ import {
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 describe("parking coordinator admin view integration test", () => {
-  const shell = new ShellIntegration();
+  const shell = new ShellIntegration({
+    presentation: {
+      id: "parking-coordinator",
+      label: "Parking coordinator",
+      color: "#2563eb",
+    },
+  });
   shell.bindLifecycle();
 
   let identity: Identity;
@@ -64,16 +73,7 @@ describe("parking coordinator admin view integration test", () => {
             active: true,
           },
         ],
-        people: [
-          {
-            name: "Alice",
-            email: "alice@example.test",
-            commuteMode: "drive",
-            spotPreferences: [],
-            defaultSpot: "",
-            priorityRank: 1,
-          },
-        ],
+        people: [],
         requests: [],
       },
     });
@@ -87,63 +87,175 @@ describe("parking coordinator admin view integration test", () => {
     await cc?.dispose();
   });
 
-  it("renders manager and admin controls with the expected enabled states", async () => {
+  it("bootstraps a team, adds capacity, and allocates parking through the UI", async () => {
+    const timeline = new StepTimer();
     const page = shell.page();
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: {
-        spaceName: SPACE_NAME,
-        pieceId,
-      },
-      identity,
-    });
-    await waitForRuntimeIdle(page);
+    try {
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: {
+          spaceName: SPACE_NAME,
+          pieceId,
+        },
+        identity,
+      });
+      await waitForRuntimeIdle(page);
 
-    await waitForText(page, "#parking-admin-access", "Alice");
-    await waitForText(page, "#parking-admin-access", "Cannot manage admins");
-    await waitForText(
-      page,
-      '[data-parking-admin-toggle="Alice"]',
-      "Make admin",
-    );
-    await waitForDisabled(page, "#parking-enable-admin-manager", false);
-    await waitForDisabled(page, '[data-parking-admin-toggle="Alice"]', true);
-    await waitForDisabled(page, "#parking-admin-mode-toggle", true);
-    await waitForTextAbsent(page, "#parking-admin-people-section", "People");
+      await timeline.run("The empty coordinator starts locked", async () => {
+        await waitForText(page, "body", "No team members yet");
+        await waitForText(
+          page,
+          "#parking-admin-access",
+          "Cannot manage admins",
+        );
+        await waitForDisabled(page, "#parking-enable-admin-manager", false);
+        await waitForDisabled(page, "#parking-admin-mode-toggle", true);
+        await waitForDisabled(page, "#parking-request-submit", true);
+        await waitForTextAbsent(
+          page,
+          "#parking-admin-people-section",
+          "People",
+        );
+      });
 
-    await clickCfButtonAndWaitForText(
-      page,
-      "#parking-enable-admin-manager",
-      "#parking-admin-access",
-      "Can manage admins",
-    );
-    await waitForRuntimeIdle(page);
-    await waitForDisabled(page, "#parking-enable-admin-manager", true);
-    await waitForDisabled(page, '[data-parking-admin-toggle="Alice"]', false);
+      await timeline.run(
+        "Demo manager access unlocks team setup",
+        async () => {
+          await clickCfButtonAndWaitForText(
+            page,
+            "#parking-enable-admin-manager",
+            "#parking-admin-people-section",
+            "People",
+          );
+          await waitForDisabled(page, "#parking-enable-admin-manager", true);
+          await waitForText(
+            page,
+            "#parking-admin-add-person-open",
+            "+ Add Person",
+          );
+        },
+      );
 
-    await clickCfButtonAndWaitForText(
-      page,
-      '[data-parking-admin-toggle="Alice"]',
-      '[data-parking-admin-row="Alice"]',
-      "Admin",
-    );
-    await waitForRuntimeIdle(page);
-    await waitForText(
-      page,
-      '[data-parking-admin-toggle="Alice"]',
-      "Remove admin",
-    );
-    await waitForDisabled(page, "#parking-admin-mode-toggle", false);
-    await waitForText(page, "#parking-admin-mode-toggle", "Admin: OFF");
+      await timeline.run("Alice joins the parking roster", async () => {
+        await clickCfButtonAndWaitForText(
+          page,
+          "#parking-admin-add-person-open",
+          "#parking-admin-add-person-form",
+          "Add Person",
+        );
+        await fillCfInput(
+          page,
+          "#parking-admin-add-person-name",
+          "Alice",
+        );
+        await fillCfInput(
+          page,
+          "#parking-admin-add-person-email",
+          "alice@example.test",
+        );
+        await fillCfInput(
+          page,
+          "#parking-admin-add-person-preferences",
+          "5, 1",
+        );
+        await clickCfButtonAndWaitForText(
+          page,
+          "#parking-admin-add-person-submit",
+          '[data-parking-admin-row="Alice"]',
+          "Alice",
+        );
+        await waitForTextAbsent(
+          page,
+          "#parking-admin-add-person-form",
+          "Add Person",
+        );
+        await waitForDisabled(page, "#parking-request-submit", false);
+      });
 
-    await clickCfButtonAndWaitForText(
-      page,
-      "#parking-admin-mode-toggle",
-      "#parking-admin-mode-toggle",
-      "Admin: ON",
-    );
-    await waitForRuntimeIdle(page);
-    await waitForText(page, "#parking-admin-people-section", "People");
-    await waitForText(page, "#parking-admin-add-person-open", "+ Add Person");
+      await timeline.run("Alice becomes the parking admin", async () => {
+        await clickCfButtonAndWaitForText(
+          page,
+          '[data-parking-admin-toggle="Alice"]',
+          '[data-parking-admin-row="Alice"]',
+          "Admin",
+        );
+        await waitForText(
+          page,
+          '[data-parking-admin-toggle="Alice"]',
+          "Remove admin",
+        );
+        await waitForDisabled(page, "#parking-admin-mode-toggle", false);
+      });
+
+      await timeline.run("Alice opens the admin tools", async () => {
+        await clickCfButtonAndWaitForText(
+          page,
+          "#parking-admin-mode-toggle",
+          "#parking-admin-mode-toggle",
+          "Admin: ON",
+        );
+        await waitForText(
+          page,
+          "#parking-admin-spots-section",
+          "Parking Spots",
+        );
+      });
+
+      await timeline.run("A new covered spot is added", async () => {
+        await clickCfButtonAndWaitForText(
+          page,
+          "#parking-admin-add-spot-open",
+          "#parking-admin-add-spot-form",
+          "Add Spot",
+        );
+        await fillCfInput(page, "#parking-admin-add-spot-number", "7");
+        await fillCfInput(
+          page,
+          "#parking-admin-add-spot-label",
+          "Level 2",
+        );
+        await fillCfInput(
+          page,
+          "#parking-admin-add-spot-notes",
+          "Covered",
+        );
+        await clickCfButtonAndWaitForText(
+          page,
+          "#parking-admin-add-spot-submit",
+          "#parking-admin-spots-section",
+          "Covered",
+        );
+        await waitForTextAbsent(
+          page,
+          "#parking-admin-add-spot-form",
+          "Add Spot",
+        );
+      });
+
+      await timeline.run("Alice requests today's parking", async () => {
+        await clickCfButtonAndWaitForText(
+          page,
+          "#parking-request-submit",
+          "#parking-request-result",
+          "Spot #5 allocated to Alice",
+        );
+        await waitForText(
+          page,
+          '[data-parking-today-spot="5"]',
+          "Alice",
+        );
+      });
+
+      await timeline.run("Duplicate requests are rejected", async () => {
+        await clickCfButtonAndWaitForText(
+          page,
+          "#parking-request-submit",
+          "#parking-request-result",
+          "already have an active request",
+        );
+      });
+    } finally {
+      logStepTimings("parking coordinator", timeline);
+    }
   });
 });
