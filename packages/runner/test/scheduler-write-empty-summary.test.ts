@@ -286,3 +286,59 @@ describe("runtime write-empty computation summaries (W2.14)", () => {
     ]);
   });
 });
+
+// The engine's claimed-commit admission requires every commit read covered by
+// observation ∪ summary reads. Framework-owned (scheduler-ignored) reads are
+// deliberately absent from the reactive log, so the runtime summary must fold
+// them in — the certified path covers them via its exhaustive certificate.
+// Measured failure without this: every claimed run of a W2.14/W2.15a action
+// rejected `unobserved-read` (flag-on default-app, 2026-07-15).
+describe("claimed-commit admission reads (framework-read folding)", () => {
+  const covered = (
+    reads: readonly IMemorySpaceAddress[],
+    target: IMemorySpaceAddress,
+  ) =>
+    reads.some((entry) =>
+      entry.space === target.space && entry.id === target.id &&
+      (entry.scope ?? "space") === (target.scope ?? "space") &&
+      target.path.join(" ").startsWith(entry.path.join(" "))
+    );
+
+  it("folds same-space space-scoped ignored reads into the summary", () => {
+    const observation = baseObservation();
+    const frameworkRead = address("of:argument-doc", { path: [] });
+    const summary = runtimeWriteEmptyComputationScopeSummary(observation, [
+      frameworkRead,
+    ]);
+    expect(summary).toBeDefined();
+    expect(covered(summary!.reads, frameworkRead)).toBe(true);
+    // The folded read must not widen the write envelope.
+    expect(summary!.writes).toEqual([address("of:output")]);
+  });
+
+  it("keeps foreign-space and scoped ignored reads uncovered (fail closed)", () => {
+    const observation = baseObservation();
+    const foreign = address("of:foreign-doc", { space: FOREIGN, path: [] });
+    const scoped = address("of:scoped-doc", {
+      scope: "session:abc" as IMemorySpaceAddress["scope"],
+      path: [],
+    });
+    const summary = runtimeWriteEmptyComputationScopeSummary(observation, [
+      foreign,
+      scoped,
+    ]);
+    expect(summary).toBeDefined();
+    expect(covered(summary!.reads, foreign)).toBe(false);
+    expect(covered(summary!.reads, scoped)).toBe(false);
+  });
+
+  it("adds cfc sibling reads for every summary doc (certified-path parity)", () => {
+    const observation = baseObservation();
+    const summary = runtimeWriteEmptyComputationScopeSummary(observation);
+    expect(summary).toBeDefined();
+    expect(covered(summary!.reads, address("of:output", { path: ["cfc"] })))
+      .toBe(true);
+    expect(covered(summary!.reads, address("of:input", { path: ["cfc"] })))
+      .toBe(true);
+  });
+});

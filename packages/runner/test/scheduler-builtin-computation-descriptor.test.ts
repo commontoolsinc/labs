@@ -204,6 +204,36 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
     expect(serverBuiltinComputationScopeSummary(obs, descriptor("ifElse")))
       .toBeUndefined();
   });
+
+  it("folds framework (scheduler-ignored) reads and cfc siblings into the summary", () => {
+    // Claimed-commit admission requires every commit read covered by
+    // observation ∪ summary reads; the argument-resolution reads are absent
+    // from the reactive log, so the descriptor summary must fold them in.
+    const obs = observation("ifElse");
+    const frameworkRead = valueAddress("of:argument-doc", { path: [] });
+    const foreignRead = valueAddress("of:foreign-doc", {
+      space: "did:key:z6Mk-elsewhere" as IMemorySpaceAddress["space"],
+      path: [],
+    });
+    const summary = serverBuiltinComputationScopeSummary(
+      obs,
+      descriptor("ifElse"),
+      [frameworkRead, foreignRead],
+    );
+    expect(summary).toBeDefined();
+    const covers = (target: IMemorySpaceAddress) =>
+      summary!.reads.some((entry) =>
+        entry.space === target.space && entry.id === target.id &&
+        target.path.join(" ").startsWith(entry.path.join(" "))
+      );
+    expect(covers(frameworkRead)).toBe(true);
+    expect(covers(foreignRead)).toBe(false);
+    // CFC label sibling for the output doc, mirroring the certified path.
+    expect(covers(valueAddress("of:output", { path: ["cfc"] }))).toBe(true);
+    // Folding must not widen the write envelope.
+    expect(summary!.writes.some((entry) => entry.id === frameworkRead.id))
+      .toBe(false);
+  });
 });
 
 const integrationSigner = await Identity.fromPassphrase(

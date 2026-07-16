@@ -14,6 +14,8 @@ import {
   isPermanentRejection,
   isTerminalRejection,
 } from "../storage/rejection.ts";
+import { isReadIgnoredForScheduling } from "../storage/reactivity-log.ts";
+import { getTransactionReadActivities } from "../storage/transaction-inspection.ts";
 import { sortAndCompactPaths } from "../reactive-dependencies.ts";
 import {
   MAX_ACTION_RUN_TRACE_HISTORY,
@@ -850,6 +852,7 @@ function attachSchedulerActionObservation(
     : withRuntimeComputationScopeSummary(
       baseObservation,
       annotated.serverBuiltinComputation,
+      schedulerIgnoredReadAddresses(args.tx),
     );
 
   try {
@@ -932,9 +935,19 @@ export function schedulerRuntimeFingerprint(): string {
  * space-scoped root value address, with no materializer or declared writes
  * beyond it. Effects are excluded (they keep `unknown-effect-surface`), and a
  * present certificate or effect-descriptor summary is never overridden.
+ *
+ * `ignoredReads` is this run's scheduler-ignored (framework-owned) read set —
+ * argument/piece/internal resolution reads deliberately excluded from the
+ * reactive log. The engine's claimed-commit admission requires every commit
+ * read to be covered by observation ∪ summary reads, and the certified path
+ * covers these via its exhaustive static certificate; the runtime summary must
+ * fold them in the same way or every claimed run rejects `unobserved-read`.
+ * Only same-space, space-scoped addresses are folded — anything else stays
+ * uncovered and fails closed.
  */
 export function runtimeWriteEmptyComputationScopeSummary(
   observation: SchedulerActionObservation,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
 ): CompleteActionScopeSummary | undefined {
   if (observation.actionKind !== "computation") return undefined;
   // Never override a transformer certificate or an effect-descriptor summary.
@@ -982,10 +995,14 @@ export function runtimeWriteEmptyComputationScopeSummary(
     // Observed-log reads; C0 admits them dynamically at the firewall. A scoped
     // or foreign read still trips the classifier's same-space check, so pass
     // them through rather than suppressing the evidence.
-    reads: sortAndCompactPaths([
-      ...observation.reads,
-      ...observation.shallowReads,
-    ]),
+    reads: claimedCommitAdmissionReads(
+      [
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...sameSpaceSpaceScopedReads(ignoredReads, ownerSpace),
+      ],
+      [directOutput],
+    ),
     writes: [cloneMemoryAddress(directOutput)],
     materializerWriteEnvelopes: [],
     directOutputs: [cloneMemoryAddress(directOutput)],
@@ -1003,13 +1020,67 @@ export function runtimeWriteEmptyComputationScopeSummary(
 function withRuntimeComputationScopeSummary(
   observation: SchedulerActionObservation,
   computationDescriptor: ServerBuiltinComputationDescriptor | undefined,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
 ): SchedulerActionObservation {
-  const summary =
-    serverBuiltinComputationScopeSummary(observation, computationDescriptor) ??
-      runtimeWriteEmptyComputationScopeSummary(observation);
+  const summary = serverBuiltinComputationScopeSummary(
+    observation,
+    computationDescriptor,
+    ignoredReads,
+  ) ?? runtimeWriteEmptyComputationScopeSummary(observation, ignoredReads);
   return summary === undefined
     ? observation
     : { ...observation, completeActionScopeSummary: summary };
+}
+
+/**
+ * This run's scheduler-ignored (framework-owned) reads: argument/piece/internal
+ * resolution reads deliberately kept out of the reactive log so they never
+ * drive wakes. Claimed-commit admission still requires them covered by the
+ * summary, so the runtime summary assemblers fold them in per run.
+ */
+function schedulerIgnoredReadAddresses(
+  tx: IExtendedStorageTransaction,
+): IMemorySpaceAddress[] {
+  const reads: IMemorySpaceAddress[] = [];
+  for (const activity of getTransactionReadActivities(tx)) {
+    if (!isReadIgnoredForScheduling(activity.meta)) continue;
+    reads.push({
+      space: activity.space,
+      scope: normalizeCellScope(activity.scope),
+      id: activity.id,
+      path: [...activity.path],
+    });
+  }
+  return reads;
+}
+
+function sameSpaceSpaceScopedReads(
+  reads: readonly IMemorySpaceAddress[],
+  space: string,
+): IMemorySpaceAddress[] {
+  return reads.filter((address) =>
+    address.space === space &&
+    normalizeCellScope(address.scope) === "space"
+  ).map(cloneMemoryAddress);
+}
+
+/**
+ * The read set the engine's claimed-commit admission is checked against.
+ * Mirrors the certified path's structural addition: CFC preparation reads the
+ * raw document-level label envelope beside the value reads, so every summary
+ * doc gets a `["cfc"]` sibling read.
+ */
+function claimedCommitAdmissionReads(
+  reads: readonly IMemorySpaceAddress[],
+  writesAndOutputs: readonly IMemorySpaceAddress[],
+): IMemorySpaceAddress[] {
+  return sortAndCompactPaths([
+    ...reads,
+    ...[...reads, ...writesAndOutputs].map((address) => ({
+      ...address,
+      path: ["cfc"],
+    })),
+  ]);
 }
 
 /**
@@ -1026,6 +1097,7 @@ function withRuntimeComputationScopeSummary(
 export function serverBuiltinComputationScopeSummary(
   observation: SchedulerActionObservation,
   descriptor: ServerBuiltinComputationDescriptor | undefined,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
 ): CompleteActionScopeSummary | undefined {
   if (descriptor === undefined || descriptor.version !== 1) return undefined;
   if (observation.actionKind !== "computation") return undefined;
@@ -1041,21 +1113,27 @@ export function serverBuiltinComputationScopeSummary(
   }
   if (descriptor.directOutputs.length !== 1) return undefined;
 
+  const piece = toMemorySpaceAddress(descriptor.piece);
+  const writes = sortAndCompactPaths([
+    ...descriptor.writes.map(toMemorySpaceAddress),
+    ...descriptor.directOutputs.map(toMemorySpaceAddress),
+  ]);
   return {
     version: 1,
     complete: true,
     implementationFingerprint: observation.implementationFingerprint,
     runtimeFingerprint: observation.runtimeFingerprint,
-    piece: toMemorySpaceAddress(descriptor.piece),
-    reads: sortAndCompactPaths([
-      ...descriptor.reads.map(toMemorySpaceAddress),
-      ...observation.reads,
-      ...observation.shallowReads,
-    ]),
-    writes: sortAndCompactPaths([
-      ...descriptor.writes.map(toMemorySpaceAddress),
-      ...descriptor.directOutputs.map(toMemorySpaceAddress),
-    ]),
+    piece,
+    reads: claimedCommitAdmissionReads(
+      [
+        ...descriptor.reads.map(toMemorySpaceAddress),
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...sameSpaceSpaceScopedReads(ignoredReads, piece.space),
+      ],
+      writes,
+    ),
+    writes,
     materializerWriteEnvelopes: [],
     directOutputs: descriptor.directOutputs.map(toMemorySpaceAddress),
   };
