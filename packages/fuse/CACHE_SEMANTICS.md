@@ -7,8 +7,11 @@ meaning has already changed across FUSE-T versions), and the reasoning behind ho
 mount flag or debugging a "file exists but the mount can't see it yet" report,
 start here.
 
-The reproducible harness that produced the measurements below lives in
-[`experiments/cache-semantics/`](./experiments/cache-semantics/).
+The measurements below were taken with a small synthetic FUSE-T filesystem that
+makes a file begin to exist daemon-side with no client syscall, while logging
+every kernel request — so a stat/readdir served from the client cache is
+distinguishable from one that reached the daemon. Re-measure that way (and read
+`nfsstat -m`) before trusting flag behavior on a new FUSE-T version.
 
 ## The short version
 
@@ -57,8 +60,7 @@ cache. Do not assume its effect; read `nfsstat -m` on the version you ship.
 
 ## The two staleness behaviors (measured)
 
-Measured with the harness on macOS 15 / arm64, FUSE-T **1.0.49** and **1.2.7**
-(a file made to exist daemon-side with no client syscall, then observed):
+Measured on macOS 15 / arm64, FUSE-T **1.0.49** and **1.2.7**:
 
 | Behavior | Cause | Default | With `-o noattrcache` |
 | --- | --- | --- | --- |
