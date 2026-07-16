@@ -15,7 +15,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForCellValue } from "./support/wait-for-cell-value.ts";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("test operator");

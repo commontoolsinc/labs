@@ -32,7 +32,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForCellValue } from "./support/wait-for-cell-value.ts";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { isSigilLink } from "../src/link-utils.ts";
 
 // Fresh identity per RUN: the server derives the on-disk cell-db file from the

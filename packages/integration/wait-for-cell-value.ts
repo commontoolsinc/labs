@@ -1,6 +1,5 @@
 import { defer } from "@commonfabric/utils/defer";
-import type { Cell } from "../../src/cell.ts";
-import type { Runtime } from "../../src/runtime.ts";
+import type { Cell, Runtime } from "@commonfabric/runner";
 
 /**
  * Resolve with `cell`'s value once `predicate` accepts it at a quiescent
