@@ -1,6 +1,13 @@
 import { assert, assertEquals, assertExists, assertThrows } from "@std/assert";
 import { toFileUrl } from "@std/path";
-import type { ClientCommit, ExecutionClaim, ExecutionLease } from "../v2.ts";
+import type { FabricValue } from "@commonfabric/api";
+import type {
+  ClientCommit,
+  EntityDocument,
+  ExecutionClaim,
+  ExecutionLease,
+} from "../v2.ts";
+import { scopeNamingLinkForPath } from "../v2/scope-naming-link.ts";
 import * as Engine from "../v2/engine.ts";
 import type {
   SchedulerActionObservation,
@@ -207,12 +214,19 @@ const applyClaimedSemanticCommit = (
   claim: ExecutionClaim,
   outputId: string,
   nowMs: number,
+  // C1.2: a scoped lane's broad writes must be scope-naming links; only the
+  // space lane may commit broad values.
+  value: FabricValue = 1,
 ) => {
   const output = spaceAddress(outputId);
   const commit: ClientCommit = {
     localSeq: 1,
     reads: { confirmed: [], pending: [] },
-    operations: [{ op: "set", id: output.id, value: { value: 1 } }],
+    operations: [{
+      op: "set",
+      id: output.id,
+      value: { value } as EntityDocument,
+    }],
     schedulerObservation: claimedRunObservation(claim, [output]),
   };
   return Engine.applyCommit(engine, {
@@ -232,16 +246,21 @@ Deno.test("user-rank claim commits at the pre-narrowed user context", async () =
     narrowFloorToUser(engine);
     const lease = acquire(engine, nowMs);
     const claim = claimFor(lease, USER_CONTEXT_KEY);
+    // Since C1.2, a scoped lane's broad write is admissible only as the
+    // conforming scope-naming link; the corner keeps its all-space run
+    // surfaces while the semantic operation carries the link shape.
+    const broadLink = scopeNamingLinkForPath([]);
     const applied = applyClaimedSemanticCommit(
       engine,
       lease,
       claim,
       "of:claim-context-output",
       nowMs + 1,
+      broadLink,
     );
     assertEquals(
       Engine.read(engine, { id: "of:claim-context-output" }),
-      { value: 1 },
+      { value: broadLink },
     );
     assertExists(applied.schedulerObservationResults);
     const [result] = applied.schedulerObservationResults;

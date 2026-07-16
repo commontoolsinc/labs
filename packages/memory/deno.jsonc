@@ -32,6 +32,7 @@
     "./v2/patch": "./v2/patch.ts",
     "./v2/client": "./v2/client.ts",
     "./v2/engine": "./v2/engine.ts",
+    "./v2/scope-naming-link": "./v2/scope-naming-link.ts",
     "./v2/server": "./v2/server.ts",
     "./v2/standalone": "./v2/standalone.ts",
     "./v2/session-open-auth": "./v2/session-open-auth.ts",

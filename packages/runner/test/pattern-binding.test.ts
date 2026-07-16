@@ -18,6 +18,10 @@ import {
   parseLink,
 } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import {
+  SCOPE_NAMING_LINK_CONFORMANCE,
+  scopeNamingLinkForPath,
+} from "@commonfabric/memory/v2/scope-naming-link";
 import { isCell } from "../src/cell.ts";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
@@ -210,6 +214,56 @@ describe("pattern-binding", () => {
           scopedValue.getAsNormalizedFullLink(),
         ),
       ).toBe(true);
+    });
+
+    it("emits the shared scope-naming-link conformance shape for broad-instance writes", () => {
+      // Emit-side half of the C1.2 wire contract (context-lattice §4): the
+      // broad-instance write output-scoping emits must equal the shared
+      // conformance fixture the engine firewall accepts. Memory takes no
+      // runner dependency; this test is the cross-package pin.
+      const output = runtime.getCell<{ value: unknown }>(
+        space,
+        "scope naming link conformance output",
+        undefined,
+        tx,
+      );
+      output.set({ value: null });
+      const argumentCellLink = getMetaCell(output, "argument", tx)
+        .getAsNormalizedFullLink();
+
+      const source = runtime.getCell<string>(
+        space,
+        "scope naming link conformance source",
+        undefined,
+        tx,
+      );
+      source.set("secret");
+
+      sendValueToBinding(
+        tx,
+        output,
+        argumentCellLink,
+        output.key("value").getAsWriteRedirectLink(),
+        source,
+        { narrowestReadScope: "user" },
+      );
+
+      const broadRaw = JSON.parse(
+        JSON.stringify(output.key("value").getRaw()),
+      );
+      expect(broadRaw).toEqual(SCOPE_NAMING_LINK_CONFORMANCE.link);
+      expect(broadRaw).toEqual(
+        scopeNamingLinkForPath(SCOPE_NAMING_LINK_CONFORMANCE.cellPath),
+      );
+      // The addressing-fields envelope and nothing else: no schema, no
+      // principal or session id, no space — the reading context supplies
+      // those, which is what makes the write byte-identical across lanes.
+      const payload = broadRaw["/"]["link@1"];
+      expect(Object.keys(payload).sort()).toEqual([
+        "overwrite",
+        "path",
+        "scope",
+      ]);
     });
 
     it("normalizes nested cell values before writing a narrower scoped binding", () => {

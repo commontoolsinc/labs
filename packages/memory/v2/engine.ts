@@ -7,7 +7,13 @@ import {
   patchOpChangesParentKeySet,
   touchedPointerPaths,
 } from "./patch.ts";
-import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
+import {
+  isPrefixPath,
+  parentPath,
+  parsePointer,
+  pathsOverlap,
+} from "./path.ts";
+import { scopeNamingLinkWriteViolation } from "./scope-naming-link.ts";
 import {
   type AcceptedCommitSeq,
   type ActionExecutionProvenance,
@@ -5518,10 +5524,49 @@ const rejectExecutionAction = (
   throw new ExecutionActionFirewallError(diagnosticCode, message);
 };
 
-const assertSpaceScopedAddress = (
+/**
+ * The scope keys one claimed lane may touch: the shared space scope, plus —
+ * for a scoped lane — exactly that lane's own scope key. `undefined` is the
+ * space lane, whose checks stay byte-identical to the pre-lane firewall.
+ * The claim contextKey doubles as the lane scope key because both use the
+ * canonical `user:<encodeURIComponent(principal)>` encoding
+ * (`userExecutionContextKey`).
+ */
+type LaneScopeKey = string | undefined;
+
+const laneScopeKeyForClaimContext = (
+  contextKey: SchedulerExecutionContextKey,
+): LaneScopeKey => {
+  if (contextKey === "space") return undefined;
+  if (principalOfUserContextKey(contextKey) !== undefined) return contextKey;
+  // Session lanes arrive with C2; claim admission already fences them, so
+  // this is a defensive fail-closed backstop.
+  return rejectExecutionAction(
+    "non-lane-scope",
+    `claim context ${contextKey} has no servable lane`,
+  );
+};
+
+const rejectNonLaneScope = (
+  laneScopeKey: LaneScopeKey,
+  kind: string,
+  id: string,
+): never =>
+  laneScopeKey === undefined
+    ? rejectExecutionAction(
+      "non-space-scope",
+      `${kind} ${id} does not resolve to the space scope`,
+    )
+    : rejectExecutionAction(
+      "non-lane-scope",
+      `${kind} ${id} resolves outside the space and lane scopes`,
+    );
+
+const assertLaneScopedAddress = (
   address: SchedulerObservationAddress,
   servedSpace: string,
   scopeContext: SchedulerScopeContext,
+  laneScopeKey: LaneScopeKey,
 ): void => {
   if (address.space !== servedSpace) {
     rejectExecutionAction(
@@ -5529,11 +5574,71 @@ const assertSpaceScopedAddress = (
       `surface ${address.id} belongs to ${address.space}, not ${servedSpace}`,
     );
   }
-  if (resolveScopeKey(address.scope, scopeContext) !== DEFAULT_SCOPE_KEY) {
-    rejectExecutionAction(
-      "non-space-scope",
-      `surface ${address.id} does not resolve to the space scope`,
+  const resolved = resolveScopeKey(address.scope, scopeContext);
+  if (resolved === DEFAULT_SCOPE_KEY) return;
+  if (laneScopeKey === undefined || resolved !== laneScopeKey) {
+    rejectNonLaneScope(laneScopeKey, "surface", address.id);
+  }
+};
+
+/**
+ * Broad-instance scope-naming-link backstop (context-lattice §4 / C1.2): a
+ * scoped lane may write a broad document only as the conforming self-scoping
+ * link the runner's output-scoping step emits — the shared wire contract in
+ * `scope-naming-link.ts`. A broad value write from a lane means
+ * output-scoping failed and rejects the whole transaction.
+ */
+const assertLaneBroadScopeNamingWrite = (
+  operation: Exclude<Operation, SqliteOperation>,
+): void => {
+  const reject: (code: string, detail: string) => never = (code, detail) =>
+    rejectExecutionAction(code, `broad lane write ${operation.id}: ${detail}`);
+  if (operation.op === "delete") {
+    return reject(
+      "broad-lane-value-write",
+      "broad deletes are value mutations",
     );
+  }
+  if (operation.op === "set") {
+    const document = operation.value ?? {};
+    for (const key of Object.keys(document)) {
+      if (key !== "value") {
+        reject(
+          "broad-lane-value-write",
+          `document field "${key}" is not a scope-naming link position`,
+        );
+      }
+    }
+    const violation = scopeNamingLinkWriteViolation({
+      value: document.value,
+      documentPath: ["value"],
+      writtenDocId: operation.id,
+    });
+    if (violation !== undefined) reject(violation.code, violation.detail);
+    return;
+  }
+  // op === "patch": only exact-position writes can prove the self-redirect
+  // property at commit time; positional and merge kinds stay value writes.
+  for (const patch of operation.patches) {
+    if (patch.op !== "replace" && patch.op !== "add") {
+      return reject(
+        "broad-lane-value-write",
+        `patch op ${patch.op} is not a scope-naming link write`,
+      );
+    }
+    const documentPath = parsePointer(patch.path);
+    if (documentPath[0] !== "value") {
+      reject(
+        "broad-lane-value-write",
+        `patch at ${patch.path} is outside the document value`,
+      );
+    }
+    const violation = scopeNamingLinkWriteViolation({
+      value: patch.value,
+      documentPath,
+      writtenDocId: operation.id,
+    });
+    if (violation !== undefined) reject(violation.code, violation.detail);
   }
 };
 
@@ -5548,11 +5653,14 @@ const assertExecutionActionTransaction = (
     servedSpace: string;
     branch: BranchName;
     scopeContext: SchedulerScopeContext;
+    /** The asserted claim's lane; `"space"` keeps the pre-lane firewall. */
+    claimContextKey: SchedulerExecutionContextKey;
     transaction: ExecutionActionTransaction;
     observation: SchedulerActionObservation;
   },
 ): void => {
   const { observation, transaction } = options;
+  const laneScopeKey = laneScopeKeyForClaimContext(options.claimContextKey);
   if (
     observation.ownerSpace !== options.servedSpace ||
     observation.branch !== options.branch
@@ -5571,17 +5679,19 @@ const assertExecutionActionTransaction = (
   }
 
   for (const address of schedulerSummaryAddresses(summary)) {
-    assertSpaceScopedAddress(
+    assertLaneScopedAddress(
       address,
       options.servedSpace,
       options.scopeContext,
+      laneScopeKey,
     );
   }
   for (const address of schedulerObservationAddresses(observation)) {
-    assertSpaceScopedAddress(
+    assertLaneScopedAddress(
       address,
       options.servedSpace,
       options.scopeContext,
+      laneScopeKey,
     );
   }
   if (schedulerRuntimeWritesExceedSummary(observation, summary)) {
@@ -5598,15 +5708,13 @@ const assertExecutionActionTransaction = (
     );
   }
   for (const precondition of transaction.preconditions ?? []) {
+    if (precondition.kind !== "entity-absent") continue;
+    const resolved = resolveScopeKey(precondition.scope, options.scopeContext);
     if (
-      precondition.kind === "entity-absent" &&
-      resolveScopeKey(precondition.scope, options.scopeContext) !==
-        DEFAULT_SCOPE_KEY
+      resolved !== DEFAULT_SCOPE_KEY &&
+      (laneScopeKey === undefined || resolved !== laneScopeKey)
     ) {
-      rejectExecutionAction(
-        "non-space-scope",
-        `precondition ${precondition.id} does not resolve to the space scope`,
-      );
+      rejectNonLaneScope(laneScopeKey, "precondition", precondition.id);
     }
   }
 
@@ -5627,13 +5735,12 @@ const assertExecutionActionTransaction = (
         `confirmed read ${read.id} belongs to another branch`,
       );
     }
+    const resolved = resolveScopeKey(read.scope, options.scopeContext);
     if (
-      resolveScopeKey(read.scope, options.scopeContext) !== DEFAULT_SCOPE_KEY
+      resolved !== DEFAULT_SCOPE_KEY &&
+      (laneScopeKey === undefined || resolved !== laneScopeKey)
     ) {
-      rejectExecutionAction(
-        "non-space-scope",
-        `confirmed read ${read.id} does not resolve to the space scope`,
-      );
+      rejectNonLaneScope(laneScopeKey, "confirmed read", read.id);
     }
     const address: SchedulerObservationAddress = {
       space: options.servedSpace,
@@ -5649,13 +5756,12 @@ const assertExecutionActionTransaction = (
     }
   }
   for (const read of transaction.reads.pending) {
+    const resolved = resolveScopeKey(read.scope, options.scopeContext);
     if (
-      resolveScopeKey(read.scope, options.scopeContext) !== DEFAULT_SCOPE_KEY
+      resolved !== DEFAULT_SCOPE_KEY &&
+      (laneScopeKey === undefined || resolved !== laneScopeKey)
     ) {
-      rejectExecutionAction(
-        "non-space-scope",
-        `pending read ${read.id} does not resolve to the space scope`,
-      );
+      rejectNonLaneScope(laneScopeKey, "pending read", read.id);
     }
     const address: SchedulerObservationAddress = {
       space: options.servedSpace,
@@ -5679,18 +5785,22 @@ const assertExecutionActionTransaction = (
       );
       continue;
     }
+    const resolvedScope = resolveScopeKey(
+      operation.scope,
+      options.scopeContext,
+    );
     if (
-      resolveScopeKey(operation.scope, options.scopeContext) !==
-        DEFAULT_SCOPE_KEY
+      resolvedScope !== DEFAULT_SCOPE_KEY &&
+      (laneScopeKey === undefined || resolvedScope !== laneScopeKey)
     ) {
-      rejectExecutionAction(
-        "non-space-scope",
-        `write ${operation.id} does not resolve to the space scope`,
-      );
+      rejectNonLaneScope(laneScopeKey, "write", operation.id);
+    }
+    if (laneScopeKey !== undefined && resolvedScope === DEFAULT_SCOPE_KEY) {
+      assertLaneBroadScopeNamingWrite(operation);
     }
     const matchingWrites = observation.actualChangedWrites.filter((write) =>
       write.space === options.servedSpace && write.id === operation.id &&
-      resolveScopeKey(write.scope, options.scopeContext) === DEFAULT_SCOPE_KEY
+      resolveScopeKey(write.scope, options.scopeContext) === resolvedScope
     );
     if (matchingWrites.length === 0) {
       rejectExecutionAction(
@@ -7378,6 +7488,7 @@ const applyCommitTransaction = (
       servedSpace: space!,
       branch,
       scopeContext: { principal: principal!, sessionId: scopeSessionId },
+      claimContextKey: executionClaim!.contextKey,
       transaction: commit,
       observation: schedulerObservation!,
     });
@@ -8377,6 +8488,7 @@ const applySchedulerObservationOnlyCommit = (
         servedSpace: space!,
         branch,
         scopeContext: { principal: principal!, sessionId: scopeSessionId },
+        claimContextKey: executionClaim!.contextKey,
         transaction,
         observation: schedulerObservation,
       });
