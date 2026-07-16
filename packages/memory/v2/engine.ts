@@ -91,6 +91,35 @@ export const principalOfSessionKey = (key: string): string | undefined => {
   }
 };
 
+/**
+ * Canonical `user:<principal>` scope/execution-context key. The principal
+ * segment is encodeURIComponent-encoded, so a colon-bearing did:key principal
+ * never appears raw — naive `user:${did}` concatenation never matches a
+ * canonical key. The single construction site for user-rank keys; parse with
+ * `principalOfUserContextKey`.
+ */
+export const userExecutionContextKey = (principal: string): `user:${string}` =>
+  `user:${encodeScopeKeyPart(principal)}`;
+
+/**
+ * Principal segment of a canonical user context key per
+ * `userExecutionContextKey`. Returns `undefined` for anything that is not a
+ * well-formed user-rank key (wrong prefix, empty or raw-colon-bearing
+ * segment, undecodable escape).
+ */
+export const principalOfUserContextKey = (key: string): string | undefined => {
+  if (!key.startsWith("user:")) return undefined;
+  const encodedPrincipal = key.slice("user:".length);
+  if (encodedPrincipal.length === 0 || encodedPrincipal.includes(":")) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(encodedPrincipal);
+  } catch {
+    return undefined;
+  }
+};
+
 export const resolveScopeKey = (
   scope: CellScope | undefined,
   options: { principal?: string; sessionId?: SessionId },
@@ -105,7 +134,7 @@ export const resolveScopeKey = (
           "user scoped memory operations require a principal",
         );
       }
-      return `user:${encodeScopeKeyPart(options.principal)}`;
+      return userExecutionContextKey(options.principal);
     case "session":
       if (!options.principal) {
         throw new ProtocolError(
@@ -1199,7 +1228,8 @@ const isSchedulerExecutionContextKey = (
 ): value is SchedulerExecutionContextKey =>
   value === "space" ||
   (typeof value === "string" &&
-    (/^user:[^:]+$/.test(value) || /^session:[^:]+:[^:]+$/.test(value)));
+    (principalOfUserContextKey(value) !== undefined ||
+      /^session:[^:]+:[^:]+$/.test(value)));
 
 const isExecutionClaimAssertion = (
   value: unknown,
@@ -6168,9 +6198,9 @@ function schedulerScopeKeyForExecutionContext(
   let contextScope: "space" | "user" | "session";
   if (executionContextKey === "space") {
     contextScope = "space";
-  } else if (parts.length === 2 && parts[0] === "user" && parts[1] !== "") {
+  } else if (principalOfUserContextKey(executionContextKey) !== undefined) {
     contextScope = "user";
-    encodedPrincipal = parts[1];
+    encodedPrincipal = executionContextKey.slice("user:".length);
   } else if (
     parts.length === 3 && parts[0] === "session" && parts[1] !== "" &&
     parts[2] !== ""
@@ -6182,16 +6212,19 @@ function schedulerScopeKeyForExecutionContext(
   }
 
   try {
-    if (encodedPrincipal !== undefined) {
-      decodeURIComponent(encodedPrincipal);
+    if (contextScope === "session") {
+      decodeURIComponent(encodedPrincipal!);
+      decodeURIComponent(parts[2]);
     }
-    if (contextScope === "session") decodeURIComponent(parts[2]);
   } catch {
     return undefined;
   }
 
   if (scope === "space") return DEFAULT_SCOPE_KEY;
   if (scope === "user" && encodedPrincipal !== undefined) {
+    // The segment is already canonically encoded (it comes from a stored
+    // context key), so re-attach the rank prefix rather than re-encoding a
+    // decoded principal through userExecutionContextKey.
     return `user:${encodedPrincipal}`;
   }
   if (scope === "session" && contextScope === "session") {
@@ -7923,20 +7956,9 @@ const resolvedPendingReadsForBasis = (
 // resolves.
 const isAdmissibleExecutionClaimContextKey = (
   contextKey: SchedulerExecutionContextKey,
-): boolean => {
-  if (contextKey === "space") return true;
-  if (!contextKey.startsWith("user:")) return false;
-  const encodedPrincipal = contextKey.slice("user:".length);
-  if (encodedPrincipal.length === 0 || encodedPrincipal.includes(":")) {
-    return false;
-  }
-  try {
-    decodeURIComponent(encodedPrincipal);
-  } catch {
-    return false;
-  }
-  return true;
-};
+): boolean =>
+  contextKey === "space" ||
+  principalOfUserContextKey(contextKey) !== undefined;
 
 const claimKeyFromExecutionClaim = (
   claim: ExecutionClaim,

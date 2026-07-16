@@ -370,6 +370,58 @@ Deno.test("space-rank claim behavior is unchanged by user-rank admission", async
   }
 });
 
+Deno.test("canonical user context key helpers round-trip colon-bearing DIDs", () => {
+  const did = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const key = Engine.userExecutionContextKey(did);
+  // Construction delegates to the engine's scope-key encoding: colons are
+  // percent-encoded, so the canonical key never carries the DID raw.
+  assertEquals(key, `user:${encodeURIComponent(did)}`);
+  assertEquals(key, Engine.resolveScopeKey("user", { principal: did }));
+  assertEquals(Engine.principalOfUserContextKey(key), did);
+  // Naive concatenation, empty principals, and foreign ranks do not parse.
+  assertEquals(Engine.principalOfUserContextKey(`user:${did}`), undefined);
+  assertEquals(Engine.principalOfUserContextKey("user:"), undefined);
+  assertEquals(Engine.principalOfUserContextKey("space"), undefined);
+  assertEquals(
+    Engine.principalOfUserContextKey(
+      Engine.resolveScopeKey("session", { principal: did, sessionId: "s" }),
+    ),
+    undefined,
+  );
+});
+
+Deno.test("the claim guard admits a helper-built colon-bearing user key", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    narrowFloorToUser(engine);
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(
+      lease,
+      Engine.userExecutionContextKey(
+        PRINCIPAL,
+      ) as SchedulerExecutionContextKey,
+    );
+    const applied = applyClaimedObservationOnly(
+      engine,
+      lease,
+      claim,
+      nowMs + 1,
+    );
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, USER_CONTEXT_KEY);
+    assertEquals(
+      result.executionProvenance?.claim.contextKey,
+      USER_CONTEXT_KEY,
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("with-operations context mismatch fences claim-context-mismatch", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;

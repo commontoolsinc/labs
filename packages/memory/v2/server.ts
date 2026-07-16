@@ -23,6 +23,7 @@ import {
   type ExecutionLease,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
+  getServerPrimaryExecutionClaimRankConfig,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
@@ -1379,24 +1380,42 @@ export class Server {
   }
 
   #assertExecutionClaimCapabilityEnabled(
-    actionKind: ExecutionClaimInput["actionKind"],
+    claim: Pick<ExecutionClaimInput, "actionKind" | "contextKey">,
   ): void {
     const flags = this.memoryProtocolFlags();
     if (!flags.serverPrimaryExecutionV1) {
       throw new Error("server-primary-execution-v1 is disabled");
     }
     if (
-      actionKind === "computation" &&
+      claim.actionKind === "computation" &&
       !flags.serverPrimaryExecutionClaimRoutingV1
     ) {
       throw new Error("server-primary computation claim routing is disabled");
     }
     if (
-      actionKind === "effect" &&
+      claim.actionKind === "effect" &&
       !flags.serverPrimaryExecutionBuiltinPassivityV1
     ) {
       throw new Error("server-primary builtin passivity is disabled");
     }
+    if (!this.#executionClaimRankEnabled(claim.contextKey)) {
+      throw new Error(
+        "server-primary execution claim rank is not enabled for this context",
+      );
+    }
+  }
+
+  /** Issuance-side rank dial (context-lattice §6): the host issues claims
+   * only up to the enabled context rank. Space is always issuable; user rank
+   * requires the dial; session rank stays un-issuable until C2 wires it into
+   * the ladder. Rank enablement gates ISSUANCE and RENEWAL only — the
+   * engine's commit-time claim guards are rank-independent. */
+  #executionClaimRankEnabled(
+    contextKey: ExecutionClaimInput["contextKey"],
+  ): boolean {
+    if (contextKey === "space") return true;
+    return Engine.principalOfUserContextKey(contextKey) !== undefined &&
+      getServerPrimaryExecutionClaimRankConfig() === "user";
   }
 
   sessionOpenAudience(): string {
@@ -3198,7 +3217,10 @@ export class Server {
       claim.runtimeFingerprint.length === 0 ||
       claim.runtimeFingerprint.length > 1024 ||
       (claim.contextKey !== "space" &&
-        !claim.contextKey.startsWith("user:") &&
+        // User-rank keys must be canonical (colon-safe encoded principal);
+        // session-rank keys keep prefix-only wire admission until C2 owns
+        // their canonical shape.
+        Engine.principalOfUserContextKey(claim.contextKey) === undefined &&
         !claim.contextKey.startsWith("session:")) ||
       (claim.actionKind !== "computation" && claim.actionKind !== "effect" &&
         claim.actionKind !== "event-handler")
@@ -3302,7 +3324,7 @@ export class Server {
     claimInput: ExecutionClaimInput,
   ): Promise<ExecutionClaim> {
     this.#validateExecutionClaimInput(claimInput);
-    this.#assertExecutionClaimCapabilityEnabled(claimInput.actionKind);
+    this.#assertExecutionClaimCapabilityEnabled(claimInput);
     const authority = this.#executionLeaseAuthorities.get(lease);
     const owned = this.#ownedExecutionLeases.get(
       executionLeaseKey(claimInput.space, claimInput.branch),
@@ -3321,7 +3343,7 @@ export class Server {
     // Engine setup is an authority boundary: the lease may expire or host
     // lifecycle may begin draining/replacing this slot while the open awaits.
     // Re-sample and re-read every host/durable authority input afterwards.
-    this.#assertExecutionClaimCapabilityEnabled(claimInput.actionKind);
+    this.#assertExecutionClaimCapabilityEnabled(claimInput);
     const claimNow = this.#executionNowMs();
     if (
       this.#executionLeaseAuthorities.get(lease) !== authority ||
@@ -3363,7 +3385,7 @@ export class Server {
     this.expireExecutionClaims(claimNow);
     // Expiry publication can synchronously notify lifecycle listeners. Fence a
     // drain requested by that notification before installing new authority.
-    this.#assertExecutionClaimCapabilityEnabled(claimInput.actionKind);
+    this.#assertExecutionClaimCapabilityEnabled(claimInput);
     if (
       this.#executionLeaseAuthorities.get(lease) !== authority ||
       this.#ownedExecutionLeases.get(
@@ -3456,6 +3478,12 @@ export class Server {
       return null;
     }
     if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
+      this.revokeExecutionClaim(live);
+      return null;
+    }
+    // Disabling a claim rank revokes its live claims at renewal, mirroring
+    // the flag-off revoke above; lower-rank claims are untouched.
+    if (!this.#executionClaimRankEnabled(live.contextKey)) {
       this.revokeExecutionClaim(live);
       return null;
     }
@@ -6364,7 +6392,8 @@ const isSchedulerExecutionContextKey = (
 ): value is SchedulerExecutionContextKey =>
   value === "space" ||
   (typeof value === "string" &&
-    (/^user:[^:]+$/.test(value) || /^session:[^:]+:[^:]+$/.test(value)));
+    (Engine.principalOfUserContextKey(value) !== undefined ||
+      /^session:[^:]+:[^:]+$/.test(value)));
 
 const parseSchedulerSnapshotQuery = (
   value: Record<string, unknown>,

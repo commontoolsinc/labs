@@ -1067,6 +1067,7 @@ let persistentSchedulerStateEnabled = true;
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
 let serverPrimaryExecutionEnabled = false;
+let serverPrimaryExecutionClaimRank: ServerPrimaryExecutionClaimRank = "space";
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -1100,6 +1101,30 @@ export function getServerPrimaryExecutionConfig(): boolean {
 
 export function resetServerPrimaryExecutionConfig(): void {
   serverPrimaryExecutionEnabled = false;
+}
+
+/**
+ * Highest context rank the host ISSUES execution claims for (context-lattice
+ * design §6: one internal dial, staged space → user → session → cross-space).
+ * Issuance-side only — never negotiated on the wire; the engine's commit-time
+ * guards stay rank-independent. The default admits only the shared space
+ * lane; C1 work enables `user` inside its gate fixtures. Registered in
+ * docs/development/EXPERIMENTAL_OPTIONS.md as `serverPrimaryExecutionClaimRank`.
+ */
+export type ServerPrimaryExecutionClaimRank = "space" | "user";
+
+export function setServerPrimaryExecutionClaimRankConfig(
+  rank?: ServerPrimaryExecutionClaimRank,
+): void {
+  serverPrimaryExecutionClaimRank = rank ?? "space";
+}
+
+export function getServerPrimaryExecutionClaimRankConfig(): ServerPrimaryExecutionClaimRank {
+  return serverPrimaryExecutionClaimRank;
+}
+
+export function resetServerPrimaryExecutionClaimRankConfig(): void {
+  serverPrimaryExecutionClaimRank = "space";
 }
 
 /**

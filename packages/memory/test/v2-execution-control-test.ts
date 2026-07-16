@@ -18,6 +18,7 @@ import {
   encodeMemoryBoundary,
   toDocumentPath,
 } from "../v2.ts";
+import * as MemoryV2 from "../v2.ts";
 import {
   TEST_SESSION_OPEN_PRINCIPAL,
   testSessionOpenAuthFactory,
@@ -937,6 +938,59 @@ Deno.test("live executors renew an exact claim without changing its incarnation"
     );
   } finally {
     unsubscribe();
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("the claim-rank dial gates user-rank issuance and revokes on disable", async () => {
+  const server = createControlServer("memory-v2-execution-claim-rank-dial");
+  const client = await connectControlClient(server);
+  const session = await mount(client) as ExecutionSession;
+  const flags = MemoryV2 as unknown as {
+    setServerPrimaryExecutionClaimRankConfig(rank?: "space" | "user"): void;
+    resetServerPrimaryExecutionClaimRankConfig(): void;
+  };
+  flags.resetServerPrimaryExecutionClaimRankConfig();
+  try {
+    const lease = await demandAndAcquireLease(server, session);
+    const userClaimKey: ActionClaimKey = {
+      ...claimKey(CONTROL_SPACE, "", "action:user-rank"),
+      contextKey: Engine.userExecutionContextKey(
+        TEST_SESSION_OPEN_PRINCIPAL,
+      ) as `user:${string}`,
+    };
+
+    // Dial off (the default): user-rank issuance is refused while space-rank
+    // behavior stays byte-identical.
+    await assertRejects(
+      () => server.setExecutionClaim(lease, userClaimKey),
+      Error,
+      "claim rank",
+    );
+    const spaceClaim = await server.setExecutionClaim(
+      lease,
+      claimKey(CONTROL_SPACE, ""),
+    );
+    assertEquals(server.listExecutionClaims(CONTROL_SPACE), [spaceClaim]);
+
+    // Dial on: the same user-rank claim is admitted and renewable.
+    flags.setServerPrimaryExecutionClaimRankConfig("user");
+    const userClaim = await server.setExecutionClaim(lease, userClaimKey);
+    assertEquals(server.hasLiveExecutionClaim(userClaim), true);
+    const renewed = await server.renewExecutionClaim(lease, userClaim);
+    assertExists(renewed);
+    assertEquals(renewed.claimGeneration, userClaim.claimGeneration);
+
+    // Disabling the rank revokes its live claims at renewal, mirroring the
+    // serverPrimaryExecutionV1 flag-off revoke; space claims survive.
+    flags.resetServerPrimaryExecutionClaimRankConfig();
+    assertEquals(await server.renewExecutionClaim(lease, renewed), null);
+    assertEquals(server.hasLiveExecutionClaim(userClaim), false);
+    const renewedSpace = await server.renewExecutionClaim(lease, spaceClaim);
+    assertExists(renewedSpace);
+  } finally {
+    flags.resetServerPrimaryExecutionClaimRankConfig();
     await client.close();
     await server.close();
   }
