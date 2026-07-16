@@ -75,6 +75,18 @@ export function isArrayIndexPropertyName(name: string): boolean {
  * numeric indices (that is, it has no named properties). Returns `true` for
  * sparse arrays.
  *
+ * **Note:** This function relies on `Object.keys()` on arrays producing output
+ * which agrees with the JavaScript spec with regards to the ordering of index
+ * vs. non-index keys. Built-in arrays of course do this, but it's possible for
+ * a `Proxy` to (a) effectively purport to be an array, and yet (b) have an
+ * `ownKeys()` trap that diverges from the behavior of built-in arrays. In such
+ * cases, this function can incorrectly return `true`, exactly because it
+ * depends on the spec-defined ordering. The rationale for this implementation
+ * is that it's reasonable to expect proxied arrays to implement `ownKeys()` in
+ * agreement with the standard array order (even though the spec _does_ allow
+ * leeway with regards to what `Proxy`s actually do), _and_ by making this
+ * assumpion, this function avoids having to iterate over _all_ keys.
+ *
  * @param array The array to check.
  * @returns `true` if the array has only numeric properties, `false` otherwise.
  */
@@ -84,9 +96,9 @@ export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
   // `Object.keys()` on an (ordinary) array yields all array-index keys first,
   // followed by any non-index keys. So if an array has _any_ non-index keys,
   // then _one_ of them is always the final key. This means the array is
-  // index-only exactly when it has no keys or its last key is an index. (This
-  // relies on ordinary-array key ordering; the input is always a real array,
-  // never a `Proxy` with a reordering `ownKeys` trap.)
+  // index-only exactly when it has no keys or its last key is an index. (But
+  // see the doc comment above for potential `Proxy` troubles that this
+  // implementation _intentionally_ does not try to handle.)
   const lastKey = keys.at(-1);
   return lastKey === undefined || isArrayIndexPropertyName(lastKey);
 }
