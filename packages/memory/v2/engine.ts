@@ -1039,6 +1039,15 @@ export interface ExecutionLeaseFence {
    * same IMMEDIATE transaction.
    */
   authorize?: (engine: Engine) => boolean;
+  /**
+   * Host-supplied lane-grant currency check for scoped (non-space) claims
+   * (C1.3). Lane generations are host-internal — never a wire field on
+   * claims — so the host re-samples its live lane grant against the
+   * generation bound at claim issuance, inside the same IMMEDIATE
+   * transaction as the fence. Returning false fences the commit with the
+   * named cause `lane-generation-stale`. Space-rank claims never consult it.
+   */
+  laneAuthority?: (claim: ExecutionClaim) => boolean;
 }
 
 export interface ApplyCommitOptions {
@@ -3698,6 +3707,15 @@ const assertExecutionLeaseFenceTransaction = (
       throw new ExecutionLeaseFenceError(
         "claim-lease-generation",
         "execution claim does not match the durable lease generation",
+      );
+    }
+    if (
+      claim.contextKey !== "space" &&
+      fence.laneAuthority?.(claim) === false
+    ) {
+      throw new ExecutionLeaseFenceError(
+        "lane-generation-stale",
+        "execution claim lane grant is fenced or superseded",
       );
     }
   }

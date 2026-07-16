@@ -546,6 +546,68 @@ type BoundExecutionSession = {
   readonly lease: ExecutionLeaseHandle;
 };
 
+/**
+ * Host-derived authority for one user lane (context-lattice §3, C1.3): keyed
+ * (space, branch, user:did), anchored on one live CONNECTED session of the
+ * lane principal, carrying a host-internal monotonic `laneGeneration` that is
+ * never a wire field. Creation and every renewal require the principal's
+ * current WRITE capability (C1 review, amendment 2). Disconnect of the
+ * anchor drains exactly this lane: the generation fences BEFORE the claim
+ * sweep so a racing issuance observes the fence (amendment 12).
+ */
+export type UserLaneGrant = {
+  readonly space: string;
+  readonly branch: BranchName;
+  readonly contextKey: `user:${string}`;
+  readonly principal: string;
+  readonly laneGeneration: number;
+  readonly anchorSessionId: string;
+  readonly anchorConnectionId: string;
+  readonly anchorSessionToken: SessionToken;
+};
+
+const userLaneKey = (
+  space: string,
+  branch: BranchName,
+  contextKey: string,
+): string => encodeMemoryBoundary([space, branch, contextKey]);
+
+/**
+ * ROUTING-DISJOINTNESS (context-lattice §2, amendment 3): two live claims
+ * for one action tuple are chain-compatible when a single client identity
+ * could match both under chain-scoped routing — `space` with anything, and
+ * `user:p` with `session:p:*`. Distinct principals' scoped claims (and one
+ * principal's distinct sessions) are the legitimate fan-out. Callers compare
+ * distinct context keys only; exact duplicates are the already-live failure.
+ */
+const executionClaimChainCompatible = (
+  left: SchedulerExecutionContextKey,
+  right: SchedulerExecutionContextKey,
+): boolean => {
+  if (left === "space" || right === "space") return true;
+  const leftUser = Engine.principalOfUserContextKey(left);
+  if (
+    leftUser !== undefined &&
+    Engine.principalOfSessionKey(right) === leftUser
+  ) {
+    return true;
+  }
+  const rightUser = Engine.principalOfUserContextKey(right);
+  return rightUser !== undefined &&
+    Engine.principalOfSessionKey(left) === rightUser;
+};
+
+/** The (branch, space, pieceId, actionId, fingerprints) tuple of amendment 3:
+ * one logical action across lanes, deliberately excluding contextKey. */
+const sameActionTupleAcrossLanes = (
+  left: ActionClaimKey,
+  right: ActionClaimKey,
+): boolean =>
+  left.branch === right.branch && left.space === right.space &&
+  left.pieceId === right.pieceId && left.actionId === right.actionId &&
+  left.implementationFingerprint === right.implementationFingerprint &&
+  left.runtimeFingerprint === right.runtimeFingerprint;
+
 /** Expected host-authority loss while a lane is changing demand or sponsor.
  * Strict host APIs still reject it; the executor's race-tolerant claim path
  * converts only this class to a non-fatal `null`. */
@@ -1255,6 +1317,17 @@ export class Server {
   #executionDemandOrder = 0;
   #executionClaims = new Map<string, ExecutionClaim>();
   #boundExecutionSessions = new Map<string, BoundExecutionSession>();
+  /** Live user-lane grants keyed by (space, branch, contextKey). */
+  #userLaneGrants = new Map<string, UserLaneGrant>();
+  /** Monotonic per-lane generation counters; they survive drains so every
+   * re-opened lane observably supersedes its predecessor. */
+  #userLaneGenerations = new Map<string, number>();
+  /** laneGeneration bound at issuance per live user-rank claim
+   * (actionClaimMapKey), re-validated by renewal and the commit fence. */
+  #executionClaimLaneBindings = new Map<
+    string,
+    { laneKey: string; laneGeneration: number }
+  >();
   #ownedExecutionLeases = new Map<string, OwnedExecutionLease>();
   #executionInvalidationStartedAt = new Map<string, number>();
   #executionLeaseAuthorities = new WeakMap<
@@ -1752,6 +1825,10 @@ export class Server {
 
   disconnect(connection: Connection): void {
     this.#connections.delete(connection.id);
+    // C1.3: a dead connection can no longer anchor lane authority. Drain
+    // (fence, then sweep) exactly the lanes it anchored before demand-based
+    // lease drains run, so no lane claim outlives its anchor.
+    this.#drainUserLanesForConnection(connection.id);
     this.#removeExecutionDemands({ connectionId: connection.id });
     for (const [key, binding] of this.#boundExecutionSessions) {
       if (binding.connectionId === connection.id) {
@@ -1768,6 +1845,10 @@ export class Server {
     sessionId: string,
     ownerConnectionId: string,
   ): void {
+    // C1.3: detaching the anchor session ends the lane's authority even
+    // though the session row survives to its TTL (connected-session
+    // anchoring, amendment 17).
+    this.#drainUserLanesForSession(space, sessionId, ownerConnectionId);
     this.#sessions.detach(space, sessionId, ownerConnectionId);
     this.#boundExecutionSessions.delete(sessionKey(space, sessionId));
   }
@@ -2284,6 +2365,7 @@ export class Server {
         claim.leaseGeneration !== lease.leaseGeneration
       ) continue;
       this.#executionClaims.delete(key);
+      this.#executionClaimLaneBindings.delete(key);
       this.#publishExecutionClaimRevoke(claim);
       revoked += 1;
     }
@@ -3028,6 +3110,17 @@ export class Server {
     return {
       lease,
       nowMs: () => this.#executionNowMs(),
+      // C1.3 commit-side lane fencing: a scoped claim commits only while its
+      // lane grant is live at the generation bound at issuance; the engine
+      // rejects otherwise with the counted cause `lane-generation-stale`.
+      laneAuthority: (claim) => {
+        const binding = this.#executionClaimLaneBindings.get(
+          actionClaimMapKey(claim),
+        );
+        return binding !== undefined &&
+          this.#userLaneGrants.get(binding.laneKey)?.laneGeneration ===
+            binding.laneGeneration;
+      },
       authorize: (transactionEngine) => {
         if (
           this.#sessions.get(space, session.id) !== session ||
@@ -3277,6 +3370,7 @@ export class Server {
     for (const [key, claim] of this.#executionClaims) {
       if (claim.expiresAt > now) continue;
       this.#executionClaims.delete(key);
+      this.#executionClaimLaneBindings.delete(key);
       this.#publishExecutionClaimRevoke(claim);
       expired += 1;
     }
@@ -3289,11 +3383,216 @@ export class Server {
     for (const [key, claim] of this.#executionClaims) {
       if (claim.space !== space) continue;
       this.#executionClaims.delete(key);
+      this.#executionClaimLaneBindings.delete(key);
       this.#publishExecutionClaimRevoke(claim);
       revoked += 1;
     }
     this.#scheduleExecutionClaimExpiry();
     return revoked;
+  }
+
+  /** Connected-session anchoring predicate (amendment 17): sessions attached
+   * to a LIVE connection, mirroring #boundExecutionSessionForCommit — never
+   * the connection-liveness-blind hasOpenSessionForPrincipal. */
+  #connectedSessionForPrincipal(
+    space: string,
+    principal: string,
+  ): SessionState | null {
+    if (principal === ANYONE_USER) return null;
+    for (const session of this.#sessions.sessionsForSpace(space)) {
+      if (
+        session.principal === principal &&
+        session.ownerConnectionId !== null &&
+        this.#connections.has(session.ownerConnectionId)
+      ) {
+        return session;
+      }
+    }
+    return null;
+  }
+
+  #laneGrantAnchorConnected(grant: UserLaneGrant): boolean {
+    const session = this.#sessions.get(grant.space, grant.anchorSessionId);
+    return session !== null && session.principal === grant.principal &&
+      session.sessionToken === grant.anchorSessionToken &&
+      session.ownerConnectionId === grant.anchorConnectionId &&
+      this.#connections.has(grant.anchorConnectionId);
+  }
+
+  /**
+   * Open (or return) the live lane grant for one (space, branch, user:did)
+   * lane. Requires a connected session of the principal to anchor on and the
+   * principal's current WRITE capability (amendment 2); both are re-sampled
+   * after the engine await. A live grant whose anchor died is drained first,
+   * so the replacement observably supersedes it under a bumped generation.
+   *
+   * Host-internal: nothing wires lane demand to this until C1.5a+/C1.7 — in
+   * production the registry stays empty and every path guarding on it is
+   * dormant.
+   */
+  async openUserLaneGrant(
+    space: string,
+    branch: BranchName,
+    principal: string,
+  ): Promise<UserLaneGrant> {
+    const contextKey = Engine.userExecutionContextKey(principal);
+    const key = userLaneKey(space, branch, contextKey);
+    const existing = this.#userLaneGrants.get(key);
+    if (existing !== undefined) {
+      if (this.#laneGrantAnchorConnected(existing)) return existing;
+      this.#drainUserLane(existing);
+    }
+    const engine = await this.openEngine(space);
+    // The engine open is an authority boundary: re-sample the anchor and the
+    // registry after it, exactly like claim issuance re-samples its inputs.
+    if (this.#userLaneGrants.get(key) !== undefined) {
+      return await this.openUserLaneGrant(space, branch, principal);
+    }
+    const anchor = this.#connectedSessionForPrincipal(space, principal);
+    if (anchor === null || anchor.ownerConnectionId === null) {
+      throw new Error(
+        "user lane grant requires a connected session of the lane principal",
+      );
+    }
+    const capability = this.#resolveCapability(engine, space, principal);
+    if (capability === null || !isCapable(capability, "WRITE")) {
+      throw new Error(
+        "user lane grant requires the lane principal's current WRITE capability",
+      );
+    }
+    const laneGeneration = (this.#userLaneGenerations.get(key) ?? 0) + 1;
+    this.#userLaneGenerations.set(key, laneGeneration);
+    const grant: UserLaneGrant = Object.freeze({
+      space,
+      branch,
+      contextKey,
+      principal,
+      laneGeneration,
+      anchorSessionId: anchor.id,
+      anchorConnectionId: anchor.ownerConnectionId,
+      anchorSessionToken: anchor.sessionToken,
+    });
+    this.#userLaneGrants.set(key, grant);
+    return grant;
+  }
+
+  /** Re-validate one exact grant incarnation: live registry identity, a
+   * connected anchor, and current WRITE (amendment 2). Any mismatch drains
+   * the lane — fence, then sweep — and reports null. */
+  async renewUserLaneGrant(
+    grant: UserLaneGrant,
+  ): Promise<UserLaneGrant | null> {
+    const key = userLaneKey(grant.space, grant.branch, grant.contextKey);
+    if (this.#userLaneGrants.get(key) !== grant) return null;
+    const engine = await this.openEngine(grant.space);
+    if (this.#userLaneGrants.get(key) !== grant) return null;
+    const capability = this.#resolveCapability(
+      engine,
+      grant.space,
+      grant.principal,
+    );
+    if (
+      !this.#laneGrantAnchorConnected(grant) ||
+      capability === null || !isCapable(capability, "WRITE")
+    ) {
+      this.#drainUserLane(grant);
+      return null;
+    }
+    return grant;
+  }
+
+  /** Read-only accessor for the live grant of one lane, if any. */
+  userLaneGrant(
+    space: string,
+    branch: BranchName,
+    principal: string,
+  ): UserLaneGrant | null {
+    return this.#userLaneGrants.get(
+      userLaneKey(space, branch, Engine.userExecutionContextKey(principal)),
+    ) ?? null;
+  }
+
+  /** Drain one lane: fence its generation FIRST (remove the live grant, so
+   * every re-validation — racing issuance, renewal, the commit fence —
+   * observes the fence), THEN revoke exactly that lane's claims. Sibling
+   * lanes and the space lane are untouched. */
+  #drainUserLane(grant: UserLaneGrant): void {
+    const key = userLaneKey(grant.space, grant.branch, grant.contextKey);
+    if (this.#userLaneGrants.get(key) !== grant) return;
+    this.#userLaneGrants.delete(key);
+    for (const [claimKey, claim] of this.#executionClaims) {
+      if (
+        claim.space !== grant.space || claim.branch !== grant.branch ||
+        claim.contextKey !== grant.contextKey
+      ) {
+        continue;
+      }
+      this.#executionClaims.delete(claimKey);
+      this.#executionClaimLaneBindings.delete(claimKey);
+      this.#publishExecutionClaimRevoke(claim);
+    }
+    this.#scheduleExecutionClaimExpiry();
+  }
+
+  #drainUserLanesForConnection(connectionId: string): void {
+    for (const grant of [...this.#userLaneGrants.values()]) {
+      if (grant.anchorConnectionId === connectionId) {
+        this.#drainUserLane(grant);
+      }
+    }
+  }
+
+  #drainUserLanesForSession(
+    space: string,
+    sessionId: string,
+    ownerConnectionId: string,
+  ): void {
+    for (const grant of [...this.#userLaneGrants.values()]) {
+      if (
+        grant.space === space && grant.anchorSessionId === sessionId &&
+        grant.anchorConnectionId === ownerConnectionId
+      ) {
+        this.#drainUserLane(grant);
+      }
+    }
+  }
+
+  /** Live lane grant for a user-rank claim input, or null for space rank.
+   * Amendment 12: issuance resolves the grant before its first await and
+   * re-validates the same incarnation after every await. */
+  #requiredLaneGrantForClaim(
+    claimInput: ExecutionClaimInput,
+  ): UserLaneGrant | null {
+    if (Engine.principalOfUserContextKey(claimInput.contextKey) === undefined) {
+      return null;
+    }
+    const grant = this.#userLaneGrants.get(
+      userLaneKey(claimInput.space, claimInput.branch, claimInput.contextKey),
+    );
+    if (grant === undefined) {
+      throw new ExecutionLeaseAuthorityError(
+        "user-rank execution claim requires a live lane grant",
+      );
+    }
+    return grant;
+  }
+
+  /** Amendment 3 issuance guard: reject any claim whose action tuple has a
+   * live claim chain-compatible with it. Exact-context duplicates are
+   * excluded here — they stay the hard already-live failure. */
+  #assertExecutionClaimRoutingDisjoint(claimInput: ExecutionClaimInput): void {
+    for (const live of this.#executionClaims.values()) {
+      if (
+        live.contextKey !== claimInput.contextKey &&
+        sameActionTupleAcrossLanes(live, claimInput) &&
+        executionClaimChainCompatible(live.contextKey, claimInput.contextKey)
+      ) {
+        throw new ExecutionLeaseAuthorityError(
+          "execution claim conflicts with a chain-compatible live claim; " +
+            "lane moves are revoke-published-before-issue",
+        );
+      }
+    }
   }
 
   async setExecutionClaim(
@@ -3325,6 +3624,22 @@ export class Server {
   ): Promise<ExecutionClaim> {
     this.#validateExecutionClaimInput(claimInput);
     this.#assertExecutionClaimCapabilityEnabled(claimInput);
+    // Amendment 12: bind the live lane grant before the first await; every
+    // re-sample below re-validates the same incarnation so a drain fencing
+    // the generation mid-issuance declines instead of orphaning a claim.
+    const laneGrant = this.#requiredLaneGrantForClaim(claimInput);
+    const laneKey = laneGrant === null
+      ? undefined
+      : userLaneKey(claimInput.space, claimInput.branch, laneGrant.contextKey);
+    const assertLaneGrantCurrent = () => {
+      if (
+        laneKey !== undefined && this.#userLaneGrants.get(laneKey) !== laneGrant
+      ) {
+        throw new ExecutionLeaseAuthorityError(
+          "user-rank execution claim lane grant was fenced during issuance",
+        );
+      }
+    };
     const authority = this.#executionLeaseAuthorities.get(lease);
     const owned = this.#ownedExecutionLeases.get(
       executionLeaseKey(claimInput.space, claimInput.branch),
@@ -3344,6 +3659,7 @@ export class Server {
     // lifecycle may begin draining/replacing this slot while the open awaits.
     // Re-sample and re-read every host/durable authority input afterwards.
     this.#assertExecutionClaimCapabilityEnabled(claimInput);
+    assertLaneGrantCurrent();
     const claimNow = this.#executionNowMs();
     if (
       this.#executionLeaseAuthorities.get(lease) !== authority ||
@@ -3386,6 +3702,7 @@ export class Server {
     // Expiry publication can synchronously notify lifecycle listeners. Fence a
     // drain requested by that notification before installing new authority.
     this.#assertExecutionClaimCapabilityEnabled(claimInput);
+    assertLaneGrantCurrent();
     if (
       this.#executionLeaseAuthorities.get(lease) !== authority ||
       this.#ownedExecutionLeases.get(
@@ -3401,6 +3718,10 @@ export class Server {
     if (existing !== undefined) {
       throw new Error("execution claim is already live");
     }
+    // Synchronous with the install and its publish: no await separates the
+    // disjointness check from claim.set, so revoke-before-issue ordering on
+    // the control feed is structural, not scheduled.
+    this.#assertExecutionClaimRoutingDisjoint(claimInput);
     const claimGeneration = (authority.claimGenerations.get(key) ?? 0) + 1;
     authority.claimGenerations.set(key, claimGeneration);
     const ttlMs = this.options.executionControl?.claimTtlMs ?? 30_000;
@@ -3414,6 +3735,12 @@ export class Server {
       expiresAt: Math.min(claimNow + ttlMs, current.expiresAt),
     });
     this.#executionClaims.set(key, claim);
+    if (laneGrant !== null && laneKey !== undefined) {
+      this.#executionClaimLaneBindings.set(key, {
+        laneKey,
+        laneGeneration: laneGrant.laneGeneration,
+      });
+    }
     this.executionStats.claimsIssued += 1;
     if (claimGeneration > 1) this.executionStats.claimsReissued += 1;
     this.#publishExecutionControl(Object.freeze({
@@ -3487,6 +3814,33 @@ export class Server {
       this.revokeExecutionClaim(live);
       return null;
     }
+    // Amendment 12: renewal re-checks lane-grant liveness at the bound
+    // generation and revokes on mismatch — an executor renewing across a
+    // drain can never keep a departed principal's claim alive.
+    if (live.contextKey !== "space") {
+      const binding = this.#executionClaimLaneBindings.get(key);
+      if (
+        binding === undefined ||
+        this.#userLaneGrants.get(binding.laneKey)?.laneGeneration !==
+          binding.laneGeneration
+      ) {
+        this.revokeExecutionClaim(live);
+        return null;
+      }
+    }
+    // Amendment 3: the routing-disjointness invariant is re-checked at
+    // renewal; a chain-compatible sibling (a race artifact) revokes this
+    // claim so clients fail open instead of matching two claims.
+    for (const other of this.#executionClaims.values()) {
+      if (
+        other !== live && other.contextKey !== live.contextKey &&
+        sameActionTupleAcrossLanes(other, live) &&
+        executionClaimChainCompatible(other.contextKey, live.contextKey)
+      ) {
+        this.revokeExecutionClaim(live);
+        return null;
+      }
+    }
     const current = Engine.currentExecutionLease(engine, {
       space: claim.space,
       branch: claim.branch,
@@ -3540,6 +3894,7 @@ export class Server {
       return false;
     }
     this.#executionClaims.delete(key);
+    this.#executionClaimLaneBindings.delete(key);
     this.#publishExecutionClaimRevoke(live);
     this.#scheduleExecutionClaimExpiry();
     return true;

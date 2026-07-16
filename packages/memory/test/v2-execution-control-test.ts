@@ -148,6 +148,11 @@ type ExecutionServer = Server & {
     sessionId: string,
     lease: ExecutionLeaseHandle,
   ): () => void;
+  openUserLaneGrant(
+    space: string,
+    branch: string,
+    principal: string,
+  ): Promise<unknown>;
 };
 
 const createServer = (
@@ -974,8 +979,15 @@ Deno.test("the claim-rank dial gates user-rank issuance and revokes on disable",
     );
     assertEquals(server.listExecutionClaims(CONTROL_SPACE), [spaceClaim]);
 
-    // Dial on: the same user-rank claim is admitted and renewable.
+    // Dial on: the same user-rank claim is admitted and renewable. Since
+    // C1.3, user-rank issuance also binds a live lane grant for the claim
+    // principal (amendment 12).
     flags.setServerPrimaryExecutionClaimRankConfig("user");
+    await server.openUserLaneGrant(
+      CONTROL_SPACE,
+      "",
+      TEST_SESSION_OPEN_PRINCIPAL,
+    );
     const userClaim = await server.setExecutionClaim(lease, userClaimKey);
     assertEquals(server.hasLiveExecutionClaim(userClaim), true);
     const renewed = await server.renewExecutionClaim(lease, userClaim);
