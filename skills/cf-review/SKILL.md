@@ -270,7 +270,6 @@ summary. Skip posting when it isn't worth it.
   `docs/development/skill-authoring.md`
 - Pattern rules + severity taxonomy: `docs/common/ai/pattern-critique-guide.md`
 - Design principles & idioms: `docs/development/DEVELOPMENT.md`
-- Transformer semantics:
-  `docs/specs/ts-transformer/ts_transformers_review_guide.md`
+- Transformer semantics: `docs/specs/ts-transformer/README.md`
 - Reactivity model: `docs/common/concepts/reactivity.md`
 - Debugging & gotchas: `docs/development/debugging/README.md`

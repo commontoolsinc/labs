@@ -1,6 +1,15 @@
 # CFC UI Helper Contract
 
-**Status:** Draft contract
+**Status:** Contract — implemented (#3263, 2026-04-14): the rewrite lives in
+`JsxExpressionSiteRouterTransformer` via
+`src/transformers/ui-helper-lowering.ts` (there is no distinct
+`CfcJsxTransformer` stage), schema hints flow through `SchemaInjection` into
+`ifc.uiContract` at schema generation. Two notes beyond this document's
+letter: (a) a non-literal `as` prop silently falls back to the helper's
+default tag; (b) the shipped `uiContract` hint carries two additional fields —
+`trustedPattern` and `requiredEventIntegrity` — fed by the
+`TrustedActionUiContract` alias (type-level, not JSX). See the behavior spec
+§6.8/§7.1.\
 **Scope:** `packages/api`, `packages/ts-transformers`,
 `packages/schema-generator`, runner UI builder/runtime integration
 
@@ -35,7 +44,8 @@ rewriting, schema hint synthesis, and builder/runtime helper code.
 
 ## JSX Rewrite Contract
 
-`CfcJsxTransformer` owns the compile-time rewrite.
+`JsxExpressionSiteRouterTransformer`, through
+`src/transformers/ui-helper-lowering.ts`, owns the compile-time rewrite.
 
 Given a recognized helper element:
 
@@ -67,7 +77,7 @@ authored use and transformed use converge.
 The helper rewrite also has a schema side effect.
 
 When the helper's required semantic props are compile-time string literals,
-`CfcJsxTransformer` must attach a node-local schema hint of the form:
+The router must attach a node-local schema hint of the form:
 
 ```ts
 // Shown for illustration only.
@@ -190,4 +200,8 @@ The contract is not fully implemented until these tests pass or equivalent
 coverage exists:
 
 - `packages/ts-transformers/test/cfc-authoring.test.ts`
-- `packages/patterns/integration/cfc-ui-direct-command.test.ts`
+- `packages/ts-transformers/test/cfc-ui-helper.test.ts`
+- `packages/runner/test/cfc-ui-contract.test.ts` and the `cfc-*` integration
+  suites (the originally named
+  `packages/patterns/integration/cfc-ui-direct-command.test.ts` does not
+  exist)

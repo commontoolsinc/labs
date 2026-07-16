@@ -412,7 +412,11 @@ function rewriteCaptureReferences(
 /**
  * Transform a lift-applied call that has closures in its callback.
  * Converts: lift((v) => v * multiplier.get())(value)
- * To: lift(inputSchema, resultSchema, ({value: v, multiplier}) => v * multiplier)({value, multiplier})
+ * To: lift(
+ *   ({ value: v, multiplier }) => v * multiplier,
+ *   inputSchema,
+ *   resultSchema,
+ * )({ value, multiplier })
  */
 export function transformLiftAppliedCall(
   inputCall: ts.CallExpression,

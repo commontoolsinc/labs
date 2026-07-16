@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-04-02
+archived: 2026-07-12
+reason: "PR-3154 reviewer entrypoint, superseded by docs/specs/ts-transformer/README.md."
+superseded-by: docs/specs/ts-transformer/README.md
+---
+
 # TS Transformers Review Guide
 
 **Status:** concise reviewer entrypoint for PR 3154 **Audience:** reviewers who
@@ -6,13 +14,13 @@ without rereading the whole branch history
 
 ## Read This First
 
-1. [ts_transformers_target_pattern_language_spec.md](./ts_transformers_target_pattern_language_spec.md)
+1. [ts_transformers_target_pattern_language_spec.md](../../../specs/ts-transformer/ts_transformers_target_pattern_language_spec.md)
    - normative source-language / target-language boundary
-2. [ts_transformers_lowering_contract.md](./ts_transformers_lowering_contract.md)
+2. [ts_transformers_lowering_contract.md](../../../specs/ts-transformer/ts_transformers_lowering_contract.md)
    - normative lowering contract
-3. [ts_transformers_current_behavior_spec.md](./ts_transformers_current_behavior_spec.md)
+3. [ts_transformers_current_behavior_spec.md](../../../specs/ts-transformer/ts_transformers_current_behavior_spec.md)
    - implemented behavior and current compatibility details
-4. [ts_transformers_design_deltas.md](./ts_transformers_design_deltas.md)
+4. [ts_transformers_design_deltas.md](../../../specs/ts-transformer/ts_transformers_design_deltas.md)
    - hardening follow-ups and deliberate deltas from older behavior
 
 ## Rollout Status
@@ -96,17 +104,17 @@ First diagnostic command when a transformer behavior is surprising:
 deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
 ```
 
-- [expression-site-policy.ts](../../../packages/ts-transformers/src/transformers/expression-site-policy.ts)
+- [expression-site-policy.ts](../../../../packages/ts-transformers/src/transformers/expression-site-policy.ts)
   - shared expression-site handling decision
-- [call-kind.ts](../../../packages/ts-transformers/src/ast/call-kind.ts)
+- [call-kind.ts](../../../../packages/ts-transformers/src/ast/call-kind.ts)
   - call family / ownership / callback-container classification
-- [callback-boundary.ts](../../../packages/ts-transformers/src/policy/callback-boundary.ts)
+- [callback-boundary.ts](../../../../packages/ts-transformers/src/policy/callback-boundary.ts)
   - shared callback-boundary semantics for context + validation
-- [pattern-context-validation.ts](../../../packages/ts-transformers/src/transformers/pattern-context-validation.ts)
+- [pattern-context-validation.ts](../../../../packages/ts-transformers/src/transformers/pattern-context-validation.ts)
   - restricted-context validation and builder placement
-- [pattern-body-reactive-root-lowering.ts](../../../packages/ts-transformers/src/transformers/pattern-body-reactive-root-lowering.ts)
+- [pattern-body-reactive-root-lowering.ts](../../../../packages/ts-transformers/src/transformers/pattern-body-reactive-root-lowering.ts)
   - remaining tracked-reactive body rewrite seam
-- [schema-injection.ts](../../../packages/ts-transformers/src/transformers/schema-injection.ts)
+- [schema-injection.ts](../../../../packages/ts-transformers/src/transformers/schema-injection.ts)
   - schema injection, fallback policy, registry-aware recovery
 
 ## Compact Schema Matrix
@@ -124,10 +132,10 @@ deno task cf check <pattern-or-fixture>.tsx --show-transformed --no-run
 
 Primary proof surface:
 
-- [schema-shrink-validation.test.ts](../../../packages/ts-transformers/test/schema-shrink-validation.test.ts)
-- [validation.test.ts](../../../packages/ts-transformers/test/validation.test.ts)
-- [fixtures/schema-injection/](../../../packages/ts-transformers/test/fixtures/schema-injection/)
-- [fixtures/schema-transform/](../../../packages/ts-transformers/test/fixtures/schema-transform/)
+- [schema-shrink-validation.test.ts](../../../../packages/ts-transformers/test/schema-shrink-validation.test.ts)
+- [validation.test.ts](../../../../packages/ts-transformers/test/validation.test.ts)
+- [fixtures/schema-injection/](../../../../packages/ts-transformers/test/fixtures/schema-injection/)
+- [fixtures/schema-transform/](../../../../packages/ts-transformers/test/fixtures/schema-transform/)
 
 ## Current Open Review Question
 

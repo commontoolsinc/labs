@@ -8,21 +8,22 @@ _Status: Phase 1 complete in CT-1615 (lift-applied form
 `__cfHelpers.lift(cb)(input)`). Registry-architecture follow-up landed in PR
 #3707 (registries consolidated into `CrossStageState`). No-input form switch
 landed in PR #3709 (`computed`-origin lifts now emit `lift(false, fn)()` instead
-of the `lift(...)({})` stopgap). **Phase 2 complete in CT-1644**
-(`LiftHoistingTransformer` hoists every lift call to a module-scope
-`const __cfLift_N = __cfHelpers.lift(...)`, after SchemaInjection; subsumes lift
-from the CT-1585 callback hoister). `derive` has since been fully retired from
-both the transformer (CT-1643) and the runtime export (CT-1624). **CT-1655
-extends Phase 2's whole-call hoisting to the other builders**: `handler`
-(hoisted to `const __cfHandler_N`) and `pattern` (hoisted to
-`const __cfPattern_N` out of `mapWithPattern`'s first argument) shipped, both
-subsuming their builder from the CT-1585 callback hoister; the hoisting stage
-was renamed `LiftHoistingTransformer` → `BuilderCallHoistingTransformer`
-accordingly. Only `patternTool` remains (its captures thread through the call's
-own argument, so whole-call hoisting needs a safety investigation first). See
-the follow-up section after the phase table. **Phase 3 (`selfcontained` marker)
-is now the active phase** — its design below is current and its open questions
-are mostly resolved (see the Phase 3 section and tracker)._
+of the `lift(...)({})` stopgap). **Phase 2 complete in CT-1644** (the
+transformer then called `LiftHoistingTransformer` hoists every lift call to a
+module-scope `const __cfLift_N = __cfHelpers.lift(...)`, after SchemaInjection;
+subsumes lift from the CT-1585 callback hoister). `derive` has since been fully
+retired from both the transformer (CT-1643) and the runtime export (CT-1624).
+**CT-1655 extends Phase 2's whole-call hoisting to the other builders**:
+`handler` (hoisted to `const __cfHandler_N`) and `pattern` (hoisted to
+`const __cfPattern_N` out of `mapWithPattern` and `patternTool` argument
+position) shipped; the old callback hoister was deleted and the sole stage is
+now `BuilderCallHoistingTransformer`. The enclosing `patternTool(...)` call
+itself stays in place because its per-instance captures live in its second
+argument. **Phase 3 (`selfcontained` marker) remains unimplemented** — its
+design below is the active proposal and its open questions are mostly resolved
+(see the Phase 3 section and tracker). Historical phase notes retain the
+transformer names that existed when those investigations ran; the glossary near
+the end maps the current code._
 
 ## Motivation
 
@@ -115,32 +116,29 @@ evaluate once at module scope. Implementation notes:
   declarations. The transformer's golden tests only check emitted text, so this
   was caught by the runner's pattern-execution tests, not the fixture suite.
 
-**`patternTool` is deferred.** Unlike `pattern`,
-`patternTool(fn, { extraParams })` is a direct call whose per-instance captures
-thread through its _own_ second argument — so whole-call hoisting would relocate
-those captures to module scope, which is only safe if `extraParams` can never
-carry per-instance reactive state. That needs investigation, so `patternTool`
-stays in `BuilderCallbackHoistingTransformer` for now. When it is resolved,
-`HOISTABLE_BUILDER_NAMES` empties and `BuilderCallbackHoistingTransformer` can
-be deleted — the "one unified hoisting phase" end-state.
+**`patternTool` resolution.** The canonical form is
+`patternTool(pattern(fn), { extraParams })`. The enclosing call stays at its
+authored site so per-instance `extraParams` stay local, while
+`BuilderCallHoistingTransformer` hoists the inner `pattern(...)` argument. This
+emptied the old CT-1585 callback-hoister set; that transformer and its
+module-scope callback-analysis module were deleted.
 
 ## Relationship to prior work
 
 - **CT-1585** added module-scope hoisting for builder callbacks whose body
-  closes only over module-level symbols. The hoister currently:
-  - Lives in
+  closed only over module-level symbols. At that point the hoister:
+  - Lived in
     `packages/ts-transformers/src/closures/module-scope-callback-hoisting.ts`.
-  - Runs as `BuilderCallbackHoistingTransformer`, scheduled immediately after
+  - Ran as `BuilderCallbackHoistingTransformer`, scheduled immediately after
     `PatternCallbackLoweringTransformer` in `cf-pipeline.ts`.
-  - Hoists the **callback** (the function-like argument), not the call.
-  - Is conditional on the callback's body genuinely closing over user-authored
+  - Hoisted the **callback** (the function-like argument), not the call.
+  - Was conditional on the callback's body genuinely closing over user-authored
     module-level references (post the over-trigger/under-trigger precision fixes
     in commits 4 and 5).
-- Phase 2 will **generalize** this: every `lift` gets hoisted, the call site
-  reads `__cfLift_N(inputs)`, and the predicate that gates hoisting goes away.
-  The mechanics from CT-1585 (counter-based naming,
-  transformer-injected-identifier exclusion list, synthetic-compute-callback
-  handling) carry forward.
+- Phase 2 **generalized** this: every `lift` gets hoisted, the call site reads
+  `__cfLift_N(inputs)`, and the predicate that gates hoisting goes away. The
+  mechanics from CT-1585 (counter-based naming, transformer-injected-identifier
+  exclusion list, synthetic-compute-callback handling) carry forward.
 
 ## Phase 1: `derive` → `lift` in-place rewrite
 
@@ -459,25 +457,21 @@ resolutions.)
 
 ## Glossary of the building blocks in the existing code
 
-Quick reference, **current as of Phase 2 (CT-1644) landing**. All paths relative
-to `packages/ts-transformers/`. (`derive` has been fully retired from the
-transformer — CT-1643 — and from the runtime export — CT-1624; entries below
-reflect the post-derive state.)
+Quick reference for the current code. All paths are relative to
+`packages/ts-transformers/`.
 
-| Concept                                        | Where it lives                                                                                     | Notes                                                                                                                                                                  |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pipeline stage order                           | `src/cf-pipeline.ts` (`CFC_TRANSFORMER_STAGE_SPECS`)                                               | The 19-stage registry. Authoritative; pinned by `test/pipeline-regressions.test.ts`.                                                                                   |
-| `LiftLoweringTransformer`                      | `src/lift/transformer.ts`                                                                          | Stage 6. Lowers `computed(...)` (and formerly user `derive(...)`) to the lift-applied form. (Was `ComputedTransformer` pre-Phase-1.)                                   |
-| `ClosureTransformer`                           | `src/closures/transformer.ts`                                                                      | Stage 7. The main reactive lowering; extracts captures into the lift input object.                                                                                     |
-| `createLiftAppliedCall`                        | `src/transformers/builtins/lift-applied.ts`                                                        | Factory for synthesized lift-style helper calls; emits the lift-applied form `lift<In,Out>(cb)(input)`. (Was `createDeriveCall`, now removed.)                         |
-| `BuilderCallbackHoistingTransformer` (CT-1585) | `src/transformers/builder-callback-hoisting.ts` + `src/closures/module-scope-callback-hoisting.ts` | Stage 12. Hoists `handler`/`pattern`/`patternTool` callbacks closing only over module scope. As of CT-1644 it no longer touches `lift` (see below).                    |
-| `LiftHoistingTransformer` (CT-1644)            | `src/transformers/lift-hoisting.ts`                                                                | Stage 14 (after SchemaInjection). Hoists each whole `lift(...)` call to a module-scope `const __cfLift_N`; the call site becomes `__cfLift_N(captures)`.               |
-| `detectCallKind` (`kind === "lift-applied"`)   | `src/ast/call-kind.ts`                                                                             | Centralized call classifier. The `__cfLift` prefix + `setOriginalNode` recognition fallback (CT-1644) live here. The `derive` branch is gone (CT-1643).                |
-| `SchemaInjectionTransformer`                   | `src/transformers/schema-injection.ts`                                                             | Stage 13. Injects input/output schemas into the lift-applied call. Derives the arg schema from the **applied captures object** (the reason CT-1644 hoists _after_ it). |
-| `analyzeCallbackForHoisting`                   | `src/closures/module-scope-callback-hoisting.ts`                                                   | CT-1585's structural body analysis (`localNames` pre-pass, `isTransformerInjectedIdentifier`, ambient-global exclusion). **Phase 3's selfcontained gate reuses this.** |
-| Pattern-test runtime                           | `tasks/integration.ts` (`runPatternTests`)                                                         | How CI runs `deno task cf test --root packages/patterns ...`. Use to validate runtime behavior of hoisted/selfcontained lifts.                                         |
-| SES bundle verifier (lift)                     | `packages/runner/src/sandbox/compiled-bundle-verifier.ts` (`callbackIndexesForBuilder`)            | Verifies trusted-builder calls in compiled bundles. CT-1644 taught it the 2-arg `lift(false, fn)` form now that hoisted lifts reach it at module scope.                |
-| Existing CT-1585 regression test               | `test/closures/module-scope-helper-hoisting.test.ts`                                               | Reference shape for hoist test fixtures (updated for the CT-1644 lift-hoist shape).                                                                                    |
+| Concept                                      | Where it lives                                                                          | Notes                                                                                                                                                                    |
+| -------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Pipeline stage order                         | `src/cf-pipeline.ts` (`CFC_TRANSFORMER_STAGE_SPECS`)                                    | The 22-stage registry is authoritative; prose synchronization is pinned by `test/spec-sync.test.ts`.                                                                     |
+| `LiftLoweringTransformer`                    | `src/lift/transformer.ts`                                                               | Stage 9. Lowers `computed(...)` (and formerly user `derive(...)`) to the lift-applied form.                                                                              |
+| `ClosureTransformer`                         | `src/closures/transformer.ts`                                                           | Stage 10. The main reactive lowering; extracts captures into the lift input object.                                                                                      |
+| `createLiftAppliedCall`                      | `src/transformers/builtins/lift-applied.ts`                                             | Factory for synthesized lift-style helper calls; emits `lift<In,Out>(cb)(input)`.                                                                                        |
+| `BuilderCallHoistingTransformer`             | `src/transformers/builder-call-hoisting.ts`                                             | Stage 16, after schema injection. Sole module-scope hoister for applied `lift`/`handler` calls and argument-position `pattern` calls, including `patternTool`'s pattern. |
+| `detectCallKind` (`kind === "lift-applied"`) | `src/ast/call-kind.ts`                                                                  | Centralized call classifier. The `__cfLift` original-node fallback preserves classification after hoisting.                                                              |
+| `SchemaInjectionTransformer`                 | `src/transformers/schema-injection.ts`                                                  | Stage 15. Derives the argument schema from the applied captures object before hoisting relocates the inner builder call.                                                 |
+| Pattern-test runtime                         | `tasks/integration.ts` (`runPatternTests`)                                              | Runs `deno task cf test --root packages/patterns ...` to validate runtime behavior of hoisted/selfcontained lifts.                                                       |
+| SES bundle verifier (lift)                   | `packages/runner/src/sandbox/compiled-bundle-verifier.ts` (`callbackIndexesForBuilder`) | Verifies trusted-builder calls in compiled bundles, including the two-argument `lift(false, fn)` form.                                                                   |
+| CT-1585/CT-1644 regression coverage          | `test/closures/module-scope-helper-hoisting.test.ts`                                    | Historical callback-hoist cases updated to the current whole-call hoist shape.                                                                                           |
 
 ## Past lessons worth carrying forward
 
@@ -577,11 +571,9 @@ the relevant phase lands.
   `prependSchemaArguments`, AFTER ClosureTransformer, so it fires only for
   genuinely zero-capture computeds (empty outer input); captured computeds keep
   `lift(fn)({...refs})`.
-- **[Follow-up post-Phase 1 — STILL OPEN]** Remove `derive` from runtime exports
-  (Berni 2026-05-21: agreed in principle). NOTE: not actually dead — the
-  transformer still _lowers_ user-source `derive()`, and runner tests call
-  `derive()` directly. Needs a who-still-uses-derive analysis + a decision on
-  whether `derive` stays a user-facing API before removal. Not a quick deletion.
+- **[DONE — CT-1643 + CT-1624]** Remove `derive` from transformer and runtime
+  exports. The lift-applied form is now the sole lowered/runtime shape; the
+  preceding note records the uncertainty before those tickets landed.
 - **[Follow-up]** Collapse the `lift` type-surface duplication: the overloads
   are declared in BOTH `module.ts` and the `LiftFunction` interface
   (`packages/api`), mirrored by hand (PR #3709 had to add the new overload to
@@ -589,17 +581,17 @@ the relevant phase lands.
   single source of truth.
 - **[DONE — PR #3707, registry architecture]** Consolidated the cross-stage
   registries into a single `CrossStageState` object (audit:
-  `docs/scratch/07-registry-audit.md`, design:
-  `12-registry-unification-design.md`). Outcome differed from the original
-  tiered plan in two evidence-driven ways: (1) the `typeRegistry` three-way
-  split was investigated and **dropped** — the three uses are isolated by key
-  node-kind (replacement-Expr / TypeNode / CallExpression never coincide), so
-  the split fixed no reachable bug; the invariant is documented instead. (2)
-  `syntheticLiftAppliedCallRegistry` was **removed** as verified-inert. The
-  remaining channels (which at the time of #3707 still included
-  `narrowedWrapperTypeRegistry` — see postscript) now live in `CrossStageState`,
-  accessed via record/lookup/mark methods; cache-invalidation stays on the
-  context. `typeRegistry` + `schemaHints` remain plain maps at the
+  `docs/scratch/07-registry-audit.md` — scratch dir since deleted, see git
+  history; design: `12-registry-unification-design.md`). Outcome differed from
+  the original tiered plan in two evidence-driven ways: (1) the `typeRegistry`
+  three-way split was investigated and **dropped** — the three uses are isolated
+  by key node-kind (replacement-Expr / TypeNode / CallExpression never
+  coincide), so the split fixed no reachable bug; the invariant is documented
+  instead. (2) `syntheticLiftAppliedCallRegistry` was **removed** as
+  verified-inert. The remaining channels (which at the time of #3707 still
+  included `narrowedWrapperTypeRegistry` — see postscript) now live in
+  `CrossStageState`, accessed via record/lookup/mark methods; cache-invalidation
+  stays on the context. `typeRegistry` + `schemaHints` remain plain maps at the
   schema-generator package boundary.
 
   _Postscript (post-#3788):_ `narrowedWrapperTypeRegistry` was subsequently
@@ -610,8 +602,8 @@ the relevant phase lands.
   arrives at the `isToSchemaCall` branch as `__cfHelpers.ComparableCell<…>` with
   `pos < 0`) by detecting it structurally and short-circuiting the redundant
   re-shrink — which left the channel without a consumer and let it be deleted.
-  The current CrossStageState inventory is the eight registries listed in
-  `core/mod.ts`. Note: the earlier session-prep doc framed the registry as
-  "derive-bound, dies with derive removal"; that was wrong — the consumer was
-  schema-injection's own re-entry on user-authored `lift`, not a derive-specific
-  shape.
+  The current CrossStageState inventory is maintained in
+  `src/core/cross-stage-state.ts` and summarized in the behavior spec §2.2.
+  Note: the earlier session-prep doc framed the registry as "derive-bound, dies
+  with derive removal"; that was wrong — the consumer was schema-injection's own
+  re-entry on user-authored `lift`, not a derive-specific shape.
