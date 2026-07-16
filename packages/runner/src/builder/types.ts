@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import type { EntityKind } from "@commonfabric/data-model/entity-kind";
+import type { EntityKind } from "../entity-kind.ts";
 import type { PatternBuilder } from "./pattern.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 

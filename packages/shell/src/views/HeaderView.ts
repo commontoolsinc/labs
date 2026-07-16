@@ -1,7 +1,7 @@
 import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { type DID, KeyStore } from "@commonfabric/identity";
-import { hasEntityUriScheme } from "@commonfabric/data-model/entity-kind";
+import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { navigate } from "../../shared/mod.ts";

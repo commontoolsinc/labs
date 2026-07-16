@@ -1,5 +1,5 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import { hasEntityUriScheme } from "@commonfabric/data-model/entity-kind";
+import { hasEntityUriScheme } from "./entity-kind.ts";
 import {
   BaseFabricPrimitive,
   FabricHash,

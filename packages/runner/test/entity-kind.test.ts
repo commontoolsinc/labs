@@ -10,9 +10,9 @@ import {
   isEntityKind,
   stripEntityUriScheme,
   uriSchemeForEntityKind,
-} from "@/entity-kind.ts";
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { hashOf } from "@/value-hash.ts";
+} from "../src/entity-kind.ts";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 
 describe("entity-kind", () => {
   const base = hashOf({ probe: "entity-kind" });
