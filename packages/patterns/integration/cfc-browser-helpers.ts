@@ -209,7 +209,14 @@ const fillAndVerify = async (
 };
 
 // Scroll the cf-button behind `selector` into view and tag its inner click
-// target so the test can resolve and click exactly that element.
+// target so the test can resolve and click exactly that element. A click target
+// that is still detached, or not rendered — laid out, and not display:none or
+// visibility:hidden — is left untagged, so a re-check on the next DOM mutation
+// retries the mark once the control renders. The check is viewport-independent:
+// the click scrolls the element into view itself, so a control below the fold
+// is markable. It reads the click target alone because hiding the host or any
+// ancestor reaches the inner button either way: display:none zeroes its box,
+// and visibility:hidden inherits into its computed visibility.
 const markForClick = async (
   probe: ProbeApi,
   selector: string,
@@ -225,6 +232,7 @@ const markForClick = async (
   const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
     | HTMLElement
     | null) ?? target;
+  if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
   clickTarget.setAttribute(attr, token);
   return true;
 };
@@ -606,15 +614,24 @@ export async function clickCfButton(
 ) {
   const token = `cf-button-${crypto.randomUUID()}`;
   try {
-    // Wait until the button exists, then mark its inner click target exactly
-    // once; the mark is the predicate, so the re-check on each DOM mutation
-    // retries finding the button without re-clicking anything.
+    // Wait until the button is rendered, then mark its inner click target
+    // exactly once; the mark is the predicate, so the re-check on each DOM
+    // mutation retries finding the button without re-clicking anything.
     await waitForCondition(page, markForClick, {
       timeout,
       args: [selector, token, CLICK_TARGET_ATTR],
     });
   } catch (cause) {
-    throw new Error(`Unable to mark ${selector} for click`, { cause });
+    // The probe's per-match `rect` and `visible` report whether the control was
+    // absent or present without a layout box.
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
+    // Indented for readable test-log output
+    throw new Error(
+      `Unable to mark ${selector} for click. Last probe: ${
+        toIndentedDebugString(probe)
+      }`,
+      { cause },
+    );
   }
   try {
     const clickTarget = await page.waitForSelector(

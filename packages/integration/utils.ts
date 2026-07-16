@@ -81,7 +81,15 @@ export const awaitViewSettled = async (page: Page): Promise<boolean> => {
 export interface ProbeApi {
   /** Every element matching `selector`, descending through shadow roots. */
   collect(selector: string): Element[];
-  /** Whether `element` is on-screen and not display/visibility hidden. */
+  /**
+   * Whether `element` is rendered: it has a non-empty layout box and is not
+   * `display:none` or `visibility:hidden`. Viewport-independent, so an element
+   * below the fold is rendered. This is the "is this control laid out yet"
+   * question a predicate asks before tagging a control it is about to click —
+   * a click scrolls the element into view itself.
+   */
+  isRendered(element: Element): boolean;
+  /** Whether `element` is rendered and also on-screen. */
   isVisible(element: Element): boolean;
   /** Visible text of `root` plus its shadow and slotted descendants. */
   deepText(root: ParentNode): string;
@@ -118,13 +126,18 @@ function installWaiter(
   predicateSource: string,
   predicateArgs: unknown[],
 ): void {
-  type Probe = {
-    collect: (selector: string) => Element[];
-    isVisible: (element: Element) => boolean;
-    deepText: (root: ParentNode) => string;
+  const isRendered = (element: Element): boolean => {
+    const style = globalThis.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
   };
 
-  const probe: Probe = {
+  // Typed as the ProbeApi the predicates are handed, so a method added to that
+  // interface has to be implemented here too. The annotation is erased before
+  // this function is serialized into the page, so it adds no runtime reference
+  // to module scope.
+  const probe: ProbeApi = {
     collect(selector) {
       const out: Element[] = [];
       const walk = (root: Document | ShadowRoot) => {
@@ -140,14 +153,13 @@ function installWaiter(
       walk(document);
       return out;
     },
+    isRendered,
     isVisible(element) {
+      if (!isRendered(element)) return false;
       const rect = element.getBoundingClientRect();
-      const style = globalThis.getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 &&
-        rect.bottom >= 0 && rect.right >= 0 &&
+      return rect.bottom >= 0 && rect.right >= 0 &&
         rect.top <= globalThis.innerHeight &&
-        rect.left <= globalThis.innerWidth &&
-        style.visibility !== "hidden" && style.display !== "none";
+        rect.left <= globalThis.innerWidth;
     },
     deepText(root) {
       const parts: string[] = [];
@@ -184,7 +196,7 @@ function installWaiter(
   };
 
   const predicate = new Function("return (" + predicateSource + ")")() as (
-    probe: Probe,
+    probe: ProbeApi,
     ...args: unknown[]
   ) => unknown;
 

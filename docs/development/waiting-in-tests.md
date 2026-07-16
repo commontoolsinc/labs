@@ -55,6 +55,27 @@ target to be rendered — laid out, and not `display:none` or `visibility:hidden
 clickable rather than tagged while it has no layout box and then failing to
 click.
 
+Ask `probe.isRendered` for that check rather than hand-rolling it, and note that
+it is deliberately not `probe.isVisible`, which additionally requires the
+element to be on-screen. A click scrolls its element into view before it
+dispatches, so where the element sits at tagging time does not decide whether
+the click lands. Requiring it on-screen only adds ways to wait forever: the
+shell sets `html { scroll-behavior: smooth }`, so a `scrollIntoView()` a
+predicate issues animates over several hundred milliseconds, and a viewport
+check within the same predicate reads a position the scroll has not reached yet.
+
+Check the element the click is dispatched on, not the host that matched the
+selector. Hiding the host or any ancestor reaches the inner control either way:
+`display:none` zeroes the control's layout box, and `visibility:hidden` inherits
+into its computed visibility. So the click target's own check covers the whole
+chain, and checking the host as well buys nothing.
+
+Being rendered is a question about whether a click can be delivered, which is
+why it belongs in the predicate that tags the control. Whether the control is
+`disabled` is a separate question — a disabled control still takes the click and
+declines it. A test that needs a control enabled before clicking says so with
+`waitForDisabled(page, selector, false)`.
+
 **Non-browser and off-page waits** have no page to observe. Resolve a `defer()`
 (from `packages/utils/src/defer.ts`) inside a callback the test already registers
 — a cell `sink`/`subscribe`, a storage subscription's `next`, a scheduler
