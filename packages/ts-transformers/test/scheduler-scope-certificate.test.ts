@@ -94,12 +94,94 @@ Deno.test("cert gate: opaque param alongside a writing sibling stays uncertified
   );
 });
 
-Deno.test("cert gate: wildcard param stays uncertified even when read-only", () => {
-  // A dynamic (`cell[k]`) access can hide a write from `writePaths`, so a
-  // "read-only"-looking wildcard param must fail closed.
+Deno.test("cert gate: read-only wildcard param stays uncertified (no envelope)", () => {
+  // A dynamic (`cell[k]`) access can hide a write, and a read-only wildcard
+  // declares no write envelope, so it must fail closed. W2.16 only relaxes
+  // wildcards that ALSO write (materializers); this boundary is unchanged.
   assertEquals(
     hasCompleteSchedulerScopeSummary(
       summary([param({ name: "p", capability: "opaque", wildcard: true })]),
+    ),
+    false,
+  );
+});
+
+// --- W2.16: envelope-complete materializers -----------------------------------
+
+Deno.test("cert gate: wildcard materializer with a write envelope certifies", () => {
+  // The backlinks-index `computeIndex` family-2 shape: a dynamic `.key(i)` write
+  // (`m.key("backlinks").push(...)`) surfaces only as a write ENVELOPE bounded to
+  // the descent prefix, with `wildcardUnbounded` clear. Its envelope is a
+  // complete write bound, so it certifies as a materializer.
+  assert(
+    hasCompleteSchedulerScopeSummary(
+      summary([
+        param({
+          name: "allPieces",
+          capability: "readonly",
+          wildcard: true,
+          writeEnvelopePaths: [["allPieces", "0", "mentioned"]],
+        }),
+      ]),
+    ),
+  );
+});
+
+Deno.test("cert gate: materializer with both exact and envelope writes certifies", () => {
+  // The full `computeIndex` param: an exact write path (`allPieces[*].backlinks`)
+  // plus a dynamic write envelope (`allPieces[*].mentioned`). Both families must
+  // land in the complete bound.
+  assert(
+    hasCompleteSchedulerScopeSummary(
+      summary([
+        param({
+          name: "allPieces",
+          capability: "writable",
+          wildcard: true,
+          writePaths: [["allPieces", "0", "backlinks"]],
+          writeEnvelopePaths: [["allPieces", "0", "mentioned"]],
+        }),
+      ]),
+    ),
+  );
+});
+
+Deno.test("cert gate: unbounded wildcard write stays uncertified (soundness)", () => {
+  // An `elementById`/dynamic-method write cannot be bounded to a param-anchored
+  // envelope: `wildcardUnbounded` is set, so a write could hide outside the
+  // recorded envelopes and the materializer must fail closed — even though it
+  // carries a write envelope for the part the analysis COULD bound.
+  assertEquals(
+    hasCompleteSchedulerScopeSummary(
+      summary([
+        param({
+          name: "p",
+          capability: "writable",
+          wildcard: true,
+          writeEnvelopePaths: [["p", "0", "mentioned"]],
+          wildcardUnbounded: true,
+        }),
+      ]),
+    ),
+    false,
+  );
+});
+
+Deno.test("cert gate: unbounded wildcard with exact writes stays uncertified", () => {
+  // A param with enumerable writes but an unbounded dynamic access alongside
+  // them still fails closed: the unbounded access could hide a write outside the
+  // enumerated set.
+  assertEquals(
+    hasCompleteSchedulerScopeSummary(
+      summary([
+        param({
+          name: "p",
+          capability: "writable",
+          wildcard: true,
+          writePaths: [["p", "0", "backlinks"]],
+          wildcardUnbounded: true,
+        }),
+      ]),
     ),
     false,
   );
@@ -179,6 +261,22 @@ function certifiedLiftCount(root: ts.SourceFile): number {
   return callsNamed(root, "lift").filter((call) =>
     schedulerOptionsFor(call)?.completeSchedulerScopeSummary === true
   ).length;
+}
+
+/**
+ * The `materializerWriteInputPaths` emitted on the (single) certifying lift,
+ * each path joined with "." for readable assertions. Empty when no lift emits
+ * one.
+ */
+function certifiedMaterializerPaths(root: ts.SourceFile): string[] {
+  for (const call of callsNamed(root, "lift")) {
+    const options = schedulerOptionsFor(call);
+    if (options?.completeSchedulerScopeSummary !== true) continue;
+    const paths = options.materializerWriteInputPaths;
+    if (!Array.isArray(paths)) continue;
+    return paths.map((path) => (path as string[]).join("."));
+  }
+  return [];
 }
 
 async function transform(source: string): Promise<ts.SourceFile> {
@@ -280,11 +378,13 @@ export default pattern<{ parent?: Writable<Notebook | null> }>(({ parent }) => {
 );
 
 Deno.test(
-  "pipeline W2.13: module-scope lift with wildcard `.key(i)` writes does NOT certify",
+  "pipeline W2.16: module-scope lift with a `.key(i)` write certifies as a materializer",
   async () => {
-    // backlinks-index computeIndex shape: dynamic `.key(i)` writes over a
-    // wildcard array iteration — the write surface is not statically bounded, so
-    // it must keep failing closed.
+    // backlinks-index computeIndex family-2 shape: a dynamic `.key(i)` write is
+    // now bounded to the descent prefix (`items[*].mentioned`) as a write
+    // ENVELOPE and certifies — the write surface is data-dependent but
+    // prefix-bounded, exactly the materializer contract (W2.13 previously kept
+    // this closed).
     const root = await transform(
       `import { lift, type Cell } from "commonfabric";
 interface Item { mentioned: (Item | null)[]; backlinks: unknown[]; }
@@ -295,6 +395,113 @@ export const indexAll = lift((input: { items: Cell<Item>[] }) => {
       item.key("mentioned").key(i).key("backlinks").set([]);
     }
   }
+});`,
+    );
+    assertEquals(certifiedLiftCount(root), 1);
+    assertEquals(certifiedMaterializerPaths(root), ["items.0.mentioned"]);
+  },
+);
+
+Deno.test(
+  "pipeline W2.16: computeIndex two-family shape names both write families",
+  async () => {
+    // The full backlinks-index `computeIndex`: an exact write
+    // (`allPieces[*].backlinks`) plus a dynamic-`.key(i)` write envelope
+    // (`allPieces[*].mentioned`). Both families must appear in
+    // `materializerWriteInputPaths` — the exact write must NOT be
+    // under-declared, and the envelope names the dynamic family.
+    const root = await transform(
+      `import { lift, type Cell } from "commonfabric";
+interface Piece { mentioned?: Piece[]; backlinks?: Piece[]; }
+export const computeIndex = lift(
+  ({ allPieces }: { allPieces: Cell<Piece>[] | undefined }) => {
+    const cs = allPieces ?? [];
+    for (const c of cs) {
+      if (!c) continue;
+      const value = c.get();
+      if (!value || !("backlinks" in value)) continue;
+      c.key("backlinks").set([]);
+    }
+    for (const c of cs) {
+      if (!c) continue;
+      const mentions = c.key("mentioned").get() ?? [];
+      for (let i = 0; i < mentions.length; i++) {
+        const m = c.key("mentioned").key(i);
+        const target = m?.get();
+        if (!target || !("backlinks" in target)) continue;
+        m.key("backlinks").push(c);
+      }
+    }
+  },
+);`,
+    );
+    assertEquals(certifiedLiftCount(root), 1);
+    // The statically-visible exact write MUST be covered (no under-declaration),
+    // and the dynamic family MUST be named by its envelope.
+    assertEquals(certifiedMaterializerPaths(root), [
+      "allPieces.0.backlinks",
+      "allPieces.0.mentioned",
+    ]);
+  },
+);
+
+Deno.test(
+  "pipeline W2.16: an `elementById` write stays uncertified (unbounded)",
+  async () => {
+    // `elementById` addresses a separately derived entity, so the analysis
+    // cannot bound the write to a param-anchored envelope — it must fail closed
+    // rather than emit an under-declared materializer bound.
+    const root = await transform(
+      `import { lift, type Cell } from "commonfabric";
+interface Item { backlinks: unknown[]; }
+export const byId = lift(
+  (input: { items: { elementById(id: string): Cell<Item> } }) => {
+    input.items.elementById("x").key("backlinks").set([]);
+  },
+);`,
+    );
+    assertEquals(certifiedLiftCount(root), 0);
+  },
+);
+
+Deno.test(
+  "pipeline W2.16: a dynamic array-index `[i]` write stays uncertified (unbounded)",
+  async () => {
+    // A raw `items[i]` element access is not a `.key(index)` keyed descent, so
+    // the analysis leaves its write unbounded and fails closed — only the
+    // explicit materializer idiom certifies.
+    const root = await transform(
+      `import { lift, type Cell } from "commonfabric";
+interface Item { backlinks: unknown[]; }
+export const byIndex = lift((input: { items: Cell<Item>[] }) => {
+  for (let i = 0; i < input.items.length; i++) {
+    const c = input.items[i];
+    c.key("backlinks").set([]);
+  }
+});`,
+    );
+    assertEquals(certifiedLiftCount(root), 0);
+  },
+);
+
+Deno.test(
+  "pipeline W2.16: read-only `.key(i)` wildcard stays uncertified (no write)",
+  async () => {
+    // A bounded `.key(i)` descent that only READS declares no write envelope,
+    // so it keeps the W2.12 boundary: a wildcard with no write does not certify
+    // (its dynamic reads are admitted at runtime by C0 instead).
+    const root = await transform(
+      `import { lift, type Cell } from "commonfabric";
+interface Item { mentioned: Item[]; }
+export const readOnly = lift((input: { items: Cell<Item>[] }) => {
+  let n = 0;
+  for (const c of input.items) {
+    const ms = c.key("mentioned").get() ?? [];
+    for (let i = 0; i < ms.length; i++) {
+      if (c.key("mentioned").key(i).get()) n++;
+    }
+  }
+  return n;
 });`,
     );
     assertEquals(certifiedLiftCount(root), 0);
