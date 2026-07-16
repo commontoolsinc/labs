@@ -104,11 +104,7 @@ that continuation is undone and the sink goes on firing afterwards. Await
 An in-process wait like this needs no timeout backstop. When the value never
 arrives and the runtime goes quiet, Deno's test runner reports `Promise
 resolution is still pending but the event loop has already resolved` and fails
-the test at once, rather than hanging. That fail-fast report depends on the
-event loop draining: a wait whose runtime holds a live server connection keeps
-the loop alive, so a never-arriving value there runs to the ambient test or CI
-limit instead. Dispose such a probe runtime once the wait returns, so a
-completed wait does not hold the loop open for the rest of the suite. The message names the test, not the wait
+the test at once, rather than hanging. The message names the test, not the wait
 inside it, so a test holding several waits needs the last step printed without
 an `ok` to place the failure. It still beats a deadline, which reports only that
 time ran out, and reports it later.
@@ -119,7 +115,12 @@ runner's one repeating timer is unref'd and gated behind `CF_TRAVERSE_CAPTURE`,
 and an unsatisfiable wait still fails in seconds in the heaviest setup we have,
 two runtimes over an in-process memory server. It does not carry over to the
 browser waits above, where a live DevTools Protocol connection holds the loop
-open and a waiter that never fires would hang instead.
+open and a waiter that never fires would hang instead. A client talking to a
+live server holds the loop open the same way. A wait against one runs to the
+ambient test or CI limit rather than failing fast. The CLI suite's readiness
+probe is such a client. It disposes its controller once the wait returns, which
+also keeps a finished wait from holding the loop open for the rest of the
+suite.
 
 ## Guard against new usage
 
