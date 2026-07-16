@@ -18,7 +18,6 @@ import {
   CF_DATA_HELPER_IDENTIFIER,
   CF_HELPERS_IDENTIFIER,
   CFHelpers,
-  injectCfDataHelper,
   injectCfHelpers,
   sourceDisablesCfTransform,
   transformCfDirective,
@@ -269,7 +268,7 @@ Deno.test("getDataHelperExpr with an original node preserves its source map rang
 });
 
 // ---------------------------------------------------------------------------
-// transformCfDirective / injectCfHelpers / injectCfDataHelper (string passes)
+// transformCfDirective / injectCfHelpers (string passes)
 // ---------------------------------------------------------------------------
 
 Deno.test("transformCfDirective returns an all-blank source unchanged", () => {
@@ -313,29 +312,10 @@ Deno.test("injectCfHelpers uses JS-only helper-shim syntax for JavaScript file n
   assertFalse(out.includes("function h(...args: any[])"));
 });
 
-Deno.test("injectCfDataHelper wraps a source with the data-helper import and keep-alive", () => {
-  const source = `const y = 2;`;
-  const out = injectCfDataHelper(source);
-  assert(
-    out.startsWith(`import { __cf_data as ${CF_DATA_HELPER_IDENTIFIER} } from`),
-  );
-  assert(out.includes(source));
-  // The keep-alive statement references the data helper so binding survives.
-  assert(out.includes(`= ${CF_DATA_HELPER_IDENTIFIER};`));
-});
-
 Deno.test("injectCfHelpers throws when the source already uses the reserved helper symbol", () => {
   assertThrows(
     () => injectCfHelpers(`const ${CF_HELPERS_IDENTIFIER} = {};`),
     Error,
     `reserved helper symbol '${CF_HELPERS_IDENTIFIER}'`,
-  );
-});
-
-Deno.test("injectCfDataHelper throws when the source already uses the reserved data-helper symbol", () => {
-  assertThrows(
-    () => injectCfDataHelper(`const ${CF_DATA_HELPER_IDENTIFIER} = {};`),
-    Error,
-    `reserved helper symbol '${CF_DATA_HELPER_IDENTIFIER}'`,
   );
 });

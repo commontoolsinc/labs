@@ -3,7 +3,6 @@ import { TransformationContext } from "./mod.ts";
 
 export const CF_HELPERS_IDENTIFIER = "__cfHelpers";
 export const CF_DATA_HELPER_IDENTIFIER = "__cfDataHelper";
-const CF_DATA_HELPER_KEEP_IDENTIFIER = "__cfDataHelperKeep";
 
 const CF_HELPERS_SPECIFIER = "commonfabric";
 
@@ -12,11 +11,6 @@ const CF_HELPERS_SPECIFIER = "commonfabric";
 // patternCoverageOptionsForCompile.
 const HELPERS_STMT =
   `import { ${CF_HELPERS_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
-const CF_DATA_HELPER_STMT =
-  `import { __cf_data as ${CF_DATA_HELPER_IDENTIFIER} } from "${CF_HELPERS_SPECIFIER}";`;
-const CF_DATA_HELPER_USED_STMT = `// @ts-ignore: Internals
-const ${CF_DATA_HELPER_KEEP_IDENTIFIER} = ${CF_DATA_HELPER_IDENTIFIER};
-`;
 
 const HELPERS_USED_STMT = `// @ts-ignore: Internals
 function h(...args: any[]) { return ${CF_HELPERS_IDENTIFIER}.h.apply(null, args); }
@@ -267,16 +261,6 @@ export function isLegacyInjectedEnvelope(source: string): boolean {
     }
   }
   return false;
-}
-
-export function injectCfDataHelper(source: string): string {
-  checkReservedHelperVar(source, CF_DATA_HELPER_IDENTIFIER);
-  checkReservedHelperVar(source, CF_DATA_HELPER_KEEP_IDENTIFIER);
-  return [
-    CF_DATA_HELPER_STMT,
-    source,
-    CF_DATA_HELPER_USED_STMT,
-  ].join("\n");
 }
 
 // Throws if `__cfHelpers` was found as an Identifier

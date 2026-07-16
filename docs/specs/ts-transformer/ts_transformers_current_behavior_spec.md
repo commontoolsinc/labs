@@ -1998,10 +1998,10 @@ the opt-in era (#3168), when modules without a `/// <cts-enable />` directive
 received only the data-helper import via `injectCfDataHelper`
 (`src/core/cf-helpers.ts`) from the runner's pretransform; that call site was
 removed when transforms became default-on (#3254,
-`packages/runner/src/harness/pretransform.ts`). `injectCfDataHelper` is still
-exported (`src/mod.ts`, `src/core/mod.ts`) but has **no callers** in the repo;
-`test/transform.test.ts` asserts `__cfDataHelper` does not appear in
-opted-out output.
+`packages/runner/src/harness/pretransform.ts`). The orphaned
+`injectCfDataHelper` helper itself was removed after the 2026-07 docs audit
+confirmed it had no callers; `test/transform.test.ts` asserts `__cfDataHelper`
+does not appear in opted-out output.
 
 
 ## 16. Pattern Runtime Coverage Instrumentation
