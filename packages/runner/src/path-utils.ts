@@ -15,12 +15,12 @@ export function setValueAtPath(
     parent = parent[key];
   }
 
-  // This no-op write gate uses `valueEqual`, the `Fabric`-aware content
-  // equality: `deepEqual` walks enumerable own-props, of which a
-  // `FabricPrimitive` has none, so it conflates every distinct same-class
-  // instance and would drop a real Fabric-value change as a no-op (CT-1770).
-  // Note `valueEqual` throws on a function or a non-`Fabric` class instance
-  // rather than reporting it unequal; both operands here are `FabricValue`s.
+  // No-op write gate: the existing and new values are compared with
+  // `valueEqual`, the `Fabric`-aware content equality, so a `FabricPrimitive`
+  // (state in private `#fields`, zero enumerable own-props) is compared by
+  // content rather than by its absent own-props. Note `valueEqual` throws on
+  // a function or a non-`Fabric` class instance rather than reporting it
+  // unequal; both operands here are `FabricValue`s by contract.
   if (valueEqual(parent[path[path.length - 1]], value)) return false;
 
   // We just set the values here. If you need to delete elements from an

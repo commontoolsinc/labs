@@ -44,11 +44,11 @@ export function mapsEqual(
   if (a.size !== b.size) return false;
   for (const [key, val] of a) {
     if (!b.has(key)) return false;
-    // `valueEqual` is the `Fabric`-aware content equality these stored
-    // read-value maps need: `deepEqual` walks enumerable own-props, of which a
-    // `FabricPrimitive` (`FabricBytes`/`FabricHash`/...) has none, so it
-    // conflates every distinct same-class instance and would mask a real value
-    // change (CT-1770).
+    // These are stored read-value maps, so values are compared with
+    // `valueEqual`, the `Fabric`-aware content equality: a `FabricPrimitive`
+    // (`FabricBytes`/`FabricHash`/...) keeps its state in private `#fields`
+    // with zero enumerable own-props, so only a content-aware comparison can
+    // tell two distinct same-class instances apart.
     if (!valueEqual(val, b.get(key))) return false;
   }
   return true;

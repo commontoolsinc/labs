@@ -49,10 +49,8 @@ describe("Path operations", () => {
 
     it("is Fabric-aware: a differing FabricBytes is a real change (CT-1770)", () => {
       // Two distinct `FabricBytes` differing only in their (private `#fields`)
-      // byte content. `deepEqual` walks enumerable own-props -- of which a
-      // `FabricPrimitive` has none -- so it wrongly reports the pair equal and
-      // drops the write as a no-op. `valueEqual` compares by content hash and
-      // sees the change: the write must happen and `true` be returned.
+      // byte content: a real change, not a no-op, so the write must happen and
+      // `true` be returned.
       const original = new FabricBytes(new Uint8Array([1, 2, 3]));
       const replacement = new FabricBytes(new Uint8Array([4, 5, 6]));
       const obj = { x: original };

@@ -1,8 +1,9 @@
-// Covers the Fabric-aware equality of `mapsEqual` (CT-1770). The helper
-// compares stored read-value maps; a `FabricPrimitive` keeps its state in
-// private `#fields` with zero enumerable own-props, so a naive `deepEqual`
-// conflates every distinct same-class instance and reports maps that differ
-// only in a `FabricBytes` value as equal -- masking a real change.
+// Covers the Fabric-aware equality of `mapsEqual`. The helper compares stored
+// read-value maps with `valueEqual`, the content equality: a `FabricPrimitive`
+// keeps its state in private `#fields` with zero enumerable own-props, so only
+// a content-aware comparison can tell two distinct same-class instances apart.
+// These tests pin that maps differing only in a `FabricBytes` value are
+// unequal, and equal-content ones equal.
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -35,10 +36,9 @@ describe("mapsEqual", () => {
   });
 
   it("is Fabric-aware: a differing FabricBytes value makes the maps unequal (CT-1770)", () => {
-    // The two maps differ only in the byte content of a `FabricBytes` value.
-    // `deepEqual` sees two zero-own-prop instances of the same class and calls
-    // them equal, so `mapsEqual` wrongly returns `true`; `valueEqual` compares
-    // by content hash and sees the difference.
+    // The two maps differ only in the (private `#fields`) byte content of a
+    // `FabricBytes` value: a real change, which the content comparison must
+    // report as unequal.
     const a = new Map<string, FabricValue>([
       ["k", new FabricBytes(new Uint8Array([1, 2, 3]))],
     ]);

@@ -830,12 +830,10 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
   it("rejects a uiContract field whose Fabric write differs from its Fabric default (CT-1770)", async () => {
     // The schema default and the written value are distinct `FabricBytes`
-    // (interned from the `Uint8Array`s) that differ only in byte content, so the
-    // write does NOT install the default -- it must be rejected exactly like the
-    // "not default" string case above. `deepEqual` sees two zero-own-prop
-    // instances of the same class and calls them equal, so the write-policy gate
-    // wrongly treats this as an initial-default install and lets the differing
-    // value through; `valueEqual` compares by content hash and rejects it.
+    // (interned from the `Uint8Array`s) that differ only in byte content, so
+    // the write does NOT install the default -- the write-policy gate's
+    // content comparison must reject it exactly like the "not default" string
+    // case above.
     const { runtime, storageManager } = createRuntime();
     try {
       // A schema whose `savedBytes` default is a `Uint8Array` cannot be authored
