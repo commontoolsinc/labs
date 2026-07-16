@@ -74,6 +74,7 @@ const diagnostics = (
     basisCoveredOverlayDrops: 4,
     nonAuthoritativeOverlayDrops: 0,
     settlementDiagnostics: {},
+    routeDiagnostics: {},
   },
   truncatedActionRecords: 0,
   ...overrides,
