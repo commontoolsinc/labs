@@ -26,7 +26,11 @@ import {
 } from "./diagnosis.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import { toActionRunTraceAddress } from "./diagnostics.ts";
-import { buildSchedulerActionObservation } from "./persistent-observation.ts";
+import {
+  buildSchedulerActionObservation,
+  type CompleteActionScopeSummary,
+  type SchedulerActionObservation,
+} from "./persistent-observation.ts";
 import { filterIgnoredAddresses, txToReactivityLog } from "./reactivity.ts";
 import { type ActionTimingState, recordActionTime } from "./timing.ts";
 import type { NodeRegistry } from "./node-record.ts";
@@ -838,7 +842,7 @@ function attachSchedulerActionObservation(
         directOutputs: serverBuiltin.directOutputs.map(toMemorySpaceAddress),
       },
     }
-    : baseObservation;
+    : withRuntimeComputationScopeSummary(baseObservation);
 
   try {
     observationTarget.setSchedulerObservation(observation);
@@ -896,6 +900,133 @@ export function schedulerImplementationFingerprint(
 
 export function schedulerRuntimeFingerprint(): string {
   return "runner:scheduler:v3";
+}
+
+/**
+ * W2.14 (RC-3b): assemble a runtime write-empty `completeActionScopeSummary`
+ * for a computation whose registered write surface is empty beyond its single
+ * direct root output. This covers trusted `impl:` computations the transformer
+ * cannot certify — e.g. backlinks-index's `computeMentionable`, a recursive
+ * read-only `lift()` that is statically unprovable but provably write-free.
+ *
+ * The summary declares NO side writes: only the single direct output, echoed
+ * into `writes` to satisfy the classifier's directOutput ∈ writes invariant.
+ * Reads come from the observed log and are admitted dynamically at the firewall
+ * (C0), so they carry no static envelope obligation. Soundness is fail-closed
+ * by construction: the engine firewall bounds every claimed commit's writes to
+ * this envelope (`dynamic-write-outside-static-surface`,
+ * `servability.ts`), so a wrong write-empty belief de-claims the action rather
+ * than corrupting state — it never trusts the belief.
+ *
+ * "Empty registered write surface" is the runner's own registration-time
+ * knowledge (`currentKnownWrites`/materializer envelopes/`declaredWrites`), not
+ * a static claim: exactly one registered write that is a same-space,
+ * space-scoped root value address, with no materializer or declared writes
+ * beyond it. Effects are excluded (they keep `unknown-effect-surface`), and a
+ * present certificate or effect-descriptor summary is never overridden.
+ */
+export function runtimeWriteEmptyComputationScopeSummary(
+  observation: SchedulerActionObservation,
+): CompleteActionScopeSummary | undefined {
+  if (observation.actionKind !== "computation") return undefined;
+  // Never override a transformer certificate or an effect-descriptor summary.
+  if (observation.completeActionScopeSummary !== undefined) return undefined;
+  // Trusted identity only: an `action:…` fingerprint is untrusted-implementation.
+  if (!observation.implementationFingerprint.startsWith("impl:")) {
+    return undefined;
+  }
+  // Canonical builtins (`impl:cf:builtin/<id>…`, per `builtinImplementationHash`)
+  // are covered ONLY by explicit, individually vetted per-builtin descriptors
+  // (W2.15+), never this blanket heuristic. Their write surfaces are not simply
+  // "one direct output": map/filter/flatMap carry output-collection envelopes
+  // and wish is a resolver, so a generic write-empty belief must never bless
+  // them. The target class here is authored `cf:module` computeds the
+  // transformer cannot certify (recursion), e.g. `computeMentionable`.
+  if (observation.implementationFingerprint.startsWith("impl:cf:builtin/")) {
+    return undefined;
+  }
+  const ownerSpace = observation.ownerSpace;
+  if (ownerSpace === undefined || ownerSpace.length === 0) return undefined;
+
+  // The registered write surface must be empty beyond the single direct output.
+  if (observation.materializerWriteEnvelopes.length > 0) return undefined;
+  if ((observation.declaredWrites?.length ?? 0) > 0) return undefined;
+  if (observation.currentKnownWrites.length !== 1) return undefined;
+  const directOutput = observation.currentKnownWrites[0]!;
+  if (!isSameSpaceRootValueAddress(directOutput, ownerSpace)) return undefined;
+
+  // Reconstruct the space piece root the pieceId was keyed from (`space:<uri>`):
+  // the definitional inverse of the runner's `${scope}:${id}` pieceId keying.
+  // Reuse the direct output's `space` (already proven equal to `ownerSpace`) so
+  // the piece carries the branded `MemorySpace`, not a bare observation string.
+  const piece = spacePieceRootFromPieceId(
+    observation.pieceId,
+    directOutput.space,
+  );
+  if (piece === undefined) return undefined;
+
+  return {
+    version: 1,
+    complete: true,
+    implementationFingerprint: observation.implementationFingerprint,
+    runtimeFingerprint: observation.runtimeFingerprint,
+    piece,
+    // Observed-log reads; C0 admits them dynamically at the firewall. A scoped
+    // or foreign read still trips the classifier's same-space check, so pass
+    // them through rather than suppressing the evidence.
+    reads: sortAndCompactPaths([
+      ...observation.reads,
+      ...observation.shallowReads,
+    ]),
+    writes: [cloneMemoryAddress(directOutput)],
+    materializerWriteEnvelopes: [],
+    directOutputs: [cloneMemoryAddress(directOutput)],
+  };
+}
+
+/**
+ * Attach a runtime-assembled computation `completeActionScopeSummary` when one
+ * of the alternative certificate sources applies. Certified computations and
+ * server-builtin effects already carry a summary before reaching here.
+ */
+function withRuntimeComputationScopeSummary(
+  observation: SchedulerActionObservation,
+): SchedulerActionObservation {
+  const summary = runtimeWriteEmptyComputationScopeSummary(observation);
+  return summary === undefined
+    ? observation
+    : { ...observation, completeActionScopeSummary: summary };
+}
+
+function isSameSpaceRootValueAddress(
+  address: IMemorySpaceAddress,
+  space: string,
+): boolean {
+  return address.space === space &&
+    (address.scope ?? "space") === "space" &&
+    address.path.length === 1 && address.path[0] === "value";
+}
+
+function spacePieceRootFromPieceId(
+  pieceId: string,
+  space: IMemorySpaceAddress["space"],
+): IMemorySpaceAddress | undefined {
+  const prefix = "space:";
+  if (!pieceId.startsWith(prefix)) return undefined;
+  const id = pieceId.slice(prefix.length);
+  if (id.length === 0) return undefined;
+  return {
+    space,
+    scope: "space",
+    id: id as IMemorySpaceAddress["id"],
+    path: ["value"],
+  };
+}
+
+function cloneMemoryAddress(
+  address: IMemorySpaceAddress,
+): IMemorySpaceAddress {
+  return { ...address, path: [...address.path] };
 }
 
 function schedulerActionOptions(
