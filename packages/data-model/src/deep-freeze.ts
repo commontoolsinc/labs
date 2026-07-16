@@ -48,10 +48,27 @@ function isInDeepFrozenCache(obj: object): boolean {
 
 /**
  * Indicates whether or not a value is "necessarily frozen." As of this writing,
- * this is the same as asking if it's a primitive value, but with an emphasis on
- * the point. However, at some point we'll end up with special knowledge about
- * objects which are also "necessarily frozen" by construction, and this is the
- * place where we'll get to expand the logic accordingly.
+ * this is _intended_ to be the same as asking if it's a primitive value, but
+ * with an emphasis on the point. However, at some point we'll end up with
+ * special knowledge about objects which are also "necessarily frozen" by
+ * construction, and this is the place where we'll get to expand the logic
+ * accordingly.
+ *
+ * TODO(danfuzz): This produces an incorrect result for values of type
+ * `function`, which are neither primitives nor necessarily frozen: a function
+ * is an ordinary mutable object, but `typeof fn !== "object"` lets it pass here
+ * as "necessarily frozen." Two consequences, both live: `isDeepFrozen()`
+ * reports `true` for any graph that reaches a function, and `deepFreeze()`
+ * silently declines to freeze one -- so a graph both of them call deep-frozen
+ * can still be mutated through it.
+ *
+ * The deeper trouble is that this file isn't consistent about which of its
+ * functions answer a question about arbitrary JavaScript values and which
+ * answer one about `FabricValue`s. For a function the two answers legitimately
+ * differ -- it's a mutable JS object, and it isn't a `FabricValue` at all --
+ * and only the `FabricValue`-shaped one (`isDeepFrozenFabricValue()`) is
+ * currently right. Sorting out that distinction is the actual fix; patching
+ * `typeof` tests one at a time is not.
  */
 function isNecessarilyFrozenValue(value: unknown): boolean {
   return (value === null) || (typeof value !== "object");
@@ -256,6 +273,12 @@ export function deepFreeze<T>(value: T): T {
  * Indicates whether the value is a deep-frozen `FabricValue`. Returns `true` if
  * the value is a primitive, or a frozen object/array whose children are all
  * also deep-frozen `FabricValue`s.
+ *
+ * A value of type `function` is not a `FabricValue`, and so yields `false`,
+ * whether it is the value itself or reached anywhere within it. Note that this
+ * differs from `isDeepFrozen()`, which asks the JavaScript-level question and
+ * (incorrectly) admits functions; see the `TODO` on
+ * `isNecessarilyFrozenValue()`.
  */
 export function isDeepFrozenFabricValue(value: unknown): value is FabricValue {
   // TODO(@danfuzz): A function `isFabricValue()` should ultimately get
