@@ -2,6 +2,7 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
   BaseFabricPrimitive,
   FabricHash,
+  hasEntityUriScheme,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,
@@ -140,6 +141,11 @@ export function createRef(
     else return obj;
   }
 
+  // The entity kind deliberately does NOT enter the preimage: a computed
+  // cell and a state cell minted from the same cause share hash bytes and
+  // differ only in their URI scheme (`computed:` vs `of:`, applied by
+  // `toURI`). The full URI string is the identity; nothing may rebuild a
+  // computed cell's URI from its bare hash.
   return entityIdFrom(hashOf(traverse({ ...source, causal: cause })));
 }
 
@@ -148,8 +154,10 @@ export function createRef(
  */
 export function getEntityId(value: any): EntityRef | undefined {
   if (typeof value === "string") {
-    // Handle URI format with "of:" prefix
-    if (value.startsWith("of:")) value = fromURI(value);
+    // Handle URI format with an entity scheme ("of:", "computed:", ...)
+    if (hasEntityUriScheme(value)) {
+      value = fromURI(value);
+    }
     return entityRefFromString(value);
   }
 

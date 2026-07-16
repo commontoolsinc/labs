@@ -2,7 +2,6 @@ import {
   action,
   computed,
   type Default,
-  entityRefToString,
   equals,
   FS,
   type FsProjection,
@@ -32,6 +31,23 @@ import {
 } from "./schemas.tsx";
 
 export { NotePiece };
+
+/**
+ * The bare id embedded in wiki-link text (`[[Name (<id>)]]`). Mirrors
+ * mentionIdFromCellId in packages/ui (not importable from a pattern): `of:`
+ * strips — the renderer (note-md) re-adds it — and `computed:` is REJECTED,
+ * because the bare embed format cannot carry the scheme and the scheme is
+ * part of the identity (a computed cell's bare hash names its of: sibling).
+ * Mentionables are pieces (always of:) today, so the throw is a tripwire —
+ * if it ever fires, the embed format must learn to carry the scheme.
+ * Exported so the pattern test can pin the tripwire.
+ */
+export const bareMentionId = (uri: string): string => {
+  if (uri.startsWith("computed:")) {
+    throw new Error(`cannot embed a computed: cell in a wiki-link: ${uri}`);
+  }
+  return uri.replace(/^of:/, "");
+};
 
 // ===== Output Type =====
 
@@ -296,8 +312,11 @@ const Note = pattern<NoteInput, NoteOutput>(
       ({ piece }: { piece: Writable<MentionablePiece> }) => {
         const name = piece.get()[NAME] ?? "";
         const resolved = (piece as any).resolveAsCell();
-        const ref = resolved?.entityId;
-        const entityId = ref ? entityRefToString(ref) : undefined;
+        // Derive the embed id from the scheme-PRESERVING sourceURI (the bare
+        // entityId would silently alias a computed: cell to its of: sibling)
+        // and let bareMentionId enforce the embed contract.
+        const uri: string | undefined = resolved?.sourceURI;
+        const entityId = uri ? bareMentionId(uri) : undefined;
         if (!name || !entityId) return;
 
         const link = `[[${name} (${entityId})]]`;

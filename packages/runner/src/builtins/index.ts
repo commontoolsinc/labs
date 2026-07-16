@@ -31,6 +31,16 @@ const WISH_DEBOUNCE_MS = 50;
 
 /**
  * Register all built-in modules with a runtime's module registry
+ *
+ * NOTE: Keep `builder/builtin-replayability.ts` in sync with these
+ * registrations. At pattern-build time these runtime registrations are
+ * invisible — builtins are just string names — and the computed-cell
+ * classifier trusts only names listed there as replayable (unknown names
+ * fail strict). When adding a builtin here, record it there: in
+ * `REPLAYABLE_BUILTIN_REFS` if replaying the node deterministically
+ * reproduces its writes, otherwise in the documented non-replayable list.
+ * (Precedent for a name-keyed builtin set: `EAGER_RESULT_BUILTIN_REFS` in
+ * runner.ts — scheduler-facing, deliberately kept separate.)
  */
 export function registerBuiltins(runtime: Runtime) {
   const moduleRegistry = runtime.moduleRegistry;

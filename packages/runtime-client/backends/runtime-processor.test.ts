@@ -348,6 +348,58 @@ describe("page slug metadata", () => {
 
     expect(result).toEqual({ slug: undefined });
   });
+
+  it("accepts bare and of:-schemed pageIds as the same entity", async () => {
+    // CellHandle.id() emits the full schemed URI while PageHandle.id() emits
+    // the bare routing form; the pageId intake must resolve both to the SAME
+    // entity. Without normalization, "of:fid1:H" parses as a hash whose tag
+    // is "of:fid1" and silently addresses the nonexistent of:of:fid1:H.
+    const received: string[] = [];
+    const processor = {
+      getSpaceCtx: homeSpaceCtx,
+      runtime: {
+        getCellFromEntityId: (_space: unknown, entityId: unknown) => {
+          received.push(String(entityId));
+          return {
+            sync: () => Promise.resolve(),
+            getMetaRaw: () => undefined,
+          };
+        },
+      },
+      pieceManager: {
+        getSpace: () => "did:key:z6Mk-runtime-processor-slug",
+      },
+    };
+
+    const bare = fid("schemed-piece");
+    for (const pageId of [bare, `of:${bare}`]) {
+      await (RuntimeProcessor.prototype as any).handlePageGetSlug
+        .call(processor, { type: RequestType.PageGetSlug, pageId });
+    }
+
+    expect(received).toEqual([bare, bare]);
+  });
+
+  it("rejects computed ids as page ids", async () => {
+    const processor = {
+      getSpaceCtx: homeSpaceCtx,
+      runtime: {
+        getCellFromEntityId: () => {
+          throw new Error("computed page id reached the runtime lookup");
+        },
+      },
+      pieceManager: {
+        getSpace: () => "did:key:z6Mk-runtime-processor-slug",
+      },
+    };
+
+    await expect(
+      (RuntimeProcessor.prototype as any).handlePageGetSlug.call(processor, {
+        type: RequestType.PageGetSlug,
+        pageId: `computed:${fid("not-a-page")}`,
+      }),
+    ).rejects.toThrow("Computed ids are not valid page ids");
+  });
 });
 
 describe("page slug redirects", () => {
@@ -395,6 +447,50 @@ describe("page slug redirects", () => {
       },
     };
   }
+
+  it("normalizes an of:-schemed id before the piece-manager lookup", async () => {
+    const bare = fid("ordinary-page");
+    const requestedRef: CellRef = {
+      id: `of:${bare}` as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const resultRef: CellRef = {
+      id: `of:${fid("ordinary-page-result")}` as CellRef["id"],
+      space,
+      scope: "space",
+      path: [],
+    };
+    const requestedCell = mockCell(requestedRef);
+    const resultCell = mockCell(resultRef);
+    const managerCalls: unknown[][] = [];
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+        cc: {
+          manager: () => ({
+            get: (...args: unknown[]) => {
+              managerCalls.push(args);
+              return Promise.resolve(resultCell);
+            },
+          }),
+        },
+      }),
+      runtime: {
+        getCellFromEntityId: () => requestedCell,
+      },
+    };
+
+    await (RuntimeProcessor.prototype as any).handlePageGet.call(processor, {
+      type: RequestType.PageGet,
+      pageId: `of:${bare}`,
+      runIt: true,
+      space,
+    });
+
+    expect(managerCalls).toEqual([[bare, true]]);
+  });
 
   it("renders slug redirects to output cells directly", async () => {
     const targetRef: CellRef = {

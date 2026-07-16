@@ -88,7 +88,7 @@ interface MutableCapabilityState {
    * by recognized `set`/`send` calls carrying an onCommit callback (whose
    * closure can escape into fresh transactions or external I/O after
    * commit — writes this analysis cannot bound). Consumers asserting
-   * write exhaustiveness must fail closed
+   * write exhaustiveness (`completeSchedulerScopeSummary`) must fail closed
    * on this, like `wildcard`; recognized reads/derivations are unaffected.
    *
    * Syntactic boundary: detection is per method-CALL dispatch. An extracted
@@ -177,6 +177,9 @@ const mergeableMethods = (kind: MergeableOpMethodKind): string[] =>
 // commit in their own transaction — effects this analysis cannot see or
 // bound. Either way a callback that sends must never summarize as
 // write-free.
+// Classifying it here also keeps writePaths an exhaustive record of capture
+// writes, which the computed-cell classifier relies on
+// (docs/specs/computed-cell-identity.md).
 const WRITER_METHODS = new Set([
   "set",
   "update",
@@ -1548,7 +1551,8 @@ export function analyzeFunctionCapabilities(
 
     // Unlike markWildcard this does NOT change shrinking or identity
     // classification — it only poisons write-exhaustiveness for consumers
-    // that need `writes` to be a closed-world record, while everything else
+    // that need `writes` to be a closed-world record
+    // (`completeSchedulerScopeSummary` is withheld), while everything else
     // behaves as before.
     const markUnverifiedCellUse = (name: string): void => {
       const state = ensureState(name);

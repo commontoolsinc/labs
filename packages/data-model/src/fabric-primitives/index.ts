@@ -6,6 +6,18 @@ import { FabricHash } from "./FabricHash.ts";
 import { FabricRegExp } from "./FabricRegExp.ts";
 
 export { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
+export {
+  COMPUTED_URI_SCHEME,
+  ENTITY_URI_SCHEMES,
+  type EntityKind,
+  entityKindOfIdString,
+  type EntityUriScheme,
+  entityUriSchemePrefix,
+  hasEntityUriScheme,
+  isEntityKind,
+  stripEntityUriScheme,
+  uriSchemeForEntityKind,
+} from "./entity-kind.ts";
 export { FabricBytes } from "./FabricBytes.ts";
 export { FabricRegExp } from "./FabricRegExp.ts";
 export { FabricHash } from "./FabricHash.ts";

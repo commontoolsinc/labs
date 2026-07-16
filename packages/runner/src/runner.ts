@@ -7,6 +7,7 @@ import {
   getPersistentSchedulerStateConfig,
   type SchedulerActionSnapshotCursor,
 } from "@commonfabric/memory/v2";
+import type { EntityKind } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -150,6 +151,12 @@ const EAGER_RESULT_BUILTIN_REFS = new Set([
 
 type InternalCellDescriptor = {
   partialCause: JSONValue;
+  /**
+   * Entity kind of the materialized cell's id. Part of the manifest match
+   * key alongside `partialCause`: a kind flip across pattern versions must
+   * re-materialize the cell under its new id rather than reuse the old link.
+   */
+  kind?: EntityKind;
   link: SigilLink;
 };
 
@@ -1094,7 +1101,8 @@ export class Runner {
         tx,
       );
       const manifestMatch = existingManifest.findIndex((existingDescriptor) =>
-        deepEqual(existingDescriptor.partialCause, descriptor.partialCause)
+        deepEqual(existingDescriptor.partialCause, descriptor.partialCause) &&
+        existingDescriptor.kind === descriptor.kind
       );
       // Re-emit the manifest link and backlink from the current descriptor on
       // every setup. A compatible setsrc may narrow an internal schema while
@@ -1106,6 +1114,7 @@ export class Runner {
       });
       manifest.push({
         partialCause: descriptor.partialCause,
+        ...(descriptor.kind !== undefined && { kind: descriptor.kind }),
         link: derivedSigilLink,
       });
       setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));

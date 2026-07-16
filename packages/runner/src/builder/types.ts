@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import type { EntityKind } from "@commonfabric/data-model/fabric-primitives";
 import type { PatternBuilder } from "./pattern.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 
@@ -255,6 +256,14 @@ export type DerivedInternalCellDescriptor = {
   partialCause: JSONValue;
   schema?: JSONSchema;
   scope?: CellScope;
+  /**
+   * Entity kind minted into the cell's id (preimage + visible tag). Set to
+   * `"computed"` only when the builder proves the cell is written solely by
+   * compute nodes. Participates in manifest matching: a kind change
+   * re-materializes the cell under a new id. See
+   * `docs/specs/computed-cell-identity.md`.
+   */
+  kind?: EntityKind;
 };
 
 declare module "@commonfabric/api" {

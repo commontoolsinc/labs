@@ -799,11 +799,20 @@ export function getDerivedInternalCellLink(
   const parent = resultCell.entityId ?? resultCell;
   return {
     space: resultCellLink.space,
-    id: toURI(createRef({}, {
-      parent,
-      type: "internal",
-      cause: descriptor.partialCause,
-    })),
+    // The kind's ONLY representation is the URI scheme applied here by
+    // toURI; the hash preimage is kind-free, so this mint site is the single
+    // place a computed identity is established.
+    id: toURI(
+      createRef(
+        {},
+        {
+          parent,
+          type: "internal",
+          cause: descriptor.partialCause,
+        },
+      ),
+      descriptor.kind,
+    ),
     path: [],
     scope: descriptor.scope ?? resultCellLink.scope,
     ...(descriptor.schema !== undefined && { schema: descriptor.schema }),

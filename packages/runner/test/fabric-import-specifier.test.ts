@@ -141,6 +141,19 @@ describe("fabric import specifiers", () => {
           ref: { kind: "uri", scheme: "of", hash: HASH },
         },
       },
+      {
+        specifier: `cf:computed:fid1:${HASH}`,
+        expected: {
+          ref: { kind: "uri", scheme: "computed", hash: HASH },
+        },
+      },
+      {
+        specifier: `cf:/kitchen/computed:fid1:${HASH}`,
+        expected: {
+          space: "kitchen",
+          ref: { kind: "uri", scheme: "computed", hash: HASH },
+        },
+      },
     ];
 
     for (const { specifier, expected, canonical } of cases) {
@@ -162,6 +175,10 @@ describe("fabric import specifiers", () => {
       `cf:pattern:${HASH}@${HASH_B}`,
       `cf:pattern:${HASH.toUpperCase()}@${HASH}`,
       `cf:of:${HASH}`,
+      // The scheme requires the fid1 segment, like of:.
+      `cf:computed:${HASH}`,
+      // The retired fid2 tag form is not readable.
+      `cf:of:fid2:computed:${HASH}`,
       "cf:data:abc",
       `cf:module/${HASH}`,
       "cf:cache-root/x",
@@ -232,5 +249,21 @@ describe("fabric import specifiers", () => {
       space: "somespace",
       ref: { kind: "uri", scheme: "of", hash: match![1] },
     });
+  });
+
+  it("round-trips real computed: URIs produced by createRef and toURI", () => {
+    const uri = toURI(
+      createRef({ x: 1 }, "fabric import canary"),
+      "computed",
+    );
+    const match = /^computed:fid1:([A-Za-z0-9_-]{43})$/.exec(uri);
+
+    expect(match).not.toBeNull();
+    const parsed = parseFabricRef(`cf:/somespace/${uri}`);
+    expect(parsed).toEqual({
+      space: "somespace",
+      ref: { kind: "uri", scheme: "computed", hash: match![1] },
+    });
+    expect(formatFabricRef(parsed!)).toBe(`cf:/somespace/${uri}`);
   });
 });

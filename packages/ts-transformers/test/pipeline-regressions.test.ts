@@ -1884,6 +1884,54 @@ export default pattern<Input>(({ departments }) => {
 );
 
 Deno.test(
+  "Pipeline regression: capture-free computed lowers with a parameterless callback and no materializer options",
+  async () => {
+    // A computed with NO captures lowers to a lift whose callback has zero
+    // parameters — the capability analysis has no first parameter to
+    // summarize (lift-applied-strategy's `!parameter` early-out) and must
+    // emit no materializer options rather than throwing or fabricating one.
+    const source = `import { computed, pattern } from "commonfabric";
+
+interface Input {
+  label: string;
+}
+
+export default pattern<Input>(({ label }) => {
+  const answer = computed(() => 42);
+  return { label, answer };
+});
+`;
+
+    const output = await transformSource(source, {
+      types: COMMONFABRIC_TYPES,
+    });
+    const root = parseModule(output);
+    const liftCall = liftCallFor(root, "answer");
+    const hasMaterializerKey = (value: unknown): boolean => {
+      if (Array.isArray(value)) return value.some(hasMaterializerKey);
+      if (value && typeof value === "object") {
+        return Object.keys(value).includes("materializerWriteInputPaths") ||
+          Object.values(value).some(hasMaterializerKey);
+      }
+      return false;
+    };
+    assert(
+      !liftCall.arguments.some((arg) => {
+        if (
+          !ts.isObjectLiteralExpression(arg) && !ts.isSatisfiesExpression(arg)
+        ) return false;
+        try {
+          return hasMaterializerKey(literalToValue(arg));
+        } catch {
+          return false;
+        }
+      }),
+      "capture-free computed() should carry no materializer options",
+    );
+  },
+);
+
+Deno.test(
   "Pipeline regression: send-only computed keeps stream paths in write metadata but never brands them collectible",
   async () => {
     const source =
