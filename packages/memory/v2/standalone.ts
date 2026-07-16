@@ -15,7 +15,17 @@
 import { encodeMemoryBoundary } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
+import {
+  deflateWirePayload,
+  inflateWirePayload,
+  MEMORY_WS_DEFLATE_MIN_BYTES,
+  memoryWsDeflateEnabled,
+  selectMemoryWsDeflateProtocol,
+  SerialTaskQueue,
+} from "./transport-deflate.ts";
 import { Identity } from "@commonfabric/identity";
+
+const standaloneTextEncoder = new TextEncoder();
 
 const standaloneMemoryAudience = (await Identity.fromPassphrase(
   "common tools standalone memory audience",
@@ -68,32 +78,100 @@ export class StandaloneMemoryServer {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         return new Response("memory websocket endpoint", { status: 200 });
       }
-      const { socket, response } = Deno.upgradeWebSocket(request);
+      // SPIKE: mirror toolshed's deflate subprotocol so in-repo clients that
+      // offer it keep working against the standalone harness server. The
+      // offer is always selected (refusal fails the connection per RFC 6455);
+      // the env switch only gates this server's outbound compression.
+      const deflateProtocol = selectMemoryWsDeflateProtocol(
+        request.headers.get("sec-websocket-protocol"),
+      );
+      const { socket, response } = Deno.upgradeWebSocket(
+        request,
+        deflateProtocol !== undefined ? { protocol: deflateProtocol } : {},
+      );
+      socket.binaryType = "arraybuffer";
       const connectionTag = nextConnectionTag++;
+      const sendQueue =
+        deflateProtocol !== undefined && memoryWsDeflateEnabled()
+          ? new SerialTaskQueue()
+          : null;
       const connection = memory.connect((message) => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(encodeMemoryBoundary(message));
-        }
-      });
-      const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
-      socket.addEventListener("message", (event) => {
-        if (typeof event.data !== "string") {
-          socket.close(1003, "memory websocket expects text frames");
-          connection.close();
+        const payload = encodeMemoryBoundary(message);
+        if (sendQueue === null) {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(payload);
+          }
           return;
         }
+        void sendQueue.enqueue(async () => {
+          if (
+            standaloneTextEncoder.encode(payload).byteLength <
+              MEMORY_WS_DEFLATE_MIN_BYTES
+          ) {
+            if (socket.readyState === WebSocket.OPEN) socket.send(payload);
+            return;
+          }
+          const compressed = await deflateWirePayload(payload);
+          if (socket.readyState === WebSocket.OPEN) socket.send(compressed);
+        }).catch(() => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.close(1011, "memory websocket send failure");
+          }
+          connection.close();
+        });
+      });
+      const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
+      const receiveQueue = deflateProtocol !== undefined
+        ? new SerialTaskQueue()
+        : null;
+      const handleText = (text: string) => {
         if (debugWrites) {
-          logCommitOperations(connectionTag, event.data);
+          logCommitOperations(connectionTag, text);
         }
-        connection.receive(event.data).catch(() => {
+        connection.receive(text).catch(() => {
           if (socket.readyState === WebSocket.OPEN) {
             socket.close(1011, "memory websocket receive failure");
           }
           connection.close();
         });
+      };
+      socket.addEventListener("message", (event) => {
+        const data: unknown = event.data;
+        if (typeof data === "string") {
+          if (receiveQueue === null) {
+            handleText(data);
+            return;
+          }
+          void receiveQueue.enqueue(() => handleText(data)).catch(() => {});
+          return;
+        }
+        if (
+          receiveQueue !== null &&
+          (data instanceof ArrayBuffer || ArrayBuffer.isView(data))
+        ) {
+          void receiveQueue.enqueue(async () => {
+            handleText(await inflateWirePayload(data));
+          }).catch(() => {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.close(1007, "memory websocket inflate failure");
+            }
+            connection.close();
+          });
+          return;
+        }
+        socket.close(1003, "memory websocket expects text frames");
+        connection.close();
       });
-      socket.addEventListener("close", () => connection.close());
-      socket.addEventListener("error", () => connection.close());
+      const closeAfterPendingFrames = () => {
+        if (receiveQueue === null) {
+          connection.close();
+          return;
+        }
+        // Frames that arrived before the close still deliver first.
+        void receiveQueue.enqueue(() => connection.close());
+      };
+      socket.addEventListener("close", closeAfterPendingFrames);
+      socket.addEventListener("error", closeAfterPendingFrames);
       return response;
     });
     return new StandaloneMemoryServer(memory, http);

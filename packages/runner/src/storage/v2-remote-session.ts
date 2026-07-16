@@ -3,6 +3,17 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
+import {
+  deflateWirePayload,
+  inflateWirePayload,
+  MEMORY_WS_DEFLATE_MIN_BYTES,
+  MEMORY_WS_DEFLATE_SUBPROTOCOL,
+  memoryWsDeflateEnabled,
+  memoryWsDeflateSupported,
+  SerialTaskQueue,
+} from "@commonfabric/memory/v2/transport-deflate";
+
+const TEXT_ENCODER = new TextEncoder();
 
 export interface SessionFactory {
   /** Opt in to StorageManager's ACL genesis handshake. Scripted factories used
@@ -96,6 +107,15 @@ export class WebSocketTransport implements MemoryClient.Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   #socket: WebSocket | null = null;
   #opening: Promise<WebSocket> | null = null;
+  // SPIKE: outbound ordering queue for the async deflate hop on a negotiated
+  // connection. One queue per transport is safe across reconnects because
+  // each task captures its own socket and no-ops once that socket closes.
+  #outbound = new SerialTaskQueue();
+  // SPIKE: while a closed socket's queued frames drain toward the close
+  // notification, a re-dial must wait — otherwise a send() could open a new
+  // socket before the consumer learns the old one closed, a window the
+  // synchronous pre-spike path never had.
+  #draining: Promise<void> | null = null;
 
   constructor(private readonly address: URL) {}
 
@@ -109,7 +129,23 @@ export class WebSocketTransport implements MemoryClient.Transport {
 
   async send(payload: string): Promise<void> {
     const socket = await this.open();
-    socket.send(payload);
+    if (socket.protocol !== MEMORY_WS_DEFLATE_SUBPROTOCOL) {
+      socket.send(payload);
+      return;
+    }
+    // Negotiated: every send funnels through the queue — a small text frame
+    // must not overtake an earlier payload still being compressed.
+    await this.#outbound.enqueue(async () => {
+      const bytes = TEXT_ENCODER.encode(payload).byteLength;
+      if (bytes < MEMORY_WS_DEFLATE_MIN_BYTES) {
+        if (socket.readyState === WebSocket.OPEN) socket.send(payload);
+        return;
+      }
+      const compressed = await deflateWirePayload(payload);
+      // Mirrors the uncompressed path: sending on a socket that closed
+      // after open() resolved is a silent drop, recovered by reconnect.
+      if (socket.readyState === WebSocket.OPEN) socket.send(compressed);
+    });
   }
 
   async close(): Promise<void> {
@@ -139,19 +175,64 @@ export class WebSocketTransport implements MemoryClient.Transport {
     if (this.#opening) {
       return await this.#opening;
     }
+    if (this.#draining !== null) {
+      await this.#draining;
+      // Drain completion may have raced another open(); re-enter to observe
+      // the current socket state.
+      return await this.open();
+    }
     const address = toWebSocketAddress(this.address);
     const opening = new Promise<WebSocket>((resolve, reject) => {
-      const socket = new WebSocket(address);
+      // SPIKE: offer the deflate subprotocol when this runtime can actually
+      // inflate (offering is a commitment) and it is not opted out via
+      // CF_MEMORY_WS_DEFLATE=0. Servers that predate the subprotocol will
+      // fail this connection per RFC 6455, so server support deploys first.
+      const socket = new WebSocket(
+        address,
+        memoryWsDeflateEnabled() && memoryWsDeflateSupported()
+          ? [MEMORY_WS_DEFLATE_SUBPROTOCOL]
+          : [],
+      );
+      socket.binaryType = "arraybuffer";
       this.#socket = socket;
       let opened = false;
+      // SPIKE: inbound ordering queue, per socket — async inflation must not
+      // let a later text frame overtake an earlier compressed frame.
+      const inbound = new SerialTaskQueue();
       socket.addEventListener("open", () => {
         opened = true;
         resolve(socket);
       }, { once: true });
       socket.addEventListener("message", (event) => {
-        if (typeof event.data === "string") {
-          this.#receiver(event.data);
+        const data: unknown = event.data;
+        if (typeof data === "string") {
+          if (socket.protocol !== MEMORY_WS_DEFLATE_SUBPROTOCOL) {
+            this.#receiver(data);
+            return;
+          }
+          void inbound.enqueue(() => this.#receiver(data)).catch((error) => {
+            console.error("memory websocket receiver failed", error);
+          });
+          return;
         }
+        if (
+          socket.protocol === MEMORY_WS_DEFLATE_SUBPROTOCOL &&
+          (data instanceof ArrayBuffer || ArrayBuffer.isView(data))
+        ) {
+          void inbound.enqueue(async () => {
+            this.#receiver(await inflateWirePayload(data));
+          }).catch(() => {
+            // A malformed compressed frame is a transport failure: close so
+            // the client's reconnect machinery takes over.
+            try {
+              socket.close();
+            } catch {
+              // Ignore close races with the peer.
+            }
+          });
+          return;
+        }
+        // Non-negotiated binary frames stay ignored (historical behavior).
       });
       socket.addEventListener("close", () => {
         if (this.#socket === socket) {
@@ -160,7 +241,16 @@ export class WebSocketTransport implements MemoryClient.Transport {
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#closeReceiver();
+        // SPIKE: the close notification queues behind pending inflates so
+        // every frame that arrived before the close is delivered first —
+        // the client's reconnect must not race a stale frame (and nothing
+        // may be delivered after the close notification).
+        const drained = inbound.enqueue(() => this.#closeReceiver())
+          .catch(() => {})
+          .finally(() => {
+            if (this.#draining === drained) this.#draining = null;
+          });
+        this.#draining = drained;
         if (!opened) {
           reject(new Error("memory websocket transport closed before opening"));
         }
@@ -172,11 +262,16 @@ export class WebSocketTransport implements MemoryClient.Transport {
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#closeReceiver(
+        const error =
           event instanceof ErrorEvent && event.error instanceof Error
             ? event.error
-            : new Error("memory websocket transport error"),
-        );
+            : new Error("memory websocket transport error");
+        const drained = inbound.enqueue(() => this.#closeReceiver(error))
+          .catch(() => {})
+          .finally(() => {
+            if (this.#draining === drained) this.#draining = null;
+          });
+        this.#draining = drained;
         reject(event);
       }, { once: true });
     });

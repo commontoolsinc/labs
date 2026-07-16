@@ -44,6 +44,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
+| [`memoryWsDeflate`](#memorywsdeflate) | `CF_MEMORY_WS_DEFLATE` env (negotiated per connection via websocket subprotocol) | on | William Kelly (spike) | graduate or delete after spike evaluation | SPIKE, on by default in the spike branch |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -575,6 +576,39 @@ the per-epic implementation notes).
 - **Path to removal.** Confirm no peer still needs the expanded payload, then
   delete the negotiation and the expanded-form encoder and always send the
   compact form.
+
+### `memoryWsDeflate`
+
+- **Toggle via.** `CF_MEMORY_WS_DEFLATE` env var (`0`/`false` disables;
+  anything else, including unset, enables). The switch gates only what a
+  process SPENDS: Deno clients stop offering the subprotocol, and servers
+  stop compressing their outbound. Servers always select an offered
+  subprotocol and always accept compressed inbound — refusing an offer fails
+  the whole connection per RFC 6455 for clients (like browsers) that cannot
+  read env. Negotiated per connection via the `fvj1.deflate` websocket
+  subprotocol declared in
+  [`packages/memory/v2/transport-deflate.ts`](../../packages/memory/v2/transport-deflate.ts).
+- **Added by.** William Kelly, websocket compression spike (no PR yet).
+- **Purpose.** Transport-level wire-size reduction: on a negotiated connection
+  either peer may send any memory wire payload as a binary frame holding the
+  raw-deflate compression of its UTF-8 bytes. Payloads under 192 bytes stay as
+  text frames. The memory protocol itself (hello flags, message shapes,
+  ordering) is untouched — this substitutes for the permessage-deflate
+  extension that `Deno.upgradeWebSocket` does not support.
+- **Current default and planned end state.** On by default in the spike
+  branch. RFC 6455 requires a client that offers a subprotocol to fail the
+  connection if the server selects none, so server-side support must deploy
+  before clients offer it. End state: graduate to always-on (and eventually
+  drop the text fallback), or delete the branch if the spike is not adopted.
+- **Status on 2026-07-16.** Spike implementation; measured on the Lunch Poll
+  two-browser flow.
+- **Path to removal.** Adopt: keep the subprotocol negotiation until every
+  client offers it, then require it. Reject: revert the spike branch; the
+  subprotocol was never shipped so no peer depends on it.
+- **Companion diagnostic.** `CF_MEMORY_WS_DEFLATE_STATS_FILE=<path>` makes
+  toolshed append one JSON line per closed memory websocket connection with
+  logical-versus-wire byte totals per direction (no payload contents). Unset
+  disables it entirely.
 
 > Two neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:
