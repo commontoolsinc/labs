@@ -54,6 +54,7 @@ export const ServerExecutionControlMetricsSchema = z.object({
   claimsIssued: nonNegativeIntegerSchema,
   claimsReissued: nonNegativeIntegerSchema,
   claimsRevoked: nonNegativeIntegerSchema,
+  claimsIssuedByContextKey: z.record(z.string(), nonNegativeIntegerSchema),
   acceptedActionAttempts: nonNegativeIntegerSchema,
   claimedActionConflicts: nonNegativeIntegerSchema,
   settlementsPublished: nonNegativeIntegerSchema,
@@ -68,6 +69,40 @@ export const ServerExecutionControlMetricsSchema = z.object({
   acceptedCommitIndexTargetCandidates: nonNegativeIntegerSchema,
   acceptedCommitIndexDemandedPieces: nonNegativeIntegerSchema,
   acceptedCommitIndexMatches: nonNegativeIntegerSchema,
+  // F1 claim-coverage counters: candidate outcomes per space and diagnostic
+  // code (the console.debug grep replacement; OQ4 rollout-gate input).
+  candidateClaimReadyBySpace: z.record(z.string(), nonNegativeIntegerSchema),
+  candidateUnservedBySpace: z.record(z.string(), nonNegativeIntegerSchema),
+  candidateUnservedByCode: z.record(z.string(), nonNegativeIntegerSchema),
+  candidateUnservedOffendersByCode: z.record(
+    z.string(),
+    nonNegativeIntegerSchema,
+  ),
+}).strict();
+
+// F1 feed observability: per-wave delivery counters plus traversal work
+// summed per memory-server operation ("session.watch.refresh" vs the
+// executor-driven "graph.query", plus watch registration operations).
+export const ServerExecutionFeedMetricsSchema = z.object({
+  refreshWaves: nonNegativeIntegerSchema,
+  refreshSessionsTouched: nonNegativeIntegerSchema,
+  refreshGraphsRefreshed: nonNegativeIntegerSchema,
+  refreshUpsertsPushed: nonNegativeIntegerSchema,
+  traversalByOperation: z.record(
+    z.string(),
+    z.object({
+      calls: nonNegativeIntegerSchema,
+      managerReads: nonNegativeIntegerSchema,
+      coveredSelectorSkips: nonNegativeIntegerSchema,
+      schemaTraversals: nonNegativeIntegerSchema,
+      pointerTraversals: nonNegativeIntegerSchema,
+      arrayTraversals: nonNegativeIntegerSchema,
+      objectTraversals: nonNegativeIntegerSchema,
+      dagTraversals: nonNegativeIntegerSchema,
+      getDocAtPathCalls: nonNegativeIntegerSchema,
+      schemaMemoHits: nonNegativeIntegerSchema,
+    }).strict(),
+  ),
 }).strict();
 
 export const HealthStatsResponseSchema = z.object({
@@ -78,6 +113,7 @@ export const HealthStatsResponseSchema = z.object({
   slowQueries: z.array(z.any()),
   serverExecutionPool: ServerExecutionPoolMetricsSchema.nullable(),
   serverExecutionControl: ServerExecutionControlMetricsSchema.nullable(),
+  serverExecutionFeed: ServerExecutionFeedMetricsSchema.nullable(),
 }).strict();
 
 export const index = createRoute({

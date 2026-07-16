@@ -477,6 +477,7 @@ export const queryGraph = (
 ): {
   serverSeq: number;
   entities: EntitySnapshot[];
+  stats: QueryTraversalStats;
 } => {
   const tracked = trackGraph(space, engine, query, reuse, {
     ...options,
@@ -486,6 +487,9 @@ export const queryGraph = (
     serverSeq: tracked.serverSeq,
     entities: [...tracked.state.entities.values()]
       .toSorted((left, right) => left.id.localeCompare(right.id)),
+    // Observability seam only: the server accumulates this per operation and
+    // must strip it before the result crosses the wire (GraphQueryResult).
+    stats: tracked.stats,
   };
 };
 

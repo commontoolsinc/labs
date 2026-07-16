@@ -101,6 +101,7 @@ import {
   isGraphQueryCoveredByState,
   queryGraph,
   type QueryGraphReuseContext,
+  type QueryTraversalStats,
   refreshTrackedGraph,
   toDirtyKey,
   type TrackedGraphState,
@@ -219,6 +220,26 @@ const recordSlowQueryDuration = (
 
 /** Returns the last N slow query/watch operations (>100ms). */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
+
+/** Aggregate traversal work for one server operation (F1 feed observability).
+ * Sums the per-call `QueryTraversalStats` that were previously computed and
+ * dropped; `calls` counts the evaluations that contributed. */
+export interface FeedTraversalOperationStats extends QueryTraversalStats {
+  calls: number;
+}
+
+const createFeedTraversalOperationStats = (): FeedTraversalOperationStats => ({
+  calls: 0,
+  managerReads: 0,
+  coveredSelectorSkips: 0,
+  schemaTraversals: 0,
+  pointerTraversals: 0,
+  arrayTraversals: 0,
+  objectTraversals: 0,
+  dagTraversals: 0,
+  getDocAtPathCalls: 0,
+  schemaMemoHits: 0,
+});
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -1552,6 +1573,10 @@ export class Server {
     claimsIssued: 0,
     claimsReissued: 0,
     claimsRevoked: 0,
+    // F1 claim-coverage evidence: issuance attributed to the claim's context
+    // key (space vs per-user lanes). Keyed by live context keys, so
+    // cardinality is bounded by the active principals on this host.
+    claimsIssuedByContextKey: {} as Record<string, number>,
     acceptedActionAttempts: 0,
     claimedActionConflicts: 0,
     settlementsPublished: 0,
@@ -1569,7 +1594,93 @@ export class Server {
     acceptedCommitIndexTargetCandidates: 0,
     acceptedCommitIndexDemandedPieces: 0,
     acceptedCommitIndexMatches: 0,
+    // F1 claim-coverage counters (recordExecutionCandidate*): the executor
+    // host reports every candidate outcome here so /api/health/stats — not a
+    // console.debug grep — is the coverage evidence channel (the OQ4
+    // per-space rollout-gate input). Space and code key cardinality is
+    // bounded by active spaces and the fixed diagnostic-code vocabulary.
+    candidateClaimReadyBySpace: {} as Record<string, number>,
+    candidateUnservedBySpace: {} as Record<string, number>,
+    candidateUnservedByCode: {} as Record<string, number>,
+    // Distinct offending implementations per code (deduped by
+    // implementationFingerprint): "one builtin unserved ×4" must read
+    // differently from "four implementations unserved once each".
+    candidateUnservedOffendersByCode: {} as Record<string, number>,
   };
+
+  /** Dedupe backing for candidateUnservedOffendersByCode: code → distinct
+   * offender fingerprints. Grows with distinct implementations only. */
+  #candidateUnservedOffenders = new Map<string, Set<string>>();
+
+  /** F1 feed observability: per-wave delivery and traversal attribution for
+   * the subscription refresh loop and graph queries. Counters only — never
+   * consulted by delivery decisions. */
+  readonly feedStats = {
+    /** Space fan-out passes of the refresh loop (one per dirty-set wave). */
+    refreshWaves: 0,
+    /** Sessions whose tracked ids intersected a wave's dirty set. */
+    refreshSessionsTouched: 0,
+    /** Tracked graphs a wave re-traversed (refreshTrackedGraph did work). */
+    refreshGraphsRefreshed: 0,
+    /** Upserts delivered to sessions by wave refreshes. */
+    refreshUpsertsPushed: 0,
+    /** Traversal work summed per server operation ("session.watch.refresh",
+     * executor/client "graph.query", "session.watch.set",
+     * "session.watch.add"). */
+    traversalByOperation: {} as Record<string, FeedTraversalOperationStats>,
+  };
+
+  #recordFeedTraversal(operation: string, stats: QueryTraversalStats): void {
+    const bucket = this.feedStats.traversalByOperation[operation] ??
+      (this.feedStats.traversalByOperation[operation] =
+        createFeedTraversalOperationStats());
+    bucket.calls += 1;
+    bucket.managerReads += stats.managerReads;
+    bucket.coveredSelectorSkips += stats.coveredSelectorSkips;
+    bucket.schemaTraversals += stats.schemaTraversals;
+    bucket.pointerTraversals += stats.pointerTraversals;
+    bucket.arrayTraversals += stats.arrayTraversals;
+    bucket.objectTraversals += stats.objectTraversals;
+    bucket.dagTraversals += stats.dagTraversals;
+    bucket.getDocAtPathCalls += stats.getDocAtPathCalls;
+    bucket.schemaMemoHits += stats.schemaMemoHits;
+  }
+
+  /** F1 claim-coverage evidence: the execution-pool host reports a
+   * claim-ready candidate. Counter maintenance only — receiving one never
+   * transfers or implies authority. */
+  recordExecutionCandidateClaimReady(claimKey: ActionClaimKey): void {
+    const stats = this.executionStats;
+    stats.candidateClaimReadyBySpace[claimKey.space] =
+      (stats.candidateClaimReadyBySpace[claimKey.space] ?? 0) + 1;
+  }
+
+  /** F1 claim-coverage evidence: the execution-pool host reports an
+   * unserved/unservable candidate diagnostic. Diagnostics without a claim
+   * key (e.g. malformed observations) count under "unknown" rather than
+   * being dropped. */
+  recordExecutionCandidateUnserved(diagnostic: {
+    readonly diagnosticCode: string;
+    readonly claimKey?: ActionClaimKey;
+    readonly claim?: ExecutionClaim;
+  }): void {
+    const code = diagnostic.diagnosticCode;
+    const key = diagnostic.claimKey ?? diagnostic.claim;
+    const space = key?.space ?? "unknown";
+    const fingerprint = key?.implementationFingerprint ?? "unknown";
+    const stats = this.executionStats;
+    stats.candidateUnservedByCode[code] =
+      (stats.candidateUnservedByCode[code] ?? 0) + 1;
+    stats.candidateUnservedBySpace[space] =
+      (stats.candidateUnservedBySpace[space] ?? 0) + 1;
+    let offenders = this.#candidateUnservedOffenders.get(code);
+    if (offenders === undefined) {
+      offenders = new Set();
+      this.#candidateUnservedOffenders.set(code, offenders);
+    }
+    offenders.add(fingerprint);
+    stats.candidateUnservedOffendersByCode[code] = offenders.size;
+  }
 
   /** space → (principal key → capability). Invalidated whenever a commit
    *  touches the space's ACL document. */
@@ -3875,6 +3986,8 @@ export class Server {
       });
     }
     this.executionStats.claimsIssued += 1;
+    this.executionStats.claimsIssuedByContextKey[claim.contextKey] =
+      (this.executionStats.claimsIssuedByContextKey[claim.contextKey] ?? 0) + 1;
     if (claimGeneration > 1) this.executionStats.claimsReissued += 1;
     this.#publishExecutionControl(Object.freeze({
       type: "session.execution.claim.set",
@@ -5971,6 +6084,7 @@ export class Server {
             undefined,
             scopeResolution.ok,
           );
+          this.#recordFeedTraversal("session.watch.add", tracked.stats);
           graphs.set(branch, tracked.state);
           for (const entity of tracked.state.entities.values()) {
             const entry = toCacheEntry(entity);
@@ -5998,6 +6112,7 @@ export class Server {
           staged,
           query,
         );
+        this.#recordFeedTraversal("session.watch.add", extended.stats);
         for (const entity of extended.updates.values()) {
           const entry = toCacheEntry(entity);
           updates.set(
@@ -6077,10 +6192,13 @@ export class Server {
       reuse,
       scopeContext,
     );
+    this.#recordFeedTraversal("graph.query", result.stats);
     recordSlowQueryDuration("graph.query", space, startedAt, {
       roots: query.roots.length,
     });
-    return result;
+    // The traversal stats are host-side observability; GraphQueryResult is a
+    // wire shape and must stay exactly { serverSeq, entities }.
+    return { serverSeq: result.serverSeq, entities: result.entities };
   }
 
   async evaluateWatchSet(
@@ -6110,6 +6228,7 @@ export class Server {
         reuse,
         scopeContext,
       );
+      this.#recordFeedTraversal("session.watch.set", result.stats);
       serverSeq = result.serverSeq;
       graphs.set(branch, result.state);
       for (const entity of result.state.entities.values()) {
@@ -6241,6 +6360,7 @@ export class Server {
             if (!touched) {
               return await emptyCatchUp();
             }
+            this.feedStats.refreshSessionsTouched += 1;
 
             const engine = await this.openEngine(space);
             const fromSeq = session.lastSyncedSeq;
@@ -6266,6 +6386,11 @@ export class Server {
               if (refreshed === null) {
                 continue;
               }
+              this.feedStats.refreshGraphsRefreshed += 1;
+              this.#recordFeedTraversal(
+                "session.watch.refresh",
+                refreshed.stats,
+              );
               for (const entity of refreshed.updates.values()) {
                 const entry = toCacheEntry(entity);
                 updates.set(
@@ -6316,6 +6441,7 @@ export class Server {
               return await emptyCatchUp(fromSeq, toSeq);
             }
             session.lastSyncedSeq = toSeq;
+            this.feedStats.refreshUpsertsPushed += upserts.length;
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
             });
@@ -6638,6 +6764,9 @@ export class Server {
         if (dirtyOrigins !== undefined) {
           this.#dirtyOriginsBySpace.delete(space);
         }
+        // One refresh wave: this space's coalesced dirty set fans out to
+        // every connection below.
+        this.feedStats.refreshWaves += 1;
         // Fan-out is a scheduled/batched timer decoupled from transact, so it
         // must be its own root span. `root: true` makes that explicit — the
         // context manager propagates the active context into timer callbacks,

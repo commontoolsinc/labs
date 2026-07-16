@@ -7,6 +7,7 @@ export type ServerExecutionControlMetrics = Readonly<{
   claimsIssued: number;
   claimsReissued: number;
   claimsRevoked: number;
+  claimsIssuedByContextKey: Readonly<Record<string, number>>;
   acceptedActionAttempts: number;
   claimedActionConflicts: number;
   settlementsPublished: number;
@@ -21,13 +22,46 @@ export type ServerExecutionControlMetrics = Readonly<{
   acceptedCommitIndexTargetCandidates: number;
   acceptedCommitIndexDemandedPieces: number;
   acceptedCommitIndexMatches: number;
+  candidateClaimReadyBySpace: Readonly<Record<string, number>>;
+  candidateUnservedBySpace: Readonly<Record<string, number>>;
+  candidateUnservedByCode: Readonly<Record<string, number>>;
+  candidateUnservedOffendersByCode: Readonly<Record<string, number>>;
 }>;
 export type ServerExecutionControlMetricsProvider = () =>
   | ServerExecutionControlMetrics
   | null;
 
+/** Traversal work summed per memory-server operation (F1 feed
+ * observability): one bucket per operation string, e.g.
+ * "session.watch.refresh" and the executor-driven "graph.query". */
+export type ServerExecutionFeedTraversalMetrics = Readonly<{
+  calls: number;
+  managerReads: number;
+  coveredSelectorSkips: number;
+  schemaTraversals: number;
+  pointerTraversals: number;
+  arrayTraversals: number;
+  objectTraversals: number;
+  dagTraversals: number;
+  getDocAtPathCalls: number;
+  schemaMemoHits: number;
+}>;
+export type ServerExecutionFeedMetrics = Readonly<{
+  refreshWaves: number;
+  refreshSessionsTouched: number;
+  refreshGraphsRefreshed: number;
+  refreshUpsertsPushed: number;
+  traversalByOperation: Readonly<
+    Record<string, ServerExecutionFeedTraversalMetrics>
+  >;
+}>;
+export type ServerExecutionFeedMetricsProvider = () =>
+  | ServerExecutionFeedMetrics
+  | null;
+
 let metricsProvider: ServerExecutionPoolMetricsProvider = () => null;
 let controlMetricsProvider: ServerExecutionControlMetricsProvider = () => null;
+let feedMetricsProvider: ServerExecutionFeedMetricsProvider = () => null;
 
 /**
  * Install the process-local pool snapshot provider without making the health
@@ -55,4 +89,16 @@ export function getServerExecutionControlMetrics():
   | ServerExecutionControlMetrics
   | null {
   return controlMetricsProvider();
+}
+
+export function setServerExecutionFeedMetricsProvider(
+  provider: ServerExecutionFeedMetricsProvider,
+): void {
+  feedMetricsProvider = provider;
+}
+
+export function getServerExecutionFeedMetrics():
+  | ServerExecutionFeedMetrics
+  | null {
+  return feedMetricsProvider();
 }

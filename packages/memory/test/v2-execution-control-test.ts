@@ -551,6 +551,8 @@ Deno.test("claims are action-qualified and reclaim mints a fresh generation", as
     assertEquals(main.claimGeneration, 1);
     assertEquals(sibling.claimGeneration, 1);
     assertEquals(server.executionStats.claimsReissued, 0);
+    // F1 coverage evidence: issuance attributes claims to their context key.
+    assertEquals(server.executionStats.claimsIssuedByContextKey, { space: 2 });
     assertEquals(server.hasLiveExecutionClaim(main), true);
     assertEquals(session.executionClaims.map((claim) => claim.actionId), [
       "action:derive",
@@ -565,6 +567,7 @@ Deno.test("claims are action-qualified and reclaim mints a fresh generation", as
     );
     assertEquals(reclaimed.claimGeneration, 2);
     assertEquals(server.executionStats.claimsReissued, 1);
+    assertEquals(server.executionStats.claimsIssuedByContextKey, { space: 3 });
 
     assertEquals(
       server.publishActionSettlement({

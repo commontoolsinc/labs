@@ -53,18 +53,23 @@ Verify:
 ## Operational signals
 
 `GET /api/health/stats` exposes the bounded-cardinality host snapshots as
-`serverExecutionPool` and `serverExecutionControl`. A null pool value means no
-pool is available or started in that process (including when the runtime flag
-is off); a null control value means its provider is not installed. Neither
-means the counters are zero.
+`serverExecutionPool`, `serverExecutionControl`, and `serverExecutionFeed`. A
+null pool value means no pool is available or started in that process
+(including when the runtime flag is off); a null control or feed value means
+its provider is not installed. None of these mean the counters are zero.
 
-Keep space, branch, action, and DID values in structured logs/traces rather than
-metric labels. The current bounded-cardinality sources are:
+Keep space, branch, action, and DID values in structured logs/traces rather
+than metric labels; the process-local health snapshot is the one exception —
+its F1 claim-coverage records key by space DID, execution context key, and
+diagnostic code (bounded by active spaces/principals and the fixed diagnostic
+vocabulary) because per-space coverage is the rollout-gate input. The current
+bounded-cardinality sources are:
 
 | Source | Signals |
 | --- | --- |
 | `/api/health/stats.serverExecutionPool` | active lanes/workers/demands and state counts; demand snapshots; completed server scheduler runs; shadow/authoritative server action transactions; server async requests; Worker start attempts/live/aborted/failed outcomes and stops; abrupt stops; lease losses/replacements; sponsor rotations; crashes; accepted-commit/index decisions; unrelated suppression; parked-wake attempts/starts; demand-empty hibernations |
-| `/api/health/stats.serverExecutionControl` | claims issued/reissued/revoked; accepted action attempts and exact claimed-action conflicts; accepted-commit index lookups plus pre-dedup target-candidate, demanded-piece, and match counts; committed/no-op/failed/unserved settlements; lease-fence and action-firewall rejects |
+| `/api/health/stats.serverExecutionControl` | claims issued/reissued/revoked, plus issuance by execution context key; accepted action attempts and exact claimed-action conflicts; accepted-commit index lookups plus pre-dedup target-candidate, demanded-piece, and match counts; committed/no-op/failed/unserved settlements; lease-fence and action-firewall rejects; F1 claim-coverage counters — claim-ready and unserved candidates per space, unserved occurrences per diagnostic code, and distinct offending implementations per code (deduped by implementation fingerprint) |
+| `/api/health/stats.serverExecutionFeed` | per-wave delivery attribution for the subscription refresh loop (waves, sessions touched, graphs re-traversed, upserts pushed) and traversal work summed per memory-server operation (`session.watch.refresh` vs the executor-driven `graph.query`, plus watch registration) |
 | `/api/health/stats.timingStats["execution.pool"]` | aggregate Worker start plus live/aborted/failed start outcomes, demand update, parked wake, hibernate, and settle latency |
 | `/api/health/stats.timingStats["execution.control"]` | `stale-reader-lookup`: synchronous host writer-index lookup during accepted-commit handling; `invalidation-settlement`: one host-local sample per published settlement, measured from the oldest exact durable source cause coalesced into that attempt |
 | Memory host APIs | `listExecutionDemands`, `currentExecutionLease`, and `listExecutionClaims` for point-in-time lane authority |
@@ -72,7 +77,7 @@ metric labels. The current bounded-cardinality sources are:
 | `execution.executor` logger | `execution-server-shadow-action-run`, `execution-server-authoritative-action-run` |
 | `storage.v2` logger | client-derived suppressed/upstream commits; overlay created/retained/dropped/divergence; `execution-overlay-held` timing |
 | `runtime.execution` logger | client/server async builtin starts by role |
-| Toolshed executor callbacks | claim candidates, unserved diagnostics, and writer discovery |
+| Toolshed executor callbacks | claim candidates, unserved diagnostics, and writer discovery; candidate outcomes also feed the `serverExecutionControl` claim-coverage counters, which are the coverage evidence channel (the debug logs remain for per-candidate detail only) |
 
 Under Deno native OTel (`OTEL_DENO=true|1` with `--unstable-otel`), every
 executor Worker bridges its isolated Runtime telemetry stream to that Worker's

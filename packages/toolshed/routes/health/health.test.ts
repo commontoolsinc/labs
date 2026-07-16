@@ -4,6 +4,7 @@ import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
 import {
   setServerExecutionControlMetricsProvider,
+  setServerExecutionFeedMetricsProvider,
   setServerExecutionPoolMetricsProvider,
 } from "@/lib/server-execution-observability.ts";
 import router from "@/routes/health/health.index.ts";
@@ -55,6 +56,7 @@ const controlMetrics = {
   claimsIssued: 2,
   claimsReissued: 1,
   claimsRevoked: 1,
+  claimsIssuedByContextKey: { space: 2 },
   acceptedActionAttempts: 4,
   claimedActionConflicts: 1,
   settlementsPublished: 4,
@@ -69,6 +71,43 @@ const controlMetrics = {
   acceptedCommitIndexTargetCandidates: 8,
   acceptedCommitIndexDemandedPieces: 2,
   acceptedCommitIndexMatches: 4,
+  candidateClaimReadyBySpace: { "did:key:z6Mk-space": 3 },
+  candidateUnservedBySpace: { "did:key:z6Mk-space": 4 },
+  candidateUnservedByCode: { "static-read-outside-space": 4 },
+  candidateUnservedOffendersByCode: { "static-read-outside-space": 1 },
+};
+
+const feedMetrics = {
+  refreshWaves: 6,
+  refreshSessionsTouched: 4,
+  refreshGraphsRefreshed: 3,
+  refreshUpsertsPushed: 9,
+  traversalByOperation: {
+    "session.watch.refresh": {
+      calls: 3,
+      managerReads: 12,
+      coveredSelectorSkips: 1,
+      schemaTraversals: 8,
+      pointerTraversals: 2,
+      arrayTraversals: 1,
+      objectTraversals: 5,
+      dagTraversals: 8,
+      getDocAtPathCalls: 2,
+      schemaMemoHits: 4,
+    },
+    "graph.query": {
+      calls: 2,
+      managerReads: 6,
+      coveredSelectorSkips: 0,
+      schemaTraversals: 4,
+      pointerTraversals: 1,
+      arrayTraversals: 0,
+      objectTraversals: 2,
+      dagTraversals: 4,
+      getDocAtPathCalls: 1,
+      schemaMemoHits: 0,
+    },
+  },
 };
 
 Deno.test("health routes", async (t) => {
@@ -92,6 +131,8 @@ Deno.test("health routes", async (t) => {
       assertEquals(json.serverExecutionPool, null);
       assertEquals("serverExecutionControl" in json, true);
       assertEquals(json.serverExecutionControl, null);
+      assertEquals("serverExecutionFeed" in json, true);
+      assertEquals(json.serverExecutionFeed, null);
     },
   );
 
@@ -100,15 +141,18 @@ Deno.test("health routes", async (t) => {
     async () => {
       setServerExecutionPoolMetricsProvider(() => poolMetrics);
       setServerExecutionControlMetricsProvider(() => controlMetrics);
+      setServerExecutionFeedMetricsProvider(() => feedMetrics);
       try {
         const response = await app.request("/api/health/stats");
         assertEquals(response.status, 200);
         const json = await response.json();
         assertEquals(json.serverExecutionPool, poolMetrics);
         assertEquals(json.serverExecutionControl, controlMetrics);
+        assertEquals(json.serverExecutionFeed, feedMetrics);
       } finally {
         setServerExecutionPoolMetricsProvider(() => null);
         setServerExecutionControlMetricsProvider(() => null);
+        setServerExecutionFeedMetricsProvider(() => null);
       }
     },
   );
@@ -124,6 +168,7 @@ Deno.test("health routes", async (t) => {
         slowQueries: [],
         serverExecutionPool: poolMetrics,
         serverExecutionControl: controlMetrics,
+        serverExecutionFeed: feedMetrics,
       };
       assertEquals(HealthStatsResponseSchema.safeParse(response).success, true);
       assertEquals(
@@ -137,6 +182,29 @@ Deno.test("health routes", async (t) => {
         HealthStatsResponseSchema.safeParse({
           ...response,
           serverExecutionControl: { ...controlMetrics, outcome: 1 },
+        }).success,
+        false,
+      );
+      assertEquals(
+        HealthStatsResponseSchema.safeParse({
+          ...response,
+          serverExecutionFeed: { ...feedMetrics, elapsedMs: 1 },
+        }).success,
+        false,
+      );
+      // Traversal buckets are keyed by operation but each bucket is bounded.
+      assertEquals(
+        HealthStatsResponseSchema.safeParse({
+          ...response,
+          serverExecutionFeed: {
+            ...feedMetrics,
+            traversalByOperation: {
+              "graph.query": {
+                ...feedMetrics.traversalByOperation["graph.query"],
+                timing: 3,
+              },
+            },
+          },
         }).success,
         false,
       );

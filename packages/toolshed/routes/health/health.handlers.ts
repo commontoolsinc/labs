@@ -16,6 +16,7 @@ import {
 } from "@commonfabric/utils/logger";
 import {
   getServerExecutionControlMetrics,
+  getServerExecutionFeedMetrics,
   getServerExecutionPoolMetrics,
 } from "@/lib/server-execution-observability.ts";
 
@@ -61,6 +62,7 @@ export const stats: AppRouteHandler<StatsRoute> = (c) => {
     slowQueries: [...getSlowQueries()],
     serverExecutionPool: getServerExecutionPoolMetrics(),
     serverExecutionControl: getServerExecutionControlMetrics(),
+    serverExecutionFeed: getServerExecutionFeedMetrics(),
   }, HttpStatusCodes.OK);
 };
 

@@ -12,6 +12,7 @@ import {
 import { DenoSpaceExecutorFactory } from "@commonfabric/runner/executor/deno";
 import {
   setServerExecutionControlMetricsProvider,
+  setServerExecutionFeedMetricsProvider,
   setServerExecutionPoolMetricsProvider,
 } from "@/lib/server-execution-observability.ts";
 
@@ -60,6 +61,7 @@ export function serverExecutionPoolMetrics():
 
 setServerExecutionPoolMetricsProvider(serverExecutionPoolMetrics);
 setServerExecutionControlMetricsProvider(() => memoryServer.executionStats);
+setServerExecutionFeedMetricsProvider(() => memoryServer.feedStats);
 
 /** Start client-demand execution after runtime flags are installed, but before
  * the HTTP server accepts connections. */
@@ -75,16 +77,23 @@ export function startServerExecutionPool(runtime: Runtime): void {
       apiUrl: new URL(env.API_URL),
       patternApiUrl: new URL(env.API_URL),
       experimental: runtime.experimental,
-      onCandidateClaim: (candidate) =>
+      // F1 claim-coverage counters are the evidence channel (surfaced under
+      // /api/health/stats serverExecutionControl); the debug logs remain for
+      // per-candidate detail but are no longer what a measurement greps.
+      onCandidateClaim: (candidate) => {
+        memoryServer.recordExecutionCandidateClaimReady(candidate.claimKey);
         console.debug(
           "Memory: Server execution candidate claim-ready",
           candidate.claimKey,
-        ),
-      onCandidateDiagnostic: (diagnostic) =>
+        );
+      },
+      onCandidateDiagnostic: (diagnostic) => {
+        memoryServer.recordExecutionCandidateUnserved(diagnostic);
         console.debug(
           "Memory: Server execution candidate unserved",
           diagnostic,
-        ),
+        );
+      },
       onWriterDiscovery: (discovery) =>
         console.debug(
           "Memory: Server execution writer discovery",
