@@ -328,21 +328,23 @@ export class PieceManager {
         scope,
       );
 
-    // Load persisted result/metadata before start() decides whether this is a
-    // resumed piece that needs dependency sync before scheduler wiring — and so
-    // the addressed cell's value link is local for the canonicalization below.
+    // Load the addressed cell. Syncing a value-link "slot" address also loads
+    // its link target — the piece's canonical result cell — together with that
+    // cell's `argument`/`patternIdentity` meta, because the query follows the
+    // top-of-doc value link and returns the target's meta docs. So this one sync
+    // makes both the slot and the canonical cell (with its metadata) local.
     await timePiecePhase("get.piece.sync", () => addressed.sync());
 
-    // Canonicalize a value-link "slot" address to the piece's canonical result
-    // cell. A piece created inside a handler and stored into a list/object (e.g.
-    // the topics board's `addTopic` doing `topics.push(Topic({...}))`) is
-    // addressed by a plain value-link that redirects to the result cell, where
-    // setup wrote `patternIdentity` and the `argument` meta-link. start() needs
-    // that identity and reads need that metadata, so resolving here makes
-    // start / read / stop all operate on the real piece rather than the wrapper.
-    // Idempotent for a normal top-level piece.
+    // Canonicalize the value-link "slot" to the piece's canonical result cell.
+    // A piece created inside a handler and stored into a list/object (e.g. the
+    // topics board's `addTopic` doing `topics.push(Topic({...}))`) is addressed
+    // by a plain value-link that redirects to the result cell, where setup wrote
+    // `patternIdentity` and the `argument` meta-link. start() needs that identity
+    // and reads need that metadata, so resolving here makes start / read / stop
+    // operate on the real piece rather than the wrapper. The sync above already
+    // made the canonical cell local, so this resolves over local links with no
+    // further sync. Idempotent for a normal top-level piece.
     const piece = addressed.resolveAsCell();
-    await timePiecePhase("get.canonical.sync", () => piece.sync());
 
     if (runIt) {
       // start() handles pattern loading and running. It's idempotent - no
