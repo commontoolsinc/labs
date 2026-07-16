@@ -115,7 +115,9 @@ If you are developing runtime code, read the following documentation:
 - `docs/development/patch-operations.md` - The patch-operation family (the
   single logical changes a commit carries), the registries that define each op
   once, and how to add a new one across the memory / runner / api / transformer
-  layers
+  layers. Its neighbour `mergeable-collection-writes.md` covers why the
+  mergeable ops exist and what they do to conflict detection; read it before
+  changing how a handler writes to a list
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
 - `docs/development/EXPERIMENTAL_OPTIONS.md` - The central registry of every

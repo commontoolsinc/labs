@@ -8,6 +8,10 @@ key, delete the record with a given key. The driving example is the lunch poll,
 whose handlers are almost entirely keyed mutations of lists of records; it is
 migrated to this approach as the worked example.
 
+For how to change an existing handler over to keyed addressing, and the mistakes
+that make such a migration look finished while it is not, see
+[migrating-collection-writes.md](./migrating-collection-writes.md).
+
 ## The lunch poll's read-then-write inventory
 
 Every mutating handler in `packages/patterns/lunch-poll`, by shape, and the

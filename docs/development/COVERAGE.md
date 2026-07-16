@@ -42,7 +42,7 @@ in front of each authored statement, and the collector writes one
 `*.pattern-coverage.lcov` file per test. The line numbers in that file point
 back at the authored pattern source.
 
-Two properties of this mechanism are worth keeping in mind.
+These properties of this mechanism are worth keeping in mind:
 
 - The counters are statement based. A single statement that spans several lines
   marks its whole source range as run the moment the statement is reached. The
@@ -51,6 +51,14 @@ Two properties of this mechanism are worth keeping in mind.
 - Coverage records that a line ran. It never records that a test checked the
   result of running that line. A test that drives a pattern through a flow
   without asserting anything still marks those lines covered.
+- Handler bodies and derived expressions run only when a test drives them, and a
+  pattern unit test can drive both. A JSX handler, inline or bound, compiles to a
+  stream on the node's prop: a test walks the rendered tree to the node, reads
+  the prop, and sends it an event. A derived expression such as `{count * 2}`
+  runs when a test reads the node it builds. So UI raises the uncovered-line
+  count only until a test drives it; write that test rather than taking a
+  `NEW_PERF_BASELINE` marker.
+  [pattern-testing.md](../common/workflows/pattern-testing.md) shows how.
 
 `CF_PATTERN_COVERAGE_DIR` is read in exactly one place: the `cf test` command in
 `packages/cli/commands/test-command.ts`. A job that runs patterns through a
@@ -182,18 +190,6 @@ positives and a less faithful, more gameable gate.
   expanded, normalizing the denominator (always scoring a pattern file against
   the same line set whether or not it has a record) would make the numbers
   easier to trust.
-
-- Event-handler bodies are never covered by the pattern-unit gate. A JSX handler
-  such as `onClick={() => stream.send({})}` compiles to a handler that the
-  runtime materializes as an opaque reference, not a callable function. A pattern
-  unit test can walk the rendered tree to pull reactive computeds, but it cannot
-  fire that handler, because firing needs the runtime's event dispatch and
-  `cf test` has no DOM. So the statements inside every event handler count as
-  uncovered. A change that adds UI buttons therefore raises the group's
-  uncovered-line count by an amount no unit test can bring back down. Accept that
-  rise with a `NEW_PERF_BASELINE` marker (see
-  [CI_PERFORMANCE.md](CI_PERFORMANCE.md)); do not restructure the handler to move
-  the counter, because that changes wiring no test exercises.
 
 ## Related documentation
 

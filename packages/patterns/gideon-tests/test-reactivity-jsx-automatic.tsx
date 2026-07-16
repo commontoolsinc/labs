@@ -59,7 +59,7 @@ const updateAllValues = handler<
   // Add or remove an item
   const currentItems = items.get();
   if (currentItems.length < 5) {
-    items.push({ title: `Item ${currentItems.length + 1}` });
+    items.set([...currentItems, { title: `Item ${currentItems.length + 1}` }]);
   } else {
     items.set(currentItems.slice(0, 3));
   }

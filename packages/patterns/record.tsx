@@ -22,6 +22,7 @@ import {
   safeDateNow,
   SELF,
   str,
+  type Stream,
   toCompactDebugString,
   UI,
   Writable,
@@ -93,6 +94,12 @@ export interface RecordOutput {
   trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
   /** Self-reference for sub-pieces to access their parent Record */
   parentRecord?: RecordOutput | null;
+  /** Adds a module of the named type to this record's sub-pieces. */
+  addModule?: Stream<{
+    type: string;
+    initialData?: Record<string, unknown>;
+    result?: Writable<unknown>;
+  }>;
 }
 
 // ===== Auto-Initialize Notes + TypePicker (Two-Lift Pattern) =====
@@ -629,13 +636,13 @@ const handleAddModule = handler<
   // Capture schema at creation time
   const schema = getResultSchema(piece);
 
-  sc.push({
+  sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
     piece,
     schema,
-  });
+  }]);
 
   if (result) {
     result.set({
