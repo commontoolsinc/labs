@@ -115,6 +115,7 @@ import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
 import {
   builtinImplementationHash,
+  isServerComputationBuiltinId,
   isServerExecutableBuiltinId,
   serverBuiltinImplementationHash,
 } from "./builtins/server-execution.ts";
@@ -5131,6 +5132,13 @@ export class Runner {
     const serverBuiltinRuntimeWrites = (builtinAction as Action & {
       serverBuiltinRuntimeWrites?: NormalizedFullLink[];
     }).serverBuiltinRuntimeWrites ?? [];
+    // W2.15a: the pure structural selectors carry a per-builtin COMPUTATION
+    // descriptor (single direct output, keyed on the same canonical
+    // `moduleRefName` as the identity stamp above). Disjoint from
+    // `serverBuiltinId` (the effect subset), so no action is ever both.
+    const computationBuiltinId = isServerComputationBuiltinId(moduleRefName)
+      ? moduleRefName
+      : undefined;
     Object.assign(action, builtinAction, {
       reads: inputCells,
       writes: schedulingWrites,
@@ -5144,6 +5152,21 @@ export class Runner {
             writes: schedulingWrites,
             runtimeWrites: serverBuiltinRuntimeWrites,
             directOutputs: [outputBinding],
+          },
+        }
+        : {}),
+      ...(computationBuiltinId !== undefined
+        ? {
+          serverBuiltinComputation: {
+            version: 1 as const,
+            id: computationBuiltinId,
+            piece: resultCell.getAsNormalizedFullLink(),
+            reads: inputCells,
+            // The registered write surface; its single direct root output is
+            // `outputCells`. Selectors write only that one result cell, so the
+            // fail-closed envelope bounds them exactly.
+            writes: schedulingWrites,
+            directOutputs: outputCells,
           },
         }
         : {}),

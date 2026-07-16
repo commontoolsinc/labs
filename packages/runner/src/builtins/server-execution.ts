@@ -64,3 +64,48 @@ export interface ServerBuiltinActionDescriptor {
   readonly runtimeWrites: readonly NormalizedFullLink[];
   readonly directOutputs: readonly NormalizedFullLink[];
 }
+
+/**
+ * Pure structural selector builtins whose whole action surface is a single
+ * direct root output over their registered inputs (W2.15a). Each reads its
+ * condition/branch inputs and writes ONLY the one result cell — verified
+ * against `if-else.ts`, `when.ts`, `unless.ts` (each `setRawUntyped`s the single
+ * result and nothing else). Keep this registry deliberately exact, exactly like
+ * `SERVER_EXECUTABLE_BUILTIN_IDS`: map/filter/flatMap carry output-collection
+ * envelopes and wish is a resolver, so they are a separately-designed follow-up
+ * (W2.15b/W2.16) and must NOT be added here.
+ */
+export const SERVER_COMPUTATION_BUILTIN_IDS = [
+  "ifElse",
+  "when",
+  "unless",
+] as const;
+
+export type ServerComputationBuiltinId =
+  typeof SERVER_COMPUTATION_BUILTIN_IDS[number];
+
+const SERVER_COMPUTATION_BUILTIN_SET = new Set<string>(
+  SERVER_COMPUTATION_BUILTIN_IDS,
+);
+
+export function isServerComputationBuiltinId(
+  value: unknown,
+): value is ServerComputationBuiltinId {
+  return typeof value === "string" &&
+    SERVER_COMPUTATION_BUILTIN_SET.has(value);
+}
+
+/**
+ * Runner-authored static surface for a pure selector builtin. Unlike the effect
+ * descriptor, there are no `runtimeWrites`: the write surface is exactly the
+ * single direct output, and the assembled summary is fail-closed (observed
+ * runtime writes are never folded into the envelope).
+ */
+export interface ServerBuiltinComputationDescriptor {
+  readonly version: 1;
+  readonly id: ServerComputationBuiltinId;
+  readonly piece: NormalizedFullLink;
+  readonly reads: readonly NormalizedFullLink[];
+  readonly writes: readonly NormalizedFullLink[];
+  readonly directOutputs: readonly NormalizedFullLink[];
+}

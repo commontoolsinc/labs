@@ -10,7 +10,10 @@ import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
-import type { ServerBuiltinActionDescriptor } from "../builtins/server-execution.ts";
+import type {
+  ServerBuiltinActionDescriptor,
+  ServerBuiltinComputationDescriptor,
+} from "../builtins/server-execution.ts";
 import type { CompleteActionScopeSummary } from "./persistent-observation.ts";
 
 export interface TelemetryAnnotations {
@@ -37,6 +40,12 @@ export interface TelemetryAnnotations {
   serverBuiltin?: ServerBuiltinActionDescriptor;
   /** Last trusted durable surface adopted for that builtin action. */
   serverBuiltinPreviousScopeSummary?: CompleteActionScopeSummary;
+  /**
+   * Trusted per-builtin descriptor for the pure structural selectors
+   * (ifElse/when/unless, W2.15a). Attached only when the canonical registry ref
+   * is a `SERVER_COMPUTATION_BUILTIN_IDS` member.
+   */
+  serverBuiltinComputation?: ServerBuiltinComputationDescriptor;
   schedulerObservationIdentity?: SchedulerObservationIdentity;
 }
 

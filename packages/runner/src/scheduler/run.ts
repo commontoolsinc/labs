@@ -43,7 +43,12 @@ import type {
   TelemetryAnnotations,
 } from "./types.ts";
 import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
-import { serverBuiltinImplementationHash } from "../builtins/server-execution.ts";
+import {
+  builtinImplementationHash,
+  isServerComputationBuiltinId,
+  type ServerBuiltinComputationDescriptor,
+  serverBuiltinImplementationHash,
+} from "../builtins/server-execution.ts";
 
 const logger = getLogger("scheduler", {
   enabled: true,
@@ -842,7 +847,10 @@ function attachSchedulerActionObservation(
         directOutputs: serverBuiltin.directOutputs.map(toMemorySpaceAddress),
       },
     }
-    : withRuntimeComputationScopeSummary(baseObservation);
+    : withRuntimeComputationScopeSummary(
+      baseObservation,
+      annotated.serverBuiltinComputation,
+    );
 
   try {
     observationTarget.setSchedulerObservation(observation);
@@ -987,15 +995,70 @@ export function runtimeWriteEmptyComputationScopeSummary(
 /**
  * Attach a runtime-assembled computation `completeActionScopeSummary` when one
  * of the alternative certificate sources applies. Certified computations and
- * server-builtin effects already carry a summary before reaching here.
+ * server-builtin effects already carry a summary before reaching here. The
+ * explicit per-builtin descriptor (W2.15a) takes precedence over the generic
+ * write-empty heuristic (W2.14); for the pure selectors the two are excluded
+ * from overlapping anyway (the heuristic never accepts `cf:builtin` identities).
  */
 function withRuntimeComputationScopeSummary(
   observation: SchedulerActionObservation,
+  computationDescriptor: ServerBuiltinComputationDescriptor | undefined,
 ): SchedulerActionObservation {
-  const summary = runtimeWriteEmptyComputationScopeSummary(observation);
+  const summary =
+    serverBuiltinComputationScopeSummary(observation, computationDescriptor) ??
+      runtimeWriteEmptyComputationScopeSummary(observation);
   return summary === undefined
     ? observation
     : { ...observation, completeActionScopeSummary: summary };
+}
+
+/**
+ * W2.15a: assemble a claim-ready `completeActionScopeSummary` from a trusted
+ * per-builtin COMPUTATION descriptor for the pure structural selectors
+ * (ifElse/when/unless), keyed on the exact `impl:cf:builtin/<id>:v1` fingerprint
+ * (W2.11). Mirrors the effect-descriptor path but is fail-closed: the write
+ * envelope is EXACTLY the descriptor's declared surface plus the single direct
+ * output — observed runtime writes are never folded in — so a selector that
+ * ever writes outside its declared output de-claims at the firewall. Reads come
+ * from the descriptor's registered inputs plus the observed log; C0 admits reads
+ * dynamically, so they carry no envelope obligation.
+ */
+export function serverBuiltinComputationScopeSummary(
+  observation: SchedulerActionObservation,
+  descriptor: ServerBuiltinComputationDescriptor | undefined,
+): CompleteActionScopeSummary | undefined {
+  if (descriptor === undefined || descriptor.version !== 1) return undefined;
+  if (observation.actionKind !== "computation") return undefined;
+  // Never override a transformer certificate already present.
+  if (observation.completeActionScopeSummary !== undefined) return undefined;
+  // Identity must be the exact canonical builtin the descriptor names.
+  if (!isServerComputationBuiltinId(descriptor.id)) return undefined;
+  if (
+    observation.implementationFingerprint !==
+      `impl:${builtinImplementationHash(descriptor.id)}`
+  ) {
+    return undefined;
+  }
+  if (descriptor.directOutputs.length !== 1) return undefined;
+
+  return {
+    version: 1,
+    complete: true,
+    implementationFingerprint: observation.implementationFingerprint,
+    runtimeFingerprint: observation.runtimeFingerprint,
+    piece: toMemorySpaceAddress(descriptor.piece),
+    reads: sortAndCompactPaths([
+      ...descriptor.reads.map(toMemorySpaceAddress),
+      ...observation.reads,
+      ...observation.shallowReads,
+    ]),
+    writes: sortAndCompactPaths([
+      ...descriptor.writes.map(toMemorySpaceAddress),
+      ...descriptor.directOutputs.map(toMemorySpaceAddress),
+    ]),
+    materializerWriteEnvelopes: [],
+    directOutputs: descriptor.directOutputs.map(toMemorySpaceAddress),
+  };
 }
 
 function isSameSpaceRootValueAddress(
