@@ -1751,8 +1751,13 @@ Mapped against the code with no external blockers, no feed dependency
 (the feed gates C2 only — design §6/§7/OQ4), and no open owner decisions.
 Much substrate already landed with W0.1: the engine resolves user/session
 execution contexts, floors store user rank, the claim wire schema admits
-`user:`/`session:` keys, `sessionsForPrincipal` exists, and the client
-parses context ranks. Two engine guards must not be conflated: the W0.4
+`user:`/`session:` keys, and the client parses context ranks (correction
+from review: only a connection-liveness-blind `hasOpenSessionForPrincipal`
+exists today; `sessionsForPrincipal` is built in C1.7). An adversarial
+panel (four lenses + code-verifying synthesis; 25/25 findings confirmed,
+none refuted) reviewed this table on 2026-07-15 — the **binding
+amendments** below the table came out of it; full verdicts in
+[the archived review](../../history/development/design/c1-adversarial-review-2026-07-15.md). Two engine guards must not be conflated: the W0.4
 guard (`claim.contextKey !== "space"`, engine.ts ~7977 →
 `claim-observation-mismatch`, NOT guard-tolerated) must widen first;
 `claim-context-mismatch` (~8398) is already the correct effective-context
@@ -1760,21 +1765,32 @@ equality check and simply starts passing.
 
 | WO | Title | Depends on | Acceptance sketch |
 | --- | --- | --- | --- |
-| C1.1 | Engine accepts user-rank claims (widen the W0.4 space guard; `session:` stays rejected until C2) | — | user claim commits at resolved user context; mismatch still fences `claim-context-mismatch` |
-| C1.2 | Firewall: lane-scoped surface validation + broad-instance scope-naming-link check (§4) | C1.1 | user-lane writes to the lane principal's scope pass; other principals/session scopes/broad value writes reject; space lane byte-identical |
-| C1.3 | Lane grants keyed (space, branch, user:did), anchored on a live principal session, host-internal `laneGeneration` | C1.1 | disconnect drains/revokes only that lane; stale generation fences with a new named cause |
-| C1.4 | Acting-context seam: host-derived actingContext on commits; scopeContext bound to the lane principal | C1.2, C1.3 | user:alice claim commits as alice; forged assertion from an unbound context rejects |
-| C1.5a | Executor candidate rank from the durable floor; laneKey gains contextKey | C1.1 | PerUser observation → user-rank candidate + distinct lane; space regression green |
-| C1.5b | Per-lane acting context; shared Worker replica re-keyed by effective scope key (the §7 intra-Worker confidentiality boundary; largest WO) | C1.4, C1.5a | two principals' PerUser derivations isolated in one Worker; overlays/rebase correct per lane |
-| C1.6 | Client chain-scoped claim routing (match key minus contextKey; accept iff contextKey ∈ {space, user:myDid}; no rank comparison) | C1.1 (testable with synthetic claims) | own-user claim → claimed overlay; other-user/session → upstream; space unchanged |
-| C1.7 | Context-scoped delivery (`sessionsForPrincipal`) + `context-lattice-claims-v1` subcapability + principal-wide cohort gate + EXPERIMENTAL_OPTIONS registry entry | C1.3, C1.6 | user claims delivered only to that principal's negotiating sessions; mixed-fleet reconnect drains before racing |
-| C1.8 | User-lane demand aggregation + lifecycle (open/anchor/re-anchor/drain, mirroring sponsor-loss) | C1.3, C1.5b, C1.7 | barrier-driven lifecycle test; re-anchor bumps laneGeneration without dropped work |
-| C1.9 | Two-principal PerUser measurement gate + fixture | C1.5b–C1.8 | design §7 C1 gate: isolated rows, zero client derived wire writes, flag-off parity |
-| C1.10 | Owed deterministic fixtures: shrink-race, shared-child, rebase-replica | C1.3, C1.5b | three barrier-driven fixtures green (pre-existing debt riding along) |
+| C1.1 | Engine accepts user-rank claims (widen the W0.4 space guard; `session:` stays rejected until C2) | — | user claim commits at resolved user context; mismatch still fences `claim-context-mismatch`. Amendments A14, A18, A20 |
+| C1.1b | Engine/claim follow-ups from review: issuance-side rank dial (EXPERIMENTAL_OPTIONS entry, default space-only, revoke-on-disable); unify the twin context-equality check (~engine.ts:7471 ProtocolError variant) with the fence cause; canonical `user:<did>` key helpers (colon-safe) used by engine/executor/server/client | C1.1 | dial off ⇒ byte-identical space-only behavior; with-operations mismatch case fences like the observation-only twin. Amendments A9, A14, A18 |
+| C1.2 | Firewall: lane-scoped surface validation + broad-instance scope-naming-link check (§4) | C1.1 | user-lane writes to the lane principal's scope pass; other principals/session scopes/broad value writes reject; space lane byte-identical. Amendment A7: the link-shape backstop is specified as a spec-level JSON wire contract with shared conformance fixtures (runner emit + engine accept); capture the real emitted shape first |
+| C1.3 | Lane grants keyed (space, branch, user:did), anchored on a live **connected** principal session, host-internal `laneGeneration` | C1.1 | disconnect drains/revokes only that lane; stale generation fences with a new named cause. Amendments A2 (grant + every renewal require the principal's current WRITE capability), A3 (issuance-time routing-disjointness: reject/supersede chain-compatible live claims, revoke-published-before-issue), A12 (issuance binds a live grant + generation, re-validated after every await; drain fences generation before sweeping claims), A13, A17 |
+| C1.4 | Acting-context seam on commits — with the four-role split of `ApplyCommitOptions.principal`: sponsor stays bound to the lease fence, replay sessionKey, pending-read resolution, and provenance.onBehalfOf; a NEW actingContext feeds scope resolution, effective-context resolution, and CFC label validation | C1.2, C1.3 | user:alice claim commits as alice; forged assertion from an unbound context rejects with a constant-shape fence cause BEFORE any scoped-state validation (preconditions/reads) runs; one commit (incl. observation batches) asserts exactly one lane; the commit fence also resolves WRITE for the acting principal. Amendments A2, A5, A6 |
+| C1.4b | Lane-scoped READ seam (blocker A1): reads/watch/snapshot/writer-lookup from a lease-bound executor session accept a per-request acting context validated against the live lane grant + generation before scope resolution; EntitySnapshot and AcceptedCommitNotice.revisions gain the resolved scopeKey; schedulerApplicableContextKeys derives from open lane grants | C1.3, C1.4 | through one sponsor-bound provider session, a read of alice's user-scoped doc under alice's live grant returns her instance; without a grant it rejects; sync frames attribute per lane |
+| C1.5a | Executor candidate rank from the durable floor; **intra-Worker lane identity** (candidate/claim/wake identity maps + CandidateClaim message) gains contextKey — the pool slot key, lease topology, and one-Worker-per-(space, branch) are explicitly unchanged (A22) | C1.1, C1.4b | PerUser observation → user-rank candidate; space regression green; C1 issues user-rank claims for `computation` only (A8 — effects stay space-lane; lane-grant egress per OQ6 is a named follow-on) |
+| C1.5b | Per-lane acting context; shared Worker replica re-keyed by effective scope key (the §7 intra-Worker confidentiality boundary; largest WO) | C1.4, C1.4b, C1.5a | two principals' PerUser derivations isolated in one Worker; overlays/rebase correct per lane. Amendments A16 (a lane's reads see confirmed state + ONLY its own lane's pending versions; other lanes' localSeqs are unresolvable), A23 (amend both executor-IPC identity-invariant comments: lane identity crosses the channel, raw credentials still do not) |
+| C1.6 | Client chain-scoped claim routing — the FULL own chain {space, user:myDid, session:myDid:mySessionId} (A10); no rank comparison; if two chain-matching claims are ever observed: route to neither, fail open, counted (A3) | C1.1, C1.5a (testable with synthetic claims) | own-chain claims → claimed overlay; other-user/session → upstream; space unchanged; the complete client seam list re-keyed by chain key (facade registerExecutionAction, #executionActionsByKey, executionClaimForActionKey, hasLiveExecutionClaimForAction, captureExecutionClaim, revoke-path invalidation) — dormant-action revoke fires exactly one wake (A15); colon-bearing did:key principals end-to-end (A18) |
+| C1.7 | Context-scoped delivery + `context-lattice-claims-v1` subcapability + principal-wide cohort gate; builds `sessionsForPrincipal` (connected-session semantics, A17) with the filter inside `#sessionAcceptsClaim` — the single predicate feeding publish, reconnect snapshots, retained events, and settlement frontiers (A21) | C1.3, C1.6 | user claims delivered only to that principal's negotiating sessions; cohort fence lives inside openSession admission (new/resume/takeover) and fences+revokes the lane BEFORE the snapshot is built and the open response sent (A11 — a raw client transacting immediately after open cannot race the drain); B's reconnect snapshot contains none of A's user claims |
+| C1.8 | User-lane demand aggregation + lifecycle (open/anchor/re-anchor/drain, mirroring sponsor-loss); **owns widening the accepted-commit wake lookup** — `applicableExecutionContextKeys` derives as [space] + every open lane grant's contextKey, paired per-lane with that principal's demanded pieces (A4); lane-partitioned set-demand wire shape with per-lane generations (A24); aclTouched reconciliation gains the lane step: fence + revoke user lanes whose principal lost WRITE or whose anchor session was removed (A2) | C1.3, C1.5b, C1.7 | barrier-driven lifecycle test; re-anchor bumps laneGeneration without dropped work; a space commit wakes another principal's user-context reader; parked principals accumulate dirt without wake |
+| C1.9 | Two-principal PerUser measurement gate + fixture | C1.5b–C1.8 | design §7 C1 gate: isolated rows, zero client derived wire writes, flag-off parity; defines the guard contract for by-design lane-drain fence causes up front (named, counted, R7-style retirement criteria — A13); mid-run WRITE revocation fixture (A2); colon-bearing DIDs end-to-end (A18); records per-lane schedulerRuns so the §4 shadow-recompute cost is measured (A25) |
+| C1.10 | Owed deterministic fixtures: shrink-race, shared-child, rebase-replica — plus the cross-lane pending-read case (lane B naming a version created by lane A on a shared broad doc, A5/A16) | C1.3, C1.5b | four barrier-driven fixtures green (pre-existing debt riding along) |
 | C1.11 | §10 parent-document edits (README §5.B.1 reconnect contract; W2.1 status text) | C1.6, C1.7 | docs describe chain-scoped routing and context-scoped snapshots |
 
 Build note: C1.5a and C1.6 share `servability.ts` seams — one builder,
 sequential patches. C1.2 and C1.3 share `engine.ts` — likewise.
+
+Amendment references (A1–A25) are the adversarial-review amendments,
+archived in full in
+[the review record](../../history/development/design/c1-adversarial-review-2026-07-15.md);
+build prompts must carry the full amendment text for their work orders.
+Entry-bullet reconciliation (A25): "without duplicating unscoped
+computation" means without duplicating unscoped AUTHORITY
+(claims/settlements); per-lane shadow recompute is the accepted §4 cost,
+bounded by the C2 latency gate and measured at C1.9.
 
 ### Phase 5 — server-directed handler events and enforced authority
 
