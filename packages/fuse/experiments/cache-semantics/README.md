@@ -1,10 +1,10 @@
 # FUSE-T cache-semantics experiment harness
 
 Reproducible apparatus behind the results in
-[`../../CACHE_SEMANTICS_VERIFICATION.md`](../../CACHE_SEMANTICS_VERIFICATION.md).
-It isolates the **macOS NFS client ↔ FUSE-T** caching layer (the load-bearing
-claims in PR #4642) with a synthetic filesystem we fully control, instead of the
-whole CF backend.
+[`../../CACHE_SEMANTICS.md`](../../CACHE_SEMANTICS.md).
+It isolates the **macOS NFS client ↔ FUSE-T** caching layer with a synthetic
+filesystem we fully control, instead of the whole CF backend, so the cache
+behavior can be measured directly (and re-measured when FUSE-T versions change).
 
 - `synthfs.c` — high-level libfuse filesystem. `/dir/pre` always exists;
   `/dir/target` begins to exist at a shared absolute epoch (daemon-side, no
