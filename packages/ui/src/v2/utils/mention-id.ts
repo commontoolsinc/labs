@@ -1,4 +1,4 @@
-import { entityUriSchemePrefix } from "@commonfabric/data-model/fabric-primitives";
+import { entityUriSchemePrefix } from "@commonfabric/data-model/entity-kind";
 
 /**
  * The id embedded in wiki-link mention text (`[[Name (<id>)]]`) is the BARE

@@ -1,8 +1,8 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { hasEntityUriScheme } from "@commonfabric/data-model/entity-kind";
 import {
   BaseFabricPrimitive,
   FabricHash,
-  hasEntityUriScheme,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   type EntityRef,

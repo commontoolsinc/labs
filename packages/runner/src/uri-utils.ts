@@ -1,10 +1,10 @@
 import {
   type EntityKind,
   entityUriSchemePrefix,
-  FabricHash,
   hasEntityUriScheme,
   uriSchemeForEntityKind,
-} from "@commonfabric/data-model/fabric-primitives";
+} from "@commonfabric/data-model/entity-kind";
+import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {

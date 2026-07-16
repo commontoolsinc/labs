@@ -1,47 +1,93 @@
-import { assertEquals } from "@std/assert";
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
 import {
+  COMPUTED_URI_SCHEME,
   ENTITY_URI_SCHEMES,
   entityKindOfIdString,
   entityUriSchemePrefix,
   hasEntityUriScheme,
+  isEntityKind,
   stripEntityUriScheme,
-} from "../src/fabric-primitives/entity-kind.ts";
+  uriSchemeForEntityKind,
+} from "@/entity-kind.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { hashOf } from "@/value-hash.ts";
 
-Deno.test("entityUriSchemePrefix recognizes exactly the canonical scheme set", () => {
-  assertEquals(entityUriSchemePrefix("of:fid1:abc"), "of:");
-  assertEquals(entityUriSchemePrefix("computed:fid1:abc"), "computed:");
-  // Bare tagged hashes and non-entity URIs carry no entity scheme.
-  assertEquals(entityUriSchemePrefix("fid1:abc"), undefined);
-  assertEquals(entityUriSchemePrefix("data:application/json,{}"), undefined);
-  assertEquals(entityUriSchemePrefix("did:key:z6Mk"), undefined);
-  assertEquals(entityUriSchemePrefix(""), undefined);
-  // Every scheme in the set round-trips through the prefix helper.
-  for (const scheme of ENTITY_URI_SCHEMES) {
-    assertEquals(entityUriSchemePrefix(`${scheme}:fid1:x`), `${scheme}:`);
-  }
-});
+describe("entity-kind", () => {
+  const base = hashOf({ probe: "entity-kind" });
 
-Deno.test("hasEntityUriScheme mirrors the prefix helper", () => {
-  assertEquals(hasEntityUriScheme("of:fid1:abc"), true);
-  assertEquals(hasEntityUriScheme("computed:fid1:abc"), true);
-  assertEquals(hasEntityUriScheme("fid1:abc"), false);
-  assertEquals(hasEntityUriScheme("future:fid1:abc"), false);
-});
+  it("maps kinds to URI schemes, no kind to plain of:", () => {
+    expect(uriSchemeForEntityKind(undefined)).toBe("of");
+    expect(uriSchemeForEntityKind("computed")).toBe(COMPUTED_URI_SCHEME);
+    expect(COMPUTED_URI_SCHEME).toBe("computed");
+  });
 
-Deno.test("stripEntityUriScheme strips any entity scheme and only those", () => {
-  assertEquals(stripEntityUriScheme("of:fid1:abc"), "fid1:abc");
-  assertEquals(stripEntityUriScheme("computed:fid1:abc"), "fid1:abc");
-  // No entity scheme: unchanged — including unknown future-looking schemes,
-  // which must stay strict rather than being silently un-prefixed.
-  assertEquals(stripEntityUriScheme("fid1:abc"), "fid1:abc");
-  assertEquals(stripEntityUriScheme("future:fid1:abc"), "future:fid1:abc");
-});
+  it("keeps the kind out of the FabricHash tag (scheme rides the URI)", () => {
+    // The kinded URI form wraps a plain fid1 tagged hash; parsing the hash
+    // portion is unchanged.
+    const uri = `${COMPUTED_URI_SCHEME}:${base.toString()}`;
+    const parsed = FabricHash.fromString(
+      uri.slice(`${COMPUTED_URI_SCHEME}:`.length),
+    );
+    expect(parsed.tag).toBe("fid1");
+    expect(parsed.hashString).toBe(base.hashString);
+  });
 
-Deno.test("entityKindOfIdString parses the kind from the URI scheme", () => {
-  assertEquals(entityKindOfIdString("computed:fid1:abc"), "computed");
-  // of:, bare, non-entity, and unknown schemes parse as no kind (strict).
-  assertEquals(entityKindOfIdString("of:fid1:abc"), undefined);
-  assertEquals(entityKindOfIdString("fid1:abc"), undefined);
-  assertEquals(entityKindOfIdString("future:fid1:abc"), undefined);
-  assertEquals(entityKindOfIdString("no-colon"), undefined);
+  it("parses the kind from a computed: id string", () => {
+    expect(entityKindOfIdString(`computed:${base.toString()}`)).toBe(
+      "computed",
+    );
+  });
+
+  it("treats of:, bare, data:, and colon-free ids as unkinded", () => {
+    expect(entityKindOfIdString(`of:${base.toString()}`)).toBeUndefined();
+    expect(entityKindOfIdString(base.toString())).toBeUndefined();
+    expect(entityKindOfIdString("data:application/json,{}")).toBeUndefined();
+    expect(entityKindOfIdString("no-colon")).toBeUndefined();
+  });
+
+  it("treats unknown schemes as unkinded (strict/authoritative)", () => {
+    // An unknown scheme must never read as a relaxed kind: old servers seeing
+    // a future scheme fall back to strict conflict semantics.
+    expect(entityKindOfIdString(`future:${base.toString()}`)).toBeUndefined();
+    expect(entityKindOfIdString(`fid2:computed:${base.hashString}`))
+      .toBeUndefined();
+  });
+
+  it("recognizes only known kinds", () => {
+    expect(isEntityKind("computed")).toBe(true);
+    expect(isEntityKind("state")).toBe(false);
+    expect(isEntityKind(undefined)).toBe(false);
+  });
+
+  it("recognizes exactly the canonical entity URI scheme prefixes", () => {
+    expect(entityUriSchemePrefix("of:fid1:abc")).toBe("of:");
+    expect(entityUriSchemePrefix("computed:fid1:abc")).toBe("computed:");
+    expect(entityUriSchemePrefix("fid1:abc")).toBeUndefined();
+    expect(entityUriSchemePrefix("data:application/json,{}"))
+      .toBeUndefined();
+    expect(entityUriSchemePrefix("did:key:z6Mk")).toBeUndefined();
+    expect(entityUriSchemePrefix("")).toBeUndefined();
+
+    for (const scheme of ENTITY_URI_SCHEMES) {
+      expect(entityUriSchemePrefix(`${scheme}:fid1:x`)).toBe(`${scheme}:`);
+    }
+  });
+
+  it("detects canonical entity URI schemes", () => {
+    expect(hasEntityUriScheme("of:fid1:abc")).toBe(true);
+    expect(hasEntityUriScheme("computed:fid1:abc")).toBe(true);
+    expect(hasEntityUriScheme("fid1:abc")).toBe(false);
+    expect(hasEntityUriScheme("future:fid1:abc")).toBe(false);
+  });
+
+  it("strips canonical entity URI schemes and only those", () => {
+    expect(stripEntityUriScheme("of:fid1:abc")).toBe("fid1:abc");
+    expect(stripEntityUriScheme("computed:fid1:abc")).toBe("fid1:abc");
+    expect(stripEntityUriScheme("fid1:abc")).toBe("fid1:abc");
+    expect(stripEntityUriScheme("future:fid1:abc")).toBe(
+      "future:fid1:abc",
+    );
+  });
 });
