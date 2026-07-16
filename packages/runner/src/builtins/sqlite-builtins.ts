@@ -41,7 +41,7 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { stripEntityUriScheme } from "@commonfabric/data-model/entity-kind";
+import { stripEntityUriScheme } from "../entity-kind.ts";
 import { columnDeclaresIfc } from "@commonfabric/memory/v2";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import { deepEqual } from "@commonfabric/utils/deep-equal";

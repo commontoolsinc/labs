@@ -1,8 +1,5 @@
 import { validateSlug } from "../slugs.ts";
-import {
-  ENTITY_URI_SCHEMES,
-  type EntityUriScheme,
-} from "@commonfabric/data-model/entity-kind";
+import { ENTITY_URI_SCHEMES, type EntityUriScheme } from "../entity-kind.ts";
 
 export const HASH_RE = /^[A-Za-z0-9_-]{43}$/;
 

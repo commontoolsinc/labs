@@ -1,4 +1,4 @@
-import { ENTITY_URI_SCHEMES } from "@commonfabric/data-model/entity-kind";
+import { ENTITY_URI_SCHEMES } from "@commonfabric/runner/entity-kind";
 
 const ENTITY_SCHEME_ALT = ENTITY_URI_SCHEMES.join("|");
 const ENTITY_SCHEME_SEGMENT_RE = new RegExp(

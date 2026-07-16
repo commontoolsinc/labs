@@ -29,7 +29,6 @@
   "exports": {
     "./cell-rep": "./src/cell-rep.ts",
     "./deep-freeze": "./src/deep-freeze.ts",
-    "./entity-kind": "./src/entity-kind.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
     "./fabric-value": "./src/fabric-value.ts",
