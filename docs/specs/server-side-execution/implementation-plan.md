@@ -1583,41 +1583,81 @@ Mirror the existing effect path — `ServerBuiltinActionDescriptor`
 a summary at observation time (`run.ts:792-841`, today gated
 `actionKind === "effect"` at `:793`) — with a per-builtin **computation**
 descriptor registry accepted as an alternative certificate source in the
-`run.ts:744-777` computation block. Order of attack:
+`run.ts:744-777` computation block. Scope after the owner direction of
+2026-07-15:
 
 1. `ifElse`/`when`/`unless` — pure single-output selectors; trivial static
    surface; the cheapest claim-coverage win (structural in every UI).
-2. `map`/`filter`/`flatMap` — fixed output-collection envelope via
-   `materializerWriteEnvelopes`; per-element children are already
-   provenance-covered hoisted patterns.
-3. `wish` — resolver semantics; may stay identity-only until its
-   servability story is designed (record explicitly if so).
+2. `map`/`filter`/`flatMap` — **moved to W2.16**: their per-element write
+   surfaces are envelope-shaped, i.e. they are materializers, and are
+   served by the materializer mechanism rather than bespoke static
+   descriptors.
+3. `wish` — resolver semantics; stays identity-only until its servability
+   story is designed. This is the phase's one recorded deferral (evaluate
+   a trivial output-only descriptor once the resolver contract is pinned).
 
 **Success criteria:**
 
-- [ ] Flag-on default-app: `ifElse`/`map` nodes are claim-ready; measured
-      claim coverage over the former 18-offender population recorded.
-- [ ] Remaining unservable verdicts name only `computeIndex` (until
-      W2.16) and any explicitly recorded `wish` deferral.
+- [ ] Flag-on default-app: `ifElse`/`when`/`unless` nodes are claim-ready.
+- [ ] Remaining unservable verdicts name only the materializer cohort
+      (until W2.16) and the recorded `wish` deferral.
 
-### W2.16 — backlinks-index computeIndex redesign (RC-3a)
+### W2.16 — Serve the materializer class (envelope-granular write completeness)
 
-**Depends on:** — (pattern-level). **Status:** planned; disposition is an
-owner-visible recommendation.
+**Depends on:** W2.11, W2.13, W2.14. **Status:** planned (owner direction,
+2026-07-15: dynamic writers are materializers — serve them as the
+scheduler already models them; no pattern redesign).
 
-`computeIndex` writes `allPieces[*].backlinks` and
-`allPieces[*].mentioned[*].backlinks` via wildcard iteration and dynamic
-`.key(i)` — not statically enumerable, and a runtime summary can only be
-made safe as a fail-closed accumulating envelope (a strictly weaker
-guarantee than completeness). Options: **(a) redesign as per-piece
-derivations with statically bounded writes (recommended — it is a
-repo-owned system pattern and this alone reaches target zero); (b)
-accumulating fail-closed write envelope (documented as weaker); (c) keep
-client-primary (contradicts target zero; last resort).**
+The scheduler already has this class: **materializers**
+(`packages/runner/src/scheduler/materializers.ts`) — actions with side
+writes beyond their direct output — run when dirty **at idle priority**
+without pull demand (`isIdleMaterializerRunnable`,
+`scheduler/work-oracle.ts`), eagerly when their known output is demanded.
+The certificate format and both firewall layers already accept
+envelope-shaped write bounds
+(`completeActionScopeSummary.materializerWriteEnvelopes`; the servability
+`covers()` loop, `servability.ts:297-334`;
+`schedulerRuntimeWritesExceedSummary`, `packages/memory/v2/engine.ts`).
+"Complete" for a materializer therefore means: *this run's writes are
+bounded by envelopes derived from this run's resolved inputs* — a
+checkable, fail-closed bound that is honest for data-dependent writers.
+The earlier "redesign computeIndex" framing conflated exact static
+enumeration with envelope completeness; no pattern rewrite is needed.
+
+Work items:
+
+1. **Per-registration envelope derivation.** Envelopes are re-derived from
+   resolved inputs each registration — list membership and link-reached
+   documents change with data (`computeIndex` writes
+   `allPieces[*].backlinks` and, through `mentioned` links,
+   *other documents'* `backlinks`). Pin the refresh-before-judgment
+   ordering with a test (a run's commit is checked against that run's
+   summary); every target stays bounded by the per-address space/scope
+   checks regardless.
+2. **Certificates for authored materializers.** Certify callbacks whose
+   writes are all covered by declared/derived
+   `materializerWriteInputPaths` (the existing lift option); `computeIndex`
+   declares its two write families if the transformer cannot derive them
+   through the wildcard loop.
+3. **Builtin materializer descriptors.** `map`/`filter`/`flatMap` via the
+   W2.15 descriptor mechanism with the output-collection envelope as the
+   write surface; per-element children are already provenance-covered
+   hoisted patterns.
+4. **Executor scheduling parity.** Claimed materializers must keep the
+   client's policy — dirty → idle-priority, demanded output → eager.
+   Verify the executor wake path does not eager-run every claimed action
+   per invalidation wave; add the policy if missing (background indexing
+   must not enter the interactive lane).
 
 **Success criteria:**
 
-- [ ] Flag-on default-app run emits **zero** R3/R4 verdicts end-to-end.
+- [ ] `computeIndex` is claim-ready flag-on; a write outside the run's
+      envelopes rejects fail-closed once (no verdict spam).
+- [ ] `map`/`filter`/`flatMap` nodes are claim-ready; per-element children
+      unchanged.
+- [ ] Executor idle-priority test for claimed materializers.
+- [ ] Flag-on default-app run emits **zero** R3/R4 verdicts except the
+      recorded `wish` deferral (W2.15) — the phase's only named residual.
 
 ---
 
