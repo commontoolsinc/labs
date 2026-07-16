@@ -55,6 +55,17 @@ const HEADLESS_PACKAGES = [
   "patterns-reload",
 ];
 
+/**
+ * Match the default-on runtime flag semantics for the reload test oracle.
+ * The canonical parser accepts only the exact value `false` as the rollback;
+ * unset or invalid values leave the built-in default enabled.
+ */
+export function expectPersistentSchedulerState(
+  raw: string | undefined,
+): boolean {
+  return raw !== "false";
+}
+
 async function runCommand(
   cmd: string[],
   options: {
@@ -528,7 +539,11 @@ export async function runPackageIntegration(
   }
 
   if (pkg === "patterns-reload") {
-    env.CF_EXPECT_PERSISTENT_SCHEDULER_STATE = "1";
+    env.CF_EXPECT_PERSISTENT_SCHEDULER_STATE = expectPersistentSchedulerState(
+        Deno.env.get("EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE"),
+      )
+      ? "1"
+      : "0";
   }
 
   // For browser test packages, pass through HEADLESS and PIPE_CONSOLE
@@ -773,9 +788,6 @@ async function main(): Promise<void> {
   try {
     if (needsServer) {
       const serverEnv: Record<string, string> = {};
-      if (packagesToRun.includes("patterns-reload")) {
-        serverEnv.EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE = "true";
-      }
 
       if (portOffsetWasSet) {
         // Reuse the requested offset, stopping anything already on its ports.

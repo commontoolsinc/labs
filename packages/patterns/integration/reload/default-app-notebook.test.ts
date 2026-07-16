@@ -148,8 +148,19 @@ describe("default-app notebook reload integration test", () => {
       JSON.stringify(reloadSummary, null, 2),
     );
 
-    if (!EXPECT_PERSISTENT_SCHEDULER_STATE) return;
+    if (!EXPECT_PERSISTENT_SCHEDULER_STATE) {
+      assertEquals(
+        schedulerSummary.rehydration.ok,
+        0,
+        "Expected the explicit rollback override to disable scheduler rehydration",
+      );
+      return;
+    }
 
+    assert(
+      schedulerSummary.rehydration.ok > 0,
+      "Expected default-on scheduler state to rehydrate at least one action",
+    );
     assert(
       schedulerSummary.graph.actionRuns <=
         NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT,

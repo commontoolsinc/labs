@@ -47,32 +47,50 @@ export const API_URL: URL = new URL(
 
 export const COMMIT_SHA: string | undefined = COMMIT_SHA_DEFINE;
 
-/**
- * Results in `true` (on), `false` (off), or `undefined` (default).
- */
-function flagValue(flag: string | undefined): boolean | undefined {
-  return (typeof flag === "string") ? (flag === "true") : undefined;
+/** Results in `true` (on), `false` (off), or `undefined` (default). */
+function flagValue(
+  name: string,
+  flag: string | undefined,
+): boolean | undefined {
+  if (flag === "true") return true;
+  if (flag === "false") return false;
+  if (flag !== undefined) {
+    console.warn(
+      `[shell env] Ignoring ${name}=${JSON.stringify(flag)} — ` +
+        `expected "true" or "false" (unset = default).`,
+    );
+  }
+  return undefined;
 }
 
 /** Build-time experimental flags, injected via felt.config.ts defines. */
 export const EXPERIMENTAL = {
-  modernCellRep: flagValue(EXPERIMENTAL_MODERN_CELL_REP_DEFINE),
+  modernCellRep: flagValue(
+    "EXPERIMENTAL_MODERN_CELL_REP",
+    EXPERIMENTAL_MODERN_CELL_REP_DEFINE,
+  ),
   persistentSchedulerState: flagValue(
+    "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
     EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE,
   ),
   // Debug `.src` source annotation: ON in development builds (so per-primitive
   // source locations keep working for debugging), OFF in production (it is the
   // boot floor's largest single cost). The define overrides either way.
-  eagerSourceAnnotation:
-    flagValue(EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE) ??
-      (ENVIRONMENT === "development"),
+  eagerSourceAnnotation: flagValue(
+    "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
+    EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE,
+  ) ??
+    (ENVIRONMENT === "development"),
   // Auto-update the NON-HOME space-root system pattern (default-app) in place.
   // Default ON; a build define (`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE=false`)
   // can force it off. The home root stays off — it carries real user data and
   // needs the second flag, pending the stable-addressing audit.
-  systemPatternAutoUpdate:
-    flagValue(EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE) ?? true,
+  systemPatternAutoUpdate: flagValue(
+    "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
+    EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_DEFINE,
+  ) ?? true,
   systemPatternAutoUpdateHome: flagValue(
+    "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
     EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME_DEFINE,
   ),
 };

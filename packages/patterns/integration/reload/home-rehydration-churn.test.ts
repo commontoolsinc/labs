@@ -17,25 +17,28 @@ import {
 
 const { FRONTEND_URL } = env;
 const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
+const SCHEDULER_STATE_MODE =
+  Deno.env.get("CF_EXPECT_PERSISTENT_SCHEDULER_STATE") === "0"
+    ? "rollback"
+    : "persistent";
 
-// The flag-ON reload-churn gate (F6c,
+// The reload-churn gate (F6c,
 // docs/specs/scheduler-v2/per-doc-rehydration.md §7). Per-doc restore
 // rehydrates the picker rows instead of re-running them, but the row map
 // COORDINATOR deliberately re-runs on resume (resumeMode "always-run", to
 // re-attach the rows), and its first reconcile still reads one cold hop
 // through the field-level alias chain — measured locally at exactly the same
-// coupled 1-conflict residual as the flag-off variant
-// (../home-rehydration-churn.test.ts). The bound therefore matches flag-off
-// for now; it drops to ZERO when resume-time runners pre-warm their persisted
-// read set (the incremental observation-adoption leg). The gate here pins
-// flag-ON at "never worse than flag-off".
+// coupled 1-conflict residual as the historical rollback-off baseline. The
+// bound remains unchanged through the default-on rollout; it drops to ZERO
+// when resume-time runners pre-warm their persisted read set (the incremental
+// observation-adoption leg). Explicit-false rollback stays covered by the
+// same browser suite so the rollout escape hatch cannot silently rot.
 //
 // This file runs in the `pattern-reload-integration-test` CI job (deno.yml),
-// which builds the shell with EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true
-// and sets CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1.
+// which exercises both default-on and explicit-false configurations.
 
-// Same stable, greppable measurement contract as the flag-off variant, under
-// a distinct label so CI-distribution greps do not mix the two populations.
+// Keep the dedicated reload job's labels distinct from the general
+// pattern-integration population and from the rollback comparison lane.
 function logChurnMetric(label: string, churn: ChurnCounters): void {
   console.log(
     `CHURN_METRIC label=${label}` +
@@ -99,7 +102,7 @@ async function gotoHome(shell: ShellIntegration, identity: Identity) {
   await clickCfButton(shell.page(), 'cf-tab[value="profile"]');
 }
 
-describe("home rehydration churn (persistent scheduler state)", () => {
+describe("home reload churn", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -122,7 +125,7 @@ describe("home rehydration churn (persistent scheduler state)", () => {
     // counters reflect real activity in this measurement).
     const afterCreate = await collectBrowserLoadSummary(page, "after-create");
     logBrowserLoadSummary(afterCreate);
-    logChurnMetric("after-create-persistent", afterCreate.churn);
+    logChurnMetric(`after-create-${SCHEDULER_STATE_MODE}`, afterCreate.churn);
     expect(afterCreate.churn.actionRuns).toBeGreaterThan(0);
 
     // RELOAD: re-instantiate the runtime against the populated, durable space.
@@ -134,13 +137,14 @@ describe("home rehydration churn (persistent scheduler state)", () => {
 
     const reload = await collectBrowserLoadSummary(page, "reload");
     logBrowserLoadSummary(reload);
-    logChurnMetric("reload-persistent", reload.churn);
+    logChurnMetric(`reload-${SCHEDULER_STATE_MODE}`, reload.churn);
 
     const c = reload.churn;
     // Rows rehydrate (no per-row first runs), but the always-run coordinator
     // reconcile keeps the one cold-alias-hop conflict — the same coupled
-    // residual the flag-off gate accepts. See the header comment; tighten to
-    // zero once resume-time runners pre-warm their persisted read sets.
+    // residual accepted by the historical rollback-off baseline. See the
+    // header comment; tighten to zero once resume-time runners pre-warm their
+    // persisted read sets.
     expect(c.commitConflicts).toBeLessThanOrEqual(1);
     expect(c.commitReverts).toBeLessThanOrEqual(c.commitConflicts);
     expect(c.scheduleRunErrors).toBeLessThanOrEqual(c.commitConflicts);

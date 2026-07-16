@@ -10,8 +10,11 @@
  *
  * Run (from packages/patterns):
  *
- *   CF_GROUPCHAT_BENCH=1 [EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true] \
+ *   CF_GROUPCHAT_BENCH=1 [EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=false] \
  *     deno test -A integration/group-chat-adoption-bench.test.ts
+ *
+ * Omit the experimental variable for default-on; set it to false for the
+ * rollback comparison.
  *
  * Output: greppable `BENCH_METRIC ...` lines, one per session plus a total.
  * Compare configs by running the same file on each checkout/flag setting.
@@ -28,9 +31,9 @@ import {
 const BENCH = Deno.env.get("CF_GROUPCHAT_BENCH") === "1";
 const MESSAGES = Number(Deno.env.get("CF_GROUPCHAT_BENCH_MESSAGES") ?? "10");
 const TAG = Deno.env.get("CF_BENCH_TAG") ??
-  (Deno.env.get("EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE") === "true"
-    ? "flag-on"
-    : "flag-off");
+  (Deno.env.get("EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE") === "false"
+    ? "flag-off"
+    : "flag-on");
 
 const PROFILE_SURFACE = "TrustedGroupChatProfileSurface";
 const SAVE_PROFILE_ACTION = "TrustedGroupChatSaveProfile";

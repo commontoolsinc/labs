@@ -33,15 +33,12 @@ import type {
 
 // The self-hosted storage server lives in THIS realm, while every runtime
 // lives in a worker realm whose Runtime constructor propagates the
-// EXPERIMENTAL_* env flags into the memory module's ambient config. No
-// Runtime is ever constructed in the harness realm, so a flag-ON test run
-// would otherwise leave the SERVER side of the flag off — a client/server
-// capability skew the harness does not intend to model (skewed peers now
-// degrade gracefully, so the suite would silently test flag-off semantics).
-// Mirror toolshed (whose in-process Runtime sets the ambient flag for its
-// memory route) by propagating the canonical env mapping. Re-asserted per
+// EXPERIMENTAL_* env overrides into the memory module's ambient config. No
+// Runtime is ever constructed in the harness realm, so mirror an explicit
+// persistent-scheduler-state override into the server realm too. When the env
+// value is unset, both realms retain the built-in default. Re-asserted per
 // harness creation: any Runtime constructed later in this realm re-derives
-// the ambient flag from ITS options and would stomp a load-time value.
+// the ambient flag from its options and would stomp a load-time value.
 function propagateExperimentalEnvToServerRealm(): void {
   const experimental = experimentalOptionsFromEnv(Deno.env.get);
   if (experimental.persistentSchedulerState !== undefined) {
