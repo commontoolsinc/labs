@@ -22,7 +22,7 @@ import { isCell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { encodeCfLinkValue } from "../src/builtins/sqlite/cf-link.ts";
-import { waitForCellValue } from "./support/wait-for-cell-value.ts";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 
 type QueryState = {
   pending: boolean;

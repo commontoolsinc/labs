@@ -65,9 +65,9 @@ Because the sink fires once on registration and then on every committed change,
 the waiter can resolve immediately when the value is already there and otherwise
 on the next change the sink reports.
 
-The runner's in-process tests have that last shape packaged as
-`waitForCellValue` in `packages/runner/test/support/wait-for-cell-value.ts`. It
-sleeps on the sink and applies its predicate to the cell only after
+That last shape is packaged as `waitForCellValue` in
+`@commonfabric/integration/wait-for-cell-value`, usable from any package's
+tests. It sleeps on the sink and applies its predicate to the cell only after
 `runtime.idle()`, so the wait has neither a poll interval under it nor an
 iteration cap over it. Its predicate takes `T | undefined`, since a cell holds
 no value until its piece writes one.
@@ -104,7 +104,11 @@ that continuation is undone and the sink goes on firing afterwards. Await
 An in-process wait like this needs no timeout backstop. When the value never
 arrives and the runtime goes quiet, Deno's test runner reports `Promise
 resolution is still pending but the event loop has already resolved` and fails
-the test at once, rather than hanging. The message names the test, not the wait
+the test at once, rather than hanging. That fail-fast report depends on the
+event loop draining: a wait whose runtime holds a live server connection keeps
+the loop alive, so a never-arriving value there runs to the ambient test or CI
+limit instead. Dispose such a probe runtime once the wait returns, so a
+completed wait does not hold the loop open for the rest of the suite. The message names the test, not the wait
 inside it, so a test holding several waits needs the last step printed without
 an `ok` to place the failure. It still beats a deadline, which reports only that
 time ran out, and reports it later.

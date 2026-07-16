@@ -11,7 +11,7 @@ import { defer } from "@commonfabric/utils/defer";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { waitForCellValue } from "./support/wait-for-cell-value.ts";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { Runtime } from "../src/runtime.ts";
 import { createCell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
