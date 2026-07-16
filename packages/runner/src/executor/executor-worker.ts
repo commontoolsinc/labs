@@ -292,6 +292,11 @@ const unavailableAddress = (cell: Cell<unknown>): UnavailableCellAddress => {
   };
 };
 
+// FA6 matcher, declared-fallback arm by construction: a pending demand
+// address is a local UNRESOLVED address (no instance exists yet), so it
+// never carries a resolved scopeKey and revisions match on declared scope.
+// Instance-exact scopeKey matching lives in the host provider's tracked
+// snapshot matcher (acceptedRevisionMatchesSnapshot).
 const revisionKey = (address: {
   id: string;
   scope?: string;
@@ -516,6 +521,11 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     protocolFlags: request.protocolFlags,
     shadowWrites: true,
     actionTransactionRouter,
+    // C1.5b per-lane acting context: a claimed action's transactions assert
+    // exactly its claim's lane (A6) and key documents by that lane's
+    // effective scope keys; unclaimed discovery runs stay on the space lane
+    // until C1.8 partitions demand per lane.
+    executionLaneForAction: (action) => claimsByAction.get(action)?.contextKey,
     onAcceptedCommitWillIntegrate(notice) {
       noteAcceptedCommitCausalActors(notice);
     },
@@ -730,7 +740,14 @@ const startClaimedAction = async (
     // but the storage router can still be selecting its async route. The exact
     // afterRouteSelected callback is the readiness acknowledgement; eventual
     // accepted settlement remains deliberately outside the global work lane.
-    await runtime.scheduler.run(action);
+    // The run starts under the claim's lane as the ambient acting context
+    // (C1.5b): its synchronous reads resolve that lane's document instances;
+    // commits stay lane-correct across awaits via executionLaneForAction.
+    await storage.runWithExecutionLane(
+      space,
+      claim.contextKey,
+      () => runtime!.scheduler.run(action),
+    );
     await attempt.routeReady;
     return { finalSettlement: attempt.finalSettlement };
   } catch (error) {

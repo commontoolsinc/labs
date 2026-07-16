@@ -23,6 +23,7 @@ import {
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
+  type SchedulerExecutionContextKey,
   type SchedulerSnapshotListResult,
   type SchedulerWritersForTargetsQuery,
   type SchedulerWritersForTargetsResult,
@@ -83,6 +84,17 @@ export type SessionOpenAuthFactory = (
   session: MountOptions,
   context: SessionOpenAuthContext,
 ) => Promise<SessionOpenAuth | undefined> | SessionOpenAuth | undefined;
+
+/**
+ * Per-request read options (C1.4b lane-scoped read seam): a lease-bound
+ * executor session may act under one of its open lane grants for a single
+ * read, watch registration, scheduler listing, or writer lookup. The host
+ * validates the acting context against the live lane grant BEFORE resolving
+ * any scope key; ordinary client sessions never send one.
+ */
+export interface SessionReadOptions {
+  actingContext?: SchedulerExecutionContextKey;
+}
 
 export interface WatchMutationResult {
   view: WatchView;
@@ -706,13 +718,19 @@ export class SpaceSession {
     return await pending.promise;
   }
 
-  async queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
+  async queryGraph(
+    query: GraphQuery,
+    options?: SessionReadOptions,
+  ): Promise<GraphQueryResult> {
     this.#assertOpen();
     const result = await this.client.request<GraphQueryResult>({
       type: "graph.query",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
       query,
     });
 
@@ -764,6 +782,7 @@ export class SpaceSession {
 
   async listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
+    options?: SessionReadOptions,
   ): Promise<SchedulerSnapshotListResult> {
     this.#assertOpen();
     if (!getPersistentSchedulerStateConfig()) {
@@ -774,6 +793,9 @@ export class SpaceSession {
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
       query,
     });
 
@@ -783,6 +805,7 @@ export class SpaceSession {
 
   async writersForTargets(
     query: SchedulerWritersForTargetsQuery,
+    options?: SessionReadOptions,
   ): Promise<SchedulerWritersForTargetsResult> {
     this.#assertOpen();
     if (!getPersistentSchedulerStateConfig()) {
@@ -796,6 +819,9 @@ export class SpaceSession {
           requestId: crypto.randomUUID(),
           space: this.space,
           sessionId: this.#sessionId,
+          ...(options?.actingContext !== undefined
+            ? { actingContext: options.actingContext }
+            : {}),
           query,
         },
       );
@@ -902,7 +928,10 @@ export class SpaceSession {
     return result.view;
   }
 
-  async watchSetSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
+  async watchSetSync(
+    watches: WatchSpec[],
+    options?: SessionReadOptions,
+  ): Promise<WatchMutationResult> {
     this.#assertOpen();
     return await this.runWatchMutation(async () => {
       const result = await this.client.request<WatchSetResult>({
@@ -910,6 +939,9 @@ export class SpaceSession {
         requestId: crypto.randomUUID(),
         space: this.space,
         sessionId: this.#sessionId,
+        ...(options?.actingContext !== undefined
+          ? { actingContext: options.actingContext }
+          : {}),
         watches,
       });
       this.noteResult(result.serverSeq);
@@ -942,7 +974,10 @@ export class SpaceSession {
     return result.view;
   }
 
-  async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
+  async watchAddSync(
+    watches: WatchSpec[],
+    options?: SessionReadOptions,
+  ): Promise<WatchMutationResult> {
     this.#assertOpen();
     return await this.runWatchMutation(async () => {
       const result = await this.client.request<WatchAddResult>({
@@ -950,6 +985,9 @@ export class SpaceSession {
         requestId: crypto.randomUUID(),
         space: this.space,
         sessionId: this.#sessionId,
+        ...(options?.actingContext !== undefined
+          ? { actingContext: options.actingContext }
+          : {}),
         watches,
       });
       this.noteResult(result.serverSeq);

@@ -1826,6 +1826,16 @@ export interface ISpaceReplica extends ISpace {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
+
+  /**
+   * Run `fn` under an execution lane's acting context (C1.5b): synchronous
+   * reads and commits inside resolve documents by the lane's effective scope
+   * keys instead of the space lane's declared keys.
+   */
+  runWithExecutionLane?<T>(
+    lane: "space" | `user:${string}` | `session:${string}:${string}`,
+    fn: () => T,
+  ): T;
 }
 
 export type PushError =

@@ -19,11 +19,22 @@ import type {
   WatchSpec,
 } from "@commonfabric/memory/v2";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
+import type { SchedulerExecutionContextKey } from "@commonfabric/memory/v2";
 
 /** Worker-local view of a replica update stream. */
 export interface ReplicaWatchView {
   close(): void;
   subscribeSync(): AsyncIterator<SessionSync>;
+}
+
+/**
+ * Per-request read options (C1.4b lane-scoped read seam, threaded by
+ * C1.5b): a lease-bound executor session resolves scoped addresses under
+ * `actingContext` — validated host-side against the live lane grant BEFORE
+ * any scope key resolves. Space-lane readers omit it.
+ */
+export interface ReplicaReadOptions {
+  actingContext?: SchedulerExecutionContextKey;
 }
 
 /**
@@ -39,8 +50,14 @@ export interface ReplicaSession {
   /** Advance execution settlement gating only after the local replica has
    * applied/confirmed the accepted commit data. */
   noteAppliedCommit?(seq: number): void;
-  queryGraph(query: GraphQuery): Promise<GraphQueryResult>;
-  watchAddSync(watches: WatchSpec[]): Promise<{
+  queryGraph(
+    query: GraphQuery,
+    options?: ReplicaReadOptions,
+  ): Promise<GraphQueryResult>;
+  watchAddSync(
+    watches: WatchSpec[],
+    options?: ReplicaReadOptions,
+  ): Promise<{
     view: ReplicaWatchView;
     sync: SessionSync;
   }>;
@@ -55,9 +72,11 @@ export interface ReplicaSession {
   ): Promise<SqliteRegisterDiskSourceResult>;
   listSchedulerActionSnapshots(
     query?: SchedulerActionSnapshotQuery,
+    options?: ReplicaReadOptions,
   ): Promise<SchedulerSnapshotListResult>;
   writersForTargets(
     query: SchedulerWritersForTargetsQuery,
+    options?: ReplicaReadOptions,
   ): Promise<SchedulerWritersForTargetsResult>;
   /** Client-only execution-control surface. Executor provider sessions omit
    *  these methods so a Worker cannot manufacture client demand. */

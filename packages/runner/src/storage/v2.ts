@@ -42,10 +42,13 @@ import {
   type PatchOp,
   type PendingRead,
   type SchedulerActionSnapshotQuery,
+  type SchedulerExecutionContextKey,
   type SchedulerObservationCommit,
   type SchedulerSnapshotListResult,
   type SchedulerWritersForTargetsResult,
   type SessionSync,
+  type SessionSyncRemove,
+  type SessionSyncUpsert,
   type SqliteDbRef,
   type SqliteOperation,
   type SqliteParamsWire,
@@ -317,22 +320,31 @@ type MaterializedVersion = {
   transactionValue: CachedTransactionValue;
 };
 
+/** Owning-lane tag on every pending version (amendment A16): a lane's reads
+ * materialize confirmed state plus ONLY its own lane's pending versions.
+ * Absent means the space lane, keeping the lanes-free shape untouched. */
+type PendingVersionLane = { lane?: SchedulerExecutionContextKey };
+
 type PendingVersion =
-  | {
+  | ({
     localSeq: number;
     op: "set";
     value: EntityDocument;
-  }
-  | {
+  } & PendingVersionLane)
+  | ({
     localSeq: number;
     op: "patch";
     patches: PatchOp[];
     value: EntityDocument;
-  }
-  | {
+  } & PendingVersionLane)
+  | ({
     localSeq: number;
     op: "delete";
-  };
+  } & PendingVersionLane);
+
+const pendingVersionLane = (
+  version: PendingVersion,
+): SchedulerExecutionContextKey => version.lane ?? "space";
 
 type ConfirmedVersion = MaterializedVersion & {
   seq: number;
@@ -344,6 +356,10 @@ type PendingMaterializedPrefix = MaterializedVersion & {
 
 type PendingMaterializationCache = {
   confirmed: ConfirmedVersion;
+  /** Lane the prefixes were materialized for (A16: the prefix cache is
+   * lane-keyed). One slot suffices: a foreign-lane read recomputes and
+   * replaces it, and the lanes-free world only ever stores "space". */
+  lane: SchedulerExecutionContextKey;
   prefixes: PendingMaterializedPrefix[];
 };
 
@@ -572,40 +588,62 @@ const applyPendingVersion = (
 
 const ensurePendingMaterializationCache = (
   record: DocumentRecord,
+  lane: SchedulerExecutionContextKey,
 ): PendingMaterializationCache => {
   const existing = record.materialized;
-  if (existing && existing.confirmed === record.confirmed) {
+  if (
+    existing && existing.confirmed === record.confirmed &&
+    existing.lane === lane
+  ) {
     return existing;
   }
   const cache: PendingMaterializationCache = {
     confirmed: record.confirmed,
+    lane,
     prefixes: [],
   };
   record.materialized = cache;
   return cache;
 };
 
+/**
+ * Materialize confirmed state plus the pending prefix `[0, pendingCount)` as
+ * seen by `lane`. Prefixes stay indexed by FULL pending-array position so
+ * every caller's index math is lane-agnostic; a foreign lane's version is
+ * carried forward untouched (amendment A16: a lane's reads materialize
+ * confirmed state plus ONLY its own lane's pending versions).
+ */
 const materializedVersionThroughPending = (
   record: DocumentRecord,
   logContext: PendingPatchLogContext,
   pendingCount = record.pending.length,
+  lane: SchedulerExecutionContextKey = "space",
 ): MaterializedVersion => {
   if (pendingCount <= 0) {
     return record.confirmed;
   }
 
-  const cache = ensurePendingMaterializationCache(record);
+  const cache = ensurePendingMaterializationCache(record, lane);
   while (cache.prefixes.length < pendingCount) {
     const nextIndex = cache.prefixes.length;
     const base = nextIndex === 0
       ? record.confirmed
       : cache.prefixes[nextIndex - 1]!;
     const pending = record.pending[nextIndex]!;
-    cache.prefixes.push({
-      localSeq: pending.localSeq,
-      value: applyPendingVersion(base.value, pending, logContext),
-      transactionValue: UNCACHED_TRANSACTION_VALUE,
-    });
+    cache.prefixes.push(
+      pendingVersionLane(pending) === lane
+        ? {
+          localSeq: pending.localSeq,
+          value: applyPendingVersion(base.value, pending, logContext),
+          transactionValue: UNCACHED_TRANSACTION_VALUE,
+        }
+        : {
+          // Foreign-lane version: invisible to this lane, value unchanged.
+          localSeq: pending.localSeq,
+          value: base.value,
+          transactionValue: base.transactionValue,
+        },
+    );
   }
   return cache.prefixes[pendingCount - 1]!;
 };
@@ -741,6 +779,14 @@ export interface Options {
    * upstream. The same seam later hosts client claimed overlays.
    */
   actionTransactionRouter?: ActionTransactionRouter;
+  /**
+   * C1.5b per-lane acting context: resolve a source action's owning
+   * execution lane (the executor Worker consults the action's live claim).
+   * Absent on client storage — the space lane stays the only lane.
+   */
+  executionLaneForAction?: (
+    action: object,
+  ) => SchedulerExecutionContextKey | undefined;
 }
 
 export const defaultSettings: IRemoteStorageProviderSettings = {
@@ -914,6 +960,9 @@ export class StorageManager implements IStorageManager {
   #sessionFactory: SessionFactory;
   readonly #shadowWrites: boolean;
   readonly #actionTransactionRouter?: ActionTransactionRouter;
+  readonly #executionLaneForAction?: (
+    action: object,
+  ) => SchedulerExecutionContextKey | undefined;
   #executionActionKeys = new WeakMap<object, ActionClaimKey>();
   readonly #executionActionsByKey = new Map<string, Set<object>>();
   readonly #clientExecutionEffects = new WeakMap<object, number>();
@@ -964,6 +1013,7 @@ export class StorageManager implements IStorageManager {
     this.#sessionFactory = sessionFactory;
     this.#shadowWrites = options.shadowWrites === true;
     this.#actionTransactionRouter = options.actionTransactionRouter;
+    this.#executionLaneForAction = options.executionLaneForAction;
     if (options.spaceIdentity) {
       this.registerSpaceIdentity(options.spaceIdentity);
     }
@@ -1142,6 +1192,7 @@ export class StorageManager implements IStorageManager {
         subscription: this.#subscription,
         shadowWrites: this.#shadowWrites,
         actionTransactionRouter: this.#actionTransactionRouter,
+        executionLaneForAction: this.#executionLaneForAction,
         clientExecutionEffectInFlight: (action) =>
           this.clientExecutionEffectInFlight(action),
         executionActionsForClaimKey: (key) =>
@@ -1165,6 +1216,22 @@ export class StorageManager implements IStorageManager {
    * before rerunning that action under an authoritative claim. */
   discardShadowWritesForAction(space: MemorySpace, action: object): void {
     this.#providers.get(space)?.replica.discardShadowWritesForAction(action);
+  }
+
+  /**
+   * Run `fn` with `lane` as the space's ambient acting lane (C1.5b): its
+   * synchronous reads and commits resolve documents under that lane's
+   * effective scope keys, and its pulls register their watches under the
+   * lane's per-request acting context (C1.4b). The executor Worker wraps a
+   * claimed action's run; everything else stays on the space lane.
+   */
+  runWithExecutionLane<T>(
+    space: MemorySpace,
+    lane: SchedulerExecutionContextKey,
+    fn: () => T,
+  ): T {
+    this.open(space);
+    return this.#providers.get(space)!.replica.runWithExecutionLane(lane, fn);
   }
 
   /**
@@ -1750,6 +1817,12 @@ type ProviderOptions = {
   actionTransactionRouter?: ActionTransactionRouter;
   clientExecutionEffectInFlight: (action: object) => boolean;
   executionActionsForClaimKey: (key: ActionClaimKey) => readonly object[];
+  /** C1.5b: resolve a source action's owning execution lane (the executor
+   * Worker consults its live claim). Absent everywhere the space lane is the
+   * only lane. */
+  executionLaneForAction?: (
+    action: object,
+  ) => SchedulerExecutionContextKey | undefined;
   supportsExecutionDemand: boolean;
   createSession: () => Promise<ReplicaSessionHandle>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
@@ -1912,6 +1985,9 @@ type SyncTask = {
 
 type WatchRefreshBatch = {
   type: "pull" | "integrate";
+  /** Acting lane the batch's watches register under (C1.4b read seam):
+   * batches never mix lanes — one request carries one acting context. */
+  lane: SchedulerExecutionContextKey;
   entries: Map<
     string,
     [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
@@ -1939,6 +2015,10 @@ type ClaimedOverlayGeneration = {
   readonly localSeq: number;
   readonly claim: ExecutionClaim;
   readonly sourceAction: object;
+  /** Owning lane of the overlay's commit (C1.5b) — keys its touched-document
+   * lookups. Client overlays stay on the space lane: the claim's contextKey
+   * partitions HOST authority, not this client-local replica. */
+  readonly lane: SchedulerExecutionContextKey;
   readonly createdAt: number;
   basisSeq: number;
   readonly unresolvedBasisLocalSeqs: Set<number>;
@@ -1990,11 +2070,46 @@ const EXECUTION_ROUTING_DIAGNOSTIC_ACTION_LIMIT = 128;
 
 type SchedulerObservationBatchEntry = {
   commit: SchedulerObservationCommit;
+  /** Asserting lane, captured at enqueue: one flush commit carries exactly
+   * one lane's observations (A6 one-commit-one-lane, client side). */
+  lane: SchedulerExecutionContextKey;
   pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
 };
 
-const docKey = (id: URI, scope?: CellScope): string =>
-  `${normalizeCellScope(scope)}\0${id}`;
+/**
+ * Effective replica scope key of one document instance (C1.5b, context-lattice
+ * §2/§7): the intra-replica confidentiality boundary between execution lanes.
+ *
+ * - The space lane keys by the DECLARED scope — byte-identical to the
+ *   pre-lane keys, so a lanes-free replica (the flag-off world) behaves
+ *   exactly as today.
+ * - A non-space lane shares broad ("space"-declared) instances with every
+ *   other lane, and keys scoped instances by the lane's resolved scope key
+ *   (the canonical context key — a colon-bearing string no declared scope
+ *   can collide with).
+ * - A declared scope the lane cannot resolve (e.g. "session" under a user
+ *   lane) still gets a collision-free per-lane key; the host rejects such
+ *   reads at the C1.4b seam, this only keeps local keying total.
+ */
+const laneScopeKey = (
+  scope: CellScope,
+  lane: SchedulerExecutionContextKey,
+): string => {
+  if (lane === "space" || scope === "space") return scope;
+  if (
+    (scope === "user" && lane.startsWith("user:")) ||
+    (scope === "session" && lane.startsWith("session:"))
+  ) {
+    return lane;
+  }
+  return `${lane}\0${scope}`;
+};
+
+const docKey = (
+  id: URI,
+  scope?: CellScope,
+  lane: SchedulerExecutionContextKey = "space",
+): string => `${laneScopeKey(normalizeCellScope(scope), lane)}\0${id}`;
 
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
@@ -2007,6 +2122,24 @@ class SpaceReplica implements ISpaceReplica {
   readonly #executionActionsForClaimKey: (
     key: ActionClaimKey,
   ) => readonly object[];
+  /** Owning lane of a source action's transactions (C1.5b): the executor
+   * Worker resolves a claimed action to its claim's contextKey so commits
+   * assert exactly one lane (A6) and key their documents by it. */
+  readonly #executionLaneForAction?: (
+    action: object,
+  ) => SchedulerExecutionContextKey | undefined;
+  /** Ambient acting lane for reads/commits without a lane-resolvable source
+   * action. "space" (the only lane of the flag-off world) by default. */
+  #actingLane: SchedulerExecutionContextKey = "space";
+  /** Every non-space lane ever engaged on this replica. Sync-frame
+   * attribution assigns an upsert to a lane instance only when its resolved
+   * scopeKey names a member; per-lane lifecycle (drains) is C1.8's. */
+  readonly #executionLanes = new Set<string>();
+  /** Owning lane of every locally allocated non-space-lane commit localSeq.
+   * Another lane's localSeqs are host-unresolvable for a commit (A16), the
+   * same way shadow and claimed-overlay versions are. Empty while only the
+   * space lane exists. */
+  readonly #localSeqLanes = new Map<number, SchedulerExecutionContextKey>();
   readonly #shadowLocalSeqsByAction = new WeakMap<object, Set<number>>();
   // Every executor-shadow local commit, across all actions. A shadow version
   // never reaches the host, so an upstream commit's pending read must never
@@ -2085,8 +2218,13 @@ class SpaceReplica implements ISpaceReplica {
   // is stale until we observe caughtUpLocalSeq >= value". Pruned as the runner
   // catches up; only populated while conflict admission control is enabled.
   #staleFloor = new Map<string, number>();
-  #queuedWatchRefresh: WatchRefreshBatch | null = null;
-  #queuedWatchRefreshScheduled = false;
+  /** One queued refresh batch per acting lane: a lane's watches register
+   * under its own per-request acting context and cannot share a request
+   * with another lane's. */
+  readonly #queuedWatchRefreshes = new Map<
+    SchedulerExecutionContextKey,
+    WatchRefreshBatch
+  >();
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
@@ -2098,10 +2236,56 @@ class SpaceReplica implements ISpaceReplica {
     this.#actionTransactionRouter = options.actionTransactionRouter;
     this.#clientExecutionEffectInFlight = options.clientExecutionEffectInFlight;
     this.#executionActionsForClaimKey = options.executionActionsForClaimKey;
+    this.#executionLaneForAction = options.executionLaneForAction;
   }
 
   did(): MemorySpace {
     return this.#space;
+  }
+
+  /**
+   * Run `fn` with `lane` as the ambient acting lane (C1.5b per-lane acting
+   * context). The ambient covers the SYNCHRONOUS extent of `fn` plus any
+   * lane capture points inside it (pull entry, commit entry); a commit whose
+   * source action resolves through `executionLaneForAction` does not need
+   * the ambient. Nesting restores the outer lane on exit.
+   */
+  runWithExecutionLane<T>(
+    lane: SchedulerExecutionContextKey,
+    fn: () => T,
+  ): T {
+    this.registerExecutionLane(lane);
+    const previous = this.#actingLane;
+    this.#actingLane = lane;
+    try {
+      return fn();
+    } finally {
+      this.#actingLane = previous;
+    }
+  }
+
+  private registerExecutionLane(lane: SchedulerExecutionContextKey): void {
+    if (lane !== "space") this.#executionLanes.add(lane);
+  }
+
+  /** Owning lane of a commit: the source action's resolved lane when the
+   * provider can name one, else the ambient acting lane. Captured
+   * synchronously at each commit/read entry — never across an await. */
+  private commitLane(
+    source?: IStorageTransaction,
+  ): SchedulerExecutionContextKey {
+    const action = source?.sourceAction;
+    const lane =
+      (action === undefined
+        ? undefined
+        : this.#executionLaneForAction?.(action)) ?? this.#actingLane;
+    this.registerExecutionLane(lane);
+    return lane;
+  }
+
+  /** Replica document key of `(id, scope)` as seen by the acting lane. */
+  private actingDocKey(id: URI, scope?: CellScope): string {
+    return docKey(id, scope, this.#actingLane);
   }
 
   get(entry: IMemoryAddress): State | undefined {
@@ -2227,6 +2411,9 @@ class SpaceReplica implements ISpaceReplica {
     if (!getPersistentSchedulerStateConfig()) {
       return { serverSeq: 0, snapshots: [] };
     }
+    // Captured synchronously: the acting lane rides the request as the
+    // C1.4b per-request acting context.
+    const lane = this.#actingLane;
     const { client, session } = await this.sessionHandle();
     // Optional capability, negotiated at hello: a server that did not
     // advertise `persistentSchedulerState` keeps no scheduler rows (and an
@@ -2236,7 +2423,10 @@ class SpaceReplica implements ISpaceReplica {
     if (client.serverFlags?.persistentSchedulerState !== true) {
       return { serverSeq: 0, snapshots: [] };
     }
-    return await session.listSchedulerActionSnapshots(query);
+    return await session.listSchedulerActionSnapshots(
+      query,
+      lane === "space" ? undefined : { actingContext: lane },
+    );
   }
 
   async writersForTargets(
@@ -2248,6 +2438,7 @@ class SpaceReplica implements ISpaceReplica {
     ) {
       return { serverSeq: 0, writers: [] };
     }
+    const lane = this.#actingLane;
     const { client, session } = await this.sessionHandle();
     if (client.serverFlags?.schedulerWriterLookup !== true) {
       return { serverSeq: 0, writers: [] };
@@ -2259,7 +2450,7 @@ class SpaceReplica implements ISpaceReplica {
         ...(target.scope !== undefined ? { scope: target.scope } : {}),
         path: toDocumentPath([...target.path]),
       })),
-    });
+    }, lane === "space" ? undefined : { actingContext: lane });
   }
 
   async setExecutionDemand(
@@ -2277,7 +2468,10 @@ class SpaceReplica implements ISpaceReplica {
     for (const address of addresses) {
       if (address.space !== this.#space) return false;
       const record = this.#docs.get(
-        docKey(address.id as URI, address.scope as CellScope | undefined),
+        this.actingDocKey(
+          address.id as URI,
+          address.scope as CellScope | undefined,
+        ),
       );
       // Missing/unconfirmed docs cannot prove either the observation's inputs
       // or its committed output surface are present in this replica.
@@ -2290,12 +2484,23 @@ class SpaceReplica implements ISpaceReplica {
   schedulerHasPendingWriteOverlapping(
     addresses: readonly IMemorySpaceAddress[],
   ): boolean {
+    const lane = this.#actingLane;
     for (const address of addresses) {
       if (address.space !== this.#space) continue;
       const record = this.#docs.get(
-        docKey(address.id as URI, address.scope as CellScope | undefined),
+        docKey(
+          address.id as URI,
+          address.scope as CellScope | undefined,
+          lane,
+        ),
       );
-      if (record !== undefined && record.pending.length > 0) return true;
+      // Only the acting lane's own pending versions exist for it (A16).
+      if (
+        record !== undefined &&
+        record.pending.some((version) => pendingVersionLane(version) === lane)
+      ) {
+        return true;
+      }
     }
     return false;
   }
@@ -2611,6 +2816,11 @@ class SpaceReplica implements ISpaceReplica {
       return { ok: {} };
     }
 
+    // The acting lane is captured synchronously at pull entry (C1.5b): a
+    // lane's pull registers its watch under that lane's acting context and
+    // never dedupes onto another lane's identical-looking pull — the same
+    // address resolves to a different instance per lane.
+    const lane = this.#actingLane;
     const normalizedEntries = normalizeSyncEntries(entries);
     // Compose the dedup key from per-part hashes instead of hashing a fresh
     // wrapper object: hashOf's frozen-object cache is only consulted at entry
@@ -2622,7 +2832,7 @@ class SpaceReplica implements ISpaceReplica {
     const key = JSON.stringify(
       normalizedEntries.map(([address, selector]) => [
         address.id,
-        normalizeCellScope(address.scope) ?? null,
+        laneScopeKey(normalizeCellScope(address.scope), lane) ?? null,
         selector === undefined ? null : selector.path,
         selector?.schema === undefined ? null : hashStringOf(selector.schema),
       ]),
@@ -2649,7 +2859,11 @@ class SpaceReplica implements ISpaceReplica {
       const baseAddress = {
         id: address.id,
         type: DOCUMENT_MIME,
-        scope: normalizeCellScope(address.scope),
+        // Lane-effective scope: selector coverage never crosses lanes.
+        scope: laneScopeKey(
+          normalizeCellScope(address.scope),
+          lane,
+        ) as CellScope,
       };
       const [superset, supersetPromise] = this.#watchSelectorTracker
         .getSupersetSelector(
@@ -2671,7 +2885,7 @@ class SpaceReplica implements ISpaceReplica {
     }
     task.entries = newEntries;
     this.#syncTasks.set(key, task);
-    const fetchPromise = this.enqueueWatchRefresh("pull", newEntries);
+    const fetchPromise = this.enqueueWatchRefresh("pull", newEntries, lane);
     // Mixed batch: some entries fetched here, others covered by in-flight
     // watches. The pull resolves only when ALL requested docs are locally
     // available, and concurrent same-key callers dedupe onto this COMBINED
@@ -2692,7 +2906,11 @@ class SpaceReplica implements ISpaceReplica {
       const baseAddress = {
         id: address.id,
         type: DOCUMENT_MIME,
-        scope: normalizeCellScope(address.scope),
+        // Lane-effective scope: selector coverage never crosses lanes.
+        scope: laneScopeKey(
+          normalizeCellScope(address.scope),
+          lane,
+        ) as CellScope,
       };
       // The tracker promise is what FUTURE pulls covered by these selectors
       // await: their data is available once THIS fetch lands, independent of
@@ -2718,7 +2936,11 @@ class SpaceReplica implements ISpaceReplica {
           const baseAddress = {
             id: address.id,
             type: DOCUMENT_MIME,
-            scope: normalizeCellScope(address.scope),
+            // Lane-effective scope: selector coverage never crosses lanes.
+            scope: laneScopeKey(
+              normalizeCellScope(address.scope),
+              lane,
+            ) as CellScope,
           };
           this.#watchSelectorTracker.delete(
             baseAddress,
@@ -2807,6 +3029,7 @@ class SpaceReplica implements ISpaceReplica {
       [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
     >,
     type: "pull" | "integrate" = "pull",
+    lane: SchedulerExecutionContextKey = "space",
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.sessionHandle();
@@ -2817,7 +3040,7 @@ class SpaceReplica implements ISpaceReplica {
       }
 
       const watches = watchEntries.map(([address, selector]) => ({
-        id: watchIdForEntry(address, selector, ""),
+        id: watchIdForEntry(address, selector, "", lane),
         kind: "graph" as const,
         query: {
           roots: [{
@@ -2828,7 +3051,14 @@ class SpaceReplica implements ISpaceReplica {
         },
       }));
 
-      const { view, sync } = await session.watchAddSync(watches);
+      // C1.4b read seam: a non-space lane's watch registration carries the
+      // lane as a per-request acting context, so the host resolves every
+      // scoped root under the LANE principal (validated against the live
+      // lane grant), never the sponsor.
+      const { view, sync } = await session.watchAddSync(
+        watches,
+        lane === "space" ? undefined : { actingContext: lane },
+      );
 
       if (this.#closed) {
         view.close();
@@ -2864,21 +3094,24 @@ class SpaceReplica implements ISpaceReplica {
   private enqueueWatchRefresh(
     type: "pull" | "integrate",
     entries: [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector][],
+    lane: SchedulerExecutionContextKey = "space",
   ): Promise<Result<Unit, PullError>> {
-    if (this.#queuedWatchRefresh !== null) {
+    const queued = this.#queuedWatchRefreshes.get(lane);
+    if (queued !== undefined) {
       for (const [address, selector] of entries) {
-        this.#queuedWatchRefresh.entries.set(
-          watchIdForEntry(address, selector, ""),
+        queued.entries.set(
+          watchIdForEntry(address, selector, "", lane),
           [address, selector],
         );
       }
-      return this.#queuedWatchRefresh.pending.promise;
+      return queued.pending.promise;
     }
 
     const batch: WatchRefreshBatch = {
       type,
+      lane,
       entries: new Map(entries.map(([address, selector]) => [
-        watchIdForEntry(address, selector, ""),
+        watchIdForEntry(address, selector, "", lane),
         [address, selector] as [
           { id: URI; type: MIME; scope?: CellScope },
           SchemaPathSelector,
@@ -2886,14 +3119,12 @@ class SpaceReplica implements ISpaceReplica {
       ])),
       pending: Promise.withResolvers<Result<Unit, PullError>>(),
     };
-    this.#queuedWatchRefresh = batch;
-    this.#queuedWatchRefreshScheduled = true;
+    this.#queuedWatchRefreshes.set(lane, batch);
     queueMicrotask(() => {
-      this.#queuedWatchRefreshScheduled = false;
-      if (this.#queuedWatchRefresh !== batch) {
+      if (this.#queuedWatchRefreshes.get(lane) !== batch) {
         return;
       }
-      this.#queuedWatchRefresh = null;
+      this.#queuedWatchRefreshes.delete(lane);
       void this.flushWatchRefreshBatch(batch);
     });
     return batch.pending.promise;
@@ -2904,7 +3135,11 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<void> {
     try {
       batch.pending.resolve(
-        await this.refreshWatchSet(batch.entries.values(), batch.type),
+        await this.refreshWatchSet(
+          batch.entries.values(),
+          batch.type,
+          batch.lane,
+        ),
       );
     } catch (error) {
       batch.pending.resolve({ error: toConnectionError(error) });
@@ -2912,12 +3147,11 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private cancelQueuedWatchRefresh(): void {
-    this.#queuedWatchRefreshScheduled = false;
-    if (this.#queuedWatchRefresh !== null) {
-      this.#queuedWatchRefresh.pending.resolve({
+    for (const [lane, batch] of this.#queuedWatchRefreshes) {
+      batch.pending.resolve({
         error: toConnectionError(new Error("memory replica closed")),
       });
-      this.#queuedWatchRefresh = null;
+      this.#queuedWatchRefreshes.delete(lane);
     }
   }
 
@@ -2951,16 +3185,19 @@ class SpaceReplica implements ISpaceReplica {
     ) {
       return Promise.resolve({ ok: {} });
     }
+    const lane = this.commitLane(source);
     const localSeq = this.#nextLocalSeq++;
+    if (lane !== "space") this.#localSeqLanes.set(localSeq, lane);
     const pending = Promise.withResolvers<
       Result<Unit, StorageTransactionRejected>
     >();
     this.#schedulerObservationBatch.push({
       commit: {
         localSeq,
-        reads: this.buildReads(source, localSeq),
+        reads: this.buildReads(source, localSeq, lane),
         schedulerObservation,
       },
+      lane,
       pending,
     });
     this.scheduleSchedulerObservationFlush();
@@ -3008,14 +3245,20 @@ class SpaceReplica implements ISpaceReplica {
   private startSchedulerObservationBatchFlush(): Promise<
     Result<Unit, StorageTransactionRejected>
   > {
-    // ONE-LANE-PER-COMMIT CONTRACT (memory C1.4): the host rejects any
-    // commit — this batch shape included — whose claim assertions name more
-    // than one execution lane (`mixed-lane-commit`). Today every asserted
-    // observation here is space-lane, so one flush is trivially compliant;
-    // when per-lane acting contexts land (C1.5b), this flush must partition
-    // entries by asserted lane into one commit per lane.
-    const entries = this.#schedulerObservationBatch.splice(0);
+    // ONE-LANE-PER-COMMIT CONTRACT (memory C1.4, Worker/client side C1.5b):
+    // the host rejects any commit — this batch shape included — whose claim
+    // assertions name more than one execution lane (`mixed-lane-commit`).
+    // Partition by asserted lane: drain exactly the FIRST queued entry's
+    // lane per flush; flushSchedulerObservationBatch's drain loop re-invokes
+    // until every lane's entries have flushed as their own commit.
+    const queued = this.#schedulerObservationBatch.splice(0);
+    const flushLane = queued[0]?.lane ?? "space";
+    const entries = queued.filter((entry) => entry.lane === flushLane);
+    this.#schedulerObservationBatch.push(
+      ...queued.filter((entry) => entry.lane !== flushLane),
+    );
     const localSeq = this.#nextLocalSeq++;
+    if (flushLane !== "space") this.#localSeqLanes.set(localSeq, flushLane);
     const commit: ClientCommit = {
       localSeq,
       reads: { confirmed: [], pending: [] },
@@ -3093,12 +3336,18 @@ class SpaceReplica implements ISpaceReplica {
       }
     }
 
+    // One commit, one lane (A6): the owning lane is captured synchronously
+    // at entry — from the source action's live claim when the provider can
+    // resolve one, else the ambient acting lane — and keys every optimistic
+    // structure this commit touches.
+    const lane = this.commitLane(source);
     const localSeq = this.#nextLocalSeq++;
+    if (lane !== "space") this.#localSeqLanes.set(localSeq, lane);
     const commit = withCommitTiming(
       ["commitOperations", "buildCommit"],
       (): ClientCommit => ({
         localSeq,
-        reads: this.buildReads(source, localSeq),
+        reads: this.buildReads(source, localSeq, lane),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
         operations: [
@@ -3191,26 +3440,33 @@ class SpaceReplica implements ISpaceReplica {
       this.hasNotificationSubscribers();
     const shouldNotifySinks = hasSemanticOperations &&
       this.hasSinkSubscribers(touched);
+    // Snapshot, apply, and diff under the COMMIT's lane: the optimistic
+    // change is visible exactly to that lane (A16), so its notification must
+    // be computed from that lane's materialization.
     const before = withCommitTiming(
       ["commitOperations", "snapshotBefore"],
       () =>
         shouldNotifySubscribers
-          ? Differential.checkout(
-            this,
-            touched.map(({ id, scope }) => snapshotState(this, id, scope)),
-          )
+          ? this.runWithExecutionLane(lane, () =>
+            Differential.checkout(
+              this,
+              touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+            ))
           : undefined,
     );
 
     withCommitTiming(["commitOperations", "applyPending"], () => {
       for (const operation of operations) {
-        this.applyPending(operation, localSeq);
+        this.applyPending(operation, localSeq, lane);
       }
     });
 
     withCommitTiming(["commitOperations", "notifyOptimistic"], () => {
       if (before !== undefined) {
-        const optimistic = before.compare(this);
+        const optimistic = this.runWithExecutionLane(
+          lane,
+          () => before.compare(this),
+        );
         this.#subscription.next({
           type: "commit",
           space: this.#space,
@@ -3218,10 +3474,10 @@ class SpaceReplica implements ISpaceReplica {
           source,
         });
         if (shouldNotifySinks) {
-          this.notifySinks(optimistic);
+          this.runWithExecutionLane(lane, () => this.notifySinks(optimistic));
         }
       } else if (shouldNotifySinks) {
-        this.notifySinksForIds(touched);
+        this.runWithExecutionLane(lane, () => this.notifySinksForIds(touched));
       }
     });
 
@@ -3253,6 +3509,7 @@ class SpaceReplica implements ISpaceReplica {
           source.sourceAction,
           commit,
           touched,
+          lane,
         );
         const live = this.#executionClaims.get(actionClaimMapKey(route.claim));
         if (
@@ -3697,17 +3954,24 @@ class SpaceReplica implements ISpaceReplica {
       this.hasNotificationSubscribers();
     const shouldNotifySinks = hasSemanticOperations &&
       this.hasSinkSubscribers(touched);
+    // The dropped optimistic write was visible only to its own lane (A16);
+    // diff the revert under that lane's materialization.
+    const lane = this.#localSeqLanes.get(localSeq) ?? "space";
     const before = shouldNotifySubscribers
-      ? Differential.checkout(
-        this,
-        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
-      )
+      ? this.runWithExecutionLane(lane, () =>
+        Differential.checkout(
+          this,
+          touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        ))
       : undefined;
     await this.waitForConflictReadRepair(rejection);
     this.dropPending(localSeq);
     this.noteSourceCommitRejected(localSeq);
     if (before !== undefined) {
-      const changes = before.compare(this);
+      const changes = this.runWithExecutionLane(
+        lane,
+        () => before.compare(this),
+      );
       // The revert snapshots CURRENT confirmed state (which already includes
       // any newer seq received by subscription since this commit started) and
       // drops only this commit's pending write — so it should not stomp newer
@@ -3723,10 +3987,10 @@ class SpaceReplica implements ISpaceReplica {
         source,
       });
       if (shouldNotifySinks) {
-        this.notifySinks(changes);
+        this.runWithExecutionLane(lane, () => this.notifySinks(changes));
       }
     } else if (shouldNotifySinks) {
-      this.notifySinksForIds(touched);
+      this.runWithExecutionLane(lane, () => this.notifySinksForIds(touched));
     }
     return { error: rejection };
   }
@@ -3734,6 +3998,7 @@ class SpaceReplica implements ISpaceReplica {
   private buildReads(
     source: IStorageTransaction | undefined,
     localSeq: number,
+    lane: SchedulerExecutionContextKey = "space",
   ) {
     const confirmed: ConfirmedCommitRead[] = [];
     const pending: PendingCommitRead[] = [];
@@ -3766,9 +4031,14 @@ class SpaceReplica implements ISpaceReplica {
       nonRecursive: boolean,
       confirmedSeq?: number,
     ) => {
-      const record = this.#docs.get(docKey(id, scope));
+      const record = this.#docs.get(docKey(id, scope, lane));
+      // A16: a commit baselines only against its OWN lane's in-flight
+      // versions. Another lane's pending version is invisible to this
+      // lane's reads and host-unresolvable for its pending-read naming.
       const pendingLocalSeq = record?.pending
-        .filter((version) => version.localSeq < localSeq)
+        .filter((version) =>
+          version.localSeq < localSeq && pendingVersionLane(version) === lane
+        )
         .at(-1)?.localSeq;
       const shape = nonRecursive ? { nonRecursive: true } : {};
       if (pendingLocalSeq !== undefined) {
@@ -3911,62 +4181,44 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
 
-    const touched = [
-      ...sync.upserts.map((upsert) => ({
-        id: upsert.id as URI,
-        scope: upsert.scope,
-      })),
-      ...sync.removes.map((remove) => ({
-        id: remove.id as URI,
-        scope: remove.scope,
-      })),
-    ];
-
-    const shouldNotifySubscribers = this.hasNotificationSubscribers();
-    const shouldNotifySinks = this.hasSinkSubscribers(touched);
-    const before = shouldNotifySubscribers
-      ? Differential.checkout(
-        this,
-        touched.map(({ id, scope }) => snapshotState(this, id, scope)),
-      )
-      : undefined;
-
-    for (const upsert of sync.upserts) {
-      const record = this.record(upsert.id as URI, upsert.scope);
-      // Watch refreshes can arrive after local confirmations. Never move the
-      // confirmed base backwards; pending replay depends on monotonic bases.
-      if (upsert.seq < record.confirmed.seq) {
-        continue;
-      }
-      record.confirmed = confirmedVersion(
-        upsert.seq,
-        upsert.deleted === true ? undefined : upsert.doc,
+    // C1.5b sync-frame attribution (FA6 consumption half): an upsert belongs
+    // to a lane instance exactly when its host-resolved scopeKey (stamped
+    // since C1.4b) names a REGISTERED lane. Everything else — no scopeKey
+    // (older host), or a scope key no lane owns (e.g. the sponsor's own
+    // scoped instance read through the space lane) — lands on the declared
+    // space-lane key, byte-identical to the pre-lane replica. Removes carry
+    // no scopeKey on the wire and stay space-lane; per-lane shrink is F2's
+    // (FA5) alongside the point-read rebuild.
+    if (this.#executionLanes.size === 0) {
+      this.applyAttributedSessionSync(
+        sync.upserts,
+        sync.removes,
+        type,
+        "space",
       );
-      record.materialized = undefined;
-      this.#watchedIds.add(docKey(upsert.id as URI, upsert.scope));
-    }
-    for (const remove of sync.removes) {
-      const id = remove.id as URI;
-      const record = this.record(id, remove.scope);
-      record.confirmed = confirmedVersion(0, undefined);
-      record.materialized = undefined;
-      this.#watchedIds.delete(docKey(id, remove.scope));
-    }
-
-    if (before !== undefined) {
-      const changes = before.compare(this);
-      if (type === "pull" || [...changes].length > 0) {
-        this.#subscription.next({
-          type,
-          space: this.#space,
-          changes,
-        } as StorageNotification);
-        if (shouldNotifySinks) {
-          this.notifySinks(changes);
+    } else {
+      const groups = new Map<
+        SchedulerExecutionContextKey,
+        SessionSyncUpsert[]
+      >();
+      for (const upsert of sync.upserts) {
+        const lane = upsert.scopeKey !== undefined &&
+            this.#executionLanes.has(upsert.scopeKey)
+          ? upsert.scopeKey as SchedulerExecutionContextKey
+          : "space";
+        const group = groups.get(lane);
+        if (group !== undefined) {
+          group.push(upsert);
+        } else {
+          groups.set(lane, [upsert]);
         }
       }
-    } else if (shouldNotifySinks) {
-      this.notifySinksForIds(touched);
+      const spaceGroup = groups.get("space") ?? [];
+      groups.delete("space");
+      this.applyAttributedSessionSync(spaceGroup, sync.removes, type, "space");
+      for (const [lane, upserts] of groups) {
+        this.applyAttributedSessionSync(upserts, [], type, lane);
+      }
     }
     // Subscription-carried scheduler observations — other clients' committed
     // action runs for this sync window. Handed to the scheduler AFTER the
@@ -3988,12 +4240,84 @@ class SpaceReplica implements ISpaceReplica {
     this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
   }
 
+  /** Apply one lane's slice of a session sync: confirmed bases update under
+   * the lane's document keys and the notification diff is computed from that
+   * lane's materialization (the change is invisible to other lanes, A16). */
+  private applyAttributedSessionSync(
+    upserts: readonly SessionSyncUpsert[],
+    removes: readonly SessionSyncRemove[],
+    type: "pull" | "integrate",
+    lane: SchedulerExecutionContextKey,
+  ): void {
+    if (upserts.length === 0 && removes.length === 0) return;
+    this.runWithExecutionLane(lane, () => {
+      const touched = [
+        ...upserts.map((upsert) => ({
+          id: upsert.id as URI,
+          scope: upsert.scope,
+        })),
+        ...removes.map((remove) => ({
+          id: remove.id as URI,
+          scope: remove.scope,
+        })),
+      ];
+
+      const shouldNotifySubscribers = this.hasNotificationSubscribers();
+      const shouldNotifySinks = this.hasSinkSubscribers(touched);
+      const before = shouldNotifySubscribers
+        ? Differential.checkout(
+          this,
+          touched.map(({ id, scope }) => snapshotState(this, id, scope)),
+        )
+        : undefined;
+
+      for (const upsert of upserts) {
+        const record = this.record(upsert.id as URI, upsert.scope, lane);
+        // Watch refreshes can arrive after local confirmations. Never move the
+        // confirmed base backwards; pending replay depends on monotonic bases.
+        if (upsert.seq < record.confirmed.seq) {
+          continue;
+        }
+        record.confirmed = confirmedVersion(
+          upsert.seq,
+          upsert.deleted === true ? undefined : upsert.doc,
+        );
+        record.materialized = undefined;
+        this.#watchedIds.add(docKey(upsert.id as URI, upsert.scope, lane));
+      }
+      for (const remove of removes) {
+        const id = remove.id as URI;
+        const record = this.record(id, remove.scope, lane);
+        record.confirmed = confirmedVersion(0, undefined);
+        record.materialized = undefined;
+        this.#watchedIds.delete(docKey(id, remove.scope, lane));
+      }
+
+      if (before !== undefined) {
+        const changes = before.compare(this);
+        if (type === "pull" || [...changes].length > 0) {
+          this.#subscription.next({
+            type,
+            space: this.#space,
+            changes,
+          } as StorageNotification);
+          if (shouldNotifySinks) {
+            this.notifySinks(changes);
+          }
+        }
+      } else if (shouldNotifySinks) {
+        this.notifySinksForIds(touched);
+      }
+    });
+  }
+
   // Mark every id this conflicted commit touched (reads + writes) stale until
   // the runner observes caughtUpLocalSeq >= the commit's localSeq — the seq the
   // server stages as the post-conflict catch-up point for these ids.
   private recordStaleFloor(commit: ClientCommit, localSeq: number): void {
+    const lane = this.#localSeqLanes.get(commit.localSeq) ?? "space";
     const mark = (id: string, scope?: CellScope) => {
-      const key = docKey(id as URI, scope);
+      const key = docKey(id as URI, scope, lane);
       const current = this.#staleFloor.get(key);
       if (current === undefined || current < localSeq) {
         this.#staleFloor.set(key, localSeq);
@@ -4020,8 +4344,9 @@ class SpaceReplica implements ISpaceReplica {
       return undefined;
     }
     let threshold: number | undefined;
+    const lane = this.#localSeqLanes.get(commit.localSeq) ?? "space";
     const consider = (id: string, scope?: CellScope) => {
-      const floor = this.#staleFloor.get(docKey(id as URI, scope));
+      const floor = this.#staleFloor.get(docKey(id as URI, scope, lane));
       if (floor !== undefined && floor > this.#caughtUpLocalSeq) {
         threshold = threshold === undefined
           ? floor
@@ -4044,8 +4369,9 @@ class SpaceReplica implements ISpaceReplica {
   // (unknown id, no local record, or only pending reads) returns false so the
   // commit is still sent and the server stays the source of truth.
   private commitReadsStaleLocally(commit: ClientCommit): boolean {
+    const lane = this.#localSeqLanes.get(commit.localSeq) ?? "space";
     for (const read of commit.reads.confirmed) {
-      const record = this.#docs.get(docKey(read.id as URI, read.scope));
+      const record = this.#docs.get(docKey(read.id as URI, read.scope, lane));
       const confirmedSeq = record?.confirmed.seq ?? 0;
       if (read.seq < confirmedSeq) {
         return true;
@@ -4138,8 +4464,12 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private record(id: URI, scope?: CellScope): DocumentRecord {
-    const key = docKey(id, scope);
+  private record(
+    id: URI,
+    scope?: CellScope,
+    lane: SchedulerExecutionContextKey = "space",
+  ): DocumentRecord {
+    const key = docKey(id, scope, lane);
     let record = this.#docs.get(key);
     if (!record) {
       record = {
@@ -4155,10 +4485,15 @@ class SpaceReplica implements ISpaceReplica {
   private applyPending(
     operation: NativeCommitOperation,
     localSeq: number,
+    lane: SchedulerExecutionContextKey = "space",
   ): void {
     const { id, scope, ...pending } = operation;
-    const record = this.record(id, scope);
-    record.pending.push(pendingVersion(localSeq, pending));
+    const record = this.record(id, scope, lane);
+    const version = pendingVersion(localSeq, pending);
+    // Owning-lane tag (A16); omitted for the space lane so the lanes-free
+    // pending shape stays byte-identical.
+    if (lane !== "space") version.lane = lane;
+    record.pending.push(version);
   }
 
   private confirmPending(
@@ -4166,14 +4501,15 @@ class SpaceReplica implements ISpaceReplica {
     operations: NativeCommitOperation[],
     applied: AppliedCommit,
   ): void {
+    const lane = this.#localSeqLanes.get(localSeq) ?? "space";
     const keys = new Map(
       operations.map((operation) => [
-        docKey(operation.id, operation.scope),
+        docKey(operation.id, operation.scope, lane),
         { id: operation.id, scope: operation.scope },
       ]),
     );
     for (const { id, scope } of keys.values()) {
-      const record = this.record(id, scope);
+      const record = this.record(id, scope, lane);
       const pendingIndexes = record.pending.flatMap((entry, index) =>
         entry.localSeq === localSeq ? [index] : []
       );
@@ -4196,8 +4532,9 @@ class SpaceReplica implements ISpaceReplica {
             record,
             { space: this.#space, id, scope },
             lastPendingIndex + 1,
+            lane,
           );
-          const cache = ensurePendingMaterializationCache(record);
+          const cache = ensurePendingMaterializationCache(record, lane);
           promoted = confirmedVersion(
             applied.seq,
             prefix.value,
@@ -4227,6 +4564,7 @@ class SpaceReplica implements ISpaceReplica {
         record.materialized = reusedSuffix && reusedSuffix.length > 0
           ? {
             confirmed: promoted,
+            lane,
             prefixes: reusedSuffix,
           }
           : undefined;
@@ -4256,17 +4594,23 @@ class SpaceReplica implements ISpaceReplica {
     record: DocumentRecord;
     version: MaterializedVersion;
   } | undefined {
-    const record = this.#docs.get(docKey(id, scope));
+    const lane = this.#actingLane;
+    const record = this.#docs.get(docKey(id, scope, lane));
     if (!record) {
       return undefined;
     }
     return {
       record,
-      version: materializedVersionThroughPending(record, {
-        space: this.#space,
-        id,
-        scope,
-      }),
+      version: materializedVersionThroughPending(
+        record,
+        {
+          space: this.#space,
+          id,
+          scope,
+        },
+        record.pending.length,
+        lane,
+      ),
     };
   }
 
@@ -4620,20 +4964,30 @@ class SpaceReplica implements ISpaceReplica {
    * optimistic window self-heals through the server's recompute.
    */
   private rebaseUnresolvablePendingReads(commit: ClientCommit): void {
-    if (this.#shadowLocalSeqs.size === 0 && this.#claimedOverlays.size === 0) {
+    if (
+      this.#shadowLocalSeqs.size === 0 && this.#claimedOverlays.size === 0 &&
+      this.#localSeqLanes.size === 0
+    ) {
       return;
     }
+    // A16: another lane's local versions are host-unresolvable for this
+    // commit exactly like shadow and claimed-overlay versions — the host
+    // resolves a pending read only against the asserting lane's own chain.
+    const commitLane = this.#localSeqLanes.get(commit.localSeq) ?? "space";
     const retained: PendingRead[] = [];
     let rebased = 0;
     for (const read of commit.reads.pending) {
       if (
         !this.#shadowLocalSeqs.has(read.localSeq) &&
-        !this.#claimedOverlays.has(read.localSeq)
+        !this.#claimedOverlays.has(read.localSeq) &&
+        (this.#localSeqLanes.get(read.localSeq) ?? "space") === commitLane
       ) {
         retained.push(read);
         continue;
       }
-      const record = this.#docs.get(docKey(read.id as URI, read.scope));
+      const record = this.#docs.get(
+        docKey(read.id as URI, read.scope, commitLane),
+      );
       commit.reads.confirmed.push({
         id: read.id,
         scope: read.scope,
@@ -4658,6 +5012,7 @@ class SpaceReplica implements ISpaceReplica {
     sourceAction: object,
     commit: ClientCommit,
     touched: readonly { id: URI; scope?: CellScope }[],
+    lane: SchedulerExecutionContextKey,
   ): ClaimedOverlayGeneration {
     let basisSeq = commit.reads.confirmed.reduce(
       (maximum, read) => Math.max(maximum, read.seq),
@@ -4674,8 +5029,8 @@ class SpaceReplica implements ISpaceReplica {
         // forever and would exceed the v1 scalar-basis contract.
         basisSeq = Math.max(
           basisSeq,
-          this.#docs.get(docKey(read.id as URI, read.scope))?.confirmed.seq ??
-            0,
+          this.#docs.get(docKey(read.id as URI, read.scope, lane))?.confirmed
+            .seq ?? 0,
         );
         continue;
       }
@@ -4690,11 +5045,12 @@ class SpaceReplica implements ISpaceReplica {
       localSeq,
       claim,
       sourceAction,
+      lane,
       createdAt: performance.now(),
       basisSeq,
       unresolvedBasisLocalSeqs,
       touched: [...new Map(touched.map((entry) => [
-        docKey(entry.id, entry.scope),
+        docKey(entry.id, entry.scope, lane),
         entry,
       ])).values()],
     };
@@ -4724,7 +5080,7 @@ class SpaceReplica implements ISpaceReplica {
     let removed = 0;
 
     for (const { id, scope } of next.touched) {
-      const record = this.#docs.get(docKey(id, scope));
+      const record = this.#docs.get(docKey(id, scope, next.lane));
       if (record === undefined) continue;
       const nextPending = record.pending.filter((entry) =>
         entry.localSeq === next.localSeq
@@ -5053,15 +5409,22 @@ class SpaceReplica implements ISpaceReplica {
       }
     }
     const localSeqs = new Set(dropped.map((overlay) => overlay.localSeq));
-    const touched = [
-      ...new Map(
-        dropped.flatMap((overlay) =>
-          overlay.touched.map((entry) =>
-            [docKey(entry.id, entry.scope), entry] as const
-          )
-        ),
-      ).values(),
-    ];
+    // Touched documents are resolved under each overlay's OWN lane key; the
+    // notification diff below intentionally reads under the ambient lane
+    // (client overlays are space-lane — see ClaimedOverlayGeneration.lane).
+    const touchedByKey = new Map<
+      string,
+      { id: URI; scope?: CellScope; lane: SchedulerExecutionContextKey }
+    >();
+    for (const overlay of dropped) {
+      for (const entry of overlay.touched) {
+        touchedByKey.set(docKey(entry.id, entry.scope, overlay.lane), {
+          ...entry,
+          lane: overlay.lane,
+        });
+      }
+    }
+    const touched = [...touchedByKey.values()];
     const shouldNotifySubscribers = touched.length > 0 &&
       this.hasNotificationSubscribers();
     const shouldNotifySinks = touched.length > 0 &&
@@ -5078,8 +5441,8 @@ class SpaceReplica implements ISpaceReplica {
     // recorded touched set. Visit only those exact documents: scanning the
     // whole replica for every server settlement makes claimed speculation
     // proportional to unrelated space size.
-    for (const { id, scope } of touched) {
-      const record = this.#docs.get(docKey(id, scope));
+    for (const { id, scope, lane } of touched) {
+      const record = this.#docs.get(docKey(id, scope, lane));
       if (record === undefined) continue;
       if (!record.pending.some((entry) => localSeqs.has(entry.localSeq))) {
         continue;

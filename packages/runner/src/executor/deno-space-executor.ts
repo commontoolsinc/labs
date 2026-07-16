@@ -74,13 +74,15 @@ export interface DenoSpaceExecutorFactoryOptions {
 
 export interface CandidateClaim {
   /** Carries the candidate's context rank: `space`, or a canonical
-   * `user:<did>` lane identity since C1.5a (amendment 22 — lane identity
-   * crosses the executor channels; raw sponsor credentials and session
-   * tokens still do not). */
+   * `user:<did>` lane identity since C1.5a. Executor-IPC identity invariant
+   * as amended by C1.5b (amendments 22/23): lane identity — a contextKey
+   * INCLUDING the lane principal's DID — crosses the executor channels;
+   * raw sponsor credentials and session tokens still do not. */
   readonly claimKey: ActionClaimKey;
   readonly builtinId?: ServerExecutableBuiltinId;
-  /** Worker-derived from a host-only accepted-commit boolean. Beyond the
-   * claim key's lane identity, no principal or actor identity crosses either
+  /** Worker-derived from a host-only accepted-commit boolean. Beyond lane
+   * identity (the contextKey, principal DID included — amendment 23), no
+   * credential, session token, or other actor identity crosses either
    * executor IPC channel. */
   readonly causalActorMatchesSponsor?: boolean;
   /** Worker-side demand epoch; stale closure candidates are ignored after a

@@ -10,6 +10,7 @@ import {
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
   type SchedulerActionSnapshotResult,
+  type SchedulerExecutionContextKey,
   type SchedulerSnapshotListResult,
   type SchedulerWritersForTargetsQuery,
   type SchedulerWritersForTargetsResult,
@@ -37,7 +38,11 @@ import {
   type SessionFactory,
   StorageManager,
 } from "./v2.ts";
-import type { ReplicaClient, ReplicaSession } from "./v2-replica-session.ts";
+import type {
+  ReplicaClient,
+  ReplicaReadOptions,
+  ReplicaSession,
+} from "./v2-replica-session.ts";
 import {
   installHostConflictRetryBarrier,
 } from "./v2-host-conflict-readiness.ts";
@@ -49,8 +54,10 @@ export interface AcceptedCommitNotice {
   dataSeq: number;
   deliverySeq: number;
   originSessionId?: string;
-  /** Host-derived comparison only. Raw origin/sponsor principals never cross
-   * the executor channel. Present only on lease-bound channels. */
+  /** Host-derived comparison only. Lane identity (a contextKey including the
+   * lane principal's DID) crosses the executor channels since C1.5a/C1.5b;
+   * raw sponsor credentials and session tokens still do not (amendment A23).
+   * Present only on lease-bound channels. */
   originMatchesExecutionSponsor?: boolean;
   revisions: {
     branch: BranchName;
@@ -576,22 +583,47 @@ class MessagePortTransport implements MemoryClient.Transport {
   }
 }
 
+// Instance identity prefers the RESOLVED scope key (present on every
+// C1.4b-and-later snapshot): two lanes' instances of one id must never
+// collide in the tracked-entity maps or the before/after diff.
 const snapshotKey = (snapshot: {
   branch: string;
   id: string;
   scope?: string;
+  scopeKey?: string;
 }): string =>
-  `${snapshot.branch}\0${snapshot.scope ?? "space"}\0${snapshot.id}`;
+  `${snapshot.branch}\0${
+    snapshot.scopeKey ?? snapshot.scope ?? "space"
+  }\0${snapshot.id}`;
 
-const dirtyEntityKey = (snapshot: {
+const declaredEntityKey = (snapshot: {
   id: string;
   scope?: string;
 }): string => `${snapshot.scope ?? "space"}\0${snapshot.id}`;
 
+/**
+ * FA6 shared contract (Worker half): an accepted-commit notice revision
+ * matches a tracked instance when their RESOLVED scope keys agree; the
+ * declared-scope comparison is the fallback used only when either side
+ * predates the C1.4b stamp (older host or older snapshot).
+ */
+export const acceptedRevisionMatchesSnapshot = (
+  revision: { id: string; scope?: string; scopeKey?: string },
+  snapshot: { id: string; scope?: string; scopeKey?: string },
+): boolean =>
+  revision.id === snapshot.id &&
+  (revision.scopeKey !== undefined && snapshot.scopeKey !== undefined
+    ? revision.scopeKey === snapshot.scopeKey
+    : declaredEntityKey(revision) === declaredEntityKey(snapshot));
+
+// C1.5b/FA6: the resolved scopeKey rides the session-sync upsert so the
+// re-keyed Worker replica can attribute the frame to its owning lane. F2
+// rebuilds these exact lines around point reads; keep the forwarding.
 const syncUpsert = (snapshot: EntitySnapshot) => ({
   branch: snapshot.branch,
   id: snapshot.id,
   ...(snapshot.scope !== undefined ? { scope: snapshot.scope } : {}),
+  ...(snapshot.scopeKey !== undefined ? { scopeKey: snapshot.scopeKey } : {}),
   seq: snapshot.seq,
   ...(snapshot.document === null
     ? { deleted: true as const }
@@ -605,6 +637,11 @@ const syncUpsert = (snapshot: EntitySnapshot) => ({
  */
 class HostReplicaSession implements ReplicaSession {
   #watches = new Map<string, WatchSpec>();
+  /** Acting context each watch registered under (C1.4b/C1.5b): the provider
+   * re-queries watches itself, so every refresh must RE-SEND the lane the
+   * watch was registered with or a scoped root would silently re-resolve
+   * under the sponsor. Absent for space-lane watches. */
+  #watchActingContexts = new Map<string, SchedulerExecutionContextKey>();
   #watchEntities = new Map<string, Map<string, EntitySnapshot>>();
   #view: MemoryClient.WatchView | null = null;
   #mutation = Promise.resolve();
@@ -779,8 +816,11 @@ class HostReplicaSession implements ReplicaSession {
     this.session.noteAppliedCommit(seq);
   }
 
-  queryGraph(query: GraphQuery): Promise<GraphQueryResult> {
-    return this.session.queryGraph({ ...query, branch: this.branch });
+  queryGraph(
+    query: GraphQuery,
+    options?: ReplicaReadOptions,
+  ): Promise<GraphQueryResult> {
+    return this.session.queryGraph({ ...query, branch: this.branch }, options);
   }
 
   sqliteQuery(
@@ -800,11 +840,12 @@ class HostReplicaSession implements ReplicaSession {
 
   async listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
+    options?: ReplicaReadOptions,
   ): Promise<SchedulerSnapshotListResult> {
     const result = await this.session.listSchedulerActionSnapshots({
       ...query,
       branch: this.branch,
-    });
+    }, options);
     for (const snapshot of result.snapshots) {
       this.#seenObservationVersions.set(
         snapshot.observationId,
@@ -822,21 +863,29 @@ class HostReplicaSession implements ReplicaSession {
 
   writersForTargets(
     query: SchedulerWritersForTargetsQuery,
+    options?: ReplicaReadOptions,
   ): Promise<SchedulerWritersForTargetsResult> {
     return this.session.writersForTargets({
       ...query,
       branch: this.branch,
-    });
+    }, options);
   }
 
-  watchAddSync(watches: WatchSpec[]): Promise<{
+  watchAddSync(watches: WatchSpec[], options?: ReplicaReadOptions): Promise<{
     view: MemoryClient.WatchView;
     sync: SessionSync;
   }> {
     let result!: { view: MemoryClient.WatchView; sync: SessionSync };
     this.#mutation = this.#mutation.then(async () => {
       if (this.#closed) throw new Error("executor provider session closed");
-      for (const watch of watches) this.#watches.set(watch.id, watch);
+      for (const watch of watches) {
+        this.#watches.set(watch.id, watch);
+        if (options?.actingContext !== undefined) {
+          this.#watchActingContexts.set(watch.id, options.actingContext);
+        } else {
+          this.#watchActingContexts.delete(watch.id);
+        }
+      }
       const fromSeq = this.#appliedSeq;
       await this.refreshWatches(watches.map((watch) => watch.id));
       const sync = this.fullSync(fromSeq, this.#appliedSeq);
@@ -911,21 +960,26 @@ class HostReplicaSession implements ReplicaSession {
       this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
       return accepted;
     }
-    const dirty = new Set(
-      accepted.flatMap((notice) => notice.revisions.map(dirtyEntityKey)),
-    );
+    const revisions = accepted.flatMap((notice) => notice.revisions);
+    // Watch roots carry only a DECLARED scope (resolution happens host-side
+    // under the watch's acting context), so root dirtiness stays a
+    // declared-scope comparison; tracked snapshots carry the resolved
+    // scopeKey and match instances exactly (FA6).
+    const declaredDirty = new Set(revisions.map(declaredEntityKey));
     const affected: string[] = [];
     for (const [watchId, watch] of this.#watches) {
       const previous = this.#watchEntities.get(watchId);
       const rootDirty = watch.query.roots.some((root) =>
-        dirty.has(dirtyEntityKey({
+        declaredDirty.has(declaredEntityKey({
           id: root.id,
           scope: root.scope,
         }))
       );
       const trackedDirty = previous !== undefined &&
         [...previous.values()].some((snapshot) =>
-          dirty.has(dirtyEntityKey(snapshot))
+          revisions.some((revision) =>
+            acceptedRevisionMatchesSnapshot(revision, snapshot)
+          )
         );
       if (rootDirty || trackedDirty) affected.push(watchId);
     }
@@ -1109,10 +1163,11 @@ class HostReplicaSession implements ReplicaSession {
     for (const watchId of watchIds) {
       const watch = this.#watches.get(watchId);
       if (watch === undefined) continue;
+      const actingContext = this.#watchActingContexts.get(watchId);
       const result = await this.queryGraph({
         ...watch.query,
         ...(atSeq !== undefined ? { atSeq } : {}),
-      });
+      }, actingContext !== undefined ? { actingContext } : undefined);
       if (atSeq === undefined) {
         this.#appliedSeq = Math.max(this.#appliedSeq, result.serverSeq);
       }
@@ -1254,6 +1309,13 @@ export interface HostStorageManagerOptions {
   /** Worker-local whole-action routing. The host still validates every
    * asserted upstream transaction against its live lease and claim. */
   actionTransactionRouter?: ActionTransactionRouter;
+  /** C1.5b per-lane acting context: resolve a source action's owning
+   * execution lane (the Worker consults the action's live claim), so its
+   * commits assert exactly one lane and its documents key by that lane's
+   * effective scope keys. */
+  executionLaneForAction?: (
+    action: object,
+  ) => SchedulerExecutionContextKey | undefined;
   /** Runs synchronously after notice ordering checks but before scheduler or
    * document integration, for causal attribution of the resulting rerun. */
   onAcceptedCommitWillIntegrate?: (notice: AcceptedCommitNotice) => void;
@@ -1289,6 +1351,7 @@ export class HostStorageManager extends StorageManager {
         settings: options.settings,
         shadowWrites: options.shadowWrites,
         actionTransactionRouter: options.actionTransactionRouter,
+        executionLaneForAction: options.executionLaneForAction,
         // The host channel is already pinned to the memory Server.
         memoryHost: new URL("memory://executor-provider"),
       },
