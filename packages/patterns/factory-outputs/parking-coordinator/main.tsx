@@ -1513,7 +1513,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                   const stripShowAdmin = stripCell.showAdmin;
                   return (
                     <cf-card
-                      data-parking-today-spot={stripSpotNumber}
                       style={`padding: 0.625rem 0.875rem; border-left: 3px solid ${
                         stripIsAvailable ? "#22c55e" : "#93c5fd"
                       };`}
@@ -1623,7 +1622,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     </cf-vstack>
 
                     <cf-button
-                      id="parking-request-submit"
                       variant="primary"
                       disabled={requestDisabled}
                       onClick={() =>
@@ -1653,7 +1651,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     const bg = isSuccess ? "#dcfce7" : "#fee2e2";
                     return (
                       <span
-                        id="parking-request-result"
                         style={`font-size: 0.875rem; color: ${color}; background-color: ${bg}; padding: 0.5rem 0.75rem; border-radius: 6px; display: block;`}
                       >
                         {result}
@@ -2379,10 +2376,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                       {addPersonFormOpen.get()
                         ? (
-                          <cf-card
-                            id="parking-admin-add-person-form"
-                            style="border: 2px dashed var(--cf-colors-gray-200);"
-                          >
+                          <cf-card style="border: 2px dashed var(--cf-colors-gray-200);">
                             <cf-vstack gap="2">
                               <cf-heading level={6}>Add Person</cf-heading>
                               <cf-hstack gap="2" wrap>
@@ -2394,7 +2388,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     Name *
                                   </span>
                                   <cf-input
-                                    id="parking-admin-add-person-name"
                                     $value={newPersonName}
                                     placeholder="Full name"
                                     timingStrategy="immediate"
@@ -2409,7 +2402,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                     Email *
                                   </span>
                                   <cf-input
-                                    id="parking-admin-add-person-email"
                                     $value={newPersonEmail}
                                     placeholder="email@company.com"
                                     timingStrategy="immediate"
@@ -2464,7 +2456,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   Preferences (comma-separated)
                                 </span>
                                 <cf-input
-                                  id="parking-admin-add-person-preferences"
                                   $value={newPersonPreferences}
                                   placeholder="e.g. 1, 5"
                                   timingStrategy="immediate"
@@ -2580,7 +2571,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                               })}
                               <cf-hstack gap="2">
                                 <cf-button
-                                  id="parking-admin-add-person-submit"
                                   variant="primary"
                                   size="sm"
                                   onClick={() => submitAddPerson.send()}
@@ -2604,11 +2594,10 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                     {/* Parking Spots */}
                     {adminModeEnabled
                       ? (
-                        <cf-vstack id="parking-admin-spots-section" gap="2">
+                        <cf-vstack gap="2">
                           <cf-hstack justify="between" align="center">
                             <cf-heading level={6}>Parking Spots</cf-heading>
                             <cf-button
-                              id="parking-admin-add-spot-open"
                               variant="primary"
                               size="sm"
                               onClick={() => toggleAddSpotForm.send()}
@@ -2818,10 +2807,7 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
 
                           {addSpotFormOpen.get()
                             ? (
-                              <cf-card
-                                id="parking-admin-add-spot-form"
-                                style="border: 2px dashed var(--cf-colors-gray-200);"
-                              >
+                              <cf-card style="border: 2px dashed var(--cf-colors-gray-200);">
                                 <cf-vstack gap="2">
                                   <cf-heading level={6}>Add Spot</cf-heading>
                                   <cf-hstack gap="2" wrap>
@@ -2830,7 +2816,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         Number *
                                       </span>
                                       <cf-input
-                                        id="parking-admin-add-spot-number"
                                         $value={newSpotNumber}
                                         placeholder="e.g. 12"
                                         style="width: 4rem;"
@@ -2841,7 +2826,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                         Label
                                       </span>
                                       <cf-input
-                                        id="parking-admin-add-spot-label"
                                         $value={newSpotLabel}
                                         placeholder="e.g. Near entrance"
                                         style="width: 100%;"
@@ -2853,7 +2837,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                       Notes
                                     </span>
                                     <cf-input
-                                      id="parking-admin-add-spot-notes"
                                       $value={newSpotNotes}
                                       placeholder="e.g. Compact only"
                                       style="width: 100%;"
@@ -2870,7 +2853,6 @@ export default pattern<ParkingCoordinatorInput, ParkingCoordinatorOutput>(
                                   })}
                                   <cf-hstack gap="2">
                                     <cf-button
-                                      id="parking-admin-add-spot-submit"
                                       variant="primary"
                                       size="sm"
                                       onClick={() => submitAddSpot.send()}
