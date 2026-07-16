@@ -82,9 +82,11 @@ export interface TopicPiece {
   /** Max of createdAt and the newest comment — the tracker sorts by this. */
   lastActivityAt: number;
   /** This topic's own place in the board's prose graph, derived read-side
-   * from `mentionable` (indices into it, so chips can bind its direct
-   * elements). Both sets stay empty until `mentionable` is wired. */
-  crossrefs: { refsOut: number[]; referencedBy: number[] };
+   * from `mentionable` (the sibling pieces it links, resolved from the
+   * board's own list). Both sets stay empty until `mentionable` is wired. */
+  crossrefs:
+    | { refsOut: TopicPiece[]; referencedBy: TopicPiece[] }
+    | Default<{ refsOut: []; referencedBy: [] }>;
   addComment: Stream<{ body: string }>;
   addLink: Stream<{ kind: TopicLinkKind; url: string; label: string }>;
   setBody: Stream<{ body: string }>;
@@ -259,30 +261,31 @@ export const openTopic = handler<void, { topic: TopicPiece }>(
 );
 
 /** One row of crossref chips ("references →" / "← referenced by"): each chip
- * names a sibling topic and navigates to it. Chips bind against direct
- * elements of a topics list — a handler bound to a piece nested inside a
- * derived wrapper object silently keeps the consuming UI computed from ever
- * running. Module-scope and pure so the single-runtime suite can also drive
- * the exact markup directly (pinning the no-edges → null branch) alongside
- * the real card path it renders via continuous UI demand. */
+ * names a sibling topic and navigates to it. Takes the sibling pieces
+ * directly and binds navigation to each — #4714's path-scoped wildcard fix
+ * makes binding a piece reached through a derived crossref row safe (before
+ * it, such a bind silently kept the consuming UI computed from ever running,
+ * which forced the earlier index-plumbed shape). Module-scope and pure so the
+ * single-runtime suite can also drive the exact markup directly (pinning the
+ * no-edges → null branch) alongside the real card path it renders via
+ * continuous UI demand. */
 export const crossrefChipRow = (
   caption: string,
   accent: boolean,
-  list: TopicPiece[],
-  indices: number[],
+  pieces: TopicPiece[],
 ) =>
-  indices.length === 0
+  pieces.length === 0
     ? null
     : (
       <cf-hstack gap="1" align="center" style="flex-wrap: wrap;">
         <cf-text variant="caption" tone="muted">{caption}</cf-text>
-        {indices.map((j) => (
+        {pieces.map((p) => (
           <cf-chip
-            label={snippet(list[j]?.title || "(untitled topic)", 40)}
+            label={snippet(p?.title || "(untitled topic)", 40)}
             size="xs"
             color={accent ? "accent" : "neutral"}
             interactive
-            oncf-click={openTopic({ topic: list[j] })}
+            oncf-click={openTopic({ topic: p })}
           />
         ))}
       </cf-hstack>
@@ -431,8 +434,8 @@ export default pattern<TopicInput, TopicOutput>(
       // erased self's comparable marking and this computed never ran.
       const me = sibs.findIndex((t) => t && equals(t, self));
       return me < 0 ? { refsOut: [], referencedBy: [] } : {
-        refsOut: joined.refsOut[me],
-        referencedBy: joined.referencedBy[me],
+        refsOut: joined.refsOut[me].map((j) => sibs[j]),
+        referencedBy: joined.referencedBy[me].map((j) => sibs[j]),
       };
     });
 
@@ -573,7 +576,6 @@ export default pattern<TopicInput, TopicOutput>(
 
               {/* ── Connections (derived crossrefs; nothing persisted) ── */}
               {computed(() => {
-                const sibs = asArray(mentionable.get());
                 const { refsOut, referencedBy } = crossrefs;
                 return refsOut.length === 0 && referencedBy.length === 0
                   ? null
@@ -581,13 +583,8 @@ export default pattern<TopicInput, TopicOutput>(
                     <cf-card>
                       <cf-vstack gap="2">
                         <cf-heading level={5}>Connections</cf-heading>
-                        {crossrefChipRow("references →", false, sibs, refsOut)}
-                        {crossrefChipRow(
-                          "← referenced by",
-                          true,
-                          sibs,
-                          referencedBy,
-                        )}
+                        {crossrefChipRow("references →", false, refsOut)}
+                        {crossrefChipRow("← referenced by", true, referencedBy)}
                       </cf-vstack>
                     </cf-card>
                   );
