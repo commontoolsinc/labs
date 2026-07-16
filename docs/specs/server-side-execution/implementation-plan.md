@@ -1484,7 +1484,7 @@ runs must observe the executor-side classifier.
 
 ### W2.11 — Static identity for every canonical builtin (R3 → 0)
 
-**Depends on:** —. **Status:** planned.
+**Depends on:** —. **Status:** implemented (2026-07-15).
 
 Generalize the raw-path stamp (`runner.ts:5096-5104`): a raw module
 resolved through the canonical builtin registry ref but outside
@@ -1500,15 +1500,17 @@ supplies descriptors — which is the honest gap (surface, not trust).
 
 **Success criteria:**
 
-- [ ] Flag-on default-app run emits zero `untrusted-implementation`
-      verdicts (executor-side classifier observed).
-- [ ] Servability unit tests: `cf:builtin/<id>:v1` candidates pass the
+- [x] Flag-on default-app run emits zero `untrusted-implementation`
+      verdicts (executor-side classifier observed; verified across five
+      flag-on runs, 2026-07-15).
+- [x] Servability unit tests: `cf:builtin/<id>:v1` candidates pass the
       fingerprint gate and still require a summary; `:server-v1` effect
       semantics untouched.
 
 ### W2.12 — Certify read-only computeds despite opaque/passthrough reads (RC-1)
 
-**Depends on:** C0 (landed). **Status:** planned.
+**Depends on:** C0 (landed). **Status:** implemented (2026-07-15); the
+runtime-floor test below is the one open follow-up.
 
 `hasCompleteSchedulerScopeSummary`
 (`packages/ts-transformers/src/closures/strategies/lift-applied-strategy.ts:156-172`)
@@ -1527,16 +1529,19 @@ opaque param must still promote the runtime floor — add a runtime test.
 
 **Success criteria:**
 
-- [ ] note.tsx `__cfLift_5/12/13` (and the latent `__cfLift_19`) carry
+- [x] note.tsx `__cfLift_5/12/13` (and the latent `__cfLift_19`) carry
       certificates in `--show-transformed` output; fixtures cover
       truthiness-on-opaque and `??`-passthrough shapes.
 - [ ] Runtime floor test: opaque-param session-scoped read still yields a
       session-context rank flag-on.
-- [ ] Writing callbacks keep today's gate behavior (regression fixtures).
+- [x] Writing callbacks keep today's gate behavior (regression fixtures).
 
 ### W2.13 — Certificate path for direct lift()/derive() builders (RC-2)
 
-**Depends on:** W2.12. **Status:** planned.
+**Depends on:** W2.12. **Status:** implemented (2026-07-15). Note:
+`__cfLift_5` (`?? new Writable()`) turned out to be mechanically this
+work order's case, not RC-1 — the no-free-captures form flows through the
+direct-builder path.
 
 The direct builder form (`visitInjectedDualSchemaBuilderCall`,
 `schema-injection.ts:3466-3569`) injects only the two schemas and never
@@ -1547,14 +1552,19 @@ capability analysis on the builder callback and emit through the same
 
 **Success criteria:**
 
-- [ ] Direct-lift fixtures certify when their bodies qualify under the
+- [x] Direct-lift fixtures certify when their bodies qualify under the
       W2.12 gate.
-- [ ] `computeIndex` explicitly does **not** certify (fixture asserts the
+- [x] `computeIndex` explicitly does **not** certify (fixture asserts the
       absence — its wildcard write surface must keep failing closed).
 
 ### W2.14 — Runtime write-empty summaries, fail-closed (RC-3b)
 
-**Depends on:** W2.11, W2.13. **Status:** planned.
+**Depends on:** W2.11, W2.13. **Status:** implemented (2026-07-15),
+including the integration fix that folds this run's scheduler-ignored
+(framework) reads plus `["cfc"]` sibling reads into the runtime summary —
+without it every claimed run rejected `unobserved-read` at the engine's
+claimed-commit admission (the certified path covers those reads via its
+exhaustive certificate).
 
 For computations with `impl:` fingerprints, no transformer certificate,
 and an empty registered write surface, assemble the observation's
@@ -1569,14 +1579,16 @@ de-claims cleanly without a conflict storm (reuse the W2.7 dedupe).
 
 **Success criteria:**
 
-- [ ] `computeMentionable` is claim-ready flag-on.
-- [ ] A test action that writes despite an empty-write summary is rejected
+- [x] `computeMentionable` is claim-ready flag-on (verified: classified
+      claim-ready and settling cleanly, 2026-07-15).
+- [x] A test action that writes despite an empty-write summary is rejected
       fail-closed once and falls back to client-primary without repeated
       verdict spam.
 
 ### W2.15 — Per-builtin computation descriptors (the R3→R4 cohort)
 
-**Depends on:** W2.11. **Status:** planned.
+**Depends on:** W2.11. **Status:** selectors implemented (2026-07-15);
+the materializer cohort moved to W2.16.
 
 Mirror the existing effect path — `ServerBuiltinActionDescriptor`
 (`packages/runner/src/builtins/server-execution.ts:40-49`) assembled into
@@ -1598,9 +1610,13 @@ descriptor registry accepted as an alternative certificate source in the
 
 **Success criteria:**
 
-- [ ] Flag-on default-app: `ifElse`/`when`/`unless` nodes are claim-ready.
-- [ ] Remaining unservable verdicts name only the materializer cohort
-      (until W2.16) and the recorded `wish` deferral.
+- [x] Flag-on default-app: `ifElse`/`when`/`unless` nodes are claim-ready
+      (`ifElse` observed claiming and settling in-run; `when`/`unless`
+      pinned at the servability level — default-app does not exercise
+      them).
+- [x] Remaining unservable verdicts name only the materializer cohort
+      (until W2.16) and the recorded `wish` deferral (measured: `map` ×9,
+      `wish` ×4, `computeIndex` ×1 — exactly the W2.16 cohort).
 
 ### W2.16 — Serve the materializer class (envelope-granular write completeness)
 

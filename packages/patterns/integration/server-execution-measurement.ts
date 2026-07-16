@@ -596,10 +596,19 @@ export async function finishServerExecutionMeasurement(
     "measured workload published no successful server settlement",
   );
   assertEquals(result.control.settlementsFailed, 0);
+  // `claim-context-mismatch` is the one fence cause tolerated pre-C2: a
+  // space-lane claim on an action whose runtime context floor evaluates above
+  // space (e.g. a view conditional reading a session-scoped address during
+  // navigation) is fenced BY DESIGN and the client computes it fail-open —
+  // register row R7 of context-lattice-execution.md, temporary by
+  // construction. Once C2 session lanes route these to the right lane, this
+  // cause returns to the hard-zero set (named C2 acceptance criterion).
+  // Every other cause indicates a defect and stays hard-zero.
   assertEquals(
-    result.control.leaseFenceRejects,
+    result.control.leaseFenceRejects -
+      (result.control.leaseFenceRejectCauses["claim-context-mismatch"] ?? 0),
     0,
-    `lease fence rejects by cause: ${
+    `unexpected lease fence rejects by cause: ${
       JSON.stringify(result.control.leaseFenceRejectCauses)
     }`,
   );

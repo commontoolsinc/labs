@@ -486,7 +486,10 @@ Phasing (each phase red-green, one PR-sized WO series like Phase 0–2):
   regardless of which principal's commit caused the recompute; a foreign
   session's client never matches the claim and its state is never readable
   from the lane; the lunch-poll placement guard passes; settlement latency
-  with ≥3 concurrent session lanes stays within the agreed budget (§4).
+  with ≥3 concurrent session lanes stays within the agreed budget (§4);
+  and `claim-context-mismatch` lease-fence rejects return to the placement
+  guard's hard-zero set (the R7 tolerance ends here — session-context runs
+  now have a lane to route to).
 - **C3 — cross-space reads** (vector basis, foreign wake via the
   foreign-readers index, ACL-checked foreign point reads, foreign
   authorization generations — all defined over the cross-engine protocol,
@@ -520,7 +523,7 @@ that claim is a design bug.
 | R4 | Actions without a complete scope summary | summary-presence bit | **defect class, target zero** (same ruling). **Diagnosed 2026-07-15**: five offenders, two causes — the certificate gate rejects opaque/passthrough *reads* that post-C0 no longer need bounding (three read-only computeds), and the direct `lift()`/`derive()` builder form has no certificate path at all (both backlinks lifts). One (`computeIndex`) has a data-dependent write surface and is served as a **materializer** — envelope-granular write bounds derived per-run from resolved inputs, idle-priority scheduling (owner, 2026-07-15; no pattern redesign). Fix: plan §4.6 W2.12–W2.14, W2.16 |
 | R5 | Builtins outside the server-executable registry | static registry lookup | per-builtin broker support as needed |
 | R6 | Cross-space reads (until C3), cross-space writes (until C4 + coordinated-commit design) | per-address space compare | **C3 is pre-ship** (owner, 2026-07-15): shipping evaluation before C3 uses single-space cases only. Multi-host is a **requirement**, not a gap — §5 defines the cross-engine seam as a protocol whose first transport beyond in-process targets co-hosted, low-latency, reliable hosts |
-| R7 | user/session contexts before their rank enables (C1/C2 staging) | lattice rank | C1/C2 shipping; temporary by construction |
+| R7 | user/session contexts before their rank enables (C1/C2 staging) | lattice rank | C1/C2 shipping; temporary by construction. Observable pre-C2 as counted `claim-context-mismatch` lease-fence rejects (a space claim whose run's context floor evaluates above space is fenced by design; the client computes fail-open — measured ~1 per few flag-on default-app runs, 2026-07-15). The placement guard tolerates exactly this cause; its return to hard-zero is a named C2 acceptance criterion |
 | R8 | User-lane work while the principal has zero sessions | host lane state | resolved for v1: session-anchored (simplest); the later delegation design restores offline continuation correctly and owns its consent question |
 | R9 | Spaces owned by the legacy background service | host exclusion lock | not in use (owner, 2026-07-15); the exclusion interlock stays as a defensive lock and registry unification is deprioritized |
 | R10 | Client compute for claimed actions (N× speculation) and graph-query subscription serving | — (not a classification; standing machinery cost) | Phase 3 feed + G17 suppression, gated on closure coverage data |
