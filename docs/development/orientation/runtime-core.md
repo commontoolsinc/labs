@@ -2,9 +2,9 @@
 
 `runner` is the reactive engine. It is the package everything else is arranged
 around, it is by far the largest hand-written package (roughly 100k non-test
-lines — several times the next-biggest), and it
-holds four of the eleven biggest files in the repo. If you understand `runner`,
-the rest of the system is mostly plumbing around it.
+lines — several times the next-biggest), and it holds most of the repo's largest
+files. If you understand `runner`, the rest of the system is mostly plumbing
+around it.
 
 One terminology note specific to this package: it uses **"piece"**, not "charm".
 
@@ -200,31 +200,8 @@ fires a notification that re-enters the same scheduler loop shown above.
 
 ## Technical debt and sharp edges
 
-- **`runner` is in three of the four import cycles** in the repo
-  (`↔ html`, `↔ memory`, `↔ llm`). See the
-  [dependency page](dependency-graph.md). The `memory` cycle forms on one
-  package edge (`memory/v2/query.ts` imports `runner/traverse`), though that same
-  file also reaches runner's CFC and storage internals through relative paths;
-  the `html` cycle is the builder needing `h()`; the `llm` cycle is a prompt
-  helper needing `createJsonSchema`.
-- **A layering violation lives in the builtins.** `builtins/wish.ts` imports a
-  home-domain schema from `home-schemas`, so a foundation builtin is coupled to
-  an end-user-program schema.
-- **Three link representations coexist.** A serialized `SigilLink`, an in-memory
-  `NormalizedLink`, and a deprecated `LegacyAlias` that is still in the
-  `PrimitiveCellLink` union (`link-types.ts:89`). New readers meet all three.
-- **The scheduler is pull-based**, which is counterintuitive if you expect a
-  push/observer model. Budget time for this.
-- **CFC silently gates commits.** The default enforcement mode can reject a
-  write or replace blocked content. If a write "disappears," check CFC before
-  the scheduler.
-- **The `TODO(danfuzz)` cluster** recurring across `schema.ts`,
-  `cfc/`, `traverse.ts`, and `cell.ts` marks an incomplete migration: several
-  graph walks do not yet admit the newer `FabricValue` special objects on every
-  path. It is a known, in-progress seam, not a set of isolated bugs.
-- **A self-referential import** in `runtime.ts` pulls a value (the
-  `RuntimeTelemetry` class) from the package's own `@commonfabric/runner` barrel
-  — a load-order trap to be aware of when reordering exports.
+The debt and rough edges touching these packages are collected, together with
+the rest of the repo's, in [TECHNICAL_DEBT.md](../TECHNICAL_DEBT.md).
 
 ---
 

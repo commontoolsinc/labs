@@ -194,29 +194,8 @@ bound "current space" (default worker URL `/scripts/worker-runtime.js`).
 
 ## Technical debt and sharp edges
 
-- **Two of the four repo cycles live here.** `ui ↔ shell` (four `cf-*`
-  components import navigation helpers from `@commonfabric/shell/shared`, and the
-  shell imports `cf-*` classes and Lit contexts back) and `runner ↔ html` (the
-  runtime's builder imports `h()` from `html`, and `html` imports cell helpers
-  back from `runner`). See the [dependency page](dependency-graph.md).
-- **`cf-markdown` renders unsanitized HTML.** It uses `unsafeHTML` without
-  sanitization — a cross-site-scripting risk if it is ever fed untrusted
-  markdown. Worth knowing before you reuse it.
-- **There are two render paths.** The worker-thread reconciler is live; the
-  main-thread `renderNode`/`effect` path in `render.ts` is legacy but still
-  present and still selectable by a flag.
-- **`cf-*` components self-register on import.** Importing the module calls
-  `customElements.define`. There is no separate registration step; if a
-  component is "missing," check that its module was imported.
-- **`v1` is gone but the `v2/` directory name remains.** `ui/src/index.ts` is
-  just `export * from "./v2/index.ts"`. Everything is v2; the directory name is
-  flagged for cleanup.
-- **Several shell views are disabled pending a worker refactor.** `ACLView` and
-  parts of `QuickJumpView` carry `TODO(runtime-worker-refactor)` and are
-  currently inert.
-- **The biggest files to budget for:** `html/src/jsx.d.ts` (the largest, but
-  generated type declarations), `html/src/worker/reconciler.ts`, and the shell
-  debug views — each several thousand lines.
+The debt and rough edges touching these packages are collected, together with
+the rest of the repo's, in [TECHNICAL_DEBT.md](../TECHNICAL_DEBT.md).
 
 ---
 

@@ -232,46 +232,8 @@ polled.
 
 ## Technical debt and sharp edges
 
-- **The provider abstraction is in the wrong-feeling place.** It is in
-  `toolshed/routes/ai/llm/models.ts`, not in the `llm` package. Look there.
-- **OAuth providers are auto-wired from descriptors at startup.** The
-  `DESCRIPTORS` array is, in order, Google, Airtable, GitHub, Notion, Linear,
-  Spotify, Discord, Strava (plus Plaid and a webhook-style Discord route that are
-  wired manually because their flows are non-standard). Providers with missing
-  credentials are silently skipped (`Promise.allSettled`, so one failure doesn't
-  block the rest), and the shared `/api/integrations/bg` route — which registers a
-  piece for background updating — attaches to whichever descriptor has credentials
-  first. Non-obvious when an endpoint "isn't there."
-- **The shell route's headers are deliberately non-isolating.** Concretely
-  `Cross-Origin-Opener-Policy: same-origin-allow-popups` and
-  `Cross-Origin-Embedder-Policy: unsafe-none`, set *after* the handler so they
-  override upstream — the goal is to keep `crossOriginIsolated === false` so
-  SES-sandboxed patterns get no `SharedArrayBuffer` or high-resolution timer.
-  The shell route is tri-state: `COMPILED` present → serve the static frontend;
-  else `SHELL_URL` set → proxy the dev server; else 404. Do not "fix" the headers
-  without understanding why.
-- **The new ingest and telemetry routes are gated and fail-safe.**
-  `/api/ingest/:id` requires a `Bearer` token (uniform 401 for any failure),
-  caps the body size, and parses only after the token verifies;
-  `/api/telemetry/*` proxies browser OTLP to the collector and is fail-open (204
-  when disabled, 413 over the size cap, otherwise a fire-and-forget 202 — never a
-  5xx).
-- **`background-piece-service` carries the most TODOs in this group**, several
-  about the scheduler being approximate: space managers should watch their own
-  pieces, a terminal error cannot always be attributed to a specific piece (so a
-  stray failure can disable a whole space), and sync is assumed never to return
-  partial results. Others are about worker/piece lifecycle and cleanup.
-- **`bcs` depends on hardcoded constants** — the system-space DID and a dated
-  cause string `BG_CELL_CAUSE = "bgUpdater-2025-03-18"` in `schema.ts` — and
-  requires a one-time admin grant before any piece is polled.
-- **The rename kept a few backward-compat identifiers.** So existing spaces keep
-  resolving, the charm→piece rename intentionally left the persisted/wire names
-  alone: the `bgUpdater` handler-stream name, the cause string
-  `BG_CELL_CAUSE = "bgUpdater-2025-03-18"`, and the derived system-space DID
-  (`BG_SYSTEM_SPACE_ID`), all in `schema.ts`/`worker.ts`. None of them contain
-  the word "charm"; they are simply legacy-shaped.
-- **A tool-loop cap is hardcoded** (`stepCountIs(...)`) in `generateText.ts` as a
-  runaway guard.
+The debt and rough edges touching these packages are collected, together with
+the rest of the repo's, in [TECHNICAL_DEBT.md](../TECHNICAL_DEBT.md).
 
 ---
 

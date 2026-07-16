@@ -215,30 +215,8 @@ identity-based depth-first pre-pass detecting cycles.
 
 ## Technical debt and sharp edges
 
-- **The marker scan is unusually clean.** There are essentially no
-  `TODO`/`FIXME`/`HACK` comments in `ts-transformers` or `js-compiler`. The open
-  work lives in design documents instead: `ts-transformers/docs/`,
-  `docs/specs/ts-transformer/`, and `ts-transformers/ISSUES_TO_FOLLOW_UP.md`.
-  The README explicitly tells you to read the behavior spec rather than infer
-  from the code. Believe it.
-- **Behavior is pinned by golden files.** Both `ts-transformers` and
-  `schema-generator` are golden-file driven — `ts-transformers` by hundreds of
-  `*.input.tsx` / `*.expected.jsx` pairs, `schema-generator` by dozens of
-  `*.input.ts` / `*.expected.json` pairs. Changing emit shape means regenerating
-  goldens (`UPDATE_GOLDENS=1`) and reviewing large diffs. The fast-iteration path
-  is `FIXTURE=<name>`.
-- **`api` declarations must stay in sync by hand.** `api/index.ts` is
-  `declare const` / ambient declarations that must match implementations
-  elsewhere — the builder vocabulary against `runner/src/builder`, and (per an
-  explicit sync note at the top of the file) the Fabric value types against
-  `data-model`. Changing a signature means editing it in two places.
-- **The biggest files are the densest part of the system.**
-  `schema-injection.ts` and `type-shrinking.ts` (each several thousand lines) are
-  the least approachable region; budget accordingly.
-- **The `lift-applied` distinction is subtle.** `__cfHelpers.lift(cb)(input)` —
-  a single application — is classified as `lift-applied` and is what `computed`
-  lowers to. An unapplied `lift(cb)` or a multi-application chain is deliberately
-  not. This gates whole dispatch branches.
+The debt and rough edges touching these packages are collected, together with
+the rest of the repo's, in [TECHNICAL_DEBT.md](../TECHNICAL_DEBT.md).
 
 ---
 

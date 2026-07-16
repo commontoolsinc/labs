@@ -199,28 +199,8 @@ and differ between macOS (FUSE v2; FUSE-T preferred over macFUSE) and Linux
 
 ## Technical debt and sharp edges
 
-- **The "charm" rename is complete in this group.** No `charm` references
-  remain in the source of these packages, and the charm-named test files are
-  gone too. The former `background-charm-service` package is now
-  `background-piece-service` (`@commonfabric/background-piece`). The main
-  survivors repo-wide are the wire-level `bgUpdater` stream name, a dated cause
-  string in that service, plain-English "charm" occurrences in test-data
-  fixtures (a Scrabble word list, a Frankenstein excerpt), and git history.
-- **`cli` is a hub, and a growing one.** It imports `runner` most, plus
-  `identity`, `utils`, `js-compiler`, `piece`, `api`, and now `state-inspector`
-  — it wires the offline space-inspector (see the
-  [storage page](storage-substrate.md)) into the `cf` command. A change in any of
-  those can break the command line.
-- **`PieceManager` has a flagged hot spot.** `piece/src/manager.ts:856` carries
-  `// FIXME(JA): this really really really needs to be revisited`, and there is
-  an elevated-permissions TODO at line 294.
-- **`runtime-client` teardown is intentionally quiet.** After a `Dispose`, the
-  worker silently acknowledges late requests and drops notifications. This is by
-  design but surprising while debugging.
-- **The biggest files to budget for:** `fuse/mod.ts` and `fuse/cell-bridge.ts`
-  (the two largest, a few thousand lines each); `cli/lib/test-runner.ts` and
-  `cli/lib/piece.ts`; `runtime-client/backends/runtime-processor.ts` and
-  `protocol/types.ts`.
+The debt and rough edges touching these packages are collected, together with
+the rest of the repo's, in [TECHNICAL_DEBT.md](../TECHNICAL_DEBT.md).
 
 ---
 

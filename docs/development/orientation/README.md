@@ -30,6 +30,11 @@ Read the pages in roughly this order:
    `patterns`, `utils`, `static`, the test runner, the dev-server scripts, and
    the skills system.
 
+These pages describe how the system works. What is *wrong* with it — the debt,
+the half-finished migrations, and the traps that will cost you an afternoon —
+is collected separately in [TECHNICAL_DEBT.md](../TECHNICAL_DEBT.md). It is
+worth skimming early; each page here links to it.
+
 A note on vocabulary before anything else: this repository was renamed from
 **"charm"** to **"piece."** That rename is now essentially complete in source —
 `background-charm-service` became `background-piece-service`, and a scan finds

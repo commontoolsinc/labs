@@ -213,27 +213,11 @@ declarations, not code to read; so are the far larger data blobs —
 
 ---
 
-## Smaller sharp edges worth knowing on day one
+## Smaller sharp edges
 
-These are individually minor but each will waste someone's time if undocumented.
-
-A batch of stale references that this orientation originally flagged has since
-been cleaned up and is recorded here only so the history is not confusing:
-`AGENTS.md` no longer points at a non-existent top-level `deprecated-patterns`
-folder (it now names the real `packages/patterns/deprecated`); the dangling
-`"./integration"` export in `packages/utils/deno.jsonc` was removed upstream; and
-the root `deno.jsonc` lint config no longer excludes a `patterns-saves-backup`
-directory that never existed. The genuinely still-live ones:
-
-- **Two storage vocabularies.** `memory` has a legacy "fact" model — the
-  `assert`/`retract` constructors in `fact.ts` (their types in `interface.ts`),
-  reached through the `@commonfabric/memory/fact` subpath that runner's storage
-  layer still imports — and the current "v2" document/operation model (in `v2/`).
-  New work is v2. The fact vocabulary is still exported and still confuses
-  people. See the [storage page](storage-substrate.md).
-- **`cf-harness` is misleadingly named.** It is not a test harness for the
-  runtime. It is an experimental agent runtime — an LLM tool-calling loop with
-  sandboxing and CFC awareness. See the [CLI/piece page](cli-piece-fuse.md).
+The cycles and the layering violation above are the structural debt. The rest of
+the repo's rough edges — legacy vocabularies, misleading names, hand-maintained
+couplings — are collected in [TECHNICAL_DEBT.md](../TECHNICAL_DEBT.md).
 
 ---
 

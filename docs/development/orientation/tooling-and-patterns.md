@@ -173,19 +173,8 @@ and a few more.
 
 ---
 
-## Sharp edges collected on one page
+## Sharp edges
 
-- Pattern authority is non-uniform; always check `index.md` Status tiers before
-  copying a pattern. Only `exemplar`-tier patterns are style references.
-- Deno is narrowly version-pinned; mismatches fail `deno task check` before any
-  real work runs.
-- The root `deno.jsonc` lint config still excludes one real, quarantined pattern
-  directory (`packages/patterns/record/`); the `fmt` config likewise excludes a
-  handful of `cf-chart`/`cf-toggle`/`cf-checkbox`/`cf-select` component files.
-  Those are intentional, not stale.
-
-A set of genuinely stale references this page used to list has since been
-cleaned up: the dangling `utils` `./integration` export was removed, `AGENTS.md`
-no longer points at a non-existent `deprecated-patterns` folder, and the
-`deno.jsonc` lint config no longer names a `patterns-saves-backup` directory or
-three deleted pattern files that were never present.
+The rough edges in this area — non-uniform pattern authority, the Deno version
+pin, the intentional lint/fmt excludes — are collected with the rest of the
+repo's in [TECHNICAL_DEBT.md](../TECHNICAL_DEBT.md).

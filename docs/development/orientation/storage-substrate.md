@@ -120,8 +120,6 @@ erDiagram
     revision ||--|| head : "latest pointer per entity"
     revision }o--o| snapshot : "materialized periodically"
 
-    branch ||--o{ commit : "owns"
-
     commit {
         int seq PK
         string branch
@@ -308,33 +306,8 @@ kinds of thing.
 
 ## Technical debt and sharp edges
 
-- **Two vocabularies in one package.** `memory/interface.ts` and `fact.ts`
-  define an older UCAN-flavored "fact" model (`assert`/`retract`/`unclaimed`,
-  content-hash keyed). The current v2 wire protocol in `v2.ts` uses a different
-  document/operation vocabulary (`EntityDocument`, `Operation`, `ClientCommit`,
-  `GraphQuery`). New work is v2; the fact model persists and confuses newcomers.
-  `lib.ts` is the legacy entry point.
-- **The `memory ↔ runner` cycle is narrow but deeper than the counts suggest.**
-  `v2/query.ts` forms the cycle with one package-alias import
-  (`@commonfabric/runner/traverse`), but the same file also reaches into runner's
-  internals through three relative-path imports (`ContextualFlowControl`, the
-  extended storage transaction, and the builder `JSONSchema` type). Answering a
-  schema-aware graph query and evaluating per-row CFC labels needs the runtime's
-  traversal and CFC logic. This is the seam to know if you ever try to extract
-  `memory` as a standalone library.
-- **The SQL guard is intentionally conservative** (`v2/sqlite/guard.ts`). It
-  rejects some valid statements (single-statement only, no PRAGMA/ATTACH, no
-  references to core engine tables) to keep the attack surface small.
-- **CFC row labels fail closed.** `v2/sqlite/row-label.ts` accepts well-formed
-  disjunctive confidentiality clauses but rejects the unsound cases — an `any()`
-  alternative that is itself a conjunction or nested disjunction, disjunctive
-  *integrity* (which "does not exist"), ambiguous multi-op nodes, and
-  ReDoS-shaped regexes — rather than risk an unsound read label.
-- **The modern cell representation is behind a default-off flag.**
-  `data-model/cell-rep.ts` fully implements both the modern (bare `FabricHash` /
-  `FabricLink`) and the legacy (`{ "/": "tag:hash" }` envelope) forms; which one
-  is used is chosen by the module-level `modernCellRepEnabled` flag, which
-  defaults off. When the representation flips, it flips here.
+The debt and rough edges touching these packages are collected, together with
+the rest of the repo's, in [TECHNICAL_DEBT.md](../TECHNICAL_DEBT.md).
 
 ---
 
