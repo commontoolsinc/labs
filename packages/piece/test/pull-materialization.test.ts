@@ -15,7 +15,11 @@ import {
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
 import { defer } from "@commonfabric/utils/defer";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  EmulatedStorageManager,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
   validateAgainstSchema,
   validateSchemaValue,
@@ -371,6 +375,43 @@ function trustPattern(runtime: Runtime, pattern: Pattern): Pattern {
   return runtime.unsafeTrustPattern(pattern, {
     reason: "piece pull materialization test fixture",
   });
+}
+
+// Two-replica harness: a server that several emulated replicas can share, so a
+// fresh reader must fetch cross-replica rather than read its own warm cache.
+// Mirrors newSharedServer/SharedServerStorageManager in
+// fresh-replica-read-asymmetry.test.ts; the auth matches the server
+// EmulatedStorageManager.emulate builds for itself (v2-emulate.ts).
+const EMULATED_AUDIENCE = "did:key:z6Mk-runner-emulated-memory";
+
+function newSharedServer(): MemoryV2Server.Server {
+  return new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: { audience: EMULATED_AUDIENCE },
+  });
+}
+
+class SharedServerStorageManager extends EmulatedStorageManager {
+  static connectTo(
+    server: MemoryV2Server.Server,
+    options: { as: typeof signer },
+  ): SharedServerStorageManager {
+    const manager = new SharedServerStorageManager(
+      // deno-lint-ignore no-explicit-any
+      { ...options, memoryHost: new URL("memory://") } as any,
+      () => server,
+    );
+    manager.#sharedServer = server;
+    return manager;
+  }
+  #sharedServer!: MemoryV2Server.Server;
+  protected override server(): MemoryV2Server.Server {
+    return this.#sharedServer;
+  }
 }
 
 describe("piece link contract localization", () => {
@@ -6032,5 +6073,120 @@ describe("piece pull materialization", () => {
       [NAME]: "tenfold",
       output: 50,
     });
+  });
+
+  it("reads a piece addressed through a value-link wrapper (headless sub-piece slot)", async () => {
+    // The canonical piece K — setup writes patternIdentity + the argument link.
+    const k = await manager.runPersistent(
+      trustPattern(runtime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    expect(manager.getResult(k).get()).toEqual({ output: 10 });
+
+    // A value-link "slot" cell R that redirects to K — the exact shape a piece
+    // pushed into a list/object gets addressed by (the array/object element,
+    // written as the child result cell's getAsLink()). Reproduces the topics
+    // board's `addTopic`, whose array element is a plain value-link to the topic
+    // piece; the slot itself carries no piece metadata.
+    const r = runtime.getCell(
+      manager.getSpace(),
+      "wrapper-slot-" + crypto.randomUUID(),
+    );
+    await runtime.editWithRetry((tx) => {
+      r.withTx(tx).set(k.getAsLink());
+    });
+    await manager.synced();
+
+    // Reading the argument directly off the slot fails exactly as
+    // `cf piece inspect <slot-fid>` did before this fix:
+    expect(() => manager.getArgument(r)).toThrow("piece missing argument cell");
+
+    // Addressing the slot by its fid (the path `cf piece inspect`/`get` take)
+    // canonicalizes R -> its result cell K (a VALUE link) in manager.get, so
+    // input/result reads land on the real piece, not the un-materialized wrapper.
+    const pieces = new PiecesController(manager);
+    const piece = await pieces.get(entityRefToString(r.entityId), false);
+    expect(await piece.result.get(["output"])).toBe(10);
+    expect(await piece.input.get(["input"])).toBe(5);
+  });
+});
+
+describe("piece cold-replica slot read (two replicas, one server)", () => {
+  let server: MemoryV2Server.Server;
+  let writerStorage: SharedServerStorageManager;
+  let writerRuntime: Runtime;
+  let writerManager: PieceManager;
+  let spaceName: string;
+
+  beforeEach(async () => {
+    server = newSharedServer();
+    writerStorage = SharedServerStorageManager.connectTo(server, {
+      as: signer,
+    });
+    writerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: writerStorage,
+    });
+    spaceName = "cold-slot-" + crypto.randomUUID();
+    const session = await createSession({ identity: signer, spaceName });
+    writerManager = new PieceManager(session, writerRuntime);
+    await writerManager.synced();
+  });
+
+  afterEach(async () => {
+    await writerRuntime?.dispose();
+    await writerStorage?.close();
+    await server?.close();
+  });
+
+  it("a fresh replica reads a piece addressed through a value-link slot (cold fetch)", async () => {
+    // Writer replica: create the canonical piece K (setup writes patternIdentity
+    // + the argument link), then a value-link slot R -> K — the exact shape the
+    // topics board's addTopic produces — and sync both to the shared server.
+    const k = await writerManager.runPersistent(
+      trustPattern(writerRuntime, doublePattern()),
+      { input: 5 },
+      undefined,
+      { start: true },
+    );
+    const r = writerRuntime.getCell(
+      writerManager.getSpace(),
+      "wrapper-slot-" + crypto.randomUUID(),
+    );
+    await writerRuntime.editWithRetry((tx) => {
+      r.withTx(tx).set(k.getAsLink());
+    });
+    await writerManager.synced();
+    const slotId = entityRefToString(r.entityId);
+
+    // Fresh reader replica: a NEW storage manager on the SAME server, so it has
+    // never pulled K. Reading the slot by its fid must canonicalize R -> K (a
+    // VALUE link) AND cold-fetch K's docs from the server — the end-to-end
+    // behavior the local-toolshed run confirmed, now repeatable in-process.
+    const readerStorage = SharedServerStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL("http://localhost:9999"),
+      storageManager: readerStorage,
+    });
+    const readerSession = await createSession({ identity: signer, spaceName });
+    const readerManager = new PieceManager(readerSession, readerRuntime);
+    try {
+      await readerManager.synced();
+      const readerPieces = new PiecesController(readerManager);
+      const piece = await readerPieces.get(slotId, false);
+
+      // Both reads canonicalize the slot R -> its result cell K (a value link)
+      // and cold-fetch K from the shared server. The argument read is the path
+      // that threw "piece missing argument cell" pre-fix, so exercise it first.
+      expect(await piece.input.get(["input"])).toBe(5);
+      expect(await piece.result.get(["output"])).toBe(10);
+    } finally {
+      await readerRuntime.dispose();
+      await readerStorage.close();
+    }
   });
 });

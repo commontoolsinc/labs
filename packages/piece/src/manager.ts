@@ -317,7 +317,7 @@ export class PieceManager {
     scope?: CellScope,
   ): Promise<Cell<T>> {
     // Get the piece cell
-    const piece: Cell<unknown> = isCell(id)
+    const addressed: Cell<unknown> = isCell(id)
       ? id
       : this.runtime.getCellFromEntityId(
         this.space,
@@ -328,19 +328,29 @@ export class PieceManager {
         scope,
       );
 
+    // Load persisted result/metadata before start() decides whether this is a
+    // resumed piece that needs dependency sync before scheduler wiring — and so
+    // the addressed cell's value link is local for the canonicalization below.
+    await timePiecePhase("get.piece.sync", () => addressed.sync());
+
+    // Canonicalize a value-link "slot" address to the piece's canonical result
+    // cell. A piece created inside a handler and stored into a list/object (e.g.
+    // the topics board's `addTopic` doing `topics.push(Topic({...}))`) is
+    // addressed by a plain value-link that redirects to the result cell, where
+    // setup wrote `patternIdentity` and the `argument` meta-link. start() needs
+    // that identity and reads need that metadata, so resolving here makes
+    // start / read / stop all operate on the real piece rather than the wrapper.
+    // Idempotent for a normal top-level piece.
+    const piece = addressed.resolveAsCell();
+    await timePiecePhase("get.canonical.sync", () => piece.sync());
+
     if (runIt) {
-      // Load persisted result/metadata before start() decides whether this is a
-      // resumed piece that needs dependency sync before scheduler wiring.
-      await timePiecePhase("get.piece.sync", () => piece.sync());
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
       await timePiecePhase(
         "get.runtime.start",
         () => this.runtime.start(piece),
       );
-    } else {
-      // Just sync the cell if not running
-      await timePiecePhase("get.piece.sync", () => piece.sync());
     }
 
     // If caller provided a schema, use it
