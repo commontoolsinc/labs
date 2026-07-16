@@ -279,18 +279,29 @@ Deno.test("user-rank claim commits at the pre-narrowed user context", async () =
   }
 });
 
-Deno.test("mismatched user-rank principal fences claim-context-mismatch", async () => {
+Deno.test("effective-context resolution follows the claim's lane, not the sponsor", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
+    // Pre-C1.4 this fenced claim-context-mismatch: scope resolution rode the
+    // sponsor, so bob's claim resolved to user:<alice>. With the C1.4
+    // acting-context seam the lane supplies the resolution principal, and
+    // the sponsor stays only on onBehalfOf; lane authority is the host's
+    // grant registry (laneAuthority / claim issuance), not this equality.
     narrowFloorToUser(engine);
     const lease = acquire(engine, nowMs);
     const claim = claimFor(lease, OTHER_USER_CONTEXT_KEY);
-    const error = assertThrows(
-      () => applyClaimedObservationOnly(engine, lease, claim, nowMs + 1),
-      Engine.ExecutionLeaseFenceError,
+    const applied = applyClaimedObservationOnly(
+      engine,
+      lease,
+      claim,
+      nowMs + 1,
     );
-    assertEquals(error.fenceCause, "claim-context-mismatch");
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, OTHER_USER_CONTEXT_KEY);
+    assertEquals(result.executionProvenance?.onBehalfOf, PRINCIPAL);
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });

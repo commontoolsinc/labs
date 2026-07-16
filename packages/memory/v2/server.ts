@@ -254,6 +254,26 @@ type CommitSchedulerObservation = {
   observation: Engine.SchedulerActionObservation;
 };
 
+/**
+ * C1.4: the single lane this commit's HOST-RESOLVED claims assert, handed to
+ * the engine as `ApplyCommitOptions.actingContext` so host and engine agree
+ * on the acting context by construction. Mixed lanes return undefined and
+ * are rejected by the engine's lane admission (one commit, one lane); a
+ * forged assertion resolves no claim, so the admission fences it before any
+ * scoped-state validation.
+ */
+const executionClaimsActingContext = (
+  claims: ReadonlyMap<number, ExecutionClaim> | undefined,
+): SchedulerExecutionContextKey | undefined => {
+  if (claims === undefined) return undefined;
+  let lane: SchedulerExecutionContextKey | undefined;
+  for (const claim of claims.values()) {
+    if (lane === undefined) lane = claim.contextKey;
+    else if (lane !== claim.contextKey) return undefined;
+  }
+  return lane;
+};
+
 const schedulerObservationsFromCommit = (
   commit: ClientCommit,
 ): CommitSchedulerObservation[] => {
@@ -3121,6 +3141,18 @@ export class Server {
           this.#userLaneGrants.get(binding.laneKey)?.laneGeneration ===
             binding.laneGeneration;
       },
+      // C1.4 (amendment 2): the same transaction-time authorize also
+      // resolves WRITE for the ACTING principal of a scoped claim, so a
+      // mid-run ACL revocation of the lane principal fences the in-flight
+      // commit instead of landing rows under her scope.
+      authorizeActingPrincipal: (transactionEngine, principal) => {
+        const capability = this.#resolveCapability(
+          transactionEngine,
+          space,
+          principal,
+        );
+        return capability !== null && isCapable(capability, "WRITE");
+      },
       authorize: (transactionEngine) => {
         if (
           this.#sessions.get(space, session.id) !== session ||
@@ -5158,7 +5190,15 @@ export class Server {
                     sessionId: message.sessionId,
                     scopeSessionId: scopeContext.sessionId,
                     space: message.space,
+                    // Sponsor identity: lease fence, replay/pending-read
+                    // sessionKey, provenance.onBehalfOf (C1.4).
                     principal: session.principal,
+                    // Acting context: scope resolution, effective-context
+                    // resolution, CFC label validation (C1.4). Derived from
+                    // the host-resolved claims' single lane.
+                    actingContext: executionClaimsActingContext(
+                      executionClaims,
+                    ),
                     commit: commitPayload,
                     executionClaims,
                     executionLeaseFence,

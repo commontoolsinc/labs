@@ -2946,6 +2946,12 @@ class SpaceReplica implements ISpaceReplica {
   private startSchedulerObservationBatchFlush(): Promise<
     Result<Unit, StorageTransactionRejected>
   > {
+    // ONE-LANE-PER-COMMIT CONTRACT (memory C1.4): the host rejects any
+    // commit — this batch shape included — whose claim assertions name more
+    // than one execution lane (`mixed-lane-commit`). Today every asserted
+    // observation here is space-lane, so one flush is trivially compliant;
+    // when per-lane acting contexts land (C1.5b), this flush must partition
+    // entries by asserted lane into one commit per lane.
     const entries = this.#schedulerObservationBatch.splice(0);
     const localSeq = this.#nextLocalSeq++;
     const commit: ClientCommit = {

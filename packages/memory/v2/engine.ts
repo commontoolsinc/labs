@@ -1048,6 +1048,15 @@ export interface ExecutionLeaseFence {
    * named cause `lane-generation-stale`. Space-rank claims never consult it.
    */
   laneAuthority?: (claim: ExecutionClaim) => boolean;
+  /**
+   * Transaction-time WRITE resolution for a scoped lane's ACTING principal
+   * (C1.4, review amendment 2), consulted inside the same IMMEDIATE
+   * transaction as the sponsor `authorize` checks — a mid-run ACL
+   * revocation of the lane principal fences the in-flight commit instead
+   * of landing rows under her scope. Returning false fences with the named
+   * cause `lane-write-authority`. Space-rank claims never consult it.
+   */
+  authorizeActingPrincipal?: (engine: Engine, principal: string) => boolean;
 }
 
 export interface ApplyCommitOptions {
@@ -1078,6 +1087,16 @@ export interface ApplyCommitOptions {
    *  apply loop executes the SQL inside the commit's transaction against the
    *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
   sqliteAttachments?: ReadonlyMap<string, string>;
+  /**
+   * Acting-context seam (C1.4, context-lattice §3): the single execution
+   * lane this commit acts as. Feeds ONLY scope resolution,
+   * effective-context resolution, and CFC label validation; the sponsor
+   * `principal` stays bound to the lease fence, the replay/pending-read
+   * sessionKey namespace, and provenance.onBehalfOf. Host-only — never
+   * ClientCommit wire input. Optional: the engine derives the lane from
+   * the commit's claim assertions and rejects a mismatching value.
+   */
+  actingContext?: SchedulerExecutionContextKey;
 }
 
 export interface AppliedRevision {
@@ -3717,6 +3736,20 @@ const assertExecutionLeaseFenceTransaction = (
         "lane-generation-stale",
         "execution claim lane grant is fenced or superseded",
       );
+    }
+    if (claim.contextKey !== "space") {
+      // Amendment 2: the fence resolves WRITE for the ACTING principal in
+      // the same transaction-time authorize as the sponsor lease checks.
+      const actingPrincipal = principalOfUserContextKey(claim.contextKey);
+      if (
+        actingPrincipal !== undefined &&
+        fence.authorizeActingPrincipal?.(engine, actingPrincipal) === false
+      ) {
+        throw new ExecutionLeaseFenceError(
+          "lane-write-authority",
+          "execution lane acting principal lacks current WRITE authority",
+        );
+      }
     }
   }
 };
@@ -7332,6 +7365,128 @@ function compareSchedulerKeys(left: string, right: string): number {
   return utf8Compare(left, right);
 }
 
+/** Wire-shape-tolerant read of an observation's asserted claim lane. */
+const assertedLaneOfObservation = (
+  observation: unknown,
+): SchedulerExecutionContextKey | undefined => {
+  if (
+    typeof observation !== "object" || observation === null ||
+    Array.isArray(observation)
+  ) {
+    return undefined;
+  }
+  const assertion = (observation as { executionClaimAssertion?: unknown })
+    .executionClaimAssertion;
+  if (typeof assertion !== "object" || assertion === null) return undefined;
+  const contextKey = (assertion as { contextKey?: unknown }).contextKey;
+  return typeof contextKey === "string"
+    ? contextKey as SchedulerExecutionContextKey
+    : undefined;
+};
+
+const commitLaneAssertions = (
+  commit: ClientCommit,
+): { localSeq: number; contextKey: SchedulerExecutionContextKey }[] => {
+  const assertions: {
+    localSeq: number;
+    contextKey: SchedulerExecutionContextKey;
+  }[] = [];
+  const single = assertedLaneOfObservation(commit.schedulerObservation);
+  if (single !== undefined) {
+    assertions.push({ localSeq: commit.localSeq, contextKey: single });
+  }
+  for (const item of commit.schedulerObservationBatch ?? []) {
+    const contextKey = assertedLaneOfObservation(item.schedulerObservation);
+    if (contextKey !== undefined) {
+      assertions.push({ localSeq: item.localSeq, contextKey });
+    }
+  }
+  return assertions;
+};
+
+/**
+ * C1.4 lane admission (C1 review amendments 5/6): resolve the asserted
+ * execution lane BEFORE any scoped-state validation (preconditions,
+ * confirmed reads, pending reads) runs, so a forged or fenced lane
+ * assertion learns nothing about scoped state — every rejection here is a
+ * constant-shape fence cause. One commit — schedulerObservationBatch
+ * included — may assert claims of exactly one lane. Space-lane commits
+ * pass through byte-identically (their claim checks keep today's later
+ * loci and ordering). The returned acting principal feeds ONLY scope
+ * resolution, effective-context resolution, and CFC label validation; the
+ * sponsor `principal` keeps the lease fence, the replay/pending-read
+ * sessionKey namespace, and provenance.onBehalfOf. Exact observation
+ * replays are exempt from the liveness checks so a lost-response replay
+ * stays idempotent after a lane drain, mirroring the replay-before-fence
+ * ordering of the per-observation apply paths.
+ */
+const admitExecutionCommitLanes = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    sessionKey: string;
+    commit: ClientCommit;
+    actingContext?: SchedulerExecutionContextKey;
+    executionClaims?: ReadonlyMap<number, ExecutionClaim>;
+    executionLeaseFence?: ExecutionLeaseFence;
+  },
+): string | undefined => {
+  const assertions = commitLaneAssertions(options.commit);
+  const lanes = new Set(assertions.map((assertion) => assertion.contextKey));
+  if (lanes.size > 1) {
+    throw new ExecutionLeaseFenceError(
+      "mixed-lane-commit",
+      "memory v2 commit may assert execution claims of exactly one lane",
+    );
+  }
+  const lane = assertions.length > 0 ? assertions[0].contextKey : undefined;
+  if (options.actingContext !== undefined && options.actingContext !== lane) {
+    // A host-supplied acting context that disagrees with the asserted lane
+    // is a host bug, never a client-reachable state.
+    throw new ProtocolError(
+      "acting context does not match the commit's asserted execution lane",
+    );
+  }
+  if (lane === undefined || lane === "space") return undefined;
+  const actingPrincipal = principalOfUserContextKey(lane);
+  // Session lanes arrive with C2; their assertions keep today's
+  // claim-observation-mismatch rejection path unchanged.
+  if (actingPrincipal === undefined) return undefined;
+  // With-operations commits already passed commit-table replay detection;
+  // observation-shaped commits are replay-checked per asserted item.
+  const checked = options.commit.operations.length > 0
+    ? assertions
+    : assertions.filter((assertion) =>
+      getSchedulerObservationReplay(engine, {
+        branch: options.branch,
+        sessionId: options.sessionKey,
+        localSeq: assertion.localSeq,
+      }) === undefined
+    );
+  for (const assertion of checked) {
+    const claim = options.executionClaims?.get(assertion.localSeq);
+    if (claim === undefined) {
+      throw new ExecutionLeaseFenceError(
+        "claim-not-live",
+        "execution claim incarnation is not live for this action attempt",
+      );
+    }
+    if (claim.contextKey !== lane) {
+      throw new ExecutionLeaseFenceError(
+        "claim-observation-mismatch",
+        "execution claim incarnation does not match the accepted scheduler action",
+      );
+    }
+    if (options.executionLeaseFence?.laneAuthority?.(claim) === false) {
+      throw new ExecutionLeaseFenceError(
+        "lane-generation-stale",
+        "execution claim lane grant is fenced or superseded",
+      );
+    }
+  }
+  return actingPrincipal;
+};
+
 const applyCommitTransaction = (
   engine: Engine,
   {
@@ -7343,10 +7498,10 @@ const applyCommitTransaction = (
     executionClaims,
     executionLeaseFence,
     sqliteAttachments,
+    actingContext,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
-  const scopeContext = { principal, sessionId: scopeSessionId };
   const schedulerObservation = commit
     .schedulerObservation as SchedulerActionObservation | undefined;
   const schedulerObservationBatch = commit.schedulerObservationBatch ?? [];
@@ -7418,6 +7573,23 @@ const applyCommitTransaction = (
     });
   }
 
+  // C1.4 lane admission runs BEFORE preconditions and read validation: a
+  // scoped lane assertion resolves against its live claim and lane grant
+  // first, so scoped-state validation can never leak through a forged or
+  // fenced lane's error shape. The acting principal it yields feeds only
+  // scope resolution, effective-context resolution, and CFC label
+  // validation below; `principal` (the sponsor) keeps every other role.
+  const actingPrincipal = admitExecutionCommitLanes(engine, {
+    branch,
+    sessionKey,
+    commit,
+    actingContext,
+    executionClaims,
+    executionLeaseFence,
+  });
+  const scopePrincipal = actingPrincipal ?? principal;
+  const scopeContext = { principal: scopePrincipal, sessionId: scopeSessionId };
+
   // Preconditions gate every commit shape, including the observation-only
   // fast paths below — a descendant of an uncommitted origin must not
   // persist anything, observations included.
@@ -7430,6 +7602,7 @@ const applyCommitTransaction = (
       sessionKey,
       space,
       principal,
+      actingPrincipal,
       branch,
       batch: schedulerObservationBatch,
       executionClaims,
@@ -7444,6 +7617,7 @@ const applyCommitTransaction = (
       sessionKey,
       space,
       principal,
+      actingPrincipal,
       branch,
       localSeq: commit.localSeq,
       transaction: commit,
@@ -7505,7 +7679,7 @@ const applyCommitTransaction = (
     assertExecutionActionTransaction({
       servedSpace: space!,
       branch,
-      scopeContext: { principal: principal!, sessionId: scopeSessionId },
+      scopeContext: { principal: scopePrincipal!, sessionId: scopeSessionId },
       claimContextKey: executionClaim!.contextKey,
       transaction: commit,
       observation: schedulerObservation!,
@@ -7615,7 +7789,7 @@ const applyCommitTransaction = (
       ownerSpace: space ?? acceptedObservation.observation.ownerSpace,
       commitSeq: seq,
       observedAtSeq: seq,
-      scopeContext: { principal: principal!, sessionId: scopeSessionId },
+      scopeContext: { principal: scopePrincipal!, sessionId: scopeSessionId },
       writerSessionId: sessionKey,
       localSeq: commit.localSeq,
       ...(acceptedObservation.provenance !== undefined
@@ -8381,6 +8555,7 @@ const applySchedulerObservationOnlyCommit = (
     sessionKey,
     space,
     principal,
+    actingPrincipal,
     branch,
     localSeq,
     transaction,
@@ -8393,6 +8568,9 @@ const applySchedulerObservationOnlyCommit = (
     sessionKey: string;
     space?: string;
     principal?: string;
+    /** C1.4: scope/effective-context resolution only; sponsor roles stay
+     * on `principal` and the sponsor-derived `sessionKey`. */
+    actingPrincipal?: string;
     branch: BranchName;
     localSeq: number;
     transaction: ExecutionActionTransaction;
@@ -8401,6 +8579,7 @@ const applySchedulerObservationOnlyCommit = (
     executionLeaseFence?: ExecutionLeaseFence;
   },
 ): AppliedCommit => {
+  const scopePrincipal = actingPrincipal ?? principal;
   const observedAtSeq = headSeq(engine, branch);
   // Request replay identity retains the transient exact-claim assertion while
   // excluding only host-authored acceptance fields. Check it before the live
@@ -8452,12 +8631,12 @@ const applySchedulerObservationOnlyCommit = (
       engine,
       branch,
       transaction,
-      { principal, sessionId: scopeSessionId },
+      { principal: scopePrincipal, sessionId: scopeSessionId },
     );
     const resolvedPending = resolvePendingReads(
       engine,
       sessionKey,
-      { principal, sessionId: scopeSessionId },
+      { principal: scopePrincipal, sessionId: scopeSessionId },
       branch,
       transaction,
     );
@@ -8476,7 +8655,7 @@ const applySchedulerObservationOnlyCommit = (
     );
     dropReason = schedulerObservationReadDropReason(engine, {
       sessionKey,
-      scopeContext: { principal, sessionId: scopeSessionId },
+      scopeContext: { principal: scopePrincipal, sessionId: scopeSessionId },
       branch,
       reads: transaction.reads,
     });
@@ -8505,7 +8684,10 @@ const applySchedulerObservationOnlyCommit = (
       assertExecutionActionTransaction({
         servedSpace: space!,
         branch,
-        scopeContext: { principal: principal!, sessionId: scopeSessionId },
+        scopeContext: {
+          principal: scopePrincipal!,
+          sessionId: scopeSessionId,
+        },
         claimContextKey: executionClaim!.contextKey,
         transaction,
         observation: schedulerObservation,
@@ -8557,7 +8739,7 @@ const applySchedulerObservationOnlyCommit = (
     // exactly serverSeq + 1 and its advancing sync window can carry this row.
     deliveryCommitSeq: serverSeq(engine) + 1,
     observedAtSeq,
-    scopeContext: { principal: principal!, sessionId: scopeSessionId },
+    scopeContext: { principal: scopePrincipal!, sessionId: scopeSessionId },
     writerSessionId: sessionKey,
     localSeq,
     replayPayload,
@@ -8623,6 +8805,7 @@ const applySchedulerObservationBatchCommit = (
     sessionKey,
     space,
     principal,
+    actingPrincipal,
     branch,
     batch,
     executionClaims,
@@ -8633,6 +8816,9 @@ const applySchedulerObservationBatchCommit = (
     sessionKey: string;
     space?: string;
     principal?: string;
+    /** C1.4: one acting principal for the WHOLE batch — lane admission has
+     * already enforced that the batch asserts exactly one lane. */
+    actingPrincipal?: string;
     branch: BranchName;
     batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
     executionClaims?: ReadonlyMap<number, ExecutionClaim>;
@@ -8649,6 +8835,7 @@ const applySchedulerObservationBatchCommit = (
       sessionKey,
       space,
       principal,
+      actingPrincipal,
       branch,
       localSeq: item.localSeq,
       transaction: {

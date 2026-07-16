@@ -226,25 +226,44 @@ Deno.test("user-lane surfaces scoped to the lane principal pass the firewall", a
   }
 });
 
-Deno.test("user-lane surfaces scoped to another principal reject non-lane-scope", async () => {
+Deno.test("user-lane scope resolution follows the lane, never the sponsor", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {
     const lease = acquire(engine, nowMs);
-    // The claim names bob's lane while the commit's scope context resolves
-    // alice's instances: every user-scoped surface is outside the lane.
+    // Since C1.4 the acting context derives from the asserted claim's lane:
+    // a commit sponsored by alice under bob's lane resolves declared user
+    // scopes to BOB's instances. Another principal's instance is not
+    // addressable from a lane — declared scopes carry no principal, and the
+    // host resolves them — so `non-lane-scope` for user surfaces survives
+    // only through session scopes (next test).
     const claim = claimFor(lease, OTHER_USER_CONTEXT_KEY);
-    const before = Engine.serverSeq(engine);
-    assertFirewallReject(
-      () =>
-        applyClaimed(engine, lease, claim, {
-          operations: [userInstanceOperation],
-          surfaces: { reads: [USER_INPUT], writes: [USER_OUTPUT] },
-          nowMs: nowMs + 1,
-        }),
-      "non-lane-scope",
+    const applied = applyClaimed(engine, lease, claim, {
+      operations: [userInstanceOperation],
+      surfaces: { reads: [USER_INPUT], writes: [USER_OUTPUT] },
+      nowMs: nowMs + 1,
+    });
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, OTHER_USER_CONTEXT_KEY);
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: OTHER_PRINCIPAL,
+      }),
+      { value: 7 },
     );
-    assertEquals(Engine.serverSeq(engine), before);
+    // The sponsoring principal's instance is untouched.
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: PRINCIPAL,
+      }),
+      null,
+    );
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });
