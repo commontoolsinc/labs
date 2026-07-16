@@ -19,6 +19,15 @@ const deepFrozenCache = new WeakSet<object>();
  * and valid Fabric values. Accessors and FabricInstance protocol values are
  * deliberately excluded: Object.freeze() does not freeze their closed-over or
  * private logical state, so their proof is not stable by root identity.
+ *
+ * TODO(danfuzz): Evaluate the above reasoning as to why `FabricInstance` is
+ * excluded. Though it's certainly true that `#private` members mean that
+ * something which is deep-frozen per the JavaScript contract might not _really_
+ * be deep frozen, the data model's contract for the `IS_DEEP_FROZEN` protocol
+ * should make it so that clients can in fact rely on `FabricInstance`s' reports
+ * about their deep-frozenness. To the extent that a `FabricInstance` class is
+ * "lying" about its effective frozenness, it probably shouldn't be up to _this_
+ * code to paper over that fact.
  */
 const deepFrozenFabricValueCache = new WeakSet<object>();
 
