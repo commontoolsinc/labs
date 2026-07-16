@@ -1723,6 +1723,37 @@ prerequisite.
    client compute; the initial authority split removes duplicate writes and
    external effects, not local speculative computation.
 
+#### Feed work-order decomposition (2026-07-16)
+
+Steps 4–5 mapped against the code. Today's cost has **two** surviving
+traversal sources: per-session `refreshTrackedGraph` re-runs full
+schema/link traversal per commit wave (`server.ts` refresh loop →
+`query.ts` traverser), and the executor Worker's own
+`refreshAcceptedCommits` re-runs `graphQuery` per affected watch per wave
+(`v2-host-provider.ts` — W2.10 only moved live-action wake to direct
+invalidation). The feed replaces traversal with (branch, id, resolved
+scopeKey) doc-set membership plus per-wave point reads; closure comes from
+served-action observations or exact client-exported closures; **mixed mode
+is designed-in** (the `wish` deferral and R1/R2/R7 classes have no server
+closure source). Critical path: F1∥F2 → F3 → F4 → F5 (the W2.9 parity
+gate); F6 before C2; F7 off the critical path.
+
+| WO | Title | Depends on | Acceptance sketch |
+| --- | --- | --- | --- |
+| F1 | Feed observability: per-space claim-coverage counters (replacing console.debug grep) + per-wave traverse attribution in /api/health/stats; dated dogfood coverage report (the OQ4 rollout-gate input) | — | counters present; wish ×4 visible as counters; wave totals match the note-create series |
+| F2 | Executor Worker replica: revision-driven point reads replace per-wave graph-query refresh | — (coordinate with C1.5b — same replica files; whichever lands second rebases) | zero steady-state executor graph queries; ≤revisions point reads per wave |
+| F3 | Doc-set watch kind: additive WatchSpec, absent-false subcapability, server membership fan-out, ordered delivery preserving SessionSync/adoption/conflict-flush contracts | F1 | membership deltas delivered exactly; non-negotiating server cleanly rejects |
+| F4 | Client closure export: runner replica registers exact-doc membership for steady-state pulls; schema-graph watches stay for cold-boot roots and residual client-primary surfaces | F3 | same UI data flows via membership + on-demand pull; fixtures stay green |
+| F5 | Retire per-session graph re-evaluation where the watch surface is fully doc-set; per-space enablement dial consuming F1's coverage (OQ4), EXPERIMENTAL_OPTIONS entry | F2, F3, F4 | **the W2.9 gate**: note-create at flag-off parity, toolshed traverse at flag-off level |
+| F6 | Lane-correct scoped delivery: resolved-scopeKey membership end-to-end + principal-cohort filtering sharing C1.7's single predicate (C2's feed prerequisite) | F3 | another session's session-scoped commit produces zero B-side work; user-scoped revisions reach only that principal's sessions |
+| F7 | G17 claimed-cold suppression: indefinite cold hold for exactly-claimed actions under a complete feed, measured (off the W2.9 critical path) | F4, F5 | claimed computation stays cold and adopts the server observation; revoke mid-hold reruns exactly once |
+
+Open decision (deferred by measurement, per the standing
+measure-before-fixing rule): closure growth under client-exported closures
+(F4) — accept the +1 RTT pull-on-demand for never-seen linked docs, or
+build §6.4's served-closure pre-push first. F4's fixtures decide;
+escalates to the owner only if both options violate the ~zero W2.9 budget.
+
 ### Phase 4 — scoped execution and delegated user keys
 
 The draft design is
