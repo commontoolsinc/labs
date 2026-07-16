@@ -2,8 +2,8 @@
 
 **Status:** Descriptive (current behavior; on conflict, code/tests win — §1)\
 **Package:** `@commonfabric/schema-generator`\
-**Last verified against:** origin/main `94e00a62f` plus this documentation and
-test branch, 2026-07-13 verification\
+**Last verified against:** origin/main `47ad2b898` plus this documentation and
+test branch, 2026-07-16 verification\
 **Related:** `docs/specs/ts-transformer/ts_transformers_current_behavior_spec.md`
 (§10, §12 describe the consumer side; its §6.8/§12 CFC-lowering account was
 corrected in the same 2026-07 audit that produced this document) and

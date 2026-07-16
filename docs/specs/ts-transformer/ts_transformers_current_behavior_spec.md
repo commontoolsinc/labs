@@ -2,8 +2,8 @@
 
 **Status:** Descriptive (current behavior; on conflict, code/tests win — §21)\
 **Package:** `@commonfabric/ts-transformers`\
-**Last verified against:** origin/main 94e00a62f plus this documentation branch,
-2026-07-13 verification\
+**Last verified against:** origin/main `47ad2b898` plus this documentation branch,
+2026-07-16 verification\
 **Scope:** Compile-time behavior implemented in `packages/ts-transformers/src`
 and exercised by current tests/fixtures. **Related:**
 
@@ -48,6 +48,24 @@ Before AST transforms, `transformCfDirective()`:
 These string-level steps run in `transformCfDirective()`
 (`src/core/cf-helpers.ts`) before any AST transformer, because symbol binding
 happens before the transformer pipeline runs.
+
+Legacy stored-envelope compatibility is deliberately separate from
+`transformCfDirective()` (#4574, CT-1838):
+
+- `isLegacyInjectedEnvelope(source)` is a public package export that recognizes
+  the exact helper-injected form persisted by pre-#4158 pipelines. The first
+  line must be byte-exactly `HELPERS_STMT`, the document must end with
+  `"\n" + HELPERS_USED_STMT` or its JavaScript form, and the prefix/trailer may
+  not overlap. A stripped final newline is accepted. Interior contents are not
+  otherwise inspected (`src/core/cf-helpers.ts`;
+  `test/core/legacy-envelope.test.ts`).
+- The detector does **not** weaken the authored-source guard above. The runner
+  consults it before `transformCfDirective()` only when
+  `tolerateStoredLegacyEnvelope: true` is set on storage-fetched,
+  Merkle-verified cold-load/fabric-mount input; an exact match passes through
+  unchanged because it already contains the injected helper envelope. Normal
+  authoring paths never set that option, so authored `__cfHelpers` input still
+  throws (`packages/runner/src/harness/pretransform.ts`).
 
 Opt-out note:
 
@@ -745,8 +763,9 @@ canonical lift-applied form:
 - `computed(fn)` -> `__cfHelpers.lift(fn)({})` before schema injection
 - no-input computed-origin calls are schema-injected as
   `__cfHelpers.lift(fn, false, undefined, { completeSchedulerScopeSummary: true })()`
-  (function first; the trailing scheduler-options object is emitted only when
-  the callback's scope is provably complete)
+  after closure analysis has proven that the empty input contains no captures
+  (function first; `false` preserves computed's no-argument runtime semantics,
+  and `undefined` keeps the options object in lift's fourth parameter)
 - **does not** forward `computed`'s type argument to `lift`: `computed<R>` has a
   single result type param, while `lift<T, R>` takes input `T` first, so
   forwarding `[R]` would place `R` in `lift`'s input slot. Type args are
@@ -843,7 +862,7 @@ Transforms lift-applied closures only when captures exist.
 Supported input forms:
 
 - `lift(callback)(input)`
-- `lift(inputSchema, resultSchema, callback)(input)`
+- `lift(callback, argumentSchema, resultSchema[, options])(input)`
 
 Behavior:
 
@@ -853,6 +872,26 @@ Behavior:
 - preserve/reinfer callback result type
 - skip explicit type args when result type is uninstantiated type parameter
 - register lift-applied call type for downstream inference
+- re-analyze the rewritten callback's merged input and, when needed, append one
+  scheduler-options object to the inner `lift` call:
+  - `materializerWriteInputPaths` is emitted when the first parameter's
+    capability summary has one or more write paths. Each path is an array of
+    static string segments. The write metadata remains present even when the
+    overall scope is not provably complete.
+  - `completeSchedulerScopeSummary: true` is emitted only when the function is
+    non-recursive, has no unreadable cell arguments, and every parameter has no
+    wildcard, unverified cell use, passthrough, opaque capability, or opaque
+    paths. A proven-empty summary qualifies.
+  - the object may contain either field or both, and is omitted when neither
+    condition holds (`closures/strategies/lift-applied-strategy.ts`;
+    `test/pipeline-regressions.test.ts`).
+- during §10 schema injection, argument/result schemas are inserted after the
+  callback and before those options, producing
+  `lift(callback, argumentSchema, resultSchema, options?)(input)`. The
+  zero-input/no-capture computed form is handled separately as described in §8.
+
+The runtime meaning of `materializerWriteInputPaths` is specified in
+`docs/specs/persistent-scheduler-state.md` ("Materializers").
 
 If no captures are found, the lift-applied call is left unchanged.
 
@@ -1055,6 +1094,7 @@ adjustments:
   - `readonly` -> `ReadonlyCell<T>`
   - `writeonly` -> `WriteonlyCell<T>`
   - `writable` -> `Writable<T>`
+  - `comparable` -> `ComparableCell<T>`
   - `opaque` -> `OpaqueCell<T>`
 - compute-oriented boundaries apply full path shrink + wrapper selection
 - type aliases and interfaces (TypeReferenceNodes) are resolved to their
@@ -1063,18 +1103,7 @@ adjustments:
   are retained the original TypeReference is kept for schema fidelity.
 - pattern boundaries apply defaults-only mode to preserve broad shape continuity
   while still applying extracted static defaults
-- wildcard roots disable path shrinking for affected parameters/arguments.
-  Since #4714, a wildcard no longer blanket-erases identity/comparable
-  markings for paths it cannot cover: it records the unknown access's static
-  prefix and erases only overlapping identity paths, while still suppressing
-  `identityOnly` (and the scheduler scope proofs gated on it) for the root —
-  closure captures share one synthetic root state, so blanket erasure
-  degraded disjoint `equals()`-only captures into unsatisfiable full-value
-  demands (`src/policy/capability-analysis.ts`;
-  `test/policy/capability-analysis.test.ts`). The identity/comparable
-  capability layer itself (identity paths, `identityOnly`, scope proofs) is
-  as of this writing documented only in `capability-analysis.ts` comments —
-  a known spec gap
+- wildcard roots disable path shrinking for affected parameters/arguments
 - capability analysis resolves member access through `.get()` when the member
   access itself is observed (`notes.get().length` records `["length"]` rather
   than a blanket root read) and suppresses the redundant blanket `.get()` read
@@ -1088,6 +1117,50 @@ adjustments:
   array-with-unknown-items during this optimization
 - after shrinking, `validateShrinkCoverage` checks that all requested property
   paths were materialized (see §6.4); unresolvable paths produce hard errors
+
+#### 10.7.1 Identity and comparable-only paths
+
+Capability analysis tracks identity-only use separately from ordinary value
+reads/writes so equality and navigation do not force full values into a
+computation's input schema:
+
+- Trusted Common Fabric `equals(...)` / `equalLinks(...)` calls record their
+  arguments as comparable identity paths. Their cell-like receiver-method forms
+  do the same; an arbitrary user object's method merely named `equals` is an
+  ordinary read. `navigateTo(...)` records identity (not comparable) argument
+  use. Bare helpers are accepted only when symbol resolution proves Common
+  Fabric provenance; receiver methods require a cell-like receiver when a
+  checker is available (`policy/capability-analysis.ts`,
+  `isKnownIdentityArgumentCall`).
+- A whole-root identity use records path `[]` and passthrough. `identityOnly` is
+  true only when that root identity path survives normalization and the root has
+  no non-identity use, ordinary reads/writes, or wildcard. Nested uses populate
+  `identityPaths`; cell-like values also populate `identityCellPaths`.
+  Comparable use is the corresponding subset in `comparablePaths` /
+  `comparableCellPaths`. Local/interprocedural capability summaries and imported
+  `ComparableCell` parameter contracts propagate these distinctions.
+- Normalization drops a root identity path after non-identity root use, and
+  drops any identity path with an ordinary read, full-shape read, write, or
+  opaque access at or below that path. Comparable and cell-like subsets are
+  pruned with the surviving identity paths. Since #4714, a wildcard records the
+  unknown access's static prefix and erases identity/comparable paths that
+  overlap it in either direction; disjoint paths survive. A root wildcard still
+  suppresses `identityOnly`. This matters because closure captures share one
+  synthetic root: blanket erasure degraded disjoint `equals()`-only captures
+  into unsatisfiable full-value self-demands
+  (`test/policy/capability-analysis.test.ts`).
+- Shrinking retains identity paths without materializing their value shape. A
+  whole unwrapped identity-only input becomes `unknown`; a wrapped one becomes
+  `OpaqueCell<unknown>`, or `ComparableCell<unknown>` for comparable use.
+  Identity-only cell leaves receive the same opaque/comparable wrappers, while
+  mixed summaries still retain and shrink their ordinary read/write paths
+  (`transformers/type-shrinking.ts`; `test/type-shrinking.test.ts`).
+- Scheduler completeness is separate from path retention: identity-only roots
+  are passthrough, and `hasCompleteSchedulerScopeSummary` rejects passthrough or
+  wildcard summaries. Thus identity/comparable tracking can preserve a
+  satisfiable input schema without asserting a complete scheduler scope.
+
+#### 10.7.2 Imported capability contracts
 
 Imported cell-wrapper parameter types act as a **capability contract** at call
 boundaries (#4486): when a handler passes a cell to a callee whose body lives
