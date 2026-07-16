@@ -209,6 +209,7 @@ const createControlServer = (
         serverPrimaryExecutionV1: true,
         serverPrimaryExecutionClaimRoutingV1: true,
         serverPrimaryExecutionBuiltinPassivityV1: true,
+        serverPrimaryExecutionContextLatticeClaimsV1: true,
       },
       acl: { mode: "off", serviceDids: [TEST_SESSION_OPEN_PRINCIPAL] },
     } as ConstructorParameters<typeof Server>[0],
@@ -223,6 +224,7 @@ const connectControlClient = async (
       serverPrimaryExecutionV1: true,
       serverPrimaryExecutionClaimRoutingV1: true,
       serverPrimaryExecutionBuiltinPassivityV1: true,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
     },
   } as ExecutionClientOptions);
 

@@ -71,6 +71,7 @@ const createServer = (name: string): LaneReadServer =>
         serverPrimaryExecutionV1: true,
         serverPrimaryExecutionClaimRoutingV1: true,
         serverPrimaryExecutionBuiltinPassivityV1: true,
+        serverPrimaryExecutionContextLatticeClaimsV1: true,
       },
       acl: { mode: "off", serviceDids: [] },
     } as unknown as ConstructorParameters<typeof Server>[0],
@@ -85,6 +86,7 @@ const connectClient = async (
       serverPrimaryExecutionV1: true,
       serverPrimaryExecutionClaimRoutingV1: true,
       serverPrimaryExecutionBuiltinPassivityV1: true,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
     },
   } as MemoryClient.ConnectOptions);
 

@@ -46,6 +46,7 @@ was last checked against the code.
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
 | [`serverPrimaryExecutionClaimRank`](#serverprimaryexecutionclaimrank) | `setServerPrimaryExecutionClaimRankConfig()` (host-internal, not negotiated) | `space` (space rank only) | Bernhard Seefeld (server-side execution C1.1b) | fold into `serverPrimaryExecution` once every context rank graduates | implemented, space-only by default |
+| [`serverPrimaryExecutionContextLatticeClaimsV1`](#serverprimaryexecutioncontextlatticeclaimsv1) | `setServerPrimaryExecutionContextLatticeClaimsConfig()` (then negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution C1.7) | fold into `serverPrimaryExecution` once user lanes graduate, then retire the negotiation | implemented, off by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -659,9 +660,53 @@ the per-epic implementation notes).
   user-rank issuance is otherwise inert because no executor requests user-rank
   claims until C1.5a.
 - **Path to removal.** Graduate each rank behind the dial as its C-phase gate
-  is accepted (C1.7 folds the user step behind the
+  is accepted (C1.7 folded the user step behind the
   `context-lattice-claims-v1` subcapability), then fold the fully graduated
   dial into `serverPrimaryExecution` and delete the config functions.
+
+### `serverPrimaryExecutionContextLatticeClaimsV1`
+
+- **Toggle via.** `setServerPrimaryExecutionContextLatticeClaimsConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts) — programmatic-only,
+  like the `serverPrimaryExecutionClaimRank` dial it partners with; there is
+  no environment variable. Unlike that host-internal dial, the resulting
+  capability IS negotiated per connection: both peers must advertise the
+  absent-false wire flag, and the connection getter chain layers it above
+  `serverPrimaryExecutionClaimRoutingV1`.
+- **Added by.** Bernhard Seefeld, in server-side execution C1.7
+  (context-scoped delivery, 2026-07-16).
+- **Purpose.** The context-lattice claim-delivery subcapability
+  ([design §5](../specs/server-side-execution/context-lattice-execution.md),
+  adversarial-review amendments 11/17/21): a session that negotiated it may
+  receive context-scoped (`user:`/`session:`) execution claims, filtered by
+  the single delivery predicate (`#sessionAcceptsClaim`) to sessions whose
+  principal is the claim's — live publishes, reconnect snapshots, retained
+  events, and settlement frontiers alike. Sessions without it receive space
+  claims exactly as before. The subcapability also drives the amendment-11
+  principal-wide cohort gate: a user lane may only open (and stay open) while
+  EVERY session of the lane principal — TTL-detached ones included — has
+  negotiated it, and any non-negotiating attach synchronously fences the
+  principal's live user lanes before its open response is sent. Deliberately
+  NOT part of the required-capability check at session admission: a mixed
+  fleet is valid, with the fence (not rejection) protecting lane integrity.
+  User-rank claim ISSUANCE additionally requires the host's own advertisement
+  (amendment 9's fold), so a host with this off issues space claims only,
+  whatever the rank dial says.
+- **Current default and planned end state.** Off by default — absent from
+  every handshake, zero delivery-path change, no lane fencing (production has
+  no user lanes to fence until the C1 gates flip the rank dial). Enabled
+  inside C1 gate fixtures alongside `serverPrimaryExecutionClaimRank: user`.
+  The end state is every supported client negotiating it.
+- **Status on 2026-07-16.** Implemented (C1.7): wire flag, connection getter
+  chain, per-attach session capability, context-scoped
+  `#sessionAcceptsClaim`, `sessionsForPrincipal` (the amendment-17
+  connected-or-TTL-detached seam that the F6 feed fan-out will consume), the
+  cohort gate at lane open/renew, and the admission fence.
+- **Path to removal.** Graduate with the C1/C2 lane rollout: once every
+  supported client negotiates it, require it whenever
+  `serverPrimaryExecution` is on (fold into the required-capability set),
+  delete the config function, and retire the per-connection negotiation with
+  an R7-style retirement for stragglers.
 
 > Five neighbours in the same handshake are related but are not runtime-toggleable
 > experimental flags:

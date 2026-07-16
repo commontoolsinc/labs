@@ -124,6 +124,7 @@ const createLaneServer = (name: string): LaneServer =>
         serverPrimaryExecutionV1: true,
         serverPrimaryExecutionClaimRoutingV1: true,
         serverPrimaryExecutionBuiltinPassivityV1: true,
+        serverPrimaryExecutionContextLatticeClaimsV1: true,
       },
       acl: { mode: "off", serviceDids: [] },
     } as unknown as ConstructorParameters<typeof Server>[0],
@@ -138,6 +139,7 @@ const connectLaneClient = async (
       serverPrimaryExecutionV1: true,
       serverPrimaryExecutionClaimRoutingV1: true,
       serverPrimaryExecutionBuiltinPassivityV1: true,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
     },
   } as MemoryClient.ConnectOptions);
 
@@ -290,10 +292,21 @@ Deno.test("disconnect drains and revokes only that principal's lane", async () =
       laneClaimKey(userKeyOf(BOB)),
     );
 
+    // C1.7 context-scoped delivery: alice's revoke reaches only alice's
+    // sessions, so the drain is observed through a second alice session
+    // while bob's session pins the non-delivery.
+    const aliceObserverClient = await connectLaneClient(server);
+    const aliceObserver = await mountAs(aliceObserverClient, ALICE);
     const revoked: ActionClaimKey[] = [];
-    const unsubscribe = bobSession.subscribeExecutionControl((event) => {
+    const unsubscribe = aliceObserver.subscribeExecutionControl((event) => {
       if (event.type === "session.execution.claim.revoke") {
         revoked.push(event.claim);
+      }
+    });
+    const bobObserved: ActionClaimKey[] = [];
+    const unsubscribeBob = bobSession.subscribeExecutionControl((event) => {
+      if (event.type === "session.execution.claim.revoke") {
+        bobObserved.push(event.claim);
       }
     });
 
@@ -306,6 +319,9 @@ Deno.test("disconnect drains and revokes only that principal's lane", async () =
     assertEquals(server.listExecutionClaims(LANE_SPACE), [bobClaim]);
     assertEquals(revoked.length, 1);
     assertEquals(revoked[0].contextKey, userKeyOf(ALICE));
+    assertEquals(bobObserved, []);
+    unsubscribeBob();
+    await aliceObserverClient.close();
     // The swept claim cannot renew: the executor's next renewal observes the
     // drain instead of resurrecting the lane.
     assertEquals(await server.renewExecutionClaim(lease, aliceClaim), null);

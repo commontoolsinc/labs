@@ -4,8 +4,13 @@ import * as MemoryV2 from "../v2.ts";
 type ServerPrimaryExecutionFlagApi = {
   setServerPrimaryExecutionConfig(enabled?: boolean): void;
   resetServerPrimaryExecutionConfig(): void;
+  setServerPrimaryExecutionContextLatticeClaimsConfig(enabled?: boolean): void;
+  resetServerPrimaryExecutionContextLatticeClaimsConfig(): void;
   getMemoryProtocolFlags(): Record<string, boolean>;
   parseMemoryProtocolFlags(value: unknown): Record<string, boolean> | null;
+  wireMemoryProtocolFlags(
+    flags: Record<string, boolean>,
+  ): Record<string, boolean>;
 };
 
 const api = MemoryV2 as unknown as ServerPrimaryExecutionFlagApi;
@@ -47,5 +52,61 @@ Deno.test("server-primary execution is an optional protocol capability that defa
     );
   } finally {
     api.resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("context-lattice-claims-v1 is a separately dialed subcapability that defaults off", () => {
+  api.resetServerPrimaryExecutionConfig();
+  api.resetServerPrimaryExecutionContextLatticeClaimsConfig();
+  try {
+    // Its own dial defaults off: enabling server-primary execution alone
+    // never advertises context-scoped claim delivery.
+    api.setServerPrimaryExecutionConfig(true);
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1,
+      false,
+    );
+    api.setServerPrimaryExecutionContextLatticeClaimsConfig(true);
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1,
+      true,
+    );
+    // The subcapability rides on the base capability: with server-primary
+    // execution off the advertisement stays off no matter the dial.
+    api.resetServerPrimaryExecutionConfig();
+    assertEquals(
+      api.getMemoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1,
+      false,
+    );
+
+    // Wire semantics: absent parses to false (an older peer never accepts
+    // context-scoped claims), non-boolean rejects, and the flag round-trips.
+    assertEquals(
+      api.parseMemoryProtocolFlags({})
+        ?.serverPrimaryExecutionContextLatticeClaimsV1,
+      false,
+    );
+    assertEquals(
+      api.parseMemoryProtocolFlags({
+        serverPrimaryExecutionContextLatticeClaimsV1: true,
+      })?.serverPrimaryExecutionContextLatticeClaimsV1,
+      true,
+    );
+    assertEquals(
+      api.parseMemoryProtocolFlags({
+        serverPrimaryExecutionContextLatticeClaimsV1: "true",
+      }),
+      null,
+    );
+    api.setServerPrimaryExecutionConfig(true);
+    api.setServerPrimaryExecutionContextLatticeClaimsConfig(true);
+    assertEquals(
+      api.wireMemoryProtocolFlags(api.getMemoryProtocolFlags())
+        .serverPrimaryExecutionContextLatticeClaimsV1,
+      true,
+    );
+  } finally {
+    api.resetServerPrimaryExecutionConfig();
+    api.resetServerPrimaryExecutionContextLatticeClaimsConfig();
   }
 });

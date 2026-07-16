@@ -713,6 +713,17 @@ class Connection {
       this.#serverFlags?.serverPrimaryExecutionBuiltinPassivityV1 === true;
   }
 
+  /** context-lattice-claims-v1 (C1.7): layered above claim routing — a
+   * connection that cannot route space claims can never route scoped ones.
+   * Never part of missesRequiredExecutionCapability: a mixed fleet is valid
+   * by design and the amendment-11 cohort gate handles it at attach. */
+  get serverPrimaryExecutionContextLatticeClaimsV1(): boolean {
+    return this.serverPrimaryExecutionClaimRoutingV1 &&
+      this.#clientFlags?.serverPrimaryExecutionContextLatticeClaimsV1 ===
+        true &&
+      this.#serverFlags?.serverPrimaryExecutionContextLatticeClaimsV1 === true;
+  }
+
   private send(message: ServerMessage): void {
     this.sendRaw(
       this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
@@ -1533,9 +1544,12 @@ export class Server {
 
   /** Issuance-side rank dial (context-lattice §6): the host issues claims
    * only up to the enabled context rank. Space is always issuable; user rank
-   * requires the dial AND actionKind `computation` (amendment 8 — effects
-   * stay space-lane in C1; lane-grant egress is a named follow-on); session
-   * rank stays un-issuable until C2 wires it into the ladder. Rank
+   * requires the dial, actionKind `computation` (amendment 8 — effects
+   * stay space-lane in C1; lane-grant egress is a named follow-on), AND the
+   * host's own context-lattice-claims-v1 advertisement (C1.7 folds the dial
+   * behind the subcapability, amendment 9: a host that does not advertise
+   * context-scoped delivery would issue claims deliverable to no session);
+   * session rank stays un-issuable until C2 wires it into the ladder. Rank
    * enablement gates ISSUANCE and RENEWAL only — the engine's commit-time
    * claim guards are rank-independent. */
   #executionClaimRankEnabled(
@@ -1544,7 +1558,8 @@ export class Server {
     if (claim.contextKey === "space") return true;
     return claim.actionKind === "computation" &&
       Engine.principalOfUserContextKey(claim.contextKey) !== undefined &&
-      getServerPrimaryExecutionClaimRankConfig() === "user";
+      getServerPrimaryExecutionClaimRankConfig() === "user" &&
+      this.memoryProtocolFlags().serverPrimaryExecutionContextLatticeClaimsV1;
   }
 
   sessionOpenAudience(): string {
@@ -3154,11 +3169,29 @@ export class Server {
     }
   }
 
+  /**
+   * THE delivery predicate (amendment 21): the one filter feeding publish
+   * (#publishExecutionControl), reconnect-snapshot claims
+   * (#executionClaimsForSession), retained events, and settlement frontiers
+   * (attachExecutionFeed). Context-scoped delivery (C1.7): a `user:`/
+   * `session:` claim is accepted only by sessions that negotiated
+   * context-lattice-claims-v1 on their current attach AND whose principal is
+   * the claim's, compared through the canonical key helpers (amendment 18).
+   * Space claims keep their pre-C1.7 delivery byte-identically.
+   */
   #sessionAcceptsClaim(
     session: SessionState,
     claim: ActionClaimKey,
   ): boolean {
     if (!session.serverPrimaryExecutionV1) return false;
+    if (claim.contextKey !== "space") {
+      if (!session.serverPrimaryExecutionContextLatticeClaimsV1) return false;
+      const principal = Engine.principalOfUserContextKey(claim.contextKey) ??
+        Engine.principalOfSessionKey(claim.contextKey);
+      if (principal === undefined || principal !== session.principal) {
+        return false;
+      }
+    }
     if (claim.actionKind === "computation") {
       return session.serverPrimaryExecutionClaimRoutingV1;
     }
@@ -3635,22 +3668,68 @@ export class Server {
     return revoked;
   }
 
+  /**
+   * The single principal-cohort seam (amendment 17, FA9): every session of
+   * `principal` in `space` that is either attached to a LIVE connection
+   * (mirroring #boundExecutionSessionForCommit — never the connection-
+   * liveness-blind hasOpenSessionForPrincipal) or TTL-detached awaiting
+   * resume. Detached sessions count as present DELIBERATELY (conservative):
+   * within its TTL a detached session can resume and transact at any moment,
+   * so treating it as absent would let a user lane open (or stay open)
+   * beside a client that never negotiated context-scoped claims — exactly
+   * the double-execution the cohort gate exists to prevent. A session bound
+   * to a connection this server no longer tracks is neither live nor
+   * resumable-by-TTL and is excluded. Delivery, reconnect snapshots, the
+   * cohort gate, and the F6 feed fan-out all derive from this one predicate.
+   */
+  sessionsForPrincipal(
+    space: string,
+    principal: string,
+  ): SessionState[] {
+    if (principal === ANYONE_USER) return [];
+    return this.#sessions.sessionsForSpace(space).filter((session) =>
+      session.principal === principal &&
+      (session.ownerConnectionId === null ||
+        this.#connections.has(session.ownerConnectionId))
+    );
+  }
+
+  /** Principal-wide cohort predicate (C1.7, consumed by F6): a user lane may
+   * exist only while EVERY session of the principal — detached ones included
+   * — negotiated context-lattice-claims-v1 on its current attach. */
+  principalCohortNegotiatesContextLatticeClaims(
+    space: string,
+    principal: string,
+  ): boolean {
+    return this.sessionsForPrincipal(space, principal).every((session) =>
+      session.serverPrimaryExecutionContextLatticeClaimsV1
+    );
+  }
+
+  /** Amendment-11 fence: drain every live user lane of `principal` in
+   * `space` (all branches). Synchronous — callers rely on the generation
+   * fence and claim revokes landing before they continue. */
+  #fenceUserLanesForNonNegotiatingAttach(
+    space: string,
+    principal: string | undefined,
+  ): void {
+    if (principal === undefined || principal === ANYONE_USER) return;
+    for (const grant of [...this.#userLaneGrants.values()]) {
+      if (grant.space === space && grant.principal === principal) {
+        this.#drainUserLane(grant);
+      }
+    }
+  }
+
   /** Connected-session anchoring predicate (amendment 17): sessions attached
-   * to a LIVE connection, mirroring #boundExecutionSessionForCommit — never
-   * the connection-liveness-blind hasOpenSessionForPrincipal. */
+   * to a LIVE connection — the stricter subset of sessionsForPrincipal that
+   * lane anchoring needs (a detached session cannot anchor a lane). */
   #connectedSessionForPrincipal(
     space: string,
     principal: string,
   ): SessionState | null {
-    if (principal === ANYONE_USER) return null;
-    for (const session of this.#sessions.sessionsForSpace(space)) {
-      if (
-        session.principal === principal &&
-        session.ownerConnectionId !== null &&
-        this.#connections.has(session.ownerConnectionId)
-      ) {
-        return session;
-      }
+    for (const session of this.sessionsForPrincipal(space, principal)) {
+      if (session.ownerConnectionId !== null) return session;
     }
     return null;
   }
@@ -3704,6 +3783,16 @@ export class Server {
         "user lane grant requires the lane principal's current WRITE capability",
       );
     }
+    // Principal-wide cohort gate (C1.7): the lane may not open while ANY
+    // session of the principal — TTL-detached ones included, see
+    // sessionsForPrincipal — lacks the subcapability. Sessions attaching
+    // later are handled by the amendment-11 fence in openSession.
+    if (!this.principalCohortNegotiatesContextLatticeClaims(space, principal)) {
+      throw new Error(
+        "user lane grant requires every session of the lane principal to " +
+          "negotiate context-lattice-claims-v1",
+      );
+    }
     const laneGeneration = (this.#userLaneGenerations.get(key) ?? 0) + 1;
     this.#userLaneGenerations.set(key, laneGeneration);
     const grant: UserLaneGrant = Object.freeze({
@@ -3721,8 +3810,9 @@ export class Server {
   }
 
   /** Re-validate one exact grant incarnation: live registry identity, a
-   * connected anchor, and current WRITE (amendment 2). Any mismatch drains
-   * the lane — fence, then sweep — and reports null. */
+   * connected anchor, current WRITE (amendment 2), and a fully negotiating
+   * principal cohort (C1.7 — belt to the attach fence's braces). Any
+   * mismatch drains the lane — fence, then sweep — and reports null. */
   async renewUserLaneGrant(
     grant: UserLaneGrant,
   ): Promise<UserLaneGrant | null> {
@@ -3737,7 +3827,11 @@ export class Server {
     );
     if (
       !this.#laneGrantAnchorConnected(grant) ||
-      capability === null || !isCapable(capability, "WRITE")
+      capability === null || !isCapable(capability, "WRITE") ||
+      !this.principalCohortNegotiatesContextLatticeClaims(
+        grant.space,
+        grant.principal,
+      )
     ) {
       this.#drainUserLane(grant);
       return null;
@@ -5117,6 +5211,8 @@ export class Server {
             connection.serverPrimaryExecutionClaimRoutingV1,
           serverPrimaryExecutionBuiltinPassivityV1:
             connection.serverPrimaryExecutionBuiltinPassivityV1,
+          serverPrimaryExecutionContextLatticeClaimsV1:
+            connection.serverPrimaryExecutionContextLatticeClaimsV1,
         },
       );
       if (opened.revokedConnectionId !== undefined) {
@@ -5125,6 +5221,17 @@ export class Server {
           opened.sessionId,
           "taken-over",
         );
+      }
+      // Principal-wide cohort gate, amendment-11 fence locus: every attach —
+      // new, resumed, or takeover, capability flags recomputed per attach —
+      // that lacks context-lattice-claims-v1 synchronously fences the
+      // principal's live user lanes (generation bump + claim revoke) HERE,
+      // before the resumed catch-up awaits, before attachExecutionFeed builds
+      // this response's snapshot, and before the open response releases. The
+      // bounded Worker drain may finish asynchronously; client-side ordering
+      // of non-negotiating clients is out of contract.
+      if (!connection.serverPrimaryExecutionContextLatticeClaimsV1) {
+        this.#fenceUserLanesForNonNegotiatingAttach(message.space, principal);
       }
       const catchup = opened.resumed === true
         ? await this.syncSessionForConnection(

@@ -694,6 +694,7 @@ const createActingServer = (name: string): ActingServer =>
         serverPrimaryExecutionV1: true,
         serverPrimaryExecutionClaimRoutingV1: true,
         serverPrimaryExecutionBuiltinPassivityV1: true,
+        serverPrimaryExecutionContextLatticeClaimsV1: true,
       },
       acl: { mode: "off", serviceDids: [] },
     } as unknown as ConstructorParameters<typeof Server>[0],
@@ -708,6 +709,7 @@ const connectActingClient = async (
       serverPrimaryExecutionV1: true,
       serverPrimaryExecutionClaimRoutingV1: true,
       serverPrimaryExecutionBuiltinPassivityV1: true,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
     },
   } as MemoryClient.ConnectOptions);
 

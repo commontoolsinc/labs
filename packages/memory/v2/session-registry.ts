@@ -34,6 +34,9 @@ export type SessionState = {
   serverPrimaryExecutionV1: boolean;
   serverPrimaryExecutionClaimRoutingV1: boolean;
   serverPrimaryExecutionBuiltinPassivityV1: boolean;
+  /** C1.7: recomputed on EVERY attach (new/resume/takeover), so a takeover
+   * from a connection without the subcapability downgrades the session. */
+  serverPrimaryExecutionContextLatticeClaimsV1: boolean;
   executionFeedSeq: number;
   executionFeedAckSeq: number;
   executionEvents: Array<{
@@ -106,6 +109,7 @@ export class SessionRegistry {
       serverPrimaryExecutionV1?: boolean;
       serverPrimaryExecutionClaimRoutingV1?: boolean;
       serverPrimaryExecutionBuiltinPassivityV1?: boolean;
+      serverPrimaryExecutionContextLatticeClaimsV1?: boolean;
     } = {},
   ): OpenSessionState {
     this.#prune();
@@ -179,6 +183,8 @@ export class SessionRegistry {
         capabilities.serverPrimaryExecutionClaimRoutingV1 === true,
       serverPrimaryExecutionBuiltinPassivityV1:
         capabilities.serverPrimaryExecutionBuiltinPassivityV1 === true,
+      serverPrimaryExecutionContextLatticeClaimsV1:
+        capabilities.serverPrimaryExecutionContextLatticeClaimsV1 === true,
       executionFeedSeq,
       executionFeedAckSeq,
       executionEvents,

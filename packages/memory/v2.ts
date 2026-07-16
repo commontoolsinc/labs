@@ -251,6 +251,14 @@ export interface MemoryProtocolFlags {
   serverPrimaryExecutionClaimRoutingV1: boolean;
   /** Client can keep async builtins passive for a claim (dark until W2.3). */
   serverPrimaryExecutionBuiltinPassivityV1: boolean;
+  /**
+   * Subcapability of claim routing (context-lattice C1.7): the client
+   * understands context-scoped (`user:`/`session:`) execution claims and
+   * routes them by chain compatibility. Sessions without it never receive a
+   * scoped claim, and their attach fences any live user lane of the same
+   * principal (the amendment-11 cohort gate). Absent parses to false.
+   */
+  serverPrimaryExecutionContextLatticeClaimsV1: boolean;
   /** Build-inherent support for authenticated scheduler writer lookup. */
   schedulerWriterLookup: boolean;
   commitPreconditions: boolean;
@@ -280,6 +288,7 @@ export type WireMemoryProtocolFlags = {
   serverPrimaryExecutionV1?: boolean;
   serverPrimaryExecutionClaimRoutingV1?: boolean;
   serverPrimaryExecutionBuiltinPassivityV1?: boolean;
+  serverPrimaryExecutionContextLatticeClaimsV1?: boolean;
   schedulerWriterLookup?: boolean;
   commitPreconditions?: boolean;
   syncSchemaTable?: boolean;
@@ -1149,6 +1158,7 @@ let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
 let serverPrimaryExecutionEnabled = false;
 let serverPrimaryExecutionClaimRank: ServerPrimaryExecutionClaimRank = "space";
+let serverPrimaryExecutionContextLatticeClaimsEnabled = false;
 
 /**
  * Ambient runtime flag for persistent scheduler observations and rehydration.
@@ -1209,6 +1219,29 @@ export function resetServerPrimaryExecutionClaimRankConfig(): void {
 }
 
 /**
+ * Ambient runtime flag for the context-lattice-claims-v1 subcapability
+ * (context-lattice C1.7): whether this server ADVERTISES context-scoped
+ * claim delivery. Defaults off; a mixed fleet stays valid either way — the
+ * amendment-11 cohort gate fences user lanes around sessions that did not
+ * negotiate it rather than rejecting them. Registered in
+ * docs/development/EXPERIMENTAL_OPTIONS.md as
+ * `serverPrimaryExecutionContextLatticeClaimsV1`.
+ */
+export function setServerPrimaryExecutionContextLatticeClaimsConfig(
+  enabled?: boolean,
+): void {
+  serverPrimaryExecutionContextLatticeClaimsEnabled = enabled ?? false;
+}
+
+export function getServerPrimaryExecutionContextLatticeClaimsConfig(): boolean {
+  return serverPrimaryExecutionContextLatticeClaimsEnabled;
+}
+
+export function resetServerPrimaryExecutionContextLatticeClaimsConfig(): void {
+  serverPrimaryExecutionContextLatticeClaimsEnabled = false;
+}
+
+/**
  * Ambient runtime flag for commit preconditions. The runner owns the feature,
  * but the memory protocol needs the value during client/server handshakes.
  */
@@ -1248,6 +1281,12 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   serverPrimaryExecutionV1: getServerPrimaryExecutionConfig(),
   serverPrimaryExecutionClaimRoutingV1: getServerPrimaryExecutionConfig(),
   serverPrimaryExecutionBuiltinPassivityV1: getServerPrimaryExecutionConfig(),
+  // Layered subcapability: meaningful only above claim routing (the
+  // connection getter chain enforces the layering); its own dial defaults
+  // off so enabling server-primary execution alone never turns it on.
+  serverPrimaryExecutionContextLatticeClaimsV1:
+    getServerPrimaryExecutionConfig() &&
+    getServerPrimaryExecutionContextLatticeClaimsConfig(),
   // Build-inherent capability: older servers omit it and clients fail open to
   // piece-root discovery rather than sending an RPC the peer cannot parse.
   schedulerWriterLookup: true,
@@ -1325,6 +1364,15 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const serverPrimaryExecutionContextLatticeClaimsV1 =
+    value.serverPrimaryExecutionContextLatticeClaimsV1;
+  if (
+    serverPrimaryExecutionContextLatticeClaimsV1 !== undefined &&
+    typeof serverPrimaryExecutionContextLatticeClaimsV1 !== "boolean"
+  ) {
+    return null;
+  }
+
   const commitPreconditions = value.commitPreconditions;
   if (
     commitPreconditions !== undefined &&
@@ -1373,6 +1421,10 @@ export const parseMemoryProtocolFlags = (
       serverPrimaryExecutionClaimRoutingV1 === true,
     serverPrimaryExecutionBuiltinPassivityV1:
       serverPrimaryExecutionBuiltinPassivityV1 === true,
+    // Absent-false: an older peer that never heard of context-scoped claims
+    // must never be treated as accepting them.
+    serverPrimaryExecutionContextLatticeClaimsV1:
+      serverPrimaryExecutionContextLatticeClaimsV1 === true,
     schedulerWriterLookup: schedulerWriterLookup === true,
     commitPreconditions: commitPreconditions === true,
     syncSchemaTable: syncSchemaTable === true,
@@ -1396,6 +1448,8 @@ export const wireMemoryProtocolFlags = (
     flags.serverPrimaryExecutionClaimRoutingV1,
   serverPrimaryExecutionBuiltinPassivityV1:
     flags.serverPrimaryExecutionBuiltinPassivityV1,
+  serverPrimaryExecutionContextLatticeClaimsV1:
+    flags.serverPrimaryExecutionContextLatticeClaimsV1,
   schedulerWriterLookup: flags.schedulerWriterLookup,
   commitPreconditions: flags.commitPreconditions,
   syncSchemaTable: flags.syncSchemaTable,
