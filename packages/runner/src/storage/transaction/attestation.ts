@@ -134,8 +134,9 @@ export const attest = (
  * of the fact in the given replica otherwise function fails with
  * `IStorageTransactionInconsistent` error.
  *
- * Optimized to check reference equality before falling back to JSON.stringify
- * comparison, avoiding expensive hashing when the replica state is unchanged.
+ * Values are compared with `valueEqual`, the `Fabric`-aware content equality
+ * (reference-identical operands settle immediately via its leading
+ * `Object.is`, without hashing).
  */
 export const claim = (
   { address, value: expected }: IAttestation,
@@ -153,15 +154,14 @@ export const claim = (
     )
     : read(source, address)?.ok?.value;
 
-  // Fast path: reference equality check avoids expensive comparison
-  // when the replica state hasn't changed since the original read.
-  // Otherwise compare the stored document value (the read/attested value) with
-  // `valueEqual`, the `Fabric`-aware content equality: `deepEqual` walks
-  // enumerable own-props, of which a `FabricPrimitive` (state in private
-  // `#fields`) has none, so it conflates every distinct same-class instance and
-  // would mis-detect a changed Fabric value as unchanged (CT-1770), masking the
-  // very `StateInconsistency` this check exists to raise.
-  if (expected === actual || valueEqual(expected, actual)) {
+  // Compare the stored document value (the read/attested value) with
+  // `valueEqual`, the `Fabric`-aware content equality: a `FabricPrimitive`
+  // keeps its state in private `#fields` with zero enumerable own-props, so
+  // only a content-aware comparison can detect the changed Fabric value this
+  // check exists to catch. `valueEqual` settles identical references via its
+  // leading `Object.is`, which is also why there is no `===` fast path here:
+  // `+0 === -0` is `true`, but they are distinct stored values.
+  if (valueEqual(expected, actual)) {
     return { ok: state };
   } else {
     return {

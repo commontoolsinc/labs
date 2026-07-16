@@ -1,15 +1,15 @@
-// Covers the Fabric-aware consistency check in `claim()` (CT-1770). The check
-// compares a stored attested value (`expected`) against the replica's current
-// value (`actual`) to decide whether the state is unchanged. A `FabricPrimitive`
-// keeps its state in private `#fields` with zero enumerable own-props, so a
-// naive `deepEqual` reports two distinct same-class instances as equal --
-// masking a genuine change as consistent and swallowing the
-// `StorageTransactionInconsistent` error the check exists to raise.
+// Covers the consistency check in `claim()`: it compares a stored attested
+// value (`expected`) against the replica's current value (`actual`) with
+// `valueEqual`, the `Fabric`-aware content equality. A `FabricPrimitive`
+// keeps its state in private `#fields` with zero enumerable own-props, so
+// only a content-aware comparison can tell two distinct same-class instances
+// apart; these tests pin the verdicts that depend on that.
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { claim } from "../src/storage/transaction/attestation.ts";
 import type {
   IAttestation,
@@ -22,7 +22,7 @@ import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 // deliberately absent so `claim()` takes its `read`-based `actual` path (the
 // `typeof replica.getDocument === "function"` guard is false), reading the
 // stored value straight off the attested state rather than an entity document.
-const replicaHolding = (storedValue: FabricBytes): ISpaceReplica => {
+const replicaHolding = (storedValue: FabricValue): ISpaceReplica => {
   const state: State = {
     the: "application/json",
     of: "of:attest-claim-fabric",
@@ -59,15 +59,26 @@ describe("attestation claim(): Fabric-aware consistency check", () => {
 
   it("reports StateInconsistency when the Fabric value actually changed (CT-1770)", () => {
     // The attested value and the stored value are distinct `FabricBytes` that
-    // differ only in byte content. `deepEqual` sees two zero-own-prop instances
-    // of the same class and calls them equal, so the check masks the change and
-    // returns `{ ok }`; `valueEqual` compares by content hash and surfaces the
-    // `StorageTransactionInconsistent` error.
+    // differ only in their (private `#fields`) byte content: a genuine change,
+    // which must surface as the `StorageTransactionInconsistent` error the
+    // check exists to raise.
     const attestation: IAttestation = {
       address,
       value: new FabricBytes(new Uint8Array([1, 2, 3])),
     };
     const replica = replicaHolding(new FabricBytes(new Uint8Array([4, 5, 6])));
+
+    const result = claim(attestation, replica);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("StorageTransactionInconsistent");
+  });
+
+  it("treats +0 and -0 as distinct stored values (Object.is semantics)", () => {
+    // Stored values are compared with `Object.is` semantics (via
+    // `valueEqual`), under which `+0` and `-0` are distinct -- IEEE754 `===`,
+    // which conflates them, must play no part in this check.
+    const attestation: IAttestation = { address, value: 0 };
+    const replica = replicaHolding(-0);
 
     const result = claim(attestation, replica);
     expect(result.error).toBeDefined();
