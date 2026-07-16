@@ -51,6 +51,7 @@ type ControlCounters = Readonly<{
   settlementsFailed: number;
   settlementsUnserved: number;
   leaseFenceRejects: number;
+  leaseFenceRejectCauses: Readonly<Record<string, number>>;
   actionFirewallRejects: number;
 }>;
 
@@ -107,6 +108,7 @@ type HealthStats = {
     settlementsFailed?: number;
     settlementsUnserved?: number;
     leaseFenceRejects?: number;
+    leaseFenceRejectCauses?: Record<string, number>;
     actionFirewallRejects?: number;
   } | null;
 };
@@ -250,6 +252,7 @@ async function readMeasurement(
         rawControl.leaseFenceRejects,
         "lease fence rejects",
       ),
+      leaseFenceRejectCauses: { ...(rawControl.leaseFenceRejectCauses ?? {}) },
       actionFirewallRejects: counter(
         rawControl.actionFirewallRejects,
         "action firewall rejects",
@@ -539,6 +542,19 @@ export async function finishServerExecutionMeasurement(
         before.control.leaseFenceRejects,
         "lease fence rejects",
       ),
+      leaseFenceRejectCauses: ((): Record<string, number> => {
+        const causes: Record<string, number> = {};
+        for (
+          const [cause, count] of Object.entries(
+            after.control.leaseFenceRejectCauses,
+          )
+        ) {
+          const grew = count -
+            (before.control.leaseFenceRejectCauses[cause] ?? 0);
+          if (grew > 0) causes[cause] = grew;
+        }
+        return causes;
+      })(),
       actionFirewallRejects: delta(
         after.control.actionFirewallRejects,
         before.control.actionFirewallRejects,
@@ -580,7 +596,13 @@ export async function finishServerExecutionMeasurement(
     "measured workload published no successful server settlement",
   );
   assertEquals(result.control.settlementsFailed, 0);
-  assertEquals(result.control.leaseFenceRejects, 0);
+  assertEquals(
+    result.control.leaseFenceRejects,
+    0,
+    `lease fence rejects by cause: ${
+      JSON.stringify(result.control.leaseFenceRejectCauses)
+    }`,
+  );
   assertEquals(result.control.actionFirewallRejects, 0);
   assertEquals(result.workerFailures.starts, 0);
   assertEquals(result.workerFailures.crashes, 0);

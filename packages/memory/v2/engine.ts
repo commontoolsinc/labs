@@ -869,9 +869,18 @@ export class ProtocolError extends Error {
  * restore that incarnation; a later run must obtain fresh authority.
  */
 export class ExecutionLeaseFenceError extends Error {
-  constructor(message: string) {
+  /**
+   * Which fence check refused the commit. Stable, machine-readable — surfaced
+   * per-cause in the host's execution stats so a fenced commit in a measured
+   * run names itself (a claim-shrink race reads very differently from a lapsed
+   * lease heartbeat, and only the cause tells them apart).
+   */
+  readonly fenceCause: string;
+
+  constructor(fenceCause: string, message: string) {
     super(message);
     this.name = "ExecutionLeaseFenceError";
+    this.fenceCause = fenceCause;
   }
 }
 
@@ -3608,11 +3617,13 @@ const assertExecutionLeaseFenceTransaction = (
     options.principal !== fence.lease.onBehalfOf
   ) {
     throw new ExecutionLeaseFenceError(
+      "lane-principal-mismatch",
       "execution lease does not match the commit lane and principal",
     );
   }
   if (fence.authorize?.(engine) !== true) {
     throw new ExecutionLeaseFenceError(
+      "sponsor-authority",
       "execution sponsor lacks current WRITE authority or execution policy",
     );
   }
@@ -3627,17 +3638,20 @@ const assertExecutionLeaseFenceTransaction = (
     !leaseOwnerMatches(current, fence.lease)
   ) {
     throw new ExecutionLeaseFenceError(
+      "lease-stale",
       "execution lease is stale, expired, or revoked",
     );
   }
   if (options.requireExactClaim === true && options.claims.length !== 1) {
     throw new ExecutionLeaseFenceError(
+      "claim-arity",
       "bound executor semantic transaction requires one exact execution claim incarnation",
     );
   }
   for (const claim of options.claims) {
     if (claim.expiresAt <= nowMs) {
       throw new ExecutionLeaseFenceError(
+        "claim-expired",
         "execution claim incarnation is expired",
       );
     }
@@ -3646,6 +3660,7 @@ const assertExecutionLeaseFenceTransaction = (
       claim.leaseGeneration !== current.lease_generation
     ) {
       throw new ExecutionLeaseFenceError(
+        "claim-lease-generation",
         "execution claim does not match the durable lease generation",
       );
     }
@@ -7939,6 +7954,7 @@ const acceptedSchedulerObservation = (
   if (claim === undefined) {
     if (assertedClaim !== undefined || unservedAttempt !== undefined) {
       throw new ExecutionLeaseFenceError(
+        "claim-not-live",
         "execution claim incarnation is not live for this action attempt",
       );
     }
@@ -7968,6 +7984,7 @@ const acceptedSchedulerObservation = (
     observation.transactionKind !== "action-run"
   ) {
     throw new ExecutionLeaseFenceError(
+      "claim-observation-mismatch",
       "execution claim incarnation does not match the accepted scheduler action",
     );
   }
@@ -8379,6 +8396,7 @@ const applySchedulerObservationOnlyCommit = (
       accepted.provenance.claim.contextKey
   ) {
     throw new ExecutionLeaseFenceError(
+      "claim-context-mismatch",
       "execution claim context does not match the effective scheduler context",
     );
   }

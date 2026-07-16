@@ -62,6 +62,7 @@ export const ServerExecutionControlMetricsSchema = z.object({
   settlementsFailed: nonNegativeIntegerSchema,
   settlementsUnserved: nonNegativeIntegerSchema,
   leaseFenceRejects: nonNegativeIntegerSchema,
+  leaseFenceRejectCauses: z.record(z.string(), nonNegativeIntegerSchema),
   actionFirewallRejects: nonNegativeIntegerSchema,
   acceptedCommitIndexLookups: nonNegativeIntegerSchema,
   acceptedCommitIndexTargetCandidates: nonNegativeIntegerSchema,

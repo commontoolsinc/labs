@@ -63,6 +63,7 @@ const controlMetrics = {
   settlementsFailed: 1,
   settlementsUnserved: 0,
   leaseFenceRejects: 0,
+  leaseFenceRejectCauses: {},
   actionFirewallRejects: 0,
   acceptedCommitIndexLookups: 5,
   acceptedCommitIndexTargetCandidates: 8,

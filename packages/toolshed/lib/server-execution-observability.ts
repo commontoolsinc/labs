@@ -15,6 +15,7 @@ export type ServerExecutionControlMetrics = Readonly<{
   settlementsFailed: number;
   settlementsUnserved: number;
   leaseFenceRejects: number;
+  leaseFenceRejectCauses: Readonly<Record<string, number>>;
   actionFirewallRejects: number;
   acceptedCommitIndexLookups: number;
   acceptedCommitIndexTargetCandidates: number;

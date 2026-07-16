@@ -1433,6 +1433,10 @@ export class Server {
     settlementsFailed: 0,
     settlementsUnserved: 0,
     leaseFenceRejects: 0,
+    // Per-cause breakdown of leaseFenceRejects (ExecutionLeaseFenceError
+    // .fenceCause). A fenced commit in a measured run must name itself: a
+    // claim-shrink race reads very differently from a lapsed lease heartbeat.
+    leaseFenceRejectCauses: {} as Record<string, number>,
     actionFirewallRejects: 0,
     acceptedCommitIndexLookups: 0,
     acceptedCommitIndexTargetCandidates: 0,
@@ -4882,6 +4886,9 @@ export class Server {
         } catch (error) {
           if (error instanceof Engine.ExecutionLeaseFenceError) {
             this.executionStats.leaseFenceRejects += 1;
+            this.executionStats.leaseFenceRejectCauses[error.fenceCause] =
+              (this.executionStats.leaseFenceRejectCauses[error.fenceCause] ??
+                0) + 1;
           }
           if (error instanceof Engine.ExecutionActionFirewallError) {
             this.executionStats.actionFirewallRejects += 1;
