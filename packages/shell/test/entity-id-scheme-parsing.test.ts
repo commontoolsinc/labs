@@ -24,7 +24,7 @@ Deno.test("normalizeEntityId prefixes bare ids and passes schemed ids through", 
   );
 });
 
-Deno.test("SchedulerGraphView strips entity URI schemes when parsing action ids", async () => {
+Deno.test("SchedulerGraphView preserves entity URI schemes when parsing action ids", async () => {
   const { XSchedulerGraph } = await import(
     "../src/views/SchedulerGraphView.ts"
   );
@@ -33,17 +33,18 @@ Deno.test("SchedulerGraphView strips entity URI schemes when parsing action ids"
     truncateLabel(label: string, maxLen?: number): string;
   };
 
-  // extractEntityId: the scheme precedes the entity id; both schemes strip.
+  // extractEntityId: the scheme precedes the entity id and remains part of its
+  // identity.
   assertEquals(
     proto.extractEntityId.call(proto, "sink:did:key:z6Mkabc/of:fid1:AAA/path"),
-    "fid1:AAA",
+    "of:fid1:AAA",
   );
   assertEquals(
     proto.extractEntityId.call(
       proto,
       "action:pattern:did:key:z6Mkabc/computed:fid1:BBB/value",
     ),
-    "fid1:BBB",
+    "computed:fid1:BBB",
   );
 
   // truncateLabel: schemed segments are recognized so the label keeps the
