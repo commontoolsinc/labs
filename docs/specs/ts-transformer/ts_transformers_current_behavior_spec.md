@@ -1063,7 +1063,18 @@ adjustments:
   are retained the original TypeReference is kept for schema fidelity.
 - pattern boundaries apply defaults-only mode to preserve broad shape continuity
   while still applying extracted static defaults
-- wildcard roots disable path shrinking for affected parameters/arguments
+- wildcard roots disable path shrinking for affected parameters/arguments.
+  Since #4714, a wildcard no longer blanket-erases identity/comparable
+  markings for paths it cannot cover: it records the unknown access's static
+  prefix and erases only overlapping identity paths, while still suppressing
+  `identityOnly` (and the scheduler scope proofs gated on it) for the root —
+  closure captures share one synthetic root state, so blanket erasure
+  degraded disjoint `equals()`-only captures into unsatisfiable full-value
+  demands (`src/policy/capability-analysis.ts`;
+  `test/policy/capability-analysis.test.ts`). The identity/comparable
+  capability layer itself (identity paths, `identityOnly`, scope proofs) is
+  as of this writing documented only in `capability-analysis.ts` comments —
+  a known spec gap
 - capability analysis resolves member access through `.get()` when the member
   access itself is observed (`notes.get().length` records `["length"]` rather
   than a blanket root read) and suppresses the redundant blanket `.get()` read
