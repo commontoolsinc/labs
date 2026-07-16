@@ -7,7 +7,7 @@ import {
   getPersistentSchedulerStateConfig,
   type SchedulerActionSnapshotCursor,
 } from "@commonfabric/memory/v2";
-import type { EntityKind } from "@commonfabric/data-model/entity-kind";
+import type { EntityKind } from "./entity-kind.ts";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";

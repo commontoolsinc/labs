@@ -51,7 +51,7 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { entityUriSchemePrefix } from "@commonfabric/data-model/entity-kind";
+import { entityUriSchemePrefix } from "../entity-kind.ts";
 import { type Action, ignoreReadForScheduling } from "../scheduler.ts";
 import { Runtime } from "../runtime.ts";
 import { spaceCellSchema } from "../runtime.ts";
