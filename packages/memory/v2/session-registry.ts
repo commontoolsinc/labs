@@ -18,6 +18,10 @@ export type SessionState = {
   seenSeq: number;
   lastSyncedSeq: number;
   watches: WatchSpec[];
+  /** C1.4b: acting principal the current watch set was registered under
+   * (a lease-bound executor session acting for a lane); undefined = the
+   * session's own scope context. Replaced atomically with the watch set. */
+  watchScopePrincipal?: string;
   graphs: Map<string, TrackedGraphState>;
   entities: Map<string, SessionCacheEntry>;
   trackedIds: Set<string>;
@@ -160,6 +164,7 @@ export class SessionRegistry {
       seenSeq,
       lastSyncedSeq: existing?.lastSyncedSeq ?? seenSeq,
       watches: existing?.watches ?? [],
+      watchScopePrincipal: existing?.watchScopePrincipal,
       graphs: existing?.graphs ?? new Map(),
       entities: existing?.entities ?? new Map(),
       trackedIds: existing?.trackedIds ??

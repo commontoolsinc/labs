@@ -56,6 +56,10 @@ export interface AcceptedCommitNotice {
     branch: BranchName;
     id: string;
     scope?: string;
+    /** RESOLVED scope key of the written instance (memory C1.4b): lets the
+     * re-keyed Worker replica attribute sync frames to lanes. Additive —
+     * consumption lands with C1.5b. */
+    scopeKey?: string;
     seq: number;
   }[];
   schedulerUpdateIds: number[];
@@ -151,6 +155,7 @@ const toAcceptedCommitNotice = (
     branch: revision.branch,
     id: revision.id,
     ...(revision.scope !== undefined ? { scope: revision.scope } : {}),
+    scopeKey: revision.scopeKey,
     seq: revision.seq,
   })),
   schedulerUpdateIds: [...event.schedulerUpdateIds],

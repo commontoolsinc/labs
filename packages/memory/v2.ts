@@ -343,6 +343,10 @@ export interface EntitySnapshot {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+  /** RESOLVED scope key of this instance (C1.4b): lets the re-keyed Worker
+   * replica attribute sync frames to lanes. Additive — absent from older
+   * hosts; clients must not require it. */
+  scopeKey?: string;
   seq: number;
   document: EntityDocument | null;
 }
@@ -603,6 +607,9 @@ export interface SessionSyncUpsert {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
+  /** RESOLVED scope key of this instance (C1.4b, additive): per-lane sync
+   * frame attribution for the re-keyed Worker replica. */
+  scopeKey?: string;
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
@@ -715,6 +722,11 @@ export interface GraphQueryRequest {
   requestId: string;
   space: string;
   sessionId: SessionId;
+  /** C1.4b lane-scoped read seam: per-request acting context from a
+   * lease-bound executor session, validated against the live lane grant
+   * BEFORE any scope key resolves. Additive/optional — non-lane readers
+   * never send it. */
+  actingContext?: SchedulerExecutionContextKey;
   query: GraphQuery;
 }
 
@@ -835,6 +847,11 @@ export interface WatchSetRequest {
   requestId: string;
   space: string;
   sessionId: SessionId;
+  /** C1.4b lane-scoped read seam: per-request acting context from a
+   * lease-bound executor session, validated against the live lane grant
+   * BEFORE any scope key resolves. Additive/optional — non-lane readers
+   * never send it. */
+  actingContext?: SchedulerExecutionContextKey;
   watches: WatchSpec[];
 }
 
@@ -843,6 +860,11 @@ export interface WatchAddRequest {
   requestId: string;
   space: string;
   sessionId: SessionId;
+  /** C1.4b lane-scoped read seam: per-request acting context from a
+   * lease-bound executor session, validated against the live lane grant
+   * BEFORE any scope key resolves. Additive/optional — non-lane readers
+   * never send it. */
+  actingContext?: SchedulerExecutionContextKey;
   watches: WatchSpec[];
 }
 
@@ -926,6 +948,11 @@ export interface SchedulerSnapshotListRequest {
   requestId: string;
   space: string;
   sessionId: SessionId;
+  /** C1.4b lane-scoped read seam: per-request acting context from a
+   * lease-bound executor session, validated against the live lane grant
+   * BEFORE any scope key resolves. Additive/optional — non-lane readers
+   * never send it. */
+  actingContext?: SchedulerExecutionContextKey;
   query: SchedulerActionSnapshotQuery;
 }
 
@@ -989,6 +1016,11 @@ export interface SchedulerWriterListRequest {
   requestId: string;
   space: string;
   sessionId: SessionId;
+  /** C1.4b lane-scoped read seam: per-request acting context from a
+   * lease-bound executor session, validated against the live lane grant
+   * BEFORE any scope key resolves. Additive/optional — non-lane readers
+   * never send it. */
+  actingContext?: SchedulerExecutionContextKey;
   query: SchedulerWritersForTargetsQuery;
 }
 

@@ -303,6 +303,15 @@ const toError = (name: string, message: string): V2Error => ({
   message,
 });
 
+/** C1.4b: constant-shape lane-read rejection — the C1.3 fence-cause
+ * vocabulary, byte-identical for a dead and an absent grant, never varying
+ * with scoped state. */
+const laneReadRejection = (): V2Error =>
+  toError(
+    "ExecutionLeaseFenceError",
+    "lane-generation-stale: execution lane grant is fenced or superseded",
+  );
+
 const toPreconditionFailedError = (
   error: unknown,
   message: string,
@@ -453,6 +462,9 @@ export interface AcceptedCommitEvent {
     branch: BranchName;
     id: string;
     scope?: CellScope;
+    /** RESOLVED scope key of the written instance (C1.4b): per-lane sync
+     * frame attribution for the re-keyed Worker replica. */
+    scopeKey: string;
     seq: number;
     op: Operation["op"];
   }>[];
@@ -3119,6 +3131,92 @@ export class Server {
     };
   }
 
+  /**
+   * C1.4b lane-scoped READ seam (context-lattice §3, amendment 1): a
+   * lease-bound executor session may name a per-request acting context;
+   * the host validates it against the LIVE lane grant of the binding's
+   * (space, branch) BEFORE any scope key resolves, rejecting in constant
+   * shape with the C1.3 fence-cause vocabulary. Requests without an acting
+   * context — and every non-lease session — keep today's session-derived
+   * scope context byte-identically.
+   */
+  #actingReadScopeContext(
+    space: string,
+    session: SessionState,
+    actingContext: SchedulerExecutionContextKey | undefined,
+  ):
+    | { ok: { principal?: string; sessionId: string }; error?: never }
+    | { ok?: never; error: V2Error } {
+    const base = this.#scopeContextForSession(space, session);
+    if (actingContext === undefined || actingContext === "space") {
+      return { ok: base };
+    }
+    const binding = this.#boundExecutionSessions.get(
+      sessionKey(space, session.id),
+    );
+    if (binding === undefined) {
+      return {
+        error: toError(
+          "ProtocolError",
+          "acting contexts require a lease-bound executor session",
+        ),
+      };
+    }
+    const principal = Engine.principalOfUserContextKey(actingContext);
+    if (principal === undefined) {
+      // Session lanes arrive with C2; malformed keys are protocol misuse.
+      return {
+        error: toError("ProtocolError", "malformed acting context"),
+      };
+    }
+    const grant = this.#userLaneGrants.get(
+      userLaneKey(
+        space,
+        binding.lease.branch,
+        actingContext as `user:${string}`,
+      ),
+    );
+    if (grant === undefined) {
+      return { error: laneReadRejection() };
+    }
+    return { ok: { principal: grant.principal, sessionId: base.sessionId } };
+  }
+
+  /**
+   * C1.4b (amendment 1, part 3): a lease-bound executor session's
+   * applicable scheduler contexts derive from its OPEN lane grants — never
+   * from the sponsor principal, whose own user/session rows stay
+   * client-primary. A per-request acting context narrows the set to that
+   * one lane (plus the shared space lane). Non-lease sessions keep the
+   * principal-derived set byte-identically.
+   */
+  #schedulerApplicableContextKeysForSession(
+    space: string,
+    session: SessionState,
+    scopeContext: { principal?: string; sessionId: string },
+    actingContext?: SchedulerExecutionContextKey,
+  ): SchedulerExecutionContextKey[] {
+    const binding = this.#boundExecutionSessions.get(
+      sessionKey(space, session.id),
+    );
+    if (binding === undefined) {
+      return schedulerApplicableContextKeys(
+        scopeContext.principal,
+        scopeContext.sessionId,
+      );
+    }
+    if (actingContext !== undefined && actingContext !== "space") {
+      return ["space", actingContext];
+    }
+    const keys: SchedulerExecutionContextKey[] = ["space"];
+    for (const grant of this.#userLaneGrants.values()) {
+      if (grant.space === space && grant.branch === binding.lease.branch) {
+        keys.push(grant.contextKey as SchedulerExecutionContextKey);
+      }
+    }
+    return keys;
+  }
+
   #executionLeaseFenceForCommit(
     space: string,
     session: SessionState,
@@ -4160,6 +4258,7 @@ export class Server {
           branch: revision.branch,
           id: revision.id,
           ...(revision.scope !== undefined ? { scope: revision.scope } : {}),
+          scopeKey: revision.scopeKey,
           seq: revision.seq,
           op: revision.op,
         })
@@ -5145,10 +5244,12 @@ export class Server {
                 pieceId: observation.pieceId,
                 processGeneration: observation.processGeneration,
                 actionId: observation.actionId,
-                applicableExecutionContextKeys: schedulerApplicableContextKeys(
-                  scopeContext.principal,
-                  scopeContext.sessionId,
-                ),
+                applicableExecutionContextKeys: this
+                  .#schedulerApplicableContextKeysForSession(
+                    message.space,
+                    session,
+                    scopeContext,
+                  ),
               },
             ).snapshots;
             previousReadSpaces.set(
@@ -5421,6 +5522,19 @@ export class Server {
     }
 
     try {
+      // C1.4b: the acting lane (if any) is validated against the live lane
+      // grant BEFORE any scope key resolves.
+      const scopeResolution = this.#actingReadScopeContext(
+        message.space,
+        session,
+        message.actingContext,
+      );
+      if (scopeResolution.error) {
+        return respondTypedError<GraphQueryResult>(
+          message.requestId,
+          scopeResolution.error,
+        );
+      }
       return {
         type: "response",
         requestId: message.requestId,
@@ -5429,7 +5543,7 @@ export class Server {
           message.query,
           aclEngine,
           undefined,
-          this.#scopeContextForSession(message.space, session),
+          scopeResolution.ok,
         ),
       };
     } catch (error) {
@@ -5490,18 +5604,28 @@ export class Server {
           },
         };
       }
-      const scopeContext = this.#scopeContextForSession(
+      const scopeResolution = this.#actingReadScopeContext(
         message.space,
         session,
+        message.actingContext,
       );
+      if (scopeResolution.error) {
+        return respondTypedError<SchedulerSnapshotListResult>(
+          message.requestId,
+          scopeResolution.error,
+        );
+      }
       const page = Engine.listSchedulerActionSnapshots(
         engine,
         {
           ...message.query,
-          applicableExecutionContextKeys: schedulerApplicableContextKeys(
-            scopeContext.principal,
-            scopeContext.sessionId,
-          ),
+          applicableExecutionContextKeys: this
+            .#schedulerApplicableContextKeysForSession(
+              message.space,
+              session,
+              scopeResolution.ok,
+              message.actingContext,
+            ),
         },
       );
       const snapshots = page.snapshots.map((snapshot) => ({
@@ -5578,10 +5702,18 @@ export class Server {
         };
       }
 
-      const scopeContext = this.#scopeContextForSession(
+      const scopeResolution = this.#actingReadScopeContext(
         message.space,
         session,
+        message.actingContext,
       );
+      if (scopeResolution.error) {
+        return respondTypedError<SchedulerWritersForTargetsResult>(
+          message.requestId,
+          scopeResolution.error,
+        );
+      }
+      const scopeContext = scopeResolution.ok;
 
       const targets: Engine.SchedulerWriterTarget[] = message.query.targets.map(
         (target) => ({
@@ -5597,10 +5729,13 @@ export class Server {
           branch: message.query.branch,
           ownerSpace: message.space,
           targets,
-          applicableExecutionContextKeys: schedulerApplicableContextKeys(
-            scopeContext.principal,
-            scopeContext.sessionId,
-          ),
+          applicableExecutionContextKeys: this
+            .#schedulerApplicableContextKeysForSession(
+              message.space,
+              session,
+              scopeContext,
+              message.actingContext,
+            ),
         }).map((writer) => ({
           ...writer,
           matchedWrites: writer.matchedWrites.map((match) => ({
@@ -5666,11 +5801,26 @@ export class Server {
     }
 
     try {
+      const scopeResolution = this.#actingReadScopeContext(
+        message.space,
+        session,
+        message.actingContext,
+      );
+      if (scopeResolution.error) {
+        return respondTypedError<WatchSetResult>(
+          message.requestId,
+          scopeResolution.error,
+        );
+      }
+      const actingPrincipal =
+        message.actingContext !== undefined && message.actingContext !== "space"
+          ? scopeResolution.ok.principal
+          : undefined;
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
         message.space,
         message.watches,
         aclEngine,
-        this.#scopeContextForSession(message.space, session),
+        scopeResolution.ok,
       );
       const sync = buildFullSync(
         session.entities,
@@ -5679,6 +5829,11 @@ export class Server {
         serverSeq,
       );
       session.watches = message.watches;
+      // The registration's acting principal is part of the watch set: the
+      // full-re-evaluation refresh resolves under it, so a lane watch never
+      // silently flips back to the sponsor's instances. Per-lane watch
+      // LIFECYCLE (drain clearing lane watches, one set per lane) is C1.5b.
+      session.watchScopePrincipal = actingPrincipal;
       session.graphs = graphs;
       session.entities = entities;
       session.trackedIds = trackedIdsFromEntries(entities.values());
@@ -5735,6 +5890,30 @@ export class Server {
     }
 
     try {
+      const scopeResolution = this.#actingReadScopeContext(
+        message.space,
+        session,
+        message.actingContext,
+      );
+      if (scopeResolution.error) {
+        return respondTypedError<WatchAddResult>(
+          message.requestId,
+          scopeResolution.error,
+        );
+      }
+      const actingPrincipal =
+        message.actingContext !== undefined && message.actingContext !== "space"
+          ? scopeResolution.ok.principal
+          : undefined;
+      if (actingPrincipal !== session.watchScopePrincipal) {
+        return respondTypedError<WatchAddResult>(
+          message.requestId,
+          toError(
+            "ProtocolError",
+            "session.watch.add acting context must match the registered watch set",
+          ),
+        );
+      }
       const startedAt = performance.now();
       const engine = aclEngine ?? await this.openEngine(message.space);
       const existingById = new Map(
@@ -5787,7 +5966,7 @@ export class Server {
             engine,
             query,
             undefined,
-            this.#scopeContextForSession(message.space, session),
+            scopeResolution.ok,
           );
           graphs.set(branch, tracked.state);
           for (const entity of tracked.state.entities.values()) {
@@ -6149,11 +6328,21 @@ export class Server {
             });
           }
 
+          const refreshScope = this.#scopeContextForSession(space, session);
           const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
             space,
             session.watches,
             undefined,
-            this.#scopeContextForSession(space, session),
+            // C1.4b: a watch set registered under an acting context keeps
+            // resolving under it on full re-evaluation (never silently
+            // flipping to the sponsor's instances); C1.5b owns per-lane
+            // watch lifecycle on lane drains.
+            session.watchScopePrincipal !== undefined
+              ? {
+                principal: session.watchScopePrincipal,
+                sessionId: refreshScope.sessionId,
+              }
+              : refreshScope,
           );
           const sync = buildDiffSync(
             session.entities,
@@ -6225,10 +6414,12 @@ export class Server {
       const page = Engine.listSchedulerActionSnapshots(engine, {
         sinceCommitSeq: sync.fromSeq,
         throughCommitSeq: sync.toSeq,
-        applicableExecutionContextKeys: schedulerApplicableContextKeys(
-          scopeContext.principal,
-          scopeContext.sessionId,
-        ),
+        applicableExecutionContextKeys: this
+          .#schedulerApplicableContextKeysForSession(
+            space,
+            session,
+            scopeContext,
+          ),
       });
       const receiverWriterSessionKey = Engine.resolveCommitSessionKey(
         sessionId,
@@ -6903,6 +7094,15 @@ const parseSchedulerWritersForTargetsQuery = (
   };
 };
 
+/** C1.4b: additive per-request acting context. Shape-checked here only;
+ * lane-grant validation is the handler's job. */
+const parsedActingContext = (
+  parsed: Record<string, unknown>,
+): { actingContext?: SchedulerExecutionContextKey } =>
+  typeof parsed.actingContext === "string"
+    ? { actingContext: parsed.actingContext as SchedulerExecutionContextKey }
+    : {};
+
 export const parseClientMessage = (
   payload: string,
 ): ClientMessage | null => {
@@ -6990,6 +7190,7 @@ export const parseClientMessage = (
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
+      ...parsedActingContext(parsed),
       query: parsed.query as unknown as GraphQueryRequest["query"],
     };
   }
@@ -7061,6 +7262,7 @@ export const parseClientMessage = (
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
+      ...parsedActingContext(parsed),
       watches: parsed.watches as WatchSpec[],
     };
   }
@@ -7077,6 +7279,7 @@ export const parseClientMessage = (
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
+      ...parsedActingContext(parsed),
       watches: parsed.watches as WatchSpec[],
     };
   }
@@ -7095,6 +7298,7 @@ export const parseClientMessage = (
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
+      ...parsedActingContext(parsed),
       query,
     };
   }
@@ -7113,6 +7317,7 @@ export const parseClientMessage = (
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
+      ...parsedActingContext(parsed),
       query,
     };
   }

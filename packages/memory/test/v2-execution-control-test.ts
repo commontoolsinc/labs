@@ -2546,11 +2546,18 @@ Deno.test("unserved attempts derive their basis and settle canonically", async (
       diagnosticCode: "dynamic-non-space-scope",
     }]);
 
-    const snapshots = await session.listSchedulerActionSnapshots({
+    // The narrowed row lands under the principal's USER context; the bound
+    // executor session no longer lists scoped rows without a lane grant
+    // (C1.4b), so the stored shape is asserted through an UNBOUND session
+    // of the same principal.
+    const observerClient = await connectControlClient(server);
+    const observer = await mount(observerClient) as ExecutionSession;
+    const snapshots = await observer.listSchedulerActionSnapshots({
       actionId: claim.actionId,
       pieceId: claim.pieceId,
       processGeneration: 1,
     });
+    await observerClient.close();
     const stored = snapshots.snapshots[0]?.observation as Record<
       string,
       unknown

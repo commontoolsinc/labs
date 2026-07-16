@@ -82,6 +82,7 @@ export class EngineObjectManager implements ObjectStorageManager {
   #attestations = new Map<string, IAttestation>();
   #details = new Map<string, {
     seq: number;
+    scopeKey: string;
     document: NonNullable<Engine.EntityState["document"]>;
   }>();
   #missing = new Set<string>();
@@ -145,6 +146,7 @@ export class EngineObjectManager implements ObjectStorageManager {
     this.#attestations.set(key, attestation);
     this.#details.set(key, {
       seq: state.seq,
+      scopeKey: state.scopeKey,
       document: state.document,
     });
     return attestation;
@@ -247,10 +249,19 @@ const snapshotForDocKey = (
   const type = "application/json";
   const detail = manager.detail({ id, type, scope });
   const state = detail === undefined ? manager.readState(id, scope) : null;
+  // RESOLVED scope key (C1.4b): carried on every snapshot so sync frames
+  // attribute per lane. An absent doc still resolves its instance key from
+  // the evaluation's scope context.
+  const scopeKey = detail?.scopeKey ?? state?.scopeKey ??
+    Engine.resolveScopeKey(scope, {
+      principal: manager.principal,
+      sessionId: manager.sessionId,
+    });
   return {
     branch,
     id,
     ...(scope !== DEFAULT_SCOPE ? { scope } : {}),
+    scopeKey,
     seq: detail?.seq ?? state?.seq ?? 0,
     document: detail?.document === undefined
       ? state?.document === null || state?.document === undefined

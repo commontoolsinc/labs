@@ -38,11 +38,17 @@ export const isEmptySync = (sync: SessionSync): boolean =>
 export const toCacheEntry = (
   entity: EntitySnapshot,
 ): SessionCacheEntry => {
+  // Resolved scope key rides through to the sync upsert (C1.4b) so a
+  // multi-lane receiver can attribute the frame to an instance.
+  const scopeKey = entity.scopeKey !== undefined
+    ? { scopeKey: entity.scopeKey }
+    : {};
   if (entity.document === null) {
     return {
       branch: entity.branch,
       id: entity.id,
       scope: entity.scope ?? DEFAULT_SCOPE,
+      ...scopeKey,
       seq: entity.seq,
       deleted: true,
     };
@@ -51,6 +57,7 @@ export const toCacheEntry = (
     branch: entity.branch,
     id: entity.id,
     scope: entity.scope ?? DEFAULT_SCOPE,
+    ...scopeKey,
     seq: entity.seq,
     doc: entity.document,
   };

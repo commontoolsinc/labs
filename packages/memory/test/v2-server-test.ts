@@ -1358,6 +1358,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
       entities: [{
         branch: "",
         id: "of:doc:1",
+        scopeKey: "space",
         seq: 1,
         document: {
           value: {
@@ -2561,6 +2562,7 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 1,
       doc: {
         value: { version: 1 },
@@ -2619,6 +2621,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
         branch: "",
         id: "of:doc:1",
         scope: "space",
+        scopeKey: "space",
         seq: 0,
         deleted: true,
       },
@@ -2703,6 +2706,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 2,
       doc: {
         value: { version: 3 },
@@ -2938,6 +2942,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 2,
       doc: {
         value: { version: 3 },
@@ -3124,6 +3129,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 1,
       doc: {
         value: { version: 1 },
@@ -3145,6 +3151,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 3,
       doc: {
         value: { version: 3 },
@@ -3153,6 +3160,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       branch: "",
       id: "of:doc:2",
       scope: "space",
+      scopeKey: "space",
       seq: 2,
       doc: {
         value: { version: 2 },
@@ -3340,6 +3348,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 1,
       doc: {
         value: { version: 1 },
@@ -3359,6 +3368,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
       branch: "",
       id: "of:doc:2",
       scope: "space",
+      scopeKey: "space",
       seq: 2,
       doc: {
         value: { version: 2 },

@@ -844,8 +844,17 @@ Deno.test("lease-bound execution reads and mirrors sponsor PerSession scope", as
         },
       },
     });
+    // C1.4b (lane-scoped read seam): a LEASE-BOUND session's applicable
+    // scheduler contexts derive from its open lane grants — never from the
+    // sponsor principal. With no grants open, the sponsor's session-context
+    // row is invisible to the executor channel; the sponsor's own session
+    // still lists it through its principal-derived keys.
     assertEquals(
-      (await executor.listSchedulerActionSnapshots()).snapshots.map(
+      (await executor.listSchedulerActionSnapshots()).snapshots,
+      [],
+    );
+    assertEquals(
+      (await sponsor.listSchedulerActionSnapshots()).snapshots.map(
         (snapshot) => (snapshot.observation as { actionId?: string }).actionId,
       ),
       ["action:sponsor-session"],
@@ -856,6 +865,16 @@ Deno.test("lease-bound execution reads and mirrors sponsor PerSession scope", as
     );
     assertEquals(
       (await executor.writersForTargets({
+        targets: [{
+          id: schedulerWrite.id,
+          scope: schedulerWrite.scope,
+          path: toDocumentPath([]),
+        }],
+      })).writers,
+      [],
+    );
+    assertEquals(
+      (await sponsor.writersForTargets({
         targets: [{
           id: schedulerWrite.id,
           scope: schedulerWrite.scope,

@@ -580,6 +580,7 @@ Deno.test("memory v2 client watch views expose incremental sync effects", async 
         branch: "",
         id: "of:doc:1",
         scope: "space",
+        scopeKey: "space",
         seq: 2,
         doc: {
           value: {
@@ -2115,6 +2116,7 @@ Deno.test(
         branch: "",
         id: "of:doc:1",
         scope: "space",
+        scopeKey: "space",
         seq: 1,
         doc: {
           value: {
