@@ -29,6 +29,7 @@ import {
   expandSessionSyncSchemas,
   type SchemaTableSessionSync,
 } from "../v2/sync-schema-table.ts";
+import { findSyncSchemaRef } from "../v2/sync-schema-ref.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 
 const textEncoder = new TextEncoder();
@@ -155,6 +156,50 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
   );
 });
 
+Deno.test("sync schema table reports each repeated schema once", () => {
+  const observed: JSONSchema[] = [];
+
+  compressSessionSyncSchemas(repeatedSchemaSync(2), (schema) => {
+    observed.push(schema);
+  });
+
+  assertEquals(observed, [internSchema(largeSchema(), true).schema]);
+});
+
+Deno.test("sync schema table preserves own __proto__ fields", () => {
+  const value = JSON.parse('{"__proto__":{"safe":true}}') as Record<
+    string,
+    unknown
+  >;
+  value.ref = linkRefFrom({
+    id: "of:target",
+    path: [],
+    schema: { type: "string" },
+  });
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:proto-source",
+      scope: "space",
+      seq: 1,
+      doc: { value },
+    }],
+    removes: [],
+  };
+
+  const compressed = compressSessionSyncSchemas(sync);
+  const compressedValue = compressed.upserts[0].doc?.value as Record<
+    string,
+    unknown
+  >;
+
+  assert(Object.hasOwn(compressedValue, "__proto__"));
+  assertEquals(compressedValue.__proto__, { safe: true });
+});
+
 Deno.test("sync schema table round-trips legacy aliases nested in arrays", () => {
   const schema: JSONSchema = {
     type: "object",
@@ -227,7 +272,14 @@ Deno.test("sync schema table round-trips legacy aliases nested in arrays", () =>
     ).schema,
     undefined,
   );
-  assertEquals(expandSessionSyncSchemas(compressed), sync);
+  const expandedSchemas: JSONSchema[] = [];
+  assertEquals(
+    expandSessionSyncSchemas(compressed, (expanded) => {
+      expandedSchemas.push(expanded);
+    }),
+    sync,
+  );
+  assertEquals(expandedSchemas, [internSchema(schema, true).schema]);
 });
 
 Deno.test("sync schema table continues through sibling fields after link payloads", () => {
@@ -293,6 +345,20 @@ Deno.test("sync schema table continues through sibling fields after link payload
   assertEquals(compressedPayload.schema, `schema-ref@2:${primaryHash}`);
   assertEquals(compressedSiblingPayload.schema, `schema-ref@2:${siblingHash}`);
   assertEquals(expandSessionSyncSchemas(compressed), sync);
+});
+
+Deno.test("sync schema table ignores inherited fields while finding schema refs", () => {
+  const inherited = {
+    hidden: {
+      $alias: {
+        schema: "schema-ref@2:inherited",
+      },
+    },
+  };
+  const payload = Object.create(inherited) as Record<string, unknown>;
+  payload.visible = { value: "ordinary data" };
+
+  assertEquals(findSyncSchemaRef(payload), undefined);
 });
 
 Deno.test("sync schema table leaves syncs without compressible schemas unchanged", () => {
@@ -448,6 +514,63 @@ Deno.test("sync schema table expands unused tables and rejects bad refs", () => 
       }),
     Error,
     "Invalid sync schema table content",
+  );
+});
+
+Deno.test("sync schema table rejects refs without a populated table", () => {
+  const compressed = compressSessionSyncSchemas(
+    repeatedSchemaSync(1),
+  ) as SchemaTableSessionSync;
+  const { schemaTable: _schemaTable, ...withoutTable } = compressed;
+
+  assertThrows(
+    () => expandSessionSyncSchemas(withoutTable),
+    Error,
+    "Invalid sync schema table reference",
+  );
+  assertThrows(
+    () => expandSessionSyncSchemas({ ...withoutTable, schemaTable: {} }),
+    Error,
+    "Invalid sync schema table reference",
+  );
+});
+
+Deno.test("sync schema table validates dangling refs without recursive traversal", () => {
+  const danglingRef = "schema-ref@2:sha256:missing";
+  let deeplyNested: unknown = {
+    $alias: {
+      id: "of:deep-target",
+      path: [],
+      schema: danglingRef,
+    },
+  };
+  for (let index = 0; index < 20_000; index += 1) {
+    deeplyNested = { next: deeplyNested };
+  }
+
+  const sync: SessionSync = {
+    type: "sync",
+    fromSeq: 0,
+    toSeq: 1,
+    upserts: [{
+      branch: "",
+      id: "of:deep-dangling-ref",
+      scope: "space",
+      seq: 1,
+      doc: {
+        value: {
+          harmless: danglingRef,
+          nested: deeplyNested,
+        },
+      },
+    }],
+    removes: [],
+  };
+
+  assertThrows(
+    () => expandSessionSyncSchemas(sync),
+    Error,
+    "Invalid sync schema table reference",
   );
 });
 

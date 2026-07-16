@@ -8,6 +8,7 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   type EntityRef,
   entityRefFromString,
+  LINK_V1_TAG,
 } from "@commonfabric/data-model/cell-rep";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
@@ -85,6 +86,254 @@ const toEntityDocument = (
   }
   return document as EntityDocument;
 };
+
+Deno.test("memory v2 engine reserves sync schema reference strings", async () => {
+  const { engine, path } = await createEngine();
+  const id = "entity:reserved-sync-schema-ref";
+  const reservedRef = "schema-ref@2:sha256:user-controlled";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:reserved-sync-schema-ref",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: toEntityDocument({
+            harmless: reservedRef,
+            ref: {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:target",
+                  path: [],
+                  schema: "opaque-schema-name",
+                },
+              },
+            },
+            $alias: {
+              id: "of:legacy-target",
+              path: [],
+              schema: "opaque-legacy-schema-name",
+            },
+          }),
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "entity:reserved-sync-schema-ref-set",
+              value: toEntityDocument({
+                $alias: {
+                  id: "of:target",
+                  path: [],
+                  schema: reservedRef,
+                },
+              }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
+    applyCommit(engine, {
+      sessionId: "session:reserved-sync-schema-ref",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "add",
+            path: "/value/harmlessPatch",
+            value: reservedRef,
+          }],
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+                value: reservedRef,
+              }],
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
+    for (
+      const path of [
+        `/value/ref/~1/${LINK_V1_TAG}/schema`,
+        "/value/$alias/schema",
+      ]
+    ) {
+      assertThrows(
+        () =>
+          applyCommit(engine, {
+            sessionId: "session:reserved-sync-schema-ref",
+            commit: {
+              localSeq: 3,
+              reads: { confirmed: [], pending: [] },
+              operations: [{
+                op: "patch",
+                id,
+                patches: [{
+                  op: "move",
+                  from: "/value/harmless",
+                  path,
+                }],
+              }],
+            },
+          }),
+        ProtocolError,
+        "reserved wire schema reference",
+      );
+    }
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "entity:reserved-sync-schema-ref-hidden-by-set",
+              value: toEntityDocument({
+                $alias: {
+                  id: "of:target",
+                  path: [],
+                  schema: reservedRef,
+                },
+              }),
+            }, {
+              op: "set",
+              id: "entity:reserved-sync-schema-ref-hidden-by-set",
+              value: toEntityDocument({ safe: true }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+    assertEquals(
+      read(engine, { id: "entity:reserved-sync-schema-ref-hidden-by-set" }),
+      null,
+    );
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+                value: reservedRef,
+              }],
+            }, {
+              op: "delete",
+              id,
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
+    assertEquals(
+      read(engine, { id }),
+      toEntityDocument({
+        harmless: reservedRef,
+        harmlessPatch: reservedRef,
+        ref: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:target",
+              path: [],
+              schema: "opaque-schema-name",
+            },
+          },
+        },
+        $alias: {
+          id: "of:legacy-target",
+          path: [],
+          schema: "opaque-legacy-schema-name",
+        },
+      }),
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine reserves request CAS schema reference strings", async () => {
+  const { engine, path } = await createEngine();
+  const reservedRef = "schema-cas@1:sha256:user-controlled";
+  try {
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-request-schema-ref",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "entity:reserved-request-schema-ref",
+              value: toEntityDocument({
+                $alias: {
+                  id: "of:target",
+                  path: [],
+                  schema: reservedRef,
+                },
+              }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+    assertEquals(
+      read(engine, { id: "entity:reserved-request-schema-ref" }),
+      null,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
 
 Deno.test("memory v2 engine stores independent scoped instances for the same id", async () => {
   const { engine, path } = await createEngine();

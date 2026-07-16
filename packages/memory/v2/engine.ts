@@ -8,6 +8,10 @@ import {
 } from "./patch.ts";
 import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
 import {
+  containsSyncSchemaRefString,
+  findSyncSchemaRef,
+} from "./sync-schema-ref.ts";
+import {
   type BranchName,
   type CellScope,
   type ClientCommit,
@@ -5060,6 +5064,8 @@ const applyCommitTransaction = (
     revisions.push(revision);
   }
 
+  validateStoredSyncSchemaRefs(engine, branch, revisions);
+
   engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, revisions);
 
@@ -5952,6 +5958,48 @@ const materializeSnapshots = (
     }
     seen.add(key);
     maybeMaterializeSnapshot(engine, branch, revision.id, revisionScopeKey);
+  }
+};
+
+const validateStoredSyncSchemaRefs = (
+  engine: Engine,
+  branch: BranchName,
+  revisions: readonly AppliedRevision[],
+): void => {
+  const candidates: AppliedRevision[] = [];
+
+  for (const revision of revisions) {
+    if (
+      (revision.op === "set" &&
+        findSyncSchemaRef(revision.document) !== undefined) ||
+      (revision.op === "patch" &&
+        (containsSyncSchemaRefString(revision.patches) ||
+          revision.patches?.some((patch) => patch.op === "move") === true))
+    ) {
+      candidates.push(revision);
+    }
+  }
+
+  for (const revision of candidates) {
+    const scopeKey = revision.scopeKey ?? DEFAULT_SCOPE_KEY;
+    let document: EntityDocument | undefined;
+    if (revision.op === "set") {
+      document = revision.document;
+    } else if (revision.op === "patch") {
+      document = reconstructPatchedDocument(engine, {
+        id: revision.id,
+        scopeKey,
+        branch,
+        seq: revision.seq,
+        opIndex: revision.opIndex,
+      });
+    }
+    const ref = findSyncSchemaRef(document);
+    if (ref !== undefined) {
+      throw new ProtocolError(
+        `memory v2 documents may not persist reserved wire schema reference: ${ref}`,
+      );
+    }
   }
 };
 
