@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import {
   emptySchemaObject,
   schemaForValueType,
@@ -122,7 +122,7 @@ export function toJSONWithLegacyAliases(
   // (zero enumerable own-props). The `for...in` copy branch below would flatten
   // it to `{}`, so return it unchanged here — after the cell / alias / array
   // handling above, which must still win for those forms.
-  if (value instanceof BaseFabricPrimitive) {
+  if (value instanceof FabricPrimitive) {
     return value as unknown as JSONValue;
   }
 

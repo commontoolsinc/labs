@@ -1,5 +1,7 @@
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import {
+  FabricPrimitive,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -820,7 +822,7 @@ function traverseAndCellify(
   // (zero enumerable own-props). It is not a link, so the `Object.fromEntries(
   // Object.entries(...))` rebuild below would flatten it to `{}`; leave it
   // intact as an atomic leaf, like any string or number.
-  if (value instanceof BaseFabricPrimitive) return value;
+  if (value instanceof FabricPrimitive) return value;
   if (isRecord(value)) {
     return Object.fromEntries(
       Object.entries(value).map((

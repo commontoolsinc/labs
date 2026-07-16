@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-primitives";
+import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import { type FactoryInput, isPattern, isReactive } from "./types.ts";
 import { noteDerivedCopy } from "./pattern-metadata.ts";
 import { isCell } from "../cell.ts";
@@ -13,7 +13,7 @@ import { isCellResultForDereferencing } from "../query-result-proxy.ts";
  * @returns Transformed value
  *
  * TODO(danfuzz): The `isRecord`-gated `Object.entries`/`Array.map` descent
- * below now leaves `FabricPrimitive` values atomic (a `BaseFabricPrimitive`
+ * below now leaves `FabricPrimitive` values atomic (an `instanceof` check
  * short-circuits the descent condition), but the other special-object type,
  * `FabricInstance` (a container), is still walked by its internal slots instead
  * of its codec contents. Unlike a primitive it *does* need descending into —
@@ -44,7 +44,7 @@ export function traverseValue(
     !isReactive(value) &&
     !isCell(value) &&
     !isCellResultForDereferencing(value) &&
-    !((value as object) instanceof BaseFabricPrimitive) &&
+    !((value as object) instanceof FabricPrimitive) &&
     (isRecord(value) || isPattern(value))
   ) {
     if (Array.isArray(value)) {
