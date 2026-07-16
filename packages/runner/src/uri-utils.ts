@@ -57,18 +57,33 @@ export function fromURI(uri: URI | string): string {
 }
 
 /**
- * Extract the JSON object from a data URI
+ * Extracts and parses the JSON payload of a `data:` URI, which is required to
+ * have the media type `application/json`. The payload is everything past the
+ * first comma, and how it is spelled is dictated by the parameters in the
+ * header before that comma:
  *
- * Data URIs are a way to embed JSON in a URI. They are a base64 encoded string
- * that is prefixed with "data:application/json". The string is then encoded in
- * base64.
+ * - `;base64` selects Base64. Without it, the payload is percent-encoded.
+ * - `;charset=` is honored only as `utf-8` (or `utf8`), and any other value is
+ *   rejected. It is UTF-8 either way; the parameter only gets to agree.
  *
- * The data URI is a string that looks like this:
+ * An empty payload yields `undefined`, rather than being a parse error.
  *
- * data:application/json;charset=utf-8;base64,
- * @param uri - The data URI to extract the JSON from
- * @returns The JSON object
- * @throws If the URI is invalid or the JSON is invalid
+ * This reads a strict superset of what gets written by `link-utils.ts`'s
+ * `createDataCellURI()`, which only ever emits the percent-encoded form with no
+ * header parameters (`data:application/json,...`). The Base64 and `charset`
+ * spellings are for `data:` URIs originating anywhere else.
+ *
+ * **Note:** This is the decode half of a matched set: it reads what
+ * `createDataCellURI()` writes. The two are a pair by construction -- the
+ * encoding chosen there dictates what is decodable here -- but the dependency
+ * between the files only runs one way (`link-utils.ts` imports this module,
+ * not the reverse), so nothing mechanically holds them in agreement. Change
+ * one and the other has to move with it; see the `TODO`s in both bodies.
+ *
+ * @param uri The `data:` URI to read.
+ * @returns The parsed payload, or `undefined` if the payload is empty.
+ * @throws If `uri` is not an `application/json` `data:` URI, if it declares a
+ *   charset other than UTF-8, or if its payload is not valid JSON.
  */
 export function getJSONFromDataURI(uri: URI | string): any {
   if (!uri.startsWith("data:application/json")) {
@@ -114,5 +129,21 @@ export function getJSONFromDataURI(uri: URI | string): any {
     decodedData = decodeURIComponent(data);
   }
 
+  // TODO(danfuzz): This `JSON.parse()` is the decode half of the `data:` URI
+  // boundary, and has to change in lockstep with the `JSON.stringify()` in
+  // `link-utils.ts`'s `createDataCellURI()`: whatever encodes the payload
+  // determines what can decode it. The `data-model` counterpart is
+  // `valueFromJson()`, given a `ReconstructionContext`;
+  // `memory/v2.ts`'s `encodeMemoryBoundary()`/`decodeMemoryBoundary()` pair is
+  // a worked example of the same boundary, and uses an
+  // `EmptyReconstructionContext` because links at that boundary are sigil
+  // (plain) data rather than `FabricInstance`s, which is true here too.
+  //
+  // Note that this decode cannot simply switch over: a `data:` URI _is_ its
+  // own content, and such URIs are embedded in persisted documents, so ids in
+  // the current (bare JSON) form survive indefinitely. This side will have to
+  // accept both forms for as long as any of them remain. The encoded form is
+  // self-identifying -- `data-model` tags it `fvj1:` -- and
+  // `seemsLikeJsonEncodedFabricValue()` exists to make that distinction.
   return decodedData.length > 0 ? JSON.parse(decodedData) : undefined;
 }
