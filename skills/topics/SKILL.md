@@ -61,16 +61,19 @@ a change attributed to the previous actor.
 ## Reading Topics
 
 Read the board's topic references from its input cell, then address a topic by
-its direct URL:
+the canonical fid published in the board's `crossrefs` result:
 
 ```bash
 deno task cf piece get --url "$TOPICS_BOARD_URL" topics --input
+deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs
 export TOPIC_URL='https://estuary.saga-castor.ts.net/topics-dev-476ea34f/<topic-fid>'
 deno task cf piece get --url "$TOPIC_URL"
 ```
 
-Read the existing topic before changing it, especially its full body, comments,
-and links.
+Each crossref row's `fid` is the canonical address for its `topic`. Prefer it to
+the intermediate wrapper link stored in the board's topics array. Read the
+existing topic before changing it, especially its full body, comments, and
+links.
 
 ## Creating and updating
 
@@ -80,17 +83,20 @@ directly:
 ```bash
 # First setMyName on the board as shown above.
 deno task cf piece call --url "$TOPICS_BOARD_URL" addTopic '{"title":"<title>"}'
+deno task cf piece step --url "$TOPICS_BOARD_URL"
+deno task cf piece get --url "$TOPICS_BOARD_URL" crossrefs
 ```
 
-Find the new topic in the board input before applying further changes. All
-handler arguments are JSON; encode multiline Markdown rather than passing an
-unescaped string.
+Find the new topic's canonical fid in `crossrefs` before applying further
+changes. All handler arguments are JSON; encode multiline Markdown rather than
+passing an unescaped string.
 
 ```bash
 # Set your name on the board immediately before each command below.
 deno task cf piece call --url "$TOPIC_URL" setBody '{"body":"<complete revised body>"}'
 deno task cf piece call --url "$TOPIC_URL" addComment '{"body":"<point-in-time update>"}'
 deno task cf piece call --url "$TOPIC_URL" addLink '{"kind":"pr","url":"<PR URL>","label":"<PR label>"}'
+deno task cf piece step --url "$TOPIC_URL"
 ```
 
 The body is the living big-picture document. Replace it in place with the full
@@ -108,10 +114,17 @@ mentioning it only in prose is not enough. Topic-to-topic connections are
 derived automatically from topic fids or page URLs mentioned in bodies,
 comments, and link URLs, so do not add manual `kind: "topic"` links.
 
-## Estuary persistence exception
+## Persistence and computed results
 
-Do **not** run `cf piece step` against Topics from a fresh CLI replica. Writes
-commit without it; stepping a partial-view replica can persist derived values
-computed from incomplete state. This Topics-specific rule overrides the generic
-CLI workflow in `skills/cf/SKILL.md`. Verify a write by reading the direct topic
-URL or opening it in a materialized renderer, not by stepping it.
+Topics handler writes commit durably before `piece step`: verify source fields
+such as bodies, comments, and links with `piece get ... --input`. Computed
+result fields remain stale until the piece is stepped or a renderer materializes
+them. After changing a topic, step that topic before relying on `commentCount`,
+`lastActivityAt`, or its derived connections. After creating a topic, step the
+board before relying on `topicCount` or `crossrefs`.
+
+There is no Topics-specific prohibition on stepping a fresh CLI replica. The
+current CLI converges the board's linked topic inputs before recomputing its
+results, so use the normal step workflow from `skills/cf/SKILL.md` whenever
+fresh computed values are needed. The linked-input convergence regression lives
+in `packages/runner/test/fresh-replica-read-asymmetry.test.ts`.

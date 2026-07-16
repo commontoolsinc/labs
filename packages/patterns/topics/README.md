@@ -61,11 +61,16 @@ Agents are first-class participants. Against a deployed board piece:
 ```bash
 cf piece call --piece <board> setMyName '{"name":"Fable"}'
 cf piece call --piece <board> addTopic '{"title":"..."}'
-cf piece get  --piece <board> topics --input      # then address a topic piece
+cf piece step --piece <board>                      # materialize computed rows
+cf piece get  --piece <board> crossrefs            # canonical topic fids
 cf piece call --piece <topic> addComment '{"body":"..."}'
+cf piece step --piece <topic>                      # refresh computed fields
 ```
 
-Do **not** run `cf piece step` from a fresh CLI replica: a replica with a
-partial view persists deriveds computed from that partial view. Writes commit
-fine on their own; renderers derive for themselves. Verify writes via a renderer
-or post-materialization fid reads.
+Handler source writes commit before `piece step`, so `--input` reads can verify
+bodies, comments, links, and the board's topics list immediately. A step is
+still needed before relying on computed result fields such as `topicCount`,
+`crossrefs`, `commentCount`, or `lastActivityAt`. Fresh CLI replicas converge
+the board's linked topic inputs before recomputing; there is no Topics-specific
+exception to the normal step workflow. Prefer the canonical topic fids exported
+by `crossrefs` over intermediate wrapper links in the board's input array.
