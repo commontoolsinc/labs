@@ -1802,16 +1802,20 @@ function resolveBuilderSymbolKind(
   if (seen.has(resolved)) return undefined;
   seen.add(resolved);
 
+  // Three ways to be one of our builders: declared in the CommonFabric
+  // declarations, imported from them, or ambient. They differ only in how the
+  // symbol got here, not in what it is.
   const name = resolved.getName();
-  const builderName = builderNameForExportName(name);
-  if (BUILDER_SYMBOL_NAMES.has(name) && isCommonFabricSymbol(resolved)) {
-    return { kind: "builder", symbol: resolved, builderName };
-  }
-  if (BUILDER_SYMBOL_NAMES.has(name) && isImportedFromCommonFabric(resolved)) {
-    return { kind: "builder", symbol: resolved, builderName };
-  }
-  if (BUILDER_SYMBOL_NAMES.has(name) && isAmbientSymbol(resolved)) {
-    return { kind: "builder", symbol: resolved, builderName };
+  if (
+    BUILDER_SYMBOL_NAMES.has(name) &&
+    (isCommonFabricSymbol(resolved) || isImportedFromCommonFabric(resolved) ||
+      isAmbientSymbol(resolved))
+  ) {
+    return {
+      kind: "builder",
+      symbol: resolved,
+      builderName: builderNameForExportName(name),
+    };
   }
 
   for (const declaration of resolved.declarations ?? []) {

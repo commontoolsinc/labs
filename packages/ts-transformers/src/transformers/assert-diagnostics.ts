@@ -41,8 +41,9 @@ import { unwrapExpression } from "../utils/expression.ts";
  */
 export class AssertDiagnosticsTransformer extends HelpersOnlyTransformer {
   override filter(context: TransformationContext): boolean {
+    // A declaration file needs no check of its own: it never receives the
+    // helpers import, so the base filter has already turned it away.
     if (!super.filter(context)) return false;
-    if (context.sourceFile.isDeclarationFile) return false;
     return context.sourceFile.text.includes("assert");
   }
 
@@ -523,7 +524,6 @@ function captureValue(
   // rather than carrying the parentheses the operator needed. The original
   // expression is still what gets evaluated.
   const source = sourceTextOf(unwrapExpression(labelSource));
-  if (source.length === 0) return value;
 
   return context.cfHelpers.createHelperCall(
     "assertCapture",

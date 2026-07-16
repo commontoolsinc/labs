@@ -351,3 +351,90 @@ Deno.test("assert records a body that returns early", async () => {
   assertEquals(records, ["false", "a.get() === b.get()"]);
   assertEquals(assertCaptureLabels(root), ["a.get()", "b.get()"]);
 });
+
+// The stage sees the AST before type-checking has rejected anything, so it has
+// to survive a callback it cannot read and leave the call alone rather than
+// emit a broken body. These sources are deliberately not well-typed.
+
+Deno.test("assert leaves a callback it was not given inline alone", async () => {
+  const root = await transformed(patternSource(`
+  const predicate = () => a.get() <= c.get();
+  const check = assert(predicate);
+  return { check };`));
+
+  // The body is somewhere else, so there is nothing here to record.
+  assertEquals(assertCaptures(root), []);
+  assertEquals(recordSource(root), undefined);
+});
+
+Deno.test("assert leaves a callback that takes parameters alone", async () => {
+  // `assert` takes a callback of no arguments, so this does not type-check —
+  // but the stage runs before that is reported and must not act on it.
+  const root = await transformed(patternSource(`
+  const check = assert((x: number) => x > 0);
+  return { check };`));
+
+  assertEquals(assertCaptures(root), []);
+});
+
+Deno.test("assert leaves a body with a bare return alone", async () => {
+  const root = await transformed(patternSource(`
+  const check = assert(() => {
+    if (a.get() < 0) { return; }
+    return a.get() === b.get();
+  });
+  return { check };`));
+
+  // A bare `return` cannot produce a record, and rewriting only the other one
+  // would leave the body handing back a boolean on that path.
+  assertEquals(assertCaptures(root), []);
+  assertEquals(recordSource(root), undefined);
+});
+
+Deno.test("assert leaves a body with no return alone", async () => {
+  const root = await transformed(patternSource(`
+  const check = assert(() => {
+    a.get();
+  });
+  return { check };`));
+
+  assertEquals(assertCaptures(root), []);
+  assertEquals(recordSource(root), undefined);
+});
+
+Deno.test("assert leaves an operator it does not record alone", async () => {
+  const root = await transformed(patternSource(`
+  const check = assert(() => (a.get(), b.get() === 2));
+  return { check };`));
+
+  // A comma yields its right operand; neither side is an operand of a
+  // comparison, so there is nothing to record. The body is still a record.
+  assertEquals(assertCaptures(root), []);
+  assertEquals(recordSource(root), "(a.get(), b.get() === 2)");
+});
+
+Deno.test("assert leaves a namespace receiver alone when nothing else records", async () => {
+  const root = await transformed(patternSource(`
+  const check = assert(() => Object.is(1, 1));
+  return { check };`));
+
+  // Both arguments are literals, so the receiver is reached for — but
+  // `Object` is a namespace, and its value would say nothing.
+  assertEquals(assertCaptures(root), []);
+  assertEquals(recordSource(root), "Object.is(1, 1)");
+});
+
+Deno.test("assert leaves an optional-call receiver alone", async () => {
+  const root = await transformed(
+    `import { assert, cell, pattern } from "commonfabric";
+export default pattern(() => {
+  const maybe = cell<number[] | undefined>(undefined);
+  const check = assert(() => maybe.get()?.includes(1) ?? false);
+  return { check };
+});`,
+  );
+
+  // Recording the receiver of `?.` would need the chain rebuilt around the
+  // recording call; the operand itself is recorded instead.
+  assertEquals(assertCaptureLabels(root), ["maybe.get()?.includes(1)"]);
+});
