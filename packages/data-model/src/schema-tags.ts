@@ -1,38 +1,11 @@
 /**
  * Discovery-tag utilities for JSONSchema values.
  *
- * This module is a dependency-free leaf (only the `JSONSchema` type) so that
- * the schema generator — which type-checks its import graph under stricter
- * compiler options — and client-side consumers can share the tag definition
- * with the runtime.
+ * This module is a dependency-free leaf (only the `JSONSchema` type), so that a
+ * client-side consumer can share the tag definition with the runtime.
  */
 
 import type { JSONSchema } from "@commonfabric/api";
-
-// A hashtag is `#` followed by a run of Unicode letters, combining marks,
-// numbers, and underscores. This matches the convention shared across social
-// platforms: letters from any script are accepted (Latin with diacritics, CJK,
-// Cyrillic, Arabic, and so on), not just unaccented a-z. Any other character,
-// including a hyphen, whitespace, or the end of the text, terminates the tag.
-const HASHTAG_PATTERN = /#([\p{L}\p{M}\p{N}_]+)/gu;
-
-/**
- * Extract hashtag tokens from free text. A token starts at `#` and runs through
- * Unicode letters, combining marks, numbers, and underscores; a hyphen, space,
- * or other punctuation ends it. Returns the tokens lowercased, without the
- * leading `#`, deduplicated, in order of first appearance.
- *
- * TODO(danfuzz): This function doesn't really have anything to do with the
- * data model and should probably move to the `utils` package.
- */
-export function extractHashtags(text: string): string[] {
-  const tags: string[] = [];
-  for (const match of text.matchAll(HASHTAG_PATTERN)) {
-    const tag = match[1]!.toLowerCase();
-    if (!tags.includes(tag)) tags.push(tag);
-  }
-  return tags;
-}
 
 /**
  * Schema keywords whose values are themselves schemas (or collections of

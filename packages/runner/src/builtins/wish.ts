@@ -25,7 +25,7 @@ import {
   internSchema,
 } from "@commonfabric/data-model/schema-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
-import { extractHashtags } from "@commonfabric/data-model/schema-tags";
+import { extractHashtags } from "@commonfabric/utils/hashtags";
 import { getPatternEnvironment } from "../env.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
