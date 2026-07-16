@@ -4,6 +4,7 @@ import {
   computed,
   Default,
   equals,
+  type FactoryInput,
   handler,
   NAME,
   pattern,
@@ -18,7 +19,6 @@ import {
 } from "commonfabric";
 import {
   activeAdminRoleForSubject,
-  adminRegistryEntries,
   adminRegistryEveryoneIsAdmin,
   type EmptyAdminRegistryValue,
 } from "../cfc/admin/mod.ts";
@@ -124,6 +124,11 @@ export type LobbyAdminRegistryValue =
   | LobbyAdminRegistryStoredValue
   | Default<EmptyAdminRegistryValue>;
 export type LobbyAdminRegistryCell = Writable<LobbyAdminRegistryValue>;
+type LobbyAdminRegistryInputValue = {
+  [K in keyof LobbyAdminRegistryStoredValue]: FactoryInput<
+    LobbyAdminRegistryStoredValue[K]
+  >;
+};
 
 const EMPTY_PARTICIPANTS: LobbyParticipant[] = [];
 const EMPTY_PARTICIPANT_VIEWS: LobbyParticipantView[] = [];
@@ -142,10 +147,15 @@ export const lobbyParticipantsValue = (
   return participants?.length ? Array.from(participants) : EMPTY_PARTICIPANTS;
 };
 
-export const lobbyAdminRolesValue = (
-  adminRegistry: LobbyAdminRegistryCell,
+export const lobbyAdminRolesValue = <
+  T extends LobbyAdminRegistryValue | LobbyAdminRegistryInputValue,
+>(
+  adminRegistry: Writable<T>,
 ): LobbyAdminRole[] => {
-  const explicitAdmins = adminRegistryEntries<LobbyAdminRole>(adminRegistry);
+  const explicitAdmins = Array.from(
+    (adminRegistry.get() as LobbyAdminRegistryStoredValue | undefined)
+      ?.admins ?? [],
+  );
   if (explicitAdmins.length > 0) return explicitAdmins;
 
   const bootstrapAdmin = (
@@ -662,7 +672,7 @@ const LobbyParticipantRow = pattern<
 });
 
 const Lobby = pattern<LobbyInput, LobbyOutput>(({ roster, adminRegistry }) => {
-  const adminRegistryCell: LobbyAdminRegistryCell = adminRegistry!;
+  const adminRegistryCell = adminRegistry!;
   const profileWish = wish<LobbyProfile>({ query: "#profile" });
   const myProfile = profileWish.result;
   const viewerState = LobbyViewerState({
