@@ -29,7 +29,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["primary", "secondary"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     items: __cfHelpers.Cell<string[]>;
 }, number | undefined>(({ items }) => items.get()[0]?.length || items.get()[1]?.length, {
@@ -46,7 +46,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: ["number", "undefined"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // Tests triple || chain: a || b || c
 // Should produce nested unless calls
 // FIXTURE: logical-triple-or-chain

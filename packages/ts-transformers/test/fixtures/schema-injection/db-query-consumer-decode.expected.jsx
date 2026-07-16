@@ -74,7 +74,7 @@ const readAuthor = lift((qv: {
             required: ["name"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 export default pattern(() => {
     const db = sqliteDatabase().for("db", true);
     const q = db.query<{

@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["price", "discount"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     price: number;
     discount: number;
@@ -53,7 +53,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["price", "discount", "tax"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: complex-expressions
 // Verifies: multi-variable arithmetic in JSX is wrapped in a lift-applied computation with captured refs
 //   {price - discount}             → lift((...) => price - discount)({ price, discount })

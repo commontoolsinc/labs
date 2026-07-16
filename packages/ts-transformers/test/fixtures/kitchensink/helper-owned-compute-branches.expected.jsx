@@ -127,7 +127,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["memberIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
     project: {
         name: string;
@@ -152,7 +152,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["project", "member"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const member = __cf_pattern_input.key("element");
     const memberIndex = __cf_pattern_input.key("index");

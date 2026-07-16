@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items", "isEnabled"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     count: __cfHelpers.Cell<number>;
     items: __cfHelpers.Cell<string[]>;
@@ -54,7 +54,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["count", "items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: logical-complex-expressions
 // Verifies: nested && and mixed || && with JSX are transformed to when() with lift-applied predicates
 //   a && b && <JSX>     → when(lift(...)({ a, b }), <JSX>)

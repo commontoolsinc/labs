@@ -77,7 +77,7 @@ const passthroughLabels = lift((labels: string[]) => labels, {
     items: {
         type: "string"
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_1 = __cfHelpers.lift<{
     state: {
         threads: Thread[];
@@ -301,7 +301,7 @@ const __cfLift_3 = __cfHelpers.lift<{
     required: ["reboundIndex", "outerIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_4 = __cfHelpers.lift<{
     state: {
         lane: string;
@@ -334,7 +334,7 @@ const __cfLift_4 = __cfHelpers.lift<{
     required: ["state", "comment"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const comment = __cf_pattern_input.key("element");
     const reboundIndex = __cf_pattern_input.key("index");
@@ -436,7 +436,7 @@ const __cfLift_5 = __cfHelpers.lift<{
     required: ["edgeIndex", "outerIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_6 = __cfHelpers.lift<{
     state: {
         lane: string;
@@ -461,7 +461,7 @@ const __cfLift_6 = __cfHelpers.lift<{
     required: ["state", "edge"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_2 = __cfHelpers.pattern(__cf_pattern_input => {
     const edge = __cf_pattern_input.key("element");
     const edgeIndex = __cf_pattern_input.key("index");
@@ -729,7 +729,7 @@ const __cfLift_8 = __cfHelpers.lift<{
     required: ["labelIndex"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_9 = __cfHelpers.lift<{
     state: {
         lane: string;
@@ -754,7 +754,7 @@ const __cfLift_9 = __cfHelpers.lift<{
     required: ["state", "label"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_3 = __cfHelpers.pattern(__cf_pattern_input => {
     const label = __cf_pattern_input.key("element");
     const labelIndex = __cf_pattern_input.key("index");

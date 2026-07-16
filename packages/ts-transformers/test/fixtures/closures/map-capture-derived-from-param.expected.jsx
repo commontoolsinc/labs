@@ -41,7 +41,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["item", "settings"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfPattern_1 = __cfHelpers.pattern(__cf_pattern_input => {
     const item = __cf_pattern_input.key("element");
     const settings = __cf_pattern_input.key("params", "settings");
