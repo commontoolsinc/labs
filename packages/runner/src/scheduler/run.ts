@@ -182,6 +182,9 @@ export function watchReactiveActionCommit(state: {
           );
         }
       }
+      if (!state.isActionGenerationCurrent(state.action, state.generation)) {
+        return;
+      }
       state.markInvalid(state.action);
       state.pending.add(state.action);
       state.queueExecution();

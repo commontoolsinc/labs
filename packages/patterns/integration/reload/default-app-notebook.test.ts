@@ -12,8 +12,8 @@ import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import {
   collectSchedulerLoadSummary,
-  waitForActiveSpaceRoot,
   vdomHasButton,
+  waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
 } from "../cfc-browser-helpers.ts";

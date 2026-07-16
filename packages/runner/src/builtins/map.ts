@@ -30,14 +30,17 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import { outputSpotFromBinding } from "./scope-policy.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import {
+  boundPatternFactoryScope,
   cellIdentityKey,
   exposedResultCell,
+  outputSpotFromBinding,
+  resolvedCellScope,
   scopedCell,
 } from "./scope-policy.ts";
+import { narrowestScope } from "../scope.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
 import {
@@ -244,6 +247,14 @@ export function map(
     const opPattern = selection.pattern;
     const factoryGeneration = selection.generation;
     const factorySelectionLink = selection.factorySelectionLink;
+    const factoryResultScope = selection.factorySourceLink === undefined
+      ? undefined
+      : boundPatternFactoryScope(
+        runtime,
+        tx,
+        opPattern,
+        selection.factorySourceLink,
+      );
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
       const resultSchema = listResultSchema(opPattern.resultSchema);
@@ -462,6 +473,10 @@ export function map(
       if (!(i in list)) continue;
 
       const { dedupKey, linkKey } = cellIdentityKey(list[i]);
+      const rowScope = narrowestScope([
+        resolvedCellScope(runtime, tx, list[i]),
+        factoryResultScope,
+      ]);
       const occurrence = keyCounts.get(dedupKey) ?? 0;
       keyCounts.set(dedupKey, occurrence + 1);
       const elementKey = JSON.stringify([...linkKey, occurrence]);
@@ -491,7 +506,12 @@ export function map(
           existing.runGeneration = factoryGeneration;
         }
         existing.lastIndex = i;
-        newArrayValue[i] = exposedResultCell(runtime, tx, existing.resultCell);
+        newArrayValue[i] = exposedResultCell(
+          runtime,
+          tx,
+          existing.resultCell,
+          rowScope,
+        );
       } else {
         const resultCell = runtime.getCell(
           parentCell.space,
@@ -526,7 +546,12 @@ export function map(
           lastIndex: i,
           runGeneration: factoryGeneration,
         });
-        newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
+        newArrayValue[i] = exposedResultCell(
+          runtime,
+          tx,
+          resultCell,
+          rowScope,
+        );
       }
     }
     probeScoped(() => resultWithLog.set(newArrayValue));

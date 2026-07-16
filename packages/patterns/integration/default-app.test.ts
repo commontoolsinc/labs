@@ -10,8 +10,8 @@ import {
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import {
-  waitForActiveSpaceRoot,
   vdomHasButton,
+  waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
 } from "./cfc-browser-helpers.ts";

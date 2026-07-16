@@ -166,6 +166,7 @@ export function exposedResultCell<T>(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
   cell: Cell<T>,
+  minimumScope?: CellScope,
 ): Cell<T> {
   // Ideally, we'd just call getRaw on the cell, but since that may be a link,
   // we need to know the base to use to parse that link.
@@ -202,14 +203,15 @@ export function exposedResultCell<T>(
   // If the last writeRedirect target is a link, use that, but otherwise use
   // the last writeRedirect target.
   const link = parseLink(raw, target) ?? target;
+  const exposedScope = narrowestScope([link?.scope, minimumScope]);
   if (
     link === undefined ||
-    scopeRank(link.scope) <= scopeRank(cell.getAsNormalizedFullLink().scope)
+    scopeRank(exposedScope) <= scopeRank(cell.getAsNormalizedFullLink().scope)
   ) {
     return cell;
   }
 
-  const exposed = scopedCell(runtime, tx, cell, link.scope);
+  const exposed = scopedCell(runtime, tx, cell, exposedScope);
   // Copy the value and result linkage into the new exposed cell
   const resultLink = getMetaLink(initialCell, "result");
   if (resultLink !== undefined) {
