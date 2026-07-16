@@ -18,6 +18,15 @@ import {
   type WorkspaceCache,
 } from "./diffdoc.ts";
 import { type DiffHunk, type DiffModel, parseDiff } from "./diff.ts";
+import {
+  type CommitMessage,
+  extractMessage,
+  findCommitMessages,
+  type GitRunner,
+  MESSAGE_INDENT,
+  messageAt,
+  sameCommit,
+} from "./commitmsg.ts";
 import { highlightDocument, type Highlighter, parseDocument } from "./parse.ts";
 import { highlightMarkdownLines, isMarkdownPath } from "./markdown.ts";
 import type {
@@ -32,12 +41,37 @@ export function diffSource(
   ws: DiffWorkspace,
   edit: DiffEdit,
   cache?: WorkspaceCache,
+  git?: GitRunner,
 ): EditableSource {
   const files = [...edit.fileText.keys()];
+  // The HEAD commit's hash, computed once — the message of that commit (and only
+  // it) is editable. Absent when there is no git runner or no repository.
+  let headResolved = false;
+  let head: string | null = null;
+  const headSha = (): string | null => {
+    if (!headResolved) {
+      headResolved = true;
+      head = git?.headSha() ?? null;
+    }
+    return head;
+  };
+
+  // The HEAD commit's message region in the given lines, or null. The regions
+  // shift as the diff is edited, so they are re-derived from the current text.
+  const editableMessage = (lines: readonly string[]): CommitMessage | null => {
+    const h = headSha();
+    if (!h) return null;
+    for (const m of findCommitMessages(lines)) {
+      if (sameCommit(m.sha, h)) return m;
+    }
+    return null;
+  };
+
   // No file on disk backs this diff (nothing resolved or verified): read-only.
   if (edit.lines.size === 0) {
     return {
       label: null,
+      isDiff: true,
       editable: false,
       reason:
         "This diff doesn't match any file on disk, so there is nothing to edit.",
@@ -46,17 +80,67 @@ export function diffSource(
     };
   }
 
-  const policy: EditPolicy = {
-    editStart: editableStart,
-    insertPrefix: "+",
-  };
-
   // Save reads the hunks' current new-side file ranges, which expanding context
   // grows, so keep a mutable copy that expand and save share.
   const saveHunks: MutableHunk[] = edit.hunks.map((h) => ({ ...h }));
 
+  // Editability is decided against the current diff structure. Re-parsing the
+  // whole buffer on each edit key is wasteful, so memoise the parse and the
+  // message scan by the text they came from; the several guard calls within one
+  // keystroke reuse them.
+  let memoText: string | null = null;
+  let memoModel: DiffModel | null = null;
+  let memoMessages: readonly CommitMessage[] = [];
+  const classify = (
+    lines: readonly string[],
+  ): { model: DiffModel | null; messages: readonly CommitMessage[] } => {
+    const text = lines.join("\n");
+    if (text !== memoText) {
+      memoText = text;
+      memoModel = parseDiff(text);
+      memoMessages = findCommitMessages(lines);
+    }
+    return { model: memoModel, messages: memoMessages };
+  };
+
+  const kindOf = (
+    lines: readonly string[],
+    row: number,
+  ): "hunk" | "message" | null => {
+    const { model, messages } = classify(lines);
+    if (editableStart(model, saveHunks, lines[row] ?? "", row) !== null) {
+      return "hunk";
+    }
+    const h = headSha();
+    if (h) {
+      const m = messageAt(messages, row);
+      if (m && sameCommit(m.sha, h)) return "message";
+    }
+    return null;
+  };
+
+  const policy: EditPolicy = {
+    editStart: (lines, row) => {
+      const kind = kindOf(lines, row);
+      if (kind === "hunk") {
+        return editableStart(
+          classify(lines).model,
+          saveHunks,
+          lines[row] ?? "",
+          row,
+        );
+      }
+      // A message line is editable past its four-space indent.
+      return kind === "message" ? MESSAGE_INDENT.length : null;
+    },
+    regionKind: kindOf,
+    insertPrefix: "+",
+    messageIndent: MESSAGE_INDENT,
+  };
+
   return {
     label: files.length === 1 ? shortName(files[0]) : `${files.length} files`,
+    isDiff: true,
     editable: true,
     policy,
     parse: (text) => reparse(ws, text, cache),
@@ -72,7 +156,61 @@ export function diffSource(
     expandContext: (current, baseline, cursorLine) =>
       expandContext(ws, cache, saveHunks, current, baseline, cursorLine),
     save: (text) => save(text, edit.fileText, saveHunks),
+    pendingAmend: (baseline, current) =>
+      pendingAmend(editableMessage, baseline, current),
+    amendCommit: (baseline, current) =>
+      amendCommit(git, editableMessage, baseline, current),
   };
+}
+
+/** The commit whose message a save would amend: the HEAD message region differs
+ * from the baseline, or has been deleted outright. Null otherwise. */
+function pendingAmend(
+  editableMessage: (lines: readonly string[]) => CommitMessage | null,
+  baseline: string,
+  current: string,
+): { sha: string; subject: string } | null {
+  const curLines = current.split("\n");
+  const baseLines = baseline.split("\n");
+  const msg = editableMessage(curLines);
+  const baseMsg = editableMessage(baseLines);
+  if (!msg) {
+    // Every line of the region was deleted, so there is no region left to read
+    // the new message from. The message the save would write is empty, and the
+    // caller refuses an empty subject.
+    return baseMsg ? { sha: baseMsg.sha, subject: "" } : null;
+  }
+  const newText = extractMessage(curLines, msg);
+  if (baseMsg && extractMessage(baseLines, baseMsg) === newText) {
+    return null; // the message is unchanged
+  }
+  // The subject is the first non-blank line — git strips leading blanks — so an
+  // all-blank message reports an empty subject, which the caller refuses.
+  const subject = newText.split("\n").find((l) => l.trim() !== "") ?? "";
+  return { sha: msg.sha, subject };
+}
+
+/** Amend the HEAD commit's message from the edited text. Re-reads HEAD to guard
+ * against it having moved (an external commit) since the diff was shown — the
+ * amend rewrites whatever is HEAD, so it must still be the commit the message
+ * belongs to. Throws when there is no git runner or no editable message (the
+ * caller checks {@link pendingAmend} first, so those are defensive). */
+function amendCommit(
+  git: GitRunner | undefined,
+  editableMessage: (lines: readonly string[]) => CommitMessage | null,
+  _baseline: string,
+  current: string,
+): string {
+  const curLines = current.split("\n");
+  const msg = editableMessage(curLines);
+  if (!git || !msg) throw new Error("No commit message to amend.");
+  const live = git.headSha();
+  if (!live || !sameCommit(msg.sha, live)) {
+    throw new Error(
+      "HEAD has moved since this diff was shown; the commit was not amended.",
+    );
+  }
+  return git.amendMessage(extractMessage(curLines, msg));
 }
 
 /**
@@ -98,6 +236,9 @@ function revert(
       text: original,
       cursorLine: Math.min(cursorLine, baseLines.length - 1),
     };
+  }
+  if (scope === "message") {
+    return revertMessage(baseLines, current.split("\n"), cursorLine);
   }
   const cur = parseDiff(current);
   const base = parseDiff(original);
@@ -149,6 +290,32 @@ function revert(
     baseHunk.headerLine,
     baseHunk.endLine,
   );
+}
+
+/** Restore the commit message the cursor is in to its original text. The
+ * messages are matched to the original by document order (like files and
+ * hunks), so a `git log -p` with several commits reverts the right one. */
+function revertMessage(
+  baseLines: readonly string[],
+  curLines: readonly string[],
+  cursorLine: number,
+): { text: string; cursorLine: number } | null {
+  const curMsgs = findCommitMessages(curLines);
+  const idx = curMsgs.findIndex((m) =>
+    cursorLine >= m.start && cursorLine <= m.end
+  );
+  if (idx < 0) return null;
+  const cur = curMsgs[idx];
+  const base = findCommitMessages(baseLines)[idx];
+  if (!base) return null;
+  return {
+    text: [
+      ...curLines.slice(0, cur.start),
+      ...baseLines.slice(base.start, base.end + 1),
+      ...curLines.slice(cur.end + 1),
+    ].join("\n"),
+    cursorLine: cur.start,
+  };
 }
 
 /**
@@ -316,9 +483,9 @@ function applyExpansion(
  * The filenames whose lines differ between the original diff and the edited one.
  * Each file's slice of the diff text (its header through its last hunk line) is
  * compared, matched by path so a line shift in an earlier file does not
- * misattribute a later one. Repeated paths (`git log -p`) are concatenated. When
- * a change cannot be pinned to any file, every named file is returned, so the
- * quit prompt never undercounts.
+ * misattribute a later one. Repeated paths (`git log -p`) are concatenated. A
+ * change that touches no file's slice — an edited commit message — names no
+ * file, so a save (and the quit prompt) reflects that it writes no files.
  */
 function dirtyLabels(original: string, current: string): string[] {
   if (original === current) return [];
@@ -341,7 +508,7 @@ function dirtyLabels(original: string, current: string): string[] {
   for (const [path, body] of cb) {
     if (body !== ob.get(path)) out.push(shortName(path));
   }
-  return out.length > 0 ? out : [...cb.keys()].map(shortName);
+  return out;
 }
 
 /**
@@ -391,23 +558,36 @@ export function createDiffHighlighter(
   };
 }
 
-/** Lines that are diff structure (headers, hunk headers, file metadata): not
- * editable. `+++ `/`--- ` file headers are distinguished from `+`/`-` body
- * lines by their three-character marker. */
-const HEADER =
-  /^(@@|diff |index |--- |\+\+\+ |new file|deleted file|old mode|new mode|similarity|dissimilarity|rename |copy |Binary files|\\ )/;
-
-/** First editable column of a diff line, or null when it cannot be edited: a
- * context or added line is editable just past its one-character marker; a
- * removed line (old side) and any structural line are not. */
-function editableStart(lineText: string): number | null {
-  if (HEADER.test(lineText)) return null;
-  const c = lineText[0];
-  // A context or added line is editable past its one-character marker. An empty
-  // line is not editable: it carries no marker to protect, and editing it would
-  // forge one (turning it into a removed or unclassified line).
-  if (c === "+" || c === " ") return 1;
-  return null; // removed line, empty line, or anything not on the new side
+/**
+ * First editable column of the diff line at `row`, or null when it cannot be
+ * edited. A line is editable only when it is a context or added line inside a
+ * hunk whose new side matched a file on disk — the only lines a save can write
+ * back. A removed line, any structural line, an empty line (no marker to
+ * protect), a line in an unverified hunk, and any text outside a hunk (a commit
+ * preamble or trailing noise) are all refused. Hunks are matched to the save map
+ * by document order, as {@link save} does, so a repeated file in `git log -p`
+ * and a context expansion both stay in step.
+ */
+function editableStart(
+  model: DiffModel | null,
+  saveHunks: readonly MutableHunk[],
+  lineText: string,
+  row: number,
+): number | null {
+  if (!model) return null;
+  let gi = 0;
+  for (const f of model.files) {
+    for (const h of f.hunks) {
+      if (row > h.headerLine && row <= h.endLine) {
+        const info = saveHunks[gi];
+        if (!info?.verified || !info.absPath) return null; // not savable
+        const c = lineText[0];
+        return c === "+" || c === " " ? 1 : null; // ctx/add past its marker
+      }
+      gi++;
+    }
+  }
+  return null; // outside every hunk
 }
 
 /**
@@ -455,6 +635,8 @@ function isMarkdownDiffLine(rawLines: string[], lineIdx: number): boolean {
   }
   return false;
 }
+
+export const _internal = { editableStart, pendingAmend, amendCommit };
 
 function reparse(
   ws: DiffWorkspace,

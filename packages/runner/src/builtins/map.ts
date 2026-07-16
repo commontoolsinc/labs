@@ -40,7 +40,7 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveLink } from "../link-resolution.ts";
-import { isPrimitiveCellLink, parseLink } from "../link-utils.ts";
+import { listElementLink } from "./list-element-link.ts";
 import {
   linkResolutionProbe,
   machineryRead,
@@ -186,12 +186,7 @@ export function map(
       : !Array.isArray(rawList)
       ? rawList as unknown as Cell<any>[] // non-array: handled by the guard below
       : rawList.map((slot, i) => {
-        const slotLink: NormalizedFullLink = isPrimitiveCellLink(slot)
-          ? parseLink(slot, listBase)
-          : {
-            ...listBase,
-            path: [...listBase.path, String(i)],
-          };
+        const slotLink = listElementLink(runtime.cfc, listBase, slot, i);
         const resolved = resolveLink(runtime, tx, slotLink, "value");
         return runtime.getCellFromLink(resolved, undefined, tx);
       });

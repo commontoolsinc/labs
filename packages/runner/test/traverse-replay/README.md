@@ -47,11 +47,12 @@ while traversal control flow is preserved.
 behavior-preserving optimization must keep byte-identical:
 
 1. **Result hashes** per invocation (truncated structural hashes).
-2. **The read set** — every `tx.read`/`readOrThrow` address + option flags. This
-   is the scheduler's invalidation surface: dropping a read mark breaks
-   reactivity invisibly, and no unit test catches it. (Verified: commenting out
-   a single `READ_FOR_SCHEDULING` read in `traverseDAG` fails the test with
-   "reads missing".)
+2. **The read set** — every `tx.read`/`readOrThrow` address and every path in a
+   `trackReadPaths` batch, plus their option flags. This is the scheduler's
+   invalidation surface: dropping a read mark breaks reactivity invisibly, and
+   no unit test catches it. (Verified: commenting out a single
+   `READ_FOR_SCHEDULING` read in `traverseDAG` fails the test with "reads
+   missing".)
 3. **Schema-tracker contents** for shared/`includeMeta` contexts — the
    server-side subscription surface.
 

@@ -5,15 +5,15 @@ import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import { PiecesController } from "@commonfabric/piece/ops";
 import {
   browserWorkerParamsFromInitializationData,
-  checkUpdateInBackground,
-  maybeCheckHomeUpdate,
   postVersionSkew,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
   sanitizeForPostMessage,
+  shouldReconcileHomeRoot,
   versionSkewNotification,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
@@ -1096,6 +1096,19 @@ describe("RuntimeProcessor blob upload IPC", () => {
 });
 
 describe("RuntimeProcessor home pattern IPC", () => {
+  it("reconciles the home root only when both update flags are enabled", () => {
+    expect(shouldReconcileHomeRoot({ experimental: {} })).toBe(false);
+    expect(shouldReconcileHomeRoot({
+      experimental: { systemPatternAutoUpdate: true },
+    })).toBe(false);
+    expect(shouldReconcileHomeRoot({
+      experimental: {
+        systemPatternAutoUpdate: true,
+        systemPatternAutoUpdateHome: true,
+      },
+    })).toBe(true);
+  });
+
   it("uses the default-pattern metadata fast path when the home pattern is already instantiated", async () => {
     const defaultPatternRef: CellRef = {
       id: "of:default-pattern-result" as CellRef["id"],
@@ -1160,40 +1173,71 @@ describe("RuntimeProcessor home pattern IPC", () => {
     expect(idleCalled).toBe(true);
   });
 
-  it("maybeCheckHomeUpdate no-ops unless both flags are on", () => {
-    let built = false;
-    const runtime = {
-      userIdentityDID: "did:key:test-home",
-      experimental: { systemPatternAutoUpdate: true }, // home flag off
-      getHomeSpaceCell: () => {
-        built = true;
-        return { sync: () => Promise.resolve() };
-      },
-    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
-    maybeCheckHomeUpdate(cfcSigner, runtime);
-    // No controller built (the home flag gates it before any construction).
-    expect(built).toBe(false);
-  });
-
-  it("maybeCheckHomeUpdate builds a home controller and kicks a check when enabled", async () => {
+  it("routes an update-enabled home root through ensure before start", async () => {
+    const defaultPatternRef: CellRef = {
+      id: "of:update-enabled-home-root" as CellRef["id"],
+      space: "did:key:test-home" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const patternRef: CellRef = {
+      id: "of:update-enabled-home-pattern" as CellRef["id"],
+      space: "did:key:test-home" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const defaultPatternCell = {
+      ...defaultPatternRef,
+      getAsLink: () => cellRefToSigilLink(defaultPatternRef),
+      getMetaRaw: (metaField: string) =>
+        metaField === "pattern" ? cellRefToSigilLink(patternRef) : undefined,
+      sync: () => Promise.resolve(),
+    };
+    let startedDirectly = false;
     const runtime = {
       userIdentityDID: "did:key:test-home",
       experimental: {
         systemPatternAutoUpdate: true,
         systemPatternAutoUpdateHome: true,
       },
-      // PieceManager reads userIdentityDID + getHomeSpaceCell().sync();
-      // the update check itself is best-effort and fails closed on this mock.
       getHomeSpaceCell: () => ({
         sync: () => Promise.resolve(),
-        key: () => ({ get: () => undefined }),
+        key: () => ({
+          get: () => ({ resolveAsCell: () => defaultPatternCell }),
+        }),
       }),
-    } as unknown as Parameters<typeof maybeCheckHomeUpdate>[1];
+      storageManager: { synced: () => Promise.resolve() },
+      start: () => {
+        startedDirectly = true;
+        return Promise.resolve(true);
+      },
+    };
+    const processor = {
+      identity: cfcSigner,
+      runtime,
+    } as unknown as RuntimeProcessor;
 
-    // Constructs the home controller and kicks the background check without
-    // throwing; let the fire-and-forget check settle.
-    maybeCheckHomeUpdate(cfcSigner, runtime);
-    await new Promise((r) => setTimeout(r, 0));
+    const originalEnsure = PiecesController.prototype.ensureDefaultPattern;
+    let ensured = false;
+    PiecesController.prototype.ensureDefaultPattern = function () {
+      ensured = true;
+      return Promise.resolve({
+        getCell: () => defaultPatternCell,
+      } as unknown as Awaited<ReturnType<typeof originalEnsure>>);
+    };
+    try {
+      await expect(
+        RuntimeProcessor.prototype.handleEnsureHomePatternRunning.call(
+          processor,
+          { type: RequestType.EnsureHomePatternRunning },
+        ),
+      ).resolves.toEqual({ cell: defaultPatternRef });
+    } finally {
+      PiecesController.prototype.ensureDefaultPattern = originalEnsure;
+    }
+
+    expect(ensured).toBe(true);
+    expect(startedDirectly).toBe(false);
   });
 });
 
@@ -1231,41 +1275,7 @@ describe("system-pattern update wiring", () => {
     }]);
   });
 
-  it("checkUpdateInBackground logs a non-current outcome and swallows a rejection", async () => {
-    const logs: string[] = [];
-    const warns: string[] = [];
-    const origLog = console.log;
-    const origWarn = console.warn;
-    console.log = (...a: unknown[]) => logs.push(a.join(" "));
-    console.warn = (...a: unknown[]) => warns.push(a.join(" "));
-    try {
-      checkUpdateInBackground(
-        { checkAndUpdateDefaultPattern: () => Promise.resolve("updated") },
-        "did:key:a",
-      );
-      checkUpdateInBackground(
-        { checkAndUpdateDefaultPattern: () => Promise.resolve("current") },
-        "did:key:b",
-      );
-      checkUpdateInBackground(
-        {
-          checkAndUpdateDefaultPattern: () => Promise.reject(new Error("boom")),
-        },
-        "did:key:c",
-      );
-      // Let the fire-and-forget promises settle.
-      await new Promise((r) => setTimeout(r, 0));
-    } finally {
-      console.log = origLog;
-      console.warn = origWarn;
-    }
-    expect(logs.some((l) => l.includes("did:key:a") && l.includes("updated")))
-      .toBe(true);
-    expect(logs.some((l) => l.includes("did:key:b"))).toBe(false);
-    expect(warns.some((w) => w.includes("did:key:c"))).toBe(true);
-  });
-
-  it("handleGetSpaceRootPattern returns the page ref and kicks the background check", async () => {
+  it("handleGetSpaceRootPattern returns the root ensured by the controller", async () => {
     const ref: CellRef = {
       id: "of:root-result" as CellRef["id"],
       space: "did:key:test-space" as CellRef["space"],
@@ -1273,13 +1283,8 @@ describe("system-pattern update wiring", () => {
       path: [],
     };
     const rootCell = { getAsLink: () => cellRefToSigilLink(ref) };
-    let checked = false;
     const cc = {
       ensureDefaultPattern: () => Promise.resolve({ getCell: () => rootCell }),
-      checkAndUpdateDefaultPattern: () => {
-        checked = true;
-        return Promise.resolve("current");
-      },
     };
     const processor = {
       getSpaceCtx: () => ({ cc }),
@@ -1291,8 +1296,6 @@ describe("system-pattern update wiring", () => {
         space: "did:key:test-space",
       });
     expect(result.page.cell).toEqual(ref);
-    // The background check was kicked (fire-and-forget).
-    expect(checked).toBe(true);
   });
 });
 

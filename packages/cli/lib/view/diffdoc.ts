@@ -644,6 +644,16 @@ interface RemapCtx {
  * exposes the innermost distinct nodes (and Tab never lands on two
  * identical-looking ones). Returns [] when no line of the node is visible.
  */
+/** An object/array literal or one of its entries — a generic node the diff
+ * structure keeps (rather than dissolving) so it can be navigated entry by
+ * entry. */
+function isLiteralShape(node: StructureNode): boolean {
+  return node.astKinds?.some((k) =>
+    k === "ObjectLiteralExpression" || k === "ArrayLiteralExpression" ||
+    k === "PropertyAssignment" || k === "ShorthandPropertyAssignment"
+  ) ?? false;
+}
+
 function remapNode(
   node: StructureNode,
   depth: number,
@@ -652,8 +662,12 @@ function remapNode(
 ): StructureNode[] {
   // A diff's structure stays focused on declarations and the like; the generic
   // expression and comment nodes that fill the full-AST tree are skipped, but
-  // their meaningful descendants are hoisted into this node's place.
-  if (node.kind === "node" || node.kind === "comment") {
+  // their meaningful descendants are hoisted into this node's place. Object and
+  // array literals and their entries are kept, though — an object literal in a
+  // diff (an options bag, a returned record) is worth navigating entry by entry.
+  if (
+    (node.kind === "node" || node.kind === "comment") && !isLiteralShape(node)
+  ) {
     const hoisted: StructureNode[] = [];
     for (const child of node.children) {
       hoisted.push(...remapNode(child, depth, parentRange, ctx));
@@ -733,6 +747,7 @@ function remapNode(
     depth,
     children,
     meta: node.meta,
+    astKinds: node.astKinds,
   };
   registerDefinition(
     node,

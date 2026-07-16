@@ -10,17 +10,33 @@ nested multiple levels deep, each with their own shadow DOM.
 
 ## Preferred Solution: Accessibility Locators
 
-For interactive `cf-*` components, prefer semantic locators against the custom
-element host. Components such as `cf-button` and `cf-input` expose roles and
-ARIA state directly on the host, so tests and browser agents can find controls
-without traversing shadow roots.
+Prefer semantic locators against the browser's flattened accessibility tree.
+Where a `cf-*` component exposes those semantics depends on its interaction
+shape:
+
+| Component shape | Semantic anchor | Benefit | Trade-off |
+| --- | --- | --- | --- |
+| One logical control, such as `cf-button` or `cf-input` | Custom-element host | Visible even to shadow-blind DOM readers; one role and one set of bounds | Requires forwarding keyboard, focus, state, and accessible-name behavior that a native control would otherwise provide |
+| Multiple independent actions, such as an interactive removable `cf-chip`, `cf-tags`, or a clickable `cf-tile` with nested details | Native controls inside the shadow root | Correct native keyboard and focus behavior; each action has its own role and name | Simple DOM walkers that do not consume the flattened tree cannot see the inner actions |
+| Informational collections, such as message-history beads | Native structural roles with no artificial tab stops | Preserves reading structure without claiming that information-only items are buttons | Readable in the accessibility tree and may appear in filtered snapshots, but intentionally remain outside the keyboard tab order |
+
+Use host-anchored semantics for a single logical control. Use named native
+shadow controls when the component is composite and needs more than one action.
+Use structural semantics for non-interactive information. Do not add a button
+role or tab stop solely to make an item appear in an interactive snapshot.
+
+Our supported automation surfaces, including agent-browser and Playwright role
+locators, consume the flattened accessibility tree and can find named shadow
+controls. A shadow-blind DOM walker is not a complete representation of a
+composite web component; use a flattened-tree tool or the pierce fallback below.
 
 ### The Pattern
 
 1. **Give controls stable accessible names**
 
    Use visible text for buttons, or use `aria-label`, an associated label, or a
-   placeholder for inputs.
+   placeholder for inputs. This applies whether the semantic control is the
+   custom-element host or a native element in its shadow root.
 
    ```typescript
    // Shown as JSX element children.
@@ -67,16 +83,20 @@ without traversing shadow roots.
 
 ## Why This Works
 
-- **Host roles** make `cf-*` components visible to accessibility-based
-  automation
+- **Host roles** give single-control `cf-*` components one stable semantic
+  anchor
+- **Native shadow controls** preserve distinct actions in composite components
+  and appear in the flattened accessibility tree
+- **Structural roles** expose information without creating false actions or
+  excessive tab stops
 - **Accessible names** let agents find the intended control by user-facing text
-- **Shadow DOM remains intact** for style isolation while host elements become
-  semantic anchors
+- **Shadow DOM remains intact** for style isolation in either interaction shape
 
 ## Fallback: Data Attributes + Pierce Strategy
 
-For older components that do not expose host roles yet, use unique data
-attributes on the actual HTML elements combined with Astral's pierce strategy.
+For older components without semantics, or tools that cannot consume the
+flattened accessibility tree, use unique data attributes on the actual HTML
+elements combined with Astral's pierce strategy.
 
 ```typescript
 // Shown inside a pattern body.
@@ -274,7 +294,7 @@ never poll-and-pray, and never re-click.
 A CI check enforces this for the polling `waitFor`: `deno task check-no-waitfor`
 fails when an integration test imports `waitFor` from
 `@commonfabric/integration`. See
-[`waitfor-migration.md`](./waitfor-migration.md) for the rationale, the full
+[`waiting-in-tests.md`](./waiting-in-tests.md) for the rationale, the full
 event-driven toolkit, and the allowlist of intentional exceptions.
 
 ## Best Practices

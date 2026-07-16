@@ -18,7 +18,9 @@ import type { ColorIntent, ComponentSize } from "../theme-context.ts";
  * @fires cf-click - Fired when chip is clicked (if interactive)
  *
  * @slot icon - Optional icon before the label
- * @slot - Main content (overrides label)
+ * @slot - Non-interactive main content (overrides label). When `interactive`,
+ *   this slot is rendered inside the primary button and must not contain links,
+ *   buttons, or other interactive descendants.
  *
  * @example
  * <cf-chip label="Tools" color="neutral"></cf-chip>
@@ -153,6 +155,39 @@ export class CFChip extends BaseElement {
         );
       }
 
+      .chip:has(.chip-action:focus-visible) {
+        outline: 2px solid
+          var(
+            --cf-theme-color-focus-ring,
+            var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa))
+          );
+        outline-offset: 2px;
+      }
+
+      .chip-action,
+      .chip-content {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--cf-chip-gap);
+        min-width: 0;
+        color: inherit;
+        font: inherit;
+        line-height: inherit;
+      }
+
+      .chip-action {
+        appearance: none;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .chip-action:focus {
+        outline: none;
+      }
+
       /* Color: primary (blue - for mentions) */
       .chip.primary {
         background: var(
@@ -250,21 +285,50 @@ export class CFChip extends BaseElement {
       }
 
       .chip-remove {
+        appearance: none;
         display: flex;
         align-items: center;
         justify-content: center;
         width: 0.75rem;
         height: 0.75rem;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
         border-radius: 50%;
         cursor: pointer;
         transition: background-color 0.1s;
         color: currentColor;
+        font: inherit;
+        line-height: 1;
         opacity: 0.6;
       }
 
       .chip-remove:hover {
         background: rgba(0, 0, 0, 0.1);
         opacity: 1;
+      }
+
+      .chip-remove:focus-visible {
+        outline: 2px solid
+          var(
+            --cf-theme-color-focus-ring,
+            var(--cf-theme-color-primary, var(--cf-colors-primary-500, #4979fa))
+          );
+        outline-offset: 2px;
+        opacity: 1;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
     `,
   ];
@@ -304,13 +368,41 @@ export class CFChip extends BaseElement {
 
     return html`
       <div class="${classes}" @click="${this._handleClick}">
-        <slot name="icon" class="chip-icon"></slot>
-        <span class="chip-label">
-          <slot>${this.label}</slot>
-        </span>
-        ${this.removable
+        ${this.interactive
           ? html`
-            <span class="chip-remove" @click="${this._handleRemove}">×</span>
+            <button
+              type="button"
+              class="chip-action"
+              part="action"
+              aria-labelledby="chip-label"
+            >
+              <slot name="icon" class="chip-icon"></slot>
+              <span id="chip-label" class="chip-label">
+                <slot>${this.label}</slot>
+              </span>
+            </button>
+          `
+          : html`
+            <span class="chip-content">
+              <slot name="icon" class="chip-icon"></slot>
+              <span id="chip-label" class="chip-label">
+                <slot>${this.label}</slot>
+              </span>
+            </span>
+          `} ${this.removable
+          ? html`
+            <button
+              type="button"
+              class="chip-remove"
+              part="remove"
+              aria-labelledby="chip-remove-prefix chip-label"
+              @click="${this._handleRemove}"
+            >
+              <span id="chip-remove-prefix" class="visually-hidden">
+                Remove
+              </span>
+              <span aria-hidden="true">×</span>
+            </button>
           `
           : ""}
       </div>

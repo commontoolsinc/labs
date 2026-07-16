@@ -16,8 +16,9 @@ import {
 } from "./parse.ts";
 import { createMarkdownHighlighter, isMarkdownPath } from "./markdown.ts";
 
-/** How much a revert restores: the cursor's hunk, the cursor's file, or all. */
-export type RevertScope = "chunk" | "file" | "all";
+/** How much a revert restores: the cursor's hunk, the cursor's file, the commit
+ * message the cursor is in, or all. */
+export type RevertScope = "chunk" | "file" | "message" | "all";
 
 /** The outcome of revealing more context (a diff only): the grown diff and its
  * matching grown baseline, where the cursor moves, and — so the pager can hold
@@ -36,6 +37,9 @@ export interface ExpandResult {
 export interface EditableSource {
   /** A short label for the editable target (the filename), or null. */
   readonly label: string | null;
+  /** True for a diff view (whether or not it is editable), so the pager offers
+   * file folding. Absent/false for a plain file or a non-diff pipe. */
+  readonly isDiff?: boolean;
   /** False when there is no underlying file to edit. `reason` is shown when a
    * cursor move is attempted on a non-editable view. */
   readonly editable: boolean;
@@ -90,6 +94,17 @@ export interface EditableSource {
    * map to fixed file lines: edits stay within a line, past the diff marker. A
    * plain file has no policy and is edited freely. */
   readonly policy?: EditPolicy;
+  /** When an edited commit message (in `git show` output) differs from its
+   * original and belongs to the HEAD commit, the commit whose message a save
+   * would amend — for the confirmation prompt. Null when no such change is
+   * pending. Absent on sources that never edit a commit message. */
+  pendingAmend?(
+    baseline: string,
+    current: string,
+  ): { sha: string; subject: string } | null;
+  /** Amend the HEAD commit's message from the edited text, returning a status
+   * line. Called only after the save has been confirmed. */
+  amendCommit?(baseline: string, current: string): string;
   /** The path of the backing file, when there is a single one. The file picker
    * opens in its directory. */
   readonly path?: string;
@@ -97,17 +112,29 @@ export interface EditableSource {
 
 /**
  * The editing constraints of a diff view. A line is editable past its marker
- * when it is a context or added line; removed lines and hunk/file headers are
- * not. Editability is decided from the line's own text, so it survives lines
+ * only when it is a context or added line inside a hunk whose new side matched
+ * a file on disk — the change it would make can then be written back. Removed
+ * lines, hunk/file headers, and any text that is not part of a savable hunk (a
+ * commit-message preamble, an unverified hunk) are refused. Editability is
+ * decided from the whole diff and the line's position, so it survives lines
  * being added or removed above it.
  */
 export interface EditPolicy {
-  /** The first editable column on a line given its text (just past the diff
-   * marker), or null when the line is not editable. */
-  editStart(lineText: string): number | null;
-  /** The marker a newly inserted line is given (a diff adds an added line, so
-   * `"+"`), keeping the diff well-formed as the user adds lines. */
+  /** The first editable column on the line at `row` (just past the diff marker,
+   * or past a commit message's indent), or null when the line is not editable.
+   * Takes the whole set of lines because editability depends on the row's
+   * region. */
+  editStart(lines: readonly string[], row: number): number | null;
+  /** What the row at `row` belongs to: a diff hunk's new side (edited as a
+   * removed/added pair), an editable commit message (edited as plain indented
+   * text), or neither. Drives how the editor treats an edit there. */
+  regionKind(lines: readonly string[], row: number): "hunk" | "message" | null;
+  /** The marker a newly inserted line is given inside a hunk (a diff adds an
+   * added line, so `"+"`), keeping the diff well-formed as the user adds lines.
+   * A commit message uses its own indent instead. */
   readonly insertPrefix: string;
+  /** The indent a new commit-message line is given (git's four spaces). */
+  readonly messageIndent: string;
 }
 
 /** An on-disk file: the document text is the file, edits write straight back. */

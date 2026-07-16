@@ -27,6 +27,7 @@ import {
   readonlySource,
 } from "./editsource.ts";
 import { diffSource } from "./diffedit.ts";
+import { realGit } from "./commitmsg.ts";
 
 export { ViewError };
 
@@ -112,8 +113,9 @@ export function buildView(
       doc,
       semantics: () =>
         createDiffSemantics(text, maps, { cwd: safeCwd() }) ?? undefined,
-      // A diff edits the new side of the files it touches, in place.
-      editSource: diffSource(ws, edit, cache),
+      // A diff edits the new side of the files it touches, in place; a
+      // `git show`'s HEAD commit message is editable and amended on save.
+      editSource: diffSource(ws, edit, cache, realGit(safeCwd())),
     };
   }
   const doc = parseDocument(text, file ?? "transformed.ts");

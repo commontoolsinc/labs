@@ -15,6 +15,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { waitForCellValue } from "./support/wait-for-cell-value.ts";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -67,7 +68,7 @@ describe("sqliteDatabase handle owner", () => {
     const result = runtime.run(tx, dbPattern, {}, resultCell);
     await tx.commit();
 
-    const minted = await waitUntil<SqliteDbRef>(
+    const minted = await waitForCellValue<SqliteDbRef>(
       runtime,
       result,
       (v) => v?.owner !== undefined,
@@ -85,7 +86,7 @@ describe("sqliteDatabase handle owner", () => {
     await tx2.commit();
 
     // A correct re-initialization leaves the handle value UNCHANGED, so there
-    // is no value transition to wait for — a `waitUntil(owner defined)` here
+    // is no value transition to wait for — a `waitForCellValue(owner defined)`
     // would be satisfied by the pre-restart state before the re-run executes.
     // Instead drive the fresh builtin action under observation (pull-mode
     // runs effects only while observed) and wait for full quiescence
@@ -101,28 +102,3 @@ describe("sqliteDatabase handle owner", () => {
     expect((result.get() as SqliteDbRef).owner).toBe("did:test:alice");
   });
 });
-
-// Wait until `pred(cell value)` holds. A `sink` keeps the effect chain live
-// (pull-mode runs effects only while observed); the loop is fully awaited and
-// the sink is cancelled in `finally`, so nothing runs after the test disposes
-// the engine (same idiom as sqlite-builtins.test.ts).
-async function waitUntil<T>(
-  runtime: Runtime,
-  // deno-lint-ignore no-explicit-any
-  cell: any,
-  pred: (v: T) => boolean,
-  iterations = 400,
-): Promise<T> {
-  const cancel = cell.sink(() => {}) as () => void;
-  try {
-    for (let i = 0; i < iterations; i++) {
-      await runtime.idle();
-      const v = cell.get() as T;
-      if (pred(v)) return v;
-      await new Promise((r) => setTimeout(r, 15));
-    }
-    throw new Error("timeout waiting for sqlite db handle");
-  } finally {
-    cancel?.();
-  }
-}

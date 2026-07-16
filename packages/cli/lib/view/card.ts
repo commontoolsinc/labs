@@ -43,6 +43,9 @@ export interface CardTarget {
   /** External file to open, when the definition lives outside the blob; with
    * `destLine` the line within that file. */
   readonly filePath?: string;
+  /** A "… N more" line: selecting it and pressing Enter rebuilds the card with
+   * every truncated list shown in full, rather than navigating anywhere. */
+  readonly expand?: boolean;
 }
 
 /** A target relative to a section's own line array (offset into the card later). */
@@ -53,6 +56,7 @@ interface TargetRel {
   readonly defOffset?: number;
   readonly defEndOffset?: number;
   readonly filePath?: string;
+  readonly expand?: boolean;
 }
 
 interface Section {
@@ -75,6 +79,7 @@ export function buildPeekCard(
   doc: Document,
   node: StructureNode,
   semantics?: Semantics,
+  expanded = false,
 ): PeekCard {
   const info: Line[] = [];
   const targets: CardTarget[] = [];
@@ -103,6 +108,7 @@ export function buildPeekCard(
         defOffset: t.defOffset,
         defEndOffset: t.defEndOffset,
         filePath: t.filePath,
+        expand: t.expand,
       });
     }
     info.push(...section.lines, BLANK);
@@ -128,10 +134,10 @@ export function buildPeekCard(
   const detail = detailSection(doc, node);
   if (detail.length > 0) info.push(...detail, BLANK);
 
-  append(outlineSection(node));
-  append(usesSection(doc, node));
-  append(depsSection(doc, node, semantics));
-  append(externalSection(doc, node, semantics));
+  append(outlineSection(node, expanded));
+  append(usesSection(doc, node, expanded));
+  append(depsSection(doc, node, semantics, expanded));
+  append(externalSection(doc, node, semantics, expanded));
 
   // Drop a trailing blank for tidiness.
   while (info.length > 0 && info[info.length - 1].text === "") info.pop();
@@ -394,12 +400,23 @@ function outlineChildren(node: StructureNode): StructureNode[] {
   return out;
 }
 
-function outlineSection(node: StructureNode): Section {
+/** Append a "… N more" line and mark it a selectable expand target. */
+function pushMore(lines: Line[], targets: TargetRel[], n: number): void {
+  targets.push({
+    relLine: lines.length,
+    destLine: 0,
+    destCol: 0,
+    expand: true,
+  });
+  lines.push(row(["  … ", "comment"], [`${n} more`, "comment"]));
+}
+
+function outlineSection(node: StructureNode, expanded: boolean): Section {
   const children = outlineChildren(node);
   if (children.length === 0) return { lines: [], targets: [] };
   const lines: Line[] = [heading(`outline · ${children.length}`)];
   const targets: TargetRel[] = [];
-  const shown = children.slice(0, MAX_CHILDREN);
+  const shown = expanded ? children : children.slice(0, MAX_CHILDREN);
   for (const child of shown) {
     const g = glyph(child.kind);
     // Avoid doubling up when the label already starts with the glyph (e.g. λ).
@@ -419,15 +436,16 @@ function outlineSection(node: StructureNode): Section {
     ));
   }
   if (children.length > shown.length) {
-    lines.push(row(["  … ", "comment"], [
-      `${children.length - shown.length} more`,
-      "comment",
-    ]));
+    pushMore(lines, targets, children.length - shown.length);
   }
   return { lines, targets };
 }
 
-function usesSection(doc: Document, node: StructureNode): Section {
+function usesSection(
+  doc: Document,
+  node: StructureNode,
+  expanded: boolean,
+): Section {
   if (!node.name) return { lines: [], targets: [] };
   const refs = findReferences(doc, node.name, node);
   // In a diff view, occurrences on removed lines are the OLD side of the same
@@ -444,7 +462,8 @@ function usesSection(doc: Document, node: StructureNode): Section {
       row(["  declared  ", "comment"], [`line ${declared.line + 1}`, "number"]),
     );
   }
-  for (const u of uses.slice(0, MAX_USES)) {
+  const limit = expanded ? uses.length : MAX_USES;
+  for (const u of uses.slice(0, limit)) {
     targets.push({ relLine: lines.length, destLine: u.line, destCol: u.col });
     lines.push(row(
       ["  line ", "comment"],
@@ -453,10 +472,8 @@ function usesSection(doc: Document, node: StructureNode): Section {
       [trimContext(u.lineText), "identifier"],
     ));
   }
-  if (uses.length > MAX_USES) {
-    lines.push(
-      row(["  … ", "comment"], [`${uses.length - MAX_USES} more`, "comment"]),
-    );
+  if (uses.length > limit) {
+    pushMore(lines, targets, uses.length - limit);
   }
   return { lines, targets };
 }
@@ -464,7 +481,8 @@ function usesSection(doc: Document, node: StructureNode): Section {
 function depsSection(
   doc: Document,
   node: StructureNode,
-  semantics?: Semantics,
+  semantics: Semantics | undefined,
+  expanded: boolean,
 ): Section {
   const deps = findDependencies(doc, node);
   const rows: Line[] = [];
@@ -473,7 +491,7 @@ function depsSection(
   for (const d of deps) {
     const jump = dependencyJump(doc, d, semantics);
     if (jump.external) continue; // a same-named external def; in "defined elsewhere"
-    if (rows.length >= MAX_DEPS) {
+    if (!expanded && rows.length >= MAX_DEPS) {
       more++;
       continue;
     }
@@ -495,9 +513,7 @@ function depsSection(
   }
   if (rows.length === 0) return { lines: [], targets: [] };
   const lines: Line[] = [heading(`depends on · ${rows.length}`), ...rows];
-  if (more > 0) {
-    lines.push(row(["  … ", "comment"], [`${more} more`, "comment"]));
-  }
+  if (more > 0) pushMore(lines, targets, more);
   return { lines, targets };
 }
 
@@ -556,7 +572,8 @@ const MAX_EXTERNAL = 8;
 function externalSection(
   doc: Document,
   node: StructureNode,
-  semantics?: Semantics,
+  semantics: Semantics | undefined,
+  expanded: boolean,
 ): Section {
   if (!semantics) return { lines: [], targets: [] };
   const rows: Line[] = [];
@@ -567,7 +584,7 @@ function externalSection(
     if (defs.some((t) => t.blobOffset !== undefined)) continue; // in-blob → deps
     const ext = defs.find((t) => t.filePath);
     if (!ext) continue;
-    if (rows.length >= MAX_EXTERNAL) {
+    if (!expanded && rows.length >= MAX_EXTERNAL) {
       more++;
       continue;
     }
@@ -590,9 +607,7 @@ function externalSection(
     heading(`defined elsewhere · ${rows.length}`),
     ...rows,
   ];
-  if (more > 0) {
-    lines.push(row(["  … ", "comment"], [`${more} more`, "comment"]));
-  }
+  if (more > 0) pushMore(lines, targets, more);
   return { lines, targets };
 }
 

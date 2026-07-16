@@ -9,12 +9,18 @@
  * PR.
  */
 import { assert } from "@std/assert";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   diffOracles,
   listFixturePaths,
   loadGolden,
 } from "./traverse-replay/goldens.ts";
 import { loadFixture, replayFixture } from "./traverse-replay/replay.ts";
+import {
+  fixtureDocKey,
+  type TraverseFixture,
+} from "../src/traverse-recorder.ts";
 
 Deno.test("traverse replay matches golden oracles", async (t) => {
   const fixtures = listFixturePaths();
@@ -37,4 +43,111 @@ Deno.test("traverse replay matches golden oracles", async (t) => {
       );
     });
   }
+});
+
+Deno.test("traverse replay records batched plain-schema reads", () => {
+  const space = "did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh";
+  const sourceId = "of:fixture-source";
+  const rowIds = ["of:fixture-row-one", "of:fixture-row-two"];
+  const link = (id: string) =>
+    linkRefFrom({ id, space, scope: "space", path: [] });
+  const docs: Record<string, FabricValue> = {};
+  docs[fixtureDocKey({ space, id: sourceId })] = {
+    value: rowIds.map(link),
+  };
+  docs[fixtureDocKey({ space, id: rowIds[0] })] = {
+    value: { label: "First" },
+  };
+  docs[fixtureDocKey({ space, id: rowIds[1] })] = {
+    value: { label: "Second" },
+  };
+  const fixture: TraverseFixture = {
+    version: 1,
+    meta: { name: "batched-plain-schema", source: "focused regression" },
+    selectors: [{
+      path: ["value"],
+      schema: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { label: { type: "string" } },
+        },
+      },
+    }],
+    links: [],
+    docs,
+    invocations: [{
+      address: {
+        space,
+        id: sourceId,
+        type: "application/json",
+        path: ["value"],
+        scope: "space",
+      },
+      selector: 0,
+      includeMeta: false,
+      context: 0,
+    }],
+  };
+
+  const { oracle } = replayFixture(fixture, { collectOracle: true });
+  assert(oracle !== undefined);
+  assert(
+    oracle.readSet.includes(
+      `${space}|space|${sourceId}|["value","0"]|nt`,
+    ),
+  );
+  assert(
+    oracle.readSet.includes(
+      `${space}|space|${sourceId}|["value","0"]|t`,
+    ),
+  );
+  assert(
+    oracle.readSet.includes(
+      `${space}|space|${rowIds[0]}|["value","label"]|nt`,
+    ),
+  );
+});
+
+Deno.test("plain primitive-array traversal records indices after failure", () => {
+  const space = "did:key:z6MkpXpeKbhbddoVvxQndKtnNZmGfpSbXXmVw88bswFy2hHh";
+  const sourceId = "of:invalid-primitive-tail";
+  const docs: Record<string, FabricValue> = {};
+  docs[fixtureDocKey({ space, id: sourceId })] = {
+    value: [[1, "still-read"]],
+  };
+  const fixture: TraverseFixture = {
+    version: 1,
+    meta: { name: "invalid-primitive-tail", source: "focused regression" },
+    selectors: [{
+      path: ["value"],
+      schema: {
+        type: "array",
+        items: { type: "array", items: { type: "string" } },
+      },
+    }],
+    links: [],
+    docs,
+    invocations: [{
+      address: {
+        space,
+        id: sourceId,
+        type: "application/json",
+        path: ["value"],
+        scope: "space",
+      },
+      selector: 0,
+      includeMeta: false,
+      context: 0,
+    }],
+  };
+
+  const { oracle } = replayFixture(fixture, { collectOracle: true });
+  assert(oracle !== undefined);
+  assert(
+    oracle.readSet.some((read) =>
+      read.includes("data:application/json") &&
+      read.endsWith('|["value","1"]|nt')
+    ),
+  );
 });

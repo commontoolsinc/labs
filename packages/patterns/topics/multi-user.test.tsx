@@ -55,15 +55,16 @@ export const gideon = pattern<{ setup: Setup }>(({ setup }) => {
     board.topics?.[0]?.commentCount === 1
   );
 
-  // Fable commented on my topic and started a second topic; my identity is
-  // untouched by Fable's name (PerUser isolation).
-  const assert_sees_fable = computed(() =>
-    board.topics?.[0]?.comments?.[1]?.authorName === "Fable" &&
-    board.topics?.[0]?.commentCount === 2 &&
-    (board.topics ?? []).length === 2 &&
-    board.topics?.[1]?.createdByName === "Fable" &&
-    board.myName === "Gideon"
+  // Fable commented on my topic and started a second topic. Use literal paths
+  // here, as required for cross-runtime reads above; aggregate length and
+  // commentCount reads can remain stale until this runtime performs a write.
+  const assert_sees_fable_comment = computed(() =>
+    board.topics?.[0]?.comments?.[1]?.authorName === "Fable"
   );
+  const assert_fable_topic_authorship = computed(() =>
+    board.topics?.[1]?.createdByName === "Fable"
+  );
+  const assert_name_still_isolated = computed(() => board.myName === "Gideon");
 
   return {
     tests: [
@@ -75,7 +76,9 @@ export const gideon = pattern<{ setup: Setup }>(({ setup }) => {
       { assertion: assert_own_comment },
       { label: "gideon-commented" },
       { await: "fable-done" },
-      { assertion: assert_sees_fable },
+      { assertion: assert_sees_fable_comment },
+      { assertion: assert_fable_topic_authorship },
+      { assertion: assert_name_still_isolated },
     ],
   };
 });

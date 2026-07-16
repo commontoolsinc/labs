@@ -3,6 +3,17 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import type { IMemorySpaceAddress, URI } from "../src/storage/interface.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import {
+  markUiInputBlindWriteTx,
+  unmarkUiInputBlindWriteTx,
+} from "../src/storage/reactivity-log.ts";
+import { ManagedStorageTransaction } from "../src/traverse.ts";
+import {
+  fixtureDocKey,
+  TraverseCaptureRecorder,
+} from "../src/traverse-recorder.ts";
 import { getTransactionWriteDetails } from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-transaction-path");
@@ -93,6 +104,139 @@ describe("memory v2 transaction path semantics", () => {
     expect(missingParent.error?.name).toBe("NotFoundError");
 
     await tx.commit();
+  });
+
+  it("batches already-loaded read tracking without changing dependencies", async () => {
+    const seedTx = runtime.edit();
+    seedTx.writeValueOrThrow({
+      space,
+      scope: "space",
+      id: "of:tracked-read-batch",
+      path: [],
+    }, { nested: { value: 1 }, label: "one" });
+    await seedTx.commit();
+
+    const addresses: IMemorySpaceAddress[] = [
+      {
+        space,
+        scope: "space" as const,
+        id: "of:tracked-read-batch" as URI,
+        type: "application/json" as const,
+        path: ["value", "nested"] as string[],
+      },
+      {
+        space,
+        scope: "space" as const,
+        id: "of:tracked-read-batch" as URI,
+        type: "application/json" as const,
+        path: ["value", "nested", "value"] as string[],
+      },
+      {
+        space,
+        scope: "space" as const,
+        id: "of:tracked-read-batch" as URI,
+        type: "application/json" as const,
+        path: ["value", "label"] as string[],
+      },
+    ];
+
+    const individual = runtime.edit();
+    for (const address of addresses) {
+      individual.read(address, {
+        nonRecursive: true,
+        trackReadWithoutLoad: true,
+      });
+    }
+
+    const batched = runtime.edit();
+    expect(batched.trackReadPaths).toBeDefined();
+    const { path: _path, ...documentAddress } = addresses[0];
+    batched.trackReadPaths!(
+      documentAddress,
+      addresses.map(({ path }) => path),
+      { nonRecursive: true },
+    );
+
+    expect(Array.from(batched.getReadActivities!())).toEqual(
+      Array.from(individual.getReadActivities!()),
+    );
+    expect(batched.getReactivityLog!()).toEqual(individual.getReactivityLog!());
+    individual.abort();
+    batched.abort();
+  });
+
+  it("preserves batched tracking edge semantics", () => {
+    const address = {
+      space,
+      scope: "space" as const,
+      id: "of:tracked-read-batch-edge" as URI,
+      type: "application/json" as const,
+    };
+    const path = ["value", "nested"];
+
+    const individual = runtime.edit();
+    const batched = runtime.edit();
+    markUiInputBlindWriteTx(individual);
+    markUiInputBlindWriteTx(batched);
+    try {
+      individual.read({ ...address, path }, {
+        nonRecursive: true,
+        trackReadWithoutLoad: true,
+      });
+      batched.trackReadPaths!(address, [path], { nonRecursive: true });
+      expect(Array.from(batched.getReadActivities!())).toEqual(
+        Array.from(individual.getReadActivities!()),
+      );
+    } finally {
+      unmarkUiInputBlindWriteTx(individual);
+      unmarkUiInputBlindWriteTx(batched);
+      individual.abort();
+      batched.abort();
+    }
+
+    const extended = runtime.edit() as ExtendedStorageTransaction;
+    expect(extended.trackReadPaths!(address, [])).toEqual({ ok: {} });
+    expect(extended.tx.trackReadPaths!(address, [])).toEqual({ ok: {} });
+    extended.abort();
+    const inactiveError = extended.tx.trackReadPaths!(address, [path]).error;
+    expect(inactiveError).toBeDefined();
+
+    const fallback = new ExtendedStorageTransaction(
+      new ManagedStorageTransaction({ load: () => null }),
+    );
+    expect(fallback.trackReadPaths!(address, [path])).toEqual({ ok: {} });
+
+    const failingInner = new ManagedStorageTransaction({ load: () => null });
+    failingInner.read = () => ({ error: inactiveError! });
+    const failingFallback = new ExtendedStorageTransaction(failingInner);
+    expect(failingFallback.trackReadPaths!(address, [path]).error).toEqual(
+      inactiveError,
+    );
+  });
+
+  it("captures documents reached only through batched read tracking", async () => {
+    const address = {
+      space,
+      scope: "space" as const,
+      id: "of:tracked-read-capture" as URI,
+      type: "application/json" as const,
+    };
+    const seedTx = runtime.edit();
+    seedTx.writeValueOrThrow({ ...address, path: [] }, {
+      nested: { value: 1 },
+    });
+    await seedTx.commit();
+
+    const recorder = new TraverseCaptureRecorder();
+    const readTx = runtime.edit();
+    const capturedTx = recorder.wrapTx(readTx);
+    capturedTx.trackReadPaths!(address, [["value", "nested", "value"]], {
+      nonRecursive: true,
+    });
+
+    const fixture = recorder.toFixture("batched-read", "test");
+    expect(fixtureDocKey(address) in fixture.docs).toBe(true);
+    readTx.abort();
   });
 
   it("creates missing parent objects without clobbering siblings", async () => {

@@ -5,7 +5,7 @@
  * Workspace code should import these types via `@commonfabric/builder`.
  */
 
-import type { Cfc, WriteAuthorizedBy } from "./cfc.ts";
+import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 
 // ============================================================================
 // Fabric Value Types
@@ -1651,7 +1651,7 @@ export type JSONSchemaObj = {
     readonly addIntegrity?: readonly ImmutableJSONValue[];
     readonly requiredIntegrity?: readonly ImmutableJSONValue[];
     readonly maxConfidentiality?: readonly ImmutableJSONValue[];
-    readonly ownerPrincipal?: string | { readonly __ctCurrentPrincipal: true };
+    readonly ownerPrincipal?: string | CurrentPrincipal;
     readonly writeAuthorizedBy?:
       | readonly string[]
       | {

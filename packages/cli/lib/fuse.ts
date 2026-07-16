@@ -30,6 +30,8 @@ export interface FuseChildDenoArgsOptions {
   logFile?: string;
   spaces?: string[];
   allowOther?: boolean;
+  noattrcache?: boolean;
+  attrcacheTimeout?: string;
   cfcMode?: string;
   cfcAnnotations?: boolean;
   cfcXattrNamespace?: string;
@@ -42,6 +44,12 @@ export interface FuseChildDenoArgsOptions {
 export interface BackgroundSupervisorDenoArgsOptions
   extends Omit<FuseChildDenoArgsOptions, "modPath"> {
   cliModPath: string;
+  statePath?: string;
+}
+
+export interface FuseBinaryArgsOptions
+  extends Omit<FuseChildDenoArgsOptions, "modPath"> {
+  subcommand: "fuse-daemon" | "fuse-supervisor";
   statePath?: string;
 }
 
@@ -361,6 +369,10 @@ export function buildFuseChildDenoArgs(
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
   if (opts.logFile) args.push("--log-file", opts.logFile);
   if (opts.allowOther) args.push("--allow-other");
+  if (opts.noattrcache) args.push("--noattrcache");
+  if (opts.attrcacheTimeout) {
+    args.push("--attrcache-timeout", opts.attrcacheTimeout);
+  }
   if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
   if (opts.cfcAnnotations) args.push("--cfc-annotations");
   if (opts.cfcXattrNamespace) {
@@ -370,6 +382,44 @@ export function buildFuseChildDenoArgs(
   if (opts.cfcWritebackState) {
     args.push("--cfc-writeback-state", opts.cfcWritebackState);
   }
+  if (opts.supervisorStatusPath) {
+    args.push("--supervisor-status", opts.supervisorStatusPath);
+  }
+  if (opts.supervisorToken) {
+    args.push("--supervisor-token", opts.supervisorToken);
+  }
+  for (const space of opts.spaces ?? []) args.push("--space", space);
+
+  return args;
+}
+
+/**
+ * Build the args for the compiled cf binary's hidden fuse subcommands. The
+ * compiled binary takes the mountpoint and mount flags directly, where a
+ * deno invocation needs a script path and permission flags first.
+ */
+export function buildFuseBinaryArgs(opts: FuseBinaryArgsOptions): string[] {
+  const args = [opts.subcommand, opts.mountpoint];
+
+  if (opts.apiUrl) args.push("--api-url", opts.apiUrl);
+  if (opts.identity) args.push("--identity", opts.identity);
+  if (opts.allowOther) args.push("--allow-other");
+  if (opts.noattrcache) args.push("--noattrcache");
+  if (opts.attrcacheTimeout) {
+    args.push("--attrcache-timeout", opts.attrcacheTimeout);
+  }
+  if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
+  if (opts.cfcAnnotations) args.push("--cfc-annotations");
+  if (opts.cfcXattrNamespace) {
+    args.push("--cfc-xattr-namespace", opts.cfcXattrNamespace);
+  }
+  if (opts.cfcWritebackXattrs) args.push("--cfc-writeback-xattrs");
+  if (opts.cfcWritebackState) {
+    args.push("--cfc-writeback-state", opts.cfcWritebackState);
+  }
+  if (opts.execCli) args.push("--exec-cli", opts.execCli);
+  if (opts.logFile) args.push("--log-file", opts.logFile);
+  if (opts.statePath) args.push("--state-path", opts.statePath);
   if (opts.supervisorStatusPath) {
     args.push("--supervisor-status", opts.supervisorStatusPath);
   }
@@ -403,6 +453,10 @@ export function buildBackgroundSupervisorDenoArgs(
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
   if (opts.logFile) args.push("--log-file", opts.logFile);
   if (opts.allowOther) args.push("--allow-other");
+  if (opts.noattrcache) args.push("--noattrcache");
+  if (opts.attrcacheTimeout) {
+    args.push("--attrcache-timeout", opts.attrcacheTimeout);
+  }
   if (opts.cfcMode) args.push("--cfc-mode", opts.cfcMode);
   if (opts.cfcAnnotations) args.push("--cfc-annotations");
   if (opts.cfcXattrNamespace) {

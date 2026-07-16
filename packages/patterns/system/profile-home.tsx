@@ -1,6 +1,9 @@
 import {
+  Cell,
   Cfc,
   computed,
+  CurrentPrincipal,
+  Default,
   equals,
   handler,
   ifElse,
@@ -8,6 +11,7 @@ import {
   NAME,
   pattern,
   RepresentsCurrentUser,
+  RequiresIntegrity,
   SELF,
   Stream,
   UI,
@@ -18,8 +22,6 @@ import {
 
 export const TRUSTED_PROFILE_HOME_SURFACE = "ProfileHome";
 export const TRUSTED_PROFILE_EDIT_ACTION = "EditProfile";
-
-type CurrentPrincipal = { readonly __ctCurrentPrincipal: true };
 
 type OwnerProtectedProfileWrite<
   T,
@@ -103,6 +105,55 @@ export type SetProfileBioEvent = {
   target?: { value?: string };
 };
 
+/** A public link to a profile the owner maintains elsewhere, such as GitHub,
+ * LinkedIn, or a personal site. Links are deliberately data, not profile
+ * elements: unlike an element, an external link does not create or reference a
+ * Common Fabric piece. */
+export type ExternalProfileLink = {
+  label: string;
+  url: string;
+};
+
+export type MutateExternalProfileLinksEvent = {
+  label?: string;
+  url?: string;
+};
+
+/**
+ * An external account identifier observed by Loom after that connector
+ * successfully authenticated as the profile owner. Stable and human-facing
+ * identifiers are separate assertions (for example `github.node_id` and
+ * `github.login`) so consumers can use either without weakening provenance.
+ *
+ * Keep this tuple deliberately small: the integrity label covers the identity
+ * type, value, and observation time together. Connector/provider metadata that
+ * is not part of the assertion belongs in the writer event, not this record.
+ */
+export type ExternalIdentityAssertion = {
+  type: string;
+  value: string;
+  verifiedAt: string;
+};
+
+export const LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY =
+  "loom-verified-external-identity" as const;
+
+export type VerifiedExternalIdentity = RequiresIntegrity<
+  ExternalIdentityAssertion,
+  readonly [typeof LOOM_VERIFIED_EXTERNAL_IDENTITY_INTEGRITY]
+>;
+
+export type VerifiedExternalIdentityCell = Cell<VerifiedExternalIdentity>;
+
+type VerifiedIdentityListWrite<Binding> = OwnerProtectedProfileWrite<
+  VerifiedExternalIdentityCell[],
+  Binding
+>;
+
+export type MutateVerifiedIdentitiesEvent = {
+  identities?: readonly VerifiedExternalIdentityCell[];
+};
+
 export type ProfileHomeOutput = {
   [NAME]: string;
   [UI]: unknown;
@@ -113,10 +164,36 @@ export type ProfileHomeOutput = {
   // bio (distinct from Home's legacy `learned.summary`). Readable from the
   // profile result and via `wish({ query: "#profileBio" })`.
   bio: OwnerProtectedProfileWrite<string, typeof setBio>;
+  // Public web profiles the owner has chosen to associate with this profile.
+  // The owner-protected list is distinct from `elements`, whose entries are
+  // Common Fabric piece references.
+  // The default is outside the CFC wrapper: an old profile has no stored
+  // property, while new profiles get an empty owner-protected list. Putting
+  // the default inside the wrapper produces divergent CFC union branches when
+  // a home appends more than one profile.
+  externalLinks: Default<
+    OwnerProtectedProfileWrite<
+      ExternalProfileLink[],
+      typeof mutateExternalProfileLinks
+    >,
+    []
+  >;
+  // Connector-observed account identifiers. The list contains the original
+  // assertion cells, each of which must already carry Loom's integrity label.
+  // This pattern only collects those capabilities; it never mints or copies
+  // their integrity-bearing values.
+  verifiedIdentities: Default<
+    VerifiedIdentityListWrite<typeof publishVerifiedIdentities>,
+    []
+  >;
   elements: OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>;
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
   setBio: Stream<SetProfileBioEvent>;
+  addExternalLink: Stream<MutateExternalProfileLinksEvent>;
+  removeExternalLink: Stream<MutateExternalProfileLinksEvent>;
+  publishVerifiedIdentities: Stream<MutateVerifiedIdentitiesEvent>;
+  revokeVerifiedIdentities: Stream<MutateVerifiedIdentitiesEvent>;
   // Both element streams accept the full mutation event (the union shape of
   // the one authorized writer); `AddProfileElementEvent` /
   // `RemoveProfileElementEvent` remain the documented per-stream subsets.
@@ -138,6 +215,11 @@ export type ProfileHomeInput = {
 
 const trimInitialName = (initialName?: string): string =>
   (initialName ?? "").trim();
+
+/** Only http(s) URLs may be rendered as links. This is enforced at write time
+ * and again at render time because a profile can contain older stored data. */
+const isSafeExternalProfileUrl = (url: string): boolean =>
+  /^https?:\/\//i.test((url ?? "").trim());
 
 const ProfileCatalogCard = pattern<{ title: string }, ProfileElementCell>(
   ({ title }) => ({
@@ -375,6 +457,122 @@ const setBio = handler<
   },
 );
 
+// The single authorized writer for externally hosted profile links. Add and
+// remove streams are instances of this handler so the owner-protected list has
+// one stable write identity, like `elements` above.
+const mutateExternalProfileLinks = handler<
+  MutateExternalProfileLinksEvent,
+  {
+    externalLinks: Writable<ExternalProfileLink[]>;
+    mode: "add" | "remove";
+    label?: Writable<string>;
+    url?: Writable<string>;
+    removeUrl?: string;
+  }
+>((event, state) => {
+  if (state.mode === "remove") {
+    const url = (event.url ?? state.removeUrl ?? "").trim();
+    if (!url) return;
+    state.externalLinks.set(
+      state.externalLinks.get().filter((link) => link.url !== url),
+    );
+    return;
+  }
+
+  const url = (event.url ?? state.url?.get() ?? "").trim();
+  if (!isSafeExternalProfileUrl(url)) return;
+  const label = (event.label ?? state.label?.get() ?? "").trim() || url;
+  const current = state.externalLinks.get();
+  if (current.some((link) => link.url === url)) return;
+  state.externalLinks.set([...current, { label, url }]);
+  state.label?.set("");
+  state.url?.set("");
+});
+
+function normalizeVerifiedAt(value: string): string | undefined {
+  // Date.parse normalizes impossible dates such as February 31. Validate the
+  // RFC3339 calendar and clock components first, then let Date produce the
+  // canonical UTC representation consumers compare by age.
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/
+      .exec(
+        value,
+      );
+  if (!match) return undefined;
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    ,
+    zone,
+  ] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offset = zone === "Z"
+    ? undefined
+    : zone.slice(1).split(":").map(Number);
+  const daysInMonth = month >= 1 && month <= 12
+    ? new Date(Date.UTC(year, month, 0)).getUTCDate()
+    : 0;
+  if (
+    year < 1 || day < 1 || day > daysInMonth || hour > 23 || minute > 59 ||
+    second > 59 || (offset && (offset[0] > 23 || offset[1] > 59))
+  ) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp)
+    ? new Date(timestamp).toISOString()
+    : undefined;
+}
+
+function isCanonicalVerifiedIdentity(
+  identity: ExternalIdentityAssertion,
+): boolean {
+  const type = identity.type;
+  const value = identity.value;
+  const verifiedAt = identity.verifiedAt;
+  return typeof type === "string" && type.length > 0 &&
+    type === type.trim().toLowerCase() &&
+    typeof value === "string" && value.length > 0 && value === value.trim() &&
+    typeof verifiedAt === "string" &&
+    normalizeVerifiedAt(verifiedAt) === verifiedAt;
+}
+
+// The profile is a collector, not the authority that creates these claims.
+// CFC rejects an event before this handler runs unless every incoming cell
+// already bears the required Loom integrity atom. The handler may inspect the
+// value to reject malformed producer output, but stores/removes the exact cell
+// reference so its integrity provenance is preserved end to end.
+const publishVerifiedIdentities = handler<
+  MutateVerifiedIdentitiesEvent,
+  {
+    verifiedIdentities: Writable<VerifiedExternalIdentityCell[]>;
+    mode: "publish" | "revoke";
+  }
+>((event, state) => {
+  const incoming = event.identities ?? [];
+  if (incoming.length === 0) return;
+
+  if (state.mode === "revoke") {
+    incoming.forEach((identity) =>
+      state.verifiedIdentities.removeAll(identity)
+    );
+    return;
+  }
+
+  incoming.forEach((identity) => {
+    if (!isCanonicalVerifiedIdentity(identity.get())) return;
+    state.verifiedIdentities.addUnique(identity);
+  });
+});
+
 // View/edit toggle for the rendered profile view (CT-1748). Plain (un-protected)
 // UI state: visiting a profile shows the read-only presentation; this flips to
 // the edit form. The flag itself is not owner-protected — anyone can flip their
@@ -404,9 +602,22 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     const bio = new Writable<
       OwnerProtectedProfileWrite<string, typeof setBio>
     >("").for("bio");
+    const externalLinks = new Writable<
+      OwnerProtectedProfileWrite<
+        ExternalProfileLink[],
+        typeof mutateExternalProfileLinks
+      >
+    >([]).for("externalLinks");
+    const verifiedIdentities = new Writable<
+      VerifiedIdentityListWrite<typeof publishVerifiedIdentities>
+    >([]).for("verifiedIdentities");
     // Unprotected draft backing the bio textarea; saved into the protected
     // `bio` cell through `setBio` (CT-1648).
     const bioDraft = new Writable("").for("bioDraft");
+    // Unprotected drafts for the external-link form. The durable links are
+    // written only through `mutateExternalProfileLinks` above.
+    const externalLinkLabel = new Writable("").for("externalLinkLabel");
+    const externalLinkUrl = new Writable("").for("externalLinkUrl");
     const elements = new Writable<
       OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>
     >([]).for("elements");
@@ -423,19 +634,20 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     // presentation by default; the owner flips this to reveal the edit form.
     const editing = new Writable<boolean>(false).for("editing");
     // Is the current viewer the profile owner? `wish("#profile")` resolves the
-    // VIEWER's own default profile (from their home); `SELF` is THIS profile's
-    // cell. They are the same cell only when the owner is viewing their own
-    // (default) profile — a visitor's `#profile` is a different per-user profile
-    // cell, so this is never a false positive (a non-owner can never be granted
-    // edit). The edit form + button are gated on this so visitors get a
-    // read-only view; the field writes are independently CFC-owner-protected,
-    // so this is a UX gate, not the security boundary. Known limitation: an
-    // owner viewing one of their OWN non-default profiles reads as a visitor
-    // here (safe false-negative — they just don't get the inline edit form).
+    // VIEWER's default profile as `.result`, but `.candidates` contains every
+    // profile linked from that viewer's home. Compare `SELF` against the whole
+    // candidate list: an owner must be able to edit ANY of their profiles, not
+    // just the one currently selected as default. A visitor's candidates are
+    // all different cells, so this remains a safe UX gate; CFC independently
+    // protects the field writes.
+    // This lookup only needs the candidate cells' identities. Keeping its
+    // value schema minimal prevents the ownership UX computation from
+    // propagating the full CFC-protected profile result through its branches.
     const viewerProfile = wish<{ name?: string }>({ query: "#profile" });
     const isOwner = computed(() => {
-      const viewer = viewerProfile.result;
-      return viewer !== undefined && equals(self, viewer) === true;
+      return viewerProfile.candidates?.some((profile) =>
+        equals(self, profile) === true
+      ) === true;
     });
     // `isEditing` is the raw view-toggle state (the user's intent), kept
     // independent of ownership so it stays a clean, testable signal. The edit
@@ -447,13 +659,15 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
     // Ownership is re-derived inline rather than referencing `isOwner` so each
     // computed is self-contained (avoids nested-computed unwrap surprises).
     const showEditForm = computed(() => {
-      const viewer = viewerProfile.result;
-      const owner = viewer !== undefined && equals(self, viewer) === true;
+      const owner = viewerProfile.candidates?.some((profile) =>
+        equals(self, profile) === true
+      ) === true;
       return editing.get() === true && owner;
     });
     // Whether a non-empty bio has been authored — drives the presentation-mode
     // bio block (CT-1648).
     const hasBio = computed(() => (bio.get() ?? "").trim().length > 0);
+    const hasExternalLinks = computed(() => externalLinks.get().length > 0);
     const parsedUserTags = computed(() =>
       userTagsText.get().split(",").map((tag) => tag.trim()).filter((tag) =>
         tag.length > 0
@@ -475,10 +689,30 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
       name,
       avatar,
       bio,
+      externalLinks,
+      verifiedIdentities,
       elements,
       setName: setName({ name }),
       setAvatar: setAvatar({ avatar }),
       setBio: setBio({ bio, draft: bioDraft }),
+      addExternalLink: mutateExternalProfileLinks({
+        externalLinks,
+        mode: "add",
+        label: externalLinkLabel,
+        url: externalLinkUrl,
+      }),
+      removeExternalLink: mutateExternalProfileLinks({
+        externalLinks,
+        mode: "remove",
+      }),
+      publishVerifiedIdentities: publishVerifiedIdentities({
+        verifiedIdentities,
+        mode: "publish",
+      }),
+      revokeVerifiedIdentities: publishVerifiedIdentities({
+        verifiedIdentities,
+        mode: "revoke",
+      }),
       // Both exported streams are instances of the one authorized writer,
       // pinned to their declared purpose via the bound mode.
       addElement: mutateElements({ elements, mode: "add" }),
@@ -500,10 +734,14 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
         <cf-screen
           data-ui-pattern={TRUSTED_PROFILE_HOME_SURFACE}
           data-ui-event-integrity={TRUSTED_PROFILE_HOME_SURFACE}
+          style={{
+            fontFamily:
+              "var(--cf-theme-font-family, var(--cf-font-family-sans, system-ui, sans-serif))",
+          }}
         >
           <cf-toolbar slot="header" sticky>
             <div slot="start">
-              <h2 style={{ margin: 0, fontSize: "18px" }}>Profile</h2>
+              <cf-heading level={2}>Profile</cf-heading>
             </div>
           </cf-toolbar>
 
@@ -533,16 +771,38 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
 
                 {ifElse(
                   hasBio,
-                  <p
+                  <cf-text
+                    block
+                    variant="body"
+                    tone="muted"
                     data-ui-region="profile-bio"
                     style={{
                       margin: 0,
                       whiteSpace: "pre-wrap",
-                      color: "var(--cf-theme-color-text-secondary)",
                     }}
                   >
                     {bio}
-                  </p>,
+                  </cf-text>,
+                  null,
+                )}
+
+                {ifElse(
+                  hasExternalLinks,
+                  <cf-hstack gap="2" wrap>
+                    {externalLinks.map((link) =>
+                      isSafeExternalProfileUrl(link.url)
+                        ? (
+                          <a
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {link.label}
+                          </a>
+                        )
+                        : <span>{link.label}</span>
+                    )}
+                  </cf-hstack>,
                   null,
                 )}
 
@@ -587,6 +847,7 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   isOwner,
                   <cf-hstack>
                     <cf-button
+                      id="profile-edit-toggle"
                       variant="ghost"
                       size="sm"
                       onClick={toggleProfileEditing({ editing })}
@@ -637,6 +898,76 @@ export default pattern<ProfileHomeInput, ProfileHomeOutput>(
                   <cf-button onClick={setBio({ bio, draft: bioDraft })}>
                     Save bio
                   </cf-button>
+                </cf-vstack>
+
+                <cf-vstack gap="2">
+                  <label>External profile links</label>
+                  <cf-input
+                    $value={externalLinkLabel}
+                    placeholder="GitHub, LinkedIn, personal site…"
+                  />
+                  <cf-input
+                    $value={externalLinkUrl}
+                    placeholder="https://…"
+                  />
+                  <cf-button
+                    onClick={mutateExternalProfileLinks({
+                      externalLinks,
+                      mode: "add",
+                      label: externalLinkLabel,
+                      url: externalLinkUrl,
+                    })}
+                  >
+                    Add external link
+                  </cf-button>
+                  <span style={{ color: "var(--cf-color-text-secondary)" }}>
+                    Add public http(s) links to profiles you maintain elsewhere.
+                  </span>
+                  {ifElse(
+                    hasExternalLinks,
+                    <cf-vstack
+                      gap="1"
+                      data-ui-region="profile-external-links"
+                    >
+                      <cf-text variant="body-compact">Current links</cf-text>
+                      <cf-vstack gap="1">
+                        {externalLinks.map((link) => (
+                          <cf-hstack gap="2" align="center">
+                            {isSafeExternalProfileUrl(link.url)
+                              ? (
+                                <a
+                                  href={link.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {link.label}
+                                </a>
+                              )
+                              : <span>{link.label}</span>}
+                            <span
+                              style={{
+                                color: "var(--cf-theme-color-text-secondary)",
+                              }}
+                            >
+                              {link.url}
+                            </span>
+                            <cf-button
+                              size="sm"
+                              variant="ghost"
+                              onClick={mutateExternalProfileLinks({
+                                externalLinks,
+                                mode: "remove",
+                                removeUrl: link.url,
+                              })}
+                            >
+                              Remove
+                            </cf-button>
+                          </cf-hstack>
+                        ))}
+                      </cf-vstack>
+                    </cf-vstack>,
+                    null,
+                  )}
                 </cf-vstack>
 
                 <cf-vstack gap="2">

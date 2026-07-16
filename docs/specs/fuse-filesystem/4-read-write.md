@@ -23,9 +23,14 @@ Every path must resolve to a valid `stat` result:
 as fallback). `ctime` = `mtime`. `atime` = current time or mount time (atime
 tracking is expensive and not useful here).
 
-**Inode assignment**: Inodes are assigned from a counter, keyed by
-`(entity_id, path)`. The same logical cell always gets the same inode within
-a mount session.
+**Inode assignment**: Inodes are assigned from a counter that only ever counts
+up (`FsTree.allocInode` in `packages/fuse/tree.ts`). Nothing keys them by cell
+identity or by path, so a path keeps its inode only for as long as the subtree
+holding it survives. Rebuilding a piece property replaces that subtree and
+allocates fresh inodes, so the same logical cell presents a new inode after
+each rebuild. A rebuild detaches the old subtree rather than dropping it
+immediately, which keeps the old inodes resolvable for a short window so that
+file handles opened before the rebuild continue to reach the same cell.
 
 ### `readdir`
 

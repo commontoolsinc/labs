@@ -643,7 +643,9 @@ canonical lift-applied form:
 
 - `computed(fn)` -> `__cfHelpers.lift(fn)({})` before schema injection
 - no-input computed-origin calls are schema-injected as
-  `__cfHelpers.lift(false, fn)()`
+  `__cfHelpers.lift(fn, false, undefined, { completeSchedulerScopeSummary: true })()`
+  (function first; the trailing scheduler-options object is emitted only when
+  the callback's scope is provably complete)
 - **does not** forward `computed`'s type argument to `lift`: `computed<R>` has a
   single result type param, while `lift<T, R>` takes input `T` first, so
   forwarding `[R]` would place `R` in `lift`'s input slot. Type args are

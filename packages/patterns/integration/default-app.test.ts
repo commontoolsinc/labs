@@ -1665,14 +1665,22 @@ async function collectNotebookSourceState(page: Page): Promise<{
     const notebookInternal = await resolveInternalManifest(
       notebookInternalManifest,
     );
+    const argumentNotes = (notebookArgument as { notes?: unknown } | undefined)
+      ?.notes;
+    const resolvedArgumentNotes = Array.isArray(argumentNotes)
+      ? argumentNotes
+      : argumentNotes !== null && typeof argumentNotes === "object" &&
+          typeof (argumentNotes as { sync?: unknown }).sync === "function"
+      ? await (argumentNotes as { sync: () => Promise<unknown> }).sync()
+      : undefined;
 
     return {
       notebookEntityId,
-      argumentNotesLength: Array.isArray(
-          (notebookArgument as { notes?: unknown[] } | undefined)
-            ?.notes,
-        )
-        ? (notebookArgument as { notes: unknown[] }).notes.length
+      // `notes` is a first-class Cell in the notebook argument schema. Newer
+      // argument links preserve that wrapper, so debug reads return a handle;
+      // older pieces may still materialize the array inline.
+      argumentNotesLength: Array.isArray(resolvedArgumentNotes)
+        ? resolvedArgumentNotes.length
         : undefined,
       noteCount:
         typeof (notebookInternal as { noteCount?: unknown } | undefined)
@@ -1761,10 +1769,16 @@ const notebookSourceStateMatches = async (
     notebookInternalManifest,
   );
 
-  const argumentNotes = (notebookArgument as { notes?: unknown[] } | undefined)
+  const argumentNotes = (notebookArgument as { notes?: unknown } | undefined)
     ?.notes;
-  const argumentNotesLength = Array.isArray(argumentNotes)
-    ? argumentNotes.length
+  const resolvedArgumentNotes = Array.isArray(argumentNotes)
+    ? argumentNotes
+    : argumentNotes !== null && typeof argumentNotes === "object" &&
+        typeof (argumentNotes as { sync?: unknown }).sync === "function"
+    ? await (argumentNotes as { sync: () => Promise<unknown> }).sync()
+    : undefined;
+  const argumentNotesLength = Array.isArray(resolvedArgumentNotes)
+    ? resolvedArgumentNotes.length
     : undefined;
   const internal = notebookInternal as {
     noteCount?: unknown;

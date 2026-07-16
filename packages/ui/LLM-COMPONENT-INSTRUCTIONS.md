@@ -22,9 +22,11 @@ follow the shadcn/ui design system. All components:
 
 ## Automation and Accessibility
 
-Interactive `cf-*` components expose semantic roles and ARIA state on the custom
-element host so browser automation agents can find them without piercing shadow
-DOM. Prefer role/name lookups first:
+Interactive `cf-*` components expose semantic roles and ARIA state through the
+browser's flattened accessibility tree. Single-control components such as
+`cf-button` anchor semantics on the custom-element host; composite components
+use separately named native controls inside their shadow roots. Prefer role/name
+lookups first:
 
 ```bash
 agent-browser find role button click --name "Save"
@@ -328,10 +330,24 @@ await input.pressSequentially("user@example.com");
 - `label` - string, display text
 - `size` - "sm" | "md" | "lg" (default: "md")
 - `removable` - boolean (shows X button)
+- `interactive` - boolean (makes the label a primary action)
 
 **Events**:
 
 - `cf-remove` - Fired when X button clicked (if removable)
+- `cf-click` - Fired when the primary action is activated (if interactive)
+
+**Slots**:
+
+- `icon` - Optional presentational icon before the label
+- Default - Label content; when `interactive`, keep this content non-interactive
+  because it is rendered inside the primary native button
+
+**Accessibility/Automation**:
+
+- An interactive chip exposes a named primary button
+- A removable chip exposes a separate `Remove <label>` button
+- A display-only chip has no button or tab stop
 
 **CSS custom properties** (per-instance color overrides):
 
@@ -359,6 +375,9 @@ await input.pressSequentially("user@example.com");
 
 <!-- Removable -->
 <cf-chip label="Tag" removable></cf-chip>
+
+<!-- Separate primary and destructive actions -->
+<cf-chip label="Roadmap" interactive removable></cf-chip>
 ```
 
 ### 14. cf-alert

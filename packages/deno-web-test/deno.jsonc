@@ -5,7 +5,7 @@
     "test": "deno test --no-check --allow-env --allow-read --allow-write --allow-run --allow-net test/*.test.ts"
   },
   "imports": {
-    "typescript": "npm:typescript@5.9.2"
+    "typescript": "npm:typescript@6.0.3"
   },
   "exports": {
     ".": "./mod.ts",

@@ -252,6 +252,8 @@ export {
   resolveSchemaForValidation,
   schemaWithInjectionSafeAnnotations,
   validateAgainstSchema,
+  validateSchemaDefinition,
+  validateSchemaValue,
 } from "./schema-sanitization.ts";
 export {
   atomsOutsideCeiling,
@@ -271,15 +273,19 @@ export {
   uniqueCfcAtoms,
 } from "./observation.ts";
 export {
+  cfcSchemaChildRoot,
   cfcSchemaIsFalse,
   cfcSchemaIsInternalKey,
   cfcSchemaIsTrue,
   cfcSchemaToObject,
   findCfcSchemaRefs,
   isEmbeddedCfcSchemaRef,
+  pruneCfcSchemaDefinitions,
   resolveCfcSchemaRef,
+  resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
   resolveCfcSchemaRefsOrThrow,
+  selectReferencedCfcSchemaDefs,
 } from "./schema-refs.ts";
 export {
   type SchemaOpaqueLinkSanitizationResult,

@@ -1,9 +1,10 @@
 import { assert, assertEquals } from "@std/assert";
-import { parseDocument, SAMPLE } from "./view-helpers.ts";
+import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
 import { overlayBox, renderFrame, type ViewState } from "../lib/view/render.ts";
 import { _internal } from "../lib/view/render.ts";
 import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
 import { renderLineColored } from "../lib/view/highlight.ts";
+import { ui } from "../lib/view/theme.ts";
 
 function baseView(over: Partial<ViewState> = {}): ViewState {
   return {
@@ -13,6 +14,7 @@ function baseView(over: Partial<ViewState> = {}): ViewState {
     height: 10,
     color: true,
     showLineNumbers: false,
+    displayMode: "pictures",
     selected: null,
     matches: null,
     currentMatch: 0,
@@ -23,9 +25,14 @@ function baseView(over: Partial<ViewState> = {}): ViewState {
   };
 }
 
-/** Per-visible-column flag: is a 24-bit background colour active on each cell?
- * (The renderer emits a self-contained SGR after each RESET, so a run with
- * `48;2;` has a bg; RESET clears it.) */
+/** The editor background sits behind every cell, so a "highlighted" cell is one
+ * whose background is some OTHER colour (a selection tint, a search match, a
+ * diff row). */
+const EDITOR_BG = bgCode(ui.editorBg);
+
+/** Per-visible-column flag: does each cell carry a background other than the
+ * editor blue? (The renderer emits a self-contained SGR after each RESET, so a
+ * run's params carry its bg; RESET clears it.) */
 function bgColumns(row: string): boolean[] {
   const out: boolean[] = [];
   let bg = false;
@@ -35,7 +42,9 @@ function bgColumns(row: string): boolean[] {
       // deno-lint-ignore no-control-regex
       const m = row.slice(i).match(/^\x1b\[([0-9;]*)m/);
       if (m) {
-        bg = m[1] === "0" || m[1] === "" ? false : /48;2;/.test(m[1]);
+        bg = m[1] === "0" || m[1] === ""
+          ? false
+          : /48;2;/.test(m[1]) && !m[1].includes(EDITOR_BG);
         i += m[0].length;
         continue;
       }
@@ -119,14 +128,77 @@ Deno.test("renderFrame: selecting a node draws a guide bar", () => {
   assert(/[╭│╰▶]/.test(joined), "guide glyphs present when a node is selected");
 });
 
+// --- display modes at the frame level ----------------------------------------
+
+/** A one-line document whose text is `text` verbatim, in a single plain span. */
+function docOf(text: string) {
+  return {
+    text: text + "\n",
+    lines: [{ text, spans: [{ col: 0, text, cls: "plain" as const }] }],
+    structure: [],
+    flatStructure: [],
+    definitions: new Map(),
+  };
+}
+
+Deno.test("renderFrame: hidden mode collapses a control run and shifts text left", () => {
+  const doc = docOf("a\x01\x02\x03b");
+  const pictures = stripAnsi(renderFrame(doc, baseView({ color: false }))[0]);
+  assertEquals(pictures.slice(0, 5), "a␁␂␃b", "pictures shows every code");
+  const hidden = stripAnsi(
+    renderFrame(doc, baseView({ color: false, displayMode: "hidden" }))[0],
+  );
+  assertEquals(
+    hidden.slice(0, 3),
+    "a…b",
+    "hidden collapses the run to one cell",
+  );
+});
+
+Deno.test("renderFrame: ansi mode paints the sequence's colour onto later text", () => {
+  const doc = docOf("a\x1b[31mb");
+  const rows = renderFrame(doc, baseView({ displayMode: "ansi" }));
+  // The escape is consumed; "b" is painted ANSI red (205;49;49) while "a" is not.
+  assertEquals(stripAnsi(rows[0]).slice(0, 2), "ab");
+  assert(rows[0].includes("38;2;205;49;49"), "ANSI red applied to later text");
+});
+
+Deno.test("renderFrame: a search match after a hidden sequence still aligns", () => {
+  const doc = docOf("a\x1b[31mbcd");
+  // "bcd" occupies source columns 6..8 (after the 5-column escape). A match on
+  // those columns must highlight the compacted cells, mapped by source column.
+  const rows = renderFrame(
+    doc,
+    baseView({
+      displayMode: "ansi",
+      matches: [{ line: 0, start: 6, end: 9 }],
+      currentMatch: 0,
+    }),
+  );
+  const cols = bgColumns(rows[0]);
+  // Display columns: a(0), b(1), c(2), d(3). The match covers b, c, d.
+  assertEquals(cols.slice(0, 4), [false, true, true, true]);
+});
+
 Deno.test("renderFrame: search matches are highlighted", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(
     doc,
-    baseView({ matches: [{ line: 1, start: 0, end: 5 }], currentMatch: 0 }),
+    baseView({
+      matches: [{ line: 1, start: 0, end: 5 }, { line: 1, start: 6, end: 9 }],
+      currentMatch: 0,
+    }),
   );
-  // current match uses the orange highlight background (48;2;209;154;102)
-  assert(rows[1].includes("48;2;209;154;102"), "current match highlighted");
+  // the current match uses the searchCurrent highlight background
+  assert(
+    rows[1].includes(bgCode(ui.searchCurrent.bg!)),
+    "current match highlighted",
+  );
+  // the other match uses the searchMatch highlight background
+  assert(
+    rows[1].includes(bgCode(ui.searchMatch.bg!)),
+    "non-current match highlighted",
+  );
 });
 
 Deno.test("renderFrame: status line reports position", () => {
@@ -187,8 +259,8 @@ Deno.test("renderFrame: a non-BMP glyph keeps the overlay borders flush", () => 
   // The right border sits at the same display column on every boxed row.
   const rightBorderCols = rows
     .map((r) => [...stripAnsi(r)])
-    .filter((chars) => /[╮│╯]/.test(chars.join("")))
-    .map((chars) => chars.findLastIndex((c) => "╮│╯".includes(c)));
+    .filter((chars) => /[╗║╝]/.test(chars.join("")))
+    .map((chars) => chars.findLastIndex((c) => "╗║╝".includes(c)));
   assert(rightBorderCols.length >= 3, "the box has multiple bordered rows");
   assertEquals(
     new Set(rightBorderCols).size,
@@ -253,4 +325,81 @@ Deno.test("render _internal: sliceVisible keeps ANSI and counts visible cols", (
 
 Deno.test("render _internal: padTo pads to visible width", () => {
   assertEquals(_internal.visibleLen(_internal.padTo("hi", 5)), 5);
+});
+
+Deno.test("renderFrame: the overlay uses a double-line (Turbo Pascal) frame", () => {
+  const doc = parseDocument(SAMPLE);
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 60,
+      height: 16,
+      overlay: {
+        title: "INFO",
+        lines: [{ text: "x", spans: [{ col: 0, text: "x", cls: "plain" }] }],
+        scroll: 0,
+        footer: "esc close",
+      },
+    }),
+  );
+  const joined = rows.map(stripAnsi).join("\n");
+  for (const glyph of ["╔", "╗", "╚", "╝", "║", "═"]) {
+    assert(joined.includes(glyph), `overlay frame uses ${glyph}`);
+  }
+  // No rounded corners survive.
+  for (const glyph of ["╭", "╮", "╰", "╯"]) {
+    assert(!joined.includes(glyph), `no rounded corner ${glyph}`);
+  }
+});
+
+Deno.test("renderFrame: the info panel uses the dialog panel and text colours", () => {
+  const doc = parseDocument(SAMPLE);
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 60,
+      height: 16,
+      overlay: {
+        title: "INFO",
+        lines: [{
+          text: "hello",
+          spans: [{ col: 0, text: "hello", cls: "plain" }],
+        }],
+        scroll: 0,
+        footer: "esc",
+      },
+    }),
+  );
+  const body = rows.find((r) => stripAnsi(r).includes("hello"))!;
+  assert(body.includes(bgCode(ui.overlayBg)), "the dialog panel colour");
+  assert(body.includes(fgCode(ui.dialogText.fg!)), "the dialog text colour");
+});
+
+Deno.test("renderFrame: a source overlay uses the editor colours, not the dialog panel", () => {
+  const doc = parseDocument(SAMPLE);
+  const overlay = (sourceView: boolean) => ({
+    title: "SRC",
+    lines: [{
+      text: "code",
+      spans: [{ col: 0, text: "code", cls: "plain" as const }],
+    }],
+    scroll: 0,
+    footer: "esc",
+    sourceView,
+  });
+  const rowsDialog = renderFrame(
+    doc,
+    baseView({ width: 60, height: 16, overlay: overlay(false) }),
+  );
+  const rowsSource = renderFrame(
+    doc,
+    baseView({ width: 60, height: 16, overlay: overlay(true) }),
+  );
+  const dialogBody = rowsDialog.find((r) => stripAnsi(r).includes("code"))!;
+  const sourceBody = rowsSource.find((r) => stripAnsi(r).includes("code"))!;
+  assert(dialogBody.includes(bgCode(ui.overlayBg)), "the dialog panel colour");
+  assert(
+    sourceBody.includes(bgCode(ui.editorBg)),
+    "the source panel is the editor colour",
+  );
 });

@@ -1491,9 +1491,9 @@ export class CellBridge {
     this.hydrationEpochs.set(key, (this.hydrationEpochs.get(key) ?? 0) + 1);
     this.markPiecePropCleared(rootIno, propName);
 
-    // Collect all descendant inodes BEFORE clearing (tree.clear removes them).
-    // FUSE-T doesn't support notify_inval_entry, so we must invalidate each
-    // cached inode individually via notify_inval_inode.
+    // Collect all descendant inodes BEFORE clearing (tree.clear removes
+    // them), so the invalidation below can name every inode whose cached
+    // data is about to go stale, not just the entries under this prop.
     const staleInos: bigint[] = [];
     const propIno = this.tree.lookup(rootIno, propName);
     if (propIno !== undefined) {

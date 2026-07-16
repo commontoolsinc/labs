@@ -1,10 +1,10 @@
 name: Benchmarks
 
 # The bench-results artifacts feed the benchmark trend charts on the team ops
-# dashboard (its /bench page), which samples one run per four-hour window, so
-# per-push samples add no resolution beyond a four-hourly cadence. Scheduled
-# runs stay on the dedicated runner group so results remain comparable across
-# runs; use the manual trigger to measure a specific commit.
+# dashboard (its /bench page), which samples one successful run per four-hour
+# window, so per-push samples add no resolution beyond a four-hourly cadence.
+# Scheduled runs stay on the dedicated runner group so results remain
+# comparable across runs; use the manual trigger to measure a specific commit.
 on:
   schedule:
     - cron: "0 */4 * * *" # Every 4 hours
@@ -37,6 +37,23 @@ jobs:
             packages/utils/src/cache.bench.ts \
             packages/utils/test/deep-equal.bench.ts \
             > bench-results/results.json
+
+      # Fail the run if any bench file wrote non-JSON to stdout, or if the
+      # report lists no benches. The dashboard samples successful runs only,
+      # so a corrupt artifact never reaches the charts and the failure is a
+      # visible red run. The script rides in a single-quoted shell argument —
+      # keep apostrophes out of it.
+      - name: ✅ Validate benchmark results
+        run: |
+          deno eval '
+            const data = JSON.parse(
+              Deno.readTextFileSync("bench-results/results.json"),
+            );
+            if (!Array.isArray(data.benches) || data.benches.length === 0) {
+              throw new Error("results.json parsed but contains no benches");
+            }
+            console.log(`results.json OK: ${data.benches.length} benches`);
+          '
 
       - name: 📤 Upload benchmark results
         if: always()

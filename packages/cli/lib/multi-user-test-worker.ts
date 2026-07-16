@@ -44,6 +44,7 @@ import {
   Identity,
   type KeyPairRaw,
 } from "@commonfabric/identity";
+import { materializeTestVDOM, mountTestVDOM } from "./materialize-test-vdom.ts";
 
 export interface WorkerRequest {
   id: number;
@@ -55,7 +56,7 @@ export type WorkerResponse =
   | { id: number; ok: unknown }
   | { id: number; error: string };
 
-export type StepKind = "action" | "assertion" | "label" | "await";
+export type StepKind = "action" | "assertion" | "render" | "label" | "await";
 
 export interface StepMeta {
   kind: StepKind;
@@ -88,6 +89,8 @@ const runtimeErrors: string[] = [];
 /** Channel 1: console.error/warn captured via the harness console event. */
 const consoleErrors: string[] = [];
 const consoleWarnings: string[] = [];
+const continuousUiErrors: Error[] = [];
+let continuousUiCancel: (() => void) | undefined;
 // Run-phase gate for channel 1 (mirrors test-runner.ts): flips true at the
 // post-compile point where the channel-2 snapshot is taken, so compile-time
 // module-evaluation console output does not fail tests.
@@ -114,6 +117,7 @@ const stepPeekSchema = {
   properties: {
     action: { type: "unknown" },
     assertion: { type: "unknown" },
+    render: { type: "unknown" },
     label: { type: "string" },
     await: { type: "string" },
     event: { type: "unknown" },
@@ -132,6 +136,7 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
   const peek = stepCell.asSchema(stepPeekSchema).get() as {
     action?: unknown;
     assertion?: unknown;
+    render?: unknown;
     label?: string;
     await?: string;
     skip?: boolean;
@@ -144,12 +149,13 @@ function classifyStep(stepCell: Cell<unknown>, index: number): StepMeta {
     return { kind: "await", marker: peek.await, ...skip };
   }
   // Streams/computeds peek as present-but-opaque; key presence is the signal.
+  if (Object.hasOwn(peek ?? {}, "render")) return { kind: "render", ...skip };
   if (Object.hasOwn(peek ?? {}, "action")) return { kind: "action", ...skip };
   if (Object.hasOwn(peek ?? {}, "assertion")) {
     return { kind: "assertion", ...skip };
   }
   throw new Error(
-    `Test step ${index} has none of action/assertion/label/await ` +
+    `Test step ${index} has none of action/assertion/render/label/await ` +
       `(keys: ${Object.keys(peek ?? {}).join(",") || "none"})`,
   );
 }
@@ -312,6 +318,12 @@ const handlers: Record<
     );
     rt().prepareTxForCommit?.(tx);
     await tx.commit();
+    if (args.continuousUI === true) {
+      continuousUiCancel = await mountTestVDOM(
+        resultCell.key("$UI") as Cell<unknown>,
+        (error) => continuousUiErrors.push(error),
+      );
+    }
     await settle();
 
     const stepsValue = resultCell.key("tests").asSchema(
@@ -372,6 +384,16 @@ const handlers: Record<
     return { passed: value === true };
   },
 
+  /** Materialize one VDOM target, then remove its renderer demand. */
+  async render({ index }) {
+    const stepCell = stepCells[index as number];
+    await materializeTestVDOM(
+      stepCell.key("render" as never) as Cell<unknown>,
+      () => settle(),
+    );
+    return {};
+  },
+
   /** Let in-flight work and incoming subscription pushes land. */
   async settle() {
     await settle(6);
@@ -388,7 +410,12 @@ const handlers: Record<
       consoleWarnings,
     );
     return Promise.resolve({
-      runtimeErrors: [...runtimeErrors],
+      runtimeErrors: [
+        ...runtimeErrors,
+        ...continuousUiErrors.map((error) =>
+          `[continuous $UI] ${String(error)}`
+        ),
+      ],
       consoleErrors: [...consoleErrors],
       consoleWarnings: [...consoleWarnings],
       nonIdempotent: rt().getIdempotencyViolations?.()?.map((violation) => {
@@ -417,6 +444,9 @@ const handlers: Record<
 
   async dispose() {
     stepCells = [];
+    continuousUiCancel?.();
+    continuousUiCancel = undefined;
+    continuousUiErrors.length = 0;
     // `engine` is the runtime's own harness; runtime.dispose() disposes it.
     await runtime?.dispose();
     await storageManager?.close();

@@ -17,6 +17,8 @@ import {
 } from "../lib/view/pager.ts";
 import { fileSource } from "../lib/view/editsource.ts";
 import { ViewError } from "../lib/view/errors.ts";
+import { term } from "../lib/view/ansi.ts";
+import { ui } from "../lib/view/theme.ts";
 
 const OPTS = { color: false, showLineNumbers: false };
 const DOC = parseDocument("export const x = 1;\nconst y = x;\n");
@@ -134,6 +136,29 @@ Deno.test("pager: draws the document and quits on q", async () => {
   assert(writes.some((w) => w.includes("\x1b[?1049l")), "left alt screen");
 });
 
+Deno.test("pager: with colour, matches the terminal background to the status bar and restores it", async () => {
+  // A redraw (the 'j' scroll) in its own read precedes the quit, so the frame is
+  // drawn again inside the loop.
+  const { deps, writes } = makeFake({
+    steps: [{ bytes: enc("j") }, { bytes: enc("q") }],
+  });
+  await runPager(
+    DOC,
+    { color: true, showLineNumbers: false },
+    undefined,
+    undefined,
+    deps,
+  );
+  const all = writes.join("");
+  const set = term.setDefaultBg(ui.statusBar.bg!);
+  // OSC 11 sets the terminal default background to the status bar colour, and it
+  // is re-asserted on every frame so a terminal that drops it cannot leave a
+  // strip in its own colour; OSC 111 restores it on exit.
+  assert(all.includes(set), "set the default background");
+  assert(all.split(set).length - 1 >= 2, "re-asserted on redraw");
+  assert(all.includes("\x1b]111\x07"), "restored the default background");
+});
+
 Deno.test("pager: a closed terminal (EOF) ends the loop", async () => {
   const { deps } = makeFake({ steps: [{ eof: true }] });
   await runPager(DOC, OPTS, undefined, undefined, deps);
@@ -224,43 +249,68 @@ function editableDoc(): {
   doc: typeof DOC;
   source: ReturnType<typeof fileSource>;
   dir: string;
+  /** How many times the source has been re-parsed — the deferred reparse calls
+   * `source.parse`, so this stays 0 unless an edit actually scheduled and ran
+   * one. */
+  parses: () => number;
 } {
   const dir = Deno.makeTempDirSync();
   const path = join(dir, "m.ts");
   const text = "export const a = 1;\nconst b = a;\n";
   Deno.writeTextFileSync(path, text);
-  return { doc: parseDocument(text, path), source: fileSource(path), dir };
+  const base = fileSource(path);
+  let parses = 0;
+  const source = {
+    ...base,
+    parse: (t: string) => {
+      parses++;
+      return base.parse(t);
+    },
+  };
+  return { doc: parseDocument(text, path), source, dir, parses: () => parses };
 }
 
 Deno.test("pager: an edit schedules the deferred reparse, which then runs", async () => {
-  const { doc, source, dir } = editableDoc();
+  const { doc, source, dir, parses } = editableDoc();
   try {
-    const { deps } = makeFake({
+    const { deps, writes } = makeFake({
       steps: [
-        { bytes: enc("\x1b[B") }, // down arrow: reveal the text cursor
+        { bytes: enc("e") }, // e: enter edit mode
         { bytes: enc("X") }, // type — marks needsReparse, schedules the timer
         { fireTimers: true }, // the debounce fires: reparse + redraw
         { eof: true },
       ],
     });
     await runPager(doc, OPTS, undefined, source, deps);
+    const out = writes.join("");
+    // If e no longer entered edit mode, X would be an inert pager key: no edit
+    // hint, no inserted character, and no reparse.
+    assert(out.includes("Esc Done"), "e entered edit mode (edit hints shown)");
+    assert(out.includes("Xexport"), "the typed X was inserted at the top");
+    assertEquals(parses(), 1, "the deferred reparse re-parsed the edited text");
   } finally {
     Deno.removeSync(dir, { recursive: true });
   }
 });
 
 Deno.test("pager: a second edit reschedules the reparse; a pending timer is cleared on exit", async () => {
-  const { doc, source, dir } = editableDoc();
+  const { doc, source, dir, parses } = editableDoc();
   try {
-    const { deps } = makeFake({
+    const { deps, writes } = makeFake({
       steps: [
-        { bytes: enc("\x1b[B") }, // reveal the cursor
+        { bytes: enc("e") }, // e: enter edit mode
         { bytes: enc("X") }, // schedules timer 1
         { bytes: enc("Y") }, // reschedules: clears timer 1, schedules timer 2
         { eof: true }, // exit with timer 2 still pending -> cleared in finally
       ],
     });
     await runPager(doc, OPTS, undefined, source, deps);
+    const out = writes.join("");
+    // Both edits must have landed for there to be a reparse to reschedule.
+    assert(out.includes("Esc Done"), "e entered edit mode");
+    assert(out.includes("XYexport"), "both typed edits were inserted");
+    // The pending reparse timer was cleared on exit before it could fire.
+    assertEquals(parses(), 0, "the rescheduled reparse never ran");
   } finally {
     Deno.removeSync(dir, { recursive: true });
   }
@@ -269,15 +319,21 @@ Deno.test("pager: a second edit reschedules the reparse; a pending timer is clea
 Deno.test("pager: a SIGINT with unsaved edits routes through the save prompt", async () => {
   const { doc, source, dir } = editableDoc();
   try {
-    const { deps } = makeFake({
+    const { deps, writes } = makeFake({
       steps: [
-        { bytes: enc("\x1b[B") }, // reveal the cursor
+        { bytes: enc("e") }, // enter edit mode
         { bytes: enc("X") }, // an unsaved edit
         { fire: "SIGINT" }, // requestQuitFromSignal is true -> redraw, no exit
         { eof: true },
       ],
     });
     await runPager(doc, OPTS, undefined, source, deps);
+    // The dirty buffer is what makes the SIGINT redraw the save prompt instead
+    // of exiting; without the edit landing, the prompt would never appear.
+    assert(
+      writes.join("").includes("Save changes to"),
+      "the SIGINT raised the save-prompt dialog over the dirty buffer",
+    );
   } finally {
     Deno.removeSync(dir, { recursive: true });
   }

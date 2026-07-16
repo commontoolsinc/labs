@@ -346,6 +346,7 @@ declare module "@commonfabric/api" {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
+        keepAsCell?: KeepAsCell;
       },
     ): SigilWriteRedirectLink;
     getRaw(options?: RawCellReadOptions): Immutable<T> | undefined;
@@ -382,8 +383,6 @@ declare module "@commonfabric/api" {
      * register a dependency that could re-trigger the writing computation.
      */
     setRawUntyped(value: FabricValue, onlyIfDifferent?: boolean): void;
-    freeze(reason: string): void;
-    isFrozen(): boolean;
     setSchema(newSchema: JSONSchema): void;
     connect(node: NodeRef): void;
     export(): {
@@ -474,8 +473,6 @@ const cellMethods = new Set<
   "setRaw",
   "setRawUntyped",
   "getArgumentCell",
-  "freeze",
-  "isFrozen",
   "setSchema",
   "connect",
   "export",
@@ -638,8 +635,6 @@ interface CauseContainer {
  */
 export class CellImpl<T extends FabricValue>
   implements ICell<T>, IStreamable<T> {
-  private readOnlyReason: string | undefined;
-
   // Stream-specific fields
   private listeners = new Set<
     (event: AnyCellWrapping<T>) => Cancel | undefined
@@ -1811,9 +1806,9 @@ export class CellImpl<T extends FabricValue>
         ? this.runtime.cfc.getSchemaAtPath(currentLink.schema, [key.toString()])
         : undefined;
 
-      // Create a child link with extended path
-      // When we have a childSchema, we need to preserve the schema that contains $defs
-      // for resolving $ref references. If schema wasn't set, fall back to the parent schema.
+      // Create a child link with an extended path. schemaAtPath retains the
+      // reachable $defs closure needed for later key() calls while dropping
+      // definitions the child can no longer reach.
       //
       // key() only extends the path and walks the schema. It must NOT change the
       // link's scope: scope lives in the schema (top-level and asCell entries)
@@ -2072,6 +2067,7 @@ export class CellImpl<T extends FabricValue>
       base?: Cell<any>;
       baseSpace?: MemorySpace;
       includeSchema?: boolean;
+      keepAsCell?: KeepAsCell;
     },
   ): SigilWriteRedirectLink {
     return createSigilLinkFromParsedLink(this.link, {
@@ -2174,14 +2170,6 @@ export class CellImpl<T extends FabricValue>
     const link = parseLink(linkObj, this._link);
     if (link === undefined) return undefined;
     return this.runtime.getCellFromLink(link).asSchema<U>(schema);
-  }
-
-  freeze(reason: string): void {
-    this.readOnlyReason = reason;
-  }
-
-  isFrozen(): boolean {
-    return !!this.readOnlyReason;
   }
 
   getMetaRaw(

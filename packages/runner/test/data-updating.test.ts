@@ -122,24 +122,6 @@ describe("data-updating", () => {
       expect(changes[0].location.path).toEqual(["b", "c"]);
     });
 
-    // Frozen cells are not freezing the underlying document right now.
-    it.skip("should fail when setting a nested value on a frozen cell", () => {
-      const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
-        space,
-        "should fail when setting a nested value on a frozen cell 1",
-        undefined,
-        tx,
-      );
-      testCell.set({ a: 1, b: { c: 2 } });
-      testCell.freeze("test");
-      expect(() =>
-        diffAndUpdate(runtime, tx, testCell.getAsNormalizedFullLink(), {
-          a: 1,
-          b: { c: 3 },
-        })
-      ).toThrow();
-    });
-
     it("should correctly update with shorter arrays", () => {
       const testCell = runtime.getCell<{ a: number[] }>(
         space,

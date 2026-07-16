@@ -14,6 +14,7 @@ import type { Document } from "./model.ts";
 import { decodeKeys } from "./keys.ts";
 import { cursorScreenPos, renderFrame } from "./render.ts";
 import { Session, type SessionOptions } from "./session.ts";
+import { ui } from "./theme.ts";
 import { createSemantics, type Semantics } from "./semantics.ts";
 import type { EditableSource } from "./editsource.ts";
 import { realFileGateway } from "./filegateway.ts";
@@ -96,6 +97,12 @@ export async function runPager(
   const semantics = semanticsIn ??
     createSemantics(doc.text, { cwd: Deno.cwd() }) ?? undefined;
 
+  // The terminal fills the area outside the character grid (the sub-cell padding
+  // below the last row) with its default background. Set that to the status
+  // bar's colour so the strip beneath the last line blends in instead of showing
+  // the terminal's own background; restore it on exit. Only with colour on.
+  const padBg = options.color ? ui.statusBar.bg : undefined;
+
   const session = new Session(
     doc,
     options,
@@ -107,15 +114,20 @@ export async function runPager(
 
   const draw = () => {
     const view = session.view();
-    const rows = renderFrame(session.doc, view);
-    let out = `${CSI}?7l${term.hideCursor}`; // disable autowrap while drawing
+    const doc = session.displayDoc();
+    const rows = renderFrame(doc, view);
+    // Re-assert the padding background every frame. Some terminals drop the
+    // OSC 11 default set at startup after the first repaint, so setting it once
+    // is not enough; re-sending the same value is a no-op where it already holds.
+    let out = (padBg ? term.setDefaultBg(padBg) : "") +
+      `${CSI}?7l${term.hideCursor}`; // disable autowrap while drawing
     for (let i = 0; i < rows.length; i++) {
       out += term.moveTo(i + 1, 1) + term.clearLine + rows[i];
     }
     out += `${CSI}?7h`;
     // Show the text cursor at its cell when edit mode has one; otherwise the
     // terminal cursor stays hidden.
-    const cur = cursorScreenPos(session.doc, view);
+    const cur = cursorScreenPos(doc, view);
     if (cur) out += term.moveTo(cur.row, cur.col) + term.showCursor;
     deps.write(out);
   };
@@ -142,7 +154,10 @@ export async function runPager(
     try {
       tty.setRaw(false);
     } catch { /* ignore */ }
-    deps.write(`${CSI}?7h${term.showCursor}${term.leaveAltScreen}`);
+    deps.write(
+      `${CSI}?7h${term.showCursor}` +
+        (padBg ? term.resetDefaultBg : "") + term.leaveAltScreen,
+    );
     try {
       tty.close();
     } catch { /* ignore */ }
@@ -174,7 +189,10 @@ export async function runPager(
   deps.addSignalListener("SIGTERM", onTerminate);
 
   tty.setRaw(true);
-  deps.write(`${term.enterAltScreen}${term.hideCursor}`);
+  deps.write(
+    `${term.enterAltScreen}${term.hideCursor}` +
+      (padBg ? term.setDefaultBg(padBg) : ""),
+  );
 
   const buf = new Uint8Array(4096);
   let leftover: Uint8Array = new Uint8Array(0);

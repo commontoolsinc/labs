@@ -39,4 +39,30 @@ describe("ContextualFlowControl.lubSchema combinator descent", () => {
       ],
     } as JSONSchema)).toEqual(["t0", "t1"]);
   });
+
+  it("does not mistake identical refs in different definition roots for a cycle", () => {
+    const shared = { $ref: "#/$defs/V" } as const;
+    expect(atomsOf({
+      type: "object",
+      properties: { entry: shared },
+      $defs: {
+        V: {
+          type: "object",
+          ifc: { confidentiality: ["a"] },
+          properties: {
+            nested: {
+              type: "object",
+              $defs: {
+                V: {
+                  type: "string",
+                  ifc: { confidentiality: ["b"] },
+                },
+              },
+              properties: { value: shared },
+            },
+          },
+        },
+      },
+    })).toEqual(["a", "b"]);
+  });
 });

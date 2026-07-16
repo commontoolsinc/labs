@@ -119,9 +119,15 @@ export type FuseLib = Deno.DynamicLibrary<typeof COMMON_SYMBOLS>;
 // deno-lint-ignore no-explicit-any
 type AnyCallback = Deno.UnsafeCallback<any>;
 
+/** Which FUSE implementation openFuse() loaded. */
+export type FuseProvider = "fuse-t" | "macfuse" | "linux-libfuse" | "unknown";
+
 export interface FusePlatform {
   /** Open the platform-appropriate libfuse and return a lib with common symbols. */
   openFuse(): FuseLib;
+
+  /** The implementation loaded by openFuse(); "unknown" before it runs. */
+  provider(): FuseProvider;
 
   // Struct sizes
   STAT_SIZE: number;

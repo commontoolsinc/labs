@@ -151,6 +151,44 @@ describe("home-space profile creation", () => {
     await waitForText(page, "#home-profile-summary", "Alan Turing");
   });
 
+  it("lets an owner edit a non-default profile", async () => {
+    const page = shell.page();
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { builtin: "home" },
+      identity,
+    });
+
+    await clickCfButton(page, 'cf-tab[value="profile"]');
+
+    // Retain Ada as the explicit default, then open Alan. This is the case that
+    // regressed when `#profile` exposed only its selected default as a
+    // candidate: ProfileHome must recognize the viewer owns Alan as well.
+    await createProfile(page, "Ada Lovelace");
+    await createProfile(page, "Alan Turing");
+    await waitForText(page, "#home-profile-summary", "Alan Turing");
+    await clickTrustedAction(page, "SetDefaultProfile");
+    await waitForRuntimeIdle(page);
+
+    await clickProfileLink(page, "Alan Turing");
+    await waitForRuntimeIdle(page);
+
+    // The profile page must expose the owner-only affordance and the real
+    // trusted click must reveal its edit form, not merely render its label.
+    await waitForText(
+      page,
+      '[data-ui-region="profile-presentation"]',
+      "Edit profile",
+    );
+    await clickProfileEditToggle(page);
+    await waitForRuntimeIdle(page);
+    await page.waitForSelector('[data-ui-region="profile-edit"]', {
+      strategy: "pierce",
+      timeout: 30_000,
+    });
+  });
+
   it("creates a profile by pressing Enter in the field (keyboard submit)", async () => {
     const page = shell.page();
 
@@ -170,3 +208,75 @@ describe("home-space profile creation", () => {
     await waitForText(page, "#home-profile-summary", "Grace Hopper");
   });
 });
+
+// `cf-cell-link` renders its visible, interactive target inside two shadow
+// roots (`cf-cell-link` -> `cf-chip` -> native button). Tag that native target
+// by its profile name, then use one browser click to exercise normal shell
+// navigation to the profile piece.
+// deno-lint-ignore no-explicit-any
+async function clickProfileLink(page: any, name: string) {
+  const token = `profile-link-${crypto.randomUUID()}`;
+  const marked = await page.evaluate(
+    (targetName: string, targetToken: string) => {
+      const collect = (root: Document | ShadowRoot, result: Element[]) => {
+        for (const element of root.querySelectorAll("*")) {
+          result.push(element);
+          if (element.shadowRoot) collect(element.shadowRoot, result);
+        }
+      };
+      const elements: Element[] = [];
+      collect(document, elements);
+      for (const element of elements) {
+        if (element.tagName.toLowerCase() !== "cf-cell-link") continue;
+        const chip = element.shadowRoot?.querySelector("cf-chip");
+        // The profile name is the light-DOM slot content of the nested chip.
+        // A host element's `textContent` excludes its shadow tree, so inspect
+        // the chip itself rather than the outer `cf-cell-link`.
+        if (!(chip?.textContent ?? "").includes(targetName)) continue;
+        const clickTarget = chip?.shadowRoot?.querySelector("button") ?? chip ??
+          element;
+        (clickTarget as HTMLElement).scrollIntoView({
+          block: "center",
+          inline: "center",
+        });
+        clickTarget.setAttribute("data-profile-link-click", targetToken);
+        return true;
+      }
+      return false;
+    },
+    { args: [name, token] },
+  );
+  if (!marked) throw new Error(`No profile link for "${name}" found`);
+  const target = await page.waitForSelector(
+    `[data-profile-link-click="${token}"]`,
+    { strategy: "pierce", timeout: 30_000 },
+  );
+  await target.click();
+}
+
+// ProfileHome rerenders its owner-gated control immediately after the test
+// runner marks a cf-button's inner click target, so the generic CDP helper can
+// lose that transient marker before it clicks. This toggle writes only local
+// view state (not CFC-protected profile data), so invoke its stable native
+// target within the browser DOM and assert the resulting edit form below.
+// deno-lint-ignore no-explicit-any
+async function clickProfileEditToggle(page: any) {
+  const clicked = await page.evaluate(() => {
+    const stack: (Document | ShadowRoot)[] = [document];
+    while (stack.length > 0) {
+      const root = stack.pop()!;
+      const button = root.querySelector("#profile-edit-toggle");
+      if (button) {
+        const target = button.shadowRoot?.querySelector("[data-cf-button]") ??
+          button;
+        (target as HTMLElement).click();
+        return true;
+      }
+      for (const element of root.querySelectorAll("*")) {
+        if (element.shadowRoot) stack.push(element.shadowRoot);
+      }
+    }
+    return false;
+  });
+  if (!clicked) throw new Error("Profile edit toggle was not rendered");
+}

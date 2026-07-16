@@ -9,7 +9,7 @@ import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
 import { piece } from "./piece.ts";
 import { identity } from "./identity.ts";
-import { test } from "./test.ts";
+import { test } from "./test-command.ts";
 import { view } from "./view.ts";
 import { wish } from "./wish.ts";
 import ports from "@commonfabric/ports" with { type: "json" };
@@ -109,6 +109,11 @@ export const main = new Command()
       .option("--exec-cli <path:string>", "Path to the cf exec shim.")
       .option("--log-file <path:string>", "Path to the FUSE child log file.")
       .option("--allow-other", "Pass allow_other through to the FUSE child.")
+      .option("--noattrcache", "Pass noattrcache through to the FUSE child.")
+      .option(
+        "--attrcache-timeout <seconds:string>",
+        "Pass attrcache-timeout through to the FUSE child.",
+      )
       .option("--cfc-mode <mode:string>", "FUSE-side CFC mode.")
       .option("--cfc-annotations", "Publish CFC annotation xattrs.")
       .option(
@@ -142,6 +147,8 @@ export const main = new Command()
           logFile: options.logFile ?? "",
           spaces: options.space ?? [],
           allowOther: options.allowOther,
+          noattrcache: options.noattrcache,
+          attrcacheTimeout: options.attrcacheTimeout,
           cfcMode: options.cfcMode,
           cfcAnnotations: options.cfcAnnotations,
           cfcXattrNamespace: options.cfcXattrNamespace,

@@ -14,6 +14,7 @@ import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
 import {
   canBranchMatch,
+  combineSchema,
   CompoundCycleTracker,
   createDefaultTraversalContext,
   createTraversalContext,
@@ -26,6 +27,7 @@ import {
   PointerCycleTracker,
   SchemaObjectTraverser,
   schemaTrackerCoversSelector,
+  type TraversalContext,
 } from "../src/traverse.ts";
 import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
@@ -39,11 +41,12 @@ import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 function getTraverser(
   store: Map<string, Revision<State>>,
   selector: SchemaPathSelector,
+  context: TraversalContext = createDefaultTraversalContext(),
 ): SchemaObjectTraverser<FabricValue> {
   const manager = new StoreObjectManager(store);
   const managedTx = new ManagedStorageTransaction(manager);
   const tx = new ExtendedStorageTransaction(managedTx);
-  return new SchemaObjectTraverser(tx, selector);
+  return new SchemaObjectTraverser(tx, selector, context);
 }
 
 describe("SchemaObjectTraverser.traverseDAG", () => {
@@ -1815,6 +1818,50 @@ describe("CompoundCycleTracker intern-based keying (Tactic 2B)", () => {
   });
 });
 
+const numericTypeCases = [
+  {
+    name: "number accepts an integer value",
+    schema: { type: "number" },
+    value: 42,
+    expected: true,
+  },
+  {
+    name: "number accepts a fractional value",
+    schema: { type: "number" },
+    value: 1.5,
+    expected: true,
+  },
+  {
+    name: "integer accepts an integer value",
+    schema: { type: "integer" },
+    value: 42,
+    expected: true,
+  },
+  {
+    name: "integer rejects a fractional value",
+    schema: { type: "integer" },
+    value: 1.5,
+    expected: false,
+  },
+  {
+    name: "a union containing integer accepts an integer value",
+    schema: { type: ["string", "integer"] },
+    value: 42,
+    expected: true,
+  },
+  {
+    name: "a union containing integer rejects a fractional value",
+    schema: { type: ["string", "integer"] },
+    value: 1.5,
+    expected: false,
+  },
+] as const satisfies readonly {
+  name: string;
+  schema: JSONSchema;
+  value: number;
+  expected: boolean;
+}[];
+
 describe("canBranchMatch", () => {
   it("rejects type mismatch: string value vs number schema", () => {
     expect(canBranchMatch({ type: "number" }, "hello")).toBe(false);
@@ -1836,6 +1883,14 @@ describe("canBranchMatch", () => {
     expect(canBranchMatch({ type: "boolean" }, true)).toBe(true);
     expect(canBranchMatch({ type: "null" }, null)).toBe(true);
   });
+
+  for (const testCase of numericTypeCases) {
+    it(testCase.name, () => {
+      expect(canBranchMatch(testCase.schema, testCase.value)).toBe(
+        testCase.expected,
+      );
+    });
+  }
 
   it("conservatively accepts const schemas (values may contain unresolved links)", () => {
     expect(canBranchMatch({ const: "a" }, "b")).toBe(true);
@@ -1993,6 +2048,47 @@ describe("canBranchMatch", () => {
   it("accepts empty array against items: false (only empty arrays match)", () => {
     expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
   });
+});
+
+describe("SchemaObjectTraverser number/integer type pruning", () => {
+  for (const [index, testCase] of numericTypeCases.entries()) {
+    it(testCase.name, () => {
+      const store = new Map<string, Revision<State>>();
+      const type = "application/json" as const;
+      const docUri = `of:number-integer-${index}` as URI;
+      const docEntity = docUri as Entity;
+      const value = testCase.value;
+
+      store.set(`${docUri}/${type}`, {
+        the: type,
+        of: docEntity,
+        is: { value },
+        cause: hashOf({ the: type, of: docEntity }),
+        since: 1,
+      });
+
+      const { ok, error } = getTraverser(store, {
+        path: ["value"],
+        schema: testCase.schema,
+      }).traverse({
+        address: {
+          space: "did:null:null",
+          id: docUri,
+          type,
+          path: ["value"],
+        },
+        value,
+      });
+
+      if (testCase.expected) {
+        expect(error).toBeUndefined();
+        expect(ok).toBe(value);
+      } else {
+        expect(error?.code).toBe("INVALID_TYPE");
+        expect(ok).toBeUndefined();
+      }
+    });
+  }
 });
 
 describe("mergeAnyOfMatches", () => {
@@ -2174,6 +2270,45 @@ describe("mergeAnyOfBranchSchemas", () => {
 });
 
 describe("anyOf optimization integration", () => {
+  it("preserves integer subtype matching in the prepared type prefilter", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-anyof-integer-subtype" as URI;
+    const docEntity = docUri as Entity;
+    const value = 42;
+
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value },
+      cause: hashOf({ the: type, of: docEntity }),
+      since: 1,
+    });
+
+    const selector = internPathSelector({
+      path: ["value"],
+      schema: {
+        anyOf: [{ type: "number" }, { type: "string" }],
+      },
+    });
+    expect(isInternedSchema(selector.schema!)).toBe(true);
+
+    const traverser = getTraverser(store, selector);
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value,
+    });
+
+    expect(error).toBeUndefined();
+    expect(ok).toBe(value);
+    expect(traverser.anyOfFastRejects).toBe(1);
+  });
+
   it("fast-rejects incompatible branches and still produces correct result", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
@@ -2440,6 +2575,457 @@ describe("anyOf optimization integration", () => {
     expect(result).toEqual({ name: "test" });
     // string and null branches should be fast-rejected
     expect(traverser.anyOfFastRejects).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("link schema path narrowing", () => {
+  const SPACE = "did:null:null";
+  const TYPE = "application/json" as const;
+
+  function putDoc(
+    store: Map<string, Revision<State>>,
+    id: URI,
+    value: unknown,
+  ) {
+    const entity = id as Entity;
+    store.set(`${entity}/${TYPE}`, {
+      the: TYPE,
+      of: entity,
+      is: { value },
+      cause: hashOf({ the: TYPE, of: entity }),
+      since: 1,
+    } as Revision<State>);
+  }
+
+  function makeLink(
+    targetId: URI,
+    path: string[],
+    schema: JSONSchema,
+  ) {
+    return {
+      "/": {
+        [LINK_V1_TAG]: { id: targetId, path, schema },
+      },
+    };
+  }
+
+  function makeRecursiveFriendsGraph(
+    prefix: string,
+    linkFriendsRequired: boolean,
+  ) {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = `of:${prefix}-friends-root` as URI;
+    const directFriendsUri = `of:${prefix}-direct-friends` as URI;
+    const directFriendUri = `of:${prefix}-direct-friend` as URI;
+    const nestedFriendsUri = `of:${prefix}-nested-friends` as URI;
+    const secondDegreeFriendUri = `of:${prefix}-second-degree-friend` as URI;
+
+    const fullUserSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+        },
+      },
+      required: linkFriendsRequired ? ["id", "friends"] : ["id"],
+    } as const satisfies JSONSchema;
+    const fullFriendsSchema = {
+      type: "array",
+      items: fullUserSchema,
+    } as const satisfies JSONSchema;
+
+    const rootValue = {
+      id: "root",
+      friends: makeLink(directFriendsUri, [], fullFriendsSchema),
+    };
+    const directFriendsValue = [
+      makeLink(directFriendUri, [], fullUserSchema),
+    ];
+    const directFriendValue = {
+      id: "direct",
+      friends: makeLink(nestedFriendsUri, [], fullFriendsSchema),
+    };
+    const nestedFriendsValue = [
+      makeLink(secondDegreeFriendUri, [], fullUserSchema),
+    ];
+
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, directFriendsUri, directFriendsValue);
+    putDoc(store, directFriendUri, directFriendValue);
+    putDoc(store, nestedFriendsUri, nestedFriendsValue);
+    putDoc(store, secondDegreeFriendUri, {
+      id: "second-degree",
+      friends: [],
+    });
+
+    return {
+      store,
+      rootUri,
+      directFriendsUri,
+      directFriendUri,
+      nestedFriendsUri,
+      secondDegreeFriendUri,
+      fullUserSchema,
+      fullFriendsSchema,
+      rootValue,
+      directFriendValue,
+      trackerKey: (id: URI) => `${SPACE}/space/${id}`,
+    };
+  }
+
+  const cases: Array<{
+    name: string;
+    targetPath: string[];
+    targetValue: unknown;
+    selectorPath: string[];
+    selectorSchema: JSONSchema;
+    linkSchema: JSONSchema;
+    expected: unknown;
+  }> = [
+    {
+      name: "narrows an object link schema to the selected property",
+      targetPath: [],
+      targetValue: { label: "Numbers", values: [1, 2, 3] },
+      selectorPath: ["label"],
+      selectorSchema: { type: "string" },
+      linkSchema: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          values: { type: "array", items: { type: "number" } },
+        },
+        required: ["label", "values"],
+      },
+      expected: "Numbers",
+    },
+    {
+      name: "narrows an array link schema to the selected element",
+      targetPath: [],
+      targetValue: [7, 8],
+      selectorPath: ["0"],
+      selectorSchema: { type: "number" },
+      linkSchema: { type: "array", items: { type: "number" } },
+      expected: 7,
+    },
+    {
+      name: "does not apply the link destination path to its schema",
+      targetPath: ["payload"],
+      targetValue: { payload: { label: "Nested" } },
+      selectorPath: ["label"],
+      selectorSchema: { type: "string" },
+      linkSchema: {
+        type: "object",
+        properties: { label: { type: "string" } },
+        required: ["label"],
+      },
+      expected: "Nested",
+    },
+    {
+      name: "drops an array link schema for its synthetic length property",
+      targetPath: [],
+      targetValue: [7, 8],
+      selectorPath: ["length"],
+      selectorSchema: { type: "number" },
+      linkSchema: { type: "array", items: { type: "number" } },
+      expected: 2,
+    },
+    {
+      name: "preserves a false link schema at the exact link path",
+      targetPath: [],
+      targetValue: "Rejected",
+      selectorPath: [],
+      selectorSchema: { type: "string" },
+      linkSchema: false,
+      expected: undefined,
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(testCase.name, () => {
+      const store = new Map<string, Revision<State>>();
+      const rootUri = `of:link-schema-root-${testCase.name}` as URI;
+      const targetUri = `of:link-schema-target-${testCase.name}` as URI;
+      const rootValue = makeLink(
+        targetUri,
+        testCase.targetPath,
+        testCase.linkSchema,
+      );
+      putDoc(store, rootUri, rootValue);
+      putDoc(store, targetUri, testCase.targetValue);
+
+      const traverser = getTraverser(store, {
+        path: ["value", ...testCase.selectorPath],
+        schema: testCase.selectorSchema,
+      });
+      const { ok: result } = traverser.traverse({
+        address: {
+          space: SPACE,
+          id: rootUri,
+          type: TYPE,
+          path: ["value"],
+        },
+        value: rootValue,
+      });
+
+      expect(result).toEqual(testCase.expected);
+    });
+  }
+
+  it("voids a linked object missing a field required only by the link schema", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:link-schema-required-union-root" as URI;
+    const targetUri = "of:link-schema-required-union-target" as URI;
+    const linkSchema = {
+      type: "object",
+      properties: {
+        a: { type: "string" },
+        b: { type: "string" },
+      },
+      required: ["b"],
+    } as const satisfies JSONSchema;
+    const rootValue = {
+      item: makeLink(targetUri, [], linkSchema),
+    };
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, targetUri, { a: "present" });
+
+    const readerSchema = {
+      type: "object",
+      properties: {
+        item: {
+          type: "object",
+          properties: { a: { type: "string" } },
+          required: ["a"],
+        },
+      },
+      required: ["item"],
+    } as const satisfies JSONSchema;
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schema: readerSchema,
+    });
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(ok).toBeUndefined();
+    expect(error).toBeDefined();
+  });
+
+  // A graph can contain records of one recursive type: for example, every
+  // User has a friends Cell whose elements are links to other Users. Each
+  // link legitimately carries the full User schema, including its required
+  // friends property. A query for "me and my direct friends" must therefore
+  // override that nested friends edge with an opaque boundary; otherwise the
+  // schema carried by each friend link makes traversal continue to friends of
+  // friends (and then onward through the recursive graph).
+  //
+  // The boundary should retain the direct friend's raw friends pointer in the
+  // query result, but must not load or subscribe to the pointer's target. The
+  // non-opaque control at the end proves that the deeper documents are
+  // reachable and are excluded specifically because of the boundary.
+  it("limits a recursive friends query to one hop with an opaque boundary", () => {
+    const {
+      store,
+      rootUri,
+      directFriendsUri,
+      directFriendUri,
+      nestedFriendsUri,
+      secondDegreeFriendUri,
+      fullUserSchema,
+      fullFriendsSchema,
+      rootValue,
+      directFriendValue,
+      trackerKey,
+    } = makeRecursiveFriendsGraph("opaque", true);
+
+    const directFriendSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: fullUserSchema,
+          asCell: ["opaque"],
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const querySchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: directFriendSchema,
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const context = createDefaultTraversalContext();
+    const traverser = getTraverser(
+      store,
+      { path: ["value"], schema: querySchema },
+      context,
+    );
+
+    const { ok: result, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toEqual({
+      id: "root",
+      friends: [{ id: "direct", friends: directFriendValue.friends }],
+    });
+
+    expect(context.schemaTracker.has(trackerKey(rootUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendsUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(nestedFriendsUri))).toBe(false);
+    expect(context.schemaTracker.has(trackerKey(secondDegreeFriendUri))).toBe(
+      false,
+    );
+
+    // Without the explicit boundary, the same schema-bearing graph expands
+    // through the direct friend's friends list to the second-degree friend.
+    const nonOpaqueDirectFriendSchema = {
+      ...directFriendSchema,
+      properties: {
+        ...directFriendSchema.properties,
+        friends: fullFriendsSchema,
+      },
+    } as const satisfies JSONSchema;
+    const nonOpaqueQuerySchema = {
+      ...querySchema,
+      properties: {
+        ...querySchema.properties,
+        friends: {
+          type: "array",
+          items: nonOpaqueDirectFriendSchema,
+        },
+      },
+    } as const satisfies JSONSchema;
+    const nonOpaqueContext = createDefaultTraversalContext();
+    const nonOpaqueTraverser = getTraverser(
+      store,
+      { path: ["value"], schema: nonOpaqueQuerySchema },
+      nonOpaqueContext,
+    );
+    nonOpaqueTraverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(nonOpaqueContext.schemaTracker.has(trackerKey(nestedFriendsUri)))
+      .toBe(true);
+    expect(
+      nonOpaqueContext.schemaTracker.has(trackerKey(secondDegreeFriendUri)),
+    ).toBe(true);
+  });
+
+  // This parent schema corresponds to the projected type
+  // `{ id: string; friends?: never }`. The stored link still carries a full
+  // User schema with an optional friends list. Intersecting the two should
+  // keep `friends: false` without making it required. Traversal can then omit
+  // that property while retaining the direct friend record itself.
+  it("omits an optional nested friends property narrowed to false", () => {
+    const {
+      store,
+      rootUri,
+      directFriendsUri,
+      directFriendUri,
+      nestedFriendsUri,
+      secondDegreeFriendUri,
+      fullUserSchema,
+      rootValue,
+      trackerKey,
+    } = makeRecursiveFriendsGraph("false-schema", false);
+    const directFriendSchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: false,
+      },
+      required: ["id"],
+    } as const satisfies JSONSchema;
+
+    expect(combineSchema(directFriendSchema, fullUserSchema)).toEqual({
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: false,
+      },
+      required: ["id"],
+    });
+
+    const querySchema = {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        friends: {
+          type: "array",
+          items: directFriendSchema,
+        },
+      },
+      required: ["id", "friends"],
+    } as const satisfies JSONSchema;
+    const context = createDefaultTraversalContext();
+    const traverser = getTraverser(
+      store,
+      { path: ["value"], schema: querySchema },
+      context,
+    );
+
+    const { ok: result, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(result).toEqual({
+      id: "root",
+      friends: [{ id: "direct" }],
+    });
+    const directFriend = (result as { friends: Record<string, unknown>[] })
+      .friends[0];
+    expect(Object.hasOwn(directFriend, "friends")).toBe(false);
+
+    expect(context.schemaTracker.has(trackerKey(rootUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendsUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(directFriendUri))).toBe(true);
+    expect(context.schemaTracker.has(trackerKey(nestedFriendsUri))).toBe(false);
+    expect(context.schemaTracker.has(trackerKey(secondDegreeFriendUri))).toBe(
+      false,
+    );
   });
 });
 

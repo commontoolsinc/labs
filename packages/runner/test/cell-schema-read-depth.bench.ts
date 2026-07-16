@@ -1,43 +1,43 @@
 /**
- * Decomposes the schema-path read cost by schema DEPTH on one unchanged doc.
+ * Compares whole-array materialization cost across schema DEPTH on one
+ * unchanged doc.
  *
- * Companion to cell-set-flat-index-list.bench.ts: that bench showed schema
- * get() of an unchanged N-item list costs ~19µs/item PER READ (~63× the
- * schemaless path, no memoization). This bench answers WHERE that cost
- * lives by reading the SAME stored 1000-item list through schemas of
- * increasing depth:
+ * Each iteration seeds one list, creates one fresh transaction, binds the cell
+ * to it, and times one get() of the whole array through schemas of increasing
+ * depth:
  *
  *   - schemaless            → the baseline proxy path
  *   - items: true           → schema path entered, zero per-item validation
  *   - items: {type:object}  → permissive object schema (no properties)
  *   - full item schema      → every field declared
  *
- * Result shape (M-series MacBook): schemaless ~0.6ms/read; items:true
- * ~18ms/read — i.e. merely ENTERING the schema path costs ~32× even when
- * validating nothing per item; a PERMISSIVE object schema is the worst
- * case (~40ms/read, full recursive walk per element); the fully-declared
- * schema is cheaper than permissive (~28ms). Field validation is not the
- * cost — the per-node traversal machinery (tracked reads, link handling,
- * freeze-discipline checks, fresh result allocation; GC ≈ 39% of ticks
- * under profile) is. A V8 profile of the same loop bottoms out in
- * validateAndTransform → traverse → deep-freeze checkValue.
+ * The transaction is created outside the timed window: this benchmark isolates
+ * Cell.get() materialization rather than transaction construction. A single
+ * transaction spans the whole-array read, matching normal runtime use; it is
+ * not the committed setup transaction and does not fall back to the ambient
+ * tx-less read path.
+ *
+ * A separate read-journal group uses the full item schema to measure the
+ * end-to-end cost of consuming recorded reads and isolate the readout itself:
+ *
+ *   - get() alone
+ *   - get() followed by fully materializing getReadActivities()
+ *   - materializing getReadActivities() after an untimed get()
  *
  * Environment controls:
  * - SCHEMA_READ_DEPTH_N: list size, default 1000
- * - SCHEMA_READ_DEPTH_READS: get() calls per bench iteration, default 100
  */
 
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { type JSONSchema } from "../src/builder/types.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 
 const signer = await Identity.fromPassphrase("bench schema read depth");
 const space = signer.did();
 
 const N = Number(Deno.env.get("SCHEMA_READ_DEPTH_N") ?? "1000");
-const READS = Number(Deno.env.get("SCHEMA_READ_DEPTH_READS") ?? "100");
 
 const items = Array.from({ length: N }, (_, i) => ({
   data: {
@@ -96,33 +96,111 @@ function setup() {
 
 async function seed(
   runtime: Runtime,
-): Promise<IExtendedStorageTransaction> {
+): Promise<void> {
   const tx = runtime.edit();
   runtime.getCell<typeof items>(space, "schema-read-depth-doc", undefined, tx)
     .set(items);
   await tx.commit();
-  return tx;
 }
 
 for (const [label, schema] of VARIANTS) {
   Deno.bench({
-    name: `schema read depth - ${label} - get() x${READS} (${N} items)`,
+    name: `schema read depth - ${label} - fresh-tx get() (${N} items)`,
     group: "schema-read-depth",
     baseline: schema === undefined,
     async fn(b) {
       const { runtime, storageManager } = setup();
       await seed(runtime);
+      const tx = runtime.edit();
       const cell = runtime.getCell(
         space,
         "schema-read-depth-doc",
         schema as JSONSchema | undefined,
+        tx,
       );
-      cell.get(); // warm
-      b.start();
-      for (let i = 0; i < READS; i++) cell.get();
-      b.end();
-      await runtime.dispose();
-      await storageManager.close();
+      try {
+        b.start();
+        cell.get();
+        b.end();
+      } finally {
+        if (tx.status().status === "ready") tx.abort();
+        await runtime.dispose();
+        await storageManager.close();
+      }
     },
   });
 }
+
+const READ_JOURNAL_VARIANTS = [
+  ["get() only", false],
+  ["get() + materialize read activities", true],
+] as const;
+
+for (const [label, materializeReadActivities] of READ_JOURNAL_VARIANTS) {
+  Deno.bench({
+    name: `schema read journal - ${label} (${N} items)`,
+    group: "schema-read-journal",
+    baseline: !materializeReadActivities,
+    async fn(b) {
+      const { runtime, storageManager } = setup();
+      await seed(runtime);
+      const tx = runtime.edit();
+      const cell = runtime.getCell(
+        space,
+        "schema-read-depth-doc",
+        { type: "array", items: FULL_ITEM_SCHEMA },
+        tx,
+      );
+      let readCount: number | undefined;
+      try {
+        b.start();
+        cell.get();
+        if (materializeReadActivities) {
+          readCount = Array.from(getTransactionReadActivities(tx)).length;
+        }
+        b.end();
+        if (readCount !== undefined && readCount < N) {
+          throw new Error(
+            `Expected at least ${N} read activities, got ${readCount}`,
+          );
+        }
+      } finally {
+        if (tx.status().status === "ready") tx.abort();
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    },
+  });
+}
+
+Deno.bench({
+  name: `schema read journal - materialize read activities only (${N} items)`,
+  group: "schema-read-journal-expansion",
+  async fn(b) {
+    const { runtime, storageManager } = setup();
+    await seed(runtime);
+    const tx = runtime.edit();
+    const cell = runtime.getCell(
+      space,
+      "schema-read-depth-doc",
+      { type: "array", items: FULL_ITEM_SCHEMA },
+      tx,
+    );
+    let readCount = 0;
+    try {
+      cell.get();
+      b.start();
+      readCount = Array.from(getTransactionReadActivities(tx)).length;
+      b.end();
+      if (readCount < N) {
+        throw new Error(
+          `Expected at least ${N} read activities, got ${readCount}`,
+        );
+      }
+    } finally {
+      if (tx.status().status === "ready") tx.abort();
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  },
+});

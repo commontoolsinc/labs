@@ -39,6 +39,7 @@ import {
 import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import { ContextualFlowControl } from "../cfc.ts";
+import { cfcSchemaChildRoot, resolveCfcSchemaRefRoot } from "./schema-refs.ts";
 import { atomPropagationClass } from "./atom-classes.ts";
 import {
   canonicalizeCfcMetadata,
@@ -1955,6 +1956,12 @@ export const gatedSinkRequestExists = (
   );
 };
 
+interface IfcSchemaVisit {
+  root: object;
+  schema: object;
+  parent?: IfcSchemaVisit;
+}
+
 const walkIfcSchema = (
   schema: JSONSchema,
   path: readonly string[] = [],
@@ -1970,18 +1977,19 @@ const walkIfcSchema = (
     }
   > = [],
   root: JSONSchema = schema,
-  active: Set<JSONSchema> = new Set(),
+  active?: IfcSchemaVisit,
 ): typeof entries => {
   if (typeof schema === "boolean") {
     return entries;
   }
-  if (active.has(schema)) {
-    return entries;
+  const schemaRoot = cfcSchemaChildRoot(schema, root);
+  const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  for (let cursor = active; cursor !== undefined; cursor = cursor.parent) {
+    if (cursor.root === rootKey && cursor.schema === schema) return entries;
   }
-  active.add(schema);
+  const nextActive = { root: rootKey, schema, parent: active };
 
-  try {
-    const schemaRoot = schema.$defs !== undefined ? schema : root;
+  {
     const resolved = typeof schema.$ref === "string"
       ? ContextualFlowControl.resolveSchemaRefs(schema, schemaRoot) ?? schema
       : schema;
@@ -1989,7 +1997,12 @@ const walkIfcSchema = (
       return entries;
     }
 
-    const childRoot = resolved.$defs !== undefined ? resolved : schemaRoot;
+    const childRoot = cfcSchemaChildRoot(
+      resolved,
+      typeof schema.$ref === "string"
+        ? resolveCfcSchemaRefRoot(schema, schemaRoot)
+        : schemaRoot,
+    );
     if (resolved.ifc !== undefined) {
       entries.push({
         path,
@@ -2008,7 +2021,7 @@ const walkIfcSchema = (
 
     if (resolved.properties) {
       for (const [key, child] of Object.entries(resolved.properties)) {
-        walkIfcSchema(child, [...path, key], entries, childRoot, active);
+        walkIfcSchema(child, [...path, key], entries, childRoot, nextActive);
       }
     }
     const compound = [
@@ -2017,10 +2030,16 @@ const walkIfcSchema = (
       ...(resolved.allOf ?? []),
     ];
     for (const child of compound) {
-      walkIfcSchema(child, path, entries, childRoot, active);
+      walkIfcSchema(child, path, entries, childRoot, nextActive);
     }
     if (typeof resolved.items === "object" && resolved.items !== null) {
-      walkIfcSchema(resolved.items, [...path, "*"], entries, childRoot, active);
+      walkIfcSchema(
+        resolved.items,
+        [...path, "*"],
+        entries,
+        childRoot,
+        nextActive,
+      );
     }
     // Record-only `additionalProperties` descends as the same `*` segment
     // arrays get from `items` (template-population §4) — RESTRICTED to
@@ -2047,12 +2066,10 @@ const walkIfcSchema = (
         [...path, "*"],
         entries,
         childRoot,
-        active,
+        nextActive,
       );
     }
     return entries;
-  } finally {
-    active.delete(schema);
   }
 };
 

@@ -6,6 +6,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  type PerSession,
   type PerUser,
   safeDateNow,
   Stream,
@@ -55,7 +56,7 @@ export interface TopicsOutput {
   myName: string;
   /** Session-local draft for the footer composer (exposed for embedding and
    * headless driving, like the chat exemplar's drafts). */
-  newTitle: Writable<string>;
+  newTitle?: PerSession<Writable<string>>;
   addTopic: Stream<{ title: string }>;
   setMyName: Stream<{ name: string }>;
   /** Submit the footer composer: reads newTitle, delegates to addTopic. */

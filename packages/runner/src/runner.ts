@@ -9,10 +9,7 @@ import {
 } from "@commonfabric/memory/v2";
 import type { EntityKind } from "@commonfabric/data-model/fabric-primitives";
 import { hashOf } from "@commonfabric/data-model/value-hash";
-import {
-  toCompactDebugString,
-  toIndentedDebugString,
-} from "@commonfabric/data-model/value-debug";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
@@ -58,6 +55,7 @@ import {
   isCellLink,
   isSigilLink,
   isWriteRedirectLink,
+  KeepAsCell,
   type NormalizedFullLink,
   parseLink,
   toMemorySpaceAddress,
@@ -91,8 +89,9 @@ import { isCellScope, narrowestScope } from "./scope.ts";
 import {
   describePatternOrModule,
   extractDefaultValues,
-  mergeObjects,
+  mergeSchemaDefaults,
   sanitizeDebugLabel,
+  schemaAcceptsOpaqueCellValue,
   setRunnableName,
   validateAndCheckReactives,
 } from "./runner-utils.ts";
@@ -104,6 +103,7 @@ import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
 } from "./cfc/types.ts";
+import { validateSchemaValue } from "./cfc/schema-sanitization.ts";
 import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
@@ -117,6 +117,9 @@ import { SigilLink } from "./sigil-types.ts";
 export {
   extractDefaultValues,
   mergeObjects,
+  mergeSchemaDefaults,
+  schemaAcceptsOpaqueCellValue,
+  schemaHasDefaultValue,
   validateAndCheckReactives,
 } from "./runner-utils.ts";
 
@@ -544,6 +547,14 @@ type SetupResult<R> = {
   needsStart: boolean;
 };
 
+type SetupValidationOptions = {
+  /** Optional layer-specific invariant checked inside the setup transaction. */
+  validateArgumentLinks?: (
+    argumentCell: Cell<unknown>,
+    argumentSchema: JSONSchema,
+  ) => void;
+};
+
 type RunResult<R> = {
   resultCell: Cell<R>;
   /** The exact local cancel registration installed by this invocation. */
@@ -651,11 +662,13 @@ function dedupeNormalizedLinks(
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
-  private locallyPreparedResults = new Set<
-    `${MemorySpace}/${CellScope}/${URI}`
+  private locallyPreparedResults = new Map<
+    `${MemorySpace}/${CellScope}/${URI}`,
+    string
   >();
-  private locallyStoppedResults = new Set<
-    `${MemorySpace}/${CellScope}/${URI}`
+  private locallyStoppedResults = new Map<
+    `${MemorySpace}/${CellScope}/${URI}`,
+    string
   >();
   // Successful event-result starts that are still live in this runner. This is
   // intentionally local and bounded by live starts: it lets a sequential
@@ -861,7 +874,17 @@ export class Runner {
     pattern: Pattern,
   ): { identity: string; symbol: string } {
     const real = this.runtime.patternManager.getArtifactEntryRef(pattern);
-    if (real) return real;
+    if (real) {
+      // Artifact refs are process-global metadata on the pattern object, while
+      // the addressable artifact index is runtime-local. Re-associate a pattern
+      // handed to this runtime so a subsequent start-by-durable-identity can
+      // resolve it even when another runtime minted the ref first.
+      this.runtime.patternManager.associatePatternIdentity(
+        resolveOriginal(pattern) as Pattern,
+        real,
+      );
+      return real;
+    }
     // Keyless: a content-hash session pointer (structurally-identical patterns
     // share it — no churn). See PatternManager.ensureKeylessPatternIdentity.
     return this.runtime.patternManager.ensureKeylessPatternIdentity(pattern);
@@ -895,6 +918,51 @@ export class Runner {
     );
   }
 
+  /** Stage an argument write, materialize aliases in the same transaction, and
+   * reject the transaction unless the resulting value satisfies its schema. */
+  private updateAndValidateArgument<T>(
+    tx: IExtendedStorageTransaction,
+    argumentLink: NormalizedFullLink,
+    argument: T,
+    argumentSchema: JSONSchema,
+    defaults: FabricValue,
+  ): void {
+    this.updateArgument(tx, argumentLink, argument, argumentSchema);
+    this.validateArgument(tx, argumentLink, argumentSchema, defaults);
+  }
+
+  private validateArgument(
+    tx: IExtendedStorageTransaction,
+    argumentLink: NormalizedFullLink,
+    argumentSchema: JSONSchema,
+    defaults: FabricValue,
+  ): void {
+    const argumentCell = this.runtime.getCellFromLink(
+      argumentLink,
+      undefined,
+      tx,
+    );
+    const materializedArgument = argumentCell.asSchema(undefined).withTx(tx)
+      .get();
+    const validationArgument = mergeSchemaDefaults(
+      materializedArgument,
+      defaults,
+      argumentSchema,
+      { mergeMaterializedLinks: true },
+    );
+    const validationFailure = validateSchemaValue(
+      argumentSchema,
+      validationArgument,
+      argumentSchema,
+      { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+    );
+    if (validationFailure !== undefined) {
+      throw new Error(
+        `updated arguments do not match the candidate schema: ${validationFailure}`,
+      );
+    }
+  }
+
   private updateResultSchemaMeta<R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
@@ -926,10 +994,22 @@ export class Runner {
 
     if (samePattern) {
       const argumentLink = getMetaLink(resultCell, "argument")!;
+      const defaults = extractDefaultValues(pattern.argumentSchema);
+      const nextArgument = mergeSchemaDefaults(
+        argument,
+        defaults,
+        pattern.argumentSchema,
+      );
+      // Nested-pattern replay passes opaque Cell handles here. Candidate-
+      // schema validation materializes the argument cell and would dereference
+      // those handles before validating them, rejecting a valid `asCell` slot
+      // when its payload is cold or absent. Piece API argument mutations
+      // validate their exact supplied value before entering Runner;
+      // pattern-changing updates always take the validated path below.
       this.updateArgument(
         tx,
         argumentLink,
-        argument,
+        nextArgument,
         pattern.argumentSchema,
       );
       return { resultCell, needsStart: false };
@@ -1024,19 +1104,21 @@ export class Runner {
         deepEqual(existingDescriptor.partialCause, descriptor.partialCause) &&
         existingDescriptor.kind === descriptor.kind
       );
+      // Re-emit the manifest link and backlink from the current descriptor on
+      // every setup. A compatible setsrc may narrow an internal schema while
+      // retaining the same partial cause; preserving the old manifest entry
+      // would leave stale producer authority attached to that cell.
+      const derivedSigilLink = derivedCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+      });
+      manifest.push({
+        partialCause: descriptor.partialCause,
+        ...(descriptor.kind !== undefined && { kind: descriptor.kind }),
+        link: derivedSigilLink,
+      });
+      setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
       if (manifestMatch === -1) {
-        // this cell isn't in our manifest yet. Create it, and add it to the manifest
-        const derivedSigilLink = derivedCell.getAsWriteRedirectLink({
-          base: resultCell,
-          includeSchema: true,
-        });
-        manifest.push({
-          partialCause: descriptor.partialCause,
-          ...(descriptor.kind !== undefined && { kind: descriptor.kind }),
-          link: derivedSigilLink,
-        });
-        setResultCell(derivedCell, resultCell.asSchema(pattern.resultSchema));
-
         // Seed the build-time default for the freshly created cell. The
         // manifest entry and this default are written together in one
         // transaction, so a manifest-referenced cell is already durable; on a
@@ -1056,8 +1138,6 @@ export class Runner {
             derivedCell.setRawUntyped(fabricFromNativeValue(schemaDefault));
           }
         }
-      } else {
-        manifest.push(existingManifest[manifestMatch]);
       }
     }
 
@@ -1089,7 +1169,8 @@ export class Runner {
     );
     resultCell.withTx(tx).setMetaRaw("internal", internalManifest);
 
-    let nextArgument = argument;
+    let nextArgument: T | undefined = argument;
+    let argumentUpdated = false;
     // The argument meta field of the result cell should be a link to the
     // argument cell. If it doesn't exist, we need to apply the defaults
     // I don't include the schema here, since I don't want cfc enforcement yet
@@ -1100,13 +1181,18 @@ export class Runner {
         tx,
       );
       setResultCell(newArgumentCell, resultCell.asSchema(pattern.resultSchema));
-      nextArgument = mergeObjects<T>(argument, defaults);
+      nextArgument = mergeSchemaDefaults<T>(
+        argument,
+        defaults,
+        pattern.argumentSchema,
+      );
       //newArgumentCell.set(nextArgument);
 
       newArgumentCell = newArgumentCell.asSchema(pattern.argumentSchema);
       const newArgumentSigilLink = newArgumentCell.getAsWriteRedirectLink({
         base: resultCell,
         includeSchema: true,
+        keepAsCell: KeepAsCell.All,
       });
       resultCell.withTx(tx).setMetaRaw("argument", newArgumentSigilLink);
 
@@ -1114,8 +1200,60 @@ export class Runner {
       if (argumentLink === undefined) {
         throw new Error("Invalid argument link in updateArgument");
       }
+    } else if (!samePattern) {
+      const previousArgumentCell = this.runtime.getCellFromLink(
+        argumentLink,
+        undefined,
+        tx,
+      );
+      const previousArgument = previousArgumentCell.getRaw({
+        meta: ignoreReadForScheduling,
+      }) as T | undefined;
+      nextArgument = mergeSchemaDefaults<T>(
+        argument === undefined ? previousArgument : argument,
+        defaults,
+        pattern.argumentSchema,
+      );
+
+      const nextArgumentCell = previousArgumentCell.asSchema(
+        pattern.argumentSchema,
+      );
+      const nextArgumentSigilLink = nextArgumentCell.getAsWriteRedirectLink({
+        base: resultCell,
+        includeSchema: true,
+        keepAsCell: KeepAsCell.All,
+      });
+      resultCell.withTx(tx).setMetaRaw("argument", nextArgumentSigilLink);
+      argumentLink = nextArgumentCell.getAsNormalizedFullLink();
+
+      // Stage the exact Fabric-layer representation before validating it. The
+      // untyped materialization below resolves ordinary sigil links through
+      // this same transaction without dropping fields that fail the candidate
+      // schema. A thrown validation error aborts the transaction, so neither
+      // this write nor the schema retarget can become durable on failure.
+      if (nextArgument !== undefined) {
+        this.updateAndValidateArgument(
+          tx,
+          argumentLink,
+          nextArgument,
+          pattern.argumentSchema,
+          defaults,
+        );
+        argumentUpdated = true;
+      } else {
+        this.validateArgument(
+          tx,
+          argumentLink,
+          pattern.argumentSchema,
+          defaults,
+        );
+      }
     }
-    if (nextArgument !== undefined) {
+    if (nextArgument !== undefined && !argumentUpdated) {
+      // A changed pattern with an existing argument either validated above or
+      // produced no value to write, so this branch is only reachable for new
+      // argument cells and same-pattern replay. Piece API argument mutations
+      // validate their exact supplied value before entering Runner.
       this.updateArgument(
         tx,
         argumentLink,
@@ -1155,6 +1293,7 @@ export class Runner {
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    validationOptions: SetupValidationOptions = {},
   ): SetupResult<R> {
     const tx = providedTx ?? this.runtime.edit();
 
@@ -1228,10 +1367,23 @@ export class Runner {
       resultCell,
     );
 
+    if (validationOptions.validateArgumentLinks !== undefined) {
+      // applySetupState() either installs this link or throws.
+      const argumentLink = getMetaLink(resultCell.withTx(tx), "argument")!;
+      validationOptions.validateArgumentLinks(
+        this.runtime.getCellFromLink(argumentLink, undefined, tx),
+        pattern.argumentSchema,
+      );
+    }
+
     const key = this.getDocKey(resultCell);
-    this.locallyPreparedResults.add(key);
+    const preparedPatternKey = patternIdentityKey(entryRef);
+    this.locallyPreparedResults.set(key, preparedPatternKey);
     tx.addCommitCallback((_tx, result) => {
-      if (result.error) {
+      if (
+        result.error &&
+        this.locallyPreparedResults.get(key) === preparedPatternKey
+      ) {
         this.locallyPreparedResults.delete(key);
       }
     });
@@ -1533,9 +1685,6 @@ export class Runner {
       : resultCell;
 
     const key = this.getDocKey(rootCell);
-    const wasPreparedLocally = this.locallyPreparedResults.has(key);
-    const wasStoppedLocally = this.locallyStoppedResults.has(key);
-
     // Step 2: Already started? Return success
     if (this.cancels.has(key)) return Promise.resolve(true);
 
@@ -1577,6 +1726,17 @@ export class Runner {
       return Promise.reject(
         new Error(`Cannot start: no pattern identity`),
       );
+    }
+    const currentPatternKey = patternIdentityKey(identityRef);
+    const preparedPatternKey = this.locallyPreparedResults.get(key);
+    const stoppedPatternKey = this.locallyStoppedResults.get(key);
+    const wasPreparedLocally = preparedPatternKey === currentPatternKey;
+    const wasStoppedLocally = stoppedPatternKey === currentPatternKey;
+    if (preparedPatternKey !== undefined && !wasPreparedLocally) {
+      this.locallyPreparedResults.delete(key);
+    }
+    if (stoppedPatternKey !== undefined && !wasStoppedLocally) {
+      this.locallyStoppedResults.delete(key);
     }
     return this.startAvailablePattern(
       rootCell,
@@ -2025,6 +2185,10 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs?: any,
+    options?: {
+      expectedPatternIdentity?: { identity: string; symbol: string };
+      validateArgumentLinks?: SetupValidationOptions["validateArgumentLinks"];
+    },
   ) {
     await resultCell.sync();
 
@@ -2044,25 +2208,54 @@ export class Runner {
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
     let setupRes: ReturnType<typeof this.setupInternal> | undefined;
+    const assertExpectedPatternIdentity = (
+      cell: Cell<any>,
+    ): void => {
+      const expected = options?.expectedPatternIdentity;
+      if (!expected) return;
+      const current = getPatternIdentityRef(cell);
+      if (
+        current === undefined ||
+        patternIdentityKey(current) !== patternIdentityKey(expected)
+      ) {
+        throw new Error(
+          "piece pattern changed while the source update was compiling",
+        );
+      }
+    };
     if (givenTx) {
       // If tx is given, i.e. result cell was part of a tx that is still open,
       // caller manages retries
+      assertExpectedPatternIdentity(resultCell.withTx(givenTx));
       setupRes = this.setupInternal(
         givenTx,
         pattern,
         inputs,
         resultCell.withTx(givenTx),
+        { validateArgumentLinks: options?.validateArgumentLinks },
       );
     } else {
       const { error } = await this.runtime.editWithRetry((tx) => {
+        assertExpectedPatternIdentity(resultCell.withTx(tx));
         setupRes = this.setupInternal(
           tx,
           pattern,
           inputs,
           resultCell.withTx(tx),
+          { validateArgumentLinks: options?.validateArgumentLinks },
         );
       });
       if (error) {
+        if (
+          error.name === "StorageTransactionAborted" &&
+          error.message.startsWith("editWithRetry action threw:") &&
+          error.reason instanceof Error
+        ) {
+          throw error.reason;
+        }
+        if (options?.expectedPatternIdentity) {
+          throw error;
+        }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;
       }
@@ -2074,36 +2267,50 @@ export class Runner {
     }
 
     if (setupRes?.needsStart) {
-      const tx = givenTx || this.runtime.edit();
-      this.startWithTx(tx, resultCell.withTx(tx), setupRes.pattern);
-      if (!givenTx) {
-        // Should be unnecessary as the start itself is read-only
-        // TODO(seefeld): Enforce this by adding a read-only flag for tx
-        this.runtime.prepareTxForCommit(tx);
-        await tx.commit().then(({ error }) => {
-          if (error) {
-            logger.error(
-              "tx-commit-error",
-              () => [
-                "Error committing transaction",
-                "\nError:",
-                toIndentedDebugString(error),
-                error.name === "ConflictError"
-                  ? [
-                    "\nConflict details:",
-                    toIndentedDebugString(error.conflict),
-                    "\nTransaction:",
-                    toIndentedDebugString(error.transaction),
-                  ]
-                  : [],
-              ],
-            );
-          }
-        });
+      if (givenTx) {
+        this.startWithTx(
+          givenTx,
+          resultCell.withTx(givenTx),
+          setupRes.pattern,
+        );
+      } else {
+        // The setup commit can be superseded while dependency sync is in
+        // flight. Resolve startup from the current durable pattern pointer so
+        // a stale caller can never instantiate its old candidate while
+        // recording a newer identity as current.
+        await resultCell.sync();
+        await this.start(resultCell);
       }
     }
 
-    return pattern?.resultSchema
+    // A concurrent source update can supersede this caller after its setup
+    // commit but before its post-commit dependency sync settles. Return a view
+    // typed by the pattern that is actually durable now, not by this caller's
+    // stale candidate.
+    let currentRef = getPatternIdentityRef(resultCell);
+    while (currentRef !== undefined) {
+      const loadedRef = currentRef;
+      const currentPattern = await this.runtime.patternManager
+        .loadPatternByIdentity(
+          loadedRef.identity,
+          loadedRef.symbol,
+          resultCell.space,
+        );
+      currentRef = getPatternIdentityRef(resultCell);
+      if (
+        currentRef !== undefined &&
+        patternIdentityKey(currentRef) !== patternIdentityKey(loadedRef)
+      ) {
+        continue;
+      }
+      if (
+        currentRef === undefined || currentPattern?.resultSchema === undefined
+      ) {
+        return resultCell;
+      }
+      return resultCell.asSchema(currentPattern.resultSchema);
+    }
+    return pattern?.resultSchema !== undefined
       ? resultCell.asSchema(pattern.resultSchema)
       : resultCell;
   }
@@ -2622,7 +2829,15 @@ export class Runner {
         // already-assembled local cells. Stopping an unresolved/storage-only
         // target must not bypass dependency sync and snapshot rehydration on a
         // later explicit start.
-        this.locallyStoppedResults.add(key);
+        const stoppedIdentity = getPatternIdentityRef(resultCell);
+        if (stoppedIdentity !== undefined) {
+          this.locallyStoppedResults.set(
+            key,
+            patternIdentityKey(stoppedIdentity),
+          );
+        } else {
+          this.locallyStoppedResults.delete(key);
+        }
       }
     }
   }
