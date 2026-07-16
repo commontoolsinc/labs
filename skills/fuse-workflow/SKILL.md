@@ -53,7 +53,7 @@ deno task cf fuse unmount /tmp/cf
   <space>/                        # connected on first access
     pieces/
       <piece-name>/
-        meta.json                 # read-only: id, entityId, name, patternName
+        meta.json                 # read-only: id, entityId, name
         input.json                # full input cell as JSON
         input/                    # exploded input — each key is a file or dir
           title                   # raw text (no quotes): "My Title"
@@ -156,9 +156,12 @@ cat /tmp/cf/my-space/pieces/assistant/result.json | jq '.messages'
 echo '{"message":"Hello from agent"}' > \
   /tmp/cf/my-space/pieces/assistant/result/sendMessage.handler
 
-# Agent waits for a piece to reach a state. Address it by entity ID, not name:
-# a piece's name gains a count suffix on every state change, so a
-# pieces/<name>/... path goes stale on the very change being waited for.
+# Agent waits for a piece to reach a state. Resolve the entity ID once, then
+# address the piece by it: a name gains a count suffix on every state change, so
+# a pieces/<name>/... path goes stale on the very change being waited for. The
+# entity ID is the piece ID, and it never changes.
+ENTITY_ID=$(jq -r .entityId /tmp/cf/my-space/pieces/task/meta.json)
+
 until [ "$(cat /tmp/cf/my-space/entities/$ENTITY_ID/result/status)" = "done" ]; do
   sleep 1
 done
