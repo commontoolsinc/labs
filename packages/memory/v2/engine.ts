@@ -7473,7 +7473,11 @@ const applyCommitTransaction = (
     schedulerObservationResult?.executionContextKey !==
       acceptedObservation.provenance.claim.contextKey
   ) {
-    throw new ProtocolError(
+    // Same semantic condition as the observation-only twin below: one fence
+    // cause keeps stats counting, the R7 measurement tolerance, and executor
+    // rejection handling identical across both commit shapes.
+    throw new ExecutionLeaseFenceError(
+      "claim-context-mismatch",
       "execution claim context does not match the effective scheduler context",
     );
   }
@@ -7911,6 +7915,29 @@ const resolvedPendingReadsForBasis = (
   return [...resolutions.values()];
 };
 
+// Claim-rank admission is shape-only: the shared space lane plus well-formed
+// canonical user-rank keys (`user:<encodeURIComponent(principal)>`, so a
+// colon-bearing DID never appears raw). Session rank arrives with C2 and
+// stays rejected here, as do malformed keys. Effective-context EQUALITY is
+// owned by the claim-context-mismatch fence once the observation's context
+// resolves.
+const isAdmissibleExecutionClaimContextKey = (
+  contextKey: SchedulerExecutionContextKey,
+): boolean => {
+  if (contextKey === "space") return true;
+  if (!contextKey.startsWith("user:")) return false;
+  const encodedPrincipal = contextKey.slice("user:".length);
+  if (encodedPrincipal.length === 0 || encodedPrincipal.includes(":")) {
+    return false;
+  }
+  try {
+    decodeURIComponent(encodedPrincipal);
+  } catch {
+    return false;
+  }
+  return true;
+};
+
 const claimKeyFromExecutionClaim = (
   claim: ExecutionClaim,
 ): ActionExecutionProvenance["claim"] => ({
@@ -7972,9 +7999,7 @@ const acceptedSchedulerObservation = (
     assertedClaim.claimGeneration !== claim.claimGeneration ||
     options.principal === undefined || options.space === undefined ||
     claim.branch !== options.branch || claim.space !== options.space ||
-    // Initial server execution is deliberately space-scoped. W1.3 owns the
-    // full firewall; a host cannot smuggle a narrower claim through W0.4.
-    claim.contextKey !== "space" ||
+    !isAdmissibleExecutionClaimContextKey(claim.contextKey) ||
     claim.pieceId !== observation.pieceId ||
     claim.actionId !== observation.actionId ||
     claim.actionKind !== observation.actionKind ||
