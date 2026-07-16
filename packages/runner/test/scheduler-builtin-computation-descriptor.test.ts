@@ -252,7 +252,7 @@ describe("per-builtin computation descriptors — end to end (W2.15a)", () => {
     storageManager = undefined;
   });
 
-  it("attaches selector descriptors and makes real ifElse/when/unless claim-ready while map stays incomplete", async () => {
+  it("attaches selector descriptors and makes real ifElse/when/unless claim-ready; map is served by a materializer descriptor, not a selector one", async () => {
     storageManager = StorageManager.emulate({ as: integrationSigner });
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -323,32 +323,57 @@ describe("per-builtin computation descriptors — end to end (W2.15a)", () => {
       await runtime.idle();
     }
 
-    // Every selector action carries the trusted computation descriptor; map does
-    // not (the registry is exact).
-    const descriptorsById = new Map<string, unknown>();
+    // Every selector action carries the trusted COMPUTATION descriptor; map
+    // does not (the selector registry is exact) — it carries the separate
+    // MATERIALIZER descriptor instead (W2.16).
+    const computationById = new Map<string, unknown>();
+    const materializerById = new Map<string, unknown>();
     for (const action of capturedActions) {
       const debugName = (action as { module?: { debugName?: string } }).module
         ?.debugName;
-      const descriptor = (action as {
-        serverBuiltinComputation?: { id?: string };
-      }).serverBuiltinComputation;
       if (
-        debugName && ["ifElse", "when", "unless", "map"].includes(debugName)
+        !debugName || !["ifElse", "when", "unless", "map"].includes(debugName)
       ) {
-        descriptorsById.set(debugName, descriptor);
+        continue;
       }
+      computationById.set(
+        debugName,
+        (action as { serverBuiltinComputation?: unknown })
+          .serverBuiltinComputation,
+      );
+      materializerById.set(
+        debugName,
+        (action as { serverBuiltinMaterializer?: unknown })
+          .serverBuiltinMaterializer,
+      );
     }
     for (const id of ["ifElse", "when", "unless"]) {
-      const descriptor = descriptorsById.get(id) as
+      const descriptor = computationById.get(id) as
         | { version?: number; id?: string }
         | undefined;
       expect(descriptor?.version).toBe(1);
       expect(descriptor?.id).toBe(id);
+      // Selectors are not materializers.
+      expect(materializerById.get(id)).toBeUndefined();
     }
-    expect(descriptorsById.get("map")).toBeUndefined();
+    // map carries a materializer descriptor (envelope surface), not a selector
+    // one.
+    expect(computationById.get("map")).toBeUndefined();
+    const mapMaterializer = materializerById.get("map") as
+      | {
+        version?: number;
+        id?: string;
+        materializerWriteEnvelopes?: unknown[];
+      }
+      | undefined;
+    expect(mapMaterializer?.version).toBe(1);
+    expect(mapMaterializer?.id).toBe("map");
+    expect((mapMaterializer?.materializerWriteEnvelopes ?? []).length)
+      .toBeGreaterThan(0);
 
     // The real observation each selector produced (carrying its real pieceId) is
-    // claim-ready; the map observation stays incomplete-static-surface.
+    // claim-ready; map is now claim-ready too, served by its materializer
+    // descriptor (W2.16) rather than staying incomplete-static-surface.
     const byFingerprint = (fingerprint: string) =>
       observations.filter((o) => o.implementationFingerprint === fingerprint);
 
@@ -367,10 +392,13 @@ describe("per-builtin computation descriptors — end to end (W2.15a)", () => {
     const mapMatches = byFingerprint("impl:cf:builtin/map:v1");
     expect(mapMatches.length).toBeGreaterThan(0);
     for (const obs of mapMatches) {
-      expect(obs.completeActionScopeSummary).toBeUndefined();
+      expect(obs.completeActionScopeSummary).toBeDefined();
+      // The summary carries the container envelope, not an empty one.
+      expect(obs.completeActionScopeSummary!.materializerWriteEnvelopes.length)
+        .toBeGreaterThan(0);
       expect(classifyStaticActionServability(obs, integrationSpace)).toEqual({
-        status: "unservable",
-        reason: "incomplete-static-surface",
+        status: "claim-ready",
+        actionKind: "computation",
       });
     }
   });

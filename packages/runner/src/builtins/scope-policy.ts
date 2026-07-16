@@ -52,6 +52,34 @@ export function outputSpotFromBinding(
   return { space: binding.space, id: binding.id, path: [...binding.path] };
 }
 
+/** The output-spot identity coordinates a list builtin keys its container on. */
+export type ListBuiltinOutputSpot = NonNullable<
+  ReturnType<typeof outputSpotFromBinding>
+>;
+
+/** Canonical registry names of the container-minting list builtins. */
+export type ListBuiltinContainerKey = "map" | "filter" | "flatMap";
+
+/**
+ * The `getCell` cause map/filter/flatMap key their result container on
+ * (CT-1623): the builtin name paired with the parent entity and the
+ * position-derived output spot. The container is a side document distinct from
+ * the node's direct output — the builtin writes the whole output collection
+ * (array plus per-slot element links) into it. Extracted as the single source
+ * of that identity so the servability layer can re-derive the SAME container
+ * entity at registration for the materializer write envelope (W2.16). Both
+ * sites MUST agree on this cause or a claimed run de-claims fail-closed. Schema
+ * and scope deliberately do not participate (see `outputSpotFromBinding`), so a
+ * caller may pass any schema/tx to `getCell` and still land the same entity id.
+ */
+export function listBuiltinResultContainerCause(
+  builtinKey: ListBuiltinContainerKey,
+  parentEntityId: unknown,
+  outputSpot: ListBuiltinOutputSpot,
+): Record<string, unknown> {
+  return { [builtinKey]: parentEntityId, outputSpot };
+}
+
 export function cellIdentityKey(cell: Cell<any>): {
   dedupKey: string;
   linkKey: readonly unknown[];

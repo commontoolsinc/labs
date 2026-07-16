@@ -13,6 +13,7 @@ import type {
 import type {
   ServerBuiltinActionDescriptor,
   ServerBuiltinComputationDescriptor,
+  ServerBuiltinMaterializerDescriptor,
 } from "../builtins/server-execution.ts";
 import type { CompleteActionScopeSummary } from "./persistent-observation.ts";
 
@@ -46,6 +47,13 @@ export interface TelemetryAnnotations {
    * is a `SERVER_COMPUTATION_BUILTIN_IDS` member.
    */
   serverBuiltinComputation?: ServerBuiltinComputationDescriptor;
+  /**
+   * Trusted per-builtin descriptor for the container-minting list builtins
+   * (map/filter/flatMap, W2.16) whose write surface is envelope-shaped. Attached
+   * only when the canonical registry ref is a `SERVER_MATERIALIZER_BUILTIN_IDS`
+   * member; the accompanying `materializerWriteEnvelopes` is the container.
+   */
+  serverBuiltinMaterializer?: ServerBuiltinMaterializerDescriptor;
   schedulerObservationIdentity?: SchedulerObservationIdentity;
 }
 

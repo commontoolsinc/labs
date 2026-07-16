@@ -117,8 +117,13 @@ import {
   builtinImplementationHash,
   isServerComputationBuiltinId,
   isServerExecutableBuiltinId,
+  isServerMaterializerBuiltinId,
   serverBuiltinImplementationHash,
 } from "./builtins/server-execution.ts";
+import {
+  listBuiltinResultContainerCause,
+  outputSpotFromBinding,
+} from "./builtins/scope-policy.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -5139,6 +5144,43 @@ export class Runner {
     const computationBuiltinId = isServerComputationBuiltinId(moduleRefName)
       ? moduleRefName
       : undefined;
+    // W2.16: map/filter/flatMap mint a result CONTAINER document (the output
+    // collection) distinct from their direct output and write the whole array
+    // plus per-slot element links into it. Re-derive that container's identity
+    // from the SAME cause the builtin keys it on
+    // (`listBuiltinResultContainerCause`) so its materializer write envelope is a
+    // root prefix over it — the two sites must agree or a claimed run de-claims
+    // fail-closed. Disjoint from `computationBuiltinId`/`serverBuiltinId`. The
+    // per-element child sub-patterns are separate provenance-covered actions
+    // outside this envelope, so a first reconcile that instantiates children
+    // de-claims fail-closed for that run (the client handles it); steady-state
+    // reconciles write only the container and stay claim-served.
+    const materializerBuiltinId = isServerMaterializerBuiltinId(moduleRefName)
+      ? moduleRefName
+      : undefined;
+    const materializerContainerEnvelope =
+      ((): NormalizedFullLink | undefined => {
+        if (materializerBuiltinId === undefined) return undefined;
+        const outputSpot = outputSpotFromBinding(outputBinding);
+        if (outputSpot === undefined) return undefined;
+        const containerLink = this.runtime.getCell(
+          processCell.space,
+          listBuiltinResultContainerCause(
+            materializerBuiltinId,
+            processCell.entityId,
+            outputSpot,
+          ),
+        ).getAsNormalizedFullLink();
+        // Root prefix (`path: []`) at space scope: covers the container's `value`,
+        // per-slot `value[i]` and `result`/`pattern` meta writes in one envelope;
+        // the schema/scope the builtin later applies do not fork the entity id
+        // (see `outputSpotFromBinding`), and a scoped or foreign actual container
+        // fails closed at the firewall rather than being served.
+        return { ...containerLink, scope: "space", path: [] };
+      })();
+    const materializerWriteEnvelopes = materializerContainerEnvelope
+      ? [materializerContainerEnvelope]
+      : undefined;
     Object.assign(action, builtinAction, {
       reads: inputCells,
       writes: schedulingWrites,
@@ -5168,6 +5210,25 @@ export class Runner {
             writes: schedulingWrites,
             directOutputs: outputCells,
           },
+        }
+        : {}),
+      ...(materializerBuiltinId !== undefined && materializerWriteEnvelopes
+        ? {
+          serverBuiltinMaterializer: {
+            version: 1 as const,
+            id: materializerBuiltinId,
+            piece: resultCell.getAsNormalizedFullLink(),
+            reads: inputCells,
+            // Declared surface + direct output; the envelope-shaped container
+            // writes ride in `materializerWriteEnvelopes` below.
+            writes: schedulingWrites,
+            directOutputs: outputCells,
+            materializerWriteEnvelopes,
+          },
+          // Registering the envelope also indexes the node as a materializer,
+          // so the scheduler runs it dirty-at-idle (the client's policy) — no
+          // executor change needed here.
+          materializerWriteEnvelopes,
         }
         : {}),
       ...(module.materializerWriteEnvelopes

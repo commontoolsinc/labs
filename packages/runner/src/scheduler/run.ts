@@ -48,8 +48,10 @@ import type { NonIdempotentReport, SchedulerActionInfo } from "../telemetry.ts";
 import {
   builtinImplementationHash,
   isServerComputationBuiltinId,
+  isServerMaterializerBuiltinId,
   type ServerBuiltinComputationDescriptor,
   serverBuiltinImplementationHash,
+  type ServerBuiltinMaterializerDescriptor,
 } from "../builtins/server-execution.ts";
 
 const logger = getLogger("scheduler", {
@@ -852,6 +854,7 @@ function attachSchedulerActionObservation(
     : withRuntimeComputationScopeSummary(
       baseObservation,
       annotated.serverBuiltinComputation,
+      annotated.serverBuiltinMaterializer,
       schedulerIgnoredReadAddresses(args.tx),
     );
 
@@ -1013,20 +1016,43 @@ export function runtimeWriteEmptyComputationScopeSummary(
  * Attach a runtime-assembled computation `completeActionScopeSummary` when one
  * of the alternative certificate sources applies. Certified computations and
  * server-builtin effects already carry a summary before reaching here. The
- * explicit per-builtin descriptor (W2.15a) takes precedence over the generic
- * write-empty heuristic (W2.14); for the pure selectors the two are excluded
- * from overlapping anyway (the heuristic never accepts `cf:builtin` identities).
+ * explicit per-builtin descriptors take precedence over the generic runtime
+ * heuristics; the four sources are mutually exclusive by identity/surface (each
+ * returns `undefined` outside its class), so the order is a stable priority, not
+ * a conflict resolution:
+ *
+ * 1. pure selector descriptor (W2.15a) — `cf:builtin` ifElse/when/unless;
+ * 2. list-builtin materializer descriptor (W2.16) — `cf:builtin`
+ *    map/filter/flatMap with an envelope write surface;
+ * 3. runtime materializer summary (W2.16) — authored `cf:module` writers that
+ *    carry registered materializer envelopes but no certificate (computeIndex);
+ * 4. write-empty heuristic (W2.14) — authored `cf:module` computeds the
+ *    transformer cannot certify but that provably write nothing beyond one
+ *    direct output (computeMentionable).
+ *
+ * The two `cf:builtin` descriptors never overlap the two `cf:module` heuristics
+ * (the heuristics reject `cf:builtin` identities); the materializer heuristic
+ * requires registered envelopes and the write-empty heuristic requires none, so
+ * they never both apply either.
  */
 function withRuntimeComputationScopeSummary(
   observation: SchedulerActionObservation,
   computationDescriptor: ServerBuiltinComputationDescriptor | undefined,
+  materializerDescriptor: ServerBuiltinMaterializerDescriptor | undefined,
   ignoredReads: readonly IMemorySpaceAddress[] = [],
 ): SchedulerActionObservation {
   const summary = serverBuiltinComputationScopeSummary(
     observation,
     computationDescriptor,
     ignoredReads,
-  ) ?? runtimeWriteEmptyComputationScopeSummary(observation, ignoredReads);
+  ) ??
+    serverBuiltinMaterializerScopeSummary(
+      observation,
+      materializerDescriptor,
+      ignoredReads,
+    ) ??
+    runtimeMaterializerComputationScopeSummary(observation, ignoredReads) ??
+    runtimeWriteEmptyComputationScopeSummary(observation, ignoredReads);
   return summary === undefined
     ? observation
     : { ...observation, completeActionScopeSummary: summary };
@@ -1136,6 +1162,179 @@ export function serverBuiltinComputationScopeSummary(
     writes,
     materializerWriteEnvelopes: [],
     directOutputs: descriptor.directOutputs.map(toMemorySpaceAddress),
+  };
+}
+
+/**
+ * W2.16: assemble a claim-ready `completeActionScopeSummary` from a trusted
+ * per-builtin MATERIALIZER descriptor for the container-minting list builtins
+ * (map/filter/flatMap), keyed on the exact `impl:cf:builtin/<id>:v1` fingerprint
+ * (W2.11). Mirrors the selector descriptor path but the write surface is
+ * ENVELOPE-shaped: the container prefix rides in `materializerWriteEnvelopes`
+ * (checkable and honest for a data-dependent per-slot writer), while `writes`
+ * carries only the declared surface plus the direct output. Fail-closed: the
+ * envelope is exactly the descriptor's container plus the direct output —
+ * observed runtime writes are never folded in — so a run that writes anywhere
+ * else (e.g. a first reconcile instantiating per-element children) de-claims at
+ * the firewall. Reads come from the descriptor's inputs plus the observed log;
+ * C0 admits reads dynamically, so they carry no envelope obligation.
+ */
+export function serverBuiltinMaterializerScopeSummary(
+  observation: SchedulerActionObservation,
+  descriptor: ServerBuiltinMaterializerDescriptor | undefined,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
+): CompleteActionScopeSummary | undefined {
+  if (descriptor === undefined || descriptor.version !== 1) return undefined;
+  if (observation.actionKind !== "computation") return undefined;
+  // Never override a transformer certificate already present.
+  if (observation.completeActionScopeSummary !== undefined) return undefined;
+  // Identity must be the exact canonical builtin the descriptor names.
+  if (!isServerMaterializerBuiltinId(descriptor.id)) return undefined;
+  if (
+    observation.implementationFingerprint !==
+      `impl:${builtinImplementationHash(descriptor.id)}`
+  ) {
+    return undefined;
+  }
+  if (descriptor.directOutputs.length !== 1) return undefined;
+  // An envelope-shaped writer with no envelope is not a materializer: refuse
+  // rather than mint an exact-surface summary that would reject its own
+  // container write on the first commit.
+  if (descriptor.materializerWriteEnvelopes.length === 0) return undefined;
+
+  const piece = toMemorySpaceAddress(descriptor.piece);
+  const materializerWriteEnvelopes = sortAndCompactPaths(
+    descriptor.materializerWriteEnvelopes.map(toMemorySpaceAddress),
+  );
+  const writes = sortAndCompactPaths([
+    ...descriptor.writes.map(toMemorySpaceAddress),
+    ...descriptor.directOutputs.map(toMemorySpaceAddress),
+  ]);
+  return {
+    version: 1,
+    complete: true,
+    implementationFingerprint: observation.implementationFingerprint,
+    runtimeFingerprint: observation.runtimeFingerprint,
+    piece,
+    reads: claimedCommitAdmissionReads(
+      [
+        ...descriptor.reads.map(toMemorySpaceAddress),
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...sameSpaceSpaceScopedReads(ignoredReads, piece.space),
+      ],
+      [...writes, ...materializerWriteEnvelopes],
+    ),
+    writes,
+    materializerWriteEnvelopes,
+    directOutputs: descriptor.directOutputs.map(toMemorySpaceAddress),
+  };
+}
+
+/**
+ * W2.16 (RC-3a): assemble a runtime materializer `completeActionScopeSummary`
+ * for an AUTHORED (`cf:module`) computation that carries no transformer
+ * certificate but HAS registered materializer write envelopes — computeIndex's
+ * shape, pending its transformer certificate. The write bound is exactly those
+ * envelopes plus the single direct root output; the registered surface must be
+ * bounded by them (every registered write envelope- or direct-output-covered)
+ * or the action stays `incomplete-static-surface`. This is the authored analog
+ * of the per-builtin materializer descriptor: builtins arrive via descriptors
+ * (`serverBuiltinMaterializerScopeSummary`) and are excluded here, exactly as
+ * the write-empty heuristic excludes them.
+ *
+ * Soundness is fail-closed by construction: the firewall bounds every claimed
+ * commit's writes to `envelopes ∪ directOutput`, so a run that writes outside
+ * them de-claims rather than corrupting state. `ignoredReads` folds the
+ * framework-owned reads exactly as the write-empty path does.
+ */
+export function runtimeMaterializerComputationScopeSummary(
+  observation: SchedulerActionObservation,
+  ignoredReads: readonly IMemorySpaceAddress[] = [],
+): CompleteActionScopeSummary | undefined {
+  if (observation.actionKind !== "computation") return undefined;
+  // Never override a transformer certificate or an effect-descriptor summary.
+  if (observation.completeActionScopeSummary !== undefined) return undefined;
+  // Trusted identity only: an `action:…` fingerprint is untrusted-implementation.
+  if (!observation.implementationFingerprint.startsWith("impl:")) {
+    return undefined;
+  }
+  // Canonical builtins are served ONLY through their explicit per-builtin
+  // descriptors (map/filter/flatMap via serverBuiltinMaterializerScopeSummary),
+  // never this authored-writer path.
+  if (observation.implementationFingerprint.startsWith("impl:cf:builtin/")) {
+    return undefined;
+  }
+  // Materializer, not write-empty (W2.14): it must carry registered envelopes.
+  if (observation.materializerWriteEnvelopes.length === 0) return undefined;
+  const ownerSpace = observation.ownerSpace;
+  if (ownerSpace === undefined || ownerSpace.length === 0) return undefined;
+
+  // Exactly one direct root output, same-space and space-scoped.
+  if (observation.currentKnownWrites.length !== 1) return undefined;
+  const directOutput = observation.currentKnownWrites[0]!;
+  if (!isSameSpaceRootValueAddress(directOutput, ownerSpace)) return undefined;
+
+  // Every registered envelope must itself be same-space and space-scoped, else
+  // this run cannot be served — refuse rather than mint a summary the firewall
+  // rejects address-by-address anyway.
+  const materializerWriteEnvelopes = sortAndCompactPaths(
+    observation.materializerWriteEnvelopes.map(cloneMemoryAddress),
+  );
+  for (const envelope of materializerWriteEnvelopes) {
+    if (
+      envelope.space !== ownerSpace ||
+      normalizeCellScope(envelope.scope) !== "space"
+    ) {
+      return undefined;
+    }
+  }
+
+  const directOutputWrite = cloneMemoryAddress(directOutput);
+  const writeEnvelopes = [directOutputWrite, ...materializerWriteEnvelopes];
+  // Every registered write must be envelope- or direct-output-covered, so the
+  // summary honestly bounds the registered surface. A declared side write
+  // outside them means the envelopes do not describe this writer; leave it
+  // incomplete-static-surface rather than assemble an unsound bound.
+  for (
+    const registered of [
+      ...observation.currentKnownWrites,
+      ...(observation.declaredWrites ?? []),
+    ]
+  ) {
+    if (
+      !writeEnvelopes.some((envelope) =>
+        surfaceCoversWrite(envelope, registered)
+      )
+    ) {
+      return undefined;
+    }
+  }
+
+  const piece = spacePieceRootFromPieceId(
+    observation.pieceId,
+    directOutput.space,
+  );
+  if (piece === undefined) return undefined;
+
+  const writes = [directOutputWrite];
+  return {
+    version: 1,
+    complete: true,
+    implementationFingerprint: observation.implementationFingerprint,
+    runtimeFingerprint: observation.runtimeFingerprint,
+    piece,
+    reads: claimedCommitAdmissionReads(
+      [
+        ...observation.reads,
+        ...observation.shallowReads,
+        ...sameSpaceSpaceScopedReads(ignoredReads, ownerSpace),
+      ],
+      writeEnvelopes,
+    ),
+    writes,
+    materializerWriteEnvelopes,
+    directOutputs: [cloneMemoryAddress(directOutput)],
   };
 }
 

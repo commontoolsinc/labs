@@ -109,3 +109,56 @@ export interface ServerBuiltinComputationDescriptor {
   readonly writes: readonly NormalizedFullLink[];
   readonly directOutputs: readonly NormalizedFullLink[];
 }
+
+/**
+ * List builtins whose write surface is envelope-shaped: map/filter/flatMap each
+ * mint a result CONTAINER document (the output collection) distinct from their
+ * direct output and write the whole array plus per-slot element links into it
+ * (W2.16). The per-element child sub-patterns are separate provenance-covered
+ * actions, NOT this node's writes, so they are deliberately outside the
+ * envelope — a first reconcile that instantiates children de-claims fail-closed
+ * for that run and the client handles it, exactly like any other
+ * dynamic-write-outside-static-surface. Keep this registry deliberately exact
+ * (mirrors `SERVER_EXECUTABLE_BUILTIN_IDS`): only the three container-minting
+ * list builtins belong; the pure selectors carry an exact single-output surface
+ * (`SERVER_COMPUTATION_BUILTIN_IDS`) and `wish` is a resolver.
+ */
+export const SERVER_MATERIALIZER_BUILTIN_IDS = [
+  "map",
+  "filter",
+  "flatMap",
+] as const;
+
+export type ServerMaterializerBuiltinId =
+  typeof SERVER_MATERIALIZER_BUILTIN_IDS[number];
+
+const SERVER_MATERIALIZER_BUILTIN_SET = new Set<string>(
+  SERVER_MATERIALIZER_BUILTIN_IDS,
+);
+
+export function isServerMaterializerBuiltinId(
+  value: unknown,
+): value is ServerMaterializerBuiltinId {
+  return typeof value === "string" &&
+    SERVER_MATERIALIZER_BUILTIN_SET.has(value);
+}
+
+/**
+ * Runner-authored static surface for a container-minting list builtin. Unlike
+ * the pure selector descriptor, the write surface is an ENVELOPE
+ * (`materializerWriteEnvelopes`, a root prefix over the result container) plus
+ * the direct output — a checkable, fail-closed bound honest for a data-dependent
+ * writer whose per-element slot count changes with the input list. The
+ * envelope is re-derived from the resolved output cells each registration
+ * (`instantiateRawNode`); the container identity is stable across list length,
+ * so it never widens, but a run writing anywhere else de-claims at the firewall.
+ */
+export interface ServerBuiltinMaterializerDescriptor {
+  readonly version: 1;
+  readonly id: ServerMaterializerBuiltinId;
+  readonly piece: NormalizedFullLink;
+  readonly reads: readonly NormalizedFullLink[];
+  readonly writes: readonly NormalizedFullLink[];
+  readonly directOutputs: readonly NormalizedFullLink[];
+  readonly materializerWriteEnvelopes: readonly NormalizedFullLink[];
+}
