@@ -1,7 +1,11 @@
-import type {
-  ActionClaimKey,
-  CellScope,
-  ExecutionClaim,
+import {
+  type ActionClaimKey,
+  actionClaimMapKey,
+  type CellScope,
+  type ExecutionClaim,
+  type SchedulerExecutionContextKey,
+  sessionExecutionContextKey,
+  userExecutionContextKey,
 } from "@commonfabric/memory/v2";
 import type {
   CompleteActionScopeSummary,
@@ -145,6 +149,72 @@ export function executionClaimMatchesActionKey(
   key: ActionClaimKey,
 ): boolean {
   return actionClaimKeysEqual(claim, key);
+}
+
+/**
+ * Chain equality: every ActionClaimKey field EXCEPT contextKey
+ * (context-lattice §2, amendment A10). The server's lane choice folds in
+ * durable context floors the client cannot reproduce, so client routing
+ * identifies one logical action by this projection and treats the claim's
+ * contextKey as an acceptance question, never an equality component.
+ */
+export function actionClaimChainKeysEqual(
+  left: ActionClaimKey,
+  right: ActionClaimKey,
+): boolean {
+  return left.branch === right.branch && left.space === right.space &&
+    left.pieceId === right.pieceId &&
+    left.actionId === right.actionId && left.actionKind === right.actionKind &&
+    left.implementationFingerprint === right.implementationFingerprint &&
+    left.runtimeFingerprint === right.runtimeFingerprint;
+}
+
+/**
+ * Canonical map key for the chain identity (ActionClaimKey minus
+ * contextKey). It reuses the protocol's canonical key encoding with the
+ * contextKey pinned to `"space"` as the chain representative, so no second
+ * encoding scheme exists and a space-context key's chain map key equals its
+ * full map key.
+ */
+export const actionClaimChainMapKey = (key: ActionClaimKey): string =>
+  actionClaimMapKey({ ...key, contextKey: "space" });
+
+/**
+ * The client's own lattice chain accept set (context-lattice §2, A10):
+ * `{space, user:<principal>, session:<principal>:<sessionId>}`, built
+ * exclusively from the canonical key helpers so colon-bearing DID and
+ * session-id segments are encoded exactly as issuance encodes them
+ * (amendment A18 — naive concatenation never matches). The session member
+ * cannot match before C2 issues session-context claims, but the accept set
+ * carries it now so a C1-vintage client matches its own session claims the
+ * moment they exist.
+ */
+export function ownChainContextKeys(
+  principal: string,
+  sessionId: string,
+): ReadonlySet<SchedulerExecutionContextKey> {
+  return new Set<SchedulerExecutionContextKey>([
+    "space",
+    userExecutionContextKey(principal),
+    sessionExecutionContextKey(principal, sessionId),
+  ]);
+}
+
+/**
+ * Chain-scoped claim acceptance (§2 with A10): the claim names this exact
+ * action (chain equality above) AND its contextKey is a member of the
+ * client's own chain. A claim naming another principal or session never
+ * matches. There is deliberately NO rank comparison against any local floor
+ * estimate: a claim broader or narrower within the own lattice still
+ * suppresses, which is what gives continuity across lane moves.
+ */
+export function executionClaimMatchesActionChain(
+  claim: ExecutionClaim,
+  key: ActionClaimKey,
+  ownContextKeys: ReadonlySet<string>,
+): boolean {
+  return actionClaimChainKeysEqual(claim, key) &&
+    ownContextKeys.has(claim.contextKey);
 }
 
 /**

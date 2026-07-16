@@ -1,9 +1,21 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import {
+  type ActionClaimKey,
+  actionClaimMapKey,
+  type ExecutionClaim,
+  sessionExecutionContextKey,
+  userExecutionContextKey,
+} from "@commonfabric/memory/v2";
+import {
   classifyStaticActionServability,
   type StaticActionServabilityCandidate,
 } from "../src/scheduler.ts";
+import {
+  actionClaimChainMapKey,
+  executionClaimMatchesActionChain,
+  ownChainContextKeys,
+} from "../src/scheduler/servability.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 
 const servedSpace = "did:key:served" as const;
@@ -400,5 +412,113 @@ describe("static action servability", () => {
         servedSpace,
       )).toEqual({ status: "unservable", reason });
     }
+  });
+});
+
+describe("chain-scoped claim keys (C1.6)", () => {
+  const chainKey: ActionClaimKey = {
+    branch: "branch-a",
+    space: servedSpace,
+    contextKey: "space",
+    pieceId: "space:of:piece",
+    actionId: "action:compute",
+    actionKind: "computation",
+    implementationFingerprint: "impl:computation-v1",
+    runtimeFingerprint: "runner:scheduler:v3",
+  };
+  // A18: colon-bearing did:key principals end-to-end, only ever encoded
+  // through the canonical helpers.
+  const myDid = "did:key:z6MkChainScopedRoutingMe";
+  const mySessionId = "session:chain-scoped";
+  const chain = ownChainContextKeys(myDid, mySessionId);
+  const liveClaim = (
+    contextKey: ExecutionClaim["contextKey"],
+  ): ExecutionClaim => ({
+    ...chainKey,
+    contextKey,
+    leaseGeneration: 1,
+    claimGeneration: 1,
+    expiresAt: 10_000,
+  });
+
+  it("keys one logical action identically across every context", () => {
+    const base = actionClaimChainMapKey(chainKey);
+    expect(actionClaimChainMapKey({
+      ...chainKey,
+      contextKey: userExecutionContextKey(myDid),
+    })).toEqual(base);
+    expect(actionClaimChainMapKey({
+      ...chainKey,
+      contextKey: sessionExecutionContextKey(myDid, mySessionId),
+    })).toEqual(base);
+    // The chain representative reuses the canonical protocol encoding: for a
+    // space-context key the chain map key IS the full map key.
+    expect(base).toEqual(actionClaimMapKey(chainKey));
+  });
+
+  it("separates chain keys on every non-context field", () => {
+    const base = actionClaimChainMapKey(chainKey);
+    const variants: Partial<ActionClaimKey>[] = [
+      { branch: "branch-b" },
+      { space: foreignSpace },
+      { pieceId: "space:of:other" },
+      { actionId: "action:other" },
+      { actionKind: "effect" },
+      { implementationFingerprint: "impl:other" },
+      { runtimeFingerprint: "runner:other" },
+    ];
+    for (const variant of variants) {
+      expect(actionClaimChainMapKey({ ...chainKey, ...variant })).not.toEqual(
+        base,
+      );
+    }
+  });
+
+  it("builds the full own chain from the canonical helpers", () => {
+    expect([...chain]).toEqual([
+      "space",
+      userExecutionContextKey(myDid),
+      sessionExecutionContextKey(myDid, mySessionId),
+    ]);
+    // Naive concatenation of a colon-bearing DID is never canonical.
+    expect(chain.has(`user:${myDid}`)).toBe(false);
+    expect(chain.has(`session:${myDid}:${mySessionId}`)).toBe(false);
+  });
+
+  it("accepts exactly the own-chain contexts for a chain-matching claim", () => {
+    for (
+      const contextKey of [
+        "space" as const,
+        userExecutionContextKey(myDid),
+        sessionExecutionContextKey(myDid, mySessionId),
+      ]
+    ) {
+      expect(executionClaimMatchesActionChain(
+        liveClaim(contextKey),
+        chainKey,
+        chain,
+      )).toBe(true);
+    }
+    for (
+      const contextKey of [
+        userExecutionContextKey("did:key:z6MkChainScopedRoutingOther"),
+        sessionExecutionContextKey(myDid, "session:other"),
+        `user:${myDid}` as ExecutionClaim["contextKey"],
+      ]
+    ) {
+      expect(executionClaimMatchesActionChain(
+        liveClaim(contextKey),
+        chainKey,
+        chain,
+      )).toBe(false);
+    }
+  });
+
+  it("never chain-matches a claim for a different action", () => {
+    expect(executionClaimMatchesActionChain(
+      { ...liveClaim("space"), actionId: "action:other" },
+      chainKey,
+      chain,
+    )).toBe(false);
   });
 });

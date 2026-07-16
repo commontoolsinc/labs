@@ -119,9 +119,17 @@ import {
   isReadIgnoredForCommit,
   isReadMarkedAsAttemptedWrite,
 } from "./reactivity-log.ts";
-import { routeClientActionTransaction } from "../client-execution/action-transaction-router.ts";
+import {
+  DUAL_CHAIN_CLAIM_MATCH_DIAGNOSTIC,
+  routeClientActionTransaction,
+} from "../client-execution/action-transaction-router.ts";
 import { isSchedulerActionObservation } from "../scheduler/persistent-observation.ts";
-import { actionClaimKeyFromObservation } from "../scheduler/servability.ts";
+import {
+  actionClaimChainMapKey,
+  actionClaimKeyFromObservation,
+  executionClaimMatchesActionChain,
+  ownChainContextKeys,
+} from "../scheduler/servability.ts";
 
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
 // part of the write; that read is dropped from its conflict set.
@@ -1013,7 +1021,11 @@ export class StorageManager implements IStorageManager {
   registerExecutionAction(action: object, key: ActionClaimKey): void {
     this.removeExecutionAction(action);
     this.#executionActionKeys.set(action, key);
-    const mapKey = actionClaimMapKey(key);
+    // Chain-scoped registration (context-lattice §2, amendment A15): the
+    // client cannot reproduce the server's lane choice, so the action index
+    // keys by the ActionClaimKey minus contextKey. A claim or revoke naming
+    // any context on the client's own chain must find this action.
+    const mapKey = actionClaimChainMapKey(key);
     let actions = this.#executionActionsByKey.get(mapKey);
     if (actions === undefined) {
       actions = new Set();
@@ -1043,7 +1055,7 @@ export class StorageManager implements IStorageManager {
   private removeExecutionAction(action: object): void {
     const previous = this.#executionActionKeys.get(action);
     if (previous !== undefined) {
-      const mapKey = actionClaimMapKey(previous);
+      const mapKey = actionClaimChainMapKey(previous);
       const actions = this.#executionActionsByKey.get(mapKey);
       actions?.delete(action);
       if (actions?.size === 0) this.#executionActionsByKey.delete(mapKey);
@@ -1052,7 +1064,9 @@ export class StorageManager implements IStorageManager {
   }
 
   private executionActionsForClaimKey(key: ActionClaimKey): readonly object[] {
-    return [...this.#executionActionsByKey.get(actionClaimMapKey(key)) ?? []];
+    return [
+      ...this.#executionActionsByKey.get(actionClaimChainMapKey(key)) ?? [],
+    ];
   }
 
   private clearExecutionActions(): void {
@@ -1958,6 +1972,7 @@ type MutableExecutionRoutingBranchTotals = {
   basisCoveredOverlayDrops: number;
   nonAuthoritativeOverlayDrops: number;
   readonly settlementDiagnostics: Record<string, number>;
+  readonly routeDiagnostics: Record<string, number>;
 };
 
 const emptyExecutionRoutingBranchTotals =
@@ -1968,6 +1983,7 @@ const emptyExecutionRoutingBranchTotals =
     basisCoveredOverlayDrops: 0,
     nonAuthoritativeOverlayDrops: 0,
     settlementDiagnostics: {},
+    routeDiagnostics: {},
   });
 
 const EXECUTION_ROUTING_DIAGNOSTIC_ACTION_LIMIT = 128;
@@ -1982,6 +1998,7 @@ const docKey = (id: URI, scope?: CellScope): string =>
 
 class SpaceReplica implements ISpaceReplica {
   readonly #space: MemorySpace;
+  readonly #as: Signer;
   readonly #subscription: IStorageSubscription;
   readonly #createSession: () => Promise<ReplicaSessionHandle>;
   readonly #shadowWrites: boolean;
@@ -2016,6 +2033,14 @@ class SpaceReplica implements ISpaceReplica {
   #executionAppliedSeq = 0;
   #executionClaimRouting = false;
   #executionBuiltinPassivity = false;
+  /**
+   * The client's own lattice chain accept set (context-lattice §2, A10):
+   * {space, user:<myDid>, session:<myDid>:<mySessionId>} in canonical
+   * encoding, captured from the provider signer and the exact live session
+   * when execution control initializes. Consulted only while
+   * #executionClaimRouting is on.
+   */
+  #executionOwnContextKeys: ReadonlySet<string> = new Set(["space"]);
   #executionSnapshotRequired = false;
   #executionWatchHandoffComplete = false;
   #sessionHandle?: Promise<ReplicaSessionHandle>;
@@ -2065,6 +2090,7 @@ class SpaceReplica implements ISpaceReplica {
 
   constructor(options: ProviderOptions) {
     this.#space = options.space;
+    this.#as = options.as;
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
@@ -2288,7 +2314,32 @@ class SpaceReplica implements ISpaceReplica {
     ) {
       return undefined;
     }
-    return this.#executionClaims.get(actionClaimMapKey(key));
+    // Chain-scoped lookup (context-lattice §2, A10/A15): accept a live claim
+    // whose key matches minus contextKey and whose contextKey is on the own
+    // chain. Two such claims are the state issuance-side disjointness makes
+    // impossible; per amendment A3 the lookup then picks NEITHER — the
+    // caller falls open to client execution — and counts the observation.
+    let match: ExecutionClaim | undefined;
+    for (const candidate of this.#executionClaims.values()) {
+      if (
+        !executionClaimMatchesActionChain(
+          candidate,
+          key,
+          this.#executionOwnContextKeys,
+        )
+      ) {
+        continue;
+      }
+      if (match !== undefined) {
+        this.noteExecutionRouteDiagnostic(
+          key.branch,
+          DUAL_CHAIN_CLAIM_MATCH_DIAGNOSTIC,
+        );
+        return undefined;
+      }
+      match = candidate;
+    }
+    return match;
   }
 
   getExecutionRoutingDiagnostics(
@@ -2309,10 +2360,17 @@ class SpaceReplica implements ISpaceReplica {
       key.space === query.space && key.branch === query.branch &&
       (query.pieceId === undefined || key.pieceId === query.pieceId) &&
       (query.actionId === undefined || key.actionId === query.actionId);
+    // The per-action view joins every source by the chain key (A15): one
+    // logical action stays one record whatever context its claims name. The
+    // exposed key is the chain representative; `claims` and `liveClaim`
+    // carry the true contextKeys.
     const actionKeys = new Map<string, ActionClaimKey>();
     const addActionKey = (key: ActionClaimKey): void => {
       if (!matchesQuery(key)) return;
-      actionKeys.set(actionClaimMapKey(key), canonicalActionClaimKey(key));
+      actionKeys.set(
+        actionClaimChainMapKey(key),
+        canonicalActionClaimKey({ ...key, contextKey: "space" }),
+      );
     };
 
     for (const record of this.#executionRoutingDiagnostics.values()) {
@@ -2338,12 +2396,16 @@ class SpaceReplica implements ISpaceReplica {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([mapKey, key]) => {
         const record = this.#executionRoutingDiagnostics.get(mapKey);
-        const liveClaim = this.#executionClaims.get(mapKey);
+        const liveClaim = [...this.#executionClaims.values()]
+          .filter((candidate) => actionClaimChainMapKey(candidate) === mapKey)
+          .sort((left, right) =>
+            actionClaimMapKey(left).localeCompare(actionClaimMapKey(right))
+          )[0];
         const overlays = [...this.#claimedOverlays.values()].filter((overlay) =>
-          actionClaimMapKey(overlay.claim) === mapKey
+          actionClaimChainMapKey(overlay.claim) === mapKey
         );
         const pendingSettlements = this.#pendingExecutionSettlements.filter(
-          (settlement) => actionClaimMapKey(settlement.claim) === mapKey,
+          (settlement) => actionClaimChainMapKey(settlement.claim) === mapKey,
         );
         const lastSettlement = record?.lastSettlement ??
           pendingSettlements.at(-1);
@@ -3313,8 +3375,12 @@ class SpaceReplica implements ISpaceReplica {
       claims: capturedClaim !== undefined
         ? [capturedClaim]
         : [...this.#executionClaims.values()],
+      ownContextKeys: this.#executionOwnContextKeys,
       builtinPassivity: this.#executionBuiltinPassivity,
       onDiagnostic: ({ diagnosticCode, claim }) => {
+        // Every client fail-open is a named counter (amendment A3 requires
+        // this for dual-chain-claim-match in particular), not only a log.
+        this.noteExecutionRouteDiagnostic(claim.branch, diagnosticCode);
         logger.warn("execution-client-route", () => [
           `Claimed action failed open: ${diagnosticCode}`,
           { actionId: claim.actionId, branch: claim.branch },
@@ -4294,6 +4360,14 @@ class SpaceReplica implements ISpaceReplica {
       handle.client.serverFlags?.serverPrimaryExecutionClaimRoutingV1 === true;
     if (!enabled) return;
     this.#executionClaimRouting = true;
+    // The own chain (A10) anchors to the provider signer and the exact live
+    // session id — the identities scoped claims would be issued under. Both
+    // segments are canonically encoded by the helpers (A18); the session
+    // member stays inert until C2 issues session-context claims.
+    this.#executionOwnContextKeys = ownChainContextKeys(
+      this.#as.did(),
+      handle.session.sessionId,
+    );
     this.#executionBuiltinPassivity =
       handle.client.serverFlags?.serverPrimaryExecutionBuiltinPassivityV1 ===
         true;
@@ -4331,7 +4405,12 @@ class SpaceReplica implements ISpaceReplica {
   private executionRoutingDiagnosticRecord(
     key: ActionClaimKey,
   ): ExecutionRoutingDiagnosticRecord {
-    const mapKey = actionClaimMapKey(key);
+    // One record per logical action: keyed by the chain key (ActionClaimKey
+    // minus contextKey, amendment A15) so route notes, overlay drops, and
+    // revoke-path diagnostics stay on a single record across lane moves. The
+    // stored key is the chain representative (contextKey pinned "space");
+    // live claims alongside carry their true contexts.
+    const mapKey = actionClaimChainMapKey(key);
     const existing = this.#executionRoutingDiagnostics.get(mapKey);
     if (existing !== undefined) {
       // Refresh insertion order so inactive actions are evicted first.
@@ -4350,7 +4429,7 @@ class SpaceReplica implements ISpaceReplica {
       }
     }
     const record: ExecutionRoutingDiagnosticRecord = {
-      key: canonicalActionClaimKey(key),
+      key: canonicalActionClaimKey({ ...key, contextKey: "space" }),
       upstreamRoutes: 0,
       claimedOverlayRoutes: 0,
       settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
@@ -4384,7 +4463,19 @@ class SpaceReplica implements ISpaceReplica {
       basisCoveredOverlayDrops: totals.basisCoveredOverlayDrops,
       nonAuthoritativeOverlayDrops: totals.nonAuthoritativeOverlayDrops,
       settlementDiagnostics: { ...totals.settlementDiagnostics },
+      routeDiagnostics: { ...totals.routeDiagnostics },
     };
+  }
+
+  /** Count one named client routing fail-open (amendment A3: observed
+   * fail-opens are counters, never silent branches). */
+  private noteExecutionRouteDiagnostic(
+    branch: BranchName,
+    diagnosticCode: string,
+  ): void {
+    const totals = this.executionRoutingBranchTotals(branch);
+    totals.routeDiagnostics[diagnosticCode] =
+      (totals.routeDiagnostics[diagnosticCode] ?? 0) + 1;
   }
 
   private noteExecutionSettlement(settlement: ActionSettlement): void {

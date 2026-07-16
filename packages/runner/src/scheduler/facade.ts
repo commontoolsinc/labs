@@ -1241,6 +1241,12 @@ export class Scheduler {
     const key: ActionClaimKey = {
       branch: identity.branch ?? "",
       space: identity.ownerSpace,
+      // Chain-scoped registration (context-lattice §2, amendment A15): the
+      // client cannot reproduce the server's lane choice, so this key
+      // participates by its chain identity (ActionClaimKey minus
+      // contextKey). "space" is the canonical chain representative, not a
+      // lane assertion — claims at user:<myDid> (and session:<myDid>:<id>
+      // once C2 issues them) resolve to this same registration.
       contextKey: "space",
       pieceId: identity.pieceId,
       actionId,

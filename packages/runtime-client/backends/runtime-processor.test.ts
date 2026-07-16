@@ -965,6 +965,7 @@ describe("RuntimeProcessor execution routing diagnostics IPC", () => {
         basisCoveredOverlayDrops: 0,
         nonAuthoritativeOverlayDrops: 0,
         settlementDiagnostics: {},
+        routeDiagnostics: {},
       },
       truncatedActionRecords: 0,
     };

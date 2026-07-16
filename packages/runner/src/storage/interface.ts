@@ -166,9 +166,18 @@ export interface ExecutionRoutingBranchTotals {
   readonly basisCoveredOverlayDrops: number;
   readonly nonAuthoritativeOverlayDrops: number;
   readonly settlementDiagnostics: Readonly<Record<string, number>>;
+  /** Named client routing fail-opens, keyed by diagnostic code. Includes
+   * `dual-chain-claim-match` — two live claims matching one action on the
+   * client's own chain (context-lattice amendment A3: counted, never a
+   * silent branch). */
+  readonly routeDiagnostics: Readonly<Record<string, number>>;
 }
 
-/** Exact-action execution-routing state and bounded historical counters. */
+/** Exact-action execution-routing state and bounded historical counters.
+ * Records are chain-scoped (context-lattice §2): `key` names the logical
+ * action with contextKey pinned to the `"space"` chain representative, and
+ * one record aggregates the action across lane moves. `liveClaim` carries a
+ * chain-matching live claim's true contextKey. */
 export interface ExecutionRoutingActionDiagnostics {
   readonly key: ActionClaimKey;
   readonly liveClaim?: ExecutionClaim;
@@ -233,14 +242,19 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   registerSpaceIdentity?(identity: Signer): void;
 
-  /** Register the exact durable action identity used by ephemeral execution
+  /** Register the durable action identity used by ephemeral execution
    * claims. Scheduler registration calls this before an effect can release an
-   * external request. */
+   * external request. Registration is chain-scoped (context-lattice §2,
+   * amendment A15): the key's contextKey is the `"space"` chain
+   * representative, not a lane assertion, and claims naming any context on
+   * the client's own chain resolve to this action. */
   registerExecutionAction?(action: object, key: ActionClaimKey): void;
   unregisterExecutionAction?(action: object): void;
-  /** Whether this client currently observes an exact live computation claim
-   * for `action`. This is a scheduling hint only: transaction routing still
-   * re-checks the captured claim incarnation at commit time. */
+  /** Whether this client currently observes exactly one live computation
+   * claim for `action` on its own lattice chain. This is a scheduling hint
+   * only: transaction routing still re-checks the captured claim incarnation
+   * at commit time. Two chain-matching claims (amendment A3) report false —
+   * the fail-open state routes to neither. */
   hasLiveExecutionClaimForAction?(action: object): boolean;
   captureExecutionClaim?(
     action: object | undefined,

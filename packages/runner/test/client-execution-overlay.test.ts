@@ -10,9 +10,11 @@ import {
   type ClientCommit,
   type ExecutionClaim,
   resetServerPrimaryExecutionConfig,
+  sessionExecutionContextKey,
   type SessionSync,
   setServerPrimaryExecutionConfig,
   toInputBasisSeq,
+  userExecutionContextKey,
 } from "@commonfabric/memory/v2";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
 import type {
@@ -2213,6 +2215,7 @@ Deno.test("execution routing diagnostics expose exact settlement barriers and re
       settlementDiagnostics: {
         "dynamic-read-outside-static-surface": 1,
       },
+      routeDiagnostics: {},
     });
   } finally {
     sourceApplied.resolve({ seq: 6, branch: "", revisions: [] });
@@ -2397,6 +2400,7 @@ Deno.test("execution routing diagnostics bound historical action records", async
       basisCoveredOverlayDrops: 0,
       nonAuthoritativeOverlayDrops: 0,
       settlementDiagnostics: {},
+      routeDiagnostics: {},
     });
     assertEquals(
       storage.getExecutionRoutingDiagnostics({
@@ -2426,6 +2430,7 @@ Deno.test("execution routing diagnostics bound historical action records", async
       basisCoveredOverlayDrops: 0,
       nonAuthoritativeOverlayDrops: 0,
       settlementDiagnostics: {},
+      routeDiagnostics: {},
     });
   } finally {
     await storage.close();
@@ -2449,5 +2454,223 @@ Deno.test("execution routing diagnostics reject an unopened space without mounti
     assertEquals(factory.commits, []);
   } finally {
     await storage.close();
+  }
+});
+
+// --- C1.6: chain-scoped claim routing -------------------------------------
+//
+// The client's accept set is its FULL own lattice chain — {space,
+// user:<myDid>, session:<myDid>:<mySessionId>} (context-lattice §2,
+// amendment A10). The principal is the storage manager's signer (a real
+// colon-bearing did:key — amendment A18), and every scoped context key below
+// is built with the canonical helpers, never by string concatenation.
+
+const ownUserContextKey = () => userExecutionContextKey(signer.did());
+const ownSessionContextKey = () =>
+  // OverlaySessionFactory mounts every session as "session:client-overlay";
+  // the raw session id itself carries a colon, so canonical encoding is
+  // load-bearing here too.
+  sessionExecutionContextKey(signer.did(), "session:client-overlay");
+
+Deno.test("own-chain user and session context claims suppress like a space claim", async () => {
+  setServerPrimaryExecutionConfig(true);
+  try {
+    for (const contextKey of [ownUserContextKey(), ownSessionContextKey()]) {
+      const factory = new OverlaySessionFactory();
+      factory.claims = [{ ...claim, contextKey }];
+      const storage = OverlayStorageManager.connect(factory);
+      try {
+        await storage.open(SPACE).sync(INPUT);
+        await writeClaimedOutput(storage, "own-chain-overlay");
+        assertEquals(visibleOutput(storage), "own-chain-overlay");
+        assertEquals(factory.commits, []);
+      } finally {
+        await storage.close();
+      }
+    }
+  } finally {
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("foreign-chain context claims never suppress the client", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const otherPrincipal = "did:key:z6Mk-other-principal";
+  try {
+    for (
+      const contextKey of [
+        userExecutionContextKey(otherPrincipal),
+        sessionExecutionContextKey(otherPrincipal, "session:client-overlay"),
+        sessionExecutionContextKey(signer.did(), "session:someone-else"),
+      ]
+    ) {
+      const factory = new OverlaySessionFactory();
+      factory.claims = [{ ...claim, contextKey }];
+      const storage = OverlayStorageManager.connect(factory);
+      try {
+        await storage.open(SPACE).sync(INPUT);
+        await writeClaimedOutput(storage, "client-authoritative");
+        assertEquals(factory.commits.length, 1);
+      } finally {
+        await storage.close();
+      }
+    }
+  } finally {
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("a dormant action's user-context claim revoke fires exactly one invalidation wake", async () => {
+  // Amendment A15 acceptance: the registered-action seams are keyed by the
+  // chain key (ActionClaimKey minus contextKey), so an authority-loss wake
+  // for a user-context claim reaches an action registered under the "space"
+  // chain representative — exactly once — while the action is dormant (no
+  // speculative overlay exists).
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  factory.claims = [];
+  const storage = OverlayStorageManager.connect(factory);
+  const computationAction = {};
+  const notifications: StorageNotification[] = [];
+  const userClaim: ExecutionClaim = {
+    ...claim,
+    contextKey: ownUserContextKey(),
+  };
+  storage.registerExecutionAction(
+    computationAction,
+    canonicalActionClaimKey(claim),
+  );
+  storage.subscribe({
+    next(notification) {
+      notifications.push(notification);
+      return { done: false };
+    },
+  });
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{ type: "session.execution.claim.set", claim: userClaim }],
+      },
+    }));
+    assertCondition(() =>
+      storage.hasLiveExecutionClaimForAction(computationAction) === true
+    );
+    await factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.claim.revoke",
+          branch: "",
+          claim: userClaim,
+          leaseGeneration: userClaim.leaseGeneration,
+          claimGeneration: userClaim.claimGeneration,
+        }],
+      },
+    }));
+    const wakes = notifications.filter((notification) =>
+      notification.type === "execution-claim-invalidation" &&
+      notification.sourceAction === computationAction
+    );
+    assertEquals(wakes.length, 1);
+    assertEquals(
+      wakes[0]?.type === "execution-claim-invalidation"
+        ? wakes[0].diagnosticCode
+        : undefined,
+      "claim-revoked",
+    );
+    assertEquals(
+      storage.hasLiveExecutionClaimForAction(computationAction),
+      false,
+    );
+  } finally {
+    storage.unregisterExecutionAction(computationAction);
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("dual live chain-matching claims route to neither and are counted", async () => {
+  // Amendment A3: issuance-side routing disjointness should make this state
+  // impossible; if the client ever observes two live claims on its own chain
+  // for one action it must not pick one. It fails open (computes locally,
+  // commits upstream) and the event is a named counter, not a silent branch.
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  factory.claims = [
+    { ...claim },
+    { ...claim, contextKey: ownUserContextKey() },
+  ];
+  const storage = OverlayStorageManager.connect(factory);
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "client-authoritative");
+    assertEquals(factory.commits.length, 1);
+    const diagnostics = storage.getExecutionRoutingDiagnostics({
+      space: SPACE,
+      branch: "",
+    });
+    assertEquals(
+      diagnostics.branchTotals.routeDiagnostics["dual-chain-claim-match"],
+      1,
+    );
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("dual live chain-matching claims disable the scheduling hint and builtin capture", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory(true);
+  const effectClaim: ExecutionClaim = { ...claim, actionKind: "effect" };
+  factory.claims = [
+    { ...claim },
+    { ...claim, contextKey: ownUserContextKey() },
+    effectClaim,
+    { ...effectClaim, contextKey: ownUserContextKey() },
+  ];
+  const storage = OverlayStorageManager.connect(factory);
+  const computationAction = {};
+  const effectAction = {};
+  storage.registerExecutionAction(
+    computationAction,
+    canonicalActionClaimKey(claim),
+  );
+  storage.registerExecutionAction(effectAction, {
+    ...canonicalActionClaimKey(claim),
+    actionKind: "effect",
+  });
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    // Two chain-matching live claims per action: neither the scheduling
+    // hint nor builtin capture may pick one (amendment A3 fail-open).
+    assertEquals(
+      storage.hasLiveExecutionClaimForAction(computationAction),
+      false,
+    );
+    assertEquals(storage.captureExecutionClaim(effectAction), undefined);
+
+    // Narrowed to a single own-chain user claim, the hint returns.
+    factory.claims = [{ ...claim, contextKey: ownUserContextKey() }];
+    await factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        snapshot: { claims: [...factory.claims] },
+        events: [],
+      },
+    }));
+    assertCondition(() =>
+      storage.hasLiveExecutionClaimForAction(computationAction) === true
+    );
+  } finally {
+    storage.unregisterExecutionAction(computationAction);
+    storage.unregisterExecutionAction(effectAction);
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
   }
 });

@@ -6,7 +6,7 @@ import {
   actionClaimKeyFromObservation,
   classifyStaticActionServability,
   dynamicActionTransactionUnservableReason,
-  executionClaimMatchesActionKey,
+  executionClaimMatchesActionChain,
 } from "../scheduler/servability.ts";
 import type {
   ActionTransactionRoute,
@@ -18,8 +18,23 @@ export interface ClientActionRouteDiagnostic {
   readonly claim: ExecutionClaim;
 }
 
+/**
+ * Named fail-open counter for the state issuance-side routing disjointness
+ * is meant to make impossible: two live claims matching one action on the
+ * client's own chain (amendment A3). Observing it means the client computed
+ * locally instead of picking a claim; it must be counted, never silent.
+ */
+export const DUAL_CHAIN_CLAIM_MATCH_DIAGNOSTIC = "dual-chain-claim-match";
+
 export interface ClientActionTransactionRouteOptions {
   readonly claims: readonly ExecutionClaim[];
+  /**
+   * The client's own lattice chain accept set — build it with
+   * `ownChainContextKeys` (context-lattice §2, A10): `{space, user:<myDid>,
+   * session:<myDid>:<mySessionId>}` in canonical encoding. Claims outside
+   * this set never match.
+   */
+  readonly ownContextKeys: ReadonlySet<string>;
   readonly builtinPassivity?: boolean;
   readonly onDiagnostic?: (diagnostic: ClientActionRouteDiagnostic) => void;
 }
@@ -32,6 +47,12 @@ const upstream = {
  * Route one cooperative client action transaction from an already-integrated
  * claim snapshot. This function is deliberately synchronous: the ordinary
  * optimistic write contract applies pending versions before commit() returns.
+ *
+ * Matching is chain-scoped (context-lattice §2, amendment A10): the claim is
+ * identified by the ActionClaimKey minus contextKey, then accepted iff its
+ * contextKey is a member of the client's own chain. There is deliberately no
+ * rank comparison against any local floor estimate — the server's lane
+ * choice folds in durable floors the client cannot see.
  */
 export function routeClientActionTransaction(
   input: ActionTransactionRouteInput,
@@ -42,17 +63,38 @@ export function routeClientActionTransaction(
   if (!isSchedulerActionObservation(observation)) return upstream;
   const key = actionClaimKeyFromObservation(observation);
   if (key === undefined) return upstream;
-  const claim = options.claims.find((candidate) =>
-    executionClaimMatchesActionKey(candidate, key)
+  const matches = options.claims.filter((candidate) =>
+    executionClaimMatchesActionChain(candidate, key, options.ownContextKeys)
   );
-  if (claim === undefined) return upstream;
+  if (matches.length === 0) return upstream;
+  if (matches.length > 1) {
+    // Amendment A3: two live chain-matching claims should be impossible
+    // under issuance-side routing disjointness. If ever observed, route to
+    // NEITHER — the client computes (fail open) — under a named diagnostic
+    // rather than a silent tie-break.
+    options.onDiagnostic?.({
+      diagnosticCode: DUAL_CHAIN_CLAIM_MATCH_DIAGNOSTIC,
+      claim: matches[0]!,
+    });
+    return upstream;
+  }
+  const claim = matches[0]!;
 
   if (claim.actionKind === "effect" && options.builtinPassivity !== true) {
     return upstream;
   }
+  // Both servability firewalls are lane-parameterized by the ACCEPTED
+  // claim's contextKey (amendments A15/A19): a user- or session-context
+  // claim admits the lane principal's user-scoped surfaces. Session rank
+  // maps onto the user parameterization until C2 teaches the classifiers
+  // session scope — session-scoped surfaces keep failing open below, a
+  // conservative subset of the session lane's authority. A space claim
+  // keeps both classifiers byte-identical to the space-only behavior.
+  const claimRank = claim.contextKey === "space" ? "space" : "user";
   const staticDecision = classifyStaticActionServability(
     observation,
     input.space,
+    claimRank === "user" ? { userContext: true } : undefined,
   );
   const expectedStaticStatus = claim.actionKind === "effect"
     ? "broker-required"
@@ -70,7 +112,7 @@ export function routeClientActionTransaction(
   const diagnosticCode = dynamicActionTransactionUnservableReason(
     input,
     observation,
-    { servedSpace: input.space, branch: claim.branch },
+    { servedSpace: input.space, branch: claim.branch, contextRank: claimRank },
   );
   if (diagnosticCode !== undefined) {
     options.onDiagnostic?.({ diagnosticCode, claim });
