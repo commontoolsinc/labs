@@ -2,6 +2,7 @@ import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
 import {
   applyPieceInput,
+  type EntryConfig,
   executePieceCallable,
   formatViewTree,
   generateSpaceMap,
@@ -98,6 +99,22 @@ export function formatPatternIdentity(
   return patternRef === undefined
     ? "<unknown>"
     : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
+}
+
+export function localPatternEntry(
+  mainPath: string,
+  options: {
+    mainExport?: string;
+    repository?: string;
+    root?: string;
+  },
+): EntryConfig {
+  return {
+    mainPath: absPath(mainPath),
+    mainExport: options.mainExport,
+    repository: options.repository,
+    rootPath: options.root ? absPath(options.root) : undefined,
+  };
 }
 
 function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
@@ -285,12 +302,7 @@ export const piece = new Command()
     const spaceConfig = parseSpaceOptions(options);
     const pieceId = await newPiece(
       spaceConfig,
-      {
-        mainPath: absPath(main),
-        mainExport: options.mainExport,
-        repository: options.repository,
-        rootPath: options.root ? absPath(options.root) : undefined,
-      },
+      localPatternEntry(main, options),
       { start: options.start, slug: options.slug },
     );
     render(pieceId);
@@ -412,12 +424,7 @@ export const piece = new Command()
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
     const pieceConfig = parsePieceOptions(options);
-    await setPiecePattern(pieceConfig, {
-      mainPath: absPath(mainPath),
-      mainExport: options.mainExport,
-      repository: options.repository,
-      rootPath: options.root ? absPath(options.root) : undefined,
-    });
+    await setPiecePattern(pieceConfig, localPatternEntry(mainPath, options));
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
@@ -1002,12 +1009,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
       await resetHomePattern(baseConfig);
       render("Reset home pattern to system default.");
     } else {
-      await setHomePattern(baseConfig, {
-        mainPath: absPath(main!),
-        mainExport: options.mainExport,
-        repository: options.repository,
-        rootPath: options.root ? absPath(options.root) : undefined,
-      });
+      await setHomePattern(baseConfig, localPatternEntry(main!, options));
       render("Deployed custom home pattern.");
     }
 

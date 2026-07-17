@@ -1034,6 +1034,7 @@ describe("mounted callable resolution and execution", () => {
           ref: `cf:pattern:${"A".repeat(43)}`,
           repository: "https://github.com/commontoolsinc/labs",
           entry: "/notes/note.tsx",
+          origin: "file:///repo/notes/note.tsx",
         },
       },
     });
@@ -1075,6 +1076,7 @@ describe("mounted callable resolution and execution", () => {
         ref: `cf:pattern:${"A".repeat(43)}`,
         repository: "https://github.com/commontoolsinc/labs",
         entry: "/notes/note.tsx",
+        origin: "file:///repo/notes/note.tsx",
       },
     });
   });
