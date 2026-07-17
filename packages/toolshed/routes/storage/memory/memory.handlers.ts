@@ -215,16 +215,32 @@ export const bufferTextMessagesUntilNegotiated = (
         notifyClose();
         return;
       }
-      void inflateQueue.enqueue(notifyClose);
+      void inflateQueue.enqueue(notifyClose).catch(() => {});
     };
 
-    const onError = () => {
-      cleanup();
+    const notifyError = () => {
       if (!settled) {
         reject(new Error("Memory websocket failed before negotiation"));
         return;
       }
-      handlers?.onError?.(new Error("Memory websocket receive failure"));
+      if (handlers !== null) {
+        handlers.onError?.(new Error("Memory websocket receive failure"));
+        return;
+      }
+      // Settled but not handed off: surface the failure at handoff so the
+      // memory connection is still torn down instead of leaking.
+      negotiationError = new Error("Memory websocket receive failure");
+    };
+
+    const onError = () => {
+      cleanup();
+      // Abnormal closures fire error-then-close; queue the notification like
+      // onClose so frames already inflating still deliver first.
+      if (inflateQueue === null) {
+        notifyError();
+        return;
+      }
+      void inflateQueue.enqueue(notifyError).catch(() => {});
     };
 
     cleanup = () => {

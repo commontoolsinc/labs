@@ -168,7 +168,7 @@ export class StandaloneMemoryServer {
           return;
         }
         // Frames that arrived before the close still deliver first.
-        void receiveQueue.enqueue(() => connection.close());
+        void receiveQueue.enqueue(() => connection.close()).catch(() => {});
       };
       socket.addEventListener("close", closeAfterPendingFrames);
       socket.addEventListener("error", closeAfterPendingFrames);

@@ -79,10 +79,15 @@ so the −78.8% is measured on top of already-interned payloads.
   Order is fixed at enqueue time, and the CLOSE notification queues behind
   pending inflates so every frame that arrived before a close is delivered
   before the close is signaled — the exact contract of the synchronous
-  pre-spike path. (An adversarial review round found and we fixed: stale
+  pre-spike path. (Two adversarial review rounds found and we fixed: stale
   frames after close on the client, dropped pre-close frames on the server,
-  and a swallowed error in the server's settle→handoff window.) Covered by
-  unit tests on both ends.
+  swallowed errors in the server's settle→handoff window, a client inflate
+  failure that let later frames deliver past the gap — which the session
+  would then ack and resume beyond, silently losing the missing update — and
+  a missing closed-latch that let an `open()` parked on the drain dial and
+  leak a fresh socket after `close()` returned. A failed inflate now poisons
+  that socket's inbound queue, and the transport refuses to dial once
+  closed.) Covered by unit tests on both ends.
 - **Capability probe**: clients offer the subprotocol only if the runtime can
   construct `deflate-raw` streams (pre-2023 browsers would otherwise
   negotiate and then brick in a reconnect loop).
@@ -113,6 +118,15 @@ so the −78.8% is measured on top of already-interned payloads.
 5. No end-to-end test drives `WebSocketTransport` against a server in pure
    text mode (all real-socket pairings in-repo now negotiate); covered at
    the unit level only.
+6. Known self-healing race: a request issued in the window between a socket
+   drop and the drained close notification can dial the next socket and go
+   out ahead of the reconnect `hello`; the server rejects it and the
+   handshake retry succeeds. One wasted reconnect attempt — fix belongs in
+   the client's hello sequencing if it matters in practice.
+7. Compression side channels (CRIME-class): compressed frame sizes leak
+   payload structure to a network observer under TLS, exactly as
+   permessage-deflate would. Needs a deliberate sign-off before production
+   exposure to hostile networks.
 
 ## Reproducing the measurements
 

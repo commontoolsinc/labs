@@ -174,6 +174,63 @@ describe("WebSocketTransport deflate framing", () => {
     });
   });
 
+  it("stops delivering after a failed inflate so a gap cannot be acked past", async () => {
+    await withTransport(async (transport, socket) => {
+      const received: string[] = [];
+      transport.setReceiver((payload) => received.push(payload));
+      let closed = false;
+      const sawClose = new Promise<void>((resolve) => {
+        transport.setCloseReceiver(() => {
+          closed = true;
+          resolve();
+        });
+      });
+
+      const send = transport.send(SMALL);
+      openSocket(socket());
+      await send;
+
+      // A corrupt compressed frame followed by a valid text frame: the valid
+      // frame arrived AFTER the gap, so it must NOT be delivered — otherwise
+      // the session would ack past the missing message and resume beyond it.
+      socket().dispatchEvent(
+        new MessageEvent("message", {
+          data: new Uint8Array([0xde, 0xad, 0xbe, 0xef]).buffer,
+        }),
+      );
+      socket().dispatchEvent(new MessageEvent("message", { data: SMALL }));
+
+      await sawClose;
+      expect(received).toEqual([]);
+      expect(closed).toBe(true);
+    });
+  });
+
+  it("refuses to dial again after close() resolves", async () => {
+    await withTransport(async (transport, socket) => {
+      const send = transport.send(SMALL);
+      openSocket(socket());
+      await send;
+
+      // Drop the socket with a compressed frame still inflating, then close
+      // the transport while the drain is pending. A send parked behind the
+      // drain must reject — never dial a fresh socket that nothing owns.
+      socket().dispatchEvent(
+        new MessageEvent("message", {
+          data: (await deflateWirePayload(LARGE)).buffer,
+        }),
+      );
+      const socketCount = DeflatingWebSocket.instances.length;
+      socket().close();
+      const parked = transport.send(SMALL);
+      await transport.close();
+      await expect(parked).rejects.toThrow(
+        "memory websocket transport is closed",
+      );
+      expect(DeflatingWebSocket.instances.length).toBe(socketCount);
+    });
+  });
+
   it("ignores binary frames when the socket did not negotiate deflate", async () => {
     await withTransport(async (transport, socket) => {
       const received: string[] = [];

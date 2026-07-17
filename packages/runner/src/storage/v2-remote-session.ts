@@ -116,6 +116,10 @@ export class WebSocketTransport implements MemoryClient.Transport {
   // socket before the consumer learns the old one closed, a window the
   // synchronous pre-spike path never had.
   #draining: Promise<void> | null = null;
+  // SPIKE: once close() is called nothing may dial again. Without this latch
+  // an open() parked on #draining could resume after close() returned and
+  // leak a brand-new live socket.
+  #closed = false;
 
   constructor(private readonly address: URL) {}
 
@@ -149,10 +153,14 @@ export class WebSocketTransport implements MemoryClient.Transport {
   }
 
   async close(): Promise<void> {
+    this.#closed = true;
     const socket = this.#socket;
     this.#socket = null;
     this.#opening = null;
     if (!socket || socket.readyState === WebSocket.CLOSED) {
+      // A drain may still be delivering frames from an already-closed socket;
+      // close() returning must mean nothing fires afterwards.
+      if (this.#draining !== null) await this.#draining;
       return;
     }
     const closed = new Promise<void>((resolve) => {
@@ -166,9 +174,13 @@ export class WebSocketTransport implements MemoryClient.Transport {
       socket.close();
     }
     await closed;
+    if (this.#draining !== null) await this.#draining;
   }
 
   private async open(): Promise<WebSocket> {
+    if (this.#closed) {
+      throw new Error("memory websocket transport is closed");
+    }
     if (this.#socket?.readyState === WebSocket.OPEN) {
       return this.#socket;
     }
@@ -177,8 +189,8 @@ export class WebSocketTransport implements MemoryClient.Transport {
     }
     if (this.#draining !== null) {
       await this.#draining;
-      // Drain completion may have raced another open(); re-enter to observe
-      // the current socket state.
+      // Drain completion may have raced another open() or a close(); re-enter
+      // to observe the current state (including the closed latch).
       return await this.open();
     }
     const address = toWebSocketAddress(this.address);
@@ -197,8 +209,22 @@ export class WebSocketTransport implements MemoryClient.Transport {
       this.#socket = socket;
       let opened = false;
       // SPIKE: inbound ordering queue, per socket — async inflation must not
-      // let a later text frame overtake an earlier compressed frame.
+      // let a later text frame overtake an earlier compressed frame. A failed
+      // inflate poisons the queue: delivering frames past a transport-level
+      // gap would let the session ack and resume beyond messages it never
+      // saw. Only the close notification may follow a poisoned frame.
       const inbound = new SerialTaskQueue();
+      let poisoned = false;
+      const deliver = (payload: string) => {
+        if (poisoned) return;
+        try {
+          this.#receiver(payload);
+        } catch (error) {
+          // Receiver failures are the consumer's problem, not a transport
+          // gap: log and keep delivering (same as the non-negotiated path).
+          console.error("memory websocket receiver failed", error);
+        }
+      };
       socket.addEventListener("open", () => {
         opened = true;
         resolve(socket);
@@ -207,12 +233,10 @@ export class WebSocketTransport implements MemoryClient.Transport {
         const data: unknown = event.data;
         if (typeof data === "string") {
           if (socket.protocol !== MEMORY_WS_DEFLATE_SUBPROTOCOL) {
-            this.#receiver(data);
+            deliver(data);
             return;
           }
-          void inbound.enqueue(() => this.#receiver(data)).catch((error) => {
-            console.error("memory websocket receiver failed", error);
-          });
+          void inbound.enqueue(() => deliver(data));
           return;
         }
         if (
@@ -220,10 +244,18 @@ export class WebSocketTransport implements MemoryClient.Transport {
           (data instanceof ArrayBuffer || ArrayBuffer.isView(data))
         ) {
           void inbound.enqueue(async () => {
-            this.#receiver(await inflateWirePayload(data));
+            if (poisoned) return;
+            let payload: string;
+            try {
+              payload = await inflateWirePayload(data);
+            } catch (error) {
+              poisoned = true;
+              throw error;
+            }
+            deliver(payload);
           }).catch(() => {
             // A malformed compressed frame is a transport failure: close so
-            // the client's reconnect machinery takes over.
+            // the client's reconnect machinery takes over and replays.
             try {
               socket.close();
             } catch {
