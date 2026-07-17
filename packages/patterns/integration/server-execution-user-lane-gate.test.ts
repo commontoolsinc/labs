@@ -427,30 +427,61 @@ const readCellNumber = async (
 };
 
 /**
- * BLOCKER (C1.9 finding, 2026-07-16): the §7 C1 gate does NOT pass on the
- * landed C1.1–C1.8 substrate. A real transformed PerUser derivation (a lift
- * reading a PerUser input) emits the §4 output-widening WRITE PAIR — the
- * broad space instance as a scope-naming redirect link plus the VALUE at the
- * acting principal's user scope — but its transformer certificate declares
- * the output envelope ONCE, at the broad space address. The engine-side
- * C1.2 firewall admits that pair; the runner-side servability seam does not:
- * `dynamicActionTransactionUnservableReason` requires every observed write
- * to be covered by a same-scope static envelope, so the user-scope value
- * write classifies `dynamic-write-outside-static-surface` (and the Worker
- * statically rejects the same shape as `malformed-output-surface`). No
- * user-rank candidate ever survives to a claim, for ANY product-shaped
- * PerUser derivation. The minimal red fixture is
- * "user-lane servability blocker" below; the full gate stays red behind
- * CF_RUN_USER_LANE_GATE=1 until the runner seam learns the §4 pair
- * (mirroring the C1.2 engine contract in v2/scope-naming-link.ts).
+ * BLOCKER history and current state (C1.9/C1.9b, 2026-07-16):
+ *
+ * FIXED (1) — the §4 widening-pair servability blocker. A real transformed
+ * PerUser derivation emits the §4 output-widening WRITE PAIR (broad space
+ * instance as a scope-naming redirect link + the VALUE at the acting
+ * principal's user scope) while its transformer certificate declares the
+ * output envelope ONCE, at the broad space address. The runner seams now
+ * admit exactly that pair under a user-rank lane, mirroring the C1.2 engine
+ * contract in v2/scope-naming-link.ts: `classifyStaticActionServability`
+ * collapses the two instances to the one logical direct output,
+ * `dynamicActionTransactionUnservableReason` covers both legs from the
+ * certificate's broad direct output (plus the engine's broad-value-write
+ * backstop on lane-acting commits), and the executor router presents
+ * claimed commits with the lane-widened certificate the engine's
+ * scope-sensitive coverage accepts (A7 lockstep). Pinned by "user-lane
+ * servability blocker" below (now default-run green) and the §4 unit
+ * suites in runner/test/scheduler-servability.test.ts and
+ * runner/test/executor-action-router.test.ts.
+ *
+ * FIXED (2) — the user-lane replica-hydration conflict storm behind it.
+ * With the pair admitted, the sponsor's user-rank claim was issued but the
+ * claimed run never settled: the Worker's demand pulls register SPACE-lane
+ * watches only, so durable user-scoped instance rows predating the lane
+ * were absent from the Worker replica; the claimed lane run read defaults,
+ * asserted seq-0 reads against durable rows, and every authoritative
+ * attempt conflicted (measured: 2,244 claimed conflicts in 30s, zero
+ * settlements). The executor router now reports each routed action's
+ * lane-instanced document set (`onLaneSurface`), and the Worker syncs
+ * exactly those documents under the lane's acting context before its
+ * claimed runs (`hydrateExecutionLane`, executor-worker.ts) — the C1.4b
+ * lane read seam then delivers and tracks the instance rows. Pinned by the
+ * sponsor-lane end-to-end test below: a user-rank claim is issued, the
+ * claimed lane run settles, and the derived row lands under the
+ * principal's user scope key with the broad instance kept a link.
+ *
+ * REMAINING (why the full two-principal gate stays env-gated): the Worker
+ * serves user-rank claims only for the demand SPONSOR's lane. Its action
+ * router keys every user-rank candidate by the fixed lease-sponsor
+ * principal, one action object holds at most one live claim, and nothing
+ * ever recomputes a PerUser action under a NON-sponsor lane's acting
+ * context — so a second principal's lane opens (C1.8) but never produces a
+ * candidate, and "user-rank claims for both principals" times out. Closing
+ * it is the per-lane serving machinery of design §7 (executor-worker.ts
+ * row: per-lane runtimes/lane-keyed candidate+claim maps; §9 Q5 lane
+ * placement), not a servability-seam property.
  */
 const GATE_BLOCKED = Deno.env.get("CF_RUN_USER_LANE_GATE") !== "1";
 
 Deno.test({
   name:
     "C1.9 gate: PerUser derivation served for two principals with isolated rows and zero client derived wire writes",
-  // Red by design until the §4 widening-pair servability fix lands; run with
-  // CF_RUN_USER_LANE_GATE=1. See the BLOCKER note above.
+  // Red by design until the Worker gains NON-sponsor per-lane serving (the
+  // REMAINING blocker above); run with CF_RUN_USER_LANE_GATE=1. The
+  // sponsor-lane leg of the same loop is green and pinned by the
+  // "C1.9b sponsor-lane" test below.
   ignore: GATE_BLOCKED,
   async fn() {
     setServerPrimaryExecutionClaimRankConfig("user");
@@ -888,19 +919,15 @@ Deno.test("user-lane control: the fixture's space derivation stays claim-ready t
   );
 });
 
-Deno.test({
-  name:
-    "user-lane servability blocker: the PerUser derivation's §4 widening pair must classify user-rank claim-ready",
-  // RED TODAY (C1.9 blocker, see the file-top BLOCKER note): the run writes
-  // the §4 pair — broad scope-naming redirect link + user-scoped value — and
-  // the router rejects the user-scope value write as
-  // `dynamic-write-outside-static-surface` because the transformer
-  // certificate declares the output envelope only at the broad address
-  // (Worker-side the same shape statically rejects as
-  // `malformed-output-surface`). Flip `ignore` off with the servability fix;
-  // the full gate above follows.
-  ignore: GATE_BLOCKED,
-  async fn() {
+Deno.test(
+  "user-lane servability blocker: the PerUser derivation's §4 widening pair must classify user-rank claim-ready",
+  // GREEN since the C1.9b servability fix (see the file-top note): the run
+  // writes the §4 pair — broad scope-naming redirect link + user-scoped
+  // value — and the router now admits it under the user-rank lane instead of
+  // rejecting `dynamic-write-outside-static-surface` /
+  // `malformed-output-surface`. Default-run: this is the primary regression
+  // pin for the fix, at the exact seam it changed.
+  async () => {
     const { candidates, diagnostics, did } = await driveFixtureThroughRouter();
     const laneKey = userExecutionContextKey(did);
     assertEquals(
@@ -927,6 +954,156 @@ Deno.test({
       }`,
     );
   },
+);
+
+// ---------------------------------------------------------------------------
+// C1.9b sponsor-lane end-to-end: the §4 servability fix carried through the
+// REAL production loop for the one lane the Worker can serve today (the
+// demand sponsor's). A user-rank claim is issued, the claimed lane run
+// settles, the derived row lands durably under the principal's user scope
+// key, and the broad instance stays a scope-naming link. Default-run: this
+// is the outcome the full two-principal gate extends once non-sponsor lanes
+// are served (see the REMAINING note above).
+// ---------------------------------------------------------------------------
+
+Deno.test("C1.9b sponsor-lane: the PerUser derivation is served end-to-end for the demand sponsor's user lane", async () => {
+  setServerPrimaryExecutionClaimRankConfig("user");
+  const storeDir = await Deno.makeTempDir({ prefix: "user-lane-sponsor-" });
+  const spaceIdentity = await Identity.generate({ implementation: "noble" });
+  const space = spaceIdentity.did() as MemorySpace;
+  const server = new Server({
+    store: new URL(`file://${storeDir}/`),
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-user-lane-sponsor" },
+    protocolFlags: FLAGS,
+    acl: { mode: "off", serviceDids: [space] },
+  });
+  let alice: GateClient | null = null;
+  let pool: SharedExecutionPool | null = null;
+  let fixture:
+    | (FixtureResult & { resultLink: ReturnType<typeof linkOf> })
+    | null = null;
+  let unsubscribeAccepted = () => {};
+  const events: string[] = [];
+  try {
+    alice = await openClient(server, FLAGS, true);
+    fixture = await seedFixture(alice, space);
+    const settled = Promise.withResolvers<void>();
+    unsubscribeAccepted = server.subscribeAcceptedCommits(space, (event) => {
+      for (const revision of event.revisions) {
+        const scopeKey = (revision as { scopeKey?: string }).scopeKey ??
+          "space";
+        events.push(`accepted:${revision.id}@${scopeKey}`);
+        if (
+          revision.id === fixture!.doubledId && scopeKey === alice!.laneKey
+        ) {
+          settled.resolve();
+        }
+      }
+    });
+    const factory = new DenoSpaceExecutorFactory({
+      server,
+      apiUrl: new URL("https://toolshed.example/"),
+      patternApiUrl: new URL("https://toolshed.example/"),
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+        serverPrimaryExecutionUserRankCandidates: true,
+      },
+      onCandidateClaim: (candidate) =>
+        events.push(
+          `candidate:${candidate.claimKey.contextKey}:${candidate.claimKey.actionId}`,
+        ),
+      onCandidateDiagnostic: (diagnostic) =>
+        events.push(
+          `diagnostic:${diagnostic.diagnosticCode}:${
+            diagnostic.claimKey?.actionId ?? "?"
+          }`,
+        ),
+    });
+    pool = new SharedExecutionPool({
+      control: server,
+      factory,
+      settleTimeoutMs: 10_000,
+      userLaneCandidates: true,
+    });
+    pool.start();
+    const root = alice.runtime.getCellFromLink(
+      // deno-lint-ignore no-explicit-any
+      fixture.resultLink as any,
+    );
+    assertEquals(await alice.runtime.start(root), true);
+    await waitForCondition(
+      "sponsor demand",
+      () => server.listExecutionDemands(space, "").length > 0,
+    );
+    await pool.idle();
+    await waitForCondition(
+      "user-rank claim for the sponsor lane",
+      () =>
+        (server.executionStats.claimsIssuedByContextKey[alice!.laneKey] ?? 0) >
+          0,
+      () => ({
+        byKey: server.executionStats.claimsIssuedByContextKey,
+        laneKey: alice!.laneKey,
+        events: events.slice(-25),
+      }),
+    );
+
+    await setMyScore(alice, fixture.resultLink, 3);
+    await awaitBarrier(
+      settled.promise,
+      "sponsor user-lane settlement",
+      () => ({
+        events: events.slice(-25),
+        stats: server.executionStats,
+        pool: pool!.metrics(),
+      }),
+    );
+    await waitForCondition(
+      "sponsor client convergence",
+      async () =>
+        await readCellNumber(alice!, fixture!.resultLink, "doubled") === 6,
+      () => ({ events: events.slice(-10) }),
+    );
+    assertEquals(
+      unexpectedLeaseFenceRejects(server.executionStats.leaseFenceRejectCauses),
+      0,
+      JSON.stringify(server.executionStats.leaseFenceRejectCauses),
+    );
+  } finally {
+    unsubscribeAccepted();
+    await pool?.close();
+    await alice?.runtime.dispose().catch(() => undefined);
+    await alice?.storage.close().catch(() => undefined);
+    await server.close();
+    resetServerPrimaryExecutionClaimRankConfig();
+  }
+
+  try {
+    // Durable §4 shape: the value under the sponsor's user scope key, the
+    // broad instance a scope-naming link (an object envelope), never a
+    // principal's value.
+    const databasePath = fromFileUrl(
+      resolveSpaceStoreUrl(new URL(`file://${storeDir}/`), space),
+    );
+    const doubledRows = scopeRows(databasePath, fixture!.doubledId);
+    assertEquals(latestScopedValue(doubledRows, alice!.laneKey), 6);
+    const broadValue = latestScopedValue(doubledRows, "space");
+    assert(
+      broadValue === undefined ||
+        (typeof broadValue === "object" && broadValue !== null),
+      `the broad doubled instance must stay a scope-naming link, got: ${
+        JSON.stringify(broadValue)
+      }`,
+    );
+  } finally {
+    await Deno.remove(storeDir, { recursive: true }).catch(() => undefined);
+  }
 });
 
 // ---------------------------------------------------------------------------

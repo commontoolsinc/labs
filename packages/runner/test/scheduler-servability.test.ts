@@ -3,20 +3,31 @@ import { describe, it } from "@std/testing/bdd";
 import {
   type ActionClaimKey,
   actionClaimMapKey,
+  type ClientCommit,
   type ExecutionClaim,
   sessionExecutionContextKey,
   userExecutionContextKey,
 } from "@commonfabric/memory/v2";
+import {
+  SCOPE_NAMING_LINK_CONFORMANCE,
+  scopeNamingLinkForPath,
+} from "@commonfabric/memory/v2/scope-naming-link";
 import {
   classifyStaticActionServability,
   type StaticActionServabilityCandidate,
 } from "../src/scheduler.ts";
 import {
   actionClaimChainMapKey,
+  dynamicActionTransactionUnservableReason,
   executionClaimMatchesActionChain,
   ownChainContextKeys,
 } from "../src/scheduler/servability.ts";
+import type {
+  CompleteActionScopeSummary,
+  SchedulerActionObservation,
+} from "../src/scheduler/persistent-observation.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
+import type { ActionTransactionRouteInput } from "../src/storage/v2.ts";
 
 const servedSpace = "did:key:served" as const;
 const foreignSpace = "did:key:foreign" as const;
@@ -412,6 +423,426 @@ describe("static action servability", () => {
         servedSpace,
       )).toEqual({ status: "unservable", reason });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §4 output-widening pair (context-lattice C1.2/C1.9): a user-rank PerUser
+// derivation writes its one logical output twice — the broad space instance
+// as a scope-naming redirect link plus the value at the ACTING principal's
+// user instance of the same document. The static classifier accepts the pair
+// as one logical direct output; the dynamic firewall covers both legs from
+// the certificate's broad direct output and keeps the engine's broad-value
+// backstop. Everything outside that exact shape stays fail-closed, and the
+// space lane keeps byte-identical space-only behavior.
+//
+// The acting principal is implicit at this seam: commit operations carry
+// only the declared scope (`user`), and the effective `user:<did>` scope key
+// is bound from the transaction's acting context by the host/engine seams
+// (C1.4/C1.4b), which is where another principal's instance is rejected.
+// What this seam CAN see — and pins fail-closed here — is the document
+// identity (only the direct output's id widens), the scope axis (session
+// never widens in C1), and the broad leg's wire shape.
+// ---------------------------------------------------------------------------
+
+describe("§4 output-widening pair servability (C1.9)", () => {
+  const broadOutput = address("of:output");
+  const userTwin = address("of:output", { scope: "user" });
+
+  describe("static classification", () => {
+    it("admits the §4 pair as the one logical direct output at user rank", () => {
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, userTwin],
+          directOutputs: [broadOutput, userTwin],
+        }),
+        servedSpace,
+        { userContext: true },
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "user",
+      });
+      // Pair order is not significant.
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [userTwin, broadOutput],
+          directOutputs: [userTwin, broadOutput],
+        }),
+        servedSpace,
+        { userContext: true },
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "user",
+      });
+    });
+
+    it("lets the declared write name either instance of the §4 output", () => {
+      expect(classifyStaticActionServability(
+        withSummary({ writes: [userTwin], directOutputs: [broadOutput] }),
+        servedSpace,
+        { userContext: true },
+      )).toEqual({
+        status: "claim-ready",
+        actionKind: "computation",
+        contextRank: "user",
+      });
+    });
+
+    it("keeps the pair malformed without the user lane (space byte-identity)", () => {
+      for (
+        const lane of [undefined, { userContext: false }] as const
+      ) {
+        expect(classifyStaticActionServability(
+          withSummary({
+            writes: [broadOutput, userTwin],
+            directOutputs: [broadOutput, userTwin],
+          }),
+          servedSpace,
+          lane,
+        )).toEqual({
+          status: "unservable",
+          reason: "malformed-output-surface",
+        });
+      }
+    });
+
+    it("never pairs across document ids", () => {
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, address("of:other", { scope: "user" })],
+          directOutputs: [broadOutput, address("of:other", { scope: "user" })],
+        }),
+        servedSpace,
+        { userContext: true },
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-output-surface",
+      });
+    });
+
+    it("never pairs with a session instance (inadmissible until C2)", () => {
+      const sessionTwin = address("of:output", { scope: "session" });
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, sessionTwin],
+          directOutputs: [broadOutput, sessionTwin],
+        }),
+        servedSpace,
+        { userContext: true },
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-output-surface",
+      });
+    });
+
+    it("never collapses two same-scope outputs into a pair", () => {
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput],
+          directOutputs: [broadOutput, address("of:output")],
+        }),
+        servedSpace,
+        { userContext: true },
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-output-surface",
+      });
+    });
+
+    it("never pairs instances whose document paths differ", () => {
+      const deepTwin = address("of:output", {
+        scope: "user",
+        path: ["value", "nested"],
+      });
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, deepTwin],
+          directOutputs: [broadOutput, deepTwin],
+        }),
+        servedSpace,
+        { userContext: true },
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-output-surface",
+      });
+    });
+  });
+
+  describe("dynamic firewall", () => {
+    // The wire-conformant broad leg: the document's cell tree carries the
+    // shared conformance link at the fixture's document path (A7 — the same
+    // value the engine accept tests admit and the runner emit test produces).
+    const conformingBroadDocument = {
+      value: { value: SCOPE_NAMING_LINK_CONFORMANCE.link },
+    };
+
+    function observation(
+      overrides: Partial<SchedulerActionObservation> = {},
+    ): SchedulerActionObservation {
+      return {
+        version: 2,
+        ownerSpace: servedSpace,
+        branch: "",
+        pieceId: "space:of:piece",
+        processGeneration: 1,
+        actionId: "action-1",
+        actionKind: "computation",
+        implementationFingerprint: "impl:computation-v1",
+        runtimeFingerprint: "runner:scheduler:v3",
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads: [address("of:input")],
+        shallowReads: [],
+        actualChangedWrites: [broadOutput, userTwin],
+        currentKnownWrites: [],
+        materializerWriteEnvelopes: [],
+        completeActionScopeSummary: candidate()
+          .completeActionScopeSummary as CompleteActionScopeSummary,
+        status: "success",
+        ...overrides,
+      };
+    }
+
+    function routeInput(
+      operations: ClientCommit["operations"],
+      observed: SchedulerActionObservation,
+    ): ActionTransactionRouteInput {
+      return {
+        space: servedSpace,
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations,
+          schedulerObservation: observed,
+        },
+        sourceAction: {},
+      };
+    }
+
+    const pairOperations = (
+      broadValue: unknown = conformingBroadDocument,
+    ): ClientCommit["operations"] => [
+      {
+        op: "set",
+        id: "of:output",
+        scope: "space",
+        value: broadValue as Record<string, never>,
+      },
+      { op: "set", id: "of:output", scope: "user", value: { value: 6 } },
+    ];
+
+    // The executor seam: user-rank commits act on the lane, so the §4 broad
+    // scope-naming backstop applies (engine lockstep).
+    const userContext = {
+      servedSpace,
+      branch: "",
+      contextRank: "user",
+      laneActingCommit: true,
+    } as const;
+
+    it("admits the widening pair under a user-rank lane", () => {
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(pairOperations(), observed),
+        observed,
+        userContext,
+      )).toBeUndefined();
+    });
+
+    it("admits a patch-form broad leg only as an exact conforming link", () => {
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput([
+          {
+            op: "patch",
+            id: "of:output",
+            scope: "space",
+            patches: [{
+              op: "replace",
+              path: "/value/value",
+              value: SCOPE_NAMING_LINK_CONFORMANCE.link,
+            }],
+          },
+          { op: "set", id: "of:output", scope: "user", value: { value: 6 } },
+        ], observed),
+        observed,
+        userContext,
+      )).toBeUndefined();
+      // Positional patch kinds cannot prove the self-redirect property.
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput([
+          {
+            op: "patch",
+            id: "of:output",
+            scope: "space",
+            patches: [{
+              op: "splice",
+              path: "/value/value",
+              index: 0,
+              remove: 0,
+              add: [SCOPE_NAMING_LINK_CONFORMANCE.link],
+            }],
+          },
+        ], observed),
+        observed,
+        userContext,
+      )).toBe("broad-lane-value-write");
+    });
+
+    it("rejects a broad VALUE write (§4 backstop)", () => {
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(pairOperations({ value: 6 }), observed),
+        observed,
+        userContext,
+      )).toBe("broad-lane-value-write");
+    });
+
+    it("rejects a scope-naming link whose shape violates the wire contract", () => {
+      const observed = observation();
+      const link = SCOPE_NAMING_LINK_CONFORMANCE
+        .link as unknown as { "/": { "link@1": Record<string, unknown> } };
+      const cases: Array<Record<string, unknown>> = [
+        // Schema-bearing: a per-lane covert channel.
+        { ...link["/"]["link@1"], schema: { type: "number" } },
+        // Foreign id: must name the written document itself.
+        { ...link["/"]["link@1"], id: "of:other" },
+        // Session scope: nonconforming until C2.
+        { ...link["/"]["link@1"], scope: "session" },
+        // Non-redirect overwrite.
+        { ...link["/"]["link@1"], overwrite: "value" },
+      ];
+      for (const payload of cases) {
+        expect(dynamicActionTransactionUnservableReason(
+          routeInput(
+            pairOperations({
+              value: { value: { "/": { "link@1": payload } } },
+            }),
+            observed,
+          ),
+          observed,
+          userContext,
+        )).toBe("malformed-scope-naming-link");
+      }
+    });
+
+    it("widens coverage only to the direct output's own document id", () => {
+      // A user-scope value write to ANOTHER document never rides the pair:
+      // both the observed-address arm and the commit-operation arm reject.
+      const foreignUserWrite = address("of:other", { scope: "user" });
+      const observedAddress = observation({
+        actualChangedWrites: [broadOutput, userTwin, foreignUserWrite],
+      });
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(pairOperations(), observedAddress),
+        observedAddress,
+        userContext,
+      )).toBe("dynamic-write-outside-static-surface");
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput([
+          ...pairOperations(),
+          { op: "set", id: "of:other", scope: "user", value: { value: 1 } },
+        ], observed),
+        observed,
+        userContext,
+      )).toBe("dynamic-write-outside-static-surface");
+    });
+
+    it("keeps session-scope writes inadmissible under a user-rank lane", () => {
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput([
+          ...pairOperations(),
+          { op: "set", id: "of:output", scope: "session", value: { value: 6 } },
+        ], observed),
+        observed,
+        userContext,
+      )).toBe("dynamic-non-space-write-scope");
+      const sessionObserved = observation({
+        actualChangedWrites: [
+          broadOutput,
+          address("of:output", { scope: "session" }),
+        ],
+      });
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(pairOperations(), sessionObserved),
+        sessionObserved,
+        userContext,
+      )).toBe("dynamic-non-space-write-scope");
+    });
+
+    it("keeps the space lane byte-identical: the pair never widens at space rank", () => {
+      const observed = observation();
+      for (
+        const context of [
+          { servedSpace, branch: "" },
+          { servedSpace, branch: "", contextRank: "space" },
+        ] as const
+      ) {
+        expect(dynamicActionTransactionUnservableReason(
+          routeInput(pairOperations(), observed),
+          observed,
+          context,
+        )).toBe("dynamic-non-space-write-scope");
+      }
+    });
+
+    it("keeps an all-space commit admitted at space rank (regression)", () => {
+      const observed = observation({ actualChangedWrites: [broadOutput] });
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(
+          [{ op: "set", id: "of:output", scope: "space", value: { value: 6 } }],
+          observed,
+        ),
+        observed,
+        { servedSpace, branch: "" },
+      )).toBeUndefined();
+    });
+
+    it("a broad delete is never a scope-naming link", () => {
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(
+          [{ op: "delete", id: "of:output", scope: "space" }],
+          observed,
+        ),
+        observed,
+        userContext,
+      )).toBe("broad-lane-value-write");
+    });
+
+    it("accepts the canonical builder output for a root self-redirect", () => {
+      // scopeNamingLinkForPath([]) is the root-cell form of the same
+      // contract; the firewall accepts any conforming document position.
+      const observed = observation();
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(
+          pairOperations({ value: scopeNamingLinkForPath([]) }),
+          observed,
+        ),
+        observed,
+        userContext,
+      )).toBeUndefined();
+    });
+
+    it("keeps the broad backstop off a client suppression mirror (A10)", () => {
+      // A cooperative client's mirror checks a commit acting on the CLIENT's
+      // own context (laneActingCommit absent): a broad value write there is
+      // ordinary client-primary output, and a user-context claim over an
+      // all-space surface must keep suppressing byte-identically.
+      const observed = observation({ actualChangedWrites: [broadOutput] });
+      expect(dynamicActionTransactionUnservableReason(
+        routeInput(
+          [{ op: "set", id: "of:output", scope: "space", value: { value: 6 } }],
+          observed,
+        ),
+        observed,
+        { servedSpace, branch: "", contextRank: "user" },
+      )).toBeUndefined();
+    });
   });
 });
 

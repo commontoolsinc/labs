@@ -9,6 +9,7 @@ import {
   toDocumentPath,
   userExecutionContextKey,
 } from "@commonfabric/memory/v2";
+import { SCOPE_NAMING_LINK_CONFORMANCE } from "@commonfabric/memory/v2/scope-naming-link";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
 import {
   createExecutorActionTransactionRouter,
@@ -1136,5 +1137,169 @@ Deno.test("executor router produces zero user-rank candidates with the option of
   assertEquals(candidates, []);
   assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
     "non-space-read-scope",
+  ]);
+});
+
+// --- C1.9: the §4 output-widening pair at the router seam ------------------
+
+/** The real transformed-PerUser shape: the certificate declares the output
+ * ONCE at the broad space address (the transformer cannot know the acting
+ * principal), while the run writes the §4 pair — the broad scope-naming
+ * redirect link plus the value at the acting principal's user instance. */
+const wideningPairObservation = () => {
+  const base = observation();
+  const userTwin = { ...output, scope: "user" as const };
+  const userRead = {
+    space: SPACE,
+    scope: "user" as const,
+    id: "of:action-router-user-input",
+    path: ["value"],
+  };
+  return {
+    ...base,
+    reads: [userRead],
+    actualChangedWrites: [output, userTwin],
+    currentKnownWrites: [output, userTwin],
+    completeActionScopeSummary: {
+      ...base.completeActionScopeSummary,
+      // The PerUser input is certificate-declared (that is what promotes the
+      // computation to user rank); the output stays declared ONCE, broad.
+      reads: [userRead],
+    },
+  };
+};
+
+const wideningPairCommit = (
+  broadDocument: unknown = {
+    value: { value: SCOPE_NAMING_LINK_CONFORMANCE.link },
+  },
+): ClientCommit => ({
+  localSeq: 1,
+  reads: {
+    confirmed: [{
+      id: "of:action-router-user-input",
+      scope: "user",
+      path: toDocumentPath(["value"]),
+      seq: 2,
+    }],
+    pending: [],
+  },
+  operations: [
+    {
+      op: "set",
+      id: "of:action-router-output",
+      scope: "space",
+      value: broadDocument as Record<string, never>,
+    },
+    {
+      op: "set",
+      id: "of:action-router-output",
+      scope: "user",
+      value: { value: 42 },
+    },
+  ],
+  schedulerObservation: wideningPairObservation(),
+});
+
+Deno.test("executor router candidates the §4 widening pair at user rank with an unwidened shadow certificate", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
+
+  const pairAction = {};
+  const shadow = wideningPairCommit();
+  const route = await router({
+    space: SPACE,
+    commit: shadow,
+    sourceAction: pairAction,
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(diagnostics, []);
+  assertEquals(candidates, [{
+    claimKey: {
+      ...key,
+      contextKey: userExecutionContextKey(LANE_PRINCIPAL),
+    },
+    sourceAction: pairAction,
+  }]);
+  // Unclaimed shadow routes keep the trusted certificate byte-identical:
+  // envelope widening is claimed-commit presentation only.
+  const shadowSummary = (shadow.schedulerObservation as ReturnType<
+    typeof wideningPairObservation
+  >).completeActionScopeSummary;
+  assertEquals(shadowSummary.writes, [output]);
+});
+
+Deno.test("executor router presents the claimed §4 pair with the lane-widened certificate (A7 engine lockstep)", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const pairAction = {};
+  const claim: ExecutionClaim = {
+    ...key,
+    contextKey: userExecutionContextKey(LANE_PRINCIPAL),
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    userRankCandidates: true,
+    lanePrincipal: LANE_PRINCIPAL,
+    claimForAction: () => claim,
+    onCandidate: (candidate, sourceAction) =>
+      candidates.push({ claimKey: candidate.claimKey, sourceAction }),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  const claimed = wideningPairCommit();
+  const route = await router({
+    space: SPACE,
+    commit: claimed,
+    sourceAction: pairAction,
+  });
+  assertEquals(diagnostics, []);
+  assertEquals(candidates, []);
+  assertEquals(route.disposition, "upstream");
+  const routed = claimed.schedulerObservation as
+    & ReturnType<
+      typeof wideningPairObservation
+    >
+    & { executionClaimAssertion?: Record<string, unknown> };
+  // The claimed commit asserts exactly the lane claim…
+  assertEquals(routed.executionClaimAssertion, {
+    contextKey: claim.contextKey,
+    leaseGeneration: claim.leaseGeneration,
+    claimGeneration: claim.claimGeneration,
+  });
+  // …and presents the certificate with the acting lane's instance of the
+  // broad direct output added to the write envelopes — the §4 pair shape the
+  // engine's scope-sensitive coverage admits. Direct outputs stay untouched.
+  assertEquals(routed.completeActionScopeSummary.writes, [
+    output,
+    { ...output, scope: "user" },
+  ]);
+  assertEquals(routed.completeActionScopeSummary.directOutputs, [output]);
+});
+
+Deno.test("executor router rejects a broad value write in the pair with the engine's code", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
+
+  const route = await router({
+    space: SPACE,
+    // Output-scoping failed: the broad leg carries a plain value.
+    commit: wideningPairCommit({ value: 42 }),
+    sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "broad-lane-value-write",
   ]);
 });

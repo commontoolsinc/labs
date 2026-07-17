@@ -66,6 +66,15 @@ export interface ExecutorActionTransactionRouterOptions {
   /** Principal of this Worker's acting context — the canonical `user:<did>`
    * candidate keys are constructed from it (amendment 18 helpers only). */
   readonly lanePrincipal?: string;
+  /** C1.9b lane hydration feed: the non-space (lane-instanced) documents the
+   * routed observation touches, deduped by (scope, id) and path-rooted. The
+   * Worker syncs exactly these documents under a lane before that lane's
+   * claimed run, so the run reads durable instance rows instead of replica
+   * defaults. Reported only when user-rank candidacy is enabled. */
+  readonly onLaneSurface?: (
+    sourceAction: object,
+    addresses: readonly IMemorySpaceAddress[],
+  ) => void;
   readonly claimForAction: (sourceAction: object) => ExecutionClaim | undefined;
   /** Exact-incarnation permanent broker failure captured synchronously by the
    * Worker. Returning a reason converts the continuation into one canonical
@@ -215,6 +224,12 @@ export function createExecutorActionTransactionRouter(
     const userLaneEnabled = options.userRankCandidates === true &&
       typeof options.lanePrincipal === "string" &&
       options.lanePrincipal.length > 0;
+    if (userLaneEnabled && options.onLaneSurface !== undefined) {
+      const laneSurface = laneScopedDocumentAddresses(routedObservation);
+      if (laneSurface.length > 0) {
+        options.onLaneSurface(sourceAction, laneSurface);
+      }
+    }
     const staticDecision = classifyStaticActionServability(
       routedObservation,
       options.servedSpace,
@@ -265,11 +280,19 @@ export function createExecutorActionTransactionRouter(
       );
       return local;
     }
+    // Engine-emission lockstep for the §4 output-widening pair (A7): a
+    // user-rank claimed commit presents its trusted certificate with the
+    // acting lane's instance of each broad direct output added to the write
+    // envelopes — exactly the pair shape the engine's scope-sensitive
+    // coverage (and its conformance fixtures) accepts.
+    const observationForClaim = contextRank === "user"
+      ? widenUserLaneOutputEnvelopes(routedObservation)
+      : routedObservation;
     const permanentUnservedReason = liveClaim === undefined
       ? undefined
       : options.permanentUnservedReasonForAction?.(sourceAction, liveClaim);
     if (permanentUnservedReason !== undefined) {
-      attachClaimAssertion(input.commit, routedObservation, liveClaim!);
+      attachClaimAssertion(input.commit, observationForClaim, liveClaim!);
       return unservedRoute(
         reported,
         options,
@@ -287,7 +310,7 @@ export function createExecutorActionTransactionRouter(
           : "broker-required"
         : staticDecision.reason;
       if (liveClaim !== undefined) {
-        attachClaimAssertion(input.commit, routedObservation, liveClaim);
+        attachClaimAssertion(input.commit, observationForClaim, liveClaim);
         return unservedRoute(
           reported,
           options,
@@ -311,11 +334,14 @@ export function createExecutorActionTransactionRouter(
         servedSpace: options.servedSpace,
         branch: options.branch,
         contextRank,
+        // Executor user-rank commits act on the lane, so the engine's §4
+        // broad scope-naming backstop applies at this seam too.
+        laneActingCommit: contextRank === "user",
       },
     );
     if (dynamicReason !== undefined) {
       if (liveClaim !== undefined) {
-        attachClaimAssertion(input.commit, routedObservation, liveClaim);
+        attachClaimAssertion(input.commit, observationForClaim, liveClaim);
         return unservedRoute(
           reported,
           options,
@@ -357,7 +383,7 @@ export function createExecutorActionTransactionRouter(
       };
     }
 
-    attachClaimAssertion(input.commit, routedObservation, liveClaim);
+    attachClaimAssertion(input.commit, observationForClaim, liveClaim);
     if (routedObservation.transactionKind === "action-run") {
       options.onActionTransaction?.("authoritative");
       logger.debug("execution-server-authoritative-action-run", () => [
@@ -874,6 +900,75 @@ function unservedRoute(
         },
       }
       : {}),
+  };
+}
+
+/**
+ * The lane-instanced document set of one routed observation (C1.9b): every
+ * distinct (scope, id) with a non-space declared scope, path-rooted. These
+ * are the documents whose per-lane instance rows a claimed lane run reads or
+ * writes, and therefore the exact set the Worker must hydrate under a lane
+ * before running there.
+ */
+function laneScopedDocumentAddresses(
+  observation: SchedulerActionObservation,
+): IMemorySpaceAddress[] {
+  const summary = observation.completeActionScopeSummary;
+  const sources: readonly (readonly IMemorySpaceAddress[])[] = [
+    observation.reads,
+    observation.shallowReads,
+    observation.actualChangedWrites,
+    observation.currentKnownWrites,
+    observation.declaredWrites ?? [],
+    observation.materializerWriteEnvelopes,
+    ...(summary === undefined
+      ? []
+      : [summary.reads, summary.writes, summary.directOutputs]),
+  ];
+  const result = new Map<string, IMemorySpaceAddress>();
+  for (const addresses of sources) {
+    for (const address of addresses) {
+      const scope = address.scope ?? "space";
+      if (scope === "space") continue;
+      const key = `${scope}\0${address.id}`;
+      if (!result.has(key)) {
+        result.set(key, { ...address, path: [] });
+      }
+    }
+  }
+  return [...result.values()];
+}
+
+/**
+ * The §4 output-widening pair, presented as the engine admits it
+ * (context-lattice C1.2/C1.9): the transformer certificate declares the
+ * derived output ONCE at the broad space address, while a user-rank run
+ * writes that document twice — the broad scope-naming redirect link plus the
+ * value at the ACTING principal's user instance. The engine's write-coverage
+ * check is scope-sensitive, so the claimed commit's trusted summary must
+ * carry the lane instance explicitly; add `user`-scope twins of the broad
+ * direct outputs to the write envelopes (id and path unchanged — never
+ * another document, never session scope). This mirrors the shape pinned by
+ * the engine's lane-firewall conformance tests.
+ */
+function widenUserLaneOutputEnvelopes(
+  observation: SchedulerActionObservation,
+): SchedulerActionObservation {
+  const summary = observation.completeActionScopeSummary;
+  if (summary === undefined) return observation;
+  const laneInstances = summary.directOutputs
+    .filter((output) => (output.scope ?? "space") === "space")
+    .map((output) => ({
+      ...output,
+      scope: "user" as const,
+      path: [...output.path],
+    }));
+  if (laneInstances.length === 0) return observation;
+  const writes = dedupeAddresses([...summary.writes, ...laneInstances]);
+  if (writes.length === summary.writes.length) return observation;
+  return {
+    ...observation,
+    completeActionScopeSummary: { ...summary, writes },
   };
 }
 

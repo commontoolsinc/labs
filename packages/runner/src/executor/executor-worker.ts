@@ -25,6 +25,7 @@ import {
   CellDataUnavailableError,
   type UnavailableCellAddress,
 } from "../cell-data-unavailable-error.ts";
+import type { IMemorySpaceAddress } from "../storage/interface.ts";
 import {
   createExecutorActionTransactionRouter,
   type ExecutorActionTransactionPlacement,
@@ -334,6 +335,7 @@ const applyLaneDemands = (lanes: WireLaneDemand[] | undefined): void => {
     if (next.has(contextKey)) continue;
     cancelClaimedAttempts(contextKey);
     laneDemands.delete(contextKey);
+    laneHydration.delete(contextKey);
     if (space !== null) {
       storage?.pruneExecutionLane(
         space,
@@ -351,6 +353,7 @@ const applyLaneDemands = (lanes: WireLaneDemand[] | undefined): void => {
       (existing !== undefined && lane.demandGeneration > existing.generation)
     ) {
       cancelClaimedAttempts(lane.contextKey);
+      laneHydration.delete(lane.contextKey);
     }
     laneDemands.set(lane.contextKey, {
       pieces: new Set(lane.pieces),
@@ -366,6 +369,84 @@ const candidateDemandGeneration = (contextKey: string): number =>
   contextKey === "space"
     ? demandGeneration
     : laneDemands.get(contextKey)?.generation ?? demandGeneration;
+
+/** The non-space (lane-instanced) documents each routed action touches,
+ * reported by the router from real observations (C1.9b). */
+const laneSurfacesByAction = new WeakMap<object, IMemorySpaceAddress[]>();
+
+/** Per-lane hydration ledger (C1.9b): document sync tasks keyed by
+ * `scope\0id`, valid for one lane demand generation. Drains, re-anchors,
+ * and resetClaims drop the record so the next claimed activation
+ * re-hydrates. */
+const laneHydration = new Map<
+  string,
+  { generation: number; pulled: Map<string, Promise<void>> }
+>();
+
+/**
+ * Hydrate a user lane's replica instances of one claimed action's scoped
+ * documents before running it (C1.9b). The Worker's demand pulls register
+ * SPACE-lane watches, so durable user-scoped instance rows written before
+ * the Worker (or its lane) existed are absent from the replica: a claimed
+ * lane run then reads defaults, its commit asserts seq-0 reads against
+ * durable rows, and every attempt conflicts — an unthrottled claimed-commit
+ * conflict storm that never settles. Syncing each scoped document WITH the
+ * lane as the ambient acting context registers a lane-scoped watch (the
+ * C1.4b read seam): the host resolves the instance under the LANE principal,
+ * delivers the existing rows, and the watch keeps them fresh so later input
+ * writes reach the replica before the claimed rerun.
+ */
+const hydrateExecutionLane = async (
+  claim: ExecutionClaim,
+  action: object,
+): Promise<void> => {
+  if (claim.contextKey === "space" || runtime === null || storage === null) {
+    return;
+  }
+  const addresses = laneSurfacesByAction.get(action) ?? [];
+  if (addresses.length === 0) return;
+  const generation = laneDemands.get(claim.contextKey)?.generation ??
+    demandGeneration;
+  let record = laneHydration.get(claim.contextKey);
+  if (record === undefined || record.generation < generation) {
+    record = { generation, pulled: new Map() };
+    laneHydration.set(claim.contextKey, record);
+  }
+  const ledger = record;
+  const provider = storage.open(space!);
+  const pending: Promise<void>[] = [];
+  for (const address of addresses) {
+    const key = `${address.scope ?? "space"}\0${address.id}`;
+    let task = ledger.pulled.get(key);
+    if (task === undefined) {
+      // provider.sync reaches the replica's pull entry synchronously, so the
+      // ambient lane is captured for the watch registration (the C1.5b
+      // runWithExecutionLane contract).
+      task = storage.runWithExecutionLane(
+        space!,
+        claim.contextKey,
+        () =>
+          provider.sync(
+            address.id,
+            { path: [], schema: false },
+            address.scope,
+          ),
+      ).then(
+        (result) => {
+          // Fail-open: an unsynced document must not poison the lane; the
+          // next claimed activation retries it.
+          if (result.error !== undefined) ledger.pulled.delete(key);
+        },
+        () => {
+          ledger.pulled.delete(key);
+        },
+      );
+      ledger.pulled.set(key, task);
+    }
+    pending.push(task);
+  }
+  await Promise.all(pending);
+};
 
 const unavailableAddress = (cell: Cell<unknown>): UnavailableCellAddress => {
   const link = cell.getAsNormalizedFullLink();
@@ -472,6 +553,7 @@ const replaceDemand = async (
     pendingDemand.clear();
     demandSinks.clear();
     candidateActions.clear();
+    laneHydration.clear();
     actionsBySchedulerIdentity.clear();
     pendingCausalActorMatches.clear();
     causalActorMatchesByAction = new WeakMap<object, boolean>();
@@ -539,6 +621,9 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
     userRankCandidates: request.experimental
       ?.serverPrimaryExecutionUserRankCandidates === true,
     lanePrincipal: request.principal,
+    onLaneSurface: (sourceAction, addresses) => {
+      laneSurfacesByAction.set(sourceAction, [...addresses]);
+    },
     claimForAction: (action) => claimsByAction.get(action),
     permanentUnservedReasonForAction,
     onCandidate: (candidate, sourceAction) => {
@@ -821,6 +906,9 @@ const startClaimedAction = async (
   }
   const attempt = claimedAttempts.start(claim, action);
   try {
+    // C1.9b: a user lane's claimed run must see the lane's durable instance
+    // rows, not replica defaults (see hydrateExecutionLane).
+    await hydrateExecutionLane(claim, action);
     const identity = schedulerIdentityKeyForAction(action, claim);
     pendingCausalActorMatches.delete(identity);
     storage.discardShadowWritesForAction(space, action);
@@ -899,6 +987,8 @@ const stop = async (): Promise<void> => {
   instantiatedDemand.clear();
   pendingDemand.clear();
   candidateActions.clear();
+  laneHydration.clear();
+  laneDemands.clear();
   actionsBySchedulerIdentity.clear();
   pendingCausalActorMatches.clear();
   causalActorMatchesByAction = new WeakMap<object, boolean>();
