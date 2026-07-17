@@ -466,6 +466,65 @@ describe("CellHandle reactive CFC label delivery", () => {
   });
 });
 
+describe("CellHandle update change detection", () => {
+  const makeRuntime = () =>
+    ({
+      [$conn]: () => ({
+        request: () => Promise.resolve({ value: undefined }),
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+      }),
+    }) as unknown as RuntimeClient;
+  const ref: CellRef = {
+    id: "of:change-detection-cell" as CellRef["id"],
+    space: "did:key:test" as CellRef["space"],
+    scope: "space",
+    path: [],
+  };
+
+  it("does not re-notify on an unchanged NaN value", () => {
+    // Value equality is `Object.is`-based: `NaN` equals itself, so a
+    // delivery repeating a NaN-bearing value is not a change.
+    const cell = new CellHandle<number>(makeRuntime(), ref);
+    const calls: Array<number | undefined> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    });
+
+    cell[$onCellUpdate](NaN);
+    const after = calls.length;
+    cell[$onCellUpdate](NaN);
+    expect(calls.length).toBe(after);
+  });
+
+  it("does not re-notify on an unchanged NaN-bearing record", () => {
+    const cell = new CellHandle<{ x: number }>(makeRuntime(), ref);
+    const calls: Array<unknown> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    });
+
+    cell[$onCellUpdate]({ x: NaN });
+    const after = calls.length;
+    cell[$onCellUpdate]({ x: NaN });
+    expect(calls.length).toBe(after);
+  });
+
+  it("notifies on a 0 -> -0 change", () => {
+    // `0` and `-0` are distinct stored values (the content hash
+    // distinguishes them); the update must not be dropped.
+    const cell = new CellHandle<number>(makeRuntime(), ref);
+    const calls: Array<number | undefined> = [];
+    cell.subscribe((value) => {
+      calls.push(value);
+    });
+
+    cell[$onCellUpdate](0);
+    cell[$onCellUpdate](-0);
+    expect(Object.is(calls.at(-1), -0)).toBe(true);
+  });
+});
+
 describe("CellHandle disposal-raced writes", () => {
   const ref: CellRef = {
     id: "of:write-cell" as CellRef["id"],

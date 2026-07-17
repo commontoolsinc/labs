@@ -583,7 +583,10 @@ function cellRefsEqual(a: CellRef, b: CellRef): boolean {
  * Handles primitives, arrays, objects, and CellHandles.
  */
 function valuesEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
+  // `Object.is`, not `===`: an unchanged `NaN` leaf must compare equal (else
+  // every delivery of a NaN-bearing value re-notifies all subscribers), and a
+  // `0` -> `-0` change must compare unequal (else the update is dropped).
+  if (Object.is(a, b)) return true;
   if (a == null || b == null) return a === b;
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object") return false;
