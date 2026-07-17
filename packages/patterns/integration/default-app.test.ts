@@ -3211,14 +3211,8 @@ const markNoteButton = async (
   token: string,
   attr: string,
 ): Promise<boolean> => {
-  const isRendered = (element: Element): boolean => {
-    const style = globalThis.getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden") return false;
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
-  };
   const target = probe.collect(selector).find((element) => {
-    if (!isRendered(element)) return false;
+    if (!probe.isRendered(element)) return false;
     if (match === "title") return element.getAttribute("title") === needle;
     const text = (element.textContent ?? "").trim();
     return match === "exact" ? text === needle : text.includes(needle);
@@ -3231,7 +3225,7 @@ const markNoteButton = async (
   const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
     | HTMLElement
     | null) ?? target;
-  if (!clickTarget.isConnected || !isRendered(clickTarget)) return false;
+  if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
   clickTarget.setAttribute(attr, token);
   return true;
 };
