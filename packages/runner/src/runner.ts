@@ -231,6 +231,49 @@ function patternDefaultScope(pattern: Pattern): CellScope | undefined {
   return schemaCellScope(pattern.resultSchema) ?? pattern.defaultScope;
 }
 
+// Does this schema (or any subschema reachable through the structural
+// keywords) carry a CFC `ifc` annotation? A labeled location's default must
+// be durably seeded at instantiation (CT-1880 otherwise leaves it virtual):
+// the write is what persists the labeled-location metadata that CFC's write
+// gate reads to recognize the slot as protected. Without it, an unlabeled
+// write into an empty integrity-protected collection slips through the gate,
+// because the labeled-append enforcement (doc-splitting + source-label
+// resolution in cfc/prepare.ts) keys off the persisted doc, not the schema.
+// Any non-empty `ifc` object marks a location CFC cares about, so we treat
+// its mere presence as label-bearing.
+function schemaCarriesCfcLabel(schema: JSONSchema | undefined): boolean {
+  const seen = new Set<JSONSchema>();
+  const walk = (node: JSONSchema | undefined): boolean => {
+    if (!isRecord(node) || seen.has(node)) return false;
+    seen.add(node);
+    if (isRecord(node.ifc) && Object.keys(node.ifc).length > 0) return true;
+    if (isRecord(node.properties)) {
+      for (const child of Object.values(node.properties)) {
+        if (walk(child as JSONSchema)) return true;
+      }
+    }
+    for (const key of ["items", "additionalProperties"] as const) {
+      const child = node[key];
+      if (isRecord(child) && walk(child as JSONSchema)) return true;
+    }
+    for (const key of ["allOf", "anyOf", "oneOf", "prefixItems"] as const) {
+      const branch = node[key];
+      if (Array.isArray(branch)) {
+        for (const child of branch) {
+          if (walk(child as JSONSchema)) return true;
+        }
+      }
+    }
+    if (isRecord(node.$defs)) {
+      for (const child of Object.values(node.$defs)) {
+        if (walk(child as JSONSchema)) return true;
+      }
+    }
+    return false;
+  };
+  return walk(schema);
+}
+
 const recordOutputSchemaPolicyInputs = (
   tx: IExtendedStorageTransaction,
   runtime: Runtime,
@@ -1147,7 +1190,21 @@ export class Runner {
         const schemaDefault = isRecord(descriptor.schema)
           ? descriptor.schema.default as JSONValue | undefined
           : undefined;
-        if (isStreamValue(schemaDefault)) {
+        // Seed at instantiation only for the two defaults whose ABSENCE the
+        // runtime cannot reconstruct from the schema at read time:
+        //   1. the `{$stream: true}` marker (instantiateJavaScriptNode needs
+        //      it durably WRITTEN, not virtual), and
+        //   2. a default on a CFC-labeled location — the durable write is
+        //      what persists the labeled-location metadata that the write-
+        //      enforcement gate (cfc/prepare.ts) reads to recognize the slot
+        //      as protected; without it an unlabeled write into an empty
+        //      integrity-protected collection would slip through the gate.
+        // Every OTHER default stays virtual (CT-1880): a pattern update that
+        // changes it must reach already-instantiated pieces, which a frozen
+        // instantiation-time write would prevent.
+        const seedAtInstantiation = isStreamValue(schemaDefault) ||
+          schemaCarriesCfcLabel(descriptor.schema);
+        if (schemaDefault !== undefined && seedAtInstantiation) {
           const currentValue = derivedCell.getRawUntyped({
             meta: ignoreReadForScheduling,
           });
