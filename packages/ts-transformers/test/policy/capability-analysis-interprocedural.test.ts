@@ -150,10 +150,10 @@ Deno.test(
 );
 
 Deno.test(
-  "optional call form over a tracked argument widens the argument to wildcard",
+  "unknown optional callback use still widens its tracked argument",
   () => {
-    // `cb?.(input)` is a non-lowerable optional call, so the argument is
-    // treated conservatively as a whole-root use.
+    // Optionality does not change the call policy. The unresolved callback
+    // itself requires conservative whole-root treatment of its argument.
     const input = getPaths(
       analyze(`${CELL}
         const fn = (input: { thing: number }, cb?: (x: unknown) => void) => {
@@ -164,6 +164,46 @@ Deno.test(
 
     assertEquals(input.wildcard, true);
     assertEquals(input.passthrough, true);
+  },
+);
+
+Deno.test(
+  "optional invocation does not wildcard a supported receiver-method path",
+  () => {
+    const input = getPaths(
+      analyze(`${CELL}
+        const fn = (input: { name?: string }) => {
+          return input.name?.trim?.();
+        };`),
+      "input",
+    );
+
+    assertEquals(input.capability, "readonly");
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("name"));
+  },
+);
+
+Deno.test(
+  "optional get chains retain the nested cell read path",
+  () => {
+    const input = getPaths(
+      analyze(`${CELL}
+        type ReadCell<T> = Cell<T> & { get(): T };
+        const fn = (
+          input: {
+            state: string;
+            auth?: ReadCell<{ token: string; refreshToken: string }>;
+          },
+        ) => input.state === "ready" &&
+          input.auth?.get?.()?.token === "initial";`),
+      "input",
+    );
+
+    assertEquals(input.capability, "readonly");
+    assertEquals(input.wildcard, false);
+    assert(input.readPaths.includes("state"));
+    assert(input.readPaths.includes("auth"));
   },
 );
 

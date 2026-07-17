@@ -32,6 +32,7 @@ especially:
 - reactive control flow
 - reactive collection operators
 - property/element access over reactive values
+- receiver-method and other supported call expressions
 - wrapper introduction (`computed`, helper control-flow forms)
 - callback capture and ownership lowering
 
@@ -96,6 +97,18 @@ unless that new shape is explicitly proven equivalent.
 
 Whole-call wrapping is acceptable when it preserves authored callee semantics.
 
+Optionality is part of that same obligation, not a separate call family. When
+lowering a supported form such as `obj?.method(arg)`, `obj.method?.(arg)`, or a
+combined chain, the lowered form must preserve:
+
+1. single evaluation of the receiver and callee
+2. the original receiver as `this`
+3. the authored nullish short-circuit points
+4. non-evaluation of call arguments when optional invocation short-circuits
+
+The compiler should lower the whole call rather than extract a function-valued
+member into reactive data.
+
 ## 3.5 Collection Operator Ownership Must Stay Coherent
 
 For collection operators:
@@ -157,7 +170,6 @@ over:
 
 This is especially important for:
 
-- optional-call
 - wildcard traversal outside supported whole-call expression-root positions
 - foreign callback-container roots in pattern-facing contexts
 - direct top-level eager `.get()` reads on reactive or cell-like values

@@ -88,9 +88,9 @@ landed after the snapshot above:
 
 ### Addendum 2 (2026-07-10 phase-4 verification findings)
 
-Unratified language deltas found by adversarial verification of the
-target-language matrix (implementation vs normative spec; each needs a
-ratify-or-revert decision):
+Language deltas found by adversarial verification of the target-language
+matrix (implementation vs normative spec). Resolution status is recorded on
+each finding:
 
 - **Top-level eager-read carve-out (#3725, 2026-05-28).** Validation accepts
   computation-feeding top-level `.get()` reads and auto-wraps the containing
@@ -99,13 +99,16 @@ ratify-or-revert decision):
   `test/validation.test.ts:3179`). Matrix row still says Unsupported
   unconditionally. Decision open: ratify a terminal-vs-computation-feeding
   split in the matrix, or revert (breaks two goldens + one test).
-- **Optional-call accepted in JSX and compute callbacks.** `{maybeFn?.(1)}`
-  and `computed(() => maybeFn?.(1))` lower intact while the same shapes error
-  at top level, statement position, and in collection callbacks. Rider: the
-  lowering drops function-typed captures from the lift input schema (function
-  values are not schema-representable or cell-storable), so the accepted form
-  is dead code at runtime — which argues for rejecting it and keeping the
-  matrix row unqualified. Decision open.
+- **Optional-call accepted in JSX and compute callbacks — resolved 2026-07-23
+  by making optionality orthogonal to call support.** The earlier location
+  split was an implementation leak, and the proposed blanket rejection would
+  have removed valid authoring forms. Optional receiver and invocation forms
+  now follow the same expression-site and call-root policy as the corresponding
+  non-optional call. Supported sites lower the whole call and preserve
+  receiver binding, nullish short-circuiting, and lazy argument evaluation;
+  unsupported call roots remain unsupported for their existing reason.
+  Function-valued reactive data remains outside the storable data model whether
+  invoked with `()` or `?.()`.
 - **Residual pass-through emits runnable-looking output alongside errors.**
   Both documented bucket-4 forms are alive: `forEach`-in-JSX survives
   verbatim as plain JS and promise-`.then` gets compute-island-wrapped, in
@@ -280,8 +283,9 @@ contract support).
    the analyzed function scope.
 5. Opaque path navigation lowering (`prop` / optional-chain navigation ->
    `key(...)`) is deterministic and semantics-preserving.
-6. Optional-call forms (for example `foo?.bar()`) are explicitly out of scope
-   for key-lowering until modeled separately.
+6. Optional receiver and invocation forms (for example `foo?.bar()` and
+   `foo.bar?.()`) follow the underlying call-root policy; supported forms lower
+   as whole calls rather than extracting a function-valued member.
 7. ~~A feature gate exists for rollout and A/B fixture validation.~~
    (Completed: `useLegacyReactiveSemantics` gate has been removed; the single
    transform pipeline is the only path.)
@@ -638,7 +642,7 @@ emitters and contextual checks.
 
 **Recommendation:** add a targeted lowering step (or utility used by emitters)
 that converts property navigation on capability-proven `OpaqueCell` receivers to
-`key(...)` chains, with explicit exclusions for optional-call.
+`key(...)` chains while routing an enclosing optional call as one semantic unit.
 
 ## S-010 Add A Shared Parameter Canonicalization Pass
 
@@ -852,12 +856,14 @@ independently.
 1. Lower `foo.bar.baz` and optional-chain path navigation to `foo.key(...)` when
    receiver summary is `OpaqueCell`.
 2. Ensure optional-chain navigation lowering preserves no-throw behavior.
-3. Keep optional-call excluded and diagnosed if needed.
+3. Classify optional calls by the same call-root and expression-site policy as
+   non-optional calls, lowering supported forms as whole calls.
 4. Ensure destructured parameter lowering composes with path-navigation lowering
    without duplicate or conflicting rewrites.
 
-**Exit criteria:** snapshot parity for supported forms and explicit handling of
-unsupported optional-call cases.
+**Exit criteria:** snapshot parity for supported forms, including receiver and
+invocation optionality, and explicit diagnostics for underlying call roots that
+remain unsupported.
 
 ## Phase D7: Interprocedural Summaries (Compute Context Focus)
 

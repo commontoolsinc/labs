@@ -3055,14 +3055,6 @@ export function analyzeFunctionCapabilities(
           }
         }
 
-        // Optional-call forms are non-lowerable; treat as wildcard usage.
-        if (node.questionDotToken && ts.isExpression(node.expression)) {
-          const source = resolveSourceRef(node.expression);
-          if (source) {
-            markWildcard(source.root, source.path);
-          }
-        }
-
         if (
           ts.isPropertyAccessExpression(node.expression) ||
           ts.isElementAccessExpression(node.expression)
@@ -3171,8 +3163,12 @@ export function analyzeFunctionCapabilities(
             } else if (READER_METHODS.has(methodName)) {
               // If the .get() result was already resolved with a more specific
               // path by the member-access handler (e.g. notes.get().length →
-              // ["notes", "length"]), skip the blanket read.
-              if (!resolvedGetCalls.has(node)) {
+              // ["notes", "length"]), skip the blanket read. Optional chains
+              // are the exception: their projected result path does not by
+              // itself retain the receiver Cell in every synthesized closure
+              // shape, so record the receiver read explicitly without
+              // widening the root to wildcard.
+              if (ts.isCallChain(node) || !resolvedGetCalls.has(node)) {
                 trackReadRef(receiver);
                 recordMergeableReadSite(receiver, node);
               }
