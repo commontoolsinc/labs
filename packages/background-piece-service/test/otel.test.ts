@@ -137,8 +137,11 @@ describe("OpenTelemetry export", () => {
   ): Promise<Request[]> {
     const requests: Request[] = [];
     const decoder = new TextDecoder("utf-8", { fatal: false });
+    // Bound to loopback so the receiver is never reachable from another host
+    // while the test runs; the endpoint below uses the same address so the
+    // process stays within a --allow-net=127.0.0.1 grant.
     const server = Deno.serve(
-      { port: 0, onListen: () => {} },
+      { hostname: "127.0.0.1", port: 0, onListen: () => {} },
       async (request) => {
         requests.push({
           path: new URL(request.url).pathname,
@@ -148,7 +151,7 @@ describe("OpenTelemetry export", () => {
       },
     );
     try {
-      await body(`http://localhost:${server.addr.port}`);
+      await body(`http://127.0.0.1:${server.addr.port}`);
     } finally {
       await server.shutdown();
     }
