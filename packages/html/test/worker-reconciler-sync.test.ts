@@ -4,6 +4,7 @@ import { type Cell, Runtime, type VNode } from "@commonfabric/runner";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
+import type { VDomOp } from "../src/vdom-ops.ts";
 import { opsFlushed } from "./reconciler-support.ts";
 
 type SyncCall = {
@@ -11,7 +12,15 @@ type SyncCall = {
   path: string[];
 };
 
-async function renderAndCollectSyncs(vnode: VNode): Promise<SyncCall[]> {
+type RenderResult = {
+  syncCalls: SyncCall[];
+  updateOps: VDomOp[];
+};
+
+async function renderAndCollect(
+  vnode: VNode,
+  update?: (rootCell: Cell<VNode>, runtime: Runtime) => Promise<void>,
+): Promise<RenderResult> {
   const signer = await Identity.fromPassphrase(
     "worker reconciler sync regression",
   );
@@ -41,13 +50,23 @@ async function renderAndCollectSyncs(vnode: VNode): Promise<SyncCall[]> {
   await tx.commit();
   syncCalls.length = 0;
 
-  const reconciler = new WorkerReconciler({ onOps: () => {} });
+  const updateOps: VDomOp[] = [];
+  const reconciler = new WorkerReconciler({
+    onOps: (ops) => {
+      updateOps.push(...ops);
+    },
+  });
   const cancel = reconciler.mount(
     rootCell.asSchema(rendererVDOMSchema) as Cell<never>,
   );
   try {
     await opsFlushed(runtime);
-    return syncCalls;
+    if (update !== undefined) {
+      updateOps.length = 0;
+      await update(rootCell, runtime);
+      await opsFlushed(runtime);
+    }
+    return { syncCalls, updateOps };
   } finally {
     cancel();
     await runtime.dispose();
@@ -55,7 +74,7 @@ async function renderAndCollectSyncs(vnode: VNode): Promise<SyncCall[]> {
 }
 
 Deno.test("worker reconciler preserves sync state across VDOM asCell cuts", async () => {
-  const syncCalls = await renderAndCollectSyncs({
+  const { syncCalls } = await renderAndCollect({
     type: "vnode",
     name: "main",
     props: {},
@@ -78,4 +97,33 @@ Deno.test("worker reconciler preserves sync state across VDOM asCell cuts", asyn
     `Expected only the mounted root to sync, got ${JSON.stringify(syncCalls)}`,
   );
   assertEquals(syncCalls[0]?.path, []);
+});
+
+Deno.test("worker reconciler reuses VDOM schema coverage for style objects", async () => {
+  const { syncCalls, updateOps } = await renderAndCollect(
+    {
+      type: "vnode",
+      name: "div",
+      props: { style: { color: "red" } },
+      children: [],
+    },
+    async (rootCell, runtime) => {
+      const tx = runtime.edit();
+      rootCell.withTx(tx).key("props", "style", "color").set("blue");
+      await tx.commit();
+    },
+  );
+
+  assertEquals(
+    syncCalls.length,
+    1,
+    `Expected style to reuse the root query, got ${JSON.stringify(syncCalls)}`,
+  );
+  assertEquals(syncCalls[0]?.path, []);
+  assertEquals(
+    updateOps.flatMap((op) =>
+      op.op === "set-prop" && op.key === "style" ? [op.value] : []
+    ),
+    ["color: blue"],
+  );
 });
