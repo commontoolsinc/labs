@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import {
+  announceSupervisorState,
   appendDecodedJsonPath,
   bufferForNoHandleTruncate,
   cfcWritebackXattrResultErrno,
@@ -785,4 +786,38 @@ Deno.test("supervisor status records when a state was reached, not when it drain
     JSON.parse(fs.published()!).updatedAt,
     "2026-03-17T00:00:01.000Z",
   );
+});
+
+Deno.test("supervisor state is announced on the pipe even when the file write fails", async () => {
+  // The pipe announcement is the handshake's channel; a failed status-file write
+  // must not stop it, or a parent blocked on the pipe would never wake. The write
+  // error still has to reach the caller.
+  const published: Array<[string, Record<string, unknown>]> = [];
+  const publish = (state: string, extra: Record<string, unknown> = {}) => {
+    published.push([state, extra]);
+    return Promise.resolve();
+  };
+  const write = () => Promise.reject(new Error("disk full"));
+
+  await assertRejects(
+    () => announceSupervisorState(write, publish, "mounted"),
+    Error,
+    "disk full",
+  );
+  assertEquals(published, [["mounted", {}]]);
+});
+
+Deno.test("supervisor state records before it announces on the success path", async () => {
+  const order: string[] = [];
+  const write = (state: string) => {
+    order.push(`write:${state}`);
+    return Promise.resolve();
+  };
+  const publish = (state: string) => {
+    order.push(`publish:${state}`);
+    return Promise.resolve();
+  };
+
+  await announceSupervisorState(write, publish, "failed", { error: "x" });
+  assertEquals(order, ["write:failed", "publish:failed"]);
 });

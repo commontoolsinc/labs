@@ -321,6 +321,26 @@ export function createSupervisorStatusWriter(
   };
 }
 
+/**
+ * Report a supervisor state to both sinks. `write` records it in the status file
+ * that `cf fuse status` reads; `publish` announces it on the readiness channel a
+ * background mount's parent blocks on. The announcement goes out in a `finally`,
+ * so a failed status write cannot strand a parent waiting on the channel, and
+ * the write's error still reaches the caller.
+ */
+export async function announceSupervisorState(
+  write: SupervisorStatusWriter,
+  publish: SupervisorStatusWriter,
+  state: SupervisorStatusState,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  try {
+    await write(state, extra);
+  } finally {
+    await publish(state, extra);
+  }
+}
+
 export async function writeFailedSupervisorStartupStatus(
   error: unknown,
   writeSupervisorStatus: (
@@ -507,22 +527,19 @@ export async function main(argv: string[] = Deno.args) {
       // No reader: the mount continues unobserved.
     }
   }
-  // Record the state, then announce it, so a parent woken by the announcement
-  // finds the status file already carrying the same state. The announcement is
-  // the handshake's channel and the file is a record for `cf fuse status`, so
-  // the announcement goes out even when the record fails: publishing in a
-  // `finally` keeps a failed status write from stranding a parent that is
-  // blocked on the pipe, while the write error still reaches the caller.
-  async function reportSupervisorState(
+  // Record the state in the status file, then announce it on the pipe. See
+  // announceSupervisorState for why the announcement runs even when the record
+  // fails.
+  const reportSupervisorState = (
     state: SupervisorStatusState,
     extra: Record<string, unknown> = {},
-  ): Promise<void> {
-    try {
-      await writeSupervisorStatus(state, extra);
-    } finally {
-      await publishSupervisorState(state, extra);
-    }
-  }
+  ): Promise<void> =>
+    announceSupervisorState(
+      writeSupervisorStatus,
+      publishSupervisorState,
+      state,
+      extra,
+    );
   try {
     await writeSupervisorStatus("starting");
   } catch (error) {
