@@ -136,11 +136,11 @@ async function removeMountStateAndChildStatus(
 }
 
 /**
- * The spawned supervisor, as this wait needs to see it: an identifier for the
- * error message, and the exit that ends the startup race.
+ * The spawned supervisor, as this wait needs to see it: the exit that ends the
+ * startup race. The daemon's own liveness is read from the status file, which
+ * carries its PID.
  */
 export interface BackgroundMountProcess {
-  pid: number;
   status: Promise<Deno.CommandStatus>;
 }
 
